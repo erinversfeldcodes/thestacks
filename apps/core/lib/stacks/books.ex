@@ -114,20 +114,41 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Returns the primary edition for a book, or the first edition as fallback.
+  Returns the primary edition for a book, or the earliest-created edition as a
+  fallback.
+
+  The pick is deterministic: `is_primary` first, then the oldest `created_at`,
+  then the smallest `id`. The page-count ceiling (`Shelving`) leans on this
+  edition, so a book with no (or multiple) `is_primary` flag must resolve to the
+  same edition every time — both here (preloaded editions) and in the query
+  clause below.
   """
   @spec primary_edition(Book.t()) :: BookEdition.t() | nil
   def primary_edition(%Book{editions: editions}) when is_list(editions) do
-    Enum.find(editions, & &1.is_primary) || List.first(editions)
+    editions
+    |> Enum.sort_by(&edition_sort_key/1)
+    |> List.first()
   end
 
   def primary_edition(%Book{id: book_id}) do
     BookEdition
     |> where([e], e.book_id == ^book_id)
-    |> order_by([e], desc: e.is_primary)
+    |> order_by([e], desc: e.is_primary, asc: e.created_at, asc: e.id)
     |> limit(1)
     |> Repo.one()
   end
+
+  # Sort key mirroring the query clause's `desc: is_primary, asc: created_at,
+  # asc: id`. `is_primary != true` maps the primary edition to `false` (0) so it
+  # sorts ahead of the non-primary ones; `created_at` is compared chronologically
+  # via Unix microseconds (Erlang term order over %DateTime{} is NOT
+  # chronological), with `id` as the final tiebreak.
+  defp edition_sort_key(edition) do
+    {edition.is_primary != true, edition_time_key(edition.created_at), edition.id}
+  end
+
+  defp edition_time_key(%DateTime{} = created_at), do: DateTime.to_unix(created_at, :microsecond)
+  defp edition_time_key(nil), do: 0
 
   @doc """
   Finds an existing book (work) by ISBN — looks up the edition, returns the parent work.

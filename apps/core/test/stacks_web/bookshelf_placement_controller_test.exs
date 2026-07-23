@@ -484,6 +484,13 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       conn = build_conn() |> put("/api/placements/#{placement.id}/formats", %{formats: []})
       assert json_response(conn, 401)
     end
+
+    test "returns 404 for a nonexistent placement id", %{conn: conn} do
+      conn =
+        put(conn, "/api/placements/#{Ecto.UUID.generate()}/formats", %{formats: ["hardcover"]})
+
+      assert %{"error" => "not found"} = json_response(conn, 404)
+    end
   end
 
   describe "PUT /api/placements/:id/visibility" do

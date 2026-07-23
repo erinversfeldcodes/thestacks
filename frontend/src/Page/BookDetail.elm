@@ -92,7 +92,7 @@ type Msg
     | ConfirmMove
     | MoveCompleted (Result Api.MoveError ())
     | ConfirmPlace
-    | PlaceCompleted String (Result Http.Error Placement)
+    | PlaceCompleted String (Result Api.PlaceError Placement)
     | OpenRemoveModal
     | CloseRemoveModal
     | ConfirmRemove
@@ -107,7 +107,7 @@ type Msg
     | ProgressCardMsg Card.Msg
     | ProgressSaved (Result Api.ProgressError Api.Progress)
     | RecordReadRequested
-    | DismissFinishedRead
+    | FinishedReadDismissed
     | ProgressFocusReturned
 
 
@@ -391,13 +391,19 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                Err err ->
+                Err Api.PlaceReadingPileFull ->
+                    -- #281: the place path can hit the same reading-pile cap the
+                    -- move path does. Reuse the move path's ReadingPileFull so
+                    -- viewMoveState renders the specific full-pile copy.
+                    ( { model | moveState = Failure Api.ReadingPileFull }, Cmd.none, NoOut )
+
+                Err (Api.PlaceHttpError err) ->
                     if Api.isUnauthorized err then
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- placeBook still reports a plain Http.Error; wrap it
-                        -- so it shares moveState with the move path.
+                        -- Wrap the transport error so the place path shares
+                        -- moveState (and its generic copy) with the move path.
                         ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
@@ -544,13 +550,13 @@ update msg model maybeToken =
             case result of
                 Ok progress ->
                     ( { model
-                        | placement = Maybe.map (\p -> foldProgress p progress) model.placement
+                        | placement = Maybe.map (\p -> Api.foldProgress p progress) model.placement
 
                         -- Fold from the CARD's placement (which carries the
                         -- embedded book) so the "/ {page count}" total survives.
                         -- Card.init closes the form on success.
                         , progressCard =
-                            Maybe.map (\c -> Card.init (foldProgress c.placement progress)) model.progressCard
+                            Maybe.map (\c -> Card.init (Api.foldProgress c.placement progress)) model.progressCard
                         , progressSaveState = Success ()
 
                         -- The "record this read?" bridge is a Reading Pile
@@ -603,7 +609,7 @@ update msg model maybeToken =
                 _ ->
                     ( model, Cmd.none, NoOut )
 
-        DismissFinishedRead ->
+        FinishedReadDismissed ->
             ( { model | finishedReadPrompt = False }, Cmd.none, NoOut )
 
 
@@ -626,16 +632,6 @@ focusProgressBadgeFromModel model =
 {-| Fold the reading-progress fields returned by the API into the placement,
 so the badge and progress line re-render in place.
 -}
-foldProgress : Placement -> Api.Progress -> Placement
-foldProgress placement progress =
-    { placement
-        | readingStatus = progress.readingStatus
-        , currentPage = progress.currentPage
-        , startedAt = progress.startedAt
-        , finishedAt = progress.finishedAt
-    }
-
-
 view : Model -> Html Msg
 view model =
     let
@@ -889,18 +885,14 @@ viewProgressSection model =
 viewProgressSaveState : RemoteData Api.ProgressError () -> Html Msg
 viewProgressSaveState state =
     case state of
-        Failure (Api.ProgressValidationFailed errs) ->
-            if List.any (\( field, _ ) -> field == "current_page") errs then
-                p [ class "book-detail__status book-detail__status--error", attribute "role" "alert", testId "progress-error" ]
-                    [ text "That page is past the end of the book." ]
-
-            else
-                p [ class "book-detail__status book-detail__status--error", attribute "role" "alert", testId "progress-error" ]
-                    [ text "Couldn't save progress. Please try again." ]
-
-        Failure (Api.ProgressRequestFailed _) ->
-            p [ class "book-detail__status book-detail__status--error", attribute "role" "alert", testId "progress-error" ]
-                [ text "Couldn't save progress. Please try again." ]
+        Failure err ->
+            p
+                [ class "book-detail__status book-detail__status--error"
+                , attribute "role" "alert"
+                , id "progress-error"
+                , testId "progress-error"
+                ]
+                [ text (Api.progressErrorMessage err) ]
 
         _ ->
             text ""
@@ -918,7 +910,7 @@ viewFinishedReadPrompt =
             [ text "Move to Library" ]
         , button
             [ class "btn btn--ghost btn--sm"
-            , onClick DismissFinishedRead
+            , onClick FinishedReadDismissed
             ]
             [ text "Not now" ]
         ]

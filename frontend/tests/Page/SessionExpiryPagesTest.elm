@@ -18,6 +18,7 @@ this suite fails to compile (RED). After the conversion each page returns a
 
 -}
 
+import Api
 import Expect
 import Http
 import Page.Admin.ScraperConfig as ScraperConfig
@@ -343,7 +344,7 @@ suite =
                     let
                         ( _, _, outMsg ) =
                             Catalogue.update
-                                (Catalogue.PlaceBookCompleted "library" "book-1" (Err unauthorized))
+                                (Catalogue.PlaceBookCompleted "library" "book-1" (Err (Api.PlaceHttpError unauthorized)))
                                 (Tuple.first (Catalogue.init (Just "tok")))
                                 (Just "tok")
                     in

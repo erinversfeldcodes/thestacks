@@ -273,5 +273,31 @@ defmodule StacksWeb.ShelfControllerTest do
 
       assert json_response(conn, 401)
     end
+
+    test "returns 404 for a nonexistent placement id", %{conn: conn, user: user, shelf_b: shelf_b} do
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/placements/#{Ecto.UUID.generate()}/shelf", %{shelf_id: shelf_b.id})
+
+      assert %{"error" => "not found"} = json_response(conn, 404)
+    end
+
+    test "returns 404 for a nonexistent target shelf id", %{
+      conn: conn,
+      user: user,
+      bookshelf: bookshelf,
+      shelf_a: shelf_a
+    } do
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book, shelf: shelf_a)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/placements/#{placement.id}/shelf", %{shelf_id: Ecto.UUID.generate()})
+
+      assert %{"error" => "not found"} = json_response(conn, 404)
+    end
   end
 end

@@ -448,6 +448,10 @@ defmodule Stacks.ShelvingTest do
       assert removed.removed_at != nil
     end
 
+    test "returns :not_found for a missing placement", %{user: user} do
+      assert {:error, :not_found} = Shelving.remove_book(Ecto.UUID.generate(), user.id)
+    end
+
     test "placement no longer appears in bookshelf listing after removal", %{
       user: user,
       placement: placement
@@ -682,6 +686,29 @@ defmodule Stacks.ShelvingTest do
     test "returns :unauthorized when user does not own the placement", %{placement: placement} do
       other_user = insert(:user)
       assert {:error, :unauthorized} = Shelving.remove_book(placement.id, other_user.id)
+    end
+  end
+
+  describe "update_placement_formats/3" do
+    setup :setup_user_bookshelf_book
+
+    test "updates the formats list for an owned placement", %{user: user, placement: placement} do
+      assert {:ok, updated} =
+               Shelving.update_placement_formats(placement.id, user.id, ["hardcover"])
+
+      assert updated.formats == ["hardcover"]
+    end
+
+    test "returns :not_found for a missing placement", %{user: user} do
+      assert {:error, :not_found} =
+               Shelving.update_placement_formats(Ecto.UUID.generate(), user.id, ["hardcover"])
+    end
+
+    test "returns :unauthorized when user does not own the placement", %{placement: placement} do
+      other_user = insert(:user)
+
+      assert {:error, :unauthorized} =
+               Shelving.update_placement_formats(placement.id, other_user.id, ["hardcover"])
     end
   end
 

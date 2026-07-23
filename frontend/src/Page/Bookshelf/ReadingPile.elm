@@ -13,7 +13,7 @@ import Components.AgeGate exposing (ageGate)
 import Components.PlacementCard as Card
 import Components.Spine exposing (WearLevel(..))
 import Html exposing (Html, button, div, p, text)
-import Html.Attributes exposing (attribute, class, style)
+import Html.Attributes exposing (attribute, class, id, style)
 import Html.Events exposing (onClick, onMouseEnter, stopPropagationOn)
 import Http
 import Json.Decode as Decode
@@ -54,7 +54,7 @@ type Msg
     | ProgressSaved String (Result Api.ProgressError Api.Progress)
     | RecordReadRequested String
     | RecordReadDone String (Result Api.MoveError ())
-    | DismissFinishedPrompt
+    | FinishedPromptDismissed
     | FocusReturned
 
 
@@ -171,7 +171,7 @@ update msg model =
                             List.map
                                 (\c ->
                                     if c.placement.id == placementId then
-                                        Card.init (foldProgress c.placement progress)
+                                        Card.init (Api.foldProgress c.placement progress)
 
                                     else
                                         c
@@ -232,7 +232,7 @@ update msg model =
                 Err Api.ReadingPileFull ->
                     ( { model | finishedPrompt = Nothing }, Cmd.none, NoOut )
 
-        DismissFinishedPrompt ->
+        FinishedPromptDismissed ->
             ( { model | finishedPrompt = Nothing }, Cmd.none, NoOut )
 
         FocusReturned ->
@@ -259,19 +259,6 @@ clearSaving placementId cards =
                 c
         )
         cards
-
-
-{-| Fold the reading-progress fields returned by the API into the placement the
-card already holds, so the badge and progress line re-render in place.
--}
-foldProgress : Placement -> Api.Progress -> Placement
-foldProgress placement progress =
-    { placement
-        | readingStatus = progress.readingStatus
-        , currentPage = progress.currentPage
-        , startedAt = progress.startedAt
-        , finishedAt = progress.finishedAt
-    }
 
 
 removeFromBooks : String -> RemoteData Http.Error (List Placement) -> RemoteData Http.Error (List Placement)
@@ -365,18 +352,14 @@ viewCard card =
 viewSaveState : RemoteData Api.ProgressError () -> Html Msg
 viewSaveState state =
     case state of
-        Failure (Api.ProgressValidationFailed errs) ->
-            if List.any (\( field, _ ) -> field == "current_page") errs then
-                p [ class "error", attribute "role" "alert", testId "progress-error" ]
-                    [ text "That page is past the end of the book." ]
-
-            else
-                p [ class "error", attribute "role" "alert", testId "progress-error" ]
-                    [ text "Couldn't save progress. Please try again." ]
-
-        Failure (Api.ProgressRequestFailed _) ->
-            p [ class "error", attribute "role" "alert", testId "progress-error" ]
-                [ text "Couldn't save progress. Please try again." ]
+        Failure err ->
+            p
+                [ class "error"
+                , attribute "role" "alert"
+                , id "progress-error"
+                , testId "progress-error"
+                ]
+                [ text (Api.progressErrorMessage err) ]
 
         _ ->
             text ""
@@ -396,7 +379,7 @@ viewFinishedPrompt maybeId =
                     [ text "Move to Library" ]
                 , button
                     [ class "btn btn--ghost"
-                    , onClick DismissFinishedPrompt
+                    , onClick FinishedPromptDismissed
                     ]
                     [ text "Not now" ]
                 ]

@@ -6,6 +6,7 @@ defmodule Stacks.BooksTest do
 
   alias Core.Repo
   alias Stacks.Books
+  alias Stacks.Books.Book
   alias Stacks.Books.BookEdition
   alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
@@ -146,6 +147,83 @@ defmodule Stacks.BooksTest do
       first = insert(:book_edition, book: book, is_primary: false)
       book = Books.get_book_detail(book.id)
       assert Books.primary_edition(book).id == first.id
+    end
+  end
+
+  describe "primary_edition/1 — deterministic ordering (PE P3-2)" do
+    test "query clause: no primary flag → picks the earliest-created edition, repeatably" do
+      book = insert(:book)
+
+      older =
+        insert(:book_edition,
+          book: book,
+          is_primary: false,
+          isbn: "9780000000010",
+          created_at: ~U[2024-01-01 00:00:00.000000Z]
+        )
+
+      _newer =
+        insert(:book_edition,
+          book: book,
+          is_primary: false,
+          isbn: "9780000000011",
+          created_at: ~U[2024-06-01 00:00:00.000000Z]
+        )
+
+      # The struct carries only the id, forcing the DB (query) clause.
+      query_book = %Book{id: book.id}
+
+      assert Books.primary_edition(query_book).id == older.id
+      assert Books.primary_edition(query_book).id == older.id
+    end
+
+    test "in-memory clause: no primary flag → picks the earliest-created edition regardless of list order" do
+      book = insert(:book)
+
+      older =
+        insert(:book_edition,
+          book: book,
+          is_primary: false,
+          isbn: "9780000000012",
+          created_at: ~U[2024-01-01 00:00:00.000000Z]
+        )
+
+      newer =
+        insert(:book_edition,
+          book: book,
+          is_primary: false,
+          isbn: "9780000000013",
+          created_at: ~U[2024-06-01 00:00:00.000000Z]
+        )
+
+      # Preload order must not sway the pick — both orderings resolve to `older`.
+      assert Books.primary_edition(%Book{id: book.id, editions: [newer, older]}).id == older.id
+      assert Books.primary_edition(%Book{id: book.id, editions: [older, newer]}).id == older.id
+    end
+
+    test "explicit primary wins over an earlier-created non-primary (both clauses)" do
+      book = insert(:book)
+
+      early =
+        insert(:book_edition,
+          book: book,
+          is_primary: false,
+          isbn: "9780000000014",
+          created_at: ~U[2020-01-01 00:00:00.000000Z]
+        )
+
+      primary =
+        insert(:book_edition,
+          book: book,
+          is_primary: true,
+          isbn: "9780000000015",
+          created_at: ~U[2024-01-01 00:00:00.000000Z]
+        )
+
+      assert Books.primary_edition(%Book{id: book.id}).id == primary.id
+
+      assert Books.primary_edition(%Book{id: book.id, editions: [early, primary]}).id ==
+               primary.id
     end
   end
 

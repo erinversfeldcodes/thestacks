@@ -19,6 +19,7 @@ import Test.Html.Selector as Selector
 import TestHelpers
     exposing
         ( bookDetailProgram
+        , simulateBookDetailResponse
         , simulateBookDetailResponseWithPlacement
         , testBook
         , testPlacement
@@ -28,6 +29,15 @@ import TestHelpers
 moveEndpoint : String
 moveEndpoint =
     "/api/placements/placement-test-001/move"
+
+
+{-| A book loaded WITHOUT a placement defaults `selectedBookshelf` to "library"
+(the first bookshelf that is not the empty current one), so the direct-place
+POST lands here.
+-}
+placeEndpoint : String
+placeEndpoint =
+    "/api/bookshelves/library/placements"
 
 
 {-| Start the page, load the book with a placement, open the shelf mover and
@@ -54,12 +64,40 @@ moveErrorResponse status body =
         body
 
 
+{-| Start the page, load the book with NO placement (so the "Add to Collection"
+place path shows), open the shelf mover and confirm — leaving the POST
+/placements request in flight.
+-}
+startPlaceFlow : ProgramTest.ProgramTest BookDetail.Model BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
+startPlaceFlow =
+    ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
+        |> ProgramTest.simulateHttpResponse "GET"
+            "/api/books/book-test-001"
+            (simulateBookDetailResponse "book-test-001" testBook)
+        |> ProgramTest.clickButton "Choose Bookshelf"
+        |> ProgramTest.clickButton "Move"
+
+
+placeErrorResponse : Int -> String -> Http.Response String
+placeErrorResponse status body =
+    Http.BadStatus_
+        { url = placeEndpoint
+        , statusCode = status
+        , statusText = "Unprocessable Entity"
+        , headers = Dict.empty
+        }
+        body
+
+
 suite : Test
 suite =
-    describe "Page.BookDetail move rejection (#276)"
+    describe "Page.BookDetail placement rejection (#276/#281)"
         [ fullPileShowsSpecificMessage
         , genericFailureKeepsGenericMessage
         , fullPile422WithoutCodeStaysGeneric
+        , placeFullPileShowsSpecificMessage
+        , placeGenericFailureKeepsGenericMessage
+        , placeFullPile422WithoutCodeStaysGeneric
         ]
 
 
@@ -99,6 +137,48 @@ fullPile422WithoutCodeStaysGeneric =
                 |> ProgramTest.simulateHttpResponse "PUT"
                     moveEndpoint
                     (moveErrorResponse 422 "{\"error\":\"something_else\"}")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Failed to move book. Please try again." ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]
+
+
+placeFullPileShowsSpecificMessage : Test
+placeFullPileShowsSpecificMessage =
+    test "place_full_pile_message: a 422 reading_pile_full on the direct-place path renders the specific full-pile message" <|
+        \() ->
+            startPlaceFlow
+                |> ProgramTest.simulateHttpResponse "POST"
+                    placeEndpoint
+                    (placeErrorResponse 422 "{\"error\":\"reading_pile_full\"}")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.text "Failed to move book. Please try again." ]
+
+
+placeGenericFailureKeepsGenericMessage : Test
+placeGenericFailureKeepsGenericMessage =
+    test "place_generic_failure: a 500 on the direct-place path renders the generic failure, not the full-pile message" <|
+        \() ->
+            startPlaceFlow
+                |> ProgramTest.simulateHttpResponse "POST"
+                    placeEndpoint
+                    (placeErrorResponse 500 "")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Failed to move book. Please try again." ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.text "Your reading pile is full — finish or remove a book before adding another." ]
+
+
+placeFullPile422WithoutCodeStaysGeneric : Test
+placeFullPile422WithoutCodeStaysGeneric =
+    test "place_422_other_code: a 422 without the reading_pile_full code on the place path renders the generic failure" <|
+        \() ->
+            startPlaceFlow
+                |> ProgramTest.simulateHttpResponse "POST"
+                    placeEndpoint
+                    (placeErrorResponse 422 "{\"error\":\"something_else\"}")
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Failed to move book. Please try again." ]
                 |> ProgramTest.expectViewHasNot

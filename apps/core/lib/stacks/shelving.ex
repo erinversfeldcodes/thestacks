@@ -432,10 +432,20 @@ defmodule Stacks.Shelving do
   Emits an event and logs an audit entry.
   """
   @spec remove_book(binary(), binary()) ::
-          {:ok, Placement.t()} | {:error, :unauthorized} | {:error, Ecto.Changeset.t()}
+          {:ok, Placement.t()}
+          | {:error, :not_found | :unauthorized}
+          | {:error, Ecto.Changeset.t()}
   def remove_book(placement_id, user_id) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
 
+      placement ->
+        do_remove_book(Repo.preload(placement, :bookshelf), user_id)
+    end
+  end
+
+  defp do_remove_book(placement, user_id) do
     if placement.bookshelf.user_id != user_id do
       {:error, :unauthorized}
     else
@@ -477,16 +487,24 @@ defmodule Stacks.Shelving do
   Deprecated: prefer `Books.merge_edition/2` for new code. Kept for Elm frontend compatibility.
   """
   @spec update_placement_formats(binary(), binary(), [String.t()]) ::
-          {:ok, Placement.t()} | {:error, :unauthorized} | {:error, Ecto.Changeset.t()}
+          {:ok, Placement.t()}
+          | {:error, :not_found | :unauthorized}
+          | {:error, Ecto.Changeset.t()}
   def update_placement_formats(placement_id, user_id, formats) when is_list(formats) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
 
-    if placement.bookshelf.user_id != user_id do
-      {:error, :unauthorized}
-    else
-      placement
-      |> placement_changeset(%{formats: formats})
-      |> Repo.update()
+      placement ->
+        placement = Repo.preload(placement, :bookshelf)
+
+        if placement.bookshelf.user_id != user_id do
+          {:error, :unauthorized}
+        else
+          placement
+          |> placement_changeset(%{formats: formats})
+          |> Repo.update()
+        end
     end
   end
 
@@ -882,22 +900,26 @@ defmodule Stacks.Shelving do
 
   @doc "Moves a placement to a different shelf within the same bookshelf."
   @spec move_placement_to_shelf(binary(), binary(), binary()) ::
-          {:ok, Placement.t()} | {:error, :unauthorized | :wrong_bookshelf}
+          {:ok, Placement.t()} | {:error, :not_found | :unauthorized | :wrong_bookshelf}
   def move_placement_to_shelf(placement_id, shelf_id, user_id) do
-    placement = Repo.get!(Placement, placement_id) |> Repo.preload(:bookshelf)
-    shelf = Repo.get!(Shelf, shelf_id)
+    with placement when not is_nil(placement) <- Repo.get(Placement, placement_id),
+         shelf when not is_nil(shelf) <- Repo.get(Shelf, shelf_id) do
+      placement = Repo.preload(placement, :bookshelf)
 
-    cond do
-      placement.bookshelf.user_id != user_id ->
-        {:error, :unauthorized}
+      cond do
+        placement.bookshelf.user_id != user_id ->
+          {:error, :unauthorized}
 
-      shelf.bookshelf_id != placement.bookshelf_id ->
-        {:error, :wrong_bookshelf}
+        shelf.bookshelf_id != placement.bookshelf_id ->
+          {:error, :wrong_bookshelf}
 
-      true ->
-        placement
-        |> placement_changeset(%{shelf_id: shelf_id})
-        |> Repo.update()
+        true ->
+          placement
+          |> placement_changeset(%{shelf_id: shelf_id})
+          |> Repo.update()
+      end
+    else
+      nil -> {:error, :not_found}
     end
   end
 
@@ -1066,12 +1088,11 @@ defmodule Stacks.Shelving do
 
   defp check_reading_pile_capacity(_repo, %Bookshelf{}), do: {:ok, :not_limited}
 
-  # A same-bookshelf "move" adds no book, so the cap must not fire — otherwise
-  # a full (or grandfathered over-limit) pile could never be reorganised in
-  # place.
-  defp check_move_capacity(_repo, %Bookshelf{id: same_id}, %Bookshelf{id: same_id}),
-    do: {:ok, :same_bookshelf}
-
+  # Only cross-bookshelf moves reach here: `move_book/3` short-circuits a
+  # same-bookshelf "move" to a no-op success before `do_move_book/3` (and thus
+  # this check) ever runs. So the cap is evaluated purely against the
+  # destination — a same-bookshelf reorganisation of a full (or grandfathered
+  # over-limit) pile never trips it because it never gets this far.
   defp check_move_capacity(repo, _from_bookshelf, to_bookshelf),
     do: check_reading_pile_capacity(repo, to_bookshelf)
 

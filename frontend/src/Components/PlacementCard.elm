@@ -256,6 +256,11 @@ viewEditForm model =
                     , placeholder "0"
                     , onInput PageChanged
                     , testId "current-page-input"
+
+                    -- Links the input to the host's inline save-error element
+                    -- (id "progress-error"), so a screen reader announces "that
+                    -- page is past the end of the book" against this field.
+                    , attribute "aria-describedby" "progress-error"
                     ]
                     []
                 ]

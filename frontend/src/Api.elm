@@ -22,6 +22,7 @@ module Api exposing
     , NotificationPreferences
     , OnboardingStatus
     , PersonalInferences
+    , PlaceError(..)
     , PlacementSummary
     , PollResponse
     , PollStatus(..)
@@ -61,6 +62,7 @@ module Api exposing
     , deleteAccount
     , deleteComment
     , dismissAssociation
+    , foldProgress
     , forgotPassword
     , getAdminSources
     , getAuditLog
@@ -97,6 +99,8 @@ module Api exposing
     , moveResponseToResult
     , personalInferencesDecoder
     , placeBook
+    , placeResponseToResult
+    , progressErrorMessage
     , progressResponseToResult
     , publicProfileDecoder
     , publicProfileSummaryDecoder
@@ -923,30 +927,58 @@ type ProgressError
     | ProgressRequestFailed Http.Error
 
 
+{-| `ProtoJSON.reading_progress/1` always emits all five fields (`id`,
+`reading_status`, `current_page`, `started_at`, `finished_at`), any of the last
+four possibly `null`. So each field is decoded fail-loudly with
+`field … (nullable …)`: a `null` is a legitimate `Nothing`, but a value of the
+wrong TYPE now fails the decode instead of being silently swallowed to
+`Nothing` — the old `oneOf [ …, succeed Nothing ]` masked such server/contract
+drift. `reading_status` is a free-form string the client maps to a known status
+(`Maybe.andThen parseReadingStatus`); an unrecognised status stays `Nothing`.
+-}
 progressDecoder : Decoder Progress
 progressDecoder =
     Decode.map5 Progress
         (Decode.field "id" Decode.string)
-        (Decode.oneOf
-            [ Decode.field "reading_status" Decode.string |> Decode.map parseReadingStatus
-            , Decode.succeed Nothing
-            ]
+        (Decode.field "reading_status" (Decode.nullable Decode.string)
+            |> Decode.map (Maybe.andThen parseReadingStatus)
         )
-        (Decode.oneOf
-            [ Decode.field "current_page" (Decode.nullable Decode.int)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "started_at" (Decode.nullable Decode.string)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "finished_at" (Decode.nullable Decode.string)
-            , Decode.succeed Nothing
-            ]
-        )
+        (Decode.field "current_page" (Decode.nullable Decode.int))
+        (Decode.field "started_at" (Decode.nullable Decode.string))
+        (Decode.field "finished_at" (Decode.nullable Decode.string))
+
+
+{-| Fold the reading-progress fields returned by the API into the placement the
+host page already holds, so the badge and progress line re-render in place. One
+home for the byte-identical fold both BookDetail and the Reading Pile card used
+(#281 item 5).
+-}
+foldProgress : Placement -> Progress -> Placement
+foldProgress placement progress =
+    { placement
+        | readingStatus = progress.readingStatus
+        , currentPage = progress.currentPage
+        , startedAt = progress.startedAt
+        , finishedAt = progress.finishedAt
+    }
+
+
+{-| The user-facing copy for a failed progress save, shared by every host so the
+message and the current-page special case live in one place (#281 item 5). The
+host wraps this string in its own error element (classes differ per surface).
+-}
+progressErrorMessage : ProgressError -> String
+progressErrorMessage error =
+    case error of
+        ProgressValidationFailed errs ->
+            if List.any (\( field, _ ) -> field == "current_page") errs then
+                "That page is past the end of the book."
+
+            else
+                "Couldn't save progress. Please try again."
+
+        ProgressRequestFailed _ ->
+            "Couldn't save progress. Please try again."
 
 
 {-| Map the raw HTTP response into a typed progress result. Pure so the
@@ -1373,13 +1405,69 @@ getInferences revealRisk token toMsg =
         }
 
 
+{-| Error type for `placeBook` (#276/#281). The direct-place path — Upload,
+Catalogue, and BookDetail "Add to Collection" — can hit the same reading-pile
+cap the move path does: the backend rejects a placement that would take the
+pile past 50 with a 422 whose body carries the stable `reading_pile_full`
+code. `Http.expectJson` would collapse that into a bare `BadStatus 422`, so a
+custom expect promotes it to `PlaceReadingPileFull`; every other failure stays
+a `PlaceHttpError`. Mirrors `MoveError`, but keeps the `Placement` on success.
+-}
+type PlaceError
+    = PlaceReadingPileFull
+    | PlaceHttpError Http.Error
+
+
+{-| Map the raw HTTP response into a typed place result. Pure so the
+elm-program-test simulated effect can reuse the exact mapping (mirrors
+`moveResponseToResult`). A 422 whose `error` code is `reading_pile_full`
+becomes `PlaceReadingPileFull`; a good response decodes the placement.
+-}
+placeResponseToResult : Http.Response String -> Result PlaceError Placement
+placeResponseToResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (PlaceHttpError (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (PlaceHttpError Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (PlaceHttpError Http.NetworkError)
+
+        Http.BadStatus_ metadata bodyText ->
+            if
+                metadata.statusCode
+                    == 422
+                    && Decode.decodeString (Decode.field "error" Decode.string) bodyText
+                    == Ok "reading_pile_full"
+            then
+                Err PlaceReadingPileFull
+
+            else
+                Err (PlaceHttpError (Http.BadStatus metadata.statusCode))
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString (Decode.field "placement" placementDecoder) bodyText of
+                Ok placement ->
+                    Ok placement
+
+                Err err ->
+                    Err (PlaceHttpError (Http.BadBody (Decode.errorToString err)))
+
+
+expectPlace : (Result PlaceError Placement -> msg) -> Http.Expect msg
+expectPlace toMsg =
+    Http.expectStringResponse toMsg placeResponseToResult
+
+
 {-| POST /api/bookshelves/:name/placements — place a book on a bookshelf.
 -}
 placeBook :
     String
     -> String
     -> String
-    -> (Result Http.Error Placement -> msg)
+    -> (Result PlaceError Placement -> msg)
     -> Cmd msg
 placeBook bookshelfName bookId token toMsg =
     Http.request
@@ -1391,7 +1479,7 @@ placeBook bookshelfName bookId token toMsg =
                 (Requests.encodePlaceBookRequest
                     { bookId = bookId }
                 )
-        , expect = Http.expectJson toMsg (Decode.field "placement" placementDecoder)
+        , expect = expectPlace toMsg
         , timeout = Nothing
         , tracker = Nothing
         }

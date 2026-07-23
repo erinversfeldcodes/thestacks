@@ -820,7 +820,7 @@ uploadEffects msg model maybeToken =
                                 , body =
                                     SimulatedEffect.Http.jsonBody
                                         (Encode.object [ ( "book_id", Encode.string book.id ) ])
-                                , expect = SimulatedEffect.Http.expectJson Upload.PlacementCompleted (Decode.field "placement" placementDecoder)
+                                , expect = SimulatedEffect.Http.expectStringResponse Upload.PlacementCompleted Api.placeResponseToResult
                                 , timeout = Nothing
                                 , tracker = Nothing
                                 }
@@ -1056,7 +1056,7 @@ bookDetailEffects msg model maybeToken =
                         , body =
                             SimulatedEffect.Http.jsonBody
                                 (Encode.object [ ( "book_id", Encode.string book.id ) ])
-                        , expect = SimulatedEffect.Http.expectJson (BookDetail.PlaceCompleted model.selectedBookshelf) (Decode.field "placement" placementDecoder)
+                        , expect = SimulatedEffect.Http.expectStringResponse (BookDetail.PlaceCompleted model.selectedBookshelf) Api.placeResponseToResult
                         , timeout = Nothing
                         , tracker = Nothing
                         }
@@ -1142,7 +1142,17 @@ decodeBookDetailResponse : Decode.Decoder BookDetailResponse
 decodeBookDetailResponse =
     Decode.map3 BookDetailResponse
         (Decode.field "book" bookDecoder)
-        (Decode.maybe (Decode.field "placement" placementDecoder))
+        -- Mirror production `Api.bookDetailResponseDecoder`: the proto-generated
+        -- placementDecoder decodes JSON null to a default struct (every field
+        -- `oneOf [ field, succeed default ]`), so `Decode.maybe` alone yields a
+        -- phantom `Just {id = ""}` for an unplaced book — hiding the
+        -- "Add to Collection" (place) path the real decoder reaches via
+        -- `Decode.nullable`. Match production so null → Nothing.
+        (Decode.oneOf
+            [ Decode.field "placement" (Decode.nullable placementDecoder)
+            , Decode.succeed Nothing
+            ]
+        )
         (Decode.oneOf
             [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
             , Decode.succeed Nothing

@@ -5,10 +5,8 @@ defmodule StacksWeb.BookshelfPlacementController do
 
   import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
 
-  alias Core.Repo
   alias Stacks.Accounts.Guardian
   alias Stacks.Shelving
-  alias Stacks.Shelving.{Bookshelf, Placement}
   alias StacksWeb.ProtoJSON
 
   @valid_bookshelves ~w(antilibrary library wishlist reading_pile looking_for_home)
@@ -112,6 +110,11 @@ defmodule StacksWeb.BookshelfPlacementController do
       {:ok, placement} ->
         json(conn, %{placement: ProtoJSON.placement_formats(placement)})
 
+      {:error, :not_found} ->
+        conn
+        |> put_status(404)
+        |> json(%{error: "not found"})
+
       {:error, :unauthorized} ->
         conn
         |> put_status(403)
@@ -196,6 +199,9 @@ defmodule StacksWeb.BookshelfPlacementController do
       {:ok, placement} ->
         json(conn, %{placement: ProtoJSON.placement_ref(placement)})
 
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: "not found"})
+
       {:error, :unauthorized} ->
         conn |> put_status(403) |> json(%{error: "forbidden"})
 
@@ -212,35 +218,28 @@ defmodule StacksWeb.BookshelfPlacementController do
   def delete(conn, %{"id" => placement_id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    placement =
-      Placement
-      |> Repo.get(placement_id)
-      |> case do
-        nil -> nil
-        p -> Repo.preload(p, :bookshelf)
-      end
+    # remove_book/2 now owns the missing-id (404) and ownership (403) checks, so
+    # the controller maps its tuples directly rather than pre-loading here. A
+    # soft-deleted row still exists, so a repeat DELETE re-finds it, passes
+    # ownership, re-stamps removed_at, and returns 204 — idempotent, not a 404.
+    case Shelving.remove_book(placement_id, user.id) do
+      {:ok, _placement} ->
+        send_resp(conn, 204, "")
 
-    case placement do
-      nil ->
+      {:error, :not_found} ->
         conn
         |> put_status(404)
         |> json(%{error: "not found"})
 
-      %Placement{bookshelf: %Bookshelf{user_id: owner_id}} when owner_id != user.id ->
+      {:error, :unauthorized} ->
         conn
         |> put_status(403)
         |> json(%{error: "forbidden"})
 
-      _ ->
-        case Shelving.remove_book(placement_id, user.id) do
-          {:ok, _placement} ->
-            send_resp(conn, 204, "")
-
-          {:error, changeset} ->
-            conn
-            |> put_status(422)
-            |> json(%{errors: format_errors(changeset)})
-        end
+      {:error, changeset} ->
+        conn
+        |> put_status(422)
+        |> json(%{errors: format_errors(changeset)})
     end
   end
 end
