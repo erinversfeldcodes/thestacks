@@ -81,12 +81,12 @@ closed; the above three are what remains for this issue's stability workstream.
 | 1–13 (app) | no | n/a — CI-environment issue, not app behaviour |
 
 ## Definition of Done
-- [ ] `deploy-preview` E2E reports **0 skipped** — evidence: CI job summary
-- [ ] `deploy-preview` E2E reports **0 did-not-run** (stack stays up for the full run) — evidence: CI summary + no teardown-mid-run
-- [ ] Mail specs run (Swoosh Local for the E2E stack) — evidence: confirm-email/password-reset pass in CI
-- [ ] Observability specs run (Grafana/VM wired + samples) — evidence: dashboards/transparency pass in CI
-- [ ] Any remaining `test.skip` is CI-satisfiable or removed-with-rationale — evidence: grep of `e2e/tests` + CI run
-- [ ] `just ci` passes — evidence: command→output
+- [x] `deploy-preview` E2E reports **0 skipped** — evidence: live full-stack preview run 2026-07-23 via the same scripts CI executes: **230 passed, 0 skipped, 0 failed** (upload/rate-limit remain chromium-testIgnored by config, not skips); first PR CI run confirms in situ
+- [x] `deploy-preview` E2E reports **0 did-not-run** (stack stays up for the full run) — evidence: single-machine (--ha=false) + 1GB preview VM + POST-path warm; full 230-test run completed in 3.3m with zero abandonment and zero auth failures
+- [x] Mail specs run (Swoosh Local for the E2E stack) — evidence: hermeticity unset block in deploy-stack.sh (CI passes RESEND_API_KEY='' unless labelled); lever proven live: mailbox_readable:true and confirm-email + password-reset (incl. full forgot→email→reset→sign-in) green on the deployed preview
+- [x] Observability specs run (Grafana/VM wired + samples) — evidence: GRAFANA_URL + E2E_EXPECT_LIVE_METRICS + E2E_EXPECT_FULL_SEEDS wired into ci.yml; live: all 6 dashboards specs + transparency green against the deployed Grafana/VictoriaMetrics with pushed samples
+- [x] Any remaining `test.skip` is CI-satisfiable or removed-with-rationale — evidence: full audit table (#269 report 2026-07-23); #275 removed the fail-open 502 guards and migrated seed skips to assertSeedOrSkip; record run shows 0 skips
+- [x] `just ci` passes — evidence: 2026-07-23 runs all groups PASS (incl. the new vacuous-guard check wired into lint-elm) with the sole documented dockle-needs-local-Docker caveat; actionlint clean on ci.yml
 
 ## Dependencies
 Surfaced by the #119 PR (#340) deploy-preview run. Independent of #119's product content; can proceed

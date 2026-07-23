@@ -101,14 +101,14 @@ Compact format — test-integrity issue.
 | 1–13 (app layers) | no | n/a — no application surface changed; this issue alters test code only. Any product defect uncovered is filed as its own issue. |
 
 ## Definition of Done
-- [ ] All 9 out-of-#112 guards triaged against the four-way fork, with the chosen case recorded per guard — evidence: table in Progress Notes
-- [ ] Vestigial guards deleted; assertions run unconditionally — evidence: diff + grep showing removal
-- [ ] Legitimately-conditional branches restructured so something is always asserted — evidence: diff
-- [ ] Each de-guarded assertion proven non-vacuous — evidence: deliberately-broken run showing failure
-- [ ] Any masked defect (wrong selector / missing feature) filed as a tracked issue with a real `issues/NNN-*.md` — evidence: issue numbers, or "none found"
-- [ ] Reintroduction prevented — evidence: a CI grep/lint check, or a documented convention in `docs/agents/standards/testing.md`
-- [ ] Full E2E suite green — evidence: command → pass/fail counts (skips itemised; a skip is not a pass)
-- [ ] `just verify` passes — evidence: command → output
+- [x] All 9 out-of-#112 guards triaged against the four-way fork, with the chosen case recorded per guard — evidence: triage table (completion report 2026-07-23; provenance traced to 6e5d6d7a3/8ad7ec6f8/0fd25a972), plus the settings 502 trio and seed-skip migrations folded in
+- [x] Vestigial guards deleted; assertions run unconditionally — evidence: commit 14b5fd2c; check script greps clean
+- [x] Legitimately-conditional branches restructured so something is always asserted — evidence: upload.spec either/or branches assert terminal state on both paths with allow-markers (commit 14b5fd2c)
+- [x] Each de-guarded assertion proven non-vacuous — evidence: per-guard broken-selector failure excerpts in the triage table (every de-guarded assertion demonstrated to fail when its target is removed)
+- [x] Any masked defect (wrong selector / missing feature) filed as a tracked issue — evidence: none found (editions:30 case-4 candidate investigated and cleared); NOTE the removed settings 502 guards immediately exposed a REAL preview OOM, fixed via the preview VM memory bump (7bedbbf5) — the class working as intended
+- [x] Reintroduction prevented — evidence: scripts/check-e2e-vacuous-guards.sh (proven exit-1 on each idiom) wired into lint-elm.sh (just ci) + test-e2e.sh pre-flight, plus the convention section in docs/agents/standards/testing.md
+- [x] Full E2E suite green — evidence: local 220/10-env-skips/0-failed (2026-07-23), then deployed-preview record run 230 passed / 0 skipped / 0 failed after the #269 env work
+- [x] `just verify` passes — evidence: just ci 2026-07-23 all groups PASS (dockle local caveat only)
 
 ## Dependencies
 - Coordinate with **#114** (E2E Book Detail Overlay) on `book-detail.spec.ts` — that issue may
