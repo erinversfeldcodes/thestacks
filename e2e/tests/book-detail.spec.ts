@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile, ensureBookOnLibrary } from "./helpers";
+import {
+  suiteAuthFile,
+  ensureBookOnLibrary,
+  provisionBookOnShelf,
+} from "./helpers";
 
 test.use({ storageState: suiteAuthFile("book-detail") });
 
@@ -268,6 +272,18 @@ test.describe("Book Detail overlay — focus contract (punch #11/#12)", () => {
       .poll(() => activeElementId(page), { timeout: 3000 })
       .toBe(spineId);
   });
+
+  test("the trailing sentinel exposes its wrap-back aria-label (rev 1)", async ({
+    page,
+  }) => {
+    const { overlay } = await openOverlayWithSpine(page);
+    await expect(
+      overlay.getByTestId("book-overlay-focus-sentinel")
+    ).toHaveAttribute(
+      "aria-label",
+      "End of book details — press Tab to return to the top"
+    );
+  });
 });
 
 test.describe("Book Detail overlay — load and error states (punch #14)", () => {
@@ -396,5 +412,90 @@ test.describe("Book Detail overlay — unauthenticated (punch #15)", () => {
         hasText: "Add to Collection",
       })
     ).toHaveCount(0);
+  });
+});
+
+test.describe("Book Detail overlay — remove-modal focus & scoped escape (rev 1)", () => {
+  // Per-test provisioning (#294): mint a fresh user with exactly one library
+  // book so the overlay always offers a real Remove trigger, independent of
+  // shared-seed drift. These specs never confirm the removal, so the placement
+  // survives — but provisioning keeps them deterministic regardless.
+
+  /**
+   * Provision a placed library book, open its overlay, and open the remove
+   * confirmation modal. Returns the overlay + modal locators.
+   */
+  async function openRemoveModal(
+    page: import("@playwright/test").Page,
+    request: import("@playwright/test").APIRequestContext
+  ) {
+    await provisionBookOnShelf(page, request, "library");
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+    const spine = page.locator('button[id^="spine-"]').first();
+    await expect(spine).toBeVisible({ timeout: 10000 });
+    await spine.click();
+    const overlay = page.getByTestId("book-overlay");
+    await expect(overlay).toBeVisible({ timeout: 5000 });
+    // The danger-zone trigger carries id book-detail-remove-trigger (rev 1);
+    // focus returns here when the modal closes.
+    await overlay.locator("#book-detail-remove-trigger").click();
+    const modal = page.getByTestId("remove-book-modal");
+    await expect(modal).toBeVisible({ timeout: 3000 });
+    return { overlay, modal };
+  }
+
+  test("modal opens with focus on the safe 'Keep It' button", async ({
+    page,
+    request,
+  }) => {
+    await openRemoveModal(page, request);
+    // OpenRemoveModal fires an async Browser.Dom.focus onto the cancel button.
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("remove-book-cancel");
+  });
+
+  test("Tab is trapped within the modal's two buttons", async ({
+    page,
+    request,
+  }) => {
+    await openRemoveModal(page, request);
+    // Forward Tab off the last button (Remove/confirm) wraps to the first
+    // (Keep It/cancel).
+    await page.locator("#remove-book-confirm").focus();
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("remove-book-confirm");
+    await page.keyboard.press("Tab");
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("remove-book-cancel");
+    // Shift+Tab off the first button wraps back to the last.
+    await page.locator("#remove-book-cancel").focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("remove-book-confirm");
+  });
+
+  test("Escape is scoped: first press closes only the modal, second closes the overlay", async ({
+    page,
+    request,
+  }) => {
+    const { overlay, modal } = await openRemoveModal(page, request);
+
+    // First Escape dismisses the TOP-MOST surface (the modal) only: the overlay
+    // stays open and focus returns to the Remove trigger.
+    await page.keyboard.press("Escape");
+    await expect(modal).not.toBeVisible({ timeout: 5000 });
+    await expect(overlay).toBeVisible();
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("book-detail-remove-trigger");
+
+    // With no nested surface left, the second Escape closes the overlay.
+    await page.keyboard.press("Escape");
+    await expect(overlay).not.toBeVisible({ timeout: 5000 });
   });
 });
