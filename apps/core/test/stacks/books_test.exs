@@ -683,36 +683,6 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  describe "search_platform/2" do
-    test "returns {books, count} tuple for a matching query" do
-      book = insert(:book, title: "Platform Search Test Book")
-      insert(:book_edition, book: book)
-      user = insert(:user)
-      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
-      insert(:placement, book: book, bookshelf: bookshelf, visibility: "platform")
-
-      {results, count} = Books.search_platform("Platform Search Test", [])
-
-      assert is_list(results)
-      assert is_integer(count)
-      assert count >= 0
-    end
-
-    test "returns {books, count} for an empty query (returns catalogue)" do
-      {results, count} = Books.search_platform("", limit: 5)
-
-      assert is_list(results)
-      assert is_integer(count)
-    end
-
-    test "returns {[], 0} when query matches nothing" do
-      {results, count} = Books.search_platform("XYZNoMatchAtAllXYZ123", [])
-
-      assert results == []
-      assert count == 0
-    end
-  end
-
   describe "ISBNResolver.resolve/1 — open_library_work_id field" do
     setup do
       original_http = Application.get_env(:core, :isbn_http_client)

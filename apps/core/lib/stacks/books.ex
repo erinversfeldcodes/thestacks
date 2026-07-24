@@ -779,55 +779,6 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Searches the platform catalogue for publicly visible books.
-
-  Full-text search is performed against the book title and joined author name.
-  An empty query returns a paginated slice of the full catalogue.
-
-  ## Options
-
-    * `:page` — 1-based page number (default 1)
-    * `:per_page` / `:limit` — items per page (default 24, max 100)
-
-  Returns `{books_list, total_count}`.
-  """
-  @spec search_platform(String.t(), keyword()) :: {[map()], non_neg_integer()}
-  def search_platform(query, opts \\ []) do
-    per_page = min(max(Keyword.get(opts, :per_page, Keyword.get(opts, :limit, 24)), 1), 100)
-    page = max(Keyword.get(opts, :page, 1), 1)
-    offset = (page - 1) * per_page
-
-    base =
-      Book
-      |> join(:left, [b], a in Author, on: a.id == b.author_id)
-      |> preload([:author, :editions])
-
-    filtered =
-      if query == nil or String.trim(query) == "" do
-        base
-      else
-        safe = String.replace(query, ~r/[^\w\s]/, "")
-
-        where(
-          base,
-          [b, a],
-          ilike(b.title, ^"%#{safe}%") or ilike(a.name, ^"%#{safe}%")
-        )
-      end
-
-    total = Repo.aggregate(filtered, :count)
-
-    books =
-      filtered
-      |> order_by([b], asc: b.title)
-      |> limit(^per_page)
-      |> offset(^offset)
-      |> Repo.all()
-
-    {books, total}
-  end
-
-  @doc """
   Finds books in the platform that are likely the same work as the given title
   and author, using Jaro-Winkler string similarity on both fields combined.
 
