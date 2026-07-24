@@ -868,6 +868,38 @@ h4 {
     font-size: var(--size-xs);
 }
 
+/* The provenance line: the collection shelf ("On your Library shelf") or the
+   platform source ("Listed by … for …" / "Looking for a home on …"). Rendered
+   only for label-bearing hits (#285). */
+.search-result__label {
+    margin-top: 0.35rem;
+    font-size: var(--size-xs);
+    font-style: italic;
+    color: #c8951f;
+}
+
+/* ===== Search Sections (#285) ===== */
+
+/* Two stacked sections — "Your Collection" above "On the Platform" — each a
+   column of result rows under a serif heading. */
+.search-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.search-section + .search-section {
+    margin-top: 2rem;
+}
+
+.search-section__title {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: var(--text-muted, #a09070);
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
+}
+
 /* ===== Filter Panel ===== */
 
 .filter-panel {

@@ -25,7 +25,7 @@ import Util.TestId exposing (testId)
 
 type alias Model =
     { query : String
-    , results : RemoteData Http.Error (List Book)
+    , results : RemoteData Http.Error Api.SearchSections
     , readers : RemoteData Http.Error (List Api.PublicProfileSummary)
     , filters : FilterState
     , sort : SortOrder
@@ -37,7 +37,7 @@ type alias Model =
 type Msg
     = QueryChanged String
     | ClearQuery
-    | SearchCompleted (Result Http.Error (List Book))
+    | SearchCompleted (Result Http.Error Api.SearchSections)
     | ReadersCompleted (Result Http.Error (List Api.PublicProfileSummary))
     | DebounceExpired Int
     | SortChanged String
@@ -132,8 +132,8 @@ update msg model maybeToken =
 
         SearchCompleted result ->
             case result of
-                Ok books ->
-                    ( { model | results = Success books }, Cmd.none, NoOut )
+                Ok sections ->
+                    ( { model | results = Success sections }, Cmd.none, NoOut )
 
                 Err err ->
                     if Api.isUnauthorized err then
@@ -234,18 +234,34 @@ view model =
             Failure _ ->
                 p [ class "error" ] [ text "We couldn't reach the shelves just now. Give it a moment and try again." ]
 
-            Success books ->
+            Success sections ->
                 let
-                    visibleBooks =
-                        books
+                    -- Sort and the year filter apply WITHIN each section: the same
+                    -- `applyYearFilter`/`sortBooks` are run independently over the
+                    -- collection hits and the platform hits (they are generic over
+                    -- any `{ a | book : Book }`), so a section's ordering never
+                    -- bleeds across the boundary.
+                    visibleCollection =
+                        sections.collection
                             |> applyYearFilter model.filters
                             |> sortBooks model.sort
+
+                    visiblePlatform =
+                        sections.platform
+                            |> applyYearFilter model.filters
+                            |> sortBooks model.sort
+
+                    rawEmpty =
+                        List.isEmpty sections.collection && List.isEmpty sections.platform
+
+                    visibleEmpty =
+                        List.isEmpty visibleCollection && List.isEmpty visiblePlatform
                 in
-                if List.isEmpty visibleBooks then
+                if visibleEmpty then
                     -- Distinguish "the query found nothing" from "the query found
                     -- books but the year filter hid them all" — the latter is
                     -- fixable by widening/clearing the filter, so say so.
-                    if not (List.isEmpty books) && yearFilterActive model.filters then
+                    if not rawEmpty && yearFilterActive model.filters then
                         p [ class "search-empty" ] [ text "No books in that year range — widen it or clear filters" ]
 
                     else
@@ -253,7 +269,9 @@ view model =
 
                 else
                     div [ class "search-results", testId "search-results" ]
-                        (List.map viewBookResult visibleBooks)
+                        [ viewCollectionSection visibleCollection
+                        , viewPlatformSection visiblePlatform
+                        ]
         , viewReadersSection model.readers
         ]
 
@@ -322,23 +340,25 @@ viewReaderLocation person =
             Just (city ++ ", " ++ country)
 
 
-{-| Keep only books whose publication year falls within the (optional) range.
-When neither bound is set the list is returned unchanged.
+{-| Keep only hits whose book's publication year falls within the (optional)
+range. When neither bound is set the list is returned unchanged. Generic over any
+`{ a | book : Book }`, so it applies uniformly to collection and platform hits
+without discarding their per-hit metadata (shelf / source).
 
 A book with no known publication year is KEPT once a bound is active, rather than
 silently vanishing: its range membership can't be confirmed either way, so hiding
 it would misrepresent the collection. Such books are surfaced with an explicit
-"Unknown year" label (see `viewBookResult`) so their presence is legible.
+"Unknown year" label (see `viewResultButton`) so their presence is legible.
 
 -}
-applyYearFilter : FilterState -> List Book -> List Book
-applyYearFilter filters books =
+applyYearFilter : FilterState -> List { a | book : Book } -> List { a | book : Book }
+applyYearFilter filters hits =
     case ( filters.yearFrom, filters.yearTo ) of
         ( Nothing, Nothing ) ->
-            books
+            hits
 
         _ ->
-            List.filter (bookWithinYearRange filters) books
+            List.filter (\hit -> bookWithinYearRange filters hit.book) hits
 
 
 {-| True when either year bound is set — i.e. the year filter is narrowing the
@@ -372,46 +392,147 @@ bookWithinYearRange filters book =
                    )
 
 
-{-| Order the rendered results by the selected sort. `ByRelevance` (the default)
-is a passthrough: the backend already returns rows in `plainto_tsquery` rank
-order, so keeping that order IS relevance ranking — there is nothing to sort on
-client-side. The other orders re-sort the list.
+{-| Order the rendered hits by the selected sort. `ByRelevance` (the default) is a
+passthrough: the backend already returns rows in `plainto_tsquery` rank order, so
+keeping that order IS relevance ranking — there is nothing to sort on client-side.
+The other orders re-sort the list. Generic over any `{ a | book : Book }` so the
+same ordering runs over each section independently, preserving per-hit metadata.
 -}
-sortBooks : SortOrder -> List Book -> List Book
-sortBooks sort books =
+sortBooks : SortOrder -> List { a | book : Book } -> List { a | book : Book }
+sortBooks sort hits =
     case sort of
         ByRelevance ->
-            books
+            hits
 
         ByTitle ->
-            List.sortBy .title books
+            List.sortBy (.book >> .title) hits
 
         ByAuthor ->
-            List.sortBy authorName books
+            List.sortBy (.book >> authorName) hits
 
         ByYear ->
-            List.sortBy (bookPublicationYear >> Maybe.withDefault 0) books
+            List.sortBy (.book >> bookPublicationYear >> Maybe.withDefault 0) hits
+
+
+{-| "Your Collection": the viewer's own matching books, each tagged with the
+shelf it sits on. Hidden entirely when empty so an empty-collection viewer sees
+the platform-only view (#285).
+-}
+viewCollectionSection : List Api.CollectionHit -> Html Msg
+viewCollectionSection hits =
+    if List.isEmpty hits then
+        text ""
+
+    else
+        div [ class "search-section search-section--collection", testId "search-collection" ]
+            (h2 [ class "search-section__title" ] [ text "Your Collection" ]
+                :: List.map viewCollectionHit hits
+            )
+
+
+{-| "On the Platform": platform-visible books, some carrying a discoverable label.
+Hidden entirely when empty (collection-only view) (#285).
+-}
+viewPlatformSection : List Api.PlatformHit -> Html Msg
+viewPlatformSection hits =
+    if List.isEmpty hits then
+        text ""
+
+    else
+        div [ class "search-section search-section--platform", testId "search-platform" ]
+            (h2 [ class "search-section__title" ] [ text "On the Platform" ]
+                :: List.map viewPlatformHit hits
+            )
+
+
+{-| A collection hit renders the book row with a "On your <Shelf> shelf" line —
+the "where in your collection" answer US-1.5.1 always promised.
+-}
+viewCollectionHit : Api.CollectionHit -> Html Msg
+viewCollectionHit hit =
+    viewResultButton hit.book (Just ("On your " ++ bookshelfLabel hit.bookshelfName ++ " shelf"))
+
+
+{-| A platform hit renders the book row with its discoverable-by-design label
+(only when `source` is non-empty — a plain result carries no label).
+-}
+viewPlatformHit : Api.PlatformHit -> Html Msg
+viewPlatformHit hit =
+    viewResultButton hit.book (platformLabel hit)
+
+
+{-| The label for a platform hit, or `Nothing` for a plain result. Labels are
+only ever emitted by the backend for always-visible provenance (an active
+`looking_for_home` advert or an active marketplace listing), so rendering them
+here never leaks private shelf provenance (#285).
+-}
+platformLabel : Api.PlatformHit -> Maybe String
+platformLabel hit =
+    case hit.source of
+        "looking_for_home" ->
+            Just ("Looking for a home on " ++ hit.ownerHandle ++ "'s shelf")
+
+        "listed" ->
+            Just ("Listed by " ++ hit.ownerHandle ++ " for " ++ hit.price)
+
+        _ ->
+            Nothing
+
+
+{-| Humanise a raw bookshelf name (`reading_pile` -> "Reading Pile") for display,
+matching the canonical shelf labels used in Upload/Catalogue. Unknown names fall
+through unchanged rather than being dropped.
+-}
+bookshelfLabel : String -> String
+bookshelfLabel name =
+    case name of
+        "library" ->
+            "Library"
+
+        "antilibrary" ->
+            "Antilibrary"
+
+        "wishlist" ->
+            "Wish List"
+
+        "reading_pile" ->
+            "Reading Pile"
+
+        "looking_for_home" ->
+            "Looking for a Home"
+
+        other ->
+            other
 
 
 {-| A search result is a real `<button>` (natively keyboard-focusable and
 Enter/Space-activatable — the accessible interactive element, mirroring the
 shelf-spine pattern in `Page.Bookshelf.Helpers.viewClickableSpine`). Its stable
 id `search-result-<bookId>` is the focus-return target Main hands to the overlay
-so focus comes back to the clicked row on close (#114 / #289).
+so focus comes back to the clicked row on close (#114 / #289). The optional label
+line carries the section's provenance (collection shelf / platform source).
 -}
-viewBookResult : Book -> Html Msg
-viewBookResult book =
+viewResultButton : Book -> Maybe String -> Html Msg
+viewResultButton book maybeLabel =
     button
         [ class "search-result"
         , id ("search-result-" ++ book.id)
         , onClick (BookClicked book.id)
         ]
-        [ h3 [ class "search-result__title" ] [ text book.title ]
-        , p [ class "search-result__author" ] [ text (authorName book) ]
-        , case bookPublicationYear book of
+        ([ h3 [ class "search-result__title" ] [ text book.title ]
+         , p [ class "search-result__author" ] [ text (authorName book) ]
+         , case bookPublicationYear book of
             Just year ->
                 p [ class "search-result__year" ] [ text (String.fromInt year) ]
 
             Nothing ->
                 p [ class "search-result__year search-result__year--unknown" ] [ text "Unknown year" ]
-        ]
+         ]
+            ++ (case maybeLabel of
+                    Just label ->
+                        [ p [ class "search-result__label" ] [ text label ] ]
+
+                    Nothing ->
+                        []
+               )
+        )

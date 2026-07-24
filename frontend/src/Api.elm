@@ -13,6 +13,7 @@ module Api exposing
     , BlockedUsersResponse
     , BookDetailResponse
     , CatalogueResponse
+    , CollectionHit
     , Deanonymisation
     , InterestProfile
     , ListingParams
@@ -24,6 +25,7 @@ module Api exposing
     , PersonalInferences
     , PlaceError(..)
     , PlacementSummary
+    , PlatformHit
     , PollResponse
     , PollStatus(..)
     , PrivacySettings
@@ -35,6 +37,7 @@ module Api exposing
     , PublicProfileSummary
     , RegisterError(..)
     , RiskInference
+    , SearchSections
     , ShelfVisibilitySetting
     , SourceHealth
     , SubjectCount
@@ -779,7 +782,7 @@ getBook bookId maybeToken toMsg =
 searchBooks :
     String
     -> String
-    -> (Result Http.Error (List Book) -> msg)
+    -> (Result Http.Error SearchSections -> msg)
     -> Cmd msg
 searchBooks query token toMsg =
     Http.request
@@ -788,10 +791,11 @@ searchBooks query token toMsg =
         , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] [ Url.Builder.string "q" query ]
         , body = Http.emptyBody
 
-        -- SearchController.index returns the SearchResponse envelope
-        -- `{query, count, results: [...]}`; decode it through the generated
-        -- proto decoder (mirrors catalogueResponseDecoder) and keep the
-        -- caller's `List Book` contract.
+        -- SearchController.index returns the SearchResponse envelope carrying
+        -- `collection` (the viewer's own placements) and `platform_hits`
+        -- (platform-visible books, some label-bearing). Decode it through the
+        -- generated proto decoder (mirrors catalogueResponseDecoder) into the
+        -- typed `SearchSections` the search page renders as two sections (#285).
         , expect = Http.expectJson toMsg searchResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
@@ -1183,20 +1187,74 @@ catalogueResponseDecoder =
     Decode.map fromProtoCatalogueResponse ProtoBookResp.decodeCatalogueResponse
 
 
-{-| Adapter: proto SearchResponse -> the `List Book` the search page consumes.
-The envelope also carries `query`/`count`; the page only needs the results,
-so they are dropped here (mirrors fromProtoCatalogueResponse's shaping).
+{-| A book the viewer already holds, matched by the search query, tagged with the
+bookshelf it sits on (raw name, e.g. `"library"` / `"reading_pile"`). Rendered in
+the "Your Collection" section (#285). Mapped from a proto `SearchHit` whose
+`collection` entries populate `bookshelf_name` and leave the label fields empty.
 -}
-fromProtoSearchResponse : ProtoBookResp.SearchResponse -> List Book
+type alias CollectionHit =
+    { book : Book
+    , bookshelfName : String
+    }
+
+
+{-| A platform-visible book surfaced by the search, with its discoverable-by-design
+provenance (#285). `source` is `""` (a plain platform result — no label),
+`"looking_for_home"` (an always-visible LFH advert → owner handle), or `"listed"`
+(an active marketplace listing → owner handle + formatted price). Rendered in the
+"On the Platform" section; the label is shown only when `source` is non-empty.
+-}
+type alias PlatformHit =
+    { book : Book
+    , source : String
+    , ownerHandle : String
+    , price : String
+    }
+
+
+{-| The two search sections the page renders: the viewer's own matching books
+("Your Collection") above platform-visible books ("On the Platform"). Either list
+may be empty — its section then hides (see `Page.Search.view`).
+-}
+type alias SearchSections =
+    { collection : List CollectionHit
+    , platform : List PlatformHit
+    }
+
+
+fromProtoCollectionHit : ProtoBookResp.SearchHit -> CollectionHit
+fromProtoCollectionHit hit =
+    { book = Types.Book.fromProtoBook hit.book
+    , bookshelfName = hit.bookshelfName
+    }
+
+
+fromProtoPlatformHit : ProtoBookResp.SearchHit -> PlatformHit
+fromProtoPlatformHit hit =
+    { book = Types.Book.fromProtoBook hit.book
+    , source = hit.source
+    , ownerHandle = hit.ownerHandle
+    , price = hit.price
+    }
+
+
+{-| Adapter: proto SearchResponse -> the typed `SearchSections` the page renders.
+The envelope also carries `query`/`count` and the legacy flat `results` list; the
+page reads only the two typed sections (`collection`, `platform_hits`), so the
+rest is dropped here (mirrors fromProtoCatalogueResponse's shaping).
+-}
+fromProtoSearchResponse : ProtoBookResp.SearchResponse -> SearchSections
 fromProtoSearchResponse proto =
-    List.map Types.Book.fromProtoBook proto.results
+    { collection = List.map fromProtoCollectionHit proto.collection
+    , platform = List.map fromProtoPlatformHit proto.platformHits
+    }
 
 
 {-| Decode GET /api/search's SearchResponse envelope through the generated
 proto decoder, keeping search drift-proof by construction. Shared with
 `TestHelpers.searchEffects` so the test mirror can never diverge.
 -}
-searchResponseDecoder : Decoder (List Book)
+searchResponseDecoder : Decoder SearchSections
 searchResponseDecoder =
     Decode.map fromProtoSearchResponse ProtoBookResp.decodeSearchResponse
 
