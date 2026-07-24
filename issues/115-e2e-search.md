@@ -1,12 +1,12 @@
 # Issue #115: E2E Test Suite — Search
 
 ## Summary
-Comprehensive end-to-end test coverage for search functionality, including debounced input, full-text search on `title_tsv`, sort/filter controls, empty/no-results states, result click opening the book detail overlay, and platform-wide search scope.
+Comprehensive end-to-end test coverage for search functionality, including debounced input, full-text search on `title_tsv`, sort/filter controls, empty/no-results states, and visibility filtering of results. Includes the in-scope bug fix for the live client/route path mismatch (`Api.elm` calls `/api/books/search`; the route is `/api/search`).
+
+> **De-scoped 2026-07-23 (epic kickoff):** US-1.5.2 (deep search) → #284; US-1.5.3 (platform discovery sectioning) → #285 (+ #286 for the unwired `search_platform/2`). US-1.5.3's one shipped AC — platform-wide visibility filtering — remains validated here under US-1.5.1.
 
 ## User Stories Covered
 - [US-1.5.1 — Search Across Shelves](../docs/user_stories/US-1.5.1-search-shelves.md)
-- [US-1.5.2 — Full-Text Search Across Reviews and Descriptions](../docs/user_stories/US-1.5.2-fulltext-search.md)
-- [US-1.5.3 — Platform-Wide Discovery Search](../docs/user_stories/US-1.5.3-platform-discovery.md)
 
 ## Scope Check
 - Does this issue touch more than 3 controllers? No (SearchController only).
@@ -34,9 +34,7 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-1.5.1 — Search Across Shelves | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.5.2 — Full-Text Search Across Reviews and Descriptions | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.5.3 — Platform-Wide Discovery Search | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.5.1 — Search Across Shelves | Route `core_web/router.ex:208` → `SearchController.index` (`search_controller.ex:12`) → `Books.search_books/2` (`books.ex:694`, `plainto_tsquery` on `title_tsv`) → controller visibility filter `Enum.filter(books, &Visibility.can_view?(&1, viewer))` (`search_controller.ex:16`) → object envelope `{query, count, results}` (`search_controller.ex:18-22`) → Elm client `Api.searchBooks` `GET /api/search` (`Api.elm:787`) decoding `Decode.field "results"` (`Api.elm:793`) → `Page.Search.view` applies `applyYearFilter`/`sortBooks` (`Page/Search.elm:231-232`) → `.search-results`. | `/search` q="Book" rendered the three seeded public works in default title-ascending order — The Book of Laughter and Forgetting / Milan Kundera / 1979, The Book of Legendary Lands / Umberto Eco / 2013, The Book of Sand / Jorge Luis Borges / 1975 — each row binding title + author + year, 0 error nodes (observed live 2026-07-24). | ✅ | Both live-wire breaks fixed in-scope: `Api.elm:787` path `/api/books/search`→`/api/search` and `Api.elm:793` bare-array→`Decode.field "results"` decoder (approved at kickoff 2026-07-23); driven live 2026-07-24. |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
@@ -55,8 +53,7 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 #### Search Results (US-1.5.1)
 - Type a query matching seeded books; verify results list renders in `div.search-results`
 - Verify each result shows: book title, author name, publication year
-- Verify results are clickable
-- Click a result; verify book detail overlay opens (US-1.4.1 integration)
+- ~~Verify results are clickable~~ / ~~Click a result; verify book detail overlay opens~~ — DE-SCOPED → #289 (2026-07-23, found during Phase 3: `viewBookResult` renders a plain div, no click affordance or NavigateTo OutMsg exists — feature unbuilt, not a test gap)
 
 #### Sort Controls (US-1.5.1)
 - Verify sort selector present with options: Title, Author, Year, Date Added
@@ -75,15 +72,14 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 #### Error State
 - Mock `GET /api/search?q=...` to return 500; verify "Search failed. Please try again."
 
-#### Full-Text Deep Search (US-1.5.2 — current status)
-- Note: Full-text search on descriptions/reviews is not yet implemented
-- Verify current search searches `title_tsv` column via `plainto_tsquery`
-- When deep search is implemented: verify "Deep search" toggle, snippet highlighting, "via deep search" labels
+#### Full-Text Deep Search — DE-SCOPED → #284
+- Deep search (descriptions/reviews, toggle, snippets) is unimplemented; feature spun out to #284.
+- In scope here: verify current search searches `title_tsv` via `plainto_tsquery`.
 
-#### Platform-Wide Results (US-1.5.3 — current status)
+#### Platform-Wide Results (visibility slice only; sectioning DE-SCOPED → #285)
 - Current implementation: `Books.search_books/2` returns all visible books platform-wide (not scoped to user)
-- Verify visibility rules enforced (hidden books excluded from results)
-- When collection scoping is implemented: verify "Your Collection" vs "On the Platform" sections, contextual labels (marketplace, partner, public shelf)
+- Verify visibility rules enforced (hidden/age-gated books excluded from results per viewer)
+- Collection scoping / "Your Collection" vs "On the Platform" sections → #285; unwired `search_platform/2` → #286
 
 #### Search Query Edge Cases
 - Single word query: verify results returned (uses `plainto_tsquery`)
@@ -182,9 +178,9 @@ N/A — search reads from `op.books` directly. No dbt models involved in the sea
 
 ## Test Audit
 
-_Baseline test-coverage map for this issue (13 layers × user story, happy/sad columns), generated 2026-07-08. This is the pre-implementation baseline — `❌`/`⚠️` cells are the work queue. Regenerate as tests land; the issue is Done when this audit is green (see Definition of Done)._
+_Test-coverage map for this issue (13 layers × user story, happy/sad columns), regenerated 2026-07-24 to the SHIPPED state. **Audit GREEN — 0 ❌ / 0 ⚠️**: every cell is `✅` (with a verified test file:line) or `n/a`-with-rationale. Baseline was generated 2026-07-08; see Progress Notes for the phase-by-phase resolution._
 
-Last regenerated: 2026-07-08 (baseline, pre-implementation — Issue #115)
+Last regenerated: 2026-07-24 (post-implementation — Issue #115 shipped)
 
 Legend: ✅ = exists | ⚠️ = exists but shallow | ❌ = missing | n/a = not applicable
 
@@ -203,42 +199,54 @@ The matrix is 13 layers × 3 US, with happy/sad columns per cell. The
 assertion inventory is drawn from each US's §3–§13 plus Issue #115's "Test
 Suites" section (Playwright / API / DB / Elm / metrics enumerations).
 
-**Feature status (verified by reading source):**
-- **US-1.5.1 is implemented.** `StacksWeb.SearchController.index/2`
-  (`apps/core/lib/stacks_web/controllers/search_controller.ex`, route
-  `GET /api/search`, `:authenticated` pipeline, router line 175) →
-  `Stacks.Books.search_books/2` (`apps/core/lib/stacks/books.ex:522`,
+**Feature status (verified by reading source + live drive 2026-07-24):**
+- **US-1.5.1 is implemented, wired end-to-end, and driven live.**
+  `StacksWeb.SearchController.index/2`
+  (`apps/core/lib/stacks_web/controllers/search_controller.ex:12`, route
+  `GET /api/search`, `core_web/router.ex:208`, `:authenticated` pipeline) →
+  `Stacks.Books.search_books/2` (`apps/core/lib/stacks/books.ex:694`,
   `title_tsv @@ plainto_tsquery('english', ?)` with a `~r/[^\w\s]/`
-  sanitiser) → `Visibility.can_view?/2` filter → `ProtoJSON.search_book/1`.
-  Frontend `Page.Search` + `Components.SearchBar` + `SortSelector` +
-  `FilterPanel`; sort/year-filter are **client-side only** (the API takes
-  only `q` + `limit`).
-- **US-1.5.2 (deep search across descriptions/reviews, snippets, "via deep
-  search" labels) is NOT implemented.** The backend searches `title_tsv`
-  only; there is no `scope=deep`, no `description_tsv`, no `ts_headline`
-  snippet generation, and no Elm "Deep search" toggle. This is a code gap,
-  not a test gap — the story-specific cells are `n/a (not implemented)` and
-  its current title-only behaviour is already covered under US-1.5.1.
-- **US-1.5.3 (platform-wide discovery) is PARTIALLY implemented.**
-  `search_books/2` already returns **all visible books platform-wide** (not
-  scoped to the caller's collection), and visibility filtering is enforced —
-  so the "visibility rules on all results" AC is met and tested. But the
-  "Your Collection" vs "On the Platform" sectioning, marketplace/partner/
-  other-user sources, and contextual labels are not implemented.
-  `Books.search_platform/2` (`books.ex:614`) exists but backs
-  `CatalogueController`, not `SearchController`, and does **not** actually
-  filter by bookshelf/placement visibility (it `ilike`-scans all books).
+  sanitiser) → controller visibility filter
+  `Enum.filter(books, &Visibility.can_view?(&1, viewer))`
+  (`search_controller.ex:16`) → object envelope `{query, count, results}`
+  (`search_controller.ex:18-22`) → `ProtoJSON.search_book/1`. Frontend
+  `Page.Search` + `Components.SearchBar` + `SortSelector` + `FilterPanel`;
+  sort/year-filter are **client-side only** (the API takes only `q` +
+  `limit`) and are now applied by `Page.Search.view`
+  (`applyYearFilter`/`sortBooks`, `Page/Search.elm:231-232, 313, 350`).
+- **US-1.5.2 (deep search) — DE-SCOPED → #284.** Deep search across
+  descriptions/reviews, `ts_headline` snippets, and the "via deep search"
+  label is not built (no `scope=deep`, no `description_tsv`, no Elm toggle).
+  Spun out to #284 at kickoff (2026-07-23); its story-specific cells are
+  `n/a (de-scoped → #284)`. The current title-only behaviour is covered
+  under US-1.5.1.
+- **US-1.5.3 (platform-wide discovery) — sectioning DE-SCOPED → #285/#286;
+  the one shipped AC validated under US-1.5.1.** `search_books/2` returns
+  **all visible books platform-wide** (not scoped to the caller's
+  collection) and visibility is enforced in the controller — so the load-
+  bearing "visibility rules on all results" AC is met and tested (the two
+  age-gated tests). The "Your Collection" vs "On the Platform" sectioning,
+  marketplace/partner/other-user sources, and contextual labels are not
+  built → #285. `Books.search_platform/2` (`books.ex`) exists but backs
+  `CatalogueController`, does not filter by bookshelf/placement visibility,
+  and is dead relative to the search path → #286.
 
-**⚠️ Cross-cutting integration finding (path mismatch):** the Elm client
-`Api.searchBooks` (`frontend/src/Api.elm:468`) issues
-`GET /api/books/search?q=...`, but the backend route is `GET /api/search`
-(router line 175 — there is no `/api/books/search` route). `SearchProgramTest`
-mocks the client's URL and `search_controller_test.exs` hits the real route
-directly, so **no layer's tests exercise the wire between them** — and the
-Playwright suite is deliberately loose ("any response, incl. error state")
-precisely because the live call 404s. Note: Issue #093 ("search-path
-consistency") is about the Postgres `search_path`, NOT this API path, so this
-mismatch is unresolved. Flagged as punch-list #6.
+**✅ Cross-cutting integration finding RESOLVED (two live-wire breaks fixed
+in-scope):** at baseline the Elm client `Api.searchBooks` issued
+`GET /api/books/search?q=...` while the backend route is `GET /api/search`
+(`core_web/router.ex:208` — there was no `/api/books/search` route), and a
+second break surfaced during E2E: the client decoded a bare top-level array
+while `SearchController.index` returns the object envelope
+`{query, count, results:[...]}`. Both are now fixed:
+`Api.elm:787` targets `["api", "search"]` and `Api.elm:793` decodes
+`Decode.field "results" (Decode.list bookDecoder)`. The wire is now
+exercised: `searchUrlIsApiSearch` (`SearchProgramTest.elm:68`) pins the URL,
+`searchResponseJson` (`SearchProgramTest.elm:416`) pins the object envelope,
+and `search.spec.ts` drives the real route in a browser. Non-vacuity proven:
+reverting the `Api.elm` path makes the seeded-results E2E fail verbatim
+(`getByTestId('search-results')` never visible → 404 `Failure` branch).
+Issue #093 (Postgres `search_path`) was never this issue. Punch-list #6
+resolved.
 
 ---
 
@@ -246,32 +254,41 @@ mismatch is unresolved. Flagged as punch-list #6.
 
 | Framework    | US-1.5.1 | US-1.5.2 | US-1.5.3 |
 |--------------|----------|----------|----------|
-| Elixir       | ⚠️ (9 controller + 2 `search_books/2` tests; gaps: multi-word/`plainto_tsquery` gotcha, special-char/injection sanitiser, `title_tsv`/GIN mechanism) | n/a — deep search not implemented | ⚠️ (3 `search_platform/2` tests + visibility filtering; placement/bookshelf-level platform scoping not implemented) |
-| Elm unit     | ❌ — no `Page/SearchTest.elm`; only the program test exists | n/a — no deep-search UI | n/a — no platform-section UI |
-| Elm program  | ⚠️ (`SearchProgramTest.elm`, 4 tests: debounce, clear, empty, filter toggle; gaps: init state, sort, year filters, stale-debounce, error state, no-token) | n/a — not implemented | n/a — not implemented |
+| Elixir       | ✅ (controller happy/sad + edge-case describe: multi-word tokenisation, injection + `op.books` intact, tsquery operators, very-long; `search_books/2` multi-word, `title_tsv` populated, GIN `idx_books_title_tsv` via EXPLAIN) | n/a — deep search de-scoped → #284 | ✅ visibility-filtering slice (two age-gated controller tests); sectioning + `search_platform/2` scoping de-scoped → #285/#286 |
+| Elm unit     | ✅ (`Page/SearchTest.elm`: init state, `SortChanged` ×5, `YearFrom/YearToChanged`, `ClearFilters`) | n/a — de-scoped → #284 | n/a — sectioning de-scoped → #285 |
+| Elm program  | ✅ (`SearchProgramTest.elm`: URL guard, debounce, clear, empty, filter toggle, failure, stale-debounce, no-token, sort ×4 view-level, year filter) | n/a — de-scoped → #284 | n/a — de-scoped → #285 |
 | Python       | n/a — vision service not involved in search | n/a | n/a |
-| E2E          | ⚠️ (`search.spec.ts`, 6 tests: render/hint/sort/filter/clear + one loose "any response"; no deterministic seeded result / empty / error assertion; masked by the path mismatch) | n/a — not implemented | n/a — not implemented |
+| E2E          | ✅ (`search.spec.ts`, 10 tests: render/hint/sort-present/filter-present/clear + deterministic seeded results, empty-state, error-state, sort re-order, year filter; fail-open guard removed, non-vacuity proven) | n/a — de-scoped → #284 | n/a — sectioning de-scoped → #285 |
 | dbt          | n/a — search reads `op.books` directly, no dbt in the path | n/a | n/a — `mart_platform_searchable` exists + tested but backs `CatalogueController`, not search |
 
-**Existing test inventory (verified by grep/read):**
-- `apps/core/test/stacks_web/search_controller_test.exs` — 9 tests
-  (matching query, empty results, 422 missing `q`, valid limit, invalid
-  limit, author info, 401 unauthenticated, + 2 visibility-filtering tests
-  for age-gated books).
-- `apps/core/test/stacks/books_test.exs` — `search_books/2` (2 tests:
-  title match, empty on no-match) + `search_platform/2` (3 tests: matching
-  query returns `{books, count}`, empty query returns catalogue slice,
-  no-match returns `{[], 0}`).
-- `frontend/tests/Page/SearchProgramTest.elm` — 4 program tests
-  (`search_debounce`, `search_clear`, `search_empty_results`,
-  `search_filter_panel_toggle`).
-- `e2e/tests/search.spec.ts` — 6 Playwright tests.
+**Existing test inventory (verified by grep/read this regeneration):**
+- `apps/core/test/stacks_web/search_controller_test.exs` —
+  matching query, empty results, 422 missing `q`, valid/invalid limit,
+  author info, 401 unauthenticated, the two age-gated visibility tests
+  (`:150+`), and the `GET /api/search — query edge cases` describe (`:93`):
+  multi-word tokenisation (`:94`), SQL-injection + `op.books` intact
+  (`:106`), tsquery operator chars (`:119`), very-long query (`:130`).
+- `apps/core/test/stacks/books_test.exs` — `search_books/2`: title match,
+  empty on no-match, multi-word `plainto_tsquery` (`:247`), `title_tsv`
+  populated on creation (`:263`), GIN `idx_books_title_tsv` used via EXPLAIN
+  with `SET LOCAL enable_seqscan=off` (`:279`).
+- `frontend/tests/Page/SearchProgramTest.elm` — `searchUrlIsApiSearch`
+  (`:68`), `searchDebounce`, `searchClear`, `searchEmptyResults`,
+  `searchFilterPanelToggle`, `searchFailure` (`:213`), `searchStaleDebounce`
+  (`:240`), `searchNoTokenFiresNoBookRequest` (`:260`), the four view-level
+  sort tests (`:345-383`), `yearFilterAndClear` (`:384`), plus the #217
+  `readers_*` people-search tests (untouched). `searchResponseJson`
+  (`:416`) is the single object-envelope body builder.
+- `frontend/tests/Page/SearchTest.elm` — NEW unit suite: init state,
+  `SortChanged` ×5 (`:57`), `YearFromChanged`/`YearToChanged`,
+  `ClearFilters`.
+- `e2e/tests/search.spec.ts` — 10 Playwright tests (deterministic seeded
+  anchor on query `"Book"`; error-state via `page.route` 500).
 - `dbt/models/marts/mart_platform_searchable.sql` + `schema.yml` — generic
-  column tests (`not_null`/`unique`/`relationships` on `book_id`,
-  `not_null` on `title` + `last_refreshed_at`) — consumed by catalogue.
+  column tests — consumed by catalogue, not search.
 - `apps/core/test/stacks/books/title_search_cache_test.exs` (+`_persistent`)
-  — **NOT part of this feature**: this is the ISBN-resolution memo for the
-  upload path (title→ISBN against Open Library), unrelated to `GET /api/search`.
+  — **NOT part of this feature**: the upload-path ISBN-resolution memo,
+  unrelated to `GET /api/search`.
 
 ---
 
@@ -279,16 +296,20 @@ mismatch is unresolved. Flagged as punch-list #6.
 
 | Status | Count |
 |--------|-------|
-| ✅ STRONG | **6** |
-| ⚠️ shallow | **8** |
+| ✅ STRONG | **11** |
+| ⚠️ shallow | **0** |
 | ❌ missing | **0** |
-| n/a (covered higher / not applicable / not implemented) | **64** |
+| n/a (covered higher / not applicable / de-scoped) | **67** |
 
-78 cells total (13 layers × 3 US × happy/sad). This is the pre-implementation
-baseline. Issue #115's DoD requires regenerating this audit to 0 ❌ / 0 ⚠️
-after the punch list lands — noting that US-1.5.2 (deep search) and the
-US-1.5.3 sectioning/multi-source behaviour are **code gaps** that, per the
-scope-lock rule, become new issues rather than tests written under #115.
+78 cells total (13 layers × 3 US × happy/sad). **Audit GREEN — 0 ❌ / 0 ⚠️.**
+The eight shallow cells at baseline all resolved: the five US-1.5.1 cells
+(API sad edge cases, DB happy + sad, Elm program happy + sad) became ✅ with
+real test citations; the three US-1.5.3 sectioning cells became
+`n/a (de-scoped → #285/#286)`. US-1.5.2 (deep search) remains
+`n/a (de-scoped → #284)`. Per the scope-lock rule the de-scoped behaviours
+are new issues, not tests written under the test-only #115; US-1.5.3's one
+shipped AC (platform-wide visibility filtering) stays validated under
+US-1.5.1's controller visibility tests.
 
 ---
 
@@ -298,9 +319,9 @@ scope-lock rule, become new issues rather than tests written under #115.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.5.1 | ✅ search_controller_test.exs — "returns matching books for query" (asserts `query` echo + title membership), "returns author info when book has an associated author" (nested `author.name`), "respects a valid limit parameter". Response shape (`{query, count, results}`) exercised. | ✅ | ⚠️ search_controller_test.exs — "returns empty results for non-matching query" (200 + `count:0` + `results:[]`), "returns 422 when q param missing", "ignores invalid limit and defaults to 20". **Missing (Issue §"Search Query Edge Cases"/§API):** no multi-word query test (the `to_tsquery` gotcha — code uses `plainto_tsquery`, which *does* handle multi-word, but nothing asserts it), no special-character / SQL-injection-safety test on the `~r/[^\w\s]/` sanitiser, no very-long-query test. | ⚠️ |
-| 1.5.2 | n/a — deep search (descriptions/reviews, `scope=deep`, `ts_headline` snippets) not implemented; the current title-only endpoint is covered under US-1.5.1. | n/a | n/a — same; deep-search error paths do not exist yet. | n/a |
-| 1.5.3 | ⚠️ Platform-wide book results ARE the current behaviour (`search_books/2` returns all visible books, not user-scoped) and are exercised by the US-1.5.1 happy tests. BUT the US-1.5.3-specific multi-source discovery (marketplace listings, partner inventory, other users' public bookshelves, events) and "Your Collection"/"On the Platform" sectioning are **not implemented** — no endpoint returns them. | ⚠️ | ✅ Visibility enforcement (the load-bearing US-1.5.3 AC "visibility rules enforced on all results") is tested: search_controller_test.exs — "excludes age_gated books from results for non-age-verified user" and "includes age_gated books … for age-verified user". | ✅ |
+| 1.5.1 | ✅ search_controller_test.exs — "returns matching books for query" (asserts `query` echo + title membership), "returns author info when book has an associated author" (nested `author.name`), "respects a valid limit parameter". Response shape (`{query, count, results}`) exercised end-to-end and now driven live (2026-07-24). | ✅ | ✅ search_controller_test.exs — "returns empty results for non-matching query" (200 + `count:0` + `results:[]`), "returns 422 when q param missing", "ignores invalid limit and defaults to 20", **plus the `query edge cases` describe (`:93`)**: multi-word tokenisation (`:94`, proves `plainto_tsquery` handles `"elixir action"`), SQL-injection-style query returns 200 + `op.books` intact (`:106`), tsquery operator chars degrade without a 500 (`:119`), very-long query (`:130`). Non-vacuity: swapping `plainto_tsquery`→`to_tsquery` fails the operator/multi-word tests (tsquery syntax_error → 500). | ✅ |
+| 1.5.2 | n/a — deep search (descriptions/reviews, `scope=deep`, `ts_headline` snippets) de-scoped → #284; the current title-only endpoint is covered under US-1.5.1. | n/a | n/a — same; deep-search error paths de-scoped → #284. | n/a |
+| 1.5.3 | n/a — platform-wide book results ARE the current behaviour (`search_books/2` returns all visible books, not user-scoped) and are exercised by the US-1.5.1 happy + E2E tests. The US-1.5.3-specific multi-source discovery (marketplace, partner inventory, other users' public bookshelves, events) and "Your Collection"/"On the Platform" sectioning are de-scoped → #285. | n/a | ✅ Visibility enforcement (the load-bearing US-1.5.3 AC "visibility rules enforced on all results") is tested: search_controller_test.exs — "excludes age_gated books from results for non-age-verified user" and "includes age_gated books … for age-verified user" (the `visibility filtering` describe, `:149`). | ✅ |
 
 #### Layer 2: Auth & Middleware Guards
 
@@ -314,9 +335,9 @@ scope-lock rule, become new issues rather than tests written under #115.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.5.1 | ⚠️ books_test.exs — `search_books/2` "returns books matching title query" (title match, non-match excluded). BUT Issue §3 DB-assertion requirements are unmet: no test that `title_tsv` is **populated** on book creation, and no test that the **GIN index** on `title_tsv` is used by the planner (no `EXPLAIN`/index-usage assertion). The tsvector mechanism itself is trusted, not asserted. | ⚠️ | ⚠️ books_test.exs — `search_books/2` "returns empty list when no match". BUT the **known `to_tsquery` gotcha is untested**: no test drives a multi-word query (e.g. `"elixir action"`) through `plainto_tsquery` to prove multi-word input is tokenised correctly rather than failing (existing tests all use single words by convention). | ⚠️ |
-| 1.5.2 | n/a — `description_tsv`/review-summary columns and their indexes do not exist. | n/a | n/a | n/a |
-| 1.5.3 | ⚠️ books_test.exs — `search_platform/2` "returns {books, count} tuple for a matching query" and "returns catalogue for empty query" (this is the `CatalogueController` path, adjacent to search). BUT: (a) the test inserts a `platform`-visibility bookshelf + placement, yet `search_platform/2` never joins `op.bookshelf_placements`/`op.bookshelves` — placement/bookshelf-level platform-visibility scoping (US-1.5.3 §5) is **not implemented**, so the placement in the fixture is inert; (b) the actual search path (`SearchController`) enforces only book-level `can_view?`. | ⚠️ | ⚠️ books_test.exs — `search_platform/2` "returns {[], 0} when query matches nothing". Same caveat: no placement/bookshelf-visibility exclusion asserted because it isn't implemented. | ⚠️ |
+| 1.5.1 | ✅ books_test.exs — `search_books/2` "returns books matching title query" (title match, non-match excluded), **plus the two DB-mechanism tests the feature rests on**: "populates the title_tsv tsvector column on book creation" (`:263`, asserts the `GENERATED ALWAYS AS to_tsvector` column carries stemmed `elixir`/`action` lexemes with `in` dropped as a stopword) and "the full-text query uses the title_tsv GIN index" (`:279`, `EXPLAIN` under `SET LOCAL enable_seqscan=off` asserts `idx_books_title_tsv` is chosen). | ✅ | ✅ books_test.exs — `search_books/2` "returns empty list when no match" (`:243`) **and** "matches a multi-word query via plainto_tsquery tokenisation" (`:247`, drives `"elixir action"` through the context to prove the multi-word path returns the right book rather than failing — the documented `to_tsquery` gotcha, now asserted at the context level). | ✅ |
+| 1.5.2 | n/a — `description_tsv`/review-summary columns and their indexes do not exist; deep search de-scoped → #284. | n/a | n/a | n/a |
+| 1.5.3 | n/a — `search_platform/2` DB behaviour and its placement/bookshelf-level platform-visibility scoping (US-1.5.3 §5, currently unimplemented — it `ilike`-scans all books and backs `CatalogueController`, not search) are de-scoped → #285/#286. The actual search path (`SearchController`) enforces book-level `can_view?`, covered under US-1.5.1 / L1 US-1.5.3 sad. | n/a | n/a — same; `search_platform/2` placement-visibility exclusion de-scoped → #286. | n/a |
 
 #### Layer 4: Event Flow & Lifecycle
 
@@ -370,9 +391,9 @@ scope-lock rule, become new issues rather than tests written under #115.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.5.1 | ⚠️ SearchProgramTest.elm — `search_debounce` (`QueryChanged` → "Searching…" → `advanceTime 300` → `simulateHttpOk` → `.search-results` + title + author rendered) and `search_filter_panel_toggle` (Show/Hide Filters). **Missing:** init-state assertion (`query=""`, `results=NotAsked`, `debounceCount=0`), `SortChanged` re-sort, `YearFromChanged`/`YearToChanged`/`ClearFilters`, and the stale-debounce no-op (`DebounceExpired count` with `count /= debounceCount`). No `Page/SearchTest.elm` unit test exists — only the program test. | ⚠️ | ⚠️ SearchProgramTest.elm — `search_empty_results` (`Success []` → "No books found matching your search.") and `search_clear` (`ClearQuery` → "Enter a search term above…"). **Missing:** `SearchCompleted (Err _)` → "Search failed. Please try again." (the `Failure` branch is never rendered by any test), and the no-token path (`maybeToken = Nothing` → debounce fires no API call). | ⚠️ |
-| 1.5.2 | n/a — no "Deep search" toggle, `searchScope` field, or snippet rendering in `Page.Search`. | n/a | n/a | n/a |
-| 1.5.3 | n/a — no `platformResults` field, `PlatformSearchCompleted` Msg, or "Your Collection"/"On the Platform" split in `Page.Search`. | n/a | n/a | n/a |
+| 1.5.1 | ✅ SearchProgramTest.elm — `searchUrlIsApiSearch` (`:68`, pins `GET /api/search?q=`), `searchDebounce` ("Searching…" → `advanceTime 300` → `simulateHttpOk` → `.search-results` + title + author), `searchFilterPanelToggle`, plus the four view-level sort tests (`:345-383`, assert rendered `.search-result__title` ORDER for default title / author / year / date-added) and `yearFilterAndClear` (`:384`, year range narrows rendered results, `ClearFilters` restores). Unit `Page/SearchTest.elm` pins init state (`query=""`, `results=NotAsked`, `debounceCount=0`, default sort/filters), `SortChanged` ×5 (`:57`), `YearFrom/YearToChanged`, `ClearFilters`. | ✅ | ✅ SearchProgramTest.elm — `searchEmptyResults` (`Success []` → "No books found matching your search."), `searchClear` (`ClearQuery` → entry hint), `searchFailure` (`:213`, `Http.BadStatus_` 500 → "Search failed. Please try again." — the `Failure` branch now rendered), `searchStaleDebounce` (`:240`, two `QueryChanged` → only the latest count fires a request), `searchNoTokenFiresNoBookRequest` (`:260`, anonymous → 0 book-search requests, readers search unaffected, entry hint remains). | ✅ |
+| 1.5.2 | n/a — no "Deep search" toggle, `searchScope` field, or snippet rendering in `Page.Search`; de-scoped → #284. | n/a | n/a | n/a |
+| 1.5.3 | n/a — no `platformResults` field, `PlatformSearchCompleted` Msg, or "Your Collection"/"On the Platform" split in `Page.Search`; sectioning de-scoped → #285. | n/a | n/a | n/a |
 
 #### Layer 11: Operational Metrics
 
@@ -400,77 +421,74 @@ scope-lock rule, become new issues rather than tests written under #115.
 
 ---
 
-### Punch list (baseline — 0 items resolved)
+### Punch list (all resolved — 0 open)
 
-Every ❌/⚠️ cell converted to a numbered item. No tests were written or
-modified during this audit (pre-implementation baseline). Items #1–#6 are
-**in-scope test gaps for #115** (feature exists, test missing). Items #7–#9
-are **code gaps** that, per the scope-lock rule, should become new issues.
+Every baseline ❌/⚠️ cell converted to a numbered item. Items #1–#6 were
+**in-scope test gaps for #115** (feature exists, test missing) — all
+resolved with the citations below. Items #7–#9 were **code gaps**; per the
+scope-lock rule they became new issues at kickoff (2026-07-23).
 
-| # | Cell | What's needed | Where it belongs |
-|--:|------|---------------|------------------|
-| 1 | L1 US-1.5.1 sad | Multi-word query test (prove `plainto_tsquery` tokenises `"elixir action"` and returns the expected book — the documented `to_tsquery` gotcha), plus special-character / SQL-injection-safety test on the `~r/[^\w\s]/` sanitiser and a very-long-query test | `apps/core/test/stacks_web/search_controller_test.exs` |
-| 2 | L3 US-1.5.1 happy | Assert `title_tsv` tsvector is populated on book creation, and that the `title_tsv` GIN index is used (an `EXPLAIN`-based or query-planner assertion, or at minimum a DB-level `plainto_tsquery` fragment test independent of `search_books/2`) | `apps/core/test/stacks/books_test.exs` |
-| 3 | L3 US-1.5.1 sad | Context-level multi-word `plainto_tsquery` match test on `search_books/2` (single-word convention leaves the multi-word path unverified) | `apps/core/test/stacks/books_test.exs` |
-| 4 | L10 US-1.5.1 happy | Elm state-machine tests: init state (`query=""`, `results=NotAsked`, `debounceCount=0`, no init API call), `SortChanged` (all four `SortOrder` variants), `YearFromChanged`/`YearToChanged`/`ClearFilters`, and stale-debounce no-op (`DebounceExpired count` with `count /= model.debounceCount` → no API call) | new `frontend/tests/Page/SearchTest.elm` (unit) and/or `SearchProgramTest.elm` |
-| 5 | L10 US-1.5.1 sad | Elm failure-state tests: `SearchCompleted (Err _)` → "Search failed. Please try again." (the `Failure` branch is currently never rendered by any test); no-token path (`maybeToken = Nothing` → debounce fires no API call) | `frontend/tests/Page/SearchProgramTest.elm` |
-| 6 | L1/L10 US-1.5.1 (E2E) | Replace the loose "any response" assertion with deterministic seeded-result checks (results render title + author + year in `.search-results`), plus empty-state and error-state assertions. **Blocked on the path mismatch:** `Api.searchBooks` calls `GET /api/books/search` but the route is `GET /api/search` — fix the client (or add a route) first, otherwise the live call 404s and only the error branch is reachable. Issue #093 does NOT cover this (it is about the Postgres `search_path`). | `e2e/tests/search.spec.ts` + `frontend/src/Api.elm` |
-| 7 | L1/L3 US-1.5.3 (code gap → new issue) | Implement platform-wide **discovery sectioning**: marketplace listings, partner inventory, other users' public-bookshelf placements, and events, split into "Your Collection" vs "On the Platform" with contextual labels. Then test. Currently only visibility-filtered book search exists. | new issue (server context + `SearchController` + `Page.Search`) |
-| 8 | L3 US-1.5.3 (code gap → new issue) | `Books.search_platform/2` ignores bookshelf/placement visibility (it `ilike`-scans all books; the `platform` bookshelf/placement in the existing test is inert). Implement placement/bookshelf-level platform-visibility scoping (US-1.5.3 §5), then assert exclusion of non-`platform` placements | new issue + `apps/core/test/stacks/books_test.exs` |
-| 9 | All layers US-1.5.2 (code gap → new issue) | Implement **deep search** across `description`/review-summary/`subjects` (`scope=deep`, GIN index on `description_tsv`, `ts_headline` snippets, "via deep search" label, Elm `searchScope` toggle), then build its own 13-layer coverage. Entirely unimplemented today — out of scope for the test-only #115 | new issue |
+| # | Cell | Resolution | Evidence |
+|--:|------|------------|----------|
+| 1 | L1 US-1.5.1 sad | ✅ RESOLVED | `search_controller_test.exs` `query edge cases` describe (`:93`): multi-word `:94`, injection + `op.books` intact `:106`, tsquery operators `:119`, very-long `:130`. Non-vacuity: `to_tsquery` swap fails the operator/multi-word tests. |
+| 2 | L3 US-1.5.1 happy | ✅ RESOLVED | `books_test.exs` — "populates the title_tsv tsvector column on book creation" (`:263`) and "the full-text query uses the title_tsv GIN index" (`:279`, `EXPLAIN` + `SET LOCAL enable_seqscan=off` → `idx_books_title_tsv`). |
+| 3 | L3 US-1.5.1 sad | ✅ RESOLVED | `books_test.exs` — "matches a multi-word query via plainto_tsquery tokenisation" (`:247`). |
+| 4 | L10 US-1.5.1 happy | ✅ RESOLVED | `Page/SearchTest.elm` (init state, `SortChanged` ×5 `:57`, `YearFrom/YearToChanged`, `ClearFilters`) + `SearchProgramTest.elm` view-level sort `:345-383`, `yearFilterAndClear` `:384`, `searchStaleDebounce` `:240`. |
+| 5 | L10 US-1.5.1 sad | ✅ RESOLVED | `SearchProgramTest.elm` — `searchFailure` (`:213`, `Failure` branch → "Search failed. Please try again.") and `searchNoTokenFiresNoBookRequest` (`:260`). |
+| 6 | L1/L10 US-1.5.1 (E2E) | ✅ RESOLVED | `search.spec.ts` — deterministic seeded results (`:106`), empty-state (`:145`), error-state (`:157`), sort re-order (`:181`), year filter (`:217`); fail-open OR-guard removed; passes `scripts/check-e2e-vacuous-guards.sh`. Path mismatch fixed in-scope (`Api.elm:787` + decoder `:793`); non-vacuity proven by path revert. Driven live 2026-07-24. |
+| 7 | L1/L3 US-1.5.3 (code gap) | → #285 | Platform-wide discovery sectioning ("Your Collection" vs "On the Platform", multi-source) spun out to #285. Only visibility-filtered book search exists (validated under US-1.5.1). |
+| 8 | L3 US-1.5.3 (code gap) | → #286 | `Books.search_platform/2` placement/bookshelf-visibility scoping (dead relative to search) spun out to #286. |
+| 9 | All layers US-1.5.2 (code gap) | → #284 | Deep search (`scope=deep`, `description_tsv`, `ts_headline` snippets, Elm toggle) spun out to #284. |
 
 ---
 
 ### Verdict
 
-**Baseline established — audit NOT yet resolved.** State across the
-13-layer × 3-US matrix (78 cells):
+**Audit GREEN — shipped state.** State across the 13-layer × 3-US matrix
+(78 cells):
 
-- **6 ✅ STRONG** — US-1.5.1 API happy path + both auth cells; US-1.5.3
-  visibility enforcement (sad) + both auth cells.
-- **8 ⚠️ shallow** — US-1.5.1 API sad (multi-word/injection), DB happy+sad
-  (`title_tsv`/GIN mechanism, `plainto_tsquery` gotcha), Elm program
-  happy+sad (init/sort/filters/stale-debounce, error/no-token); US-1.5.3 API
-  happy + DB happy+sad (platform sectioning + placement-visibility scoping
-  unimplemented).
-- **0 ❌** — no cell is "feature exists, zero tests"; every gap is either a
-  shallow test (⚠️) or an unimplemented feature (n/a).
-- **64 n/a** — read-only layers (events, jobs, external, storage, cache,
-  dbt, metrics, performance, cost) across all three US; plus every
-  US-1.5.2 cell (deep search not implemented) and the US-1.5.3 UI-section
-  cells (not implemented).
+- **11 ✅ STRONG** — US-1.5.1 API happy + sad, DB happy + sad, Elm program
+  happy + sad, and both auth cells; US-1.5.3 visibility enforcement (sad) +
+  both auth cells.
+- **0 ⚠️** — every baseline shallow cell resolved (five US-1.5.1 cells → ✅
+  with real citations; three US-1.5.3 sectioning cells → n/a de-scoped).
+- **0 ❌** — no cell is "feature exists, zero tests".
+- **67 n/a** — read-only layers (events, jobs, external, storage, cache,
+  dbt, metrics, performance, cost) across all three US; every US-1.5.2 cell
+  (deep search de-scoped → #284); and the US-1.5.3 sectioning cells
+  (de-scoped → #285/#286).
 
 **Headline findings:**
-1. **US-1.5.1 is genuinely implemented and reasonably covered** at the
-   controller/context level (11 Elixir tests) — but the two DB mechanisms
-   the feature rests on are untested: `title_tsv` tsvector population + GIN
-   index usage, and the multi-word `plainto_tsquery` behaviour (the
-   documented `to_tsquery` single-word gotcha means the multi-word path has
-   never been asserted). The `Failure` UI branch is also never rendered by
-   any Elm test.
-2. **A live path mismatch is masked by the test suite:** the Elm client
-   calls `/api/books/search` while the backend serves `/api/search`. Unit
-   tests mock each side of the wire independently and the Playwright test is
-   loose enough ("any response, incl. error") to pass on the resulting 404.
-   This is the single most important integration gap and is not what Issue
-   #093 fixes.
-3. **US-1.5.2 (deep search) and the US-1.5.3 discovery sectioning are code,
-   not test, gaps** — they should become new issues rather than absorb #115's
-   test-only scope. US-1.5.3's one shipped, testable AC — platform-wide
-   visibility filtering — is the audit's clearest ✅.
+1. **US-1.5.1 is implemented, covered, and driven live.** The two DB
+   mechanisms the feature rests on are now asserted — `title_tsv` tsvector
+   population (`books_test.exs:263`) and GIN index usage via `EXPLAIN`
+   (`:279`) — and the multi-word `plainto_tsquery` path is proven at both
+   the controller (`search_controller_test.exs:94`) and context
+   (`books_test.exs:247`) levels. The Elm `Failure` branch is now rendered
+   (`SearchProgramTest.elm:213`).
+2. **Both live-wire breaks are fixed and locked.** The path mismatch
+   (`/api/books/search` → `/api/search`, `Api.elm:787`) and the decoder
+   shape mismatch (bare array → `Decode.field "results"`, `Api.elm:793`)
+   are pinned by `searchUrlIsApiSearch`/`searchResponseJson` and exercised
+   in a real browser by `search.spec.ts`. Non-vacuity proven: reverting the
+   path fails the seeded-results E2E verbatim. Live drive of `/search`
+   q="Book" rendered the three seeded works title-ascending (2026-07-24).
+3. **US-1.5.2 (deep search) and US-1.5.3 discovery sectioning are de-scoped
+   code gaps** → #284 / #285 / #286 (the scope-lock rule keeps them out of
+   the test-only #115). US-1.5.3's one shipped AC — platform-wide
+   visibility filtering — is validated under US-1.5.1 (the two age-gated
+   controller tests).
 
-**Test runner totals at baseline (search-related only):** Elixir 14 tests
-(9 `search_controller_test.exs` + 2 `search_books/2` + 3 `search_platform/2`),
-Elm 4 program tests (`SearchProgramTest.elm`), Playwright 6 tests
-(`search.spec.ts`), dbt 5 generic column tests on `mart_platform_searchable`
-(catalogue, not search). Punch list: **9 items** — 6 in-scope test gaps
-(#1–#6), 3 code gaps for new issues (#7–#9).
+**Test runner totals (this session, verified green):** Elixir 2862 / 0,
+Elm 999 / 0, Playwright 12 / 12 live (10 search + 2 setup, 2026-07-24),
+`just verify` green (dbt 237 / 237). Punch list: **0 open** — items #1–#6
+resolved with citations above, #7–#9 spun out to #284/#285/#286.
 ## Definition of Done
-- [ ] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local`
-- [ ] No flaky tests
-- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
-- [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
-- [ ] `just verify` passes
+- [x] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local` — Elixir 2862/0, Elm 999/0, Playwright 12/12 live (10 search + 2 setup, 2026-07-24)
+- [x] No flaky tests — each suite green across three independent runs this session (impl + reviewer re-runs); E2E passes `scripts/check-e2e-vacuous-guards.sh`, non-vacuity proven by `Api.elm` path revert
+- [x] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — US-1.5.1 happy path built end-to-end and driven live 2026-07-24 (`/search` q="Book" → three seeded works title-ascending); US-1.5.2 → #284, US-1.5.3 sectioning → #285/#286 de-scoped (Summary edited + spin-out issues). No named story reaches GREEN via `n/a (see #NNN)`.
+- [x] **Test audit (embedded above) is GREEN** — 11 ✅ / 0 ⚠️ / 0 ❌ / 67 n/a across the 78-cell matrix; regenerated to shipped state 2026-07-24, every ✅ cell cites a verified test file:line
+- [x] `just verify` passes — green 2026-07-24, dbt 237/237
 
 ## Dependencies
 - Seeded books with titles for full-text search testing
@@ -482,4 +500,9 @@ Elm 4 program tests (`SearchProgramTest.elm`), Playwright 6 tests
 Orchestrator-coordinated: `playwright-agent` for UI tests, `elixir-agent` for API/DB tests, `elm-agent` for state machine tests.
 
 ## Progress Notes
-[Updated by agents during execution.]
+- 2026-07-23 — Epic kickoff (#115/#114/#113 on `feat/115-114-3-e2e`). Baseline re-verified against current code: path mismatch (`Api.elm:787` `/api/books/search` vs route `/api/search`) still live, masked by the fail-open OR-assertion at `search.spec.ts:50-57`. People-search (#217) added to `Page.Search` since baseline (readers section + 4 `readers_*` program tests) — specs must not break it. `search_books/2` does visibility in the CONTROLLER, not the context. US-1.5.2 → #284, US-1.5.3 sectioning → #285, `search_platform/2` dead code → #286. Approved in-scope: the `Api.elm` path fix.
+- 2026-07-23 — Phase 2 (Elixir) done: added controller edge-case tests (multi-word tokenisation, SQL-injection safety + `op.books` intact assertion, tsquery-operator chars, very-long query) in `search_controller_test.exs` and context tests (multi-word `plainto_tsquery` match, `title_tsv` populated on insert, GIN `idx_books_title_tsv` used via EXPLAIN with `SET LOCAL enable_seqscan=off`) in `books_test.exs`. 75 tests / 0 failures; format + credo clean. Non-vacuity proven: swapping `plainto_tsquery`→`to_tsquery` fails 5 of the new tests (tsquery syntax_error). FLAG: removing the `~r/[^\w\s]/` sanitiser alone does NOT fail any test — `plainto_tsquery` + Ecto param binding already make injection inert; the sanitiser is belt-and-suspenders, not the load-bearing guard (audit punch #1 rests on `plainto_tsquery`, not the regex). No production changes.
+- 2026-07-23 — Phase 1 (elm-agent) done: fixed `Api.elm` `searchBooks` path `/api/books/search`→`/api/search` (+ the in-sync `TestHelpers.searchEffects` mirror, since program tests exercise the mirror not the opaque real Cmd). Test-first URL assertion (`searchUrlIsApiSearch`) captured failing pre-fix (`GET /api/books/search?q=habit` observed). Added program tests `searchFailure`, `searchStaleDebounce`, `searchNoTokenFiresNoBookRequest` (punch #5) and pure-unit `tests/Page/SearchTest.elm` — init state, `SortChanged` ×5, `YearFrom/YearToChanged`, `ClearFilters` (punch #4). FLAG: `Page.Search.view` never consumes `model.sort`/`model.filters` — the sort/year controls set state but do not re-order/filter rendered results (inert control, candidate follow-up). Full elm-test 978 pass / 0 fail; elm-format + elm-review clean.
+- 2026-07-23 — Phase 1 revision 1 (elm-agent): the inert-sort/filter flag accepted as in-scope bug fix. Test-first — 4 new view-level tests in `SearchProgramTest.elm` (`sort_default_title`, `sort_by_author`, `sort_by_year`, `year_filter`) failed against the unsorted view (verbatim: rendered order stayed server-order `[Zebra, Middle, Alpha]`; `sort_by_date_added` passed pre-fix since DateAdded preserves server order). Implemented `applyYearFilter`/`sortBooks` in `Page.Search.view` (filter then sort the Success list before render; DateAdded keeps server order, no-year books excluded once a bound is active). Update-level `SearchTest.elm` tests retained. Full elm-test 983 pass / 0 fail; elm-format, `elm make --optimize`, elm-review all clean.
+- 2026-07-23 — Phase 1 revision 2 (elm-agent): second live-wire bug (found by Phase 3 E2E). `SearchController.index` returns `{query, count, results:[...]}` (`search_controller.ex:18-22`) but `Api.searchBooks` decoded a bare top-level array → every real response failed to decode → live search rendered "Search failed" for all queries. Root cause the mirror missed: every simulated search body used the same bare-list fiction. Test-first — switched `searchResponseJson` to the real object shape FIRST; 7 tests failed on the bare-list decoder (`search_debounce`, `search_empty_results`, all 4 `sort_*`, `year_filter`). Fixed `Api.elm:793` → `Decode.field "results" (Decode.list bookDecoder)` (matches sibling `book`/`users` unwrapping) + synced the `TestHelpers.searchEffects` mirror decoder. Swept: no bare-list search body remains (single builder `searchResponseJson` is object-shaped). Full elm-test 983 pass / 0 fail; elm-format + elm-review clean. Rebuilt deployed assets (`apps/core/assets && npm run deploy`) so the live stack serves the fixed `app.js`.
+- 2026-07-23 — Phase 3 (testing-coordinator/Playwright) done: rewrote `e2e/tests/search.spec.ts` — killed the fail-open OR-guard (old `:50-57`, a #275-class vacuous assertion) and replaced it with deterministic seeded-content tests anchored on query `"Book"` (3 distinct public works: The Book of Legendary Lands/Eco/2013, The Book of Sand/Borges/1975, The Book of Laughter and Forgetting/Kundera/1979). New: seeded-results (exact title order + per-row author+year bound inside `[data-testid="search-results"]`), empty-state ("No books found matching your search."), error-state (page.route 500 → "Search failed. Please try again."), sort re-order (Title/Author/Year, exact computed orders), year-filter (From=1976 excludes Sand, Clear Filters restores). Kept the render/hint/sort-present/filter-present/clear tests. Run against a real local stack (Phoenix :4000, `STACKS_E2E_TEST_HELPERS=1` + `AGE_GATING_ENABLED=true`, seeded `stacks_dev`, assets rebuilt): **12 passed / 0 failed** (10 search + 2 setup). Passes `scripts/check-e2e-vacuous-guards.sh`. Non-vacuity PROVEN: with `Api.elm` path reverted to `/api/books/search` + assets rebuilt, the seeded-results test FAILS verbatim (`getByTestId('search-results')` never visible → 404 Failure branch); path restored, assets rebuilt, `git diff -- frontend/src/Api.elm` shows only Phase-1's path+decoder fix (no proving-gate trace). Live drive of `/search` q=`"Book"`: 3 rows rendered in default title order [Laughter/Kundera/1979, Legendary/Eco/2013, Sand/Borges/1975], 0 error nodes — US-1.5.1 Pre-Check happy path observed live end-to-end. Note: Phase 3 caught Phase 1's second live-wire bug (decoder shape), fixed under Phase 1 revision 2. Touched only `e2e/**` + this issue file.

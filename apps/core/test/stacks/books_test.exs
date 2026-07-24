@@ -243,6 +243,54 @@ defmodule Stacks.BooksTest do
     test "returns empty list when no match" do
       assert [] == Books.search_books("ZZZNoMatchZZZ")
     end
+
+    test "matches a multi-word query via plainto_tsquery tokenisation" do
+      book = insert(:book, title: "Elixir in Action")
+      insert(:book_edition, book: book)
+      other = insert(:book, title: "Rust Atomics and Locks")
+      insert(:book_edition, book: other)
+
+      results = Books.search_books("elixir action")
+      titles = Enum.map(results, & &1.title)
+
+      assert "Elixir in Action" in titles
+      refute "Rust Atomics and Locks" in titles
+    end
+
+    # Layer 3 DB-assertion punch (#115 audit #2): prove the two DB mechanisms the
+    # feature rests on — the generated tsvector column and the GIN index — rather
+    # than trusting them via `search_books/2`.
+    test "populates the title_tsv tsvector column on book creation" do
+      book = insert(:book, title: "Elixir in Action")
+
+      %{rows: [[tsv]]} =
+        Repo.query!(
+          "SELECT title_tsv::text FROM op.books WHERE id = $1",
+          [Ecto.UUID.dump!(book.id)]
+        )
+
+      # Column is GENERATED ALWAYS AS to_tsvector('english', title) STORED, so it
+      # is non-null and carries stemmed lexemes with `in` dropped as a stopword.
+      assert tsv =~ "elixir"
+      assert tsv =~ "action"
+      refute tsv =~ "'in'"
+    end
+
+    test "the full-text query uses the title_tsv GIN index" do
+      # On a tiny table the planner prefers a seqscan; disable it within this
+      # sandbox transaction so the plan reflects index availability, then assert
+      # the GIN index (idx_books_title_tsv) is chosen.
+      Repo.query!("SET LOCAL enable_seqscan = off")
+
+      %{rows: rows} =
+        Repo.query!(
+          "EXPLAIN SELECT id FROM op.books WHERE title_tsv @@ plainto_tsquery('english', $1)",
+          ["elixir"]
+        )
+
+      plan = rows |> List.flatten() |> Enum.join("\n")
+      assert plan =~ "idx_books_title_tsv"
+    end
   end
 
   describe "confirm_cover_association/2" do

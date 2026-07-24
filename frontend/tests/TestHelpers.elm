@@ -1,6 +1,7 @@
 module TestHelpers exposing
     ( BookDetailTestModel
     , ReadingPileTestModel
+    , bookDetailOverlayProgramWithOut
     , bookDetailProgram
     , bookDetailProgramWithOut
     , bookshelfProgram
@@ -948,9 +949,13 @@ searchEffects msg model maybeToken =
                                 SimulatedEffect.Http.request
                                     { method = "GET"
                                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                    , url = "/api/books/search?q=" ++ model.query
+                                    , url = "/api/search?q=" ++ model.query
                                     , body = SimulatedEffect.Http.emptyBody
-                                    , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted (Decode.list bookDecoder)
+
+                                    -- Mirror Api.searchBooks: SearchController.index
+                                    -- returns `{query, count, results: [...]}`, so
+                                    -- unwrap the `results` field (not a bare array).
+                                    , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted (Decode.field "results" (Decode.list bookDecoder))
                                     , timeout = Nothing
                                     , tracker = Nothing
                                     }
@@ -1680,5 +1685,34 @@ bookDetailProgramWithOut bookId maybeToken maybePreviousRoute =
                 in
                 ( { page = newModel, lastOut = out }, bookDetailEffects msg newModel maybeToken )
         , view = \model -> BookDetail.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Like `bookDetailProgramWithOut`, but renders `BookDetail.overlayView` (the
+modal chrome: backdrop, close button, focus sentinel) instead of the routed
+`view`. Records the page's `OutMsg` so a test can assert that dismissing the
+overlay via the X button or a backdrop click emits `RequestCloseOverlay`.
+-}
+bookDetailOverlayProgramWithOut : String -> Maybe String -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailOverlayProgramWithOut bookId maybeToken maybePreviousRoute =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        BookDetail.init bookId maybeToken maybePreviousRoute
+                in
+                ( { page = model, lastOut = BookDetail.NoOut }
+                , bookDetailInitEffects bookId maybeToken
+                )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, out ) =
+                        BookDetail.update msg model.page maybeToken
+                in
+                ( { page = newModel, lastOut = out }, bookDetailEffects msg newModel maybeToken )
+        , view = \model -> BookDetail.overlayView model.page
         }
         |> ProgramTest.withSimulatedEffects identity

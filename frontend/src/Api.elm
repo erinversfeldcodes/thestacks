@@ -784,9 +784,13 @@ searchBooks query token toMsg =
     Http.request
         { method = "GET"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = Url.Builder.crossOrigin baseUrl [ "api", "books", "search" ] [ Url.Builder.string "q" query ]
+        , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] [ Url.Builder.string "q" query ]
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg (Decode.list bookDecoder)
+
+        -- SearchController.index returns an object `{query, count, results: [...]}`,
+        -- not a bare array — unwrap `results` (mirrors the `book`/`users`
+        -- unwrapping in getBook / searchUsers).
+        , expect = Http.expectJson toMsg (Decode.field "results" (Decode.list bookDecoder))
         , timeout = Nothing
         , tracker = Nothing
         }

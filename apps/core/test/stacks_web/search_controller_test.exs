@@ -83,6 +83,63 @@ defmodule StacksWeb.SearchControllerTest do
     end
   end
 
+  # Query edge cases (Issue #115 audit punch #1). These exercise the read path's
+  # resilience to real-world input: multi-word tokenisation (the documented
+  # `to_tsquery` single-word gotcha — `Books.search_books/2` uses
+  # `plainto_tsquery`, which tokenises free text), injection/special-character
+  # safety, and pathological length. Each asserts on returned CONTENT + a 200,
+  # not merely status, so a regression to `to_tsquery` (which raises a tsquery
+  # syntax error on bare multi-word/operator input → 500) is caught here.
+  describe "GET /api/search — query edge cases" do
+    test "tokenises a multi-word query and returns the matching book", %{conn: conn} do
+      insert_book_with_edition(title: "Elixir in Action", isbn: "9781617295027")
+      insert_book_with_edition(title: "Rust Atomics and Locks", isbn: "9781098119447")
+
+      conn = get(conn, "/api/search", q: "elixir action")
+      response = json_response(conn, 200)
+
+      titles = Enum.map(response["results"], & &1["title"])
+      assert "Elixir in Action" in titles
+      refute "Rust Atomics and Locks" in titles
+    end
+
+    test "handles a SQL-injection-style query without a 500 and leaves op.books intact",
+         %{conn: conn} do
+      insert_book_with_edition(title: "Canary Survives", isbn: "9780000000019")
+
+      conn = get(conn, "/api/search", q: "'; DROP TABLE op.books;--")
+      response = json_response(conn, 200)
+
+      # Query is parameterised + `plainto_tsquery` treats it as plain text — no
+      # DDL executes. Sane (list) result shape, and the seeded row still exists.
+      assert is_list(response["results"])
+      assert %{rows: [[1]]} = Core.Repo.query!("SELECT count(*) FROM op.books")
+    end
+
+    test "handles tsquery operator characters without a 500", %{conn: conn} do
+      insert_book_with_edition(title: "Boolean Logic Primer", isbn: "9780000000026")
+
+      conn = get(conn, "/api/search", q: "book & (title | !x)")
+      response = json_response(conn, 200)
+
+      # `plainto_tsquery` ignores `& | ! ( )` as operators (it would raise under
+      # `to_tsquery`); the query degrades to the plain lexemes and 200s.
+      assert is_list(response["results"])
+    end
+
+    test "handles a very long query gracefully", %{conn: conn} do
+      insert_book_with_edition(title: "Brevity", isbn: "9780000000033")
+
+      long_query = String.duplicate("verylongsearchterm ", 200)
+      assert String.length(long_query) > 2000
+
+      conn = get(conn, "/api/search", q: long_query)
+      response = json_response(conn, 200)
+
+      assert is_list(response["results"])
+    end
+  end
+
   # #229 REGRESSION LOCK — search already hides age-gated books from an
   # authenticated-but-unverified viewer via `Stacks.Visibility` (the setup conn's
   # `insert(:user)` defaults `age_verified: false`, i.e. authed-unverified). These

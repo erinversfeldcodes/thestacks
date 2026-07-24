@@ -225,12 +225,18 @@ view model =
                 p [ class "error" ] [ text "Search failed. Please try again." ]
 
             Success books ->
-                if List.isEmpty books then
+                let
+                    visibleBooks =
+                        books
+                            |> applyYearFilter model.filters
+                            |> sortBooks model.sort
+                in
+                if List.isEmpty visibleBooks then
                     p [ class "search-empty" ] [ text "No books found matching your search." ]
 
                 else
                     div [ class "search-results", testId "search-results" ]
-                        (List.map viewBookResult books)
+                        (List.map viewBookResult visibleBooks)
         , viewReadersSection model.readers
         ]
 
@@ -297,6 +303,64 @@ viewReaderLocation person =
 
         ( city, country ) ->
             Just (city ++ ", " ++ country)
+
+
+{-| Keep only books whose publication year falls within the (optional) range.
+When neither bound is set the list is returned unchanged. A book with no known
+publication year is excluded once any bound is active, since its range
+membership cannot be confirmed.
+-}
+applyYearFilter : FilterState -> List Book -> List Book
+applyYearFilter filters books =
+    case ( filters.yearFrom, filters.yearTo ) of
+        ( Nothing, Nothing ) ->
+            books
+
+        _ ->
+            List.filter (bookWithinYearRange filters) books
+
+
+bookWithinYearRange : FilterState -> Book -> Bool
+bookWithinYearRange filters book =
+    case bookPublicationYear book of
+        Nothing ->
+            False
+
+        Just year ->
+            (case filters.yearFrom of
+                Just from ->
+                    year >= from
+
+                Nothing ->
+                    True
+            )
+                && (case filters.yearTo of
+                        Just to ->
+                            year <= to
+
+                        Nothing ->
+                            True
+                   )
+
+
+{-| Order the rendered results by the selected sort. `ByDateAdded` preserves the
+server's order — search results carry no per-user "date added", so there is
+nothing to sort on and the relevance order the backend returned is kept.
+-}
+sortBooks : SortOrder -> List Book -> List Book
+sortBooks sort books =
+    case sort of
+        ByTitle ->
+            List.sortBy .title books
+
+        ByAuthor ->
+            List.sortBy authorName books
+
+        ByYear ->
+            List.sortBy (bookPublicationYear >> Maybe.withDefault 0) books
+
+        ByDateAdded ->
+            books
 
 
 viewBookResult : Book -> Html Msg
