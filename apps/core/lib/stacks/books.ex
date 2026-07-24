@@ -634,12 +634,16 @@ defmodule Stacks.Books do
   defp maybe_search(query, ""), do: query
 
   defp maybe_search(query, search) do
-    safe_query = String.replace(search, ~r/[^\w\s]/, "")
-
+    # Raw query straight to `plainto_tsquery` via the bound param — same rationale
+    # as `search_books/2` (#291): injection-safety comes from Ecto binding +
+    # plainto_tsquery treating input as plain text, NOT from stripping characters.
+    # This path uses `plainto_tsquery` (not `ilike`), so there are no `%`/`_`
+    # wildcard semantics to escape. A prior `String.replace(~r/[^\w\s]/)` sanitiser
+    # was lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" (#296).
     where(
       query,
       [b],
-      fragment("title_tsv @@ plainto_tsquery('english', ?)", ^safe_query)
+      fragment("title_tsv @@ plainto_tsquery('english', ?)", ^search)
     )
   end
 

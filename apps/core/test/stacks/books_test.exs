@@ -325,6 +325,39 @@ defmodule Stacks.BooksTest do
     end
   end
 
+  # #296 REGRESSION LOCK: the catalogue search path (`maybe_search/2`, shared by
+  # `list_catalogue/1` and `list_for_moderation/1`) uses the SAME `plainto_tsquery`
+  # mechanism as `search_books/2` — NOT `ilike` — so there are no `%`/`_` wildcard
+  # semantics to worry about; the raw query is passed via the bound param and
+  # plainto_tsquery treats it as plain text. A prior `String.replace(~r/[^\w\s]/)`
+  # sanitiser was lossy here too ("O'Brien" → "OBrien", "spider-man" → "spiderman"),
+  # degrading legitimate catalogue searches. Sibling of #291.
+  describe "list_catalogue/1 — search" do
+    test "matches a title containing an apostrophe" do
+      insert(:book, title: "The Master of O'Brien Manor")
+      insert(:book, title: "Rust Atomics and Locks")
+
+      {books, total} = Books.list_catalogue(search: "O'Brien")
+      titles = Enum.map(books, & &1.title)
+
+      assert "The Master of O'Brien Manor" in titles
+      refute "Rust Atomics and Locks" in titles
+      assert total == 1
+    end
+
+    test "matches a title containing a hyphenated word" do
+      insert(:book, title: "The Amazing Spider-Man Chronicles")
+      insert(:book, title: "Rust Atomics and Locks")
+
+      {books, total} = Books.list_catalogue(search: "Spider-Man")
+      titles = Enum.map(books, & &1.title)
+
+      assert "The Amazing Spider-Man Chronicles" in titles
+      refute "Rust Atomics and Locks" in titles
+      assert total == 1
+    end
+  end
+
   describe "confirm_cover_association/2" do
     test "updates cover_image_url on a known edition" do
       edition = insert(:book_edition)
