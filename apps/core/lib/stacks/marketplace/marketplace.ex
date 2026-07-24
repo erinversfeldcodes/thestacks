@@ -103,6 +103,53 @@ defmodule Stacks.Marketplace do
     |> Repo.all()
   end
 
+  @doc """
+  Builds discovery labels for the active listings of the given book ids (#285).
+
+  Returns a map `%{book_id => %{source: "listed", owner_handle: handle, price: formatted}}`
+  for every book that has an active marketplace listing. An active listing is
+  discoverable by design (US-7.2), so its seller's public handle and formatted
+  price are surfaced as the search-hit provenance. When several active listings
+  exist for one book, the most recently listed wins (deterministic). Books with
+  no active listing are simply absent from the map.
+  """
+  @spec active_listing_labels([binary()]) :: %{binary() => map()}
+  def active_listing_labels([]), do: %{}
+
+  def active_listing_labels(book_ids) when is_list(book_ids) do
+    Listing
+    |> join(:inner, [l], s in assoc(l, :seller))
+    |> where([l], l.status == "active" and l.book_id in ^book_ids)
+    |> order_by([l], desc: l.listed_at)
+    |> select([l, s], {l.book_id, s.handle, l.price_cents, l.currency})
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {book_id, handle, cents, currency}, acc ->
+      Map.put_new(acc, book_id, %{
+        source: "listed",
+        owner_handle: handle || "",
+        price: format_price(cents, currency)
+      })
+    end)
+  end
+
+  @doc """
+  Formats a listing price for display (#285). ZAR renders with the "R" symbol;
+  any other currency falls back to its code prefix. Whole-rand amounts omit the
+  decimals ("R120"); fractional amounts keep two ("R120.50").
+  """
+  @spec format_price(integer(), String.t()) :: String.t()
+  def format_price(cents, currency) when is_integer(cents) do
+    symbol = if currency == "ZAR", do: "R", else: "#{currency} "
+    rands = div(cents, 100)
+    remainder = rem(cents, 100)
+
+    if remainder == 0 do
+      "#{symbol}#{rands}"
+    else
+      "#{symbol}#{rands}.#{String.pad_leading(Integer.to_string(remainder), 2, "0")}"
+    end
+  end
+
   @doc "Returns listings for a given seller, newest first. Limited to `limit` (default 50)."
   @spec list_user_listings(binary(), keyword()) :: [Listing.t()]
   def list_user_listings(seller_id, opts \\ []) do

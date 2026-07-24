@@ -176,6 +176,66 @@ defmodule Stacks.Shelving do
     |> Repo.all()
   end
 
+  @doc """
+  Searches the viewer's own collection by book title (#285).
+
+  Returns up to `:limit` (default 20) distinct books the user has an ACTIVE
+  (non-removed) placement of, whose title matches the full-text query. The raw
+  query is passed straight to `plainto_tsquery` via a bound param — injection
+  safety comes from Ecto param binding + `plainto_tsquery` treating its input as
+  plain text (the #291/#296 rationale), NOT from stripping characters. `title_tsv`
+  is unqualified: only `op.books` carries that generated column, so it resolves
+  unambiguously across the placement/bookshelf joins. Author + editions are
+  preloaded for search-hit serialization.
+  """
+  @spec search_collection(binary(), String.t(), keyword()) :: [Book.t()]
+  def search_collection(user_id, query, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 20)
+
+    Book
+    |> join(:inner, [b], p in Placement, on: p.book_id == b.id and is_nil(p.removed_at))
+    |> join(:inner, [b, p], bs in Bookshelf,
+      on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
+    )
+    |> where([b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
+    |> distinct(true)
+    |> limit(^limit)
+    |> preload([:author, :editions])
+    |> Repo.all()
+  end
+
+  @doc """
+  Builds "looking for a home" discovery labels for the given book ids (#285).
+
+  Returns a map `%{book_id => %{source: "looking_for_home", owner_handle: handle}}`
+  for every book with an always-visible `looking_for_home` placement — one whose
+  `listing_status` is `"active"` (the `Stacks.Visibility` marketplace exception,
+  the only shape that surfaces a placement regardless of its visibility). The
+  owner's public handle rides the existing public-handle exposure; no price is
+  attached (the LFH advert has no price — the marketplace listing carries that).
+  When several such placements exist for one book, the most recently placed wins.
+  Books with no active LFH placement are absent from the map.
+  """
+  @spec looking_for_home_labels([binary()]) :: %{binary() => map()}
+  def looking_for_home_labels([]), do: %{}
+
+  def looking_for_home_labels(book_ids) when is_list(book_ids) do
+    Placement
+    |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id)
+    |> join(:inner, [p, bs], u in assoc(bs, :user))
+    |> where(
+      [p, bs],
+      bs.name == "looking_for_home" and p.listing_status == "active" and
+        is_nil(p.removed_at) and p.book_id in ^book_ids
+    )
+    |> order_by([p], desc: p.placed_at)
+    |> select([p, bs, u], {p.book_id, u.handle})
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {book_id, handle}, acc ->
+      Map.put_new(acc, book_id, %{source: "looking_for_home", owner_handle: handle || ""})
+    end)
+  end
+
   @doc "Returns all users who have the given book on their wishlist."
   @spec users_with_book_on_wishlist(binary()) :: [User.t()]
   def users_with_book_on_wishlist(book_id) do

@@ -9,7 +9,7 @@ defmodule StacksWeb.SearchControllerTest do
     user = insert(:user)
     {:ok, token, _} = Guardian.encode_and_sign(user)
     authed_conn = put_req_header(conn, "authorization", "Bearer #{token}")
-    %{conn: authed_conn}
+    %{conn: authed_conn, user: user}
   end
 
   defp insert_book_with_edition(attrs) do
@@ -21,6 +21,20 @@ defmodule StacksWeb.SearchControllerTest do
     )
 
     book
+  end
+
+  # Places `book` on `user`'s named bookshelf. `attrs` may carry :listing_status
+  # (the denormalised marketplace flag) and :visibility. The shelf is built on the
+  # same bookshelf so `shelf_id` (NOT NULL) points back at the intended bookshelf.
+  defp place(user, book, shelf_name, attrs \\ []) do
+    bookshelf = insert(:bookshelf, user: user, name: shelf_name)
+    shelf = insert(:shelf, bookshelf: bookshelf)
+
+    insert(
+      :placement,
+      [book: book, bookshelf: bookshelf, shelf: shelf] ++
+        Keyword.take(attrs, [:listing_status, :visibility])
+    )
   end
 
   describe "GET /api/search" do
@@ -187,6 +201,134 @@ defmodule StacksWeb.SearchControllerTest do
 
       assert "Gatekeeper Chronicles" in titles
       assert "Gatekeeper Secrets" in titles
+    end
+  end
+
+  # #285 — Platform Discovery Sectioning. The search response is split into
+  # "Your Collection" (the viewer's own active-placement title matches) and
+  # "On the Platform" (platform-visible book matches), each hit carrying
+  # optional discovery-source provenance. Provenance is labelled ONLY when the
+  # source is discoverable by design — an always-visible `looking_for_home`
+  # placement (`listing_status: "active"`, the `Visibility` marketplace
+  # exception) or an active marketplace listing. Ordinary private placements
+  # leak NO owner/provenance. `results` (flat list) stays populated for
+  # backward compatibility with the pre-migration Elm decoder.
+  describe "GET /api/search — sectioning (#285)" do
+    test "viewer's own active placement lands in collection, not platform_hits",
+         %{conn: conn, user: user} do
+      book = insert_book_with_edition(title: "Dune Messiah", isbn: "9780593098233")
+      place(user, book, "library")
+
+      response = conn |> get("/api/search", q: "Dune") |> json_response(200)
+
+      collection_titles = Enum.map(response["collection"], & &1["book"]["title"])
+      platform_ids = Enum.map(response["platform_hits"], & &1["book"]["id"])
+
+      assert "Dune Messiah" in collection_titles
+      refute book.id in platform_ids
+
+      hit = Enum.find(response["collection"], &(&1["book"]["title"] == "Dune Messiah"))
+      # Owned by the viewer — never source-labelled.
+      assert hit["source"] == ""
+      assert hit["owner_handle"] == ""
+      assert hit["price"] == ""
+    end
+
+    test "another user's private library placement leaks no label or provenance",
+         %{conn: conn} do
+      other = insert(:user)
+      book = insert_book_with_edition(title: "Hidden Gardens", isbn: "9780000000101")
+      place(other, book, "library", visibility: "owner")
+
+      response = conn |> get("/api/search", q: "Hidden Gardens") |> json_response(200)
+
+      hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == book.id))
+      # The public book work is still discoverable, but the private placement's
+      # owner and provenance must never surface.
+      assert hit, "public book should still be discoverable on the platform"
+      assert hit["source"] == ""
+      assert hit["owner_handle"] == ""
+      refute book.id in Enum.map(response["collection"], & &1["book"]["id"])
+    end
+
+    test "another user's active looking_for_home placement is labelled with owner handle",
+         %{conn: conn} do
+      other = insert(:user, handle: "shelf_owner")
+      book = insert_book_with_edition(title: "Wandering Copy", isbn: "9780000000118")
+      place(other, book, "looking_for_home", listing_status: "active")
+
+      response = conn |> get("/api/search", q: "Wandering Copy") |> json_response(200)
+
+      hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == book.id))
+      assert hit["source"] == "looking_for_home"
+      assert hit["owner_handle"] == "shelf_owner"
+      assert hit["price"] == ""
+    end
+
+    test "a looking_for_home placement without an active listing_status is NOT labelled",
+         %{conn: conn} do
+      other = insert(:user, handle: "idle_owner")
+      book = insert_book_with_edition(title: "Idle Advert", isbn: "9780000000163")
+      place(other, book, "looking_for_home")
+
+      response = conn |> get("/api/search", q: "Idle Advert") |> json_response(200)
+
+      hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == book.id))
+      assert hit["source"] == ""
+      assert hit["owner_handle"] == ""
+    end
+
+    test "an active listing is labelled 'listed' with owner handle and formatted price",
+         %{conn: conn} do
+      seller = insert(:user, handle: "book_seller")
+      book = insert_book_with_edition(title: "Priced Tome", isbn: "9780000000125")
+      insert(:listing, book: book, seller: seller, status: "active", price_cents: 12_000)
+
+      response = conn |> get("/api/search", q: "Priced Tome") |> json_response(200)
+
+      hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == book.id))
+      assert hit["source"] == "listed"
+      assert hit["owner_handle"] == "book_seller"
+      assert hit["price"] == "R120"
+    end
+
+    test "an active listing takes precedence over a looking_for_home label",
+         %{conn: conn} do
+      seller = insert(:user, handle: "dual_seller")
+      book = insert_book_with_edition(title: "Double Signal", isbn: "9780000000132")
+      place(seller, book, "looking_for_home", listing_status: "active")
+      insert(:listing, book: book, seller: seller, status: "active", price_cents: 8_000)
+
+      response = conn |> get("/api/search", q: "Double Signal") |> json_response(200)
+
+      hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == book.id))
+      assert hit["source"] == "listed"
+      assert hit["price"] == "R80"
+    end
+
+    test "collection is empty when the viewer has no matching placement", %{conn: conn} do
+      insert_book_with_edition(title: "Unowned Volume", isbn: "9780000000149")
+
+      response = conn |> get("/api/search", q: "Unowned Volume") |> json_response(200)
+
+      assert response["collection"] == []
+    end
+
+    test "response carries the sectioned proto shape", %{conn: conn, user: user} do
+      book = insert_book_with_edition(title: "Shape Check", isbn: "9780000000156")
+      place(user, book, "library")
+
+      response = conn |> get("/api/search", q: "Shape Check") |> json_response(200)
+
+      assert Map.has_key?(response, "results")
+      assert Map.has_key?(response, "collection")
+      assert Map.has_key?(response, "platform_hits")
+
+      hit = hd(response["collection"])
+      assert Map.has_key?(hit, "book")
+      assert Map.has_key?(hit, "source")
+      assert Map.has_key?(hit, "owner_handle")
+      assert Map.has_key?(hit, "price")
     end
   end
 end

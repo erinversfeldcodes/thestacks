@@ -394,4 +394,41 @@ defmodule Stacks.MarketplaceTest do
       assert {:error, :invalid_transition} = Marketplace.activate_listing(listing, user.id)
     end
   end
+
+  # #285 — discovery-label helpers used by the sectioned search response.
+  describe "format_price/2" do
+    test "renders whole-rand ZAR amounts without decimals" do
+      assert Marketplace.format_price(12_000, "ZAR") == "R120"
+    end
+
+    test "renders fractional ZAR amounts with two decimals" do
+      assert Marketplace.format_price(12_050, "ZAR") == "R120.50"
+      assert Marketplace.format_price(12_005, "ZAR") == "R120.05"
+    end
+
+    test "falls back to a currency-code prefix for non-ZAR currencies" do
+      assert Marketplace.format_price(9_900, "USD") == "USD 99"
+    end
+  end
+
+  describe "active_listing_labels/1" do
+    test "returns a 'listed' label with seller handle and formatted price" do
+      seller = insert(:user, handle: "seller_one")
+      book = insert(:book)
+      insert(:listing, book: book, seller: seller, status: "active", price_cents: 7_500)
+
+      labels = Marketplace.active_listing_labels([book.id])
+      book_id = book.id
+
+      assert %{^book_id => %{source: "listed", owner_handle: "seller_one", price: "R75"}} = labels
+    end
+
+    test "omits draft/removed/sold listings and unknown book ids" do
+      book = insert(:book)
+      insert(:listing, book: book, status: "draft", price_cents: 5_000)
+
+      assert Marketplace.active_listing_labels([book.id]) == %{}
+      assert Marketplace.active_listing_labels([]) == %{}
+    end
+  end
 end

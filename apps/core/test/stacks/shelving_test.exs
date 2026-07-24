@@ -9,6 +9,15 @@ defmodule Stacks.ShelvingTest do
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
+  # Places `book` on `user`'s named bookshelf with a real shelf (shelf_id is NOT
+  # NULL). `attrs` may carry :listing_status / :removed_at. Used by the #285
+  # discovery-helper tests below.
+  defp place_on(user, book, shelf_name, attrs \\ []) do
+    bookshelf = insert(:bookshelf, user: user, name: shelf_name)
+    shelf = insert(:shelf, bookshelf: bookshelf)
+    insert(:placement, [book: book, bookshelf: bookshelf, shelf: shelf] ++ attrs)
+  end
+
   defp setup_user_bookshelf_book(_ctx) do
     user = insert(:user)
     bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -1498,5 +1507,84 @@ defmodule Stacks.ShelvingTest do
       ),
       :count
     )
+  end
+
+  # #285 — discovery helpers backing the sectioned search response.
+  describe "search_collection/3" do
+    setup do
+      user = insert(:user)
+      other = insert(:user)
+      {:ok, user: user, other: other}
+    end
+
+    test "returns the viewer's active-placement title matches only", %{user: user, other: other} do
+      mine = insert(:book, title: "Tidewater Reckoning")
+      place_on(user, mine, "library")
+
+      theirs = insert(:book, title: "Tidewater Currents")
+      place_on(other, theirs, "library")
+
+      results = Shelving.search_collection(user.id, "Tidewater")
+      ids = Enum.map(results, & &1.id)
+
+      assert mine.id in ids
+      refute theirs.id in ids
+    end
+
+    test "excludes removed placements", %{user: user} do
+      book = insert(:book, title: "Vanished Copy")
+      place_on(user, book, "library", removed_at: DateTime.utc_now())
+
+      assert Shelving.search_collection(user.id, "Vanished Copy") == []
+    end
+
+    test "returns a book at most once even across multiple shelves", %{user: user} do
+      book = insert(:book, title: "Twice Shelved")
+      place_on(user, book, "library")
+      place_on(user, book, "wishlist")
+
+      results = Shelving.search_collection(user.id, "Twice Shelved")
+
+      assert Enum.count(results, &(&1.id == book.id)) == 1
+    end
+  end
+
+  describe "looking_for_home_labels/1" do
+    test "labels only active looking_for_home placements with the owner handle" do
+      owner = insert(:user, handle: "home_seeker")
+      book = insert(:book, title: "Adrift")
+      bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      insert(:placement, book: book, bookshelf: bookshelf, shelf: shelf, listing_status: "active")
+
+      labels = Shelving.looking_for_home_labels([book.id])
+      book_id = book.id
+
+      assert %{^book_id => %{source: "looking_for_home", owner_handle: "home_seeker"}} = labels
+    end
+
+    test "ignores looking_for_home placements without an active listing_status" do
+      owner = insert(:user)
+      book = insert(:book)
+      bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      insert(:placement, book: book, bookshelf: bookshelf, shelf: shelf)
+
+      assert Shelving.looking_for_home_labels([book.id]) == %{}
+    end
+
+    test "ignores active listing_status on a non-LFH bookshelf" do
+      owner = insert(:user)
+      book = insert(:book)
+      bookshelf = insert(:bookshelf, user: owner, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      insert(:placement, book: book, bookshelf: bookshelf, shelf: shelf, listing_status: "active")
+
+      assert Shelving.looking_for_home_labels([book.id]) == %{}
+    end
+
+    test "returns an empty map for no ids" do
+      assert Shelving.looking_for_home_labels([]) == %{}
+    end
   end
 end
