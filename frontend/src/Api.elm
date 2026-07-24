@@ -781,14 +781,29 @@ getBook bookId maybeToken toMsg =
 
 searchBooks :
     String
+    -> Bool
     -> String
     -> (Result Http.Error SearchSections -> msg)
     -> Cmd msg
-searchBooks query token toMsg =
+searchBooks query deep token toMsg =
+    let
+        -- Deep search opts into description/review matching via `scope=deep`
+        -- (#284). The default (title-only) search emits NO scope param, so the
+        -- backend's default behaviour is unchanged and the wire URL stays
+        -- byte-identical to the pre-#284 request.
+        queryParams =
+            Url.Builder.string "q" query
+                :: (if deep then
+                        [ Url.Builder.string "scope" "deep" ]
+
+                    else
+                        []
+                   )
+    in
     Http.request
         { method = "GET"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] [ Url.Builder.string "q" query ]
+        , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] queryParams
         , body = Http.emptyBody
 
         -- SearchController.index returns the SearchResponse envelope carrying
@@ -1191,10 +1206,13 @@ catalogueResponseDecoder =
 bookshelf it sits on (raw name, e.g. `"library"` / `"reading_pile"`). Rendered in
 the "Your Collection" section (#285). Mapped from a proto `SearchHit` whose
 `collection` entries populate `bookshelf_name` and leave the label fields empty.
+`snippet` is a deep-search `ts_headline` excerpt (`<mark>`-wrapped), non-empty
+only when the match was on the description/review under `scope=deep` (#284).
 -}
 type alias CollectionHit =
     { book : Book
     , bookshelfName : String
+    , snippet : String
     }
 
 
@@ -1203,12 +1221,15 @@ provenance (#285). `source` is `""` (a plain platform result — no label),
 `"looking_for_home"` (an always-visible LFH advert → owner handle), or `"listed"`
 (an active marketplace listing → owner handle + formatted price). Rendered in the
 "On the Platform" section; the label is shown only when `source` is non-empty.
+`snippet` is a deep-search `ts_headline` excerpt, non-empty only for a
+description/review match under `scope=deep` (#284).
 -}
 type alias PlatformHit =
     { book : Book
     , source : String
     , ownerHandle : String
     , price : String
+    , snippet : String
     }
 
 
@@ -1226,6 +1247,7 @@ fromProtoCollectionHit : ProtoBookResp.SearchHit -> CollectionHit
 fromProtoCollectionHit hit =
     { book = Types.Book.fromProtoBook hit.book
     , bookshelfName = hit.bookshelfName
+    , snippet = hit.snippet
     }
 
 
@@ -1235,6 +1257,7 @@ fromProtoPlatformHit hit =
     , source = hit.source
     , ownerHandle = hit.ownerHandle
     , price = hit.price
+    , snippet = hit.snippet
     }
 
 

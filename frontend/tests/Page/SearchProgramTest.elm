@@ -72,6 +72,12 @@ suite =
         , emptyPlatformHidesSection
         , sortWithinEachSection
         , collectionResultRendersAsButton
+        , deepToggleRefiresWithScopeDeep
+        , defaultScopeEmitsNoScopeParam
+        , deepToggleOffRefiresWithoutScope
+        , snippetAndLabelRenderWhenSnippetPresent
+        , highlightRendersAsMarkElement
+        , noSnippetNoLabelWhenSnippetEmpty
         ]
 
 
@@ -714,12 +720,128 @@ collectionResultRendersAsButton =
 
 
 
+-- DEEP SEARCH (#284) ----------------------------------------------------------
+--
+-- The "Deep search" toggle opts the query into matching book descriptions and
+-- reviews (not just titles) via the `scope=deep` API param. Flipping it re-fires
+-- the current query with the new scope; a deep-matched result renders a
+-- highlighted `ts_headline` snippet excerpt plus a "via deep search" label. These
+-- drive the toggle → re-fire → render path, and assert the URL param exactly so
+-- the scope wiring can never silently regress.
+
+
+{-| Toggling deep search ON with a non-empty query re-fires the book search with
+`scope=deep` appended — the signal the backend reads to match descriptions.
+-}
+deepToggleRefiresWithScopeDeep : Test
+deepToggleRefiresWithScopeDeep =
+    test "deep_toggle_refires: toggling deep ON re-queries with scope=deep" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "book")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.update (DeepSearchToggled True)
+                |> ProgramTest.expectHttpRequestWasMade "GET" "/api/search?q=book&scope=deep"
+
+
+{-| The default (deep OFF) search emits NO scope param — the request URL stays
+`/api/search?q=…` exactly, so the backend's default title-only behaviour is
+unchanged. Asserting zero `scope=deep` requests proves the param is opt-in only.
+-}
+defaultScopeEmitsNoScopeParam : Test
+defaultScopeEmitsNoScopeParam =
+    test "default_scope_no_param: the default search emits no scope=deep param" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "book")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.ensureHttpRequests "GET"
+                    "/api/search?q=book&scope=deep"
+                    (\requests -> Expect.equal 0 (List.length requests))
+                |> ProgramTest.expectHttpRequestWasMade "GET" "/api/search?q=book"
+
+
+{-| Toggling deep OFF (after ON) re-fires the query WITHOUT the scope param. The
+initial debounce already fired `/api/search?q=book` once; the OFF toggle fires it
+again, so exactly two such requests exist — proving the OFF path re-queries too
+(not that it merely left the earlier request standing).
+-}
+deepToggleOffRefiresWithoutScope : Test
+deepToggleOffRefiresWithoutScope =
+    test "deep_toggle_off_refires: toggling deep OFF re-queries without scope" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "book")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.update (DeepSearchToggled True)
+                |> ProgramTest.ensureHttpRequestWasMade "GET" "/api/search?q=book&scope=deep"
+                |> ProgramTest.update (DeepSearchToggled False)
+                |> ProgramTest.expectHttpRequests "GET"
+                    "/api/search?q=book"
+                    (\requests -> Expect.equal 2 (List.length requests))
+
+
+{-| A deep-matched result (non-empty snippet) renders the highlighted excerpt in
+`search-result__snippet` and a "via deep search" provenance line.
+-}
+snippetAndLabelRenderWhenSnippetPresent : Test
+snippetAndLabelRenderWhenSnippetPresent =
+    test "snippet_renders: a deep-matched hit renders its snippet + 'via deep search'" <|
+        \() ->
+            loadedSections
+                []
+                [ plainPlatformHit (fixtureBook "Deep Match" "Anna Blake" 2001)
+                    |> withSnippet "the <mark>habit</mark> loop"
+                ]
+                |> ProgramTest.ensureViewHas [ Selector.class "search-result__snippet" ]
+                |> ProgramTest.ensureViewHas [ Selector.text "habit" ]
+                |> ProgramTest.expectViewHas [ Selector.text "via deep search" ]
+
+
+{-| The `<mark>` run in a snippet renders as a real `<mark>` element carrying the
+highlighted text — proving the markup was parsed into a styled element, not
+injected as raw HTML (which Elm cannot do without a port anyway).
+-}
+highlightRendersAsMarkElement : Test
+highlightRendersAsMarkElement =
+    test "snippet_highlight_mark: a <mark> run renders as a <mark> element" <|
+        \() ->
+            loadedSections
+                []
+                [ plainPlatformHit (fixtureBook "Deep Match" "Anna Blake" 2001)
+                    |> withSnippet "a <mark>habit</mark> b"
+                ]
+                |> ProgramTest.expectView
+                    (\view ->
+                        Query.findAll [ Selector.tag "mark", Selector.text "habit" ] view
+                            |> Query.count (Expect.equal 1)
+                    )
+
+
+{-| A title match (empty snippet) renders NEITHER the snippet block NOR the "via
+deep search" label — the excerpt is shown only when the match was on description
+/review text (#284).
+-}
+noSnippetNoLabelWhenSnippetEmpty : Test
+noSnippetNoLabelWhenSnippetEmpty =
+    test "no_snippet_no_label: a title match (empty snippet) renders no snippet/label" <|
+        \() ->
+            loadedSections
+                []
+                [ plainPlatformHit (fixtureBook "Title Match" "Anna Blake" 2001) ]
+                |> ProgramTest.ensureViewHas [ Selector.text "Title Match" ]
+                |> ProgramTest.ensureViewHasNot [ Selector.text "via deep search" ]
+                |> ProgramTest.expectViewHasNot [ Selector.class "search-result__snippet" ]
+
+
+
 -- JSON ENCODING HELPERS
 
 
 {-| A test-side search hit mirroring the proto `SearchHit` wire shape
-(`book`, `source`, `owner_handle`, `price`, `bookshelf_name`). The constructors
-below build the four shapes the backend emits.
+(`book`, `source`, `owner_handle`, `price`, `bookshelf_name`, `snippet`). The
+constructors below build the shapes the backend emits; `snippet` defaults to ""
+(a title match) and `withSnippet` sets a deep-search description/review excerpt.
 -}
 type alias TestHit =
     { book : Book
@@ -727,6 +849,7 @@ type alias TestHit =
     , ownerHandle : String
     , price : String
     , bookshelfName : String
+    , snippet : String
     }
 
 
@@ -735,28 +858,36 @@ no label fields.
 -}
 collectionHit : String -> Book -> TestHit
 collectionHit bookshelfName book =
-    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = bookshelfName }
+    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = bookshelfName, snippet = "" }
 
 
 {-| A plain platform hit: a platform-visible book with no discoverable label.
 -}
 plainPlatformHit : Book -> TestHit
 plainPlatformHit book =
-    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = "" }
+    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = "", snippet = "" }
 
 
 {-| An always-visible looking-for-home platform hit, carrying the owner handle.
 -}
 lookingForHomeHit : String -> Book -> TestHit
 lookingForHomeHit ownerHandle book =
-    { book = book, source = "looking_for_home", ownerHandle = ownerHandle, price = "", bookshelfName = "" }
+    { book = book, source = "looking_for_home", ownerHandle = ownerHandle, price = "", bookshelfName = "", snippet = "" }
 
 
 {-| An active-listing platform hit, carrying the seller handle and formatted price.
 -}
 listedHit : String -> String -> Book -> TestHit
 listedHit ownerHandle price book =
-    { book = book, source = "listed", ownerHandle = ownerHandle, price = price, bookshelfName = "" }
+    { book = book, source = "listed", ownerHandle = ownerHandle, price = price, bookshelfName = "", snippet = "" }
+
+
+{-| Attach a deep-search snippet (a `ts_headline` `<mark>` excerpt) to any hit —
+the wire signal that the match was on the description/review, not the title (#284).
+-}
+withSnippet : String -> TestHit -> TestHit
+withSnippet snippet hit =
+    { hit | snippet = snippet }
 
 
 {-| Start a search and load the given collection + platform hits through the real
@@ -782,6 +913,7 @@ encodeSearchHit hit =
         , ( "owner_handle", Encode.string hit.ownerHandle )
         , ( "price", Encode.string hit.price )
         , ( "bookshelf_name", Encode.string hit.bookshelfName )
+        , ( "snippet", Encode.string hit.snippet )
         ]
 
 

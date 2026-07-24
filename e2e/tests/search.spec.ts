@@ -605,3 +605,113 @@ test.describe("Sectioned search (#285)", () => {
     await expect(platformTitles).toHaveText(YEAR_ORDER);
   });
 });
+
+// ── Deep search across descriptions (#284) ────────────────────────────────────
+//
+// Deep search opts the query into matching book DESCRIPTIONS/reviews (not just
+// titles) via the `scope=deep` param, surfacing a highlighted `ts_headline`
+// snippet excerpt and a "via deep search" label on each description-matched
+// result. The shared seed is title-only (0 of 169 books carry a description), so
+// these specs create their OWN public, description-bearing book via
+// POST /api/test/book-description and drive the toggle live against it. Each book
+// carries globally-unique title/description terms, so parallel and repeat runs
+// never collide on the shared catalogue. Fresh minted viewers, isolated from the
+// shared search seed.
+test.describe("Deep search (#284)", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  /**
+   * Create a public book whose DESCRIPTION carries a globally-unique term that
+   * appears nowhere in its title (and vice-versa), so `scope=deep` is the only
+   * way a description-term query finds it and a title-term query never yields a
+   * description snippet. Returns the exact title + the two disjoint query terms.
+   *
+   * Skips cleanly (loud under E2E_EXPECT_FULL_SEEDS) when the helper is
+   * unavailable — the same STACKS_E2E_TEST_HELPERS gate mintOrSkip rides on.
+   */
+  async function seedDescribedBook(
+    request: APIRequestContext,
+  ): Promise<{ title: string; titleTerm: string; descTerm: string }> {
+    const unique = `${Date.now().toString(36)}${Math.floor(
+      Math.random() * 1e6,
+    ).toString(36)}`;
+    const titleTerm = `Zztitle${unique}`;
+    const descTerm = `Zzdesc${unique}`;
+    const title = `${titleTerm} Deep Anchor`;
+    const description = `A ${descTerm} creature drifts through the abyssal dark of a forgotten sea.`;
+
+    const resp = await request.post("/api/test/book-description", {
+      data: { title, description },
+    });
+    assertSeedOrSkip(
+      resp.status() !== 404,
+      "POST /api/test/book-description unavailable (STACKS_E2E_TEST_HELPERS off)",
+    );
+    expect(resp.status(), "create description-bearing book").toBe(201);
+    return { title, titleTerm, descTerm };
+  }
+
+  test("a description-only match surfaces only under deep search, with a highlighted snippet and 'via deep search' label", async ({
+    page,
+    request,
+  }) => {
+    const viewer = await mintOrSkip(request);
+    const { title, descTerm } = await seedDescribedBook(request);
+    await injectSession(page, viewer);
+
+    await page.goto("/search");
+    await page.getByTestId("search-page").waitFor({ timeout: 5000 });
+
+    // Default (title-only) search for a term that lives ONLY in the description
+    // finds nothing → the book is absent. (The term is globally unique, so no
+    // other catalogue title can match it either.)
+    await page.getByTestId("search-input").fill(descTerm);
+    await expect(
+      page.locator(".search-result__title", { hasText: title }),
+    ).toHaveCount(0, { timeout: 10000 });
+
+    // Enable deep search → re-fires the query with scope=deep → the
+    // description match now appears.
+    await page.getByTestId("deep-search-toggle").check();
+
+    const row = page.locator(".search-result", {
+      has: page.locator(".search-result__title", { hasText: title }),
+    });
+    await expect(row).toHaveCount(1, { timeout: 10000 });
+
+    // The snippet excerpt renders with the matched term highlighted as a real
+    // <mark> element (parsed, not injected as HTML), plus the "via deep search"
+    // provenance line.
+    const snippet = row.locator(".search-result__snippet");
+    await expect(snippet).toBeVisible();
+    await expect(snippet.locator("mark").first()).toHaveText(descTerm);
+    await expect(row.locator(".search-result__via-deep")).toHaveText(
+      "via deep search",
+    );
+  });
+
+  test("a title match under deep search carries no snippet or label", async ({
+    page,
+    request,
+  }) => {
+    const viewer = await mintOrSkip(request);
+    const { title, titleTerm } = await seedDescribedBook(request);
+    await injectSession(page, viewer);
+
+    await page.goto("/search");
+    await page.getByTestId("search-page").waitFor({ timeout: 5000 });
+
+    // Deep search ON, but query a term that lives in the TITLE (not the
+    // description): the match is on the title, so ts_headline yields no
+    // description snippet — the excerpt and label must both be absent.
+    await page.getByTestId("deep-search-toggle").check();
+    await page.getByTestId("search-input").fill(titleTerm);
+
+    const row = page.locator(".search-result", {
+      has: page.locator(".search-result__title", { hasText: title }),
+    });
+    await expect(row).toHaveCount(1, { timeout: 10000 });
+    await expect(row.locator(".search-result__snippet")).toHaveCount(0);
+    await expect(row.locator(".search-result__via-deep")).toHaveCount(0);
+  });
+});

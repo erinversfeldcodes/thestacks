@@ -2,7 +2,9 @@ module Page.Search exposing
     ( Model
     , Msg(..)
     , OutMsg(..)
+    , SnippetSegment(..)
     , init
+    , parseSnippet
     , update
     , view
     )
@@ -11,9 +13,9 @@ import Api
 import Components.FilterPanel exposing (FilterState, SortOrder(..), defaultFilterState, filterPanel)
 import Components.SearchBar exposing (searchBar)
 import Components.SortSelector exposing (sortSelector)
-import Html exposing (Html, a, button, div, h1, h2, h3, p, text)
-import Html.Attributes exposing (class, href, id)
-import Html.Events exposing (onClick)
+import Html exposing (Html, a, button, div, h1, h2, h3, input, label, mark, p, text)
+import Html.Attributes exposing (checked, class, href, id, type_)
+import Html.Events exposing (onCheck, onClick)
 import Http
 import Navigation.Route as Route
 import Process
@@ -30,6 +32,7 @@ type alias Model =
     , filters : FilterState
     , sort : SortOrder
     , filterPanelOpen : Bool
+    , deepSearch : Bool
     , debounceCount : Int
     }
 
@@ -45,6 +48,7 @@ type Msg
     | YearFromChanged String
     | YearToChanged String
     | ClearFilters
+    | DeepSearchToggled Bool
     | BookClicked String
 
 
@@ -66,6 +70,7 @@ init =
     , filters = defaultFilterState
     , sort = ByRelevance
     , filterPanelOpen = False
+    , deepSearch = False
     , debounceCount = 0
     }
 
@@ -113,11 +118,12 @@ update msg model maybeToken =
             if count == model.debounceCount && not (String.isEmpty model.query) then
                 let
                     -- Book search is authenticated; people search is optional-auth
-                    -- so it fires with or without a token.
+                    -- so it fires with or without a token. The scope (title-only vs
+                    -- deep) follows the current toggle state (#284).
                     bookCmd =
                         case maybeToken of
                             Just token ->
-                                Api.searchBooks model.query token SearchCompleted
+                                Api.searchBooks model.query model.deepSearch token SearchCompleted
 
                             Nothing ->
                                 Cmd.none
@@ -198,6 +204,25 @@ update msg model maybeToken =
         ClearFilters ->
             ( { model | filters = defaultFilterState }, Cmd.none, NoOut )
 
+        DeepSearchToggled deep ->
+            let
+                newModel =
+                    { model | deepSearch = deep }
+            in
+            -- Re-fire the current query under the new scope so the results
+            -- update immediately (no re-typing). Only the book search re-runs —
+            -- deep scope affects books, not people — and only when there is a
+            -- token and a non-empty query; otherwise just flip the flag (#284).
+            case ( maybeToken, String.isEmpty model.query ) of
+                ( Just token, False ) ->
+                    ( { newModel | results = Loading }
+                    , Api.searchBooks model.query deep token SearchCompleted
+                    , NoOut
+                    )
+
+                _ ->
+                    ( newModel, Cmd.none, NoOut )
+
         BookClicked bookId ->
             ( model, Cmd.none, OpenOverlay bookId )
 
@@ -224,6 +249,7 @@ view model =
             , onYearTo = YearToChanged
             , onClear = ClearFilters
             }
+        , viewDeepSearchToggle model.deepSearch
         , case model.results of
             NotAsked ->
                 p [ class "search-hint" ] [ text "Type a title, author, or ISBN to search the stacks." ]
@@ -273,6 +299,25 @@ view model =
                         , viewPlatformSection visiblePlatform
                         ]
         , viewReadersSection model.readers
+        ]
+
+
+{-| The "Deep search" toggle: off by default, it opts the query into matching
+book descriptions/reviews (not just titles) via `scope=deep` (#284). Flipping it
+re-fires the current query with the new scope (see `update`, `DeepSearchToggled`).
+-}
+viewDeepSearchToggle : Bool -> Html Msg
+viewDeepSearchToggle deep =
+    label [ class "deep-search-toggle" ]
+        [ input
+            [ type_ "checkbox"
+            , class "deep-search-toggle__checkbox"
+            , testId "deep-search-toggle"
+            , checked deep
+            , onCheck DeepSearchToggled
+            ]
+            []
+        , text "Deep search"
         ]
 
 
@@ -446,19 +491,22 @@ viewPlatformSection hits =
 
 
 {-| A collection hit renders the book row with a "On your <Shelf> shelf" line —
-the "where in your collection" answer US-1.5.1 always promised.
+the "where in your collection" answer US-1.5.1 always promised. Its deep-search
+snippet (non-empty only when the match was on the description/review, not the
+title) is carried through so the excerpt + "via deep search" label render (#284).
 -}
 viewCollectionHit : Api.CollectionHit -> Html Msg
 viewCollectionHit hit =
-    viewResultButton hit.book (Just ("On your " ++ bookshelfLabel hit.bookshelfName ++ " shelf"))
+    viewResultButton hit.book (Just ("On your " ++ bookshelfLabel hit.bookshelfName ++ " shelf")) hit.snippet
 
 
 {-| A platform hit renders the book row with its discoverable-by-design label
-(only when `source` is non-empty — a plain result carries no label).
+(only when `source` is non-empty — a plain result carries no label), plus its
+deep-search snippet when the match was on description/review text (#284).
 -}
 viewPlatformHit : Api.PlatformHit -> Html Msg
 viewPlatformHit hit =
-    viewResultButton hit.book (platformLabel hit)
+    viewResultButton hit.book (platformLabel hit) hit.snippet
 
 
 {-| The label for a platform hit, or `Nothing` for a plain result. Labels are
@@ -510,10 +558,12 @@ Enter/Space-activatable — the accessible interactive element, mirroring the
 shelf-spine pattern in `Page.Bookshelf.Helpers.viewClickableSpine`). Its stable
 id `search-result-<bookId>` is the focus-return target Main hands to the overlay
 so focus comes back to the clicked row on close (#114 / #289). The optional label
-line carries the section's provenance (collection shelf / platform source).
+line carries the section's provenance (collection shelf / platform source); a
+non-empty `snippet` (a deep-search description/review excerpt) renders the
+highlighted excerpt and a "via deep search" line beneath it (#284).
 -}
-viewResultButton : Book -> Maybe String -> Html Msg
-viewResultButton book maybeLabel =
+viewResultButton : Book -> Maybe String -> String -> Html Msg
+viewResultButton book maybeLabel snippet =
     button
         [ class "search-result"
         , id ("search-result-" ++ book.id)
@@ -529,10 +579,124 @@ viewResultButton book maybeLabel =
                 p [ class "search-result__year search-result__year--unknown" ] [ text "Unknown year" ]
          ]
             ++ (case maybeLabel of
-                    Just label ->
-                        [ p [ class "search-result__label" ] [ text label ] ]
+                    Just label_ ->
+                        [ p [ class "search-result__label" ] [ text label_ ] ]
 
                     Nothing ->
                         []
                )
+            ++ viewSnippet snippet
         )
+
+
+{-| Render a deep-search snippet excerpt and its "via deep search" provenance
+line, but ONLY when the snippet is non-empty — a title match carries no snippet,
+so it renders neither (#284). The `<mark>` runs in the excerpt are parsed into
+styled `<mark>` elements (never injected as HTML — see `parseSnippet`).
+-}
+viewSnippet : String -> List (Html Msg)
+viewSnippet snippet =
+    if String.isEmpty snippet then
+        []
+
+    else
+        [ p [ class "search-result__snippet" ]
+            (List.map viewSnippetSegment (parseSnippet snippet))
+        , p [ class "search-result__via-deep" ] [ text "via deep search" ]
+        ]
+
+
+{-| Render one parsed snippet segment: plain text as an escaped text node, a
+highlighted run as a `<mark>` element (safe — the text goes through Elm's `text`,
+which escapes; no innerHTML, so no injection).
+-}
+viewSnippetSegment : SnippetSegment -> Html Msg
+viewSnippetSegment segment =
+    case segment of
+        Plain str ->
+            text str
+
+        Highlight str ->
+            mark [ class "search-result__mark" ] [ text str ]
+
+
+{-| A parsed snippet segment: either plain text or a `<mark>`-highlighted run.
+-}
+type SnippetSegment
+    = Plain String
+    | Highlight String
+
+
+markOpen : String
+markOpen =
+    "<mark>"
+
+
+markClose : String
+markClose =
+    "</mark>"
+
+
+{-| Parse a `ts_headline` snippet string into plain / highlighted segments,
+splitting on balanced `<mark>…</mark>` pairs. Elm cannot set innerHTML without a
+port, so the `<mark>` markup is parsed HERE and rendered as styled `<mark>`
+elements via the safe `text` API (which escapes) — never injected as HTML.
+
+Malformed or unbalanced input is passed through verbatim as plain text rather
+than dropped or falsely highlighted: an opening `<mark>` with no matching close
+emits the remaining input as one plain segment (so the literal tag is shown,
+escaped, not treated as a highlight). An empty string yields no segments.
+
+-}
+parseSnippet : String -> List SnippetSegment
+parseSnippet input =
+    case List.head (String.indexes markOpen input) of
+        Nothing ->
+            plainSegment input
+
+        Just openIdx ->
+            let
+                before =
+                    String.left openIdx input
+
+                afterOpen =
+                    String.dropLeft (openIdx + String.length markOpen) input
+            in
+            case List.head (String.indexes markClose afterOpen) of
+                Nothing ->
+                    -- Unbalanced: an open with no close. Emit the whole remaining
+                    -- input verbatim as plain text — no false highlight.
+                    plainSegment input
+
+                Just closeIdx ->
+                    let
+                        highlighted =
+                            String.left closeIdx afterOpen
+
+                        rest =
+                            String.dropLeft (closeIdx + String.length markClose) afterOpen
+                    in
+                    consPlain before (Highlight highlighted :: parseSnippet rest)
+
+
+{-| A single plain segment for `str`, or none when `str` is empty (so empty runs
+never produce phantom `Plain ""` segments).
+-}
+plainSegment : String -> List SnippetSegment
+plainSegment str =
+    if String.isEmpty str then
+        []
+
+    else
+        [ Plain str ]
+
+
+{-| Prepend `str` as a leading plain segment, dropping it when empty.
+-}
+consPlain : String -> List SnippetSegment -> List SnippetSegment
+consPlain str segments =
+    if String.isEmpty str then
+        segments
+
+    else
+        Plain str :: segments

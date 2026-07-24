@@ -878,6 +878,48 @@ h4 {
     color: #c8951f;
 }
 
+/* ===== Deep Search (#284) ===== */
+
+/* The "Deep search" toggle sits under the filter panel — a labelled checkbox
+   that opts the query into matching descriptions/reviews (not just titles). */
+.deep-search-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+    color: var(--text-muted, #a09070);
+    font-size: var(--size-sm);
+    cursor: pointer;
+}
+
+.deep-search-toggle__checkbox {
+    cursor: pointer;
+}
+
+/* A deep-search description/review excerpt, shown beneath a result whose match
+   was NOT on the title. The <mark> runs are the query terms ts_headline flagged. */
+.search-result__snippet {
+    margin-top: 0.5rem;
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    line-height: 1.5;
+}
+
+.search-result__mark {
+    background-color: rgba(212, 160, 41, 0.28);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    padding: 0 0.15em;
+}
+
+/* The "via deep search" provenance line — why this result matched at all. */
+.search-result__via-deep {
+    margin-top: 0.2rem;
+    font-size: var(--size-xs);
+    font-style: italic;
+    color: #c8951f;
+}
+
 /* ===== Search Sections (#285) ===== */
 
 /* Two stacked sections — "Your Collection" above "On the Platform" — each a

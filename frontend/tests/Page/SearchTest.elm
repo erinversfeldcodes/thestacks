@@ -15,7 +15,7 @@ without threading a full loaded-results program through each case.
 
 import Components.FilterPanel exposing (SortOrder(..), defaultFilterState)
 import Expect
-import Page.Search as Search exposing (Msg(..))
+import Page.Search as Search exposing (Msg(..), SnippetSegment(..))
 import Test exposing (Test, describe, test)
 import Types.RemoteData exposing (RemoteData(..))
 
@@ -28,6 +28,8 @@ suite =
         , yearFromChanged
         , yearToChanged
         , clearFilters
+        , deepSearchToggledSetsFlag
+        , snippetParser
         ]
 
 
@@ -155,3 +157,69 @@ clearFilters =
                     Search.update ClearFilters withBoth (Just "test-token")
             in
             Expect.equal defaultFilterState cleared.filters
+
+
+{-| `DeepSearchToggled` stores the new flag on the model. `init` starts it off,
+so toggling on sets it True and toggling off sets it back False.
+-}
+deepSearchToggledSetsFlag : Test
+deepSearchToggledSetsFlag =
+    describe "deep_search_toggled: stores the flag on the model"
+        [ test "init starts deep search OFF" <|
+            \() ->
+                Expect.equal False Search.init.deepSearch
+        , test "toggling on sets deepSearch True" <|
+            \() ->
+                let
+                    ( model, _, _ ) =
+                        Search.update (DeepSearchToggled True) Search.init (Just "test-token")
+                in
+                Expect.equal True model.deepSearch
+        , test "toggling off sets deepSearch False" <|
+            \() ->
+                let
+                    ( on, _, _ ) =
+                        Search.update (DeepSearchToggled True) Search.init (Just "test-token")
+
+                    ( off, _, _ ) =
+                        Search.update (DeepSearchToggled False) on (Just "test-token")
+                in
+                Expect.equal False off.deepSearch
+        ]
+
+
+{-| `Page.Search.parseSnippet` turns a `ts_headline` snippet string into a list
+of plain / `<mark>`-highlighted segments. Elm cannot innerHTML without a port, so
+the `<mark>` markup must be parsed into styled elements rather than injected — and
+malformed / unbalanced input must pass through verbatim as plain text (never a
+false highlight, never dropped).
+-}
+snippetParser : Test
+snippetParser =
+    describe "snippet_parser: parseSnippet splits on balanced <mark> pairs"
+        [ test "happy: one highlight between plain runs" <|
+            \() ->
+                Expect.equal
+                    [ Plain "the ", Highlight "habit", Plain " loop" ]
+                    (Search.parseSnippet "the <mark>habit</mark> loop")
+        , test "multiple: two highlights are each parsed" <|
+            \() ->
+                Expect.equal
+                    [ Highlight "sand", Plain " and ", Highlight "sea" ]
+                    (Search.parseSnippet "<mark>sand</mark> and <mark>sea</mark>")
+        , test "no marks: whole string is one plain segment" <|
+            \() ->
+                Expect.equal
+                    [ Plain "just plain text" ]
+                    (Search.parseSnippet "just plain text")
+        , test "malformed: an open with no close passes through verbatim as plain" <|
+            \() ->
+                Expect.equal
+                    [ Plain "the <mark>habit loop" ]
+                    (Search.parseSnippet "the <mark>habit loop")
+        , test "empty: an empty snippet parses to no segments" <|
+            \() ->
+                Expect.equal
+                    []
+                    (Search.parseSnippet "")
+        ]

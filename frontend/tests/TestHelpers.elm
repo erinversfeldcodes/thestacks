@@ -945,25 +945,9 @@ searchEffects msg model maybeToken =
             if count == model.debounceCount && not (String.isEmpty model.query) then
                 let
                     booksEffect =
-                        case maybeToken of
-                            Just token ->
-                                SimulatedEffect.Http.request
-                                    { method = "GET"
-                                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                    , url = "/api/search?q=" ++ model.query
-                                    , body = SimulatedEffect.Http.emptyBody
-
-                                    -- Reuse the exact decoder Api.searchBooks
-                                    -- uses (the generated SearchResponse envelope)
-                                    -- so this mirror can never drift from the real
-                                    -- wire (#292).
-                                    , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted Api.searchResponseDecoder
-                                    , timeout = Nothing
-                                    , tracker = Nothing
-                                    }
-
-                            Nothing ->
-                                SimulatedEffect.Cmd.none
+                        -- The scope follows the current toggle state (#284): deep
+                        -- appends `&scope=deep`, default emits no param.
+                        searchBooksEffect model.query model.deepSearch maybeToken
 
                     readersEffect =
                         SimulatedEffect.Http.request
@@ -983,7 +967,49 @@ searchEffects msg model maybeToken =
             else
                 SimulatedEffect.Cmd.none
 
+        Search.DeepSearchToggled deep ->
+            -- Mirror `Page.Search.update`: flipping the toggle with a non-empty
+            -- query re-fires ONLY the book search, under the new scope. `model` is
+            -- the pre-update model, whose `query` the toggle does not change; the
+            -- new scope comes from the Msg's `deep` value, not `model.deepSearch`.
+            if String.isEmpty model.query then
+                SimulatedEffect.Cmd.none
+
+            else
+                searchBooksEffect model.query deep maybeToken
+
         _ ->
+            SimulatedEffect.Cmd.none
+
+
+{-| The book-search SimulatedEffect, shared by the debounce and deep-toggle paths
+so the mirror URL (`/api/search?q=…` + optional `&scope=deep`) and the reused
+`Api.searchResponseDecoder` can never drift from the real wire (#284/#292). Fires
+nothing without a token (book search is authenticated-only).
+-}
+searchBooksEffect : String -> Bool -> Maybe String -> SimulatedEffect Search.Msg
+searchBooksEffect query deep maybeToken =
+    case maybeToken of
+        Just token ->
+            SimulatedEffect.Http.request
+                { method = "GET"
+                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                , url =
+                    "/api/search?q="
+                        ++ query
+                        ++ (if deep then
+                                "&scope=deep"
+
+                            else
+                                ""
+                           )
+                , body = SimulatedEffect.Http.emptyBody
+                , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted Api.searchResponseDecoder
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
             SimulatedEffect.Cmd.none
 
 
