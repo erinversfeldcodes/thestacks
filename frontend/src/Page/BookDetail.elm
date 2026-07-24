@@ -3,7 +3,9 @@ module Page.BookDetail exposing
     , Model
     , Msg(..)
     , OutMsg(..)
+    , firstFocusableId
     , init
+    , lastFocusableId
     , overlayView
     , update
     , view
@@ -21,7 +23,7 @@ import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
 import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, value)
-import Html.Events exposing (on, onClick, onInput, targetValue)
+import Html.Events exposing (on, onClick, onInput, preventDefaultOn, targetValue)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
@@ -109,6 +111,9 @@ type Msg
     | RecordReadRequested
     | FinishedReadDismissed
     | ProgressFocusReturned
+    | FocusWrapToFirst
+    | FocusWrapToLast
+    | FocusWrapNoOp
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
@@ -612,6 +617,15 @@ update msg model maybeToken =
         FinishedReadDismissed ->
             ( { model | finishedReadPrompt = False }, Cmd.none, NoOut )
 
+        FocusWrapToFirst ->
+            ( model, focusElement firstFocusableId, NoOut )
+
+        FocusWrapToLast ->
+            ( model, focusElement lastFocusableId, NoOut )
+
+        FocusWrapNoOp ->
+            ( model, Cmd.none, NoOut )
+
 
 focusProgressBadge : Card.Model -> Cmd Msg
 focusProgressBadge card =
@@ -627,6 +641,69 @@ focusProgressBadgeFromModel model =
 
         Nothing ->
             Cmd.none
+
+
+{-| The DOM id of the first focusable control in the overlay — the close
+button, which is also the element focused on open (see `Main.openOverlay`).
+The focus trap wraps to this id when Tab falls off the trailing sentinel.
+-}
+firstFocusableId : String
+firstFocusableId =
+    "book-overlay-close"
+
+
+{-| The DOM id of the trailing focus sentinel — the last tab stop inside the
+overlay card. Shift+Tab off the first control wraps here; forward Tab off it
+wraps back to the first control. Anchoring "last" to a fixed sentinel keeps the
+trap correct regardless of which content controls the overlay renders.
+-}
+lastFocusableId : String
+lastFocusableId =
+    "book-overlay-focus-sentinel"
+
+
+{-| Move DOM focus to the given element id, discarding the (ignorable) result.
+-}
+focusElement : String -> Cmd Msg
+focusElement elementId =
+    Browser.Dom.focus elementId
+        |> Task.attempt (\_ -> FocusWrapNoOp)
+
+
+{-| Keydown decoder for the overlay card implementing the Tab focus trap.
+
+It reads `key`, `shiftKey`, and the focused element's `target.id`, and only
+`preventDefault`s (and emits a wrap message) at the two overlay boundaries:
+
+  - forward Tab while on the trailing sentinel → wrap to the first control
+  - Shift+Tab while on the first control → wrap to the trailing sentinel
+
+Every other keydown fails the decoder, so native tab order is preserved for
+all the controls in between and no `preventDefault` is applied.
+
+-}
+trapKeydownDecoder : Decode.Decoder ( Msg, Bool )
+trapKeydownDecoder =
+    Decode.map3 trapDecision
+        (Decode.field "key" Decode.string)
+        (Decode.field "shiftKey" Decode.bool)
+        (Decode.at [ "target", "id" ] Decode.string)
+        |> Decode.andThen identity
+
+
+trapDecision : String -> Bool -> String -> Decode.Decoder ( Msg, Bool )
+trapDecision key shiftKey targetId =
+    if key /= "Tab" then
+        Decode.fail "focus-trap: not a Tab keydown"
+
+    else if not shiftKey && targetId == lastFocusableId then
+        Decode.succeed ( FocusWrapToFirst, True )
+
+    else if shiftKey && targetId == firstFocusableId then
+        Decode.succeed ( FocusWrapToLast, True )
+
+    else
+        Decode.fail "focus-trap: natural tab order"
 
 
 {-| Fold the reading-progress fields returned by the API into the placement,
@@ -1295,6 +1372,10 @@ overlayView model =
             , attribute "aria-label" ariaLabel
             , attribute "aria-modal" "true"
             , tabindex -1
+
+            -- Focus trap (US-1.4.1): intercept Tab/Shift+Tab at the overlay
+            -- boundaries so keyboard focus never escapes to the shelf behind.
+            , preventDefaultOn "keydown" trapKeydownDecoder
             , style "position" "relative"
             , style "z-index" "1001"
             , style "max-width" "900px"
@@ -1328,8 +1409,29 @@ overlayView model =
                 ]
                 [ text "×" ]
             , overlayContent model
+            , overlayFocusSentinel
             ]
         ]
+
+
+{-| The trailing focus sentinel — the overlay's last tab stop. It is focusable
+(`tabindex 0`) but visually collapsed. Forward Tab off it wraps to the close
+button (via `trapKeydownDecoder`); Shift+Tab off the close button lands here.
+-}
+overlayFocusSentinel : Html Msg
+overlayFocusSentinel =
+    div
+        [ id lastFocusableId
+        , testId "book-overlay-focus-sentinel"
+        , tabindex 0
+        , class "book-overlay__focus-sentinel"
+        , style "position" "absolute"
+        , style "width" "1px"
+        , style "height" "1px"
+        , style "overflow" "hidden"
+        , style "clip" "rect(0 0 0 0)"
+        ]
+        []
 
 
 {-| The inner content of the overlay — reuses the same view logic as the full page

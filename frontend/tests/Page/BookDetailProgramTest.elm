@@ -11,10 +11,12 @@ import Dict
 import Expect
 import Html.Attributes
 import Http
+import Json.Encode as Encode
 import Navigation.Route as Route
 import Page.BookDetail as BookDetail
 import ProgramTest
 import Test exposing (Test, describe, test)
+import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
@@ -57,7 +59,223 @@ suite =
         , confirmMoveNoTokenIsNoOp
         , confirmRemoveNoPlacementIsNoOp
         , confirmRemoveNoTokenIsNoOp
+        , moveCompletedErrorShowsMessage
+        , closeOverlayXEmitsRequestClose
+        , closeOverlayBackdropEmitsRequestClose
+        , overlayHasFocusBoundaries
+        , trapForwardTabOnSentinelWrapsToFirst
+        , trapShiftTabOnCloseWrapsToLast
+        , trapForwardTabOnCloseIsNatural
+        , trapShiftTabOnSentinelIsNatural
+        , trapNonTabKeyIsNatural
         ]
+
+
+{-| A fully-loaded overlay model (book + placement) for exercising `overlayView`
+directly. `overlayView` renders the modal chrome (close button, backdrop,
+focus sentinel) the page `view` does not.
+-}
+loadedOverlayModel : BookDetail.Model
+loadedOverlayModel =
+    let
+        ( m0, _ ) =
+            BookDetail.init "book-test-001" (Just "test-token") Nothing
+
+        ( m1, _, _ ) =
+            BookDetail.update
+                (BookDetail.BookLoaded
+                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                )
+                m0
+                (Just "test-token")
+    in
+    m1
+
+
+{-| A synthetic `keydown` event payload carrying the fields the trap decoder
+reads: `key`, `shiftKey`, and `target.id` (the focused element).
+-}
+tabKeydownEvent : Bool -> String -> Encode.Value
+tabKeydownEvent shiftKey targetId =
+    Encode.object
+        [ ( "key", Encode.string "Tab" )
+        , ( "shiftKey", Encode.bool shiftKey )
+        , ( "target", Encode.object [ ( "id", Encode.string targetId ) ] )
+        ]
+
+
+{-| A `keydown` event payload with an explicit `key` value (e.g. "Enter"),
+`shiftKey`, and `target.id` — for asserting that non-Tab keys are not trapped.
+-}
+keydownEvent : String -> Bool -> String -> Encode.Value
+keydownEvent key shiftKey targetId =
+    Encode.object
+        [ ( "key", Encode.string key )
+        , ( "shiftKey", Encode.bool shiftKey )
+        , ( "target", Encode.object [ ( "id", Encode.string targetId ) ] )
+        ]
+
+
+simulateCardKeydown : Encode.Value -> Result String BookDetail.Msg
+simulateCardKeydown eventValue =
+    BookDetail.overlayView loadedOverlayModel
+        |> Query.fromHtml
+        |> Query.find [ Selector.class "book-overlay__card" ]
+        |> Event.simulate ( "keydown", eventValue )
+        |> Event.toResult
+
+
+
+-- B4 (punch #10): move-failure copy
+
+
+{-| A failed move (`ConfirmMove` → `MoveCompleted (Err (MoveHttpError _))`)
+renders the generic move-failure copy. A 500 maps via `Api.moveResponseToResult`
+to `MoveHttpError` (not the `ReadingPileFull` 422 special-case).
+-}
+moveCompletedErrorShowsMessage : Test
+moveCompletedErrorShowsMessage =
+    test "move_completed_error: a failed PUT renders the move failure message" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Choose Bookshelf"
+                |> ProgramTest.update (BookDetail.SelectBookshelf "wishlist")
+                |> ProgramTest.clickButton "Move"
+                |> ProgramTest.simulateHttpResponse "PUT"
+                    moveEndpoint
+                    (Http.BadStatus_
+                        { url = moveEndpoint
+                        , statusCode = 500
+                        , statusText = "Internal Server Error"
+                        , headers = Dict.empty
+                        }
+                        ""
+                    )
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Failed to move book. Please try again." ]
+
+
+
+-- B5 (punch #10): CloseOverlay → RequestCloseOverlay OutMsg (X + backdrop)
+
+
+startOverlayWithOut : ProgramTest.ProgramTest TestHelpers.BookDetailTestModel BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
+startOverlayWithOut =
+    ProgramTest.start ()
+        (TestHelpers.bookDetailOverlayProgramWithOut "book-test-001" (Just "test-token") (Just Route.Library))
+        |> ProgramTest.simulateHttpResponse "GET"
+            "/api/books/book-test-001"
+            (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+
+
+{-| Clicking the overlay's X (close) button emits the `RequestCloseOverlay`
+OutMsg, which `Main` consumes to tear down the overlay and return focus.
+-}
+closeOverlayXEmitsRequestClose : Test
+closeOverlayXEmitsRequestClose =
+    test "close_overlay_x: clicking the X button emits RequestCloseOverlay" <|
+        \() ->
+            startOverlayWithOut
+                |> ProgramTest.simulateDomEvent
+                    (Query.find [ Selector.id "book-overlay-close" ])
+                    Event.click
+                |> ProgramTest.expectModel
+                    (\model -> Expect.equal BookDetail.RequestCloseOverlay model.lastOut)
+
+
+{-| Clicking the backdrop (a distinct DOM element from the X button) also emits
+`RequestCloseOverlay` — the backdrop-dismiss half of the contract.
+-}
+closeOverlayBackdropEmitsRequestClose : Test
+closeOverlayBackdropEmitsRequestClose =
+    test "close_overlay_backdrop: clicking the backdrop emits RequestCloseOverlay" <|
+        \() ->
+            startOverlayWithOut
+                |> ProgramTest.simulateDomEvent
+                    (Query.find [ Selector.class "book-overlay__backdrop" ])
+                    Event.click
+                |> ProgramTest.expectModel
+                    (\model -> Expect.equal BookDetail.RequestCloseOverlay model.lastOut)
+
+
+
+-- FOCUS TRAP (US-1.4.1 a11y contract; kickoff-approved in-scope build)
+
+
+{-| The overlay's two focus-trap anchors are present in the DOM: the close
+button (first focusable / focus-on-open target) and the trailing sentinel
+(the last tab stop). The update's wrap commands focus these exact ids, so their
+presence ties the wrap targets to real elements.
+-}
+overlayHasFocusBoundaries : Test
+overlayHasFocusBoundaries =
+    test "trap_boundaries: overlay renders the close button and a trailing focus sentinel" <|
+        \() ->
+            BookDetail.overlayView loadedOverlayModel
+                |> Query.fromHtml
+                |> Expect.all
+                    [ Query.has [ Selector.id BookDetail.firstFocusableId ]
+                    , Query.has [ Selector.id BookDetail.lastFocusableId ]
+                    ]
+
+
+{-| Forward Tab while focus is on the trailing sentinel wraps to the first
+control — the decoder emits `FocusWrapToFirst` (and preventDefaults).
+-}
+trapForwardTabOnSentinelWrapsToFirst : Test
+trapForwardTabOnSentinelWrapsToFirst =
+    test "trap_forward_wrap: Tab on the trailing sentinel wraps to the first control" <|
+        \() ->
+            simulateCardKeydown (tabKeydownEvent False BookDetail.lastFocusableId)
+                |> Expect.equal (Ok BookDetail.FocusWrapToFirst)
+
+
+{-| Shift+Tab while focus is on the first control (close button) wraps to the
+trailing sentinel — the decoder emits `FocusWrapToLast` (and preventDefaults).
+-}
+trapShiftTabOnCloseWrapsToLast : Test
+trapShiftTabOnCloseWrapsToLast =
+    test "trap_reverse_wrap: Shift+Tab on the close button wraps to the trailing sentinel" <|
+        \() ->
+            simulateCardKeydown (tabKeydownEvent True BookDetail.firstFocusableId)
+                |> Expect.equal (Ok BookDetail.FocusWrapToLast)
+
+
+{-| Forward Tab on the first control is NOT trapped: the decoder fails, so no
+message fires and no `preventDefault` is applied — native tab order carries
+focus to the next control inside the overlay.
+-}
+trapForwardTabOnCloseIsNatural : Test
+trapForwardTabOnCloseIsNatural =
+    test "trap_forward_natural: forward Tab on the close button is not intercepted" <|
+        \() ->
+            simulateCardKeydown (tabKeydownEvent False BookDetail.firstFocusableId)
+                |> Expect.err
+
+
+{-| Shift+Tab on the trailing sentinel is NOT trapped: native Shift+Tab walks
+back to the previous control inside the overlay.
+-}
+trapShiftTabOnSentinelIsNatural : Test
+trapShiftTabOnSentinelIsNatural =
+    test "trap_reverse_natural: Shift+Tab on the trailing sentinel is not intercepted" <|
+        \() ->
+            simulateCardKeydown (tabKeydownEvent True BookDetail.lastFocusableId)
+                |> Expect.err
+
+
+{-| A non-Tab key (Enter) on a boundary element is never trapped — the trap
+only governs Tab navigation.
+-}
+trapNonTabKeyIsNatural : Test
+trapNonTabKeyIsNatural =
+    test "trap_non_tab: a non-Tab keydown on a boundary is not intercepted" <|
+        \() ->
+            simulateCardKeydown (keydownEvent "Enter" False BookDetail.lastFocusableId)
+                |> Expect.err
 
 
 loadingState : Test

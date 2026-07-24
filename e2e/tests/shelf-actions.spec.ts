@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { suiteAuthFile, ensureBookOnLibrary, assertSeedOrSkip } from "./helpers";
+import {
+  suiteAuthFile,
+  ensureBookOnLibrary,
+  ensureBookOnShelf,
+  assertSeedOrSkip,
+} from "./helpers";
 
 test.use({ storageState: suiteAuthFile("shelf-actions") });
 
@@ -244,5 +249,87 @@ test.describe("Shelf actions — remove book from collection", () => {
     // Overlay should close and we should be back on the library page
     await expect(overlay).not.toBeVisible({ timeout: 10000 });
     await expect(page).toHaveURL(/\/library/, { timeout: 10000 });
+  });
+});
+
+test.describe("Shelf actions — mutation failures (punch #13)", () => {
+  // Real overlay, real placement — only the mutation request is mocked so we
+  // exercise the genuine failure-copy branches (Api.MoveHttpError / remove
+  // Failure) that a healthy API never produces.
+
+  async function openLibraryOverlay(page: import("@playwright/test").Page) {
+    // This describe runs after tests that REMOVE the library book, and
+    // ensureBookOnLibrary only guarantees a placement somewhere (not on the
+    // library shelf). ensureBookOnShelf actively places a book on library when
+    // the shelf is empty, so a spine is always present here.
+    await ensureBookOnShelf(page, "library");
+    await page.goto("/library");
+    await page.waitForSelector(".bookcase", { timeout: 10000 });
+    const bookButton = page.getByTestId("book-spine").first();
+    await expect(bookButton).toBeAttached({ timeout: 10000 });
+    await bookButton.evaluate((el) => (el as HTMLElement).click());
+    const overlay = page.getByTestId("book-overlay");
+    await expect(overlay).toBeVisible({ timeout: 10000 });
+    return overlay;
+  }
+
+  test("move failure (403) shows the move-error message", async ({ page }) => {
+    // 403 is a plain transport error (not the 422 reading_pile_full body), so
+    // it maps to Api.MoveHttpError → the generic move-failure copy.
+    await page.route("**/api/placements/*/move", (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "forbidden" }),
+      })
+    );
+
+    const overlay = await openLibraryOverlay(page);
+    await overlay.locator('button:has-text("Choose Bookshelf")').click();
+    await expect(overlay.locator(".shelf-mover")).toBeVisible();
+    await overlay.getByTestId("shelf-mover-select").selectOption("wishlist");
+    await overlay.locator('button:text-is("Move")').click();
+
+    await expect(overlay.locator(".book-detail__status--error")).toHaveText(
+      "Failed to move book. Please try again.",
+      { timeout: 5000 }
+    );
+    // The overlay stays open on failure — no navigation, no dismissal.
+    await expect(overlay).toBeVisible();
+  });
+
+  test("remove failure (500) shows the remove-error message", async ({
+    page,
+  }) => {
+    // Mock only the DELETE; let every other /api/placements/* call (mine, move)
+    // pass through untouched.
+    await page.route("**/api/placements/*", async (route) => {
+      if (route.request().method() === "DELETE") {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "server_error" }),
+        });
+      } else {
+        await route.fallback();
+      }
+    });
+
+    const overlay = await openLibraryOverlay(page);
+    await overlay.locator('button:has-text("Remove from collection")').click();
+
+    // Confirm removal in the modal (renders above the overlay).
+    await expect(page.getByTestId("remove-book-modal")).toBeVisible({
+      timeout: 3000,
+    });
+    await page.getByTestId("remove-book-confirm").click();
+
+    // ConfirmRemove closes the modal and the failed DELETE surfaces the error
+    // in the danger zone; the overlay must NOT close.
+    await expect(overlay.locator(".book-detail__status--error")).toHaveText(
+      "Failed to remove book. Please try again.",
+      { timeout: 5000 }
+    );
+    await expect(overlay).toBeVisible();
   });
 });
