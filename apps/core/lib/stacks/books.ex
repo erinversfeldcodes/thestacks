@@ -693,14 +693,19 @@ defmodule Stacks.Books do
   @spec search_books(String.t(), keyword()) :: [Book.t()]
   def search_books(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
-    safe_query = String.replace(query, ~r/[^\w\s]/, "")
 
+    # The raw query is passed straight to `plainto_tsquery` via the bound param:
+    # injection-safety comes from Ecto param binding + `plainto_tsquery` treating
+    # its input as plain text (proven by the #115 edge-case suite), NOT from
+    # stripping characters. A prior `String.replace(~r/[^\w\s]/)` sanitiser was
+    # lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" — which changed the
+    # lexemes and dropped legitimate matches (#291).
     Book
     |> where(
       [b],
       fragment(
         "title_tsv @@ plainto_tsquery('english', ?)",
-        ^safe_query
+        ^query
       )
     )
     |> preload([:author, :editions])

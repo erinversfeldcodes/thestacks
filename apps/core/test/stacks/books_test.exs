@@ -257,6 +257,38 @@ defmodule Stacks.BooksTest do
       refute "Rust Atomics and Locks" in titles
     end
 
+    # #291 REGRESSION LOCK: the raw query must reach `plainto_tsquery` so titles
+    # with apostrophes/hyphens still match. A prior `String.replace(~r/[^\w\s]/)`
+    # sanitiser mangled "O'Brien" → "OBrien" and "spider-man" → "spiderman",
+    # changing the lexemes and dropping legitimate matches. Injection-safety comes
+    # from Ecto param binding + plainto_tsquery (see search_controller_test.exs
+    # "query edge cases"), not from stripping characters.
+    test "matches a title containing an apostrophe" do
+      book = insert(:book, title: "The Master of O'Brien Manor")
+      insert(:book_edition, book: book)
+      other = insert(:book, title: "Rust Atomics and Locks")
+      insert(:book_edition, book: other)
+
+      results = Books.search_books("O'Brien")
+      titles = Enum.map(results, & &1.title)
+
+      assert "The Master of O'Brien Manor" in titles
+      refute "Rust Atomics and Locks" in titles
+    end
+
+    test "matches a title containing a hyphenated word" do
+      book = insert(:book, title: "The Amazing Spider-Man Chronicles")
+      insert(:book_edition, book: book)
+      other = insert(:book, title: "Rust Atomics and Locks")
+      insert(:book_edition, book: other)
+
+      results = Books.search_books("Spider-Man")
+      titles = Enum.map(results, & &1.title)
+
+      assert "The Amazing Spider-Man Chronicles" in titles
+      refute "Rust Atomics and Locks" in titles
+    end
+
     # Layer 3 DB-assertion punch (#115 audit #2): prove the two DB mechanisms the
     # feature rests on — the generated tsvector column and the GIN index — rather
     # than trusting them via `search_books/2`.
