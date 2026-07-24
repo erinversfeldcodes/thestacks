@@ -27,7 +27,7 @@ import Components.OnboardingOverlay as OnboardingOverlay
 import Components.UserMenu as UserMenu
 import Components.ViewAsBar as ViewAsBar
 import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
-import Html.Attributes exposing (attribute, class, href, id)
+import Html.Attributes exposing (attribute, class, href, id, tabindex)
 import Html.Events
 import Http
 import Json.Decode as Decode
@@ -1502,6 +1502,11 @@ update msg model =
                             , Cmd.batch
                                 [ baseCmd
                                 , Nav.pushUrl model.key (Route.toPath route)
+
+                                -- Match the overlay path: after a remove on the
+                                -- full-page route, focus the main landmark so it
+                                -- is not lost to <body> (#295 item b).
+                                , focusMainContent
                                 ]
                             )
 
@@ -2108,8 +2113,14 @@ update msg model =
                             )
 
                         BookDetail.NavigateTo route ->
+                            -- Remove-success path: tear down the overlay, land on
+                            -- the previous shelf, and move focus to the main
+                            -- landmark so it is not lost to <body> (#295 item b).
                             ( { model | bookDetailOverlay = Nothing }
-                            , Nav.pushUrl model.key (Route.toPath route)
+                            , Cmd.batch
+                                [ Nav.pushUrl model.key (Route.toPath route)
+                                , focusMainContent
+                                ]
                             )
 
                         BookDetail.NoOut ->
@@ -2202,11 +2213,35 @@ update msg model =
                             )
 
                 Nothing ->
-                    let
-                        ( newUserMenu, _ ) =
-                            UserMenu.update UserMenu.Close model.userMenu
-                    in
-                    ( { model | userMenu = newUserMenu }, Cmd.none )
+                    -- No overlay is open. On the full-page BookDetail route,
+                    -- give the page first dibs on Escape so its nested surfaces
+                    -- (remove modal / progress-edit form) dismiss too (#295 item
+                    -- e) — the same consumed/not-consumed pattern as the overlay.
+                    case model.page of
+                        PageBookDetail subModel ->
+                            let
+                                maybeToken =
+                                    Maybe.map .token model.auth
+
+                                ( newSubModel, subCmd, outMsg ) =
+                                    BookDetail.update BookDetail.EscapePressed subModel maybeToken
+                            in
+                            case outMsg of
+                                BookDetail.RequestCloseOverlay ->
+                                    -- No nested surface consumed it; there is no
+                                    -- overlay to close on the page route, so fall
+                                    -- back to the default (close the user menu).
+                                    closeUserMenuOnEscape model
+
+                                _ ->
+                                    -- The page dismissed a nested surface and
+                                    -- stays put; run its (focus-return) command.
+                                    ( { model | page = PageBookDetail newSubModel }
+                                    , Cmd.map BookDetailMsg subCmd
+                                    )
+
+                        _ ->
+                            closeUserMenuOnEscape model
 
         OnboardingMsg subMsg ->
             let
@@ -2379,6 +2414,30 @@ openOverlay model bookId =
     openOverlayWithTrigger model bookId ("spine-" ++ bookId)
 
 
+{-| Move focus to the persistent main-content landmark. Used after a book is
+removed from its shelf (#295 item b): the remove-success path navigates to the
+previous shelf route, and without an explicit target focus would drop to
+`<body>`, stranding keyboard and screen-reader users. The landmark carries
+`tabindex -1` so this focus lands. It is always in the DOM (the app shell), so
+the command can run alongside the route change regardless of ordering.
+-}
+focusMainContent : Cmd Msg
+focusMainContent =
+    Task.attempt (always FocusResult) (Browser.Dom.focus "main-content")
+
+
+{-| The default top-level Escape behaviour when no book overlay is open and the
+current page has nothing nested to dismiss: close the user menu.
+-}
+closeUserMenuOnEscape : Model -> ( Model, Cmd Msg )
+closeUserMenuOnEscape model =
+    let
+        ( newUserMenu, _ ) =
+            UserMenu.update UserMenu.Close model.userMenu
+    in
+    ( { model | userMenu = newUserMenu }, Cmd.none )
+
+
 {-| Open the book detail overlay, returning focus to an explicit trigger
 element id on close. Shelf pages trigger from a `spine-<bookId>` element
 (`openOverlay`); the search results list triggers from its own
@@ -2403,7 +2462,12 @@ openOverlayWithTrigger model bookId triggerId =
     ( { model | bookDetailOverlay = Just overlay }
     , Cmd.batch
         [ Cmd.map OverlayBookDetailMsg detailCmd
-        , Task.attempt (always FocusResult) (Browser.Dom.focus "book-overlay-close")
+
+        -- #295 item a: focus the labelled dialog card on open (not the close
+        -- button), so a screen reader announces the book first. The card is
+        -- `tabindex -1`, so the first forward Tab still lands on the close
+        -- button and the focus trap is unaffected.
+        , Task.attempt (always FocusResult) (Browser.Dom.focus BookDetail.cardFocusId)
         ]
     )
 
@@ -2478,6 +2542,11 @@ view model =
             , viewNav model.route model.auth model.userMenu
             , main_
                 [ id "main-content"
+
+                -- `tabindex -1` makes the main landmark programmatically
+                -- focusable: it is both the skip-link target and where focus
+                -- lands after a book is removed from its shelf (#295 item b).
+                , tabindex -1
                 , class
                     ("app__main"
                         ++ (case model.transition of

@@ -64,6 +64,7 @@ suite =
         , closeOverlayXEmitsRequestClose
         , closeOverlayBackdropEmitsRequestClose
         , overlayHasFocusBoundaries
+        , cardExposesFocusOnOpenTarget
         , trapForwardTabOnSentinelWrapsToFirst
         , trapShiftTabOnCloseWrapsToLast
         , trapForwardTabOnCloseIsNatural
@@ -369,6 +370,28 @@ overlayHasFocusBoundaries =
                 |> Expect.all
                     [ Query.has [ Selector.id BookDetail.firstFocusableId ]
                     , Query.has [ Selector.id BookDetail.lastFocusableId ]
+                    ]
+
+
+{-| The dialog card is the focus-on-open target (#295 item a): it carries the
+stable id `Main.openOverlay` focuses, `tabindex -1` (focusable but out of the
+tab order, so the first forward Tab lands on the close button), and the labelled
+`aria-label` that becomes the first utterance for a screen reader. Asserting the
+id ties `Main`'s focus command to a real element.
+-}
+cardExposesFocusOnOpenTarget : Test
+cardExposesFocusOnOpenTarget =
+    test "card_focus_target: the dialog card carries the focus-on-open id, tabindex -1, and its aria-label" <|
+        \() ->
+            BookDetail.overlayView loadedOverlayModel
+                |> Query.fromHtml
+                |> Query.find [ Selector.id BookDetail.cardFocusId ]
+                |> Query.has
+                    [ Selector.attribute (Html.Attributes.tabindex -1)
+                    , Selector.attribute
+                        (Html.Attributes.attribute "aria-label"
+                            ("Book details: " ++ testBook.title)
+                        )
                     ]
 
 

@@ -3,6 +3,7 @@ module Page.BookDetail exposing
     , Model
     , Msg(..)
     , OutMsg(..)
+    , cardFocusId
     , firstFocusableId
     , init
     , lastFocusableId
@@ -676,9 +677,21 @@ focusProgressBadgeFromModel model =
             Cmd.none
 
 
-{-| The DOM id of the first focusable control in the overlay — the close
-button, which is also the element focused on open (see `Main.openOverlay`).
-The focus trap wraps to this id when Tab falls off the trailing sentinel.
+{-| The DOM id of the dialog card — the element focused when the overlay opens
+(#295 item a; see `Main.openOverlay`). The card carries `tabindex -1` and the
+`aria-label "Book details: {title}"`, so a screen reader announces the book on
+open, and the first forward Tab moves to the close button (the card is out of
+the tab order). It is deliberately NOT a focus-trap anchor: the trap still wraps
+between the close button (first control) and the trailing sentinel (last).
+-}
+cardFocusId : String
+cardFocusId =
+    "book-overlay-card"
+
+
+{-| The DOM id of the first focusable CONTROL in the overlay — the close button.
+The focus trap wraps to this id when Tab falls off the trailing sentinel. (The
+element focused on open is the dialog card, `cardFocusId`, not this control.)
 -}
 firstFocusableId : String
 firstFocusableId =
@@ -1411,6 +1424,7 @@ overlayView model =
             []
         , div
             [ class "book-overlay__card"
+            , id cardFocusId
             , attribute "role" "dialog"
             , attribute "aria-label" ariaLabel
             , attribute "aria-modal" "true"

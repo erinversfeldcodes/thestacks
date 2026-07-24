@@ -35,9 +35,10 @@ n/a-adjacent — polish of a shipped story; fill hops for changed affordances wh
 | others | no | n/a — polish only |
 
 ## Definition of Done
-- [ ] (a) decided + implemented + E2E updated — evidence: spec diff + live SR/keyboard note
-- [ ] (b) post-remove focus target set — evidence: program/E2E assertion
-- [ ] (c) + (d) applied — evidence: diff
+- [x] (a) decided + implemented + E2E updated — evidence: focus-on-open now targets the labelled dialog card (`BookDetail.cardFocusId = "book-overlay-card"`, `Main.openOverlayWithTrigger` focuses it); program test `cardExposesFocusOnOpenTarget` (id + tabindex -1 + aria-label); E2E `book-detail.spec.ts:186` (card focus on open) + `:199` (first Tab from card → close button) — live 27/27. SR/keyboard note: the card carries `aria-label "Book details: {title}"` so a reader announces the book first on open; being `tabindex -1` it is out of the tab order, so the first forward Tab reaches the close button and the close↔sentinel trap is unchanged.
+- [x] (b) post-remove focus target set — evidence: `Main.focusMainContent` fires on the remove-success `NavigateTo` (both overlay + full-page handlers); `main-content` landmark given `tabindex -1` so focus lands; E2E `book-detail.spec.ts:520` "removing the book returns focus to the main landmark" — live pass. (BookDetail-side `NavigateTo previousRoute` already covered by `removeConfirmNavigatesToPreviousRoute`.)
+- [x] (c) + (d) applied — evidence: (c) removed dead `.book-overlay__close` block + `:hover` (belonged to the removed Library quick-view block-button; only bled margin/padding onto the inline-styled round "×") in `main.css`, kept the live `.book-overlay__close:focus-visible` ring; (d) one-line defense-in-depth comment at `book_controller.ex:211`.
+- [x] (e) page-route Escape forwarding — evidence: `Main.EscapePressed` `Nothing` branch now forwards to `PageBookDetail` (same consumed/not-consumed pattern); E2E `book-detail.spec.ts:545` "Escape dismisses the remove modal on the full-page route" — live pass.
 - [ ] `just verify` passes; **`completion-audit` passed**
 
 ## Dependencies
@@ -48,3 +49,4 @@ n/a-adjacent — polish of a shipped story; fill hops for changed affordances wh
 
 ## Progress Notes
 - 2026-07-24 — Created from #114 review P3 batch (ux ×2, ux-cosmetic ×1, elixir ×1).
+- 2026-07-24 — Implemented all five items (a)-(e). Test-first: `cardExposesFocusOnOpenTarget` captured failing-first at the elm-test layer (`Query.find [id "book-overlay-card"]` → 0 matches; baseline 1031 pass + 1 fail) before adding the card `id`. Items (b)/(e) are Main-level wiring (not program-testable in isolation) so their new post-conditions are proven by the live E2E specs, which are non-vacuous: without `focusMainContent` post-remove focus falls to `<body>` (not `main-content`), and without the page-route Escape forwarding the modal stays open (the old `Nothing` branch only closed the user menu). Gates: elm-test **1032/0** (baseline 1031 + card test); elm-format `--validate` clean; elm-review no errors; vacuous-guard check clean; E2E `book-detail.spec.ts --project=chromium` **27/27** live on :4000; scoped `book_controller_test.exs` **41/0** (comment-only). Full `just verify` + `completion-audit` left for the integration gate.

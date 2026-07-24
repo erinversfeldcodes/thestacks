@@ -183,12 +183,30 @@ test.describe("Book Detail overlay — dismissal (punch #11)", () => {
 });
 
 test.describe("Book Detail overlay — focus contract (punch #11/#12)", () => {
-  test("focus lands on the close button when the overlay opens", async ({
+  test("focus lands on the labelled dialog card when the overlay opens (#295 a)", async ({
     page,
   }) => {
     await openOverlayWithSpine(page);
-    // Focus is moved by an Elm Browser.Dom.focus Task that resolves a frame
-    // after render, so poll rather than reading synchronously.
+    // #295 item a: the overlay now focuses the labelled dialog card (not the
+    // close button) on open, so a screen reader announces "Book details: …"
+    // first. Focus is moved by an Elm Browser.Dom.focus Task that resolves a
+    // frame after render, so poll rather than reading synchronously.
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("book-overlay-card");
+  });
+
+  test("first Tab from the freshly-focused card lands on the close button (#295 a)", async ({
+    page,
+  }) => {
+    await openOverlayWithSpine(page);
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("book-overlay-card");
+    // The card is tabindex -1 (out of the tab order), so the first forward Tab
+    // moves to the first tabbable control — the close button — confirming the
+    // trap's first anchor is still reached from the card.
+    await page.keyboard.press("Tab");
     await expect
       .poll(() => activeElementId(page), { timeout: 3000 })
       .toBe("book-overlay-close");
@@ -198,7 +216,7 @@ test.describe("Book Detail overlay — focus contract (punch #11/#12)", () => {
     const { overlay } = await openOverlayWithSpine(page);
     await expect
       .poll(() => activeElementId(page), { timeout: 3000 })
-      .toBe("book-overlay-close");
+      .toBe("book-overlay-card");
 
     // Walk forward through every focusable control. At each stop, focus must
     // remain inside the overlay subtree — never on a shelf-behind element.
@@ -264,7 +282,7 @@ test.describe("Book Detail overlay — focus contract (punch #11/#12)", () => {
     const { overlay, spineId } = await openOverlayWithSpine(page);
     await expect
       .poll(() => activeElementId(page), { timeout: 3000 })
-      .toBe("book-overlay-close");
+      .toBe("book-overlay-card");
     await page.keyboard.press("Escape");
     await expect(overlay).not.toBeVisible({ timeout: 5000 });
     // Focus-return is likewise an async Browser.Dom.focus Task.
@@ -497,5 +515,53 @@ test.describe("Book Detail overlay — remove-modal focus & scoped escape (rev 1
     // With no nested surface left, the second Escape closes the overlay.
     await page.keyboard.press("Escape");
     await expect(overlay).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test("removing the book returns focus to the main landmark (#295 b)", async ({
+    page,
+    request,
+  }) => {
+    const { overlay, modal } = await openRemoveModal(page, request);
+    // Confirm the removal — safe here because the minted user's only placement
+    // is this one. The success path tears down the overlay, navigates to the
+    // previous shelf (/library), and moves focus to the persistent main
+    // landmark so it is not lost to <body>.
+    await modal.locator("#remove-book-confirm").click();
+    await expect(overlay).not.toBeVisible({ timeout: 5000 });
+    expect(page.url()).toContain("/library");
+    // Focus-on-navigate is an async Browser.Dom.focus Task, so poll.
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("main-content");
+  });
+});
+
+test.describe("Book Detail full-page route — scoped escape (#295 e)", () => {
+  // The overlay is the default surface for a spine click, but the full-page
+  // BookDetail route (/books/:id, reached by a direct navigation) renders the
+  // same detail — and previously the global Escape fell through to the
+  // user-menu handler there, leaving the remove modal stuck open.
+
+  test("Escape dismisses the remove modal on the full-page route", async ({
+    page,
+    request,
+  }) => {
+    const { bookId } = await provisionBookOnShelf(page, request, "library");
+    await page.goto(`/books/${bookId}`);
+    // Full-page route: the book detail renders inline (no overlay card).
+    await expect(page.locator(".book-detail")).toBeVisible({ timeout: 10000 });
+    await page.locator("#book-detail-remove-trigger").click();
+    const modal = page.getByTestId("remove-book-modal");
+    await expect(modal).toBeVisible({ timeout: 3000 });
+
+    // Escape must dismiss the modal on the page route too (#295 item e).
+    await page.keyboard.press("Escape");
+    await expect(modal).not.toBeVisible({ timeout: 5000 });
+    // The page stays put and focus returns to the danger-zone trigger.
+    await expect(page.locator(".book-detail")).toBeVisible();
+    expect(page.url()).toContain(`/books/${bookId}`);
+    await expect
+      .poll(() => activeElementId(page), { timeout: 3000 })
+      .toBe("book-detail-remove-trigger");
   });
 });

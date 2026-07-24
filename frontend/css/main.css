@@ -3420,22 +3420,11 @@ h4 {
     margin-bottom: 1rem;
 }
 
-.book-overlay__close {
-    display: block;
-    margin-top: 1.5rem;
-    padding: 0.5rem 1.5rem;
-    background: var(--accent);
-    color: var(--text);
-    border: none;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-family: var(--font-body);
-    font-size: var(--size-sm);
-}
-
-.book-overlay__close:hover {
-    background: var(--accent-hover);
-}
+/* NB: the BookDetail overlay's round "×" close button (also `.book-overlay__close`)
+   is fully inline-styled in Page.BookDetail.overlayView; only its
+   `:focus-visible` ring below is stylesheet-driven. The block-button rule that
+   once lived here belonged to a removed Library quick-view and only bled unwanted
+   margin/padding onto the "×", so it was deleted (#295 item c). */
 
 /* ===== Skip Link (Accessibility) ===== */
 
