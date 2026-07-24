@@ -116,6 +116,7 @@ module Api exposing
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
+    , searchResponseDecoder
     , searchUsers
     , setBookAgeGate
     , soldListing
@@ -787,10 +788,11 @@ searchBooks query token toMsg =
         , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] [ Url.Builder.string "q" query ]
         , body = Http.emptyBody
 
-        -- SearchController.index returns an object `{query, count, results: [...]}`,
-        -- not a bare array — unwrap `results` (mirrors the `book`/`users`
-        -- unwrapping in getBook / searchUsers).
-        , expect = Http.expectJson toMsg (Decode.field "results" (Decode.list bookDecoder))
+        -- SearchController.index returns the SearchResponse envelope
+        -- `{query, count, results: [...]}`; decode it through the generated
+        -- proto decoder (mirrors catalogueResponseDecoder) and keep the
+        -- caller's `List Book` contract.
+        , expect = Http.expectJson toMsg searchResponseDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -1179,6 +1181,24 @@ fromProtoCatalogueResponse proto =
 catalogueResponseDecoder : Decoder CatalogueResponse
 catalogueResponseDecoder =
     Decode.map fromProtoCatalogueResponse ProtoBookResp.decodeCatalogueResponse
+
+
+{-| Adapter: proto SearchResponse -> the `List Book` the search page consumes.
+The envelope also carries `query`/`count`; the page only needs the results,
+so they are dropped here (mirrors fromProtoCatalogueResponse's shaping).
+-}
+fromProtoSearchResponse : ProtoBookResp.SearchResponse -> List Book
+fromProtoSearchResponse proto =
+    List.map Types.Book.fromProtoBook proto.results
+
+
+{-| Decode GET /api/search's SearchResponse envelope through the generated
+proto decoder, keeping search drift-proof by construction. Shared with
+`TestHelpers.searchEffects` so the test mirror can never diverge.
+-}
+searchResponseDecoder : Decoder (List Book)
+searchResponseDecoder =
+    Decode.map fromProtoSearchResponse ProtoBookResp.decodeSearchResponse
 
 
 {-| A single audit-log entry as shown on the read-only audit page.

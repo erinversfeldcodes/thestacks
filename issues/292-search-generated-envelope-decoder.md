@@ -36,10 +36,10 @@ n/a — no user stories (contract hygiene); proof = all #115 unit/program/E2E su
 | others | no | n/a — pure client refactor |
 
 ## Definition of Done
-- [ ] searchBooks decodes via generated `decodeSearchResponse`; no hand-rolled envelope remains — evidence: diff + grep
-- [ ] Hand mirror retired or unified — evidence: TestHelpers diff
-- [ ] All #115 suites green unchanged — evidence: elm-test + search.spec.ts runs
-- [ ] `just verify` passes; **`completion-audit` passed**; **Completion Bar met**
+- [x] searchBooks decodes via generated `decodeSearchResponse`; no hand-rolled envelope remains — evidence: `Api.elm:795` `expect = Http.expectJson toMsg searchResponseDecoder`; `searchResponseDecoder = Decode.map fromProtoSearchResponse ProtoBookResp.decodeSearchResponse` (`Api.elm:1199-1201`); grep `Decode.field "results"` over `frontend/src` + `frontend/tests` → 0 matches
+- [x] Hand mirror retired or unified — evidence: `TestHelpers.elm:959` now `expect = ... Api.searchResponseDecoder` (the exact same exposed decoder); no separate `Decode.field "results" (Decode.list bookDecoder)` mirror remains
+- [x] All #115 suites green unchanged — evidence: `npx elm-test` → 1008 passed / 0 failed (baseline unchanged); `npx elm-review` → no errors; `npx elm-format --validate` → clean; `search.spec.ts --project=chromium` (local :4000) → 12 passed (10 chromium + 2 setup), incl. the `searchResponseJson`-driven seeded/empty/error/sort/filter specs, assertions unchanged
+- [ ] `just verify` passes; **`completion-audit` passed**; **Completion Bar met** — Elm gates (elm-test/elm-format/elm-review) + live search E2E green; full `just verify` + completion-audit deferred to epic-level close (team-lead mandate)
 
 ## Dependencies
 - #115 (its suites are the acceptance gate, merged on feat/115-114-3-e2e)
@@ -49,3 +49,4 @@ n/a — no user stories (contract hygiene); proof = all #115 unit/program/E2E su
 
 ## Progress Notes
 - 2026-07-24 — Created from #115 contract-review P3 (un-governed envelope; generated decoder already exists unused).
+- 2026-07-24 — Implemented. `Api.searchBooks` now decodes through `searchResponseDecoder = Decode.map fromProtoSearchResponse ProtoBookResp.decodeSearchResponse` (generated `SearchResponse` envelope; `fromProtoSearchResponse` maps `proto.results` via `Types.Book.fromProtoBook`, mirroring `fromProtoCatalogueResponse`). Decoder exposed from `Api`; `TestHelpers.searchEffects` now reuses `Api.searchResponseDecoder`, retiring the hand `Decode.field "results" (Decode.list bookDecoder)` mirror. Gates: elm-test 1008/1008, elm-review clean, elm-format clean, search.spec.ts 12/12 (local :4000). Grep sweep for `Decode.field "results"` → 0. Behaviour identical; `query`/`count` dropped at the adapter (page consumes `List Book` unchanged).

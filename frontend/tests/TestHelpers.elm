@@ -952,10 +952,11 @@ searchEffects msg model maybeToken =
                                     , url = "/api/search?q=" ++ model.query
                                     , body = SimulatedEffect.Http.emptyBody
 
-                                    -- Mirror Api.searchBooks: SearchController.index
-                                    -- returns `{query, count, results: [...]}`, so
-                                    -- unwrap the `results` field (not a bare array).
-                                    , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted (Decode.field "results" (Decode.list bookDecoder))
+                                    -- Reuse the exact decoder Api.searchBooks
+                                    -- uses (the generated SearchResponse envelope)
+                                    -- so this mirror can never drift from the real
+                                    -- wire (#292).
+                                    , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted Api.searchResponseDecoder
                                     , timeout = Nothing
                                     , tracker = Nothing
                                     }
