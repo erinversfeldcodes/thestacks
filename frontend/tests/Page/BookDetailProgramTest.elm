@@ -7,6 +7,7 @@ simulated HTTP responses and user interactions.
 
 -}
 
+import Components.RemoveBookModal as RemoveBookModal
 import Dict
 import Expect
 import Html.Attributes
@@ -68,7 +69,156 @@ suite =
         , trapForwardTabOnCloseIsNatural
         , trapShiftTabOnSentinelIsNatural
         , trapNonTabKeyIsNatural
+        , sentinelHasAriaLabel
+        , removeModalHasDialogSemantics
+        , removeModalButtonsHaveIds
+        , escapeClosesRemoveModalFirst
+        , escapeClosesProgressFormFirst
+        , escapeWithNoNestedSurfaceRequestsClose
+        , removeModalTrapForwardWrap
+        , removeModalTrapReverseWrap
+        , removeModalTrapNaturalOrder
         ]
+
+
+{-| Simulate a `keydown` on the remove modal's dialog element and return the
+decoded message (if any). Mirrors `simulateCardKeydown` for the overlay card.
+-}
+simulateModalKeydown : Encode.Value -> Result String BookDetail.Msg
+simulateModalKeydown eventValue =
+    BookDetail.overlayView overlayModelWithModal
+        |> Query.fromHtml
+        |> Query.find [ Selector.class "modal" ]
+        |> Event.simulate ( "keydown", eventValue )
+        |> Event.toResult
+
+
+
+-- SCOPED ESCAPE (ux fix 1): dismiss the top-most surface first
+
+
+escapeClosesRemoveModalFirst : Test
+escapeClosesRemoveModalFirst =
+    test "escape_scoped_modal: Escape with the remove modal open closes just the modal, overlay stays (NoOut)" <|
+        \() ->
+            let
+                ( model, _, out ) =
+                    BookDetail.update BookDetail.EscapePressed
+                        { loadedOverlayModel | removeModalOpen = True }
+                        (Just "test-token")
+            in
+            Expect.all
+                [ \_ -> Expect.equal False model.removeModalOpen
+                , \_ -> Expect.equal BookDetail.NoOut out
+                ]
+                ()
+
+
+escapeClosesProgressFormFirst : Test
+escapeClosesProgressFormFirst =
+    test "escape_scoped_progress: Escape with the progress-edit form open closes just the form, overlay stays (NoOut)" <|
+        \() ->
+            let
+                editingModel =
+                    { loadedOverlayModel
+                        | progressCard = Maybe.map (\c -> { c | editing = True }) loadedOverlayModel.progressCard
+                    }
+
+                ( model, _, out ) =
+                    BookDetail.update BookDetail.EscapePressed editingModel (Just "test-token")
+            in
+            Expect.all
+                [ \_ -> Expect.equal (Just False) (Maybe.map .editing model.progressCard)
+                , \_ -> Expect.equal BookDetail.NoOut out
+                ]
+                ()
+
+
+escapeWithNoNestedSurfaceRequestsClose : Test
+escapeWithNoNestedSurfaceRequestsClose =
+    test "escape_scoped_none: Escape with no nested surface open requests overlay close (RequestCloseOverlay)" <|
+        \() ->
+            let
+                ( _, _, out ) =
+                    BookDetail.update BookDetail.EscapePressed loadedOverlayModel (Just "test-token")
+            in
+            Expect.equal BookDetail.RequestCloseOverlay out
+
+
+
+-- REMOVE-MODAL FOCUS TRAP (ux fix 2)
+
+
+removeModalTrapForwardWrap : Test
+removeModalTrapForwardWrap =
+    test "remove_modal_forward_wrap: Tab on the Remove button wraps to Keep It" <|
+        \() ->
+            simulateModalKeydown (tabKeydownEvent False RemoveBookModal.confirmButtonId)
+                |> Expect.equal (Ok (BookDetail.FocusOn RemoveBookModal.cancelButtonId))
+
+
+removeModalTrapReverseWrap : Test
+removeModalTrapReverseWrap =
+    test "remove_modal_reverse_wrap: Shift+Tab on Keep It wraps to the Remove button" <|
+        \() ->
+            simulateModalKeydown (tabKeydownEvent True RemoveBookModal.cancelButtonId)
+                |> Expect.equal (Ok (BookDetail.FocusOn RemoveBookModal.confirmButtonId))
+
+
+removeModalTrapNaturalOrder : Test
+removeModalTrapNaturalOrder =
+    test "remove_modal_natural: forward Tab on Keep It is not intercepted (native order to Remove)" <|
+        \() ->
+            simulateModalKeydown (tabKeydownEvent False RemoveBookModal.cancelButtonId)
+                |> Expect.err
+
+
+{-| An overlay model with the remove-confirmation modal open.
+-}
+overlayModelWithModal : BookDetail.Model
+overlayModelWithModal =
+    { loadedOverlayModel | removeModalOpen = True }
+
+
+sentinelHasAriaLabel : Test
+sentinelHasAriaLabel =
+    test "sentinel_label: the trailing focus sentinel carries an explanatory aria-label" <|
+        \() ->
+            BookDetail.overlayView loadedOverlayModel
+                |> Query.fromHtml
+                |> Query.find [ Selector.id BookDetail.lastFocusableId ]
+                |> Query.has
+                    [ Selector.attribute
+                        (Html.Attributes.attribute "aria-label"
+                            "End of book details — press Tab to return to the top"
+                        )
+                    ]
+
+
+removeModalHasDialogSemantics : Test
+removeModalHasDialogSemantics =
+    test "remove_modal_semantics: the remove modal is a labelled aria dialog" <|
+        \() ->
+            BookDetail.overlayView overlayModelWithModal
+                |> Query.fromHtml
+                |> Query.find [ Selector.class "modal" ]
+                |> Query.has
+                    [ Selector.attribute (Html.Attributes.attribute "role" "dialog")
+                    , Selector.attribute (Html.Attributes.attribute "aria-modal" "true")
+                    , Selector.attribute (Html.Attributes.attribute "aria-labelledby" "remove-book-title")
+                    ]
+
+
+removeModalButtonsHaveIds : Test
+removeModalButtonsHaveIds =
+    test "remove_modal_buttons: the remove modal's two buttons carry stable focus ids" <|
+        \() ->
+            BookDetail.overlayView overlayModelWithModal
+                |> Query.fromHtml
+                |> Expect.all
+                    [ Query.has [ Selector.id "remove-book-cancel" ]
+                    , Query.has [ Selector.id "remove-book-confirm" ]
+                    ]
 
 
 {-| A fully-loaded overlay model (book + placement) for exercising `overlayView`

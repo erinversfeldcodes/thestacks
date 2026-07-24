@@ -2159,7 +2159,16 @@ update msg model =
             case model.bookDetailOverlay of
                 Just overlay ->
                     let
-                        focusCmd =
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        -- Give the overlay first dibs on Escape: it dismisses a
+                        -- nested surface (remove modal / progress-edit form) if
+                        -- one is open, else returns RequestCloseOverlay.
+                        ( newDetail, subCmd, outMsg ) =
+                            BookDetail.update BookDetail.EscapePressed overlay.detail maybeToken
+
+                        returnFocusCmd =
                             case overlay.triggerSpineId of
                                 Just spineId ->
                                     Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
@@ -2167,7 +2176,18 @@ update msg model =
                                 Nothing ->
                                     Cmd.none
                     in
-                    ( { model | bookDetailOverlay = Nothing }, focusCmd )
+                    case outMsg of
+                        BookDetail.RequestCloseOverlay ->
+                            -- No nested surface consumed it: close the overlay and
+                            -- return focus to the triggering spine.
+                            ( { model | bookDetailOverlay = Nothing }, returnFocusCmd )
+
+                        _ ->
+                            -- The overlay closed a nested surface and stays open;
+                            -- run its (focus-return) command.
+                            ( { model | bookDetailOverlay = Just { overlay | detail = newDetail } }
+                            , Cmd.map OverlayBookDetailMsg subCmd
+                            )
 
                 Nothing ->
                     let

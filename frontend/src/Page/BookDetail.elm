@@ -18,7 +18,7 @@ import Components.AuthorCard as AuthorCard
 import Components.FormatPicker exposing (formatPicker)
 import Components.PlacementCard as Card
 import Components.PriceInfo as PriceInfo
-import Components.RemoveBookModal exposing (removeBookModal)
+import Components.RemoveBookModal as RemoveBookModal exposing (removeBookModal)
 import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
@@ -111,8 +111,10 @@ type Msg
     | RecordReadRequested
     | FinishedReadDismissed
     | ProgressFocusReturned
+    | EscapePressed
     | FocusWrapToFirst
     | FocusWrapToLast
+    | FocusOn String
     | FocusWrapNoOp
 
 
@@ -306,6 +308,31 @@ update msg model maybeToken =
         CloseOverlay ->
             ( model, Cmd.none, RequestCloseOverlay )
 
+        EscapePressed ->
+            -- Scoped Escape (US-1.4.1): dismiss the TOP-MOST surface first. Only
+            -- when no nested surface is open does Escape close the overlay (via
+            -- RequestCloseOverlay, which Main consumes to return focus to the
+            -- triggering spine). A consumed Escape returns NoOut so the overlay
+            -- stays open.
+            if model.removeModalOpen then
+                ( { model | removeModalOpen = False }, focusElement removeTriggerId, NoOut )
+
+            else
+                case model.progressCard of
+                    Just card ->
+                        if card.editing then
+                            let
+                                ( closedCard, _ ) =
+                                    Card.update Card.CancelClicked card
+                            in
+                            ( { model | progressCard = Just closedCard }, focusProgressBadge closedCard, NoOut )
+
+                        else
+                            ( model, Cmd.none, RequestCloseOverlay )
+
+                    Nothing ->
+                        ( model, Cmd.none, RequestCloseOverlay )
+
         OpenBookshelfMover ->
             ( { model | bookshelfMoverOpen = True }, Cmd.none, NoOut )
 
@@ -412,10 +439,13 @@ update msg model maybeToken =
                         ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
-            ( { model | removeModalOpen = True }, Cmd.none, NoOut )
+            -- Move focus into the destructive dialog, defaulting to the safe
+            -- "Keep It" button.
+            ( { model | removeModalOpen = True }, focusElement RemoveBookModal.cancelButtonId, NoOut )
 
         CloseRemoveModal ->
-            ( { model | removeModalOpen = False }, Cmd.none, NoOut )
+            -- Return focus to the control that opened the dialog.
+            ( { model | removeModalOpen = False }, focusElement removeTriggerId, NoOut )
 
         ConfirmRemove ->
             case ( model.placement, maybeToken ) of
@@ -623,6 +653,9 @@ update msg model maybeToken =
         FocusWrapToLast ->
             ( model, focusElement lastFocusableId, NoOut )
 
+        FocusOn elementId ->
+            ( model, focusElement elementId, NoOut )
+
         FocusWrapNoOp ->
             ( model, Cmd.none, NoOut )
 
@@ -660,6 +693,14 @@ trap correct regardless of which content controls the overlay renders.
 lastFocusableId : String
 lastFocusableId =
     "book-overlay-focus-sentinel"
+
+
+{-| The DOM id of the "Remove from collection" button — the control that opens
+the remove-confirmation dialog, and where focus returns when it closes.
+-}
+removeTriggerId : String
+removeTriggerId =
+    "book-detail-remove-trigger"
 
 
 {-| Move DOM focus to the given element id, discarding the (ignorable) result.
@@ -745,6 +786,8 @@ view model =
                                 { bookTitle = book.title
                                 , onConfirm = ConfirmRemove
                                 , onCancel = CloseRemoveModal
+                                , onWrapToFirst = FocusOn RemoveBookModal.cancelButtonId
+                                , onWrapToLast = FocusOn RemoveBookModal.confirmButtonId
                                 }
 
                         _ ->
@@ -1279,7 +1322,7 @@ viewMoveState state =
 viewDangerZone : Model -> Html Msg
 viewDangerZone model =
     section [ class "book-detail__section book-detail__danger-zone" ]
-        [ button [ class "btn btn--danger btn--sm", onClick OpenRemoveModal ]
+        [ button [ class "btn btn--danger btn--sm", id removeTriggerId, onClick OpenRemoveModal ]
             [ text "Remove from collection" ]
         , viewRemoveState model.removeState
         ]
@@ -1424,6 +1467,7 @@ overlayFocusSentinel =
         [ id lastFocusableId
         , testId "book-overlay-focus-sentinel"
         , tabindex 0
+        , attribute "aria-label" "End of book details — press Tab to return to the top"
         , class "book-overlay__focus-sentinel"
         , style "position" "absolute"
         , style "width" "1px"
@@ -1466,6 +1510,8 @@ overlayContent model =
                             { bookTitle = book.title
                             , onConfirm = ConfirmRemove
                             , onCancel = CloseRemoveModal
+                            , onWrapToFirst = FocusOn RemoveBookModal.cancelButtonId
+                            , onWrapToLast = FocusOn RemoveBookModal.confirmButtonId
                             }
 
                     _ ->
