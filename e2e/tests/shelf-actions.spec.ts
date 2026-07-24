@@ -1,23 +1,34 @@
 import { test, expect } from "@playwright/test";
-import {
-  suiteAuthFile,
-  ensureBookOnLibrary,
-  ensureBookOnShelf,
-  assertSeedOrSkip,
-} from "./helpers";
+import { provisionBookOnShelf, assertSeedOrSkip } from "./helpers";
 
-test.use({ storageState: suiteAuthFile("shelf-actions") });
-
-// All shelf-actions tests share the same DB user and mutate placement state.
-// Serial mode prevents race conditions between describe blocks when
-// fullyParallel: true is set globally.
-test.describe.configure({ mode: "serial" });
+/**
+ * Shelf-actions flagship suite — move, add, and remove a book through the real
+ * book-detail overlay and catalogue, driven in a real browser against a live
+ * stack.
+ *
+ * Every test mints its OWN fresh, confirmed, empty-collection user via
+ * POST /api/test/session (STACKS_E2E_TEST_HELPERS=1 only; skips cleanly where
+ * the helper is off) and provisions exactly the placements it mutates via the
+ * normal placement API (provisionBookOnShelf). Previously the suite shared one
+ * seeded user and its real move/remove tests drained that user's library shelf
+ * on every local run without restoring it, flaking repeated local iteration
+ * (#294 — CI/preview reseed per run so it bit local only). Per-test provisioning
+ * makes the suite self-restoring: each test builds the exact shelf state it
+ * asserts against, so runs are deterministic and independent — the #113
+ * spine-rendering pattern applied here. Isolated users make the specs safe to
+ * run fully parallel.
+ *
+ * The mutation-failure describe (#114) mints+provisions the same way but mocks
+ * only the mutation request, exercising the genuine failure-copy branches a
+ * healthy API never produces.
+ */
 
 test.describe("Shelf actions — move book between shelves", () => {
   test("move a book from library to wishlist via book detail overlay", async ({
     page,
+    request,
   }) => {
-    await ensureBookOnLibrary(page);
+    await provisionBookOnShelf(page, request, "library");
 
     // Go to the library shelf
     await page.goto("/library");
@@ -64,7 +75,15 @@ test.describe("Shelf actions — move book between shelves", () => {
 test.describe("Shelf actions — add book from catalogue", () => {
   test("add an unplaced book to a shelf from the catalogue", async ({
     page,
+    request,
   }) => {
+    // Provision one placement (the first catalogue book) on a fresh user. That
+    // one placement suppresses the placement-free onboarding overlay — which
+    // otherwise intercepts catalogue clicks — while every OTHER catalogue book
+    // stays unplaced, so the "Add to Shelf" affordance is still present. This is
+    // the precondition provisioned per test rather than consuming the shared seed.
+    await provisionBookOnShelf(page, request, "library");
+
     await page.goto("/catalogue");
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
@@ -76,9 +95,9 @@ test.describe("Shelf actions — add book from catalogue", () => {
 
     // Find an "Add to Shelf" button (only appears on unplaced books). A seed
     // gate rather than a silent guard: with E2E_EXPECT_FULL_SEEDS=1 (preview/CI)
-    // the absence of an unplaced book on the first page is a HARD FAILURE — the
-    // full dev-fixture seed always leaves this suite user with unplaced books —
-    // while a prod-shaped/thin target skips loudly instead of passing vacuously.
+    // the absence of an unplaced book on the first page is a HARD FAILURE — a
+    // fresh user always has unplaced books when the catalogue is seeded — while a
+    // prod-shaped/thin target skips loudly instead of passing vacuously.
     const addButton = page.locator(".catalogue__card-add").first();
     assertSeedOrSkip(
       (await addButton.count()) > 0,
@@ -111,7 +130,13 @@ test.describe("Shelf actions — add book from catalogue", () => {
 test.describe("Shelf actions — add unplaced book from detail overlay", () => {
   test("open an unplaced book detail overlay and add to collection", async ({
     page,
+    request,
   }) => {
+    // Provision one placement on a fresh user: it suppresses the placement-free
+    // onboarding overlay (which would intercept clicks) while leaving every other
+    // catalogue book unplaced for the add-from-overlay flow below.
+    await provisionBookOnShelf(page, request, "library");
+
     // Register the placements response listener BEFORE navigating so we cannot miss it.
     // Elm fetches /api/placements/mine on catalogue init; we must wait for it to complete
     // before querying .catalogue__card-add, otherwise the race condition causes us to click
@@ -203,8 +228,9 @@ test.describe("Shelf actions — add unplaced book from detail overlay", () => {
 test.describe("Shelf actions — remove book from collection", () => {
   test("remove button only visible when book has a placement", async ({
     page,
+    request,
   }) => {
-    await ensureBookOnLibrary(page);
+    await provisionBookOnShelf(page, request, "library");
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
@@ -223,8 +249,9 @@ test.describe("Shelf actions — remove book from collection", () => {
 
   test("remove button triggers modal and confirm removes the book", async ({
     page,
+    request,
   }) => {
-    await ensureBookOnLibrary(page);
+    await provisionBookOnShelf(page, request, "library");
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
 
@@ -257,12 +284,13 @@ test.describe("Shelf actions — mutation failures (punch #13)", () => {
   // exercise the genuine failure-copy branches (Api.MoveHttpError / remove
   // Failure) that a healthy API never produces.
 
-  async function openLibraryOverlay(page: import("@playwright/test").Page) {
-    // This describe runs after tests that REMOVE the library book, and
-    // ensureBookOnLibrary only guarantees a placement somewhere (not on the
-    // library shelf). ensureBookOnShelf actively places a book on library when
-    // the shelf is empty, so a spine is always present here.
-    await ensureBookOnShelf(page, "library");
+  async function openLibraryOverlay(
+    page: import("@playwright/test").Page,
+    request: import("@playwright/test").APIRequestContext
+  ) {
+    // Provision a fresh user with exactly one library placement, so a spine is
+    // always present here without depending on prior tests' shelf state.
+    await provisionBookOnShelf(page, request, "library");
     await page.goto("/library");
     await page.waitForSelector(".bookcase", { timeout: 10000 });
     const bookButton = page.getByTestId("book-spine").first();
@@ -273,7 +301,10 @@ test.describe("Shelf actions — mutation failures (punch #13)", () => {
     return overlay;
   }
 
-  test("move failure (403) shows the move-error message", async ({ page }) => {
+  test("move failure (403) shows the move-error message", async ({
+    page,
+    request,
+  }) => {
     // 403 is a plain transport error (not the 422 reading_pile_full body), so
     // it maps to Api.MoveHttpError → the generic move-failure copy.
     await page.route("**/api/placements/*/move", (route) =>
@@ -284,7 +315,7 @@ test.describe("Shelf actions — mutation failures (punch #13)", () => {
       })
     );
 
-    const overlay = await openLibraryOverlay(page);
+    const overlay = await openLibraryOverlay(page, request);
     await overlay.locator('button:has-text("Choose Bookshelf")').click();
     await expect(overlay.locator(".shelf-mover")).toBeVisible();
     await overlay.getByTestId("shelf-mover-select").selectOption("wishlist");
@@ -300,6 +331,7 @@ test.describe("Shelf actions — mutation failures (punch #13)", () => {
 
   test("remove failure (500) shows the remove-error message", async ({
     page,
+    request,
   }) => {
     // Mock only the DELETE; let every other /api/placements/* call (mine, move)
     // pass through untouched.
@@ -315,7 +347,7 @@ test.describe("Shelf actions — mutation failures (punch #13)", () => {
       }
     });
 
-    const overlay = await openLibraryOverlay(page);
+    const overlay = await openLibraryOverlay(page, request);
     await overlay.locator('button:has-text("Remove from collection")').click();
 
     // Confirm removal in the modal (renders above the overlay).

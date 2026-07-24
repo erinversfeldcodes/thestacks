@@ -432,3 +432,41 @@ export function assertSeedOrSkip(sufficient: boolean, message: string): void {
     test.skip(!sufficient, message);
   }
 }
+
+// ── Per-test shelf provisioning (Issue #294) ───────────────────────────────
+
+/**
+ * Mint a fresh, empty-collection user, place one catalogue book on `shelf` via
+ * the normal placement API, and land the browser authenticated as that user.
+ * Returns the session and the placed book's id.
+ *
+ * Because the user is brand-new, the ONLY active placement in their collection
+ * is the one created here — a mutation test (move/remove) can drain it without
+ * touching the shared suite seed, so repeated local runs stay deterministic
+ * (#294). Mirrors the per-test provisioning in spine-rendering.spec.ts (#113):
+ * build the exact shelf state the test asserts against instead of consuming a
+ * shared seed. Skips cleanly when the session helper is off (mintOrSkip) or the
+ * catalogue is empty (assertSeedOrSkip).
+ */
+export async function provisionBookOnShelf(
+  page: Page,
+  request: APIRequestContext,
+  shelf: string
+): Promise<{ session: MintedSession; bookId: string }> {
+  const session = await mintOrSkip(request);
+  const resp = await request.get("/api/catalogue?per_page=1");
+  expect(resp.ok(), "catalogue fetch for shelf provisioning").toBeTruthy();
+  const data = await resp.json();
+  const book = ((data.books ?? []) as Array<{ id: string }>)[0];
+  assertSeedOrSkip(
+    book !== undefined,
+    "catalogue has no books to provision a shelf placement"
+  );
+  const place = await request.post(`/api/bookshelves/${shelf}/placements`, {
+    headers: { Authorization: `Bearer ${session.token}` },
+    data: { book_id: book.id },
+  });
+  expect(place.status(), `place book on ${shelf}`).toBe(201);
+  await injectSession(page, session);
+  return { session, bookId: book.id };
+}
