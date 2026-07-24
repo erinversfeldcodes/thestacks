@@ -23,6 +23,7 @@ n/a-adjacent — polish of a shipped story; fill hops for changed affordances wh
 - (b) Remove-success (`BookDetail.elm:431-437` → Main.elm:2098-2101): set a focus target on the destination shelf (heading/landmark).
 - (c) Remove/reconcile the dead `.book-overlay__close` rule (main.css:3365).
 - (d) One-line comment at book_controller.ex:211.
+- (e) Full-page BookDetail route: keyboard Escape does not dismiss the remove modal (Main's global Escape only forwards into BookDetail when the overlay is open; on the page route it falls through to user-menu-close). Pre-existing, found in the #114 ux re-review 2026-07-24. Fix: forward Escape to the page-route BookDetail too (same consumed/not-consumed OutMsg pattern).
 
 ## Reviewer Context
 - The #114 E2E suite asserts the current focus-on-open target — change (a) must update that spec in the same diff.
