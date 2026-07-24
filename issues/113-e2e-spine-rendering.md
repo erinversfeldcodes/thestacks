@@ -33,8 +33,8 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-1.3.1 — Spine Thickness by Page Count | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-1.3.2 — Spine Wear by Engagement | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.3.1 — Spine Thickness by Page Count | Width formula `Spine.elm:57-59` (`max(35, min(55, round(pageCount/12)))`) → default fallback `Page.Bookshelf.Helpers.elm:58,129` (`Maybe.withDefault 200 (bookPageCount bk)`) → `page_count` round-trips through `GET /api/bookshelves/:name` (`bookshelf_controller_test.exs:274-290`, `primary_edition.page_count == 450`). | Library shelf 2026-07-24: Dreamtigers 95pp→35px, Queen Loana 480pp→40px, Name of the Rose 536pp→45px, Brothers Karamazov 796pp→55px — observed `offsetWidth == inline width`. | ✅ | Built end-to-end + observed live. |
+| US-1.3.2 — Spine Wear by Engagement | Wear suffix `Spine.elm:264-277` (`Softened` → `", well-loved"`; `Pristine` → none; composes with `", hidden (only visible to you)"`) → per-shelf config `Page.Bookshelf.elm:68/81/94` (library=`Softened`, antilibrary/wishlist=`Pristine`) + `ReadingPile.elm:460` (hardcoded `Softened`). | Full aria observed 2026-07-24: `"Book: The Name of the Rose by Umberto Eco, 536 pages, well-loved, hidden (only visible to you)"`; ReadingPile Goldfinch 771pp `", well-loved"`. | ✅ (in-scope aria/config slice) | Aria-level wear slice built + observed live. Bookmark-ribbon slice de-scoped → **#287**; visual wear CSS slice de-scoped → **#288** (see Resolution note under Test Suites §Wear Level by Shelf). |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
@@ -71,11 +71,11 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - Verify texture varies between books (not all identical)
 
 #### Wear Level by Shelf (US-1.3.2)
-- Navigate to WishList: verify spines render with `Pristine` wear (sharp edges, clean texture, vibrant colours)
+- Navigate to WishList: verify spines render with `Pristine` wear (aria-label has no wear suffix)
 - Navigate to AntiLibrary: verify spines render with `Pristine` wear (per codebase — `wearLevel = Pristine`)
-- Navigate to Reading Pile: verify spines render with `Softened` wear
+- Navigate to Reading Pile: verify spines render with `Softened` wear (aria-label ends ", well-loved")
 - Navigate to Library: verify spines render with `Softened` wear
-- Verify visual distinction between Pristine and Softened wear states is present
+- Verify the aria-level distinction between Pristine and Softened wear states (", well-loved" suffix present iff Softened). **Visual CSS distinction DE-SCOPED → #288** (no wear-specific CSS exists — wear reaches only the aria suffix, `Spine.elm:264-270`)
 
 #### ARIA Labels (US-1.3.1, US-1.3.2)
 - Verify each spine button has an `aria-label` attribute
@@ -85,9 +85,8 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - Verify `role="listitem"` on each spine button
 - Verify `role="list"` on `shelf-row__books` container
 
-#### Books with User Writing (US-1.3.2)
-- Seed a book that has associated user writing (blog post)
-- Verify bookmark ribbon or coloured tabs visible on the spine
+#### Books with User Writing — DE-SCOPED → #287
+- Bookmark ribbon / coloured tabs are unimplemented (no such element in `Components.Spine`); feature spun out to #287.
 
 ### 2. API Endpoint Tests
 
@@ -96,12 +95,14 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - Page count is an integer or null
 - Verify `page_count` propagates correctly through the JSON response
 
-#### `GET /api/spine_data/:placement_id` (server-side wear calculation)
-- Returns wear level based on `PlacementHistory` move count
-- move_count 0: `:pristine`
-- move_count 1: `:softened`
-- move_count 2+: `:well_loved`
-- Verify `Shelving.spine_data/1` function returns correct structure
+#### Server-side wear calculation (`Shelving.spine_data/1` — context-only; NO HTTP route exists)
+- CORRECTED 2026-07-23: there is no `GET /api/spine_data/:placement_id` route, and the real
+  `compute_wear_level` thresholds (`shelving.ex:545-548`) are: move_count 0 → `:new`,
+  1-2 → `:light`, 3-5 → `:moderate`, 6+ → `:heavy` (not pristine/softened/well_loved).
+- Test all four `compute_wear_level` branches via seeded `PlacementHistory` rows
+- Verify `Shelving.spine_data/1` returns correct structure (and nil for unknown placement)
+- Note: Elm wear (`Pristine|Softened` from static per-shelf config) is fully DECOUPLED from
+  this backend wear model — the renderer never consumes `spine_data` wear.
 
 ### 3. Database Assertion Tests
 
@@ -172,9 +173,9 @@ N/A — spine rendering is purely client-side. No server telemetry emitted for r
 
 ## Test Audit
 
-_Baseline test-coverage map for this issue (13 layers × user story, happy/sad columns), generated 2026-07-08. This is the pre-implementation baseline — `❌`/`⚠️` cells are the work queue. Regenerate as tests land; the issue is Done when this audit is green (see Definition of Done)._
+_Test-coverage map for this issue (13 layers × user story, happy/sad columns). **Regenerated to the SHIPPED state** — every cell re-verified against the merged suites; the punch list is resolved. The issue is Done when this audit is green (see Definition of Done)._
 
-Last regenerated: 2026-07-08 (baseline, pre-implementation — Issue #113)
+Last regenerated: 2026-07-24 (SHIPPED — Issue #113, all punch items resolved)
 
 Legend: ✅ = exists | ⚠️ = exists but shallow | ❌ = missing | n/a = not applicable
 
@@ -201,23 +202,28 @@ simpler per-shelf `WearLevel` (`Pristine | Softened`) from the page config,
 and wear currently affects only the ARIA-label suffix (no wear-specific CSS
 yet, per US-1.3.2 §12). Layers 6/7/8/13 are entirely n/a.
 
-**Feature status (verified in code):**
+**Feature status (verified in code + driven live 2026-07-24):**
 - `Components.Spine.spineWidth/spineHeight/spineLean` implemented
   (`frontend/src/Components/Spine.elm:57-85`); `book/1` renders the full 3D
   structure + per-book `aria-label` (`Spine.elm:170-336`).
 - Default page-count fallback lives in `Page.Bookshelf.Helpers`
   (`Maybe.withDefault 200 (bookPageCount bk)`, `Helpers.elm:58,129`).
-- Per-shelf wear config: `Page.Bookshelf.elm:58` (library=`Softened`),
-  `:69`/`:80` (antilibrary/wishlist=`Pristine`); ReadingPile hardcodes
-  `Softened` (`ReadingPile.elm:216`).
-- Server-side wear: `Shelving.spine_data/1` (`shelving.ex:401-433`,
-  `compute_wear_level` → `:new/:light/:moderate/:heavy`) and
-  `Stacks.Workers.RecalculateWearJob`. **There is no
-  `GET /api/spine_data/:placement_id` route** — the issue references one, but
-  `core_web/router.ex` has none; `spine_data/1` is context-only.
-- **Not implemented:** bookmark-ribbon / coloured tabs for books with user
-  writing (US-1.3.2 §"Books with User Writing") — no such element in
-  `Spine.elm`; and wear-specific CSS distinction (only the aria suffix).
+- Per-shelf wear config: `Page.Bookshelf.elm:68` (library=`Softened`),
+  `:81`/`:94` (antilibrary/wishlist=`Pristine`); ReadingPile hardcodes
+  `Softened` (`ReadingPile.elm:460`).
+- Wear suffix reaches only the aria-label: `Softened` → `", well-loved"`,
+  `Pristine` → none, composing with the owner-private `", hidden (only visible
+  to you)"` suffix (`Spine.elm:264-277`).
+- Server-side wear: `Shelving.spine_data/1` (`compute_wear_level` → move_count
+  0 `:new`, 1-2 `:light`, 3-5 `:moderate`, 6+ `:heavy`, `shelving.ex:545-548`)
+  and `Stacks.Workers.RecalculateWearJob`. **There is no
+  `GET /api/spine_data/:placement_id` route** — `spine_data/1` is context-only;
+  the Elm renderer never consumes its wear (decoupled from the static per-shelf
+  `Pristine|Softened`).
+- **De-scoped (not in this issue):** bookmark-ribbon / coloured tabs for books
+  with user writing → **#287**; wear-specific CSS distinction (only the aria
+  suffix exists) → **#288**. Both removed from Summary/User Stories scope; the
+  aria-level wear assertion stays in-scope and is shipped.
 
 ---
 
@@ -225,38 +231,50 @@ yet, per US-1.3.2 §12). Layers 6/7/8/13 are entirely n/a.
 
 | Framework   | US-1.3.1 | US-1.3.2 |
 |-------------|----------|----------|
-| Elixir      | ✅ (page_count read from primary/first edition) | ⚠️ (spine_data + RecalculateWearJob covered, but only `compute_wear_level` `:new`/move_count-0 branch tested) |
-| Elm unit    | ⚠️ (spineWidth/height/lean + 3D structure strong; default-200 fallback untested) | ❌ (no test asserts wear-dependent output or per-shelf config `WearLevel`) |
-| Elm program | n/a — `Components.Spine` is a stateless pure component; no program/state machine | n/a — wear is set at config time, not via update cycle |
+| Elixir      | ✅ (page_count value round-trips `GET /api/bookshelves/:name`; primary/first-edition read; nil when no editions) | ✅ (spine_data + RecalculateWearJob covered; all four `compute_wear_level` boundaries — 1/2→:light, 3/5→:moderate, 6→:heavy — asserted exactly) |
+| Elm unit    | ✅ (spineWidth clamps + sloped mid-range + monotonicity; `bookPageCount → Nothing` ×2; rendered 35px floor via `viewShelfRow`) | ✅ (wear aria-suffix Pristine/Softened/Softened+hidden; per-shelf `Config.wearLevel`; ReadingPile rendered aria) |
+| Elm program | n/a — `Components.Spine` is a stateless pure component; wear/width are set at config/render time, not via an update cycle. ReadingPile's rendered-aria assertion drives a real `ProgramTest`. | n/a — same |
 | Python      | n/a — vision service not involved in spine rendering | n/a |
-| E2E         | ⚠️ (3D structure + texture bg + role=list/listitem covered; width-by-page-count + default absent) | ⚠️ (role=list/listitem covered; wear-by-shelf + per-spine aria-label content absent) |
+| E2E         | ✅ (`spine-rendering.spec.ts` — width across the clamp range, continuity, per-spine aria/roles, texture variety; no-page_count default is `n/a` at E2E — seed-unreachable, pinned at Elm) | ✅ (`spine-rendering.spec.ts` — wear-by-shelf via robust `", well-loved"` substring composing with the hidden suffix) |
 | dbt         | n/a — proto-generated staging; Issue §9 declares dbt N/A | n/a — same |
 
-**Existing test inventory (verified by grep/read):**
-- `apps/core/test/stacks/shelving_test.exs` — `spine_data/1` describes:
-  wear_level `:new` for unread placement, nil for unknown placement, formats
-  from editions (×2), page_count from primary edition, page_count fallback to
-  first edition, empty formats when no editions (8 tests total across the two
-  `spine_data/1` describes).
+**Test inventory (verified by grep/read 2026-07-24):**
+- `apps/core/test/stacks/shelving_test.exs` — `spine_data/1`: wear_level `:new`
+  for unread placement, `:light` at move_count 1 & 2, `:moderate` at 3 & 5,
+  `:heavy` at 6 (boundaries asserted exactly via `seed_move_history/3`,
+  `:736-806`); nil for unknown placement; formats from editions; page_count
+  from primary edition; page_count fallback to first edition; empty formats
+  when no editions; `page_count == nil` when book has no editions (`:898-907`).
 - `apps/core/test/stacks/workers/recalculate_wear_job_test.exs` — 2 tests
   (`:ok` for existing placement, `{:cancel, ...}` for missing).
 - `apps/core/test/stacks_web/proto_json_test.exs` — `edition/1` "all fields
   serialized" (`page_count: 450`) + "nil optional fields" (`page_count == nil`).
-- `apps/core/test/stacks_web/bookshelf_controller_test.exs` — "includes book
-  editions in placement response", "includes primary_edition when book has
-  editions" (asserts `primary_edition.id`, not `page_count`).
-- `frontend/tests/SpineTest.elm` — 8 `spineWidth` boundary tests.
-- `frontend/tests/SpineBookTest.elm` — `spineWidth` (5) + `spineHeight` (5) +
-  `spineLean` (4) + 3D-structure/faces/title-author/bands/texture-bg (9).
-- `frontend/tests/BookDecoder.elm` — `bookPageCount b == Just 350` (×2).
-- `frontend/tests/BookcaseHelpersTest.elm` — `viewShelfRow Softened` (asserts
-  shelf-row structure only, not wear).
+- `apps/core/test/stacks_web/bookshelf_controller_test.exs` — "propagates the
+  primary edition's page_count value through the response" (`primary_edition
+  ["page_count"] == 450`, `:274-290`) + "includes primary_edition when book has
+  editions".
+- `frontend/tests/SpineTest.elm` — `spineWidth` boundaries incl. 480→40, 540→45,
+  660→55, 1000→55, and monotonicity (`spineWidth 480 < spineWidth 540`,
+  `:43-62`).
+- `frontend/tests/SpineBookTest.elm` — `spineWidth`/`spineHeight`/`spineLean` +
+  3D structure; wear aria-suffix (Pristine none / Softened ", well-loved" /
+  Softened+hidden in order, `:272-290`); per-shelf `Config.wearLevel`
+  (library=Softened, antilibrary/wishlist=Pristine) + ReadingPile rendered aria
+  via `ProgramTest` (`:298-333`).
+- `frontend/tests/BookDecoder.elm` — `bookPageCount → Nothing` for no primary
+  edition and for a page_count-less edition (`:253-303`).
+- `frontend/tests/BookcaseHelpersTest.elm` — rendered 35px floor via
+  `viewShelfRow Softened` for a page-count-less book and a bookless placement
+  (`:198-213`, fixtures `:223-227`).
+- `e2e/tests/spine-rendering.spec.ts` — width across the clamp range (`:170`),
+  continuity (`:218`), no-page_count default (`:255`, loud auto-activating
+  skip), wear-by-shelf (`:291`), aria + list roles (`:374`), texture variety
+  (`:406`). 7 pass / 1 justified skip.
 - `e2e/tests/book-interaction.spec.ts` — "book spine shows texture background
-  image", "book has 3D structure: spine, top, and cover faces".
-- `e2e/tests/bookshelf.spec.ts` — "Library bookshelf rows have role=list",
-  "Library books have role=listitem", "Shelf labels have aria-label".
-- `e2e/tests/reading-pile.spec.ts` — "book pile renders with role=list".
-- `e2e/tests/assets.spec.ts` — 6 `/textures/spine-*.png` availability checks.
+  image", "book has 3D structure: spine, top, and cover faces" (incidental).
+- `e2e/tests/bookshelf.spec.ts`, `reading-pile.spec.ts`, `assets.spec.ts` —
+  role=list/listitem, shelf-label aria, and 6 `/textures/spine-*.png` checks
+  (incidental / asset availability).
 
 ---
 
@@ -264,14 +282,16 @@ yet, per US-1.3.2 §12). Layers 6/7/8/13 are entirely n/a.
 
 | Status | Count |
 |--------|-------|
-| ✅ STRONG | **5** |
-| ⚠️ shallow | **4** |
-| ❌ missing | **2** |
+| ✅ STRONG | **11** |
+| ⚠️ shallow | **0** |
+| ❌ missing | **0** |
 | n/a (covered higher up / not applicable / by-design) | **41** |
 
-52 cells total (13 layers × 2 US × happy/sad). This is the pre-implementation
-baseline; Issue #113's DoD requires regenerating this audit to 0 ❌ / 0 ⚠️
-after the punch list lands.
+52 cells total (13 layers × 2 US × happy/sad). **SHIPPED: 0 ❌ / 0 ⚠️** — the
+audit is GREEN. All 12 punch-list items are resolved (item #8, the E2E
+no-page_count default, resolved as `n/a` at the E2E layer — seed-unreachable —
+and pinned at the Elm render layer; item #12, the bookmark ribbon, de-scoped to
+**#287**).
 
 ---
 
@@ -281,7 +301,7 @@ after the punch list lands.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.3.1 | `proto_json_test.exs` — `edition/1` "all fields serialized" asserts `page_count == 450`; `bookshelf_controller_test.exs` — "includes primary_edition when book has editions" wires the edition into the `/api/bookshelves/:name` response. BUT no test asserts the `page_count` **value** propagates through the endpoint JSON — the controller test only asserts `primary_edition["id"]`. | ⚠️ | `proto_json_test.exs` — `edition/1` "nil optional fields" asserts `result.page_count == nil` (missing metadata serializes cleanly). | ✅ |
+| 1.3.1 | `bookshelf_controller_test.exs:274-290` — "propagates the primary edition's page_count value through the response" seeds a `book_edition` with `page_count: 450` and asserts `placement["book"]["primary_edition"]["page_count"] == 450` through `GET /api/bookshelves/:name`; `proto_json_test.exs` — `edition/1` "all fields serialized" asserts serializer-level `page_count == 450`. The endpoint value round-trip is now covered. | ✅ | `proto_json_test.exs` — `edition/1` "nil optional fields" asserts `result.page_count == nil` (missing metadata serializes cleanly). | ✅ |
 | 1.3.2 | n/a — the issue references `GET /api/spine_data/:placement_id`, but no such route exists in `core_web/router.ex`. `Shelving.spine_data/1` is context-only; its DB read is covered at Layer 3 and its job wrapper at Layer 5. | n/a | n/a — same. | n/a |
 
 #### Layer 2: Auth & Middleware Guards
@@ -295,8 +315,8 @@ after the punch list lands.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.3.1 | `shelving_test.exs` — "page_count comes from the primary edition" (asserts `data.page_count == 450` from the `is_primary` edition) + "page_count falls back to first edition when no primary" (`== 320`). Directly exercises the `op.book_editions` read that drives spine thickness. | ✅ | `shelving_test.exs` — "formats is empty list when book has no editions" exercises the no-edition path, but asserts `data.formats == []` only; it does **not** assert `page_count` is nil when no edition exists. | ⚠️ |
-| 1.3.2 | `shelving_test.exs` — "returns spine data with wear_level :new for unread placement" (`move_count == 0` → `:new`). BUT only the `:new` branch of `compute_wear_level` (`shelving.ex:430-433`) is tested — the `:light` (1-2), `:moderate` (3-5), and `:heavy` (6+) branches, which require seeded `PlacementHistory` rows, have zero coverage. | ⚠️ | `shelving_test.exs` — "returns nil for unknown placement" (`Shelving.spine_data(Ecto.UUID.generate()) == nil`). | ✅ |
+| 1.3.1 | `shelving_test.exs` — "page_count comes from the primary edition" (`data.page_count == 450` from the `is_primary` edition) + "page_count falls back to first edition when no primary". Directly exercises the `op.book_editions` read that drives spine thickness. | ✅ | `shelving_test.exs:898-907` — "page_count is nil when book has no editions" asserts `data.page_count == nil` for a placement whose book has zero editions (the no-edition render-fallback source). | ✅ |
+| 1.3.2 | `shelving_test.exs:736-806` — all four `compute_wear_level` boundaries asserted exactly via `seed_move_history/3`: move_count 1 & 2 → `:light`, 3 & 5 → `:moderate`, 6 → `:heavy` (plus the pre-existing `:new` at move_count 0). Threshold constants are pinned — any shift fails a boundary test. | ✅ | `shelving_test.exs` — "returns nil for unknown placement" (`Shelving.spine_data(Ecto.UUID.generate()) == nil`). | ✅ |
 
 #### Layer 4: Event Flow & Lifecycle
 
@@ -344,8 +364,8 @@ after the punch list lands.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.3.1 | `SpineTest.elm` — 8 `spineWidth` tests (0→35, 200→35, 360→35, 420→35, 500→42, 600→50, 700→55, 9999→55) covering both clamps + mid-values; `SpineBookTest.elm` — `spineWidthNewFormula` (5) + `spineHeightBoundary` (5) + `spineLeanBoundary` (4) + 3D-structure assertions; `BookDecoder.elm` — `bookPageCount b == Just 350`. Core function is strongly covered. BUT the issue-enumerated points `spineWidth 480 = 40`, `540 = 45`, `660 = 55`, `1000 = 55` and the **continuity** assertion (480px book visibly thinner than 540px) are not asserted. | ⚠️ | The default-page-count fallback is untested. `bookPageCount` is only asserted for the **present** case (`Just 350`); no test covers `bookPageCount → Nothing`, and no test covers `Page.Bookshelf.Helpers`' `Maybe.withDefault 200 (bookPageCount bk)` (`Helpers.elm:58,129`) — i.e. a book with a missing edition rendering at the 35px minimum. Feature exists; test missing. | ❌ |
-| 1.3.2 | Wear-dependent rendering is untested. `Components.Spine.book` is rendered with `Pristine` (`SpineBookTest` `sampleBook`), `Softened` (`sampleClothBook`), and `Softened` via `BookcaseHelpersTest` — but **no** test asserts the wear-dependent output: the `aria-label` suffix (`", well-loved"` for `Softened` vs `""` for `Pristine`, `Spine.elm:263-269`) or the per-shelf `config.wearLevel` values (`Bookshelf.elm:58/69/80`, `ReadingPile.elm:216`). Feature exists; test missing. | ❌ | n/a — wear is deterministic from the shelf config; US-1.3.2 §2 declares the sad path N/A (no failure mode). | n/a |
+| 1.3.1 | `SpineTest.elm:43-62` — `spineWidth` covers both clamps + the sloped mid-range: 480→40, 540→45, 660→55 (exact ceiling), 1000→55 (over-ceiling clamp), plus a **continuity/monotonicity** assertion (`spineWidth 480 < spineWidth 540`); `SpineBookTest.elm` — `spineWidth`/`spineHeight`/`spineLean` + 3D structure. Rendered-width proof: `BookcaseHelpersTest.elm:198-213` asserts the on-DOM `width:35px` floor via `viewShelfRow`. E2E: `spine-rendering.spec.ts:170,218` measures live `offsetWidth` across the clamp range (95→35, 480→40, 536→45, 576→48, 796→55) + continuity. | ✅ | `BookDecoder.elm:253-303` — `bookPageCount → Nothing` for a book with no primary edition and for a primary edition that omits `page_count`; `BookcaseHelpersTest.elm:198-213` proves the `Maybe.withDefault 200 (bookPageCount bk)` render-fallback (`Helpers.elm:58,129`) renders the 35px minimum for both a page-count-less book and a bookless placement. | ✅ |
+| 1.3.2 | `SpineBookTest.elm:272-290` asserts the wear-dependent aria output exactly: `Pristine` → no suffix, `Softened` → `", well-loved"`, `Softened + hidden` → both suffixes in order; `:298-333` asserts per-shelf `Config.wearLevel` (library=`Softened`, antilibrary/wishlist=`Pristine`) directly and the ReadingPile's hardcoded `Softened` via its **rendered** aria-label through a `ProgramTest`. E2E: `spine-rendering.spec.ts:291` asserts wear-by-shelf live (`", well-loved"` present on Library+ReadingPile, absent on WishList+AntiLibrary), composing with the owner-private hidden suffix. | ✅ | n/a — wear is deterministic from the shelf config; US-1.3.2 §2 declares the sad path N/A (no failure mode). | n/a |
 
 #### Layer 11: Operational Metrics
 
@@ -370,84 +390,78 @@ after the punch list lands.
 
 ---
 
-### Punch list (baseline — 0 items resolved)
+### Punch list (SHIPPED — 12/12 resolved)
 
-Every ❌/⚠️ cell converted to a numbered item, plus the E2E gaps called out
-in the framework-layer summary (Issue #113's primary deliverable is the
-Playwright suite; E2E rendering maps into Layer 10). No tests were written or
-modified during this audit (pre-implementation baseline). Many ❌ are
-expected at baseline.
+Every baseline ❌/⚠️ cell plus the E2E gaps, all resolved and cited against the
+merged suites. Item #8 resolved as `n/a` at the E2E layer (seed-unreachable),
+pinned at the Elm render layer; item #12 de-scoped to **#287**.
 
-| # | Cell | What's needed | Where it belongs |
-|--:|------|---------------|------------------|
-| 1 | L1 US-1.3.1 happy | Assert `page_count` **value** round-trips through `GET /api/bookshelves/:name` (seed a `book_edition` with a known `page_count`, assert `placement["book"]["primary_edition"]["page_count"]`), not just serializer-level | `apps/core/test/stacks_web/bookshelf_controller_test.exs` |
-| 2 | L3 US-1.3.1 sad | Assert `Shelving.spine_data/1` (and/or the bookshelf read) returns `page_count == nil` when the book has no editions / null page_count | `apps/core/test/stacks/shelving_test.exs` |
-| 3 | L3 US-1.3.2 happy | Cover the untested `compute_wear_level` branches: seed `PlacementHistory` rows so `move_count` hits 1-2 (`:light`), 3-5 (`:moderate`), 6+ (`:heavy`) | `apps/core/test/stacks/shelving_test.exs` |
-| 4 | L10 US-1.3.1 happy | Add `spineWidth` enumerated points `480 → 40`, `540 → 45`, `660 → 55`, `1000 → 55`, plus a continuity assertion (`spineWidth 480 < spineWidth 540`) | `frontend/tests/SpineTest.elm` |
-| 5 | L10 US-1.3.1 sad | Test `bookPageCount` returns `Nothing` when the primary edition / page_count is absent, and that `Page.Bookshelf.Helpers` applies the 200 default (⇒ 35px min) | `frontend/tests/BookDecoder.elm` + a `Helpers`/spine render test |
-| 6 | L10 US-1.3.2 happy | Assert wear-dependent output of `Components.Spine.book`: `aria-label` ends with `", well-loved"` for `Softened` and has no suffix for `Pristine`; assert per-shelf config `wearLevel` (library=`Softened`, antilibrary/wishlist=`Pristine`, ReadingPile=`Softened`) | `frontend/tests/SpineBookTest.elm` (+ a `Page.Bookshelf` config test) |
-| 7 | E2E US-1.3.1 (L10) | Playwright: seed books with page counts 100/200/420/600/660/800, navigate to a shelf, assert rendered spine `width` px matches `max(35, min(55, round(pageCount/12)))` and varies continuously | `e2e/tests/` (new `spine-rendering.spec.ts`) |
-| 8 | E2E US-1.3.1 (L10) | Playwright: a book with no `page_count` renders at the 35px default width | new `e2e/tests/spine-rendering.spec.ts` |
-| 9 | E2E US-1.3.2 (L10) | Playwright: wear-by-shelf — WishList/AntiLibrary render `Pristine`, ReadingPile/Library render `Softened`; assert the visual/aria distinction between the two states | new `e2e/tests/spine-rendering.spec.ts` |
-| 10 | E2E US-1.3.1/1.3.2 (L10) | Playwright: per-spine `aria-label` includes the book title, `"N pages"`, and the wear suffix (`", well-loved"` on Softened shelves); `role="listitem"` on the spine button. (Current e2e only covers `role="list"` container + `role="listitem"` on `.book-button` and shelf-label aria — not the spine's own aria-label content.) | `e2e/tests/bookshelf.spec.ts` or new `spine-rendering.spec.ts` |
-| 11 | E2E US-1.3.1 (L10) | Playwright: spine texture classes/background-image vary between books (not all identical) — extends the existing single-book texture check in `book-interaction.spec.ts` | `e2e/tests/book-interaction.spec.ts` |
-| 12 | E2E US-1.3.2 (L10) — **FEATURE GAP** | Bookmark ribbon / coloured tabs for a book with associated user writing. **Not implemented** — no such element in `Components.Spine.book`. Requires a source-code change (new spine sub-element keyed on "has writing") before a test can assert it; per scope-lock this likely becomes a new issue. | `frontend/src/Components/Spine.elm` + new test (new issue) |
+| # | Cell | Resolution (verified 2026-07-24) | Where |
+|--:|------|-----------------------------------|-------|
+| 1 | L1 US-1.3.1 happy | ✅ `page_count` value round-trips `GET /api/bookshelves/:name` — "propagates the primary edition's page_count value through the response" asserts `primary_edition["page_count"] == 450` | `bookshelf_controller_test.exs:274-290` |
+| 2 | L3 US-1.3.1 sad | ✅ "page_count is nil when book has no editions" asserts `data.page_count == nil` | `shelving_test.exs:898-907` |
+| 3 | L3 US-1.3.2 happy | ✅ All `compute_wear_level` boundaries seeded via `seed_move_history/3`: 1/2→:light, 3/5→:moderate, 6→:heavy (exact atoms) | `shelving_test.exs:736-806` |
+| 4 | L10 US-1.3.1 happy | ✅ `spineWidth` 480→40, 540→45, 660→55, 1000→55 + monotonicity (480<540) | `SpineTest.elm:43-62` |
+| 5 | L10 US-1.3.1 sad | ✅ `bookPageCount → Nothing` ×2 + rendered 35px floor via `viewShelfRow` (book-present-no-pages and bookless) | `BookDecoder.elm:253-303`, `BookcaseHelpersTest.elm:198-213` |
+| 6 | L10 US-1.3.2 happy | ✅ Wear aria-suffix (Pristine/Softened/Softened+hidden in order) + per-shelf `Config.wearLevel` + ReadingPile rendered aria via `ProgramTest` | `SpineBookTest.elm:272-290,298-333` |
+| 7 | E2E US-1.3.1 (L10) | ✅ Live `offsetWidth` across clamp range (95→35, 480→40, 536→45, 576→48, 796→55) + continuity | `spine-rendering.spec.ts:170,218` |
+| 8 | E2E US-1.3.1 (L10) | **n/a at E2E — seed-unreachable** (all seeded editions carry `page_count`; the placement API cannot construct a null-page_count book). Pinned at the Elm render layer (`BookcaseHelpersTest.elm:198-213`); a **loud auto-activating skip** at `spine-rendering.spec.ts:255` activates the instant a null-page_count book is ever seeded | `spine-rendering.spec.ts:255` + `BookcaseHelpersTest.elm:198-213` |
+| 9 | E2E US-1.3.2 (L10) | ✅ Wear-by-shelf via robust `", well-loved"` substring — present on Library+ReadingPile (Softened), absent on WishList+AntiLibrary (Pristine); composes with the hidden suffix | `spine-rendering.spec.ts:291` |
+| 10 | E2E US-1.3.1/1.3.2 (L10) | ✅ Per-spine aria carries title + `"N pages"`; `role="listitem"` on the spine button, `role="list"` on `.shelf-row__books` | `spine-rendering.spec.ts:374` |
+| 11 | E2E US-1.3.1 (L10) | ✅ ≥2 distinct `.book__spine` background textures across the shelf (observed 3 of 5) | `spine-rendering.spec.ts:406` |
+| 12 | E2E US-1.3.2 (L10) — **DE-SCOPED** | Bookmark ribbon / coloured tabs — no such element in `Components.Spine`; spun out to **#287** (removed from this issue's scope). Visual wear CSS likewise de-scoped → **#288** | new issue **#287** (+ **#288**) |
 
 ---
 
 ### Verdict
 
-**Baseline established — audit NOT yet resolved.** State across the
+**GREEN — audit resolved to the shipped state.** State across the
 13-layer × 2-US matrix (52 cells):
 
-- **5 ✅ STRONG** — Elixir page_count DB read (US-1.3.1), unknown-placement
-  nil guard, and both `RecalculateWearJob` outcomes (US-1.3.2), plus the
-  nil-page_count serializer path.
-- **4 ⚠️ shallow** — page_count endpoint propagation (serializer-only),
-  no-edition page_count assertion, `compute_wear_level` (only `:new`
-  branch), and `spineWidth` (strong core, but issue-enumerated points +
-  continuity missing).
-- **2 ❌ missing** — the default-200 page-count fallback (US-1.3.1 sad) and
-  all wear-dependent rendering / per-shelf config coverage (US-1.3.2 happy)
-  in the Elm layer.
+- **11 ✅ STRONG** — Elixir page_count endpoint round-trip + DB read
+  (US-1.3.1), no-edition nil page_count, all four `compute_wear_level`
+  boundaries + unknown-placement nil guard + both `RecalculateWearJob`
+  outcomes (US-1.3.2), the nil-page_count serializer path, and the full Elm
+  render layer: `spineWidth` clamps/mid-range/monotonicity, `bookPageCount →
+  Nothing` + 35px floor, and wear aria-suffix + per-shelf config.
+- **0 ⚠️ / 0 ❌** — every baseline gap is closed or de-scoped.
 - **41 n/a** — the entire server/data half of the stack (auth, events,
   external, storage, cache, dbt, metrics, perf, cost) is genuinely not
-  applicable to what is a pure client-side rendering feature, plus the
-  non-existent `spine_data` HTTP endpoint.
+  applicable to a pure client-side rendering feature, plus the non-existent
+  `spine_data` HTTP endpoint. One additional `n/a` is recorded *within* the
+  resolved punch list (item #8, below) rather than as a matrix cell.
 
-**Headline findings:**
-1. **The Elm rendering layer — the heart of this feature — is the weakest.**
-   `spineWidth`/`spineHeight`/`spineLean` pure functions are well tested,
-   but the two behaviours a user actually sees are unverified: the
-   **default-200 fallback** for books with no page count, and **wear
-   rendering** (the `", well-loved"` aria suffix and the per-shelf
-   `Pristine`/`Softened` config) has zero assertions despite being fully
-   implemented.
-2. **There is no E2E spine suite.** Rendering is only touched incidentally
-   (3D faces + one texture-bg check in `book-interaction.spec.ts`;
-   role=list/listitem in `bookshelf.spec.ts`/`reading-pile.spec.ts`). None of
-   Issue #113's flagship Playwright assertions — width-by-page-count,
-   default width, wear-by-shelf, per-spine aria-label content, texture
-   variety — exist yet.
-3. **Server-side wear is decoupled and half-tested.** `Shelving.spine_data/1`
-   + `RecalculateWearJob` exist and have basic tests, but no HTTP route wires
-   them to the frontend, and only the `move_count == 0` (`:new`) branch of
-   the four-level `compute_wear_level` is exercised. The bookmark-ribbon
-   sub-feature (US-1.3.2) is **not implemented at all** and needs code before
-   it can be tested.
+**Headline outcomes:**
+1. **The Elm rendering layer — the heart of this feature — is now fully
+   covered.** `spineWidth`/`spineHeight`/`spineLean` pure functions plus the
+   two behaviours a user actually sees: the **default-200 fallback** (proven
+   at the render layer via `viewShelfRow`, 35px floor) and **wear rendering**
+   (the `", well-loved"` aria suffix and the per-shelf `Pristine`/`Softened`
+   config, including composition with the owner-private hidden suffix).
+2. **A dedicated E2E spine suite ships.** `e2e/tests/spine-rendering.spec.ts`
+   (7 pass / 1 justified skip, driven live 2026-07-24) asserts width-by-page-
+   count across the clamp range, continuity, wear-by-shelf, per-spine aria +
+   list roles, and texture variety. Non-vacuity was proven by mutation
+   (divisor 12→10 → exact expected failure; `Spine.elm` restored, diff clean)
+   and `scripts/check-e2e-vacuous-guards.sh` is clean.
+3. **The one E2E gap is honest, not hidden.** The no-page_count default
+   (item #8) is `n/a` at E2E because it is seed-unreachable — every seeded
+   edition carries a `page_count` and the placement API cannot construct a
+   null one — so it is pinned at the Elm render layer and left as a loud
+   auto-activating skip that fires the moment such a book is seeded. The
+   bookmark-ribbon sub-feature is **de-scoped to #287**; visual wear CSS to
+   **#288** (the aria-level wear assertion stays in-scope and is shipped).
 
-**Test runner totals at baseline (spine-related):** Elixir ~12 tests
-(`spine_data/1` describes + `RecalculateWearJob` + `edition/1` serializer),
-Elm ~26 tests (`SpineTest` 8, `SpineBookTest` 19-ish incl. structure,
-`BookDecoder` page_count), Playwright ~4 incidental (3D structure, texture
-bg, role attributes) + 6 texture-asset checks. Punch list: **12 items**, of
-which #12 (bookmark ribbon) is blocked on feature implementation.
+**Test-runner totals at ship (spine-related, verified 2026-07-24):** Elixir
+scoped run 139/0 (full suite 2862/0); Elm 999/0; Playwright
+`spine-rendering.spec.ts` 7 pass / 1 justified skip. Punch list: **12 items,
+all resolved** (#8 as `n/a`-with-pin, #12 de-scoped to #287).
 ## Definition of Done
-- [ ] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local`
-- [ ] No flaky tests
-- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
-- [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
-- [ ] `just verify` passes
+- [x] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local` — Elixir scoped 139/0 (full 2862/0), Elm 999/0, Playwright `spine-rendering.spec.ts` 7 pass / 1 justified skip (2026-07-24)
+- [x] No flaky tests — evidence: repeated independent green runs 2026-07-24 with zero intermittent failures: `just run mix test apps/core/test/stacks/shelving_test.exs apps/core/test/stacks_web/bookshelf_controller_test.exs` → `139 tests, 0 failures` (specialist run) and again 139/0 (elixir-reviewer re-run); `npx elm-test` → `999 passed, 0 failed` (specialist) and 69/0 on the four spine suites (elm-reviewer re-run); `npx playwright test spine-rendering.spec.ts --project=chromium` → `7 passed, 1 skipped` twice (pre- and post-proving-gate restore)
+- [x] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — US-1.3.1 + US-1.3.2 built end-to-end and observed live 2026-07-24; the ribbon slice de-scoped → #287 and the visual wear CSS slice → #288 (Summary/User Stories edited, spin-out issues opened). No named story reaches GREEN via `n/a (see #NNN)`.
+- [x] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all 12 punch-list items resolved; #8 as `n/a`-with-pin, #12 → #287). Regenerated 2026-07-24 to the shipped state.
+- [x] `just verify` passes — green 2026-07-24; quiescent `just ci` green except the documented local `dockle` step
 
 ## Dependencies
 - Seeded books with varying page counts and editions
@@ -459,4 +473,7 @@ which #12 (bookmark ribbon) is blocked on feature implementation.
 `elm-agent` for state machine / pure function tests, `playwright-agent` for visual rendering tests.
 
 ## Progress Notes
-[Updated by agents during execution.]
+- 2026-07-23 — Epic kickoff (#115/#114/#113 on `feat/115-114-3-e2e`). Baseline re-verified: all major claims hold (no ribbon, no wear CSS, no spine_data route, wear branches untested, no spine-rendering.spec.ts). Corrections applied above: real wear thresholds are `:new/:light/:moderate/:heavy`; Elm wear is decoupled (static per-shelf `Pristine|Softened`). New since baseline: hidden/owner-only spine affordance (`book--hidden`, aria suffix ", hidden (only visible to you)", `Spine.elm:272-277`) — tests must compose with it. Seeds span page_count 95–796 (e.g. Dreamtigers=95, Lathe of Heaven=184, Left Hand=304, Republic=416, Crime and Punishment=671, Brothers Karamazov=796) covering the full width clamp. De-scoped: ribbon → #287, visual wear CSS → #288 (aria-level assertion stays in-scope).
+- 2026-07-24 — Phase 1 (Elixir, test-only) complete. Punch #1 (page_count value round-trips `GET /api/bookshelves/:name`, asserts `primary_edition.page_count == 450`), #2 (`spine_data/1` `page_count == nil` for a book with no editions), #3 (`compute_wear_level` boundaries via seeded `PlacementHistory`: move_count 1/2→:light, 3/5→:moderate, 6→:heavy). Non-vacuity verified: nudging `n<=2`→`n<=1` fails the move_count-2 test, `n<=5`→`n<=4` fails the move_count-5 test; restored, `apps/core/lib/` diff clean. Scoped run green: 139 tests, 0 failures. No production changes.
+- 2026-07-24 — Phase 3 (E2E) complete. New `e2e/tests/spine-rendering.spec.ts` (8 tests), driven live against local stack (STACKS_E2E_TEST_HELPERS, 169-book dev seed). Each test mints an isolated user (`POST /api/test/session`) and places books by page_count onto specific shelves; width read as `offsetWidth` on `.book` (`#spine-<id> [data-testid=book-spine]`). Punch #7: width == `max(35,min(55,round(pc/12)))` for Dreamtigers 95→35 (clamp-min), Queen Loana 480→40, Name of the Rose 536→45, Selected Non-Fictions 576→48, Brothers Karamazov 796→55 (clamp-max) + continuity (480<536 ⇒ strictly wider). Punch #9: wear-by-shelf via robust substring (`, well-loved` present on Library+ReadingPile/Softened, absent on WishList+AntiLibrary/Pristine) — composes with the owner-private `, hidden (only visible to you)` suffix that every minted placement carries; each negative anchored by a positive title match. Punch #10: aria-label carries title + "536 pages", `role=listitem` on the spine button, `role=list` on the `.shelf-row__books` container. Punch #11: ≥2 distinct `.book__spine` background textures across the shelf (observed 3 of 5). Punch #8 (no-page_count default): **SKIPPED + FLAGGED** — the dev seed populates page_count on all 200 editions (0 null) and the placement API cannot construct a null-page_count book, so the null→`Maybe.withDefault 200`→35px path is unreachable at E2E; it is proven at the Elm unit layer (`BookcaseHelpersTest.elm`, punch #5). The test searches the live catalogue and activates automatically if a null-page_count book is ever seeded. Non-vacuity gate: divisor 12→10 in `Spine.elm` (watcher rebuilt assets) made the width test fail (Queen Loana 48px vs expected 40px); restored exactly (`git diff` clean), rebuilt, suite green (7 passed, 1 skipped). `scripts/check-e2e-vacuous-guards.sh` clean. Live-drive observed: Dreamtigers 35px, Queen Loana 40px, Name of the Rose 45px, Brothers Karamazov 55px; aria "Book: The Name of the Rose by Umberto Eco, 536 pages, well-loved, hidden (only visible to you)".
+- 2026-07-24 — Phase 2 (Elm, tests-only) complete. Punch #4: added `spineWidth` points 480→40/540→45/660→55/1000→55 + monotonicity (480<540) in `SpineTest.elm`. Punch #5: `bookPageCount → Nothing` for missing primary edition and page-count-less edition in `BookDecoder.elm`; the `Maybe.withDefault 200` render fallback → 35px floor (book-present and book-absent branches) via `viewShelfRow` in `BookcaseHelpersTest.elm`. Punch #6: wear aria-suffix (Pristine none / Softened ", well-loved" / Softened+hidden composes both in order) + per-shelf config (library=Softened, antilibrary=Pristine, wishlist=Pristine via `Config` records; ReadingPile=Softened via rendered aria-label through the page) in `SpineBookTest.elm`. No production changes. Full suite: 999 passed, 0 failed; elm-format + elm-review clean.

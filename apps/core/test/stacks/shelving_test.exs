@@ -726,6 +726,83 @@ defmodule Stacks.ShelvingTest do
     test "returns nil for unknown placement" do
       assert nil == Shelving.spine_data(Ecto.UUID.generate())
     end
+
+    # compute_wear_level branches (shelving.ex:545-548): move_count 0 → :new,
+    # 1-2 → :light, 3-5 → :moderate, 6+ → :heavy. move_count is COUNT(*) of
+    # PlacementHistory rows for the placement's book, so we seed that many
+    # history rows keyed on the book. Boundary values are asserted exactly so
+    # the tests fail if any threshold constant shifts.
+
+    test "wear_level is :light at move_count 1 (lower :light boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 1)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 1
+      assert data.wear_level == :light
+    end
+
+    test "wear_level is :light at move_count 2 (upper :light boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 2)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 2
+      assert data.wear_level == :light
+    end
+
+    test "wear_level is :moderate at move_count 3 (lower :moderate boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 3)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 3
+      assert data.wear_level == :moderate
+    end
+
+    test "wear_level is :moderate at move_count 5 (upper :moderate boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 5)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 5
+      assert data.wear_level == :moderate
+    end
+
+    test "wear_level is :heavy at move_count 6 (lower :heavy boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 6)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 6
+      assert data.wear_level == :heavy
+    end
+  end
+
+  # Inserts `count` PlacementHistory rows for `book`, using a real bookshelf id
+  # for the from_bookshelf/to_bookshelf FKs. move_count is COUNT(*) of these
+  # rows for the book, which is what compute_wear_level reads.
+  defp seed_move_history(book, bookshelf, count) do
+    insert_list(count, :placement_history,
+      book_id: book.id,
+      from_bookshelf: bookshelf.id,
+      to_bookshelf: bookshelf.id
+    )
   end
 
   describe "spine_data/1 — formats from editions" do
@@ -816,6 +893,17 @@ defmodule Stacks.ShelvingTest do
       data = Shelving.spine_data(placement.id)
 
       assert data.formats == []
+    end
+
+    test "page_count is nil when book has no editions" do
+      book = insert(:book)
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      data = Shelving.spine_data(placement.id)
+
+      assert data.page_count == nil
     end
   end
 
@@ -1283,6 +1371,67 @@ defmodule Stacks.ShelvingTest do
 
       assert placement.reading_status == "to_read"
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Event PAYLOAD assertions for move/remove (Issue #114, punch #16).
+  #
+  # The existing "emits placement.moved/removed event" tests assert only the row
+  # COUNT. These pin the emitted PAYLOAD so a regression that fires the right
+  # event type with a wrong/empty payload (or the wrong aggregate) fails.
+  #
+  # The exact payload keys are read from shelving.ex:
+  #   placement.moved   -> %{from_bookshelf: <name>, to_bookshelf: <name>}
+  #   placement.removed -> %{book_id: <uuid>}
+  # (See the Phase 2 report flag: `placement.moved` carries the shelf NAMES, not
+  # ids, and does NOT carry book_id — the aggregate_id is the placement id.)
+  # ---------------------------------------------------------------------------
+
+  describe "move_book/3 — placement.moved payload" do
+    setup :setup_user_bookshelf_book
+
+    test "payload carries the source and destination bookshelf names", %{
+      user: user,
+      placement: placement
+    } do
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "wishlist")
+
+      event = latest_event("placement.moved")
+      {:ok, aggregate_id} = Ecto.UUID.load(event.aggregate_id)
+
+      assert aggregate_id == placement.id
+      assert event.payload["from_bookshelf"] == "library"
+      assert event.payload["to_bookshelf"] == "wishlist"
+    end
+  end
+
+  describe "remove_book/2 — placement.removed payload" do
+    setup :setup_user_bookshelf_book
+
+    test "payload carries the removed placement's book_id", %{
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      assert {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      event = latest_event("placement.removed")
+      {:ok, aggregate_id} = Ecto.UUID.load(event.aggregate_id)
+
+      assert aggregate_id == placement.id
+      assert event.payload["book_id"] == book.id
+    end
+  end
+
+  defp latest_event(event_type) do
+    from(e in "event_log",
+      prefix: "op",
+      where: e.event_type == ^event_type,
+      order_by: [desc: e.occurred_at],
+      limit: 1,
+      select: %{aggregate_id: e.aggregate_id, payload: e.payload}
+    )
+    |> Repo.one()
   end
 
   defp event_count(event_type) do

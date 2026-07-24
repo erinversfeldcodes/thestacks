@@ -271,6 +271,24 @@ defmodule StacksWeb.BookshelfControllerTest do
       assert placement["book"]["primary_edition"]["id"] == edition.id
     end
 
+    test "propagates the primary edition's page_count value through the response", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      book = insert(:book)
+      _edition = insert(:book_edition, book: book, is_primary: true, page_count: 450)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
+      assert placement["book"]["primary_edition"]["page_count"] == 450
+    end
+
     test "includes author in book response", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")

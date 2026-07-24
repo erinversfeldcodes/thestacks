@@ -11,9 +11,13 @@ title/author text, leather band elements, spine width based on the formula
 import Components.Spine exposing (SpineTexture(..), WearLevel(..), book, spineHeight, spineLean, spineWidth, textureUrl)
 import Expect
 import Html
+import Html.Attributes
+import Page.Bookshelf as Bookshelf
+import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
+import TestHelpers exposing (namedPlacement, readingPileProgram, simulateBookshelfResponse)
 
 
 suite : Test
@@ -28,6 +32,9 @@ suite =
         , leatherBookHasBands
         , clothBookHasNoBands
         , spineHasTextureBackgroundImage
+        , wearSuffixInAriaLabel
+        , perShelfWearConfig
+        , readingPileSpineIsSoftened
         ]
 
 
@@ -231,3 +238,97 @@ spineHasTextureBackgroundImage =
                 |> Query.fromHtml
                 |> Query.find [ Selector.class "book__spine" ]
                 |> Query.has [ Selector.style "background-image" (textureUrl Leather "Moby Dick") ]
+
+
+{-| A hidden, Softened book: exercises both aria suffixes together.
+-}
+softenedHiddenBook : Html.Html msg
+softenedHiddenBook =
+    book
+        { pageCount = 400
+        , wearLevel = Softened
+        , texture = Leather
+        , title = "The Secret History"
+        , author = "Donna Tartt"
+        , coverImageUrl = Nothing
+        , hidden = True
+        }
+
+
+hasAriaLabel : String -> Query.Single msg -> Expect.Expectation
+hasAriaLabel expected single =
+    single
+        |> Query.has
+            [ Selector.attribute (Html.Attributes.attribute "aria-label" expected) ]
+
+
+{-| The wear level shows up in the aria-label as a ", well-loved" suffix, and
+_only_ for `Softened` — `Pristine` books carry no suffix at all. The suffix must
+also compose with the owner-only "hidden" suffix in a fixed order (wear first,
+then hidden), so a screen-reader hears "…, well-loved, hidden (only visible to
+you)" rather than the reverse. Asserting the exact whole aria-label pins both
+the presence/absence of the wear suffix and its position.
+-}
+wearSuffixInAriaLabel : Test
+wearSuffixInAriaLabel =
+    describe "wear level drives the aria-label suffix"
+        [ test "Pristine book has no wear suffix" <|
+            \_ ->
+                sampleBook
+                    |> Query.fromHtml
+                    |> hasAriaLabel "Book: Moby Dick by Herman Melville, 400 pages"
+        , test "Softened book ends with ', well-loved'" <|
+            \_ ->
+                sampleClothBook
+                    |> Query.fromHtml
+                    |> hasAriaLabel "Book: Jane Eyre by Charlotte Bronte, 300 pages, well-loved"
+        , test "Softened + hidden composes both suffixes in order (wear then hidden)" <|
+            \_ ->
+                softenedHiddenBook
+                    |> Query.fromHtml
+                    |> hasAriaLabel "Book: The Secret History by Donna Tartt, 400 pages, well-loved, hidden (only visible to you)"
+        ]
+
+
+{-| Each bookshelf pins its own static wear level in its `Config`. Library books
+render as `Softened` (a read shelf), while the Antilibrary and Wish List — books
+you own-but-haven't-read and books you want — stay `Pristine`. These assert the
+config records directly, the honest surface for a static, per-shelf setting.
+-}
+perShelfWearConfig : Test
+perShelfWearConfig =
+    describe "per-bookshelf wear configuration"
+        [ test "library is Softened" <|
+            \_ ->
+                Bookshelf.libraryConfig.wearLevel
+                    |> Expect.equal Softened
+        , test "antilibrary is Pristine" <|
+            \_ ->
+                Bookshelf.antiLibraryConfig.wearLevel
+                    |> Expect.equal Pristine
+        , test "wish list is Pristine" <|
+            \_ ->
+                Bookshelf.wishListConfig.wearLevel
+                    |> Expect.equal Pristine
+        ]
+
+
+{-| The Reading Pile has no `Config` record — it hardcodes `Softened` wear inline
+in its piled-book render. The honest surface there is the rendered aria-label:
+a book driven into the pile must announce ", well-loved". (`namedPlacement`
+wraps the shared `testBook`: 371 pages, "Charles Duhigg", not hidden.)
+-}
+readingPileSpineIsSoftened : Test
+readingPileSpineIsSoftened =
+    test "reading pile spines render Softened wear (', well-loved')" <|
+        \() ->
+            ProgramTest.start () (readingPileProgram (Just "test-token"))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/bookshelves/reading_pile"
+                    (simulateBookshelfResponse [ namedPlacement "book-rp" "Reading Now" ])
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute
+                        (Html.Attributes.attribute "aria-label"
+                            "Book: Reading Now by Charles Duhigg, 371 pages, well-loved"
+                        )
+                    ]
