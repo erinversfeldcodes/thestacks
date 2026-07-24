@@ -18,6 +18,7 @@ defmodule StacksWeb.TestHelperController do
   alias Stacks.Accounts.Guardian
   alias Stacks.AgeVerification
   alias Stacks.Blog
+  alias Stacks.Books
   alias Swoosh.Adapters.Local.Storage.Memory
 
   require Logger
@@ -246,6 +247,67 @@ defmodule StacksWeb.TestHelperController do
   end
 
   def seed_book_writing(conn, _params), do: not_found(conn)
+
+  @doc """
+  POST /api/test/book-description
+
+  Body `{"title": string, "description": string, "isbn"?: string}` → creates a
+  NEW public, single-edition book (work + primary edition) carrying the given
+  title and description, so the generated `op.books.description_tsv` column
+  populates and the #284 deep-search E2E can drive a live description match +
+  highlighted snippet. When `isbn` is omitted a unique, checksum-valid ISBN-13
+  is generated.
+
+  Unlike the other helpers this writes CATALOGUE metadata only — no user data,
+  no PII, no `.test`-domain scoping needed — and it INSERTS a fresh row rather
+  than mutating shared catalogue, so it is safe on a public preview. The
+  E2ETestHelper plug remains the sole gate (404 unless the flag is exactly "1").
+
+  Responds `201 {"ok": true, "book_id": <uuid>, "title": <title>}` on success,
+  or `422 {"errors": ...}` when the book cannot be created (e.g. a supplied ISBN
+  is malformed or already taken).
+  """
+  def seed_book_description(conn, %{"title" => title, "description" => description} = params)
+      when is_binary(title) and is_binary(description) do
+    isbn = Map.get(params, "isbn") || generate_valid_isbn13()
+
+    case Books.create(%{"isbn" => isbn, "title" => title, "description" => description}) do
+      {:ok, book} ->
+        conn
+        |> put_status(:created)
+        |> json(%{ok: true, book_id: book.id, title: book.title})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: format_errors(changeset)})
+    end
+  end
+
+  def seed_book_description(conn, _params), do: not_found(conn)
+
+  # Generates a fresh, checksum-valid ISBN-13 in the 978 prefix. The nine middle
+  # digits are seeded from a process-unique integer (+ a random tail) so repeated
+  # calls don't collide on the edition unique-constraint; the 13th digit is the
+  # EAN-13 mod-10 check digit (weights 1,3,1,3… — the same rule Books enforces).
+  defp generate_valid_isbn13 do
+    middle =
+      (System.unique_integer([:positive]) * 10 + :rand.uniform(10) - 1)
+      |> Integer.to_string()
+      |> String.pad_leading(9, "0")
+      |> String.slice(-9, 9)
+
+    first12 = "978" <> middle
+    digits = first12 |> String.graphemes() |> Enum.map(&String.to_integer/1)
+
+    sum =
+      digits
+      |> Enum.with_index()
+      |> Enum.reduce(0, fn {d, i}, acc -> acc + d * if(rem(i, 2) == 0, do: 1, else: 3) end)
+
+    check = rem(10 - rem(sum, 10), 10)
+    first12 <> Integer.to_string(check)
+  end
 
   # Unique default address in the reserved E2E domain — mirrors uniqueEmail()
   # in e2e/tests/helpers.ts so minted users are recognisable in preview data.

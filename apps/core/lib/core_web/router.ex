@@ -393,6 +393,10 @@ defmodule CoreWeb.Router do
     # spine bookmark-ribbon spec (#287) is deterministic (prod associates via an
     # async LLM worker). Same hard `.test`-domain allowlist in the controller.
     post "/book-writing", TestHelperController, :seed_book_writing
+    # Inserts a fresh public book carrying a description so the #284 deep-search
+    # spec can drive a live description match + snippet (the seed has 0
+    # description-bearing books). Catalogue metadata only — no user data/PII.
+    post "/book-description", TestHelperController, :seed_book_description
   end
 
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)
