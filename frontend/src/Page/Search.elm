@@ -57,7 +57,7 @@ init =
     , results = NotAsked
     , readers = NotAsked
     , filters = defaultFilterState
-    , sort = ByTitle
+    , sort = ByRelevance
     , filterPanelOpen = False
     , debounceCount = 0
     }
@@ -151,17 +151,17 @@ update msg model maybeToken =
             let
                 newSort =
                     case sortStr of
+                        "title" ->
+                            ByTitle
+
                         "author" ->
                             ByAuthor
 
                         "year" ->
                             ByYear
 
-                        "date_added" ->
-                            ByDateAdded
-
                         _ ->
-                            ByTitle
+                            ByRelevance
             in
             ( { model | sort = newSort }, Cmd.none, NoOut )
 
@@ -216,13 +216,13 @@ view model =
             }
         , case model.results of
             NotAsked ->
-                p [ class "search-hint" ] [ text "Enter a search term above to find books." ]
+                p [ class "search-hint" ] [ text "Type a title, author, or ISBN to search the stacks." ]
 
             Loading ->
-                div [ class "loading" ] [ text "Searching..." ]
+                div [ class "loading" ] [ text "Searching the stacks…" ]
 
             Failure _ ->
-                p [ class "error" ] [ text "Search failed. Please try again." ]
+                p [ class "error" ] [ text "We couldn't reach the shelves just now. Give it a moment and try again." ]
 
             Success books ->
                 let
@@ -232,7 +232,14 @@ view model =
                             |> sortBooks model.sort
                 in
                 if List.isEmpty visibleBooks then
-                    p [ class "search-empty" ] [ text "No books found matching your search." ]
+                    -- Distinguish "the query found nothing" from "the query found
+                    -- books but the year filter hid them all" — the latter is
+                    -- fixable by widening/clearing the filter, so say so.
+                    if not (List.isEmpty books) && yearFilterActive model.filters then
+                        p [ class "search-empty" ] [ text "No books in that year range — widen it or clear filters" ]
+
+                    else
+                        p [ class "search-empty" ] [ text "Nothing on the shelves matches that — yet." ]
 
                 else
                     div [ class "search-results", testId "search-results" ]
@@ -250,13 +257,13 @@ viewReadersSection readers =
         Loading ->
             div [ class "search-readers", testId "search-readers" ]
                 [ h2 [ class "search-readers__title" ] [ text "Readers" ]
-                , div [ class "loading" ] [ text "Searching..." ]
+                , div [ class "loading" ] [ text "Searching the stacks…" ]
                 ]
 
         Failure _ ->
             div [ class "search-readers", testId "search-readers" ]
                 [ h2 [ class "search-readers__title" ] [ text "Readers" ]
-                , p [ class "error" ] [ text "Reader search failed. Please try again." ]
+                , p [ class "error" ] [ text "We couldn't reach the shelves just now. Give it a moment and try again." ]
                 ]
 
         Success people ->
@@ -306,9 +313,13 @@ viewReaderLocation person =
 
 
 {-| Keep only books whose publication year falls within the (optional) range.
-When neither bound is set the list is returned unchanged. A book with no known
-publication year is excluded once any bound is active, since its range
-membership cannot be confirmed.
+When neither bound is set the list is returned unchanged.
+
+A book with no known publication year is KEPT once a bound is active, rather than
+silently vanishing: its range membership can't be confirmed either way, so hiding
+it would misrepresent the collection. Such books are surfaced with an explicit
+"Unknown year" label (see `viewBookResult`) so their presence is legible.
+
 -}
 applyYearFilter : FilterState -> List Book -> List Book
 applyYearFilter filters books =
@@ -320,11 +331,19 @@ applyYearFilter filters books =
             List.filter (bookWithinYearRange filters) books
 
 
+{-| True when either year bound is set — i.e. the year filter is narrowing the
+results, so an empty visible list can be blamed on the filter rather than the query.
+-}
+yearFilterActive : FilterState -> Bool
+yearFilterActive filters =
+    filters.yearFrom /= Nothing || filters.yearTo /= Nothing
+
+
 bookWithinYearRange : FilterState -> Book -> Bool
 bookWithinYearRange filters book =
     case bookPublicationYear book of
         Nothing ->
-            False
+            True
 
         Just year ->
             (case filters.yearFrom of
@@ -343,13 +362,17 @@ bookWithinYearRange filters book =
                    )
 
 
-{-| Order the rendered results by the selected sort. `ByDateAdded` preserves the
-server's order — search results carry no per-user "date added", so there is
-nothing to sort on and the relevance order the backend returned is kept.
+{-| Order the rendered results by the selected sort. `ByRelevance` (the default)
+is a passthrough: the backend already returns rows in `plainto_tsquery` rank
+order, so keeping that order IS relevance ranking — there is nothing to sort on
+client-side. The other orders re-sort the list.
 -}
 sortBooks : SortOrder -> List Book -> List Book
 sortBooks sort books =
     case sort of
+        ByRelevance ->
+            books
+
         ByTitle ->
             List.sortBy .title books
 
@@ -358,9 +381,6 @@ sortBooks sort books =
 
         ByYear ->
             List.sortBy (bookPublicationYear >> Maybe.withDefault 0) books
-
-        ByDateAdded ->
-            books
 
 
 viewBookResult : Book -> Html Msg
@@ -373,5 +393,5 @@ viewBookResult book =
                 p [ class "search-result__year" ] [ text (String.fromInt year) ]
 
             Nothing ->
-                text ""
+                p [ class "search-result__year search-result__year--unknown" ] [ text "Unknown year" ]
         ]

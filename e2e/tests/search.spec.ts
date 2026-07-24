@@ -19,13 +19,19 @@ test.use({ storageState: suiteAuthFile("search") });
 // filter each produce a DIFFERENT, precomputable rendered order — which is what
 // makes the sort/filter assertions below deterministic rather than "something
 // changed".
+//
+// NOTE: the DEFAULT sort is now Relevance (#290) — a passthrough of the
+// backend's `plainto_tsquery` rank order, which is NOT client-side
+// deterministic for three equally-matching titles. So every ORDER assertion
+// below first selects an explicit sort (title/author/year); only membership and
+// count are asserted against the default (relevance) order.
 const BOOK_QUERY = "Book";
 
 const LEGENDARY = "The Book of Legendary Lands";
 const SAND = "The Book of Sand";
 const LAUGHTER = "The Book of Laughter and Forgetting";
 
-// Default sort is ByTitle ascending (Page.Search.init → sort = ByTitle).
+// Title ascending: "The Book of Laughter…" < "The Book of Legendary…" < "The Book of Sand".
 const TITLE_ORDER = [LAUGHTER, LEGENDARY, SAND];
 // authorName ascending: "Jorge Luis Borges" < "Milan Kundera" < "Umberto Eco".
 const AUTHOR_ORDER = [SAND, LAUGHTER, LEGENDARY];
@@ -42,12 +48,16 @@ const YEAR_ORDER = [SAND, LAUGHTER, LEGENDARY];
  * the gate passes and the DOM assertion is the one that fails.
  */
 async function assertBookSeedSufficient(page: Page): Promise<void> {
-  const probe = await apiCallFromPage(page, "GET", `/api/search?q=${BOOK_QUERY}`);
+  const probe = await apiCallFromPage(
+    page,
+    "GET",
+    `/api/search?q=${BOOK_QUERY}`,
+  );
   const data = probe.data as { count?: number } | null;
   const count = data && typeof data.count === "number" ? data.count : 0;
   assertSeedOrSkip(
     count >= 3,
-    `GET /api/search?q=${BOOK_QUERY} returned count=${count}; expected >= 3 seeded "Book" works`
+    `GET /api/search?q=${BOOK_QUERY} returned count=${count}; expected >= 3 seeded "Book" works`,
   );
 }
 
@@ -59,7 +69,9 @@ async function renderedTitles(page: Page): Promise<string[]> {
 test.describe("Search page", () => {
   test("search page renders with input field and title", async ({ page }) => {
     await page.goto("/search");
-    await expect(page.getByTestId("search-page")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId("search-page")).toBeVisible({
+      timeout: 5000,
+    });
     await expect(page.locator(".page__title")).toContainText("Search");
     await expect(page.getByTestId("search-input")).toBeVisible();
   });
@@ -68,19 +80,29 @@ test.describe("Search page", () => {
     await page.goto("/search");
     await expect(page.locator(".search-hint")).toBeVisible({ timeout: 5000 });
     await expect(page.locator(".search-hint")).toHaveText(
-      "Enter a search term above to find books."
+      "Type a title, author, or ISBN to search the stacks.",
     );
   });
 
-  test("sort selector is present with options", async ({ page }) => {
+  test("sort selector lists Relevance/Title/Author/Year with Relevance selected by default", async ({
+    page,
+  }) => {
     await page.goto("/search");
     await page.getByTestId("search-page").waitFor({ timeout: 5000 });
 
     const sortSelect = page.getByTestId("sort-selector");
     await expect(sortSelect).toBeVisible();
 
-    const options = await sortSelect.locator("option").count();
-    expect(options).toBeGreaterThanOrEqual(2);
+    // Truthful option set — no silent no-op "Date Added" (#290).
+    await expect(sortSelect.locator("option")).toHaveText([
+      "Relevance",
+      "Title",
+      "Author",
+      "Year",
+    ]);
+
+    // Controlled dropdown: the default sort (Relevance) is reflected as selected.
+    await expect(sortSelect).toHaveValue("relevance");
   });
 
   test("filter panel toggle is present", async ({ page }) => {
@@ -98,7 +120,9 @@ test.describe("Search page", () => {
 
     await page.getByTestId("search-input").fill("test");
 
-    await expect(page.getByTestId("search-clear")).toBeVisible({ timeout: 2000 });
+    await expect(page.getByTestId("search-clear")).toBeVisible({
+      timeout: 2000,
+    });
   });
 
   // ── Deterministic results (replaces the old fail-open "any response" guard) ──
@@ -115,31 +139,41 @@ test.describe("Search page", () => {
     // Debounced (300ms) request → the three works render in the results list.
     const results = page.getByTestId("search-results");
     await expect(results).toBeVisible({ timeout: 10000 });
-    await expect(page.locator(".search-result")).toHaveCount(3, { timeout: 10000 });
+    await expect(page.locator(".search-result")).toHaveCount(3, {
+      timeout: 10000,
+    });
 
-    // Default sort is by title ascending.
-    expect(await renderedTitles(page)).toEqual(TITLE_ORDER);
-
-    // Each row binds the correct author + publication year.
+    // Each row binds the correct author + publication year (order-independent,
+    // so this holds under the default relevance order).
     const rowFor = (title: string) =>
       page.locator(".search-result", {
         has: page.locator(".search-result__title", { hasText: title }),
       });
 
-    await expect(rowFor(LEGENDARY).locator(".search-result__author")).toHaveText(
-      "Umberto Eco"
+    await expect(
+      rowFor(LEGENDARY).locator(".search-result__author"),
+    ).toHaveText("Umberto Eco");
+    await expect(rowFor(LEGENDARY).locator(".search-result__year")).toHaveText(
+      "2013",
     );
-    await expect(rowFor(LEGENDARY).locator(".search-result__year")).toHaveText("2013");
 
     await expect(rowFor(SAND).locator(".search-result__author")).toHaveText(
-      "Jorge Luis Borges"
+      "Jorge Luis Borges",
     );
-    await expect(rowFor(SAND).locator(".search-result__year")).toHaveText("1975");
+    await expect(rowFor(SAND).locator(".search-result__year")).toHaveText(
+      "1975",
+    );
 
     await expect(rowFor(LAUGHTER).locator(".search-result__author")).toHaveText(
-      "Milan Kundera"
+      "Milan Kundera",
     );
-    await expect(rowFor(LAUGHTER).locator(".search-result__year")).toHaveText("1979");
+    await expect(rowFor(LAUGHTER).locator(".search-result__year")).toHaveText(
+      "1979",
+    );
+
+    // Explicit title sort gives the deterministic title-ascending order.
+    await page.getByTestId("sort-selector").selectOption("title");
+    expect(await renderedTitles(page)).toEqual(TITLE_ORDER);
   });
 
   test("empty result set shows the no-books message", async ({ page }) => {
@@ -149,7 +183,7 @@ test.describe("Search page", () => {
     await page.getByTestId("search-input").fill("zzqxwvnomatchbook0000");
 
     await expect(
-      page.getByText("No books found matching your search.")
+      page.getByText("Nothing on the shelves matches that — yet."),
     ).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("search-results")).toHaveCount(0);
   });
@@ -162,7 +196,7 @@ test.describe("Search page", () => {
         status: 500,
         contentType: "application/json",
         body: JSON.stringify({ error: "boom" }),
-      })
+      }),
     );
 
     await page.goto("/search");
@@ -171,7 +205,11 @@ test.describe("Search page", () => {
     await page.getByTestId("search-input").fill(BOOK_QUERY);
 
     await expect(
-      page.getByText("Search failed. Please try again.")
+      page
+        .getByText(
+          "We couldn't reach the shelves just now. Give it a moment and try again.",
+        )
+        .first(),
     ).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("search-results")).toHaveCount(0);
   });
@@ -186,12 +224,17 @@ test.describe("Search page", () => {
     await assertBookSeedSufficient(page);
 
     await page.getByTestId("search-input").fill(BOOK_QUERY);
-    await expect(page.locator(".search-result")).toHaveCount(3, { timeout: 10000 });
-
-    // Default (title) order.
-    expect(await renderedTitles(page)).toEqual(TITLE_ORDER);
+    await expect(page.locator(".search-result")).toHaveCount(3, {
+      timeout: 10000,
+    });
 
     const titles = page.locator(".search-result__title");
+
+    // Sort by title → Laughter, Legendary, Sand.
+    await page.getByTestId("sort-selector").selectOption("title");
+    await expect(titles.nth(0)).toHaveText(TITLE_ORDER[0]);
+    await expect(titles.nth(1)).toHaveText(TITLE_ORDER[1]);
+    await expect(titles.nth(2)).toHaveText(TITLE_ORDER[2]);
 
     // Sort by author → Borges, Kundera, Eco.
     await page.getByTestId("sort-selector").selectOption("author");
@@ -205,11 +248,9 @@ test.describe("Search page", () => {
     await expect(titles.nth(1)).toHaveText(YEAR_ORDER[1]);
     await expect(titles.nth(2)).toHaveText(YEAR_ORDER[2]);
 
-    // Back to title → default order restored.
-    await page.getByTestId("sort-selector").selectOption("title");
-    await expect(titles.nth(0)).toHaveText(TITLE_ORDER[0]);
-    await expect(titles.nth(1)).toHaveText(TITLE_ORDER[1]);
-    await expect(titles.nth(2)).toHaveText(TITLE_ORDER[2]);
+    // Back to relevance → the backend order returns (all three still present).
+    await page.getByTestId("sort-selector").selectOption("relevance");
+    await expect(page.locator(".search-result")).toHaveCount(3);
   });
 
   // ── Year filter ─────────────────────────────────────────────────────────────
@@ -222,23 +263,57 @@ test.describe("Search page", () => {
     await assertBookSeedSufficient(page);
 
     await page.getByTestId("search-input").fill(BOOK_QUERY);
-    await expect(page.locator(".search-result")).toHaveCount(3, { timeout: 10000 });
+    await expect(page.locator(".search-result")).toHaveCount(3, {
+      timeout: 10000,
+    });
 
     // Open the filter panel and set "Year From" = 1976 — this excludes
     // The Book of Sand (1975) and keeps Laughter (1979) + Legendary (2013).
+    // Assert membership (not order): the default sort is relevance.
     await page.getByTestId("filter-toggle").click();
     const yearFrom = page.locator(".filter-panel__input").first();
     await yearFrom.fill("1976");
 
-    await expect(page.locator(".search-result")).toHaveCount(2, { timeout: 5000 });
-    expect(await renderedTitles(page)).toEqual([LAUGHTER, LEGENDARY]);
+    await expect(page.locator(".search-result")).toHaveCount(2, {
+      timeout: 5000,
+    });
     await expect(
-      page.locator(".search-result__title", { hasText: SAND })
+      page.locator(".search-result__title", { hasText: SAND }),
     ).toHaveCount(0);
+    await expect(
+      page.locator(".search-result__title", { hasText: LAUGHTER }),
+    ).toHaveCount(1);
+    await expect(
+      page.locator(".search-result__title", { hasText: LEGENDARY }),
+    ).toHaveCount(1);
 
     // Clear Filters restores all three.
     await page.locator(".filter-panel__clear").click();
-    await expect(page.locator(".search-result")).toHaveCount(3, { timeout: 5000 });
-    expect(await renderedTitles(page)).toEqual(TITLE_ORDER);
+    await expect(page.locator(".search-result")).toHaveCount(3, {
+      timeout: 5000,
+    });
+  });
+
+  test("a year range that matches nothing shows the filter-aware empty state", async ({
+    page,
+  }) => {
+    await page.goto("/search");
+    await page.getByTestId("search-page").waitFor({ timeout: 5000 });
+    await assertBookSeedSufficient(page);
+
+    await page.getByTestId("search-input").fill(BOOK_QUERY);
+    await expect(page.locator(".search-result")).toHaveCount(3, {
+      timeout: 10000,
+    });
+
+    // A "Year From" bound past every seeded year empties the list via the
+    // filter (not the query) → filter-aware copy, not the plain no-match copy.
+    await page.getByTestId("filter-toggle").click();
+    await page.locator(".filter-panel__input").first().fill("3000");
+
+    await expect(
+      page.getByText("No books in that year range — widen it or clear filters"),
+    ).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId("search-results")).toHaveCount(0);
   });
 });

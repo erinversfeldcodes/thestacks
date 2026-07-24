@@ -44,7 +44,7 @@ initState =
                 , \m -> Expect.equal NotAsked m.results
                 , \m -> Expect.equal NotAsked m.readers
                 , \m -> Expect.equal 0 m.debounceCount
-                , \m -> Expect.equal ByTitle m.sort
+                , \m -> Expect.equal ByRelevance m.sort
                 , \m -> Expect.equal defaultFilterState m.filters
                 , \m -> Expect.equal False m.filterPanelOpen
                 ]
@@ -52,7 +52,8 @@ initState =
 
 
 {-| `SortChanged` maps each selector value to its `SortOrder` and stores it
-(`Page.Search.update`). Unknown / "title" both fall back to `ByTitle`.
+(`Page.Search.update`). Unknown / "relevance" both fall back to `ByRelevance`,
+the default (a passthrough that preserves the backend's relevance ranking).
 -}
 sortChangedVariants : Test
 sortChangedVariants =
@@ -67,11 +68,11 @@ sortChangedVariants =
                         in
                         Expect.equal expected model.sort
             )
-            [ ( "title", ByTitle )
+            [ ( "relevance", ByRelevance )
+            , ( "title", ByTitle )
             , ( "author", ByAuthor )
             , ( "year", ByYear )
-            , ( "date_added", ByDateAdded )
-            , ( "gibberish", ByTitle )
+            , ( "gibberish", ByRelevance )
             ]
         )
 
@@ -79,6 +80,9 @@ sortChangedVariants =
 sortLabel : SortOrder -> String
 sortLabel sort =
     case sort of
+        ByRelevance ->
+            "ByRelevance"
+
         ByTitle ->
             "ByTitle"
 
@@ -87,9 +91,6 @@ sortLabel sort =
 
         ByYear ->
             "ByYear"
-
-        ByDateAdded ->
-            "ByDateAdded"
 
 
 {-| `YearFromChanged` parses the input into `filters.yearFrom` (invalid -> Nothing).

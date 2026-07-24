@@ -17,16 +17,19 @@
 **What they see on the page:**
 - The search bar has a warm cream background with a serif placeholder: "Search by title, author, or ISBN..."
 - Results appear in a list below the search bar.
-- Sort selector with options: Title, Author, Year, Date Added.
+- Sort selector with options: Relevance (default), Title, Author, Year.
 - Filter panel with year range filter.
 
 **Acceptance Criteria:**
 - Search queries fire after 300ms debounce.
-- Results display title, author, and publication year.
-- Sort options: by title, author, year, date added.
-- Year range filter available.
-- Empty state shows "Enter a search term above to find books."
-- No results shows "No books found matching your search."
+- Results display title, author, and publication year (undated books show "Unknown year" rather than a blank).
+- Sort options: relevance (default — preserves backend `plainto_tsquery` ranking), title, author, year.
+- Year range filter available. Undated books stay visible under an active year bound (labelled "Unknown year") rather than silently vanishing.
+- Entry hint (no query yet) shows "Type a title, author, or ISBN to search the stacks."
+- No results for the query shows "Nothing on the shelves matches that — yet."
+- Results emptied by the year filter (query matched, but no book falls in range) shows "No books in that year range — widen it or clear filters".
+- Book/reader search error shows "We couldn't reach the shelves just now. Give it a moment and try again."
+- Loading shows "Searching the stacks…".
 
 ---
 
@@ -43,9 +46,10 @@
 8. User can filter by year range via the filter panel.
 
 ### Sad Paths
-- **API error**: `SearchCompleted (Err err)` -> "Search failed. Please try again."
-- **Empty results**: `Success []` -> "No books found matching your search."
-- **No query**: `NotAsked` -> "Enter a search term above to find books."
+- **API error**: `SearchCompleted (Err err)` -> "We couldn't reach the shelves just now. Give it a moment and try again."
+- **Empty results (query)**: `Success []` -> "Nothing on the shelves matches that — yet."
+- **Empty results (year filter)**: `Success books` non-empty but the year filter removes all -> "No books in that year range — widen it or clear filters".
+- **No query**: `NotAsked` -> "Type a title, author, or ISBN to search the stacks."
 - **No token**: No API call fires on debounce expiry.
 
 ### Elm State Machine
@@ -139,7 +143,7 @@ N/A -- search queries the `op.books` table directly, not dbt models.
 ### Init
 - **`initPage` branch**: Creates `Page.Search.init`
 - **API calls on init**: None -- search only fires after user types and debounce expires
-- **Initial model state**: `{ query = "", results = NotAsked, filters = defaultFilterState, sort = ByTitle, filterPanelOpen = False, debounceCount = 0 }`
+- **Initial model state**: `{ query = "", results = NotAsked, filters = defaultFilterState, sort = ByRelevance, filterPanelOpen = False, debounceCount = 0 }`
 
 ### Update cycle
 - **Msg `QueryChanged query`**: `query` -> new value; `debounceCount` incremented; `results` -> `Loading` if non-empty query, `NotAsked` if empty; Cmd: `Process.sleep 300` then `DebounceExpired newCount`
@@ -147,7 +151,7 @@ N/A -- search queries the `op.books` table directly, not dbt models.
 - **Msg `DebounceExpired count`**: If `count == debounceCount` and query non-empty, fires `Api.searchBooks`; otherwise no-op
 - **Msg `SearchCompleted (Ok books)`**: `results` -> `Success books`
 - **Msg `SearchCompleted (Err err)`**: `results` -> `Failure err`
-- **Msg `SortChanged sortStr`**: `sort` -> parsed `SortOrder` (`ByTitle`, `ByAuthor`, `ByYear`, `ByDateAdded`)
+- **Msg `SortChanged sortStr`**: `sort` -> parsed `SortOrder` (`ByRelevance` [default/fallback], `ByTitle`, `ByAuthor`, `ByYear`). `ByRelevance` is a passthrough — it keeps the backend's `plainto_tsquery` rank order.
 - **Msg `ToggleFilterPanel`**: `filterPanelOpen` -> toggled
 - **Msg `YearFromChanged str`**: `filters.yearFrom` -> `String.toInt str`
 - **Msg `YearToChanged str`**: `filters.yearTo` -> `String.toInt str`
@@ -158,16 +162,17 @@ N/A -- search queries the `op.books` table directly, not dbt models.
   - `div.page.page--search` wrapper
   - `h1.page__title` "Search Books"
   - `Components.SearchBar.searchBar` -- input with placeholder "Search by title, author, or ISBN...", clear button
-  - `Components.SortSelector.sortSelector` -- dropdown for sort order
+  - `Components.SortSelector.sortSelector` -- controlled dropdown for sort order (Relevance/Title/Author/Year; the option matching `model.sort` renders `selected`)
   - `Components.FilterPanel.filterPanel` -- collapsible year range filter
-  - `NotAsked`: `p.search-hint` "Enter a search term above to find books."
-  - `Loading`: `div.loading` "Searching..."
-  - `Failure _`: `p.error` "Search failed. Please try again."
-  - `Success []`: `p.search-empty` "No books found matching your search."
+  - `NotAsked`: `p.search-hint` "Type a title, author, or ISBN to search the stacks."
+  - `Loading`: `div.loading` "Searching the stacks…"
+  - `Failure _`: `p.error` "We couldn't reach the shelves just now. Give it a moment and try again."
+  - `Success []` (query matched nothing): `p.search-empty` "Nothing on the shelves matches that — yet."
+  - `Success books` all filtered out by an active year bound: `p.search-empty` "No books in that year range — widen it or clear filters"
   - `Success books`: `div.search-results` containing `viewBookResult` for each book
-  - Each result: `div.search-result` with `h3.search-result__title`, `p.search-result__author`, `p.search-result__year`
+  - Each result: `div.search-result` with `h3.search-result__title`, `p.search-result__author`, `p.search-result__year` (undated books render `p.search-result__year.search-result__year--unknown` "Unknown year")
 - **ARIA attributes**: N/A (no explicit ARIA on search results beyond standard HTML)
-- **CSS classes**: `page page--search`, `page__title`, `search-hint`, `loading`, `error`, `search-empty`, `search-results`, `search-result`, `search-result__title`, `search-result__author`, `search-result__year`
+- **CSS classes**: `page page--search`, `page__title`, `search-hint`, `loading`, `error`, `search-empty`, `search-results`, `search-result`, `search-result__title`, `search-result__author`, `search-result__year`, `search-result__year--unknown`
 
 ---
 

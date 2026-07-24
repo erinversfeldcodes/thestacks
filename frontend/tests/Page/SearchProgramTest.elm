@@ -48,10 +48,13 @@ suite =
         , searchFailure
         , searchStaleDebounce
         , searchNoTokenFiresNoBookRequest
-        , sortDefaultTitleAscending
+        , sortDefaultRelevance
+        , sortByTitleSelected
         , sortByAuthor
         , sortByYear
-        , sortByDateAdded
+        , sortByRelevanceSelected
+        , filterAwareEmptyState
+        , undatedVisibleUnderFilter
         , yearFilterAndClear
         , readersResults
         , readersEmptyResults
@@ -93,7 +96,7 @@ readersFailure =
                         "{\"error\":\"boom\"}"
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Reader search failed. Please try again." ]
+                    [ Selector.text "We couldn't reach the shelves just now. Give it a moment and try again." ]
 
 
 {-| A 401 from people-search must raise `SessionExpired` (so Main routes to the
@@ -153,7 +156,7 @@ searchDebounce =
             startSearch
                 |> ProgramTest.update (QueryChanged "habit")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Searching..." ]
+                    [ Selector.text "Searching the stacks…" ]
                 |> ProgramTest.advanceTime 300
                 |> ProgramTest.simulateHttpOk "GET"
                     "/api/search?q=habit"
@@ -173,10 +176,10 @@ searchClear =
             startSearch
                 |> ProgramTest.update (QueryChanged "something")
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Searching..." ]
+                    [ Selector.text "Searching the stacks…" ]
                 |> ProgramTest.update ClearQuery
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Enter a search term above to find books." ]
+                    [ Selector.text "Type a title, author, or ISBN to search the stacks." ]
 
 
 searchEmptyResults : Test
@@ -190,7 +193,7 @@ searchEmptyResults =
                     "/api/search?q=zzzznonexistent"
                     (searchResponseJson [])
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "No books found matching your search." ]
+                    [ Selector.text "Nothing on the shelves matches that — yet." ]
 
 
 searchFilterPanelToggle : Test
@@ -228,7 +231,7 @@ searchFailure =
                         "{\"error\":\"boom\"}"
                     )
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Search failed. Please try again." ]
+                    [ Selector.text "We couldn't reach the shelves just now. Give it a moment and try again." ]
 
 
 {-| A stale debounce must not fire a request. Typing twice schedules two
@@ -269,7 +272,7 @@ searchNoTokenFiresNoBookRequest =
                     (\requests -> Expect.equal 0 (List.length requests))
                 |> ProgramTest.ensureHttpRequestWasMade "GET" "/api/search/users?q=habit"
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Enter a search term above to find books." ]
+                    [ Selector.text "Type a title, author, or ISBN to search the stacks." ]
 
 
 
@@ -342,11 +345,12 @@ expectResultTitleOrder titles =
         )
 
 
-sortDefaultTitleAscending : Test
-sortDefaultTitleAscending =
-    test "sort_default_title: results render title-ascending by default" <|
+sortByTitleSelected : Test
+sortByTitleSelected =
+    test "sort_by_title: SortChanged title re-orders rendered results title-ascending" <|
         \() ->
             loadedThreeBooks
+                |> ProgramTest.update (SortChanged "title")
                 |> expectResultTitleOrder
                     [ "Alpha Dawn", "Middle Ground", "Zebra Tales" ]
 
@@ -371,14 +375,68 @@ sortByYear =
                     [ "Middle Ground", "Zebra Tales", "Alpha Dawn" ]
 
 
-sortByDateAdded : Test
-sortByDateAdded =
-    test "sort_by_date_added: SortChanged date_added preserves server order" <|
+{-| Selecting "Relevance" after another sort restores the server order — proving
+the passthrough is reachable from the selector, not just the default.
+-}
+sortByRelevanceSelected : Test
+sortByRelevanceSelected =
+    test "sort_by_relevance: SortChanged relevance restores server (relevance) order" <|
         \() ->
             loadedThreeBooks
-                |> ProgramTest.update (SortChanged "date_added")
+                |> ProgramTest.update (SortChanged "author")
+                |> ProgramTest.update (SortChanged "relevance")
                 |> expectResultTitleOrder
                     [ "Zebra Tales", "Middle Ground", "Alpha Dawn" ]
+
+
+sortDefaultRelevance : Test
+sortDefaultRelevance =
+    test "sort_default_relevance: results render in server (relevance) order by default" <|
+        \() ->
+            loadedThreeBooks
+                |> expectResultTitleOrder
+                    [ "Zebra Tales", "Middle Ground", "Alpha Dawn" ]
+
+
+filterAwareEmptyState : Test
+filterAwareEmptyState =
+    test "filter_aware_empty: a year range that empties matched results shows filter-aware copy" <|
+        \() ->
+            loadedThreeBooks
+                |> ProgramTest.update (YearFromChanged "3000")
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "No books in that year range — widen it or clear filters" ]
+
+
+undatedVisibleUnderFilter : Test
+undatedVisibleUnderFilter =
+    test "undated_visible: an undated book stays visible under a year bound, labelled Unknown year" <|
+        \() ->
+            startSearch
+                |> ProgramTest.update (QueryChanged "book")
+                |> ProgramTest.advanceTime 300
+                |> ProgramTest.simulateHttpOk "GET"
+                    "/api/search?q=book"
+                    (searchResponseJson [ fixtureBook "Dated Book" "Anna Blake" 2001, undatedBook ])
+                |> ProgramTest.update (YearFromChanged "2000")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "No Year Book" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Unknown year" ]
+
+
+{-| A fixture book with no publication year, for the undated-treatment tests.
+-}
+undatedBook : Book
+undatedBook =
+    { testBook
+        | id = "book-undated"
+        , title = "No Year Book"
+        , author = Just { id = "author-noyear", name = "Nemo Undated", bio = Nothing, website = Nothing }
+        , primaryEdition =
+            testBook.primaryEdition
+                |> Maybe.map (\ed -> { ed | id = "edition-undated", publicationYear = Nothing })
+    }
 
 
 yearFilterAndClear : Test
@@ -398,7 +456,7 @@ yearFilterAndClear =
                     )
                 |> ProgramTest.update ClearFilters
                 |> expectResultTitleOrder
-                    [ "Alpha Dawn", "Middle Ground", "Zebra Tales" ]
+                    [ "Zebra Tales", "Middle Ground", "Alpha Dawn" ]
 
 
 

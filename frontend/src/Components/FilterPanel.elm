@@ -12,10 +12,10 @@ import Util.TestId exposing (testId)
 
 
 type SortOrder
-    = ByTitle
+    = ByRelevance
+    | ByTitle
     | ByAuthor
     | ByYear
-    | ByDateAdded
 
 
 type alias FilterState =

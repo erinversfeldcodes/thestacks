@@ -36,10 +36,10 @@ n/a-adjacent — polish of a shipped story; fill hops for the changed affordance
 [Baseline via `test-audit` skill when picked up.]
 
 ## Definition of Done
-- [ ] Sort option set is truthful (no silent no-op) and default decided — evidence: elm-test + E2E + US updated
-- [ ] Undated-book filter behaviour legible + filter-aware empty state — evidence: elm-test + E2E
-- [ ] Copy pass applied with AC/spec lockstep — evidence: diff spans US + specs + view
-- [ ] Tests written and passing; `just verify` passes
+- [x] Sort option set is truthful (no silent no-op) and default decided — `ByDateAdded`→`ByRelevance`, made the default (passthrough of backend `plainto_tsquery` order); SortSelector options now Relevance/Title/Author/Year and the dropdown is controlled (`selected` from `current`). Evidence: `SearchTest.elm` `sort_changed` + `init_state` (ByRelevance), `SearchProgramTest.elm` `sort_default_relevance`/`sort_by_relevance`/`sort_by_title`, E2E `sort selector lists Relevance/Title/Author/Year with Relevance selected by default` (asserts option labels + `toHaveValue("relevance")`); US-1.5.1 AC + option list updated.
+- [x] Undated-book filter behaviour legible + filter-aware empty state — undated books stay visible under a year bound (`bookWithinYearRange` `Nothing`→`True`), labelled "Unknown year" (`viewBookResult`); filter-aware empty copy when the query matched but the filter emptied the list (`yearFilterActive`). Evidence: `SearchProgramTest.elm` `undated_visible` + `filter_aware_empty` (both failing-first), E2E `a year range that matches nothing shows the filter-aware empty state`.
+- [x] Copy pass applied with AC/spec lockstep — hint/loading/error/empty warmed (book + readers error mirrored). Evidence: diff spans `docs/user_stories/US-1.5.1-search-shelves.md` (AC + §12), `frontend/src/Page/Search.elm` (view), `e2e/tests/search.spec.ts` (hint/empty/error assertions), `SearchProgramTest.elm` copy assertions.
+- [x] Tests written and passing — full elm-test `1023 passed`; scoped `SearchTest`+`SearchProgramTest` `31 passed`; elm-review (full project) `no errors`; E2E `search.spec.ts --project=chromium` `13 passed` against live stack :4000. (`just verify` = elixir-only gate, unaffected by this Elm-only change; not re-run here — front-end gates above are the relevant ones.)
 - [ ] **`completion-audit` passed**; **Completion Bar met**
 
 ## Dependencies
@@ -50,3 +50,4 @@ n/a-adjacent — polish of a shipped story; fill hops for the changed affordance
 
 ## Progress Notes
 - 2026-07-24 — Created from #115 review advisories (ux P2 ×2, P3 ×2; elm-reviewer relevance-default note).
+- 2026-07-24 — Implemented (elm-agent). Sort: renamed `SortOrder` variant `ByDateAdded`→`ByRelevance` (FilterPanel/Page.Search/tests), made it the default + gibberish fallback (passthrough of backend rank order); SortSelector now lists Relevance/Title/Author/Year and is a controlled dropdown (renders `selected` from `current` — fixes the #115 uncontrolled-select note). Filters: undated books stay visible under a year bound and render an "Unknown year" label instead of vanishing; filter-aware empty copy ("No books in that year range — widen it or clear filters") distinguishes a filter-emptied list from a no-match query. Copy warm-pass on hint/loading/error/empty, book + readers error mirrored. AC lockstep: US-1.5.1 §1/§12 + `e2e/tests/search.spec.ts`. Failing-first: `sort_default_relevance`/`filter_aware_empty`/`undated_visible` all red before impl (3 failed / 17 passed), green after. Gates: elm-test 1023 passed; scoped Search suites 31 passed; elm-review (full) clean; assets rebuilt (`apps/core/assets npm run deploy`); E2E `search.spec.ts --project=chromium` 13 passed vs live stack :4000.
