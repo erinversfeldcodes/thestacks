@@ -691,30 +691,96 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Full-text search on book titles using the stored `title_tsv` tsvector column.
+  Full-text search on books using the stored tsvector columns.
+
   Returns up to `limit` results (default 20).
+
+  ## Options
+
+    * `:limit` — max results (default 20)
+    * `:scope` — `:title` (default) matches `title_tsv` only; `:deep` (#284)
+      ALSO matches `description_tsv`, so a book whose description mentions the
+      query surfaces even when its title does not. Under `:deep`, title matches
+      are ordered ahead of description-only matches (a boolean title-match key,
+      DESC, then title ASC) so the most-relevant hits stay first; the default
+      title scope is unchanged.
+
+  In both scopes the raw query is passed straight to `plainto_tsquery` via the
+  bound param: injection-safety comes from Ecto param binding + `plainto_tsquery`
+  treating its input as plain text (proven by the #115 edge-case suite), NOT from
+  stripping characters. A prior `String.replace(~r/[^\w\s]/)` sanitiser was
+  lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" — which changed the
+  lexemes and dropped legitimate matches (#291).
   """
   @spec search_books(String.t(), keyword()) :: [Book.t()]
   def search_books(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
+    scope = Keyword.get(opts, :scope, :title)
 
-    # The raw query is passed straight to `plainto_tsquery` via the bound param:
-    # injection-safety comes from Ecto param binding + `plainto_tsquery` treating
-    # its input as plain text (proven by the #115 edge-case suite), NOT from
-    # stripping characters. A prior `String.replace(~r/[^\w\s]/)` sanitiser was
-    # lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" — which changed the
-    # lexemes and dropped legitimate matches (#291).
     Book
-    |> where(
-      [b],
-      fragment(
-        "title_tsv @@ plainto_tsquery('english', ?)",
-        ^query
-      )
-    )
+    |> search_scope_where(scope, query)
+    |> search_scope_order(scope, query)
     |> preload([:author, :editions])
     |> limit(^limit)
     |> Repo.all()
+  end
+
+  defp search_scope_where(query_ast, :deep, query) do
+    where(
+      query_ast,
+      [b],
+      fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query) or
+        fragment("description_tsv @@ plainto_tsquery('english', ?)", ^query)
+    )
+  end
+
+  defp search_scope_where(query_ast, _title, query) do
+    where(query_ast, [b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
+  end
+
+  # Under deep scope, rank title matches ahead of description-only matches: the
+  # boolean `title_tsv @@ ...` sorts `true` before `false` under DESC, then title
+  # breaks ties alphabetically. Title scope keeps its implicit (unordered) shape.
+  defp search_scope_order(query_ast, :deep, query) do
+    order_by(
+      query_ast,
+      [b],
+      desc: fragment("(title_tsv @@ plainto_tsquery('english', ?))", ^query),
+      asc: b.title
+    )
+  end
+
+  defp search_scope_order(query_ast, _title, _query), do: query_ast
+
+  @doc """
+  Builds `ts_headline` description snippets for a deep search (#284).
+
+  Given a list of `book_ids` and the raw `query`, returns a map
+  `%{book_id => snippet}` for every book in the list whose `description_tsv`
+  matches — the "why this matched" excerpt behind US-1.5.2. Books whose
+  description does NOT match (title-only hits) are absent from the map, so the
+  caller leaves their snippet empty. The excerpt wraps matched lexemes in
+  `<mark>…</mark>`. Same `plainto_tsquery` injection-safety rationale as
+  `search_books/2`.
+  """
+  @spec description_snippets([binary()], String.t()) :: %{binary() => String.t()}
+  def description_snippets([], _query), do: %{}
+
+  def description_snippets(book_ids, query) when is_list(book_ids) do
+    Book
+    |> where([b], b.id in ^book_ids)
+    |> where([b], fragment("description_tsv @@ plainto_tsquery('english', ?)", ^query))
+    |> select(
+      [b],
+      {b.id,
+       fragment(
+         "ts_headline('english', coalesce(?, ''), plainto_tsquery('english', ?), 'StartSel=<mark>, StopSel=</mark>')",
+         b.description,
+         ^query
+       )}
+    )
+    |> Repo.all()
+    |> Map.new()
   end
 
   @doc """

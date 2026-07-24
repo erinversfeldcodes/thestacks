@@ -112,6 +112,13 @@ message SearchHit {
   // US-1.5.1's collection story. Populated for COLLECTION hits only; always
   // empty ("") on platform_hits (platform provenance is source/handle/price).
   string bookshelf_name = 5 [json_name = "bookshelf_name"];
+
+  // A `ts_headline`-highlighted description excerpt (#284 deep search),
+  // populated ONLY for a scope=deep hit whose DESCRIPTION matched the query —
+  // the "why this matched" behind US-1.5.2. Empty string ("") for every
+  // title-only hit and for the default (title-only) search scope. The `<mark>`
+  // delimiters wrap the matched lexemes.
+  string snippet = 6 [json_name = "snippet"];
 }
 
 // CatalogueResponse is returned for paginated book catalogue views (GET /api/catalogue).

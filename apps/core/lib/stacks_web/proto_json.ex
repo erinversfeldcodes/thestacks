@@ -133,8 +133,10 @@ defmodule StacksWeb.ProtoJSON do
   ONLY for discoverable-by-design platform hits (an always-visible
   `looking_for_home` placement or an active marketplace listing).
   `:bookshelf_name` is set ONLY for the viewer's own collection hits (the shelf
-  the book sits on) — platform hits leave it empty. A plain platform book passes
-  `%{}` and carries neither.
+  the book sits on) — platform hits leave it empty. `:snippet` is a
+  `ts_headline`-highlighted description excerpt set ONLY for a scope=deep hit
+  whose description matched (#284); every title-only hit leaves it empty. A plain
+  platform book passes `%{}` and carries none of them.
   """
   @spec search_hit(map(), map()) :: map()
   def search_hit(book, label \\ %{}) do
@@ -143,7 +145,8 @@ defmodule StacksWeb.ProtoJSON do
       source: Map.get(label, :source, ""),
       owner_handle: Map.get(label, :owner_handle, ""),
       price: Map.get(label, :price, ""),
-      bookshelf_name: Map.get(label, :bookshelf_name, "")
+      bookshelf_name: Map.get(label, :bookshelf_name, ""),
+      snippet: Map.get(label, :snippet, "")
     }
   end
 

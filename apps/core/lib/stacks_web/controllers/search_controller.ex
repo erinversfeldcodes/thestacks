@@ -28,21 +28,30 @@ defmodule StacksWeb.SearchController do
   """
   def index(conn, %{"q" => query}) when is_binary(query) and query != "" do
     limit = parse_limit(conn.params["limit"])
+    scope = parse_scope(conn.params["scope"])
     viewer = build_viewer(conn)
 
     platform_books =
       query
-      |> Books.search_books(limit: limit)
+      |> Books.search_books(limit: limit, scope: scope)
       |> Enum.filter(&Visibility.can_view?(&1, viewer))
 
-    collection = collection_section(viewer, query, limit)
+    collection = collection_section(viewer, query, limit, scope)
     collection_ids = MapSet.new(collection, & &1.book.id)
     labels = discovery_labels(platform_books)
+
+    # Deep search (#284): a `ts_headline` excerpt for every hit — collection or
+    # platform — whose DESCRIPTION matched. Title-only hits (and every hit under
+    # the default title scope) are absent from the map and carry an empty snippet.
+    snippets = deep_snippets(scope, query, platform_books, collection)
 
     platform_hits =
       platform_books
       |> Enum.reject(&MapSet.member?(collection_ids, &1.id))
-      |> Enum.map(fn book -> ProtoJSON.search_hit(book, Map.get(labels, book.id, %{})) end)
+      |> Enum.map(fn book ->
+        label = labels |> Map.get(book.id, %{}) |> put_snippet(snippets, book.id)
+        ProtoJSON.search_hit(book, label)
+      end)
 
     json(conn, %{
       query: query,
@@ -50,7 +59,7 @@ defmodule StacksWeb.SearchController do
       results: Enum.map(platform_books, &ProtoJSON.search_book/1),
       collection:
         Enum.map(collection, fn %{book: book, bookshelf_name: name} ->
-          ProtoJSON.search_hit(book, %{bookshelf_name: name})
+          ProtoJSON.search_hit(book, put_snippet(%{bookshelf_name: name}, snippets, book.id))
         end),
       platform_hits: platform_hits
     })
@@ -69,12 +78,37 @@ defmodule StacksWeb.SearchController do
     end
   end
 
-  # "Your Collection": only an authenticated viewer has one.
-  defp collection_section({:platform_user, user_id}, query, limit) do
-    Shelving.search_collection(user_id, query, limit: limit)
+  # "Your Collection": only an authenticated viewer has one. `scope` (:title |
+  # :deep) is threaded through so deep search covers the collection section too.
+  defp collection_section({:platform_user, user_id}, query, limit, scope) do
+    Shelving.search_collection(user_id, query, limit: limit, scope: scope)
   end
 
-  defp collection_section(:unauthenticated, _query, _limit), do: []
+  defp collection_section(:unauthenticated, _query, _limit, _scope), do: []
+
+  # Only `scope=deep` enables description matching; anything else is title-only.
+  defp parse_scope("deep"), do: :deep
+  defp parse_scope(_), do: :title
+
+  # Under deep scope, build the `%{book_id => snippet}` map over the union of the
+  # platform + collection hit ids. Title scope skips the extra query entirely.
+  defp deep_snippets(:deep, query, platform_books, collection) do
+    ids =
+      (Enum.map(platform_books, & &1.id) ++ Enum.map(collection, & &1.book.id))
+      |> Enum.uniq()
+
+    Books.description_snippets(ids, query)
+  end
+
+  defp deep_snippets(_title, _query, _platform_books, _collection), do: %{}
+
+  # Attach the `:snippet` label only when this book matched on its description.
+  defp put_snippet(label, snippets, book_id) do
+    case Map.get(snippets, book_id) do
+      nil -> label
+      snippet -> Map.put(label, :snippet, snippet)
+    end
+  end
 
   # Merges the two discovery-label sources into a `%{book_id => label}` map for
   # the given platform books. "listed" (active marketplace listing, carries a

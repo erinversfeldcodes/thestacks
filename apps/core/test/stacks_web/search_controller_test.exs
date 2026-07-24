@@ -353,4 +353,94 @@ defmodule StacksWeb.SearchControllerTest do
       assert Map.has_key?(hit, "bookshelf_name")
     end
   end
+
+  # #284 — Deep search. `?scope=deep` extends matching to book descriptions (not
+  # just titles), applies to BOTH sections (collection + platform), and returns a
+  # `ts_headline` snippet on each hit whose DESCRIPTION matched. The default
+  # (no scope / title-only) behaviour is unchanged.
+  describe "GET /api/search — deep scope (#284)" do
+    # Seeds a platform-visible book that mentions the term only in its description.
+    defp insert_description_only_book(title, description, isbn) do
+      book = insert(:book, title: title, description: description)
+      insert(:book_edition, book: book, isbn: isbn, is_primary: true)
+      book
+    end
+
+    test "scope=deep surfaces a description-only match with a highlighted snippet",
+         %{conn: conn} do
+      book =
+        insert_description_only_book(
+          "Unrelated Cover",
+          "A definitive treatise on interstellar cartography.",
+          "9780000000200"
+        )
+
+      response = conn |> get("/api/search", q: "cartography", scope: "deep") |> json_response(200)
+
+      hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == book.id))
+      assert hit, "description-only book should surface under scope=deep"
+      assert hit["snippet"] =~ "<mark>cartography</mark>"
+    end
+
+    test "default scope (no param) does NOT surface a description-only match", %{conn: conn} do
+      book =
+        insert_description_only_book(
+          "Quiet Spine",
+          "A meandering account of deep-sea bioluminescence.",
+          "9780000000217"
+        )
+
+      response = conn |> get("/api/search", q: "bioluminescence") |> json_response(200)
+
+      platform_ids = Enum.map(response["platform_hits"], & &1["book"]["id"])
+      result_ids = Enum.map(response["results"], & &1["id"])
+      refute book.id in platform_ids
+      refute book.id in result_ids
+    end
+
+    test "a title-only hit under scope=deep carries an empty snippet", %{conn: conn} do
+      book =
+        insert_description_only_book(
+          "Lighthouse Keeper",
+          "An unrelated blurb about nothing in particular.",
+          "9780000000224"
+        )
+
+      response = conn |> get("/api/search", q: "Lighthouse", scope: "deep") |> json_response(200)
+
+      hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == book.id))
+      assert hit, "title match should still surface under deep scope"
+      assert hit["snippet"] == ""
+    end
+
+    test "deep scope applies to the collection section with a snippet", %{conn: conn, user: user} do
+      book =
+        insert_description_only_book(
+          "My Own Volume",
+          "Field notes on alpine mycology and spores.",
+          "9780000000231"
+        )
+
+      place(user, book, "library")
+
+      response = conn |> get("/api/search", q: "mycology", scope: "deep") |> json_response(200)
+
+      hit = Enum.find(response["collection"], &(&1["book"]["id"] == book.id))
+      assert hit, "viewer's own description-matched book should land in collection under deep"
+      assert hit["bookshelf_name"] == "library"
+      assert hit["snippet"] =~ "<mark>mycology</mark>"
+
+      refute book.id in Enum.map(response["platform_hits"], & &1["book"]["id"])
+    end
+
+    test "the SearchHit shape always carries a snippet field (empty by default)", %{conn: conn} do
+      insert_book_with_edition(title: "Snippet Shape", isbn: "9780000000248")
+
+      response = conn |> get("/api/search", q: "Snippet Shape") |> json_response(200)
+
+      hit = hd(response["platform_hits"])
+      assert Map.has_key?(hit, "snippet")
+      assert hit["snippet"] == ""
+    end
+  end
 end
