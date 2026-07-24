@@ -131,6 +131,18 @@ defmodule Stacks.Factory do
     }
   end
 
+  # book_id / from_bookshelf / to_bookshelf intentionally default to random
+  # UUIDs, so a bare `insert(:placement_history)` WILL violate the three FKs on
+  # op.bookshelf_placement_history (book_id is null: false → the failure you
+  # hit first). That is BY DESIGN, not a factory bug: the history table is an
+  # append-only audit trail deliberately decoupled from Ecto associations
+  # (proto/persisted.exs:525-542 maps these columns as plain :binary_id, never
+  # belongs_to, so a book/bookshelf delete never cascades its history away).
+  # Because there is no association, ExMachina cannot lazily insert real rows
+  # on insert — always override the FKs with real records, e.g. the
+  # `seed_move_history/3` pattern in shelving_test.exs:
+  #   insert(:placement_history, book_id: book.id,
+  #     from_bookshelf: bookshelf.id, to_bookshelf: bookshelf.id)
   def placement_history_factory do
     %PlacementHistory{
       book_id: Ecto.UUID.generate(),
