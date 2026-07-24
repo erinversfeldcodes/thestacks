@@ -11,8 +11,9 @@ import Api
 import Components.FilterPanel exposing (FilterState, SortOrder(..), defaultFilterState, filterPanel)
 import Components.SearchBar exposing (searchBar)
 import Components.SortSelector exposing (sortSelector)
-import Html exposing (Html, a, div, h1, h2, h3, p, text)
-import Html.Attributes exposing (class, href)
+import Html exposing (Html, a, button, div, h1, h2, h3, p, text)
+import Html.Attributes exposing (class, href, id)
+import Html.Events exposing (onClick)
 import Http
 import Navigation.Route as Route
 import Process
@@ -44,11 +45,17 @@ type Msg
     | YearFromChanged String
     | YearToChanged String
     | ClearFilters
+    | BookClicked String
 
 
 type OutMsg
     = NoOut
     | SessionExpired
+      -- A search result was activated: open the book detail overlay for this
+      -- book id. Main handles this by opening the overlay over /search (URL
+      -- unchanged, per the overlay convention / ADR-005), with the clicked row
+      -- as the focus-return trigger (see #114, #289).
+    | OpenOverlay String
 
 
 init : Model
@@ -190,6 +197,9 @@ update msg model maybeToken =
 
         ClearFilters ->
             ( { model | filters = defaultFilterState }, Cmd.none, NoOut )
+
+        BookClicked bookId ->
+            ( model, Cmd.none, OpenOverlay bookId )
 
 
 view : Model -> Html Msg
@@ -383,9 +393,19 @@ sortBooks sort books =
             List.sortBy (bookPublicationYear >> Maybe.withDefault 0) books
 
 
+{-| A search result is a real `<button>` (natively keyboard-focusable and
+Enter/Space-activatable — the accessible interactive element, mirroring the
+shelf-spine pattern in `Page.Bookshelf.Helpers.viewClickableSpine`). Its stable
+id `search-result-<bookId>` is the focus-return target Main hands to the overlay
+so focus comes back to the clicked row on close (#114 / #289).
+-}
 viewBookResult : Book -> Html Msg
 viewBookResult book =
-    div [ class "search-result" ]
+    button
+        [ class "search-result"
+        , id ("search-result-" ++ book.id)
+        , onClick (BookClicked book.id)
+        ]
         [ h3 [ class "search-result__title" ] [ text book.title ]
         , p [ class "search-result__author" ] [ text (authorName book) ]
         , case bookPublicationYear book of

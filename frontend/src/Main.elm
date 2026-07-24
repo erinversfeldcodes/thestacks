@@ -1569,6 +1569,18 @@ update msg model =
                         Search.SessionExpired ->
                             handleSessionExpiry model
 
+                        Search.OpenOverlay bookId ->
+                            let
+                                baseModel =
+                                    { model | page = PageSearch newSubModel }
+
+                                ( overlayModel, overlayCmd ) =
+                                    openOverlayWithTrigger baseModel bookId ("search-result-" ++ bookId)
+                            in
+                            ( overlayModel
+                            , Cmd.batch [ Cmd.map SearchMsg subCmd, overlayCmd ]
+                            )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -2364,6 +2376,17 @@ Stores the triggering spine element ID so focus can return on close.
 -}
 openOverlay : Model -> String -> ( Model, Cmd Msg )
 openOverlay model bookId =
+    openOverlayWithTrigger model bookId ("spine-" ++ bookId)
+
+
+{-| Open the book detail overlay, returning focus to an explicit trigger
+element id on close. Shelf pages trigger from a `spine-<bookId>` element
+(`openOverlay`); the search results list triggers from its own
+`search-result-<bookId>` button (#289) — both compose with the #114
+focus-return mechanism via `triggerSpineId`.
+-}
+openOverlayWithTrigger : Model -> String -> String -> ( Model, Cmd Msg )
+openOverlayWithTrigger model bookId triggerId =
     let
         maybeToken =
             Maybe.map .token model.auth
@@ -2374,7 +2397,7 @@ openOverlay model bookId =
         overlay =
             { bookId = bookId
             , detail = detailModel
-            , triggerSpineId = Just ("spine-" ++ bookId)
+            , triggerSpineId = Just triggerId
             }
     in
     ( { model | bookDetailOverlay = Just overlay }

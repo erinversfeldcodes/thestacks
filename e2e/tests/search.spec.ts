@@ -294,6 +294,59 @@ test.describe("Search page", () => {
     });
   });
 
+  // ── Result click-through to the book detail overlay (#289) ──────────────────
+
+  test("clicking a result opens the book detail overlay; URL unchanged; Escape returns focus", async ({
+    page,
+  }) => {
+    await page.goto("/search");
+    await page.getByTestId("search-page").waitFor({ timeout: 5000 });
+    await assertBookSeedSufficient(page);
+
+    await page.getByTestId("search-input").fill(BOOK_QUERY);
+    await expect(page.locator(".search-result")).toHaveCount(3, {
+      timeout: 10000,
+    });
+
+    // Explicit title sort so the target row is deterministic (relevance order
+    // is not client-deterministic, per #290) — first row is LAUGHTER.
+    await page.getByTestId("sort-selector").selectOption("title");
+    await expect(page.locator(".search-result__title").first()).toHaveText(
+      LAUGHTER,
+    );
+
+    // The row is a real <button> carrying the stable focus-return id
+    // (`search-result-<bookId>`). Capture that id before clicking so we can
+    // assert focus lands back on this exact element after Escape.
+    const row = page.locator(".search-result", {
+      has: page.locator(".search-result__title", { hasText: LAUGHTER }),
+    });
+    const rowId = await row.getAttribute("id");
+    expect(rowId).toMatch(/^search-result-.+/);
+
+    const urlBefore = page.url();
+
+    await row.click();
+
+    // Overlay opens over /search showing the clicked book's title.
+    const overlay = page.getByTestId("book-overlay");
+    await expect(overlay).toBeVisible({ timeout: 10000 });
+    await expect(overlay.getByTestId("book-title")).toContainText(LAUGHTER, {
+      timeout: 5000,
+    });
+
+    // Overlay convention (ADR-005): opening the overlay does NOT change the URL.
+    expect(page.url()).toBe(urlBefore);
+    expect(new URL(page.url()).pathname).toBe("/search");
+
+    // Escape closes the overlay and returns focus to the clicked row (#114).
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveCount(0, { timeout: 5000 });
+    await expect(page.locator(`[id="${rowId}"]`)).toBeFocused({
+      timeout: 5000,
+    });
+  });
+
   test("a year range that matches nothing shows the filter-aware empty state", async ({
     page,
   }) => {

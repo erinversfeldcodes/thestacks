@@ -60,6 +60,8 @@ suite =
         , readersEmptyResults
         , readersFailure
         , readers401RaisesSessionExpired
+        , resultClickEmitsOpenOverlay
+        , resultRendersAsButtonWithStableId
         ]
 
 
@@ -457,6 +459,58 @@ yearFilterAndClear =
                 |> ProgramTest.update ClearFilters
                 |> expectResultTitleOrder
                     [ "Zebra Tales", "Middle Ground", "Alpha Dawn" ]
+
+
+
+-- RESULT CLICK-THROUGH (#289) -------------------------------------------------
+--
+-- Clicking a search result opens the book detail overlay for that book. The
+-- OutMsg (`OpenOverlay bookId`) is swallowed by the ProgramTest harness — like
+-- readers401RaisesSessionExpired — so the emit contract is asserted directly
+-- against `Search.update`; the render test proves the click surface is a real,
+-- keyboard-operable <button> carrying the stable focus-return id.
+
+
+{-| Activating a result must emit `OpenOverlay <bookId>` — the OutMsg Main turns
+into an overlay-open with a `search-result-<bookId>` focus-return trigger. The
+harness swallows the OutMsg, so assert the update contract directly.
+-}
+resultClickEmitsOpenOverlay : Test
+resultClickEmitsOpenOverlay =
+    test "result_click_open_overlay: BookClicked emits OpenOverlay for that book id" <|
+        \() ->
+            let
+                ( _, _, outMsg ) =
+                    Search.update
+                        (BookClicked "book-Zebra Tales")
+                        Search.init
+                        (Just "test-token")
+            in
+            Expect.equal outMsg (Search.OpenOverlay "book-Zebra Tales")
+
+
+{-| Each result renders as a real `<button>` (natively keyboard-focusable and
+Enter/Space-activatable) carrying `id="search-result-<bookId>"` — the stable
+element id Main hands the overlay as the focus-return trigger (#114 / #289). A
+plain div with an onClick would fail both the tag and the id assertion.
+-}
+resultRendersAsButtonWithStableId : Test
+resultRendersAsButtonWithStableId =
+    test "result_button_stable_id: a result renders as a <button> with id search-result-<bookId>" <|
+        \() ->
+            loadedThreeBooks
+                |> ProgramTest.expectView
+                    (\view ->
+                        Query.findAll
+                            [ Selector.tag "button"
+                            , Selector.id "search-result-book-Zebra Tales"
+                            ]
+                            view
+                            |> Expect.all
+                                [ Query.count (Expect.equal 1)
+                                , Query.index 0 >> Query.has [ Selector.text "Zebra Tales" ]
+                                ]
+                    )
 
 
 

@@ -826,7 +826,16 @@ h4 {
     margin-top: 1rem;
 }
 
+/* A search result is a real <button> (#289) so it is keyboard-operable; reset
+   the native button chrome so it renders as the full-width card row it was. */
 .search-result {
+    appearance: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    display: block;
+    width: 100%;
     padding: 1rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -836,6 +845,11 @@ h4 {
 
 .search-result:hover {
     background-color: rgba(255, 255, 255, 0.04);
+}
+
+.search-result:focus-visible {
+    outline: 2px solid #d4a029;
+    outline-offset: 2px;
 }
 
 .search-result__title {
@@ -3161,6 +3175,29 @@ h4 {
     z-index: 2;
     background: radial-gradient(ellipse at center,
         transparent 55%, rgba(0, 0, 0, 0.22) 100%);
+}
+
+/* --- Bookmark ribbon: books the owner has written about (#287) --- */
+
+/* A slim cloth ribbon tucked into the head of the spine and poking a little
+   above the top edge, marking a book the owner has written about. A direct
+   child of the .book wrapper (not the overflow-hidden spine face) so it can
+   extend past the top edge; decorative only — the ", with your notes" aria
+   suffix on the .book element carries the meaning. The swallowtail foot is a
+   clip-path notch so it reads as a ribbon end, not a plain bar. */
+.book__ribbon {
+    position: absolute;
+    top: -7px;
+    right: 22%;
+    width: 7px;
+    height: 26px;
+    background: linear-gradient(180deg,
+        #7c1f2b 0%, #9e2a38 55%, #7c1f2b 100%);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    border-radius: 1px 1px 0 0;
+    z-index: 4;
+    pointer-events: none;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
 }
 
 .book__title {
