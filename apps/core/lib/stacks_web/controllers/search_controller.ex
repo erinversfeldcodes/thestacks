@@ -35,8 +35,8 @@ defmodule StacksWeb.SearchController do
       |> Books.search_books(limit: limit)
       |> Enum.filter(&Visibility.can_view?(&1, viewer))
 
-    collection_books = collection_section(viewer, query, limit)
-    collection_ids = MapSet.new(collection_books, & &1.id)
+    collection = collection_section(viewer, query, limit)
+    collection_ids = MapSet.new(collection, & &1.book.id)
     labels = discovery_labels(platform_books)
 
     platform_hits =
@@ -48,7 +48,10 @@ defmodule StacksWeb.SearchController do
       query: query,
       count: length(platform_books),
       results: Enum.map(platform_books, &ProtoJSON.search_book/1),
-      collection: Enum.map(collection_books, &ProtoJSON.search_hit/1),
+      collection:
+        Enum.map(collection, fn %{book: book, bookshelf_name: name} ->
+          ProtoJSON.search_hit(book, %{bookshelf_name: name})
+        end),
       platform_hits: platform_hits
     })
   end

@@ -228,10 +228,31 @@ defmodule StacksWeb.SearchControllerTest do
       refute book.id in platform_ids
 
       hit = Enum.find(response["collection"], &(&1["book"]["title"] == "Dune Messiah"))
-      # Owned by the viewer — never source-labelled.
+      # Owned by the viewer — never source-labelled, but tagged with the shelf.
       assert hit["source"] == ""
       assert hit["owner_handle"] == ""
       assert hit["price"] == ""
+      assert hit["bookshelf_name"] == "library"
+    end
+
+    test "collection hits carry their bookshelf name; platform hits leave it empty",
+         %{conn: conn, user: user} do
+      mine = insert_book_with_edition(title: "Marginalia Notes", isbn: "9780000000170")
+      place(user, mine, "wishlist")
+
+      seller = insert(:user, handle: "note_seller")
+      listed = insert_book_with_edition(title: "Marginalia Ledger", isbn: "9780000000187")
+      insert(:listing, book: listed, seller: seller, status: "active", price_cents: 5_000)
+
+      response = conn |> get("/api/search", q: "Marginalia") |> json_response(200)
+
+      collection_hit = Enum.find(response["collection"], &(&1["book"]["id"] == mine.id))
+      assert collection_hit["bookshelf_name"] == "wishlist"
+
+      platform_hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == listed.id))
+      # Platform provenance is source/handle/price — never the viewer's shelf.
+      assert platform_hit["source"] == "listed"
+      assert platform_hit["bookshelf_name"] == ""
     end
 
     test "another user's private library placement leaks no label or provenance",
@@ -329,6 +350,7 @@ defmodule StacksWeb.SearchControllerTest do
       assert Map.has_key?(hit, "source")
       assert Map.has_key?(hit, "owner_handle")
       assert Map.has_key?(hit, "price")
+      assert Map.has_key?(hit, "bookshelf_name")
     end
   end
 end

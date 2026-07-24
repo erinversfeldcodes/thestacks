@@ -1525,10 +1525,20 @@ defmodule Stacks.ShelvingTest do
       place_on(other, theirs, "library")
 
       results = Shelving.search_collection(user.id, "Tidewater")
-      ids = Enum.map(results, & &1.id)
+      ids = Enum.map(results, & &1.book.id)
 
       assert mine.id in ids
       refute theirs.id in ids
+    end
+
+    test "tags each hit with the bookshelf it sits on", %{user: user} do
+      book = insert(:book, title: "Shelf Tagged")
+      place_on(user, book, "wishlist")
+
+      assert [%{book: hit_book, bookshelf_name: "wishlist"}] =
+               Shelving.search_collection(user.id, "Shelf Tagged")
+
+      assert hit_book.id == book.id
     end
 
     test "excludes removed placements", %{user: user} do
@@ -1545,7 +1555,9 @@ defmodule Stacks.ShelvingTest do
 
       results = Shelving.search_collection(user.id, "Twice Shelved")
 
-      assert Enum.count(results, &(&1.id == book.id)) == 1
+      assert Enum.count(results, &(&1.book.id == book.id)) == 1
+      # Deterministic: the alphabetically-first shelf name wins ("library" < "wishlist").
+      assert [%{bookshelf_name: "library"}] = results
     end
   end
 

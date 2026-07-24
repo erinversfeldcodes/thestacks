@@ -179,29 +179,42 @@ defmodule Stacks.Shelving do
   @doc """
   Searches the viewer's own collection by book title (#285).
 
-  Returns up to `:limit` (default 20) distinct books the user has an ACTIVE
-  (non-removed) placement of, whose title matches the full-text query. The raw
-  query is passed straight to `plainto_tsquery` via a bound param — injection
-  safety comes from Ecto param binding + `plainto_tsquery` treating its input as
-  plain text (the #291/#296 rationale), NOT from stripping characters. `title_tsv`
-  is unqualified: only `op.books` carries that generated column, so it resolves
-  unambiguously across the placement/bookshelf joins. Author + editions are
-  preloaded for search-hit serialization.
+  Returns up to `:limit` (default 20) `%{book: Book.t(), bookshelf_name: String.t()}`
+  entries — the distinct books the user has an ACTIVE (non-removed) placement of
+  whose title matches the query, each tagged with the bookshelf it sits on (the
+  "where" behind US-1.5.1's collection story). The raw query is passed straight
+  to `plainto_tsquery` via a bound param — injection safety comes from Ecto param
+  binding + `plainto_tsquery` treating its input as plain text (the #291/#296
+  rationale), NOT from stripping characters. `title_tsv` is unqualified: only
+  `op.books` carries that generated column, so it resolves unambiguously across
+  the placement/bookshelf joins. When a book sits on more than one shelf the
+  alphabetically-first bookshelf name wins (deterministic via the order_by).
+  Author + editions are batch-preloaded for search-hit serialization.
   """
-  @spec search_collection(binary(), String.t(), keyword()) :: [Book.t()]
+  @spec search_collection(binary(), String.t(), keyword()) :: [
+          %{book: Book.t(), bookshelf_name: String.t()}
+        ]
   def search_collection(user_id, query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
 
-    Book
-    |> join(:inner, [b], p in Placement, on: p.book_id == b.id and is_nil(p.removed_at))
-    |> join(:inner, [b, p], bs in Bookshelf,
-      on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
-    )
-    |> where([b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
-    |> distinct(true)
-    |> limit(^limit)
-    |> preload([:author, :editions])
-    |> Repo.all()
+    pairs =
+      Book
+      |> join(:inner, [b], p in Placement, on: p.book_id == b.id and is_nil(p.removed_at))
+      |> join(:inner, [b, p], bs in Bookshelf,
+        on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
+      )
+      |> where([b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
+      |> order_by([b, p, bs], asc: b.title, asc: bs.name)
+      |> select([b, p, bs], {b, bs.name})
+      |> Repo.all()
+      |> Enum.uniq_by(fn {book, _name} -> book.id end)
+      |> Enum.take(limit)
+
+    books = pairs |> Enum.map(&elem(&1, 0)) |> Repo.preload([:author, :editions])
+
+    Enum.zip_with(books, pairs, fn book, {_book, name} ->
+      %{book: book, bookshelf_name: name}
+    end)
   end
 
   @doc """

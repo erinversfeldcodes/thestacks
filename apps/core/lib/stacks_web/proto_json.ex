@@ -127,11 +127,14 @@ defmodule StacksWeb.ProtoJSON do
   Serializes a search result into the proto `SearchHit` shape (#285).
 
   Wraps a book (via `search_book/1`) with optional discovery-source provenance.
-  `label` is a map that may carry `:source`, `:owner_handle`, and `:price`; each
-  defaults to the empty string (proto3 string default) when absent. Labels are
-  populated ONLY for discoverable-by-design provenance (an always-visible
-  `looking_for_home` placement or an active marketplace listing) — a collection
-  hit or a plain platform book passes `%{}` and carries no provenance.
+  `label` is a map that may carry `:source`, `:owner_handle`, `:price`, and
+  `:bookshelf_name`; each defaults to the empty string (proto3 string default)
+  when absent. The provenance labels (`:source`/`:owner_handle`/`:price`) are set
+  ONLY for discoverable-by-design platform hits (an always-visible
+  `looking_for_home` placement or an active marketplace listing).
+  `:bookshelf_name` is set ONLY for the viewer's own collection hits (the shelf
+  the book sits on) — platform hits leave it empty. A plain platform book passes
+  `%{}` and carries neither.
   """
   @spec search_hit(map(), map()) :: map()
   def search_hit(book, label \\ %{}) do
@@ -139,7 +142,8 @@ defmodule StacksWeb.ProtoJSON do
       book: search_book(book),
       source: Map.get(label, :source, ""),
       owner_handle: Map.get(label, :owner_handle, ""),
-      price: Map.get(label, :price, "")
+      price: Map.get(label, :price, ""),
+      bookshelf_name: Map.get(label, :bookshelf_name, "")
     }
   end
 

@@ -89,7 +89,7 @@ message SearchResponse {
 // design (an always-visible looking_for_home placement, or an active
 // marketplace listing) — never for ordinary private placements.
 // JSON shape: {book: {...}, source: "" | "looking_for_home" | "listed",
-//              owner_handle: "", price: ""}
+//              owner_handle: "", price: "", bookshelf_name: ""}
 message SearchHit {
   // The matched book (with embedded author, editions, primary_edition).
   stacks.common.v1.Book book = 1 [json_name = "book"];
@@ -106,6 +106,12 @@ message SearchHit {
 
   // Formatted price (e.g. "R120") for a "listed" hit. Empty string otherwise.
   string price = 4 [json_name = "price"];
+
+  // The viewer's own bookshelf this book sits on ("library", "wishlist",
+  // "reading_pile", "antilibrary", "looking_for_home") — the "where" behind
+  // US-1.5.1's collection story. Populated for COLLECTION hits only; always
+  // empty ("") on platform_hits (platform provenance is source/handle/price).
+  string bookshelf_name = 5 [json_name = "bookshelf_name"];
 }
 
 // CatalogueResponse is returned for paginated book catalogue views (GET /api/catalogue).
