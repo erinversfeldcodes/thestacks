@@ -371,6 +371,68 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     expect(aPile).toContain(WEAR_SUFFIX);
   });
 
+  test("a Softened shelf spine carries a muted worn filter a Pristine one lacks", async ({
+    page,
+    request,
+  }) => {
+    // Issue #288: wear is visible, not just audible. A Library (Softened) spine
+    // gets the .book--softened treatment — a `filter` on its .book__spine face
+    // (saturate/brightness) plus a corner-wear vignette — while a Wish List
+    // (Pristine) spine gets none. We read the computed `filter` on the spine
+    // face: Softened resolves to a non-"none" filter string, Pristine to "none".
+    const all = await fetchAllCatalogue(request);
+    const [libBook, wishBook] = lookup(all, [
+      "The Name of the Rose", // Library — Softened
+      "The Idiot", // Wish List — Pristine
+    ]);
+    assertSeedOrSkip(
+      libBook !== null && wishBook !== null,
+      "wear-CSS test needs The Name of the Rose (Library) and The Idiot (Wish List)",
+    );
+
+    const session = await mintOrSkip(request);
+    await apiPlace(request, session.token, "library", libBook!.id, libBook!.title);
+    await apiPlace(
+      request,
+      session.token,
+      "wishlist",
+      wishBook!.id,
+      wishBook!.title,
+    );
+    await injectSession(page, session);
+
+    // Softened (Library): the spine face carries a real, non-"none" filter.
+    await gotoShelf(page, "library");
+    const libSpineFace = page.locator(
+      `#spine-${libBook!.id} [data-testid="book-spine"] .book__spine`,
+    );
+    await expect(libSpineFace).toBeAttached({ timeout: 10000 });
+    const libFilter = await libSpineFace.evaluate(
+      (e) => getComputedStyle(e as HTMLElement).filter,
+    );
+    expect(
+      libFilter,
+      "Softened (Library) spine has a muted worn filter",
+    ).not.toBe("none");
+    expect(libFilter).toContain("saturate");
+
+    // Pristine (Wish List): the same spine face carries no filter.
+    await gotoShelf(page, "wishlist");
+    const wishSpineFace = page.locator(
+      `#spine-${wishBook!.id} [data-testid="book-spine"] .book__spine`,
+    );
+    await expect(wishSpineFace).toBeAttached({ timeout: 10000 });
+    const wishFilter = await wishSpineFace.evaluate(
+      (e) => getComputedStyle(e as HTMLElement).filter,
+    );
+    expect(wishFilter, "Pristine (Wish List) spine has no wear filter").toBe(
+      "none",
+    );
+
+    // The distinction is real, not a coincidence of equal values.
+    expect(libFilter).not.toBe(wishFilter);
+  });
+
   test("each spine exposes its title, page count, and list semantics", async ({
     page,
     request,

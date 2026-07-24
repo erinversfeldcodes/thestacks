@@ -33,6 +33,7 @@ suite =
         , clothBookHasNoBands
         , spineHasTextureBackgroundImage
         , wearSuffixInAriaLabel
+        , softenedBookHasWearClass
         , perShelfWearConfig
         , readingPileSpineIsSoftened
         ]
@@ -287,6 +288,37 @@ wearSuffixInAriaLabel =
                 softenedHiddenBook
                     |> Query.fromHtml
                     |> hasAriaLabel "Book: The Secret History by Donna Tartt, 400 pages, well-loved, hidden (only visible to you)"
+        ]
+
+
+{-| Wear also drives a visible CSS hook: a `Softened` book carries the
+`book--softened` class (the muted, worn treatment in main.css), a `Pristine` book
+does not, and the class composes with the base `book` class and the owner-only
+`book--hidden` class (Issue #288). Asserting the class here pins the Elm side of
+the visual distinction the Playwright computed-style test proves live.
+-}
+softenedBookHasWearClass : Test
+softenedBookHasWearClass =
+    describe "wear level drives the book--softened class"
+        [ test "Softened book has the book--softened class" <|
+            \_ ->
+                sampleClothBook
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.class "book", Selector.class "book--softened" ]
+        , test "Pristine book has no book--softened class" <|
+            \_ ->
+                sampleBook
+                    |> Query.fromHtml
+                    |> Query.hasNot [ Selector.class "book--softened" ]
+        , test "Softened + hidden composes book, book--hidden and book--softened" <|
+            \_ ->
+                softenedHiddenBook
+                    |> Query.fromHtml
+                    |> Query.has
+                        [ Selector.class "book"
+                        , Selector.class "book--hidden"
+                        , Selector.class "book--softened"
+                        ]
         ]
 
 

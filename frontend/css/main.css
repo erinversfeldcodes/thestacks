@@ -3142,6 +3142,27 @@ h4 {
     z-index: 1;
 }
 
+/* --- Wear: Softened (well-loved) --- */
+
+/* A well-loved book reads as gently muted and worn at the edges: the spine
+   colour is slightly desaturated and darkened, and a soft corner-wear vignette
+   darkens the four corners. Pristine books carry no treatment. Applied to the
+   spine face so the 3D structure and hover animation are untouched; composes
+   with .book--hidden (owner-private opacity lives on the .book wrapper). */
+.book--softened .book__spine {
+    filter: saturate(0.8) brightness(0.9);
+}
+
+.book--softened .book__spine::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    background: radial-gradient(ellipse at center,
+        transparent 55%, rgba(0, 0, 0, 0.22) 100%);
+}
+
 .book__title {
     writing-mode: vertical-rl;
     text-orientation: mixed;

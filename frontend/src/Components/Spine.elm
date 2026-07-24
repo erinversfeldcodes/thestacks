@@ -287,16 +287,27 @@ book config =
                 ++ wearSuffix
                 ++ hiddenSuffix
 
+        -- A well-loved (Softened) book earns a muted, worn treatment via the
+        -- book--softened class (see .book--softened in main.css); Pristine books
+        -- get nothing. Composed alongside book/book--hidden below.
+        wearClass =
+            case config.wearLevel of
+                Pristine ->
+                    ""
+
+                Softened ->
+                    " book--softened"
+
         -- Owner-only placements on an otherwise-visible shelf render as a
         -- faint outline so the owner still sees the book is there but private.
         hiddenAttrs =
             if config.hidden then
-                [ class "book book--hidden"
+                [ class ("book book--hidden" ++ wearClass)
                 , style "opacity" "0.35"
                 ]
 
             else
-                [ class "book" ]
+                [ class ("book" ++ wearClass) ]
     in
     div
         (hiddenAttrs
