@@ -33,6 +33,7 @@ hiddenBook =
         , author = "Donna Tartt"
         , coverImageUrl = Nothing
         , hidden = True
+        , hasWriting = False
         }
 
 
@@ -46,6 +47,7 @@ visibleBook =
         , author = "Donna Tartt"
         , coverImageUrl = Nothing
         , hidden = False
+        , hasWriting = False
         }
 
 

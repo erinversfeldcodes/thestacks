@@ -558,12 +558,16 @@ defmodule StacksWeb.ProtoJSON do
   Used by BookshelfController to build the `shelves` response shape.
   Each shelf includes its position and the placements visible to the viewer.
   """
-  @spec shelf_with_placements(map(), term()) :: map()
-  def shelf_with_placements(shelf, viewer) do
+  @spec shelf_with_placements(map(), term(), MapSet.t()) :: map()
+  def shelf_with_placements(shelf, viewer, writing_book_ids \\ MapSet.new()) do
     visible_placements =
       shelf.placements
       |> Enum.filter(&(Stacks.Visibility.resolve_visibility(&1, viewer) == :visible))
-      |> Enum.map(&placement_detail/1)
+      |> Enum.map(fn placement ->
+        placement
+        |> placement_detail()
+        |> Map.put(:has_user_writing, MapSet.member?(writing_book_ids, placement.book_id))
+      end)
 
     %{id: shelf.id, position: shelf.position, placements: visible_placements}
   end

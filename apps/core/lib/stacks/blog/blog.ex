@@ -370,6 +370,31 @@ defmodule Stacks.Blog do
     |> Repo.all()
   end
 
+  @doc """
+  Returns the subset of `book_ids` that `user_id` has written about — i.e. has at
+  least one visible book association authored by them (the "has user writing"
+  signal the spine bookmark ribbon renders, #287).
+
+  Same association semantics as `list_posts_for_book_by_user/2` (visible
+  association authored by the user, drafts included), but batched: one query for a
+  whole shelf so rendering N spines costs no N+1 lookups. An empty `book_ids`
+  short-circuits to the empty set without a query.
+  """
+  @spec book_ids_with_user_writing(String.t(), [String.t()]) :: MapSet.t()
+  def book_ids_with_user_writing(_user_id, []), do: MapSet.new()
+
+  def book_ids_with_user_writing(user_id, book_ids) do
+    from(a in PostBookAssociation,
+      join: p in Post,
+      on: p.id == a.post_id,
+      where: p.user_id == ^user_id and a.visible == true and a.book_id in ^book_ids,
+      select: a.book_id,
+      distinct: true
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
   # ---------------------------------------------------------------------------
   # Comments
   # ---------------------------------------------------------------------------

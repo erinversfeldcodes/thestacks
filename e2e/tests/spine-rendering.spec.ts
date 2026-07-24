@@ -1,6 +1,11 @@
 import { test, expect } from "@playwright/test";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
-import { mintOrSkip, injectSession, assertSeedOrSkip } from "./helpers";
+import {
+  mintOrSkip,
+  injectSession,
+  assertSeedOrSkip,
+  seedBookWriting,
+} from "./helpers";
 
 /**
  * Issue #113 Phase 3 — the spine-rendering flagship Playwright suite (US-1.3.1
@@ -391,7 +396,13 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     );
 
     const session = await mintOrSkip(request);
-    await apiPlace(request, session.token, "library", libBook!.id, libBook!.title);
+    await apiPlace(
+      request,
+      session.token,
+      "library",
+      libBook!.id,
+      libBook!.title,
+    );
     await apiPlace(
       request,
       session.token,
@@ -502,5 +513,61 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
       textures.size,
       "shelf uses more than one spine texture",
     ).toBeGreaterThanOrEqual(2);
+  });
+
+  test("a book the owner has written about shows a bookmark ribbon; one without does not (US-1.3.2, #287)", async ({
+    page,
+    request,
+  }) => {
+    // Two public books placed on the SAME Library shelf by one minted user, only
+    // the first given a visible blog-post association. The ribbon (a `.book__ribbon`
+    // child) and the ", with your notes" aria suffix must appear on the first and
+    // NOT the second — proving the has_user_writing flag flows through the payload
+    // and Components.Spine into the DOM per placement, not per shelf.
+    const all = await fetchAllCatalogue(request);
+    const [written, plain] = lookup(all, ["The Name of the Rose", "The Idiot"]);
+    assertSeedOrSkip(
+      written !== null && plain !== null,
+      "ribbon test needs The Name of the Rose and The Idiot",
+    );
+
+    const session = await mintOrSkip(request);
+    await apiPlace(
+      request,
+      session.token,
+      "library",
+      written!.id,
+      written!.title,
+    );
+    await apiPlace(request, session.token, "library", plain!.id, plain!.title);
+    // Only the first book gets a visible writing association.
+    await seedBookWriting(request, session.email, written!.id);
+
+    await injectSession(page, session);
+    await gotoShelf(page, "library");
+
+    // Written-about book: the accessible name carries ", with your notes"
+    // (anchored by the title so the substring assertion can't pass against a
+    // wrong/empty label), and a `.book__ribbon` child is present.
+    const writtenAria = await ariaLabelOf(spineEl(page, written!.id));
+    expect(writtenAria, "reading the written-about spine").toContain(
+      written!.title,
+    );
+    expect(writtenAria).toContain(", with your notes");
+    await expect(
+      page.locator(`#spine-${written!.id} .book__ribbon`),
+      "written-about spine renders a bookmark ribbon",
+    ).toHaveCount(1);
+
+    // Plain book on the SAME shelf: no ribbon and no notes suffix. The positive
+    // title read first makes both negatives non-vacuous — a wrong selector would
+    // fail the title assertion loudly rather than let the negatives pass empty.
+    const plainAria = await ariaLabelOf(spineEl(page, plain!.id));
+    expect(plainAria, "reading the un-written spine").toContain(plain!.title);
+    expect(plainAria).not.toContain(", with your notes");
+    await expect(
+      page.locator(`#spine-${plain!.id} .book__ribbon`),
+      "un-written spine renders no bookmark ribbon",
+    ).toHaveCount(0);
   });
 });

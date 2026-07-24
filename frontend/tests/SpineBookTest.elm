@@ -36,6 +36,8 @@ suite =
         , softenedBookHasWearClass
         , perShelfWearConfig
         , readingPileSpineIsSoftened
+        , writingRibbonRendering
+        , writingSuffixInAriaLabel
         ]
 
 
@@ -130,6 +132,7 @@ sampleBook =
         , author = "Herman Melville"
         , coverImageUrl = Nothing
         , hidden = False
+        , hasWriting = False
         }
 
 
@@ -143,6 +146,7 @@ sampleClothBook =
         , author = "Charlotte Bronte"
         , coverImageUrl = Nothing
         , hidden = False
+        , hasWriting = False
         }
 
 
@@ -253,6 +257,7 @@ softenedHiddenBook =
         , author = "Donna Tartt"
         , coverImageUrl = Nothing
         , hidden = True
+        , hasWriting = False
         }
 
 
@@ -364,3 +369,92 @@ readingPileSpineIsSoftened =
                             "Book: Reading Now by Charles Duhigg, 371 pages, well-loved"
                         )
                     ]
+
+
+{-| A Pristine, visible book the owner has written about (#287): exercises the
+bookmark ribbon in isolation.
+-}
+writingBook : Html.Html msg
+writingBook =
+    book
+        { pageCount = 400
+        , wearLevel = Pristine
+        , texture = Leather
+        , title = "Moby Dick"
+        , author = "Herman Melville"
+        , coverImageUrl = Nothing
+        , hidden = False
+        , hasWriting = True
+        }
+
+
+{-| A book that is Softened, hidden AND written-about: exercises all three
+aria suffixes together to pin the fixed order (wear, then notes, then hidden).
+-}
+wornWrittenHiddenBook : Html.Html msg
+wornWrittenHiddenBook =
+    book
+        { pageCount = 400
+        , wearLevel = Softened
+        , texture = Leather
+        , title = "The Secret History"
+        , author = "Donna Tartt"
+        , coverImageUrl = Nothing
+        , hidden = True
+        , hasWriting = True
+        }
+
+
+{-| The bookmark ribbon (`.book__ribbon`) renders as an additive child iff the
+book carries writing, and never otherwise. It is decorative (`aria-hidden`), so
+the meaning is carried by the aria-label suffix asserted separately below.
+-}
+writingRibbonRendering : Test
+writingRibbonRendering =
+    describe "bookmark ribbon renders iff the book has user writing"
+        [ test "a written-about book renders a .book__ribbon element" <|
+            \_ ->
+                writingBook
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.class "book__ribbon" ]
+        , test "the ribbon is decorative (aria-hidden)" <|
+            \_ ->
+                writingBook
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "book__ribbon" ]
+                    |> Query.has
+                        [ Selector.attribute
+                            (Html.Attributes.attribute "aria-hidden" "true")
+                        ]
+        , test "a book with no writing renders no .book__ribbon element" <|
+            \_ ->
+                sampleBook
+                    |> Query.fromHtml
+                    |> Query.hasNot [ Selector.class "book__ribbon" ]
+        ]
+
+
+{-| The writing signal shows up in the aria-label as a ", with your notes"
+suffix, only when the book has writing, and composes with wear and hidden in the
+fixed order pages → wear → notes → hidden. Asserting the exact whole aria-label
+pins both the presence/absence of the suffix and its position.
+-}
+writingSuffixInAriaLabel : Test
+writingSuffixInAriaLabel =
+    describe "writing drives the ', with your notes' aria-label suffix"
+        [ test "a written-about book ends with ', with your notes'" <|
+            \_ ->
+                writingBook
+                    |> Query.fromHtml
+                    |> hasAriaLabel "Book: Moby Dick by Herman Melville, 400 pages, with your notes"
+        , test "a book with no writing has no notes suffix" <|
+            \_ ->
+                sampleBook
+                    |> Query.fromHtml
+                    |> hasAriaLabel "Book: Moby Dick by Herman Melville, 400 pages"
+        , test "wear, notes and hidden compose in order (wear, notes, hidden)" <|
+            \_ ->
+                wornWrittenHiddenBook
+                    |> Query.fromHtml
+                    |> hasAriaLabel "Book: The Secret History by Donna Tartt, 400 pages, well-loved, with your notes, hidden (only visible to you)"
+        ]

@@ -77,11 +77,9 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
     const mineResp = await fetch("/api/placements/mine", {
       headers: { Authorization: `Bearer ${auth.token}` },
     });
-    const mineData = mineResp.ok
-      ? await mineResp.json()
-      : { placements: [] };
+    const mineData = mineResp.ok ? await mineResp.json() : { placements: [] };
     const placedIds = new Set(
-      (mineData.placements ?? []).map((p: any) => p.book_id)
+      (mineData.placements ?? []).map((p: any) => p.book_id),
     );
 
     // If any visible book is already placed, the badge will render.
@@ -103,7 +101,9 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
   });
 
   if (!placed) {
-    console.log("WARN: could not ensure a placed book is visible on the catalogue first page");
+    console.log(
+      "WARN: could not ensure a placed book is visible on the catalogue first page",
+    );
   }
 }
 
@@ -113,7 +113,7 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
  */
 export async function ensureBookOnShelf(
   page: Page,
-  shelfName: string
+  shelfName: string,
 ): Promise<void> {
   await page.goto(`/${shelfName}`);
   const placed = await page.evaluate(
@@ -127,19 +127,17 @@ export async function ensureBookOnShelf(
       if (!shelfResp.ok) return false;
       const shelfData = await shelfResp.json();
       // API returns {shelves: [{placements: [...]}]} after #151 shelf entity change
-      const allPlacements = (shelfData.shelves ?? []).flatMap((s: any) => s.placements ?? []);
+      const allPlacements = (shelfData.shelves ?? []).flatMap(
+        (s: any) => s.placements ?? [],
+      );
       if (allPlacements.length > 0) return true;
 
       // Shelf is empty — find an unplaced book and place it
       const mineResp = await fetch("/api/placements/mine", {
         headers: { Authorization: `Bearer ${auth.token}` },
       });
-      const mineData = mineResp.ok
-        ? await mineResp.json()
-        : { placements: [] };
-      const placedIds = new Set(
-        mineData.placements.map((p: any) => p.book_id)
-      );
+      const mineData = mineResp.ok ? await mineResp.json() : { placements: [] };
+      const placedIds = new Set(mineData.placements.map((p: any) => p.book_id));
 
       const catResp = await fetch("/api/catalogue?per_page=200");
       const catData = await catResp.json();
@@ -156,7 +154,7 @@ export async function ensureBookOnShelf(
       });
       return placeResp.ok;
     },
-    { shelf: shelfName }
+    { shelf: shelfName },
   );
 
   if (!placed) {
@@ -172,7 +170,7 @@ export async function apiCallFromPage(
   page: Page,
   method: string,
   path: string,
-  body?: Record<string, unknown>
+  body?: Record<string, unknown>,
 ): Promise<{ status: number; data: unknown }> {
   return page.evaluate(
     async ({ method, path, body }) => {
@@ -189,7 +187,7 @@ export async function apiCallFromPage(
       const data = await resp.json().catch(() => null);
       return { status: resp.status, data };
     },
-    { method, path, body }
+    { method, path, body },
   );
 }
 
@@ -212,7 +210,7 @@ export function uniqueEmail(prefix = "e2e-reg"): string {
  */
 export async function registerViaApi(
   request: APIRequestContext,
-  opts: { email: string; password: string; displayName?: string }
+  opts: { email: string; password: string; displayName?: string },
 ) {
   return request.post("/api/auth/register", {
     data: {
@@ -234,15 +232,15 @@ export async function registerViaApi(
  */
 export async function fetchConfirmationToken(
   request: APIRequestContext,
-  email: string
+  email: string,
 ): Promise<string | null> {
   const resp = await request.get(
-    `/api/test/confirmation-token?email=${encodeURIComponent(email)}`
+    `/api/test/confirmation-token?email=${encodeURIComponent(email)}`,
   );
   if (resp.status() === 404) return null;
   if (!resp.ok()) {
     throw new Error(
-      `confirmation-token helper returned HTTP ${resp.status()} for ${email}`
+      `confirmation-token helper returned HTTP ${resp.status()} for ${email}`,
     );
   }
   const body = await resp.json();
@@ -268,7 +266,7 @@ export interface SentEmail {
 export async function fetchSentEmails(
   request: APIRequestContext,
   email: string,
-  opts: { timeoutMs?: number } = {}
+  opts: { timeoutMs?: number } = {},
 ): Promise<SentEmail[] | null> {
   const timeoutMs = opts.timeoutMs ?? 20_000;
   const deadline = Date.now() + timeoutMs;
@@ -279,7 +277,7 @@ export async function fetchSentEmails(
     if (resp.status() === 404) return null;
     if (!resp.ok()) {
       throw new Error(
-        `sent-emails helper returned HTTP ${resp.status()} for ${email}`
+        `sent-emails helper returned HTTP ${resp.status()} for ${email}`,
       );
     }
     const body = await resp.json();
@@ -327,7 +325,7 @@ export interface MintedSession {
  */
 export async function mintSession(
   request: APIRequestContext,
-  opts: { email?: string; displayName?: string } = {}
+  opts: { email?: string; displayName?: string } = {},
 ): Promise<MintedSession | null> {
   const resp = await request.post("/api/test/session", {
     data: {
@@ -349,6 +347,26 @@ export async function mintSession(
 }
 
 /**
+ * Seed a VISIBLE blog-post→book association for a minted `.test`-domain user via
+ * POST /api/test/book-writing (STACKS_E2E_TEST_HELPERS=1 only), so a spec can
+ * drive the spine bookmark ribbon (#287) deterministically. The production path
+ * associates books via an async LLM worker on publish, which is non-deterministic
+ * for a browser test; this helper writes the same end state (visible manual
+ * association) directly. Asserts 201 — the caller has already minted a session,
+ * so the STACKS_E2E_TEST_HELPERS flag is guaranteed on by the time this runs.
+ */
+export async function seedBookWriting(
+  request: APIRequestContext,
+  email: string,
+  bookId: string,
+): Promise<void> {
+  const resp = await request.post("/api/test/book-writing", {
+    data: { email, book_id: bookId },
+  });
+  expect(resp.status(), `seed writing for book ${bookId}`).toBe(201);
+}
+
+/**
  * Land the browser authenticated as a minted user by injecting the session
  * into localStorage under "stacks-auth" — the exact shape the Elm saveAuth
  * port writes and auth.setup.ts injects. The NEXT page.goto() boots the SPA
@@ -356,7 +374,7 @@ export async function mintSession(
  */
 export async function injectSession(
   page: Page,
-  session: MintedSession
+  session: MintedSession,
 ): Promise<void> {
   // Navigate to the app origin first so localStorage is writable for it.
   await page.goto("/");
@@ -369,7 +387,7 @@ export async function injectSession(
       userId: session.userId,
       email: session.email,
       displayName: session.displayName,
-    }
+    },
   );
 }
 
@@ -380,7 +398,7 @@ export async function injectSession(
 export async function signInViaForm(
   page: Page,
   email: string,
-  password: string
+  password: string,
 ): Promise<void> {
   await page.goto("/login");
   await page.fill('input[id="email"]', email);
@@ -404,7 +422,7 @@ export const SESSION_HELPER_SKIP =
  */
 export async function mintOrSkip(
   request: APIRequestContext,
-  opts: { email?: string; displayName?: string } = {}
+  opts: { email?: string; displayName?: string } = {},
 ): Promise<MintedSession> {
   const session = await mintSession(request, opts);
   test.skip(session === null, SESSION_HELPER_SKIP);
@@ -451,7 +469,7 @@ export function assertSeedOrSkip(sufficient: boolean, message: string): void {
 export async function provisionBookOnShelf(
   page: Page,
   request: APIRequestContext,
-  shelf: string
+  shelf: string,
 ): Promise<{ session: MintedSession; bookId: string }> {
   const session = await mintOrSkip(request);
   const resp = await request.get("/api/catalogue?per_page=1");
@@ -460,7 +478,7 @@ export async function provisionBookOnShelf(
   const book = ((data.books ?? []) as Array<{ id: string }>)[0];
   assertSeedOrSkip(
     book !== undefined,
-    "catalogue has no books to provision a shelf placement"
+    "catalogue has no books to provision a shelf placement",
   );
   const place = await request.post(`/api/bookshelves/${shelf}/placements`, {
     headers: { Authorization: `Bearer ${session.token}` },

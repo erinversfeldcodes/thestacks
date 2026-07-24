@@ -6,6 +6,7 @@ defmodule StacksWeb.BookshelfController do
   import StacksWeb.ChangesetHelpers, only: [format_errors: 1]
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Blog
   alias Stacks.Shelving
   alias Stacks.Visibility
   alias StacksWeb.Plugs.ViewAsPlug
@@ -70,7 +71,20 @@ defmodule StacksWeb.BookshelfController do
       conn |> put_status(404) |> json(%{error: "not_found"})
     else
       shelves = Shelving.get_bookshelf_shelves(user.id, bookshelf_name)
-      shelf_json = Enum.map(shelves, &ProtoJSON.shelf_with_placements(&1, viewer))
+
+      # Which of this owner's placed books they have written about — one batched
+      # query for the whole bookshelf, so each spine's ribbon flag (#287) costs no
+      # per-book lookup. The shelf is always the authenticated owner's own, so the
+      # writing is looked up for `user.id`.
+      writing_book_ids =
+        shelves
+        |> Enum.flat_map(& &1.placements)
+        |> Enum.map(& &1.book_id)
+        |> then(&Blog.book_ids_with_user_writing(user.id, &1))
+
+      shelf_json =
+        Enum.map(shelves, &ProtoJSON.shelf_with_placements(&1, viewer, writing_book_ids))
+
       placement_count = shelf_json |> Enum.flat_map(& &1.placements) |> length()
 
       json(conn, %{

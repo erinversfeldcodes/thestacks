@@ -351,6 +351,49 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
+  # The spine bookmark ribbon (#287): each placement carries a server-computed
+  # `has_user_writing` flag — true when the owner has a visible blog-post
+  # association to that book — so the SPA can render the ribbon without a
+  # per-book lookup. The flag is layered onto PlacementDetail (not a proto
+  # field), so it must survive the ProtoJSON serialization for every placement.
+  describe "GET /api/bookshelves/:bookshelf_name — has_user_writing flag (#287)" do
+    test "is true for a book the owner has written a visible association about", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      book = insert(:book)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
+      post = insert(:post, user: user)
+      insert(:post_book_association, post: post, book: book, visible: true)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
+      assert placement["has_user_writing"] == true
+    end
+
+    test "is false for a book the owner has not written about", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      book = insert(:book)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
+      assert placement["has_user_writing"] == false
+    end
+  end
+
   # Punch #1 (Issue #112, L1 US-1.2.4): the "returns all valid bookshelf names"
   # loop only asserts the echoed name — it seeds nothing, so a reading_pile
   # response body has never been asserted. These tests seed placements and

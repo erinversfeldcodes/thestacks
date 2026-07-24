@@ -17,6 +17,7 @@ defmodule StacksWeb.TestHelperController do
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.AgeVerification
+  alias Stacks.Blog
   alias Swoosh.Adapters.Local.Storage.Memory
 
   require Logger
@@ -203,6 +204,48 @@ defmodule StacksWeb.TestHelperController do
         |> json(%{errors: format_errors(changeset)})
     end
   end
+
+  @doc """
+  POST /api/test/book-writing  body: {"email": <email>, "book_id": <uuid>, "title": <optional>}
+
+  Seeds a blog post authored by the given test user with a VISIBLE manual
+  association to `book_id`, so the E2E suite can drive the spine bookmark-ribbon
+  (#287) deterministically. The production path associates books via an async
+  LLM worker on publish (`BlogAssociationHandler` → `PostBookAssociationWorker`),
+  which is non-deterministic for a browser test — this helper writes the same
+  end state directly via `Blog.associate_book/3` (visible, source `manual`).
+
+  Scoped to `@thestacks.test` emails ONLY (like every other helper here) — a real
+  account can never be in the reserved test TLD, so this can never fabricate
+  writing for a real user even on a public preview with the flag on. Responds
+  `201 {"ok": true, "post_id", "association_id"}` on success, a plain `404` for an
+  out-of-scope email or unknown user, and `422 {"errors": ...}` when the post or
+  association cannot be created.
+  """
+  def seed_book_writing(conn, %{"email" => email, "book_id" => book_id} = params)
+      when is_binary(email) and is_binary(book_id) do
+    title = Map.get(params, "title", "E2E writing about a book")
+
+    with true <- e2e_test_email?(email),
+         %{} = user <- Accounts.get_user_by_email(email),
+         {:ok, post} <-
+           Blog.create_post(user, %{title: title, body: "Seeded by the E2E ribbon spec."}),
+         {:ok, assoc} <- Blog.associate_book(post, book_id) do
+      conn
+      |> put_status(:created)
+      |> json(%{ok: true, post_id: post.id, association_id: assoc.id})
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: format_errors(changeset)})
+
+      _ ->
+        not_found(conn)
+    end
+  end
+
+  def seed_book_writing(conn, _params), do: not_found(conn)
 
   # Unique default address in the reserved E2E domain — mirrors uniqueEmail()
   # in e2e/tests/helpers.ts so minted users are recognisable in preview data.

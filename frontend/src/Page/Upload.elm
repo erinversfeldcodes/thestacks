@@ -693,6 +693,7 @@ placementStub =
     , startedAt = Nothing
     , finishedAt = Nothing
     , visibility = Nothing
+    , hasUserWriting = False
     }
 
 
