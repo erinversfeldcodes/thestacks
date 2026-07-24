@@ -554,10 +554,29 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
       written!.title,
     );
     expect(writtenAria).toContain(", with your notes");
+    const ribbon = page.locator(`#spine-${written!.id} .book__ribbon`);
     await expect(
-      page.locator(`#spine-${written!.id} .book__ribbon`),
+      ribbon,
       "written-about spine renders a bookmark ribbon",
     ).toHaveCount(1);
+    // Not a phantom node: the `.book__ribbon` rule actually matched (its
+    // signature `position: absolute` overrides the default `static`) and the
+    // element is laid out (non-zero box), so the ribbon is genuinely visible —
+    // the same computed-style proof #288 uses for the wear filter.
+    const ribbonStyle = await ribbon.evaluate((e) => {
+      const cs = getComputedStyle(e as HTMLElement);
+      const r = (e as HTMLElement).getBoundingClientRect();
+      return {
+        position: cs.position,
+        display: cs.display,
+        w: r.width,
+        h: r.height,
+      };
+    });
+    expect(ribbonStyle.position, "ribbon CSS rule matched").toBe("absolute");
+    expect(ribbonStyle.display).not.toBe("none");
+    expect(ribbonStyle.w, "ribbon has a rendered width").toBeGreaterThan(0);
+    expect(ribbonStyle.h, "ribbon has a rendered height").toBeGreaterThan(0);
 
     // Plain book on the SAME shelf: no ribbon and no notes suffix. The positive
     // title read first makes both negatives non-vacuous — a wrong selector would
