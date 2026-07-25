@@ -11,6 +11,27 @@ defmodule Stacks.GDPRTest do
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Workers.ImageRetentionJob
 
+  # op.users columns deliberately NOT in the GDPR export (mirrors the
+  # exclusion rationale in Stacks.GDPR.Export's user map). Secrets, account-
+  # security mechanics, and internal UX progress flags — none are user-provided
+  # personal data the subject is entitled to receive. Every OTHER real schema
+  # field MUST appear in the export or this guard fails.
+  @export_excluded_fields [
+    # Secrets — exporting would leak credentials / defeat their purpose.
+    :password_hash,
+    :email_confirmation_token,
+    :password_reset_token,
+    # Account-security mechanics — internal auth state, not personal data.
+    :email_confirmed,
+    :password_reset_sent_at,
+    :failed_login_count,
+    :failed_login_first_at,
+    :locked_until,
+    # Internal UX progress flags — app state, not personal data.
+    :onboarding_completed,
+    :onboarding_steps
+  ]
+
   describe "Export.export_user_data/2" do
     test "returns a map with user data" do
       user = insert(:user)
@@ -124,6 +145,57 @@ defmodule Stacks.GDPRTest do
       assert export.writing_assistant_sessions == []
       assert export.writing_assistant_feedback == []
       assert export.embeddings_summary == []
+    end
+
+    test "exports the settings personal-data fields verbatim (#299)" do
+      # The four notify_* prefs, website_url, country_code, city and handle are
+      # all written by the settings screens; a data export must return them.
+      # Each value below is NON-DEFAULT (flips the schema default) so the
+      # assertion fails against a map that omits the field OR hardcodes a default.
+      user =
+        insert(:user,
+          handle: "night_reader",
+          website_url: "https://myblog.example.com",
+          country_code: "GB",
+          city: "Edinburgh",
+          notify_wishlist_availability: true,
+          notify_marketplace: false,
+          notify_group_invitations: false,
+          notify_event_matches: true
+        )
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+
+      assert export.user.handle == "night_reader"
+      assert export.user.website_url == "https://myblog.example.com"
+      assert export.user.country_code == "GB"
+      assert export.user.city == "Edinburgh"
+      assert export.user.notify_wishlist_availability == true
+      assert export.user.notify_marketplace == false
+      assert export.user.notify_group_invitations == false
+      assert export.user.notify_event_matches == true
+    end
+
+    test "every personal user-schema field appears in the export (schema-sweep guard, #299)" do
+      # Mirrors the erasure schema-level guard (#185): a future column added to
+      # op.users fails this test until it is either exported by
+      # Export.export_user_data/2 or added to @export_excluded_fields WITH a
+      # written rationale. Prevents a new personal field silently escaping export.
+      user = insert(:user)
+      assert {:ok, export} = Export.export_user_data(user.id)
+      exported_keys = MapSet.new(Map.keys(export.user))
+
+      missing =
+        for field <- User.__schema__(:fields),
+            field not in @export_excluded_fields,
+            not MapSet.member?(exported_keys, field),
+            do: field
+
+      assert missing == [],
+             "op.users personal fields missing from GDPR export: #{inspect(missing)}. " <>
+               "Add each to Export.export_user_data/2's user map, or add it to " <>
+               "@export_excluded_fields WITH a written rationale if it is a secret, " <>
+               "account-security mechanic, or internal UX flag."
     end
   end
 

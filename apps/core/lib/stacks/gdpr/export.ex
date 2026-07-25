@@ -64,12 +64,32 @@ defmodule Stacks.GDPR.Export do
 
     export = %{
       exported_at: DateTime.utc_now(),
+      # Every personal / user-provided column on op.users is exported here.
+      # Columns deliberately EXCLUDED (see the schema-sweep guard in
+      # test/stacks/gdpr_test.exs, whose exclusion list mirrors this rationale):
+      #   Secrets — exporting them would defeat their purpose / leak credentials:
+      #     password_hash, email_confirmation_token, password_reset_token,
+      #     password (virtual, never persisted).
+      #   Account-security mechanics — internal auth state, not user-provided
+      #     personal data:
+      #     email_confirmed, password_reset_sent_at, failed_login_count,
+      #     failed_login_first_at, locked_until.
+      #   Internal UX progress flags — app state, not personal data:
+      #     onboarding_completed, onboarding_steps.
       user: %{
         id: user.id,
         email: user.email,
         display_name: user.display_name,
+        handle: user.handle,
         role: user.role,
         profile_visibility: user.profile_visibility,
+        website_url: user.website_url,
+        country_code: user.country_code,
+        city: user.city,
+        notify_wishlist_availability: user.notify_wishlist_availability,
+        notify_marketplace: user.notify_marketplace,
+        notify_group_invitations: user.notify_group_invitations,
+        notify_event_matches: user.notify_event_matches,
         age_verified: user.age_verified,
         age_verified_at: user.age_verified_at,
         age_verification_provider: user.age_verification_provider,
@@ -77,7 +97,8 @@ defmodule Stacks.GDPR.Export do
         consent_analytics_at: user.consent_analytics_at,
         consent_writing_assistant: user.consent_writing_assistant,
         consent_writing_assistant_at: user.consent_writing_assistant_at,
-        created_at: user.created_at
+        created_at: user.created_at,
+        updated_at: user.updated_at
       },
       bookshelves: Enum.map(bookshelves, &bookshelf_to_map/1),
       placements: Enum.map(placements, &placement_to_map/1),

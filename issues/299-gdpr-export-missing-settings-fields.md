@@ -28,10 +28,10 @@ n/a — no user stories; the deliverable is an invariant-completeness fix. Valid
 - No new endpoints, events, or stored data.
 
 ## Definition of Done
-- [ ] Export includes all personal user-row fields (evidence: test file:line asserting each)
-- [ ] Schema-sweep guard: a personal column missing from the export fails a test (evidence: guard test file:line)
-- [ ] `just run just verify` passes (evidence: run output)
-- [ ] gdpr-review PASS recorded on the diff
+- [x] Export includes all personal user-row fields (evidence: `apps/core/test/stacks/gdpr_test.exs:150` asserts handle/website_url/country_code/city + 4 notify_* verbatim; map at `apps/core/lib/stacks/gdpr/export.ex:75-96`)
+- [x] Schema-sweep guard: a personal column missing from the export fails a test (evidence: `apps/core/test/stacks/gdpr_test.exs:179` iterates `User.__schema__(:fields)` minus `@export_excluded_fields`; perturbation red confirmed — removing `handle` from the map fails with "op.users personal fields missing from GDPR export: [:handle]")
+- [x] `just run just verify` passes (evidence: run 2026-07-26, exit 0 — full suite + format + credo + proto sync + dbt-checkpoint "All blocking checks passed"; full backend suite 2957/0 in the specialist run, gdpr file 19/0 fresh orchestrator run)
+- [x] gdpr-review PASS recorded on the diff (evidence: orchestrator lens 2026-07-26 — portability-only surface, secrets/live tokens correctly excluded with in-code rationale, sweep guard derives exported keys from the real map [no dual-list drift, reviewer-verified], no storage/event/audit/warehouse change; elixir-reviewer APPROVED)
 
 ## Dependencies
 None. Context: found during the #125/#126 epic; see `issues/126-e2e-settings.md` GDPR Review Record and `plans/125-126-e2e-epic-state.json` notes.
