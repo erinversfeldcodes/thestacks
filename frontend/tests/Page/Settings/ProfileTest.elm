@@ -301,4 +301,107 @@ suite =
                         ]
                         ()
             ]
+        , describe "personal-info setters (#126 residual)"
+            [ test "SetDisplayName updates the field and clears a prior save result" <|
+                \_ ->
+                    let
+                        edited =
+                            initialModel
+                                |> apply (SaveProfileCompleted (Ok "ada"))
+                                |> apply (SetDisplayName "Ada Lovelace")
+                    in
+                    Expect.all
+                        [ \_ -> edited.displayName |> Expect.equal "Ada Lovelace"
+                        , \_ -> edited.savingProfile |> Expect.equal NotAsked
+                        ]
+                        ()
+            , test "SetEmail updates the field" <|
+                \_ ->
+                    initialModel
+                        |> apply (SetEmail "grace@example.com")
+                        |> .email
+                        |> Expect.equal "grace@example.com"
+            , test "SetWebsiteUrl updates the field and clears a prior save result" <|
+                \_ ->
+                    let
+                        edited =
+                            initialModel
+                                |> apply (SaveProfileCompleted (Ok "ada"))
+                                |> apply (SetWebsiteUrl "https://ada.dev")
+                    in
+                    Expect.all
+                        [ \_ -> edited.websiteUrl |> Expect.equal "https://ada.dev"
+                        , \_ -> edited.savingProfile |> Expect.equal NotAsked
+                        ]
+                        ()
+            ]
+        , describe "location (#126 punch 16/17)"
+            [ test "SetCountryCode updates the field and clears a prior save result" <|
+                \_ ->
+                    let
+                        edited =
+                            initialModel
+                                |> applyWithToken SaveLocation
+                                |> apply (SaveLocationCompleted (Ok ()))
+                                |> apply (SetCountryCode "GB")
+                    in
+                    Expect.all
+                        [ \_ -> edited.countryCode |> Expect.equal "GB"
+                        , \_ -> edited.savingLocation |> Expect.equal NotAsked
+                        ]
+                        ()
+            , test "SetCity updates the field and clears a prior save result" <|
+                \_ ->
+                    let
+                        edited =
+                            initialModel
+                                |> applyWithToken SaveLocation
+                                |> apply (SaveLocationCompleted (Ok ()))
+                                |> apply (SetCity "London")
+                    in
+                    Expect.all
+                        [ \_ -> edited.city |> Expect.equal "London"
+                        , \_ -> edited.savingLocation |> Expect.equal NotAsked
+                        ]
+                        ()
+            , test "SaveLocation with a token dispatches the save (Loading)" <|
+                \_ ->
+                    initialModel
+                        |> apply (SetCountryCode "GB")
+                        |> applyWithToken SaveLocation
+                        |> .savingLocation
+                        |> Expect.equal Loading
+            , test "SaveLocation without a token is a no-op" <|
+                \_ ->
+                    initialModel
+                        |> apply (SetCountryCode "GB")
+                        |> apply SaveLocation
+                        |> .savingLocation
+                        |> Expect.equal NotAsked
+            , test "a successful location save reports success and renders the saved copy" <|
+                \_ ->
+                    let
+                        saved =
+                            initialModel
+                                |> applyWithToken SaveLocation
+                                |> apply (SaveLocationCompleted (Ok ()))
+                    in
+                    Expect.all
+                        [ \_ -> saved.savingLocation |> Expect.equal (Success ())
+                        , \_ ->
+                            saved
+                                |> Profile.view
+                                |> Query.fromHtml
+                                |> Query.has [ Selector.text "Location saved." ]
+                        ]
+                        ()
+            , test "a failed location save renders the failure copy" <|
+                \_ ->
+                    initialModel
+                        |> applyWithToken SaveLocation
+                        |> apply (SaveLocationCompleted (Err Http.NetworkError))
+                        |> Profile.view
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "Could not save location. Please try again." ]
+            ]
         ]

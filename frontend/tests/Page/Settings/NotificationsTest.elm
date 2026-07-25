@@ -104,6 +104,36 @@ suite =
                     |> Tuple.first
                     |> .prefs
                     |> Expect.equal (Success { allOff | priceDrops = True })
+        , test "ToggleNewReviews flips only new reviews" <|
+            \_ ->
+                Notifications.update ToggleNewReviews (loadedWith allOff) (Just "test-token")
+                    |> Tuple.first
+                    |> .prefs
+                    |> Expect.equal (Success { allOff | newReviews = True })
+        , test "ToggleAuthorUpdates flips only author updates" <|
+            \_ ->
+                Notifications.update ToggleAuthorUpdates (loadedWith allOff) (Just "test-token")
+                    |> Tuple.first
+                    |> .prefs
+                    |> Expect.equal (Success { allOff | authorUpdates = True })
+        , test "ToggleEventAlerts flips only event alerts" <|
+            \_ ->
+                Notifications.update ToggleEventAlerts (loadedWith allOff) (Just "test-token")
+                    |> Tuple.first
+                    |> .prefs
+                    |> Expect.equal (Success { allOff | eventAlerts = True })
+        , test "toggling a loaded preference clears any prior save result" <|
+            \_ ->
+                -- flipAndSave resets `saving` to NotAsked as it dispatches the
+                -- auto-save, so a stale "Preferences saved." banner cannot linger
+                -- over a freshly-flipped (not-yet-confirmed) value.
+                loadedWith allOff
+                    |> (\model -> Notifications.update (SaveCompleted (Ok ())) model (Just "test-token"))
+                    |> Tuple.first
+                    |> (\model -> Notifications.update ToggleNewReviews model (Just "test-token"))
+                    |> Tuple.first
+                    |> .saving
+                    |> Expect.equal NotAsked
         , test "a toggle before the preferences load is a no-op" <|
             \_ ->
                 let
