@@ -46,17 +46,22 @@ defmodule StacksWeb.SearchControllerTest do
       response = json_response(conn, 200)
 
       assert response["query"] == "Elixir"
-      titles = Enum.map(response["results"], & &1["title"])
+      # `results` is deprecated (#298) — read the sectioned `platform_hits`.
+      titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
       assert "Elixir in Action" in titles
       refute "Programming Phoenix" in titles
     end
 
-    test "returns empty results for non-matching query", %{conn: conn} do
+    test "returns an empty response for a non-matching query", %{conn: conn} do
       conn = get(conn, "/api/search", q: "ZZZNoMatchZZZ")
       response = json_response(conn, 200)
 
+      # count is the total distinct across both sections — zero when nothing
+      # matches. `results` stays deprecated-empty (#298).
       assert response["count"] == 0
       assert response["results"] == []
+      assert response["collection"] == []
+      assert response["platform_hits"] == []
     end
 
     test "returns 422 when q param missing", %{conn: conn} do
@@ -72,7 +77,7 @@ defmodule StacksWeb.SearchControllerTest do
       conn = get(conn, "/api/search", q: "Rustica", limit: "2")
       response = json_response(conn, 200)
 
-      assert length(response["results"]) <= 2
+      assert length(response["platform_hits"]) <= 2
     end
 
     test "ignores invalid limit and defaults to 20", %{conn: conn} do
@@ -87,8 +92,8 @@ defmodule StacksWeb.SearchControllerTest do
       conn = get(conn, "/api/search", q: "Lefthandedness")
       response = json_response(conn, 200)
 
-      [result | _] = response["results"]
-      assert result["author"]["name"] == "Ursula K. Le Guin"
+      [hit | _] = response["platform_hits"]
+      assert hit["book"]["author"]["name"] == "Ursula K. Le Guin"
     end
 
     test "returns 401 without authentication" do
@@ -112,7 +117,7 @@ defmodule StacksWeb.SearchControllerTest do
       conn = get(conn, "/api/search", q: "elixir action")
       response = json_response(conn, 200)
 
-      titles = Enum.map(response["results"], & &1["title"])
+      titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
       assert "Elixir in Action" in titles
       refute "Rust Atomics and Locks" in titles
     end
@@ -126,7 +131,7 @@ defmodule StacksWeb.SearchControllerTest do
 
       # Query is parameterised + `plainto_tsquery` treats it as plain text — no
       # DDL executes. Sane (list) result shape, and the seeded row still exists.
-      assert is_list(response["results"])
+      assert is_list(response["platform_hits"])
       assert %{rows: [[1]]} = Core.Repo.query!("SELECT count(*) FROM op.books")
     end
 
@@ -138,7 +143,7 @@ defmodule StacksWeb.SearchControllerTest do
 
       # `plainto_tsquery` ignores `& | ! ( )` as operators (it would raise under
       # `to_tsquery`); the query degrades to the plain lexemes and 200s.
-      assert is_list(response["results"])
+      assert is_list(response["platform_hits"])
     end
 
     test "handles a very long query gracefully", %{conn: conn} do
@@ -150,7 +155,7 @@ defmodule StacksWeb.SearchControllerTest do
       conn = get(conn, "/api/search", q: long_query)
       response = json_response(conn, 200)
 
-      assert is_list(response["results"])
+      assert is_list(response["platform_hits"])
     end
   end
 
@@ -173,7 +178,7 @@ defmodule StacksWeb.SearchControllerTest do
 
       conn = get(conn, "/api/search", q: "Thornfield")
       response = json_response(conn, 200)
-      titles = Enum.map(response["results"], & &1["title"])
+      titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
 
       assert "Thornfield Chronicles" in titles
       refute "Thornfield Secrets" in titles
@@ -197,7 +202,7 @@ defmodule StacksWeb.SearchControllerTest do
 
       conn = get(verified_conn, "/api/search", q: "Gatekeeper")
       response = json_response(conn, 200)
-      titles = Enum.map(response["results"], & &1["title"])
+      titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
 
       assert "Gatekeeper Chronicles" in titles
       assert "Gatekeeper Secrets" in titles
@@ -211,8 +216,8 @@ defmodule StacksWeb.SearchControllerTest do
   # source is discoverable by design — an always-visible `looking_for_home`
   # placement (`listing_status: "active"`, the `Visibility` marketplace
   # exception) or an active marketplace listing. Ordinary private placements
-  # leak NO owner/provenance. `results` (flat list) stays populated for
-  # backward compatibility with the pre-migration Elm decoder.
+  # leak NO owner/provenance. The legacy flat `results` list is deprecated as of
+  # #298 — always empty; the SPA reads only the sectioned fields.
   describe "GET /api/search — sectioning (#285)" do
     test "viewer's own active placement lands in collection, not platform_hits",
          %{conn: conn, user: user} do
@@ -345,6 +350,17 @@ defmodule StacksWeb.SearchControllerTest do
       assert Map.has_key?(response, "collection")
       assert Map.has_key?(response, "platform_hits")
 
+      # #298 — `results` is deprecated: the field stays on the wire (proto field 3
+      # is reserved forever) but is no longer populated; the SPA never read it
+      # post-sectioning. `count` is the total distinct books returned across both
+      # sections — here the one book, which de-dups into collection.
+      assert response["results"] == []
+
+      assert response["count"] ==
+               length(response["collection"]) + length(response["platform_hits"])
+
+      assert response["count"] == 1
+
       hit = hd(response["collection"])
       assert Map.has_key?(hit, "book")
       assert Map.has_key?(hit, "source")
@@ -393,9 +409,9 @@ defmodule StacksWeb.SearchControllerTest do
       response = conn |> get("/api/search", q: "bioluminescence") |> json_response(200)
 
       platform_ids = Enum.map(response["platform_hits"], & &1["book"]["id"])
-      result_ids = Enum.map(response["results"], & &1["id"])
       refute book.id in platform_ids
-      refute book.id in result_ids
+      # `results` is deprecated (#298): always empty, never a discovery surface.
+      assert response["results"] == []
     end
 
     test "a title-only hit under scope=deep carries an empty snippet", %{conn: conn} do

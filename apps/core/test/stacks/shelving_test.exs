@@ -1559,6 +1559,32 @@ defmodule Stacks.ShelvingTest do
       # Deterministic: the alphabetically-first shelf name wins ("library" < "wishlist").
       assert [%{bookshelf_name: "library"}] = results
     end
+
+    # #298 — deep-scope ranking consistency: mirror `Books.search_books/2` so the
+    # collection section ranks title matches ahead of description-only matches,
+    # rather than ordering purely alphabetically by title (the pre-#298 gap where
+    # a description-only hit with an earlier title could outrank a title match).
+    test "under deep scope, ranks a title match above an alphabetically-earlier description-only match",
+         %{user: user} do
+      # Sorts FIRST alphabetically, but matches only on its description.
+      desc_only =
+        insert(:book, title: "Aardvark Almanac", description: "A field study of zephyr winds.")
+
+      place_on(user, desc_only, "library")
+
+      # Sorts LAST alphabetically, but matches on its TITLE. On a distinct
+      # bookshelf — one user can hold only one bookshelf per name.
+      title_match =
+        insert(:book, title: "Zephyr Chronicles", description: "Nothing relevant here.")
+
+      place_on(user, title_match, "wishlist")
+
+      results = Shelving.search_collection(user.id, "zephyr", scope: :deep)
+      ids = Enum.map(results, & &1.book.id)
+
+      assert ids == [title_match.id, desc_only.id],
+             "the title match must rank ahead of the description-only match under deep scope"
+    end
   end
 
   describe "looking_for_home_labels/1" do

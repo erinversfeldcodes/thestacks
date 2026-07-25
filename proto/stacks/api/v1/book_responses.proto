@@ -55,22 +55,26 @@ message BookConfirmResponse {
 // SearchResponse is returned for book search queries (GET /api/search?q=...).
 // JSON shape: {query, count, results: [...], collection: [...], platform_hits: [...]}
 //
-// `results` (field 3) is the flat, unsectioned list retained for backward
-// compatibility with the current Elm decoder — it mirrors `platform_hits`
-// (the platform-visible books). The sectioned view is delivered by `collection`
-// (the viewer's own active-placement matches) and `platform_hits` (discoverable
-// platform inventory, each carrying optional source-label metadata). Once the
-// Elm client migrates to the sectioned fields, `results` can be deprecated.
+// The sectioned view is delivered by `collection` (the viewer's own
+// active-placement matches) and `platform_hits` (discoverable platform
+// inventory, each carrying optional source-label metadata). `results` (field 3)
+// is the DEPRECATED flat list — no longer populated as of #298 (see its field
+// comment); the SPA reads only the sectioned fields since #285/#292.
 message SearchResponse {
   // The original search query string.
   string query = 1 [json_name = "query"];
 
-  // Total number of matching results (the platform-visible book count — mirrors
-  // the length of `results`/`platform_hits`, preserved for backward compat).
+  // Total DISTINCT books returned across both sections — length(collection) +
+  // length(platform_hits). `platform_hits` already excludes the viewer's
+  // collection books (de-duplicated into `collection`), so the two never
+  // overlap and this is a true, non-double-counted total (#298). It is NOT the
+  // length of the deprecated `results` field.
   int32 count = 2 [json_name = "count"];
 
-  // Matching books (with embedded author, editions, primary_edition).
-  // Backward-compat flat list — mirrors the books inside `platform_hits`.
+  // DEPRECATED (#298): kept reserved, no longer populated — always an empty
+  // list on the wire. The SPA never consumed it post-sectioning (it decodes and
+  // drops the field). Field number 3 stays permanently so it is never reused;
+  // the sectioned data lives in `collection` + `platform_hits`.
   repeated stacks.common.v1.Book results = 3 [json_name = "results"];
 
   // "Your Collection": books the viewer has an active placement of whose title

@@ -198,6 +198,10 @@ defmodule Stacks.Shelving do
     * `:scope` — `:title` (default) matches `title_tsv` only; `:deep` (#284) ALSO
       matches `description_tsv`, mirroring `Stacks.Books.search_books/2`, so a
       collection book whose description mentions the query surfaces here too.
+      Under `:deep`, title matches are ordered ahead of description-only matches
+      (a boolean title-match key DESC, then title ASC, then bookshelf name ASC),
+      consistent with `search_books/2` (#298); the default title scope keeps its
+      plain alphabetical order.
   """
   @spec search_collection(binary(), String.t(), keyword()) :: [
           %{book: Book.t(), bookshelf_name: String.t()}
@@ -213,7 +217,7 @@ defmodule Stacks.Shelving do
         on: p.bookshelf_id == bs.id and bs.user_id == ^user_id
       )
       |> collection_scope_where(scope, query)
-      |> order_by([b, p, bs], asc: b.title, asc: bs.name)
+      |> collection_scope_order(scope, query)
       |> select([b, p, bs], {b, bs.name})
       |> Repo.all()
       |> Enum.uniq_by(fn {book, _name} -> book.id end)
@@ -237,6 +241,25 @@ defmodule Stacks.Shelving do
 
   defp collection_scope_where(query_ast, _title, query) do
     where(query_ast, [b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
+  end
+
+  # Under deep scope, rank title matches ahead of description-only matches
+  # (mirrors `Stacks.Books.search_books/2`): the boolean `title_tsv @@ ...` sorts
+  # `true` before `false` under DESC, then title (and bookshelf name) break ties.
+  # Title scope keeps its plain alphabetical order. Ordering happens in SQL, so
+  # the later `Enum.uniq_by`/`Enum.take` preserve it.
+  defp collection_scope_order(query_ast, :deep, query) do
+    order_by(
+      query_ast,
+      [b, p, bs],
+      desc: fragment("(title_tsv @@ plainto_tsquery('english', ?))", ^query),
+      asc: b.title,
+      asc: bs.name
+    )
+  end
+
+  defp collection_scope_order(query_ast, _title, _query) do
+    order_by(query_ast, [b, p, bs], asc: b.title, asc: bs.name)
   end
 
   @doc """

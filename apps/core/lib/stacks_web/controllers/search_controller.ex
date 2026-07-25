@@ -13,10 +13,12 @@ defmodule StacksWeb.SearchController do
   @doc """
   GET /api/search?q=... — full-text search across book titles, sectioned (#285).
 
-  The response carries three views of the same query:
+  The response carries two sectioned views of the same query:
 
-    * `results` — the flat, backward-compatible list of platform-visible books
-      (the pre-#285 shape the current Elm decoder still reads).
+    * `results` — DEPRECATED (#298): always an empty list. The flat, pre-#285
+      list is no longer populated — the SPA reads only the sectioned fields
+      (`collection`/`platform_hits`) since #285/#292 and drops `results`. The
+      proto field number stays reserved; the key is kept for wire-compat.
     * `collection` — "Your Collection": the viewer's own active-placement title
       matches, as `SearchHit`s with no provenance (owned by the viewer).
     * `platform_hits` — "On the Platform": the platform-visible books EXCLUDING
@@ -55,8 +57,15 @@ defmodule StacksWeb.SearchController do
 
     json(conn, %{
       query: query,
-      count: length(platform_books),
-      results: Enum.map(platform_books, &ProtoJSON.search_book/1),
+      # Total DISTINCT books returned across both sections. `platform_hits`
+      # already excludes the viewer's collection books (de-duped above), so the
+      # two counts never overlap (#298).
+      count: length(collection) + length(platform_hits),
+      # Deprecated (#298): `results` (proto field 3) is no longer populated. The
+      # field number stays reserved on the wire — never reused — but the SPA
+      # decodes-and-drops it (it reads only `collection`/`platform_hits` since
+      # #285/#292), so serialising a flat list was pure wasted work.
+      results: [],
       collection:
         Enum.map(collection, fn %{book: book, bookshelf_name: name} ->
           ProtoJSON.search_hit(book, put_snippet(%{bookshelf_name: name}, snippets, book.id))
