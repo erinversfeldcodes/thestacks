@@ -38,6 +38,30 @@ test.describe("Authentication", () => {
     await expect(page).toHaveURL("/login");
   });
 
+  test("a failed login preserves the typed email and password (US-16.2.1)", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+
+    await page.fill('input[id="email"]', DEV_EMAIL);
+    await page.fill('input[id="password"]', "wrong-password");
+    await page.getByTestId("login-submit").click();
+
+    // The error renders …
+    const error = page.getByTestId("login-error");
+    await expect(error).toBeVisible();
+    await expect(error).toContainText(
+      "The door remains shut. Invalid credentials."
+    );
+
+    // … and both inputs RETAIN what the user typed (RemoteData Failure must not
+    // clear the form — US-16.2.1 "form inputs never cleared on failure").
+    await expect(page.locator('input[id="email"]')).toHaveValue(DEV_EMAIL);
+    await expect(page.locator('input[id="password"]')).toHaveValue(
+      "wrong-password"
+    );
+  });
+
   test("sign in with unknown email shows error message", async ({ page }) => {
     await page.goto("/login");
 
@@ -168,6 +192,43 @@ test.describe("Logout", () => {
     });
     expect(resp.status()).toBe(401);
   });
+});
+
+test.describe("Unauthenticated access to protected pages (US-16.3.1)", () => {
+  test("visiting /library unauthenticated renders the login form at the SAME url", async ({
+    page,
+  }) => {
+    await page.goto("/library");
+
+    // The client-side requiresAuth guard renders the login form in place …
+    await expect(page.locator('input[id="email"]')).toBeVisible({
+      timeout: 10000,
+    });
+
+    // … WITHOUT changing the URL to /login — the login form renders at the
+    // protected URL (Reviewer Context: "URL bar does NOT change to /login").
+    expect(page.url()).toMatch(/\/library$/);
+    expect(page.url()).not.toMatch(/\/login$/);
+  });
+
+  // The guard covers every protected route, not just /upload — exercise two
+  // more (a settings sub-route and a marketplace action route) to prove breadth.
+  const protectedRoutes = ["/settings/privacy", "/marketplace/create"];
+  for (const route of protectedRoutes) {
+    test(`visiting ${route} unauthenticated renders the login form`, async ({
+      page,
+    }) => {
+      await page.goto(route);
+
+      await expect(page.locator('input[id="email"]')).toBeVisible({
+        timeout: 10000,
+      });
+      await expect(page.locator('input[id="password"]')).toBeVisible();
+
+      // URL stays at the protected route (login renders in place).
+      expect(page.url()).toContain(route);
+    });
+  }
 });
 
 test.describe("Session expiry", () => {
