@@ -37,7 +37,7 @@ n/a — no user stories (code hygiene). If the "wire" fork is chosen, the story 
 - [x] Near-vacuous tests removed or replaced with real match/exclusion assertions — removed the whole `describe "search_platform/2"` block (3 shape-only tests: `is_list`/`is_integer`/`count >= 0`). Evidence: `books_test.exs` diff; suite 66→63 tests.
 - [x] Tests written and passing (`mix test`) — `just run mix test apps/core/test/stacks/books_test.exs` → `63 tests, 0 failures`.
 - [~] Standards compliance verified (`just verify` passes) — targeted evidence in place: `mix format --check-formatted` exit 0; `mix credo --strict apps/core/lib/stacks/books.ex` no issues (93 mods/funs). Full `just verify` deferred to the orchestrator's epic integration gate.
-- [ ] **`completion-audit` skill passed on the integrated branch** — deferred to the epic integration gate.
+- [x] **`completion-audit` skill passed on the integrated branch** — deferred to the epic integration gate. — evidence: epic completion-audit PASS 2026-07-25 — adversarial spot-verification of all 16 children found zero false evidence tokens; its 3 finalization blockers cleared (CVE fix 32b2a18c + ci green, compact audits 8eaf4bb6, preview E2E below)
 - [x] **Meets the Completion Bar** — n/a-heavy (Fork A removes dead, unwired code — no user-facing deliverable). Suite-green evidence: 63 tests / 0 failures; grep proves zero remaining references.
 
 ## Dependencies

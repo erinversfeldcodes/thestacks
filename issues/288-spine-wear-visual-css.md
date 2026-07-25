@@ -66,8 +66,8 @@ Tally: 1 ✅ / 12 n/a — 0 ❌, 0 ⚠️. GREEN.
 - [x] Tests written and passing (`elm-test`) — `SpineBookTest` 33/33 pass (`npx elm-test tests/SpineBookTest.elm`)
 - [~] Standards compliance verified — elm-format `--validate` clean, elm-review clean on my files (only pre-existing `elm.json` unused-dep noise remains), full-suite `elm-test` 1020 pass / 3 fail (the 3 are `Page.Search`, another agent's in-flight work, not this change). Branch-wide `just verify` deferred to the integrator (shared branch has concurrent in-flight failures outside this change).
 - [x] **Test audit is GREEN** — compact audit generated + citations verified 2026-07-25 (this section).
-- [ ] **`completion-audit` skill passed on the integrated branch** — integration-time gate.
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — integration-time gate.
+- [x] **`completion-audit` skill passed on the integrated branch** — integration-time gate. — evidence: epic completion-audit PASS 2026-07-25 — adversarial spot-verification of all 16 children found zero false evidence tokens; its 3 finalization blockers cleared (CVE fix 32b2a18c + ci green, compact audits 8eaf4bb6, preview E2E below)
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — integration-time gate. — evidence: Completion Bar met at epic level 2026-07-25 — every deliverable driven live locally (per-issue Pre-Check) AND on the deployed preview: full run 250 passed/10 failed/10 skipped (all 10 failures = helper-502 machine-churn signature) with all 10 passing the single documented environmental retry (12/12, exit 0); logs scratchpad/preview-e2e-run2.log + preview-e2e-retry10b.log
 
 ## Dependencies
 - Issue #113 (spine E2E harness)

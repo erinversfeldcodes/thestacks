@@ -67,8 +67,8 @@ Tally: 1 ✅ / 12 n/a — 0 ❌, 0 ⚠️. GREEN.
 - [x] Tests written and passing (`elm-test`, Playwright) — full `npx elm-test` **1031 passed, 0 failures** (includes SearchProgramTest 22/22 with the two new #289 tests; unblocked once #287 landed the `UploadTest.elm` `hasUserWriting` fix, cf88d4da); `search.spec.ts` 14/14 live on :4000.
 - [x] Standards compliance verified — elm-format `--validate` clean, elm-review clean (src/ tests/), full elm-test green, vacuous-guard check clean (full `just verify` = auditor's remaining integration gate)
 - [x] **Test audit is GREEN** — compact audit generated + citations verified 2026-07-25 (this section).
-- [ ] **`completion-audit` skill passed on the integrated branch**
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`)
+- [x] **`completion-audit` skill passed on the integrated branch** — evidence: epic completion-audit PASS 2026-07-25 — adversarial spot-verification of all 16 children found zero false evidence tokens; its 3 finalization blockers cleared (CVE fix 32b2a18c + ci green, compact audits 8eaf4bb6, preview E2E below)
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — evidence: Completion Bar met at epic level 2026-07-25 — every deliverable driven live locally (per-issue Pre-Check) AND on the deployed preview: full run 250 passed/10 failed/10 skipped (all 10 failures = helper-502 machine-churn signature) with all 10 passing the single documented environmental retry (12/12, exit 0); logs scratchpad/preview-e2e-run2.log + preview-e2e-retry10b.log
 
 ## Dependencies
 - Issue #115 (deterministic search E2E harness — merged on feat/115-114-3-e2e)

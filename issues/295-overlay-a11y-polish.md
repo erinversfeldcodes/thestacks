@@ -39,7 +39,7 @@ n/a-adjacent — polish of a shipped story; fill hops for changed affordances wh
 - [x] (b) post-remove focus target set — evidence: `Main.focusMainContent` fires on the remove-success `NavigateTo` (both overlay + full-page handlers); `main-content` landmark given `tabindex -1` so focus lands; E2E `book-detail.spec.ts:520` "removing the book returns focus to the main landmark" — live pass. (BookDetail-side `NavigateTo previousRoute` already covered by `removeConfirmNavigatesToPreviousRoute`.)
 - [x] (c) + (d) applied — evidence: (c) removed dead `.book-overlay__close` block + `:hover` (belonged to the removed Library quick-view block-button; only bled margin/padding onto the inline-styled round "×") in `main.css`, kept the live `.book-overlay__close:focus-visible` ring; (d) one-line defense-in-depth comment at `book_controller.ex:211`.
 - [x] (e) page-route Escape forwarding — evidence: `Main.EscapePressed` `Nothing` branch now forwards to `PageBookDetail` (same consumed/not-consumed pattern); E2E `book-detail.spec.ts:545` "Escape dismisses the remove modal on the full-page route" — live pass.
-- [ ] `just verify` passes; **`completion-audit` passed**
+- [x] `just verify` passes; **`completion-audit` passed** — evidence: `just verify` green on branch tip 2026-07-25 — elixir 2931 tests/0 failures, elm 1056/0, dbt 237/237 (scratchpad/verify-head-post284.log; sources.yml gap it caught fixed in 6fbe066c); epic completion-audit PASS 2026-07-25 — adversarial spot-verification of all 16 children found zero false evidence tokens; its 3 finalization blockers cleared (CVE fix 32b2a18c + ci green, compact audits 8eaf4bb6, preview E2E below)
 
 ## Dependencies
 - #114 (shipped overlay a11y this polishes).

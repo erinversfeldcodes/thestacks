@@ -73,10 +73,10 @@ Tally: 3 ✅ / 10 n/a — 0 ❌, 0 ⚠️. GREEN.
 - [x] Every backend behaviour has a validation path (context + controller test layers).
 - [x] Deep-search toggle + snippet rendering built with tests (`Api.searchBooks` scope param, `Page.Search` `DeepSearchToggled` + `parseSnippet`/`viewSnippet`) — evidence: `elm-test` **1056/0** (was 1042; +14: 3 toggle-flag + 5 `parseSnippet` unit + 6 program-test for re-fire/scope/snippet-render); test-first (5 captured failing on the stub, then green); elm-format/elm-review/`elm make --optimize` clean; e2e `search.spec.ts` "Deep search (#284)" 2 specs GREEN live.
 - [x] Tests written and passing (`mix test` 213/0 scoped; `elm-test` 1056/0; e2e search.spec.ts 19/19 live incl. 2 deep).
-- [ ] Standards compliance verified (`just verify` passes) — format/credo/proto/squawk clean for backend diff; full `just ci` gate to run at epic integration.
+- [x] Standards compliance verified (`just verify` passes) — format/credo/proto/squawk clean for backend diff; full `just ci` gate to run at epic integration. — evidence: `just verify` green on branch tip 2026-07-25 — elixir 2931 tests/0 failures, elm 1056/0, dbt 237/237 (scratchpad/verify-head-post284.log; sources.yml gap it caught fixed in 6fbe066c); `just ci` green on CVE-patched tip 2026-07-25 — all groups pass except dockle (no local Docker daemon, documented env limitation; CI has Docker); npm audits 0 vulns both trees, Trivy clean (scratchpad/ci-final-tip.log)
 - [x] **Test audit is GREEN** — compact audit generated + citations verified 2026-07-25 (this section).
-- [ ] **`completion-audit` skill passed on the integrated branch** — after Elm phase.
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — after Elm phase.
+- [x] **`completion-audit` skill passed on the integrated branch** — after Elm phase. — evidence: epic completion-audit PASS 2026-07-25 — adversarial spot-verification of all 16 children found zero false evidence tokens; its 3 finalization blockers cleared (CVE fix 32b2a18c + ci green, compact audits 8eaf4bb6, preview E2E below)
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — after Elm phase. — evidence: Completion Bar met at epic level 2026-07-25 — every deliverable driven live locally (per-issue Pre-Check) AND on the deployed preview: full run 250 passed/10 failed/10 skipped (all 10 failures = helper-502 machine-churn signature) with all 10 passing the single documented environmental retry (12/12, exit 0); logs scratchpad/preview-e2e-run2.log + preview-e2e-retry10b.log
 
 ## Dependencies
 - Issue #115 (search E2E hardening — lands the deterministic search E2E harness this feature will extend)

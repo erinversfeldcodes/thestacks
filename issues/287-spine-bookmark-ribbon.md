@@ -66,8 +66,8 @@ Tally: 3 ✅ / 10 n/a — 0 ❌, 0 ⚠️. GREEN.
 - [x] Tests written and passing — `npx elm-test` scoped to SpineBookTest/SpineHiddenTest/Bookshelf*/Library/UpdateTest = 88 passed; `just run mix test blog_test bookshelf_controller_test` = 72 passed, 0 failures.
 - [x] Standards compliance verified — elm-format clean; `elm-review --config elm-review src/ tests/` = "no errors"; `mix format --check-formatted` clean; `mix credo` = no issues; `prettier --check` on e2e = clean.
 - [x] **Test audit is GREEN** — compact audit generated + citations verified 2026-07-25 (this section).
-- [ ] **`completion-audit` skill passed on the integrated branch** — pending integration (run by orchestrator on the integrated branch).
-- [ ] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — pending integration-level validation.
+- [x] **`completion-audit` skill passed on the integrated branch** — pending integration (run by orchestrator on the integrated branch). — evidence: epic completion-audit PASS 2026-07-25 — adversarial spot-verification of all 16 children found zero false evidence tokens; its 3 finalization blockers cleared (CVE fix 32b2a18c + ci green, compact audits 8eaf4bb6, preview E2E below)
+- [x] **Meets the Completion Bar** (`docs/agents/standards/completion-bar.md`) — pending integration-level validation. — evidence: Completion Bar met at epic level 2026-07-25 — every deliverable driven live locally (per-issue Pre-Check) AND on the deployed preview: full run 250 passed/10 failed/10 skipped (all 10 failures = helper-502 machine-churn signature) with all 10 passing the single documented environmental retry (12/12, exit 0); logs scratchpad/preview-e2e-run2.log + preview-e2e-retry10b.log
 
 > Note: full-suite `npx elm-test` is currently blocked by an unrelated, uncommitted partial in `tests/Page/SearchProgramTest.elm` (search track / #289 — two suite entries with no backing functions) that breaks compilation. Flagged to main; not part of #287 and not committed here. #287 modules were validated by explicit-file elm-test.
 
