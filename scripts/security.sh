@@ -42,6 +42,7 @@ trivy fs . --severity CRITICAL,HIGH --exit-code 1 \
     --skip-dirs apps/vision/.venv \
     --skip-dirs .venv-tools \
     --skip-dirs scripts/mcp/.venv \
+    --skip-dirs .claude/worktrees \
     --skip-files apps/core/erl_crash.dump
 
 # TruffleHog — deep entropy-based secret scanning
