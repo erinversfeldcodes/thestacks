@@ -33,15 +33,17 @@ it — delete the story from Summary + User Stories above and spin out a feature
 "to verify"; fill verdicts + file:line evidence when this issue is picked up.
 -->
 
+_Static trace re-verified 2026-07-25 (researcher-125). Line numbers per current `frontend/src/Main.elm` (3042 lines). Live-drive column is filled by Plan Phase 1._
+
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-15.1.1 — View the Home Page | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-15.2.1 — Navigate Between Sections via the Top Navigation Bar | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-15.2.2 — Swipe Navigation Between Bookshelves | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-15.3.1 — View the Platform Footer | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-16.1.1 — View the 404 Not Found Page | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-16.2.1 — Handle Network Failures Gracefully | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-16.3.1 — Handle Unauthenticated Access to Protected Pages | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-15.1.1 — View the Home Page | `Route Home` → `initPage` (Main.elm:505) → `viewHome` (Main.elm:2979) — shipped CTAs are About `/about` + Marketplace `/marketplace` (#235) | ✅ `/` (unauth): `h1`="The Stacks", subtitle="Your personal collection, beautifully organised.", CTAs `a.btn--primary.home__link--about` "About The Stacks"→`/about` + `a.btn--secondary.home__link--marketplace` "Browse the Marketplace"→`/marketplace` (2026-07-25) | ✅ (doc reconciled) | Feature built + observed live; story doc `US-15.1.1` now reconciled to shipped CTAs (Phase 1). |
+| US-15.2.1 — Navigate Between Sections via the Top Navigation Bar | `viewNav`/`navItem`/`navDropdown` (Main.elm:2702/2770) — exposed + unit-tested (`MainNavTest.elm`) | ✅ unauth nav = [Catalogue, Marketplace, Sign In] (About under brand dropdown); authed nav = 5 shelves (Library/Antilibrary/Wish List/Reading Pile/Looking for a Home) + Catalogue(Search, Add Book) + Marketplace(Create Listing→`/marketplace/create`, My Listings→`/marketplace/mine`) + user menu; `app-nav__item--active` on Library@`/library` (2026-07-25) | ✅ | — |
+| US-15.2.2 — Swipe Navigation Between Bookshelves | `onSwipe` port (Main.elm:78) → `decodeSwipe` (:2519) → `SwipeReceived` (:2388) → `SwipeNavigation.swipeLeft/right` (modular wrap) | ✅ real `touchstart`/`touchend` (dx=-240) on `/library` → navigated to `/antilibrary`; same gesture on `/search` → no navigation (2026-07-25) | ✅ | wiring untested — punch item |
+| US-15.3.1 — View the Platform Footer | `viewFooter` (Main.elm:3037) on every page | ✅ `footer.app-footer` "The Stacks — open source book management" present on `/`, `/library` (authed), and `/404` (2026-07-25) | ✅ | zero test coverage — punch item |
+| US-16.1.1 — View the 404 Not Found Page | `Route.fromUrl` → `withDefault NotFound` → `viewNotFound` (Main.elm:3028); `pageTitle NotFound` (:2572) | ✅ `/nonexistent-page-xyz` → `document.title`="Not Found — The Stacks", `h1`="Page Not Found", explanation "The page you're looking for doesn't exist.", "Go Home"→`/`, nav + footer visible (2026-07-25) | ✅ | render untested — punch item |
+| US-16.2.1 — Handle Network Failures Gracefully | RemoteData pattern + per-status Login messages (`LoginProgramTest.elm` asserts 422/403/423/503/401) | ✅ login wrong-pw → "The door remains shut. Invalid credentials." + email/password RETAINED; settings password wrong-current → 422 "Current password is incorrect." + all 3 fields RETAINED — **form preservation WORKS** (no gap) (2026-07-25) | ✅ | form-input preservation VERIFIED live (login + settings/password); no clearing-on-failure gap found |
+| US-16.3.1 — Handle Unauthenticated Access to Protected Pages | `requiresAuth` (Main.elm:441) + `initPage` guard (:505) render Login at protected URL; PLUS global session-expiry interceptor (#173/#178, Main.elm:857-920) | ✅ `/library` unauth → login form renders, URL stays `/library` (not `/login`); post-login → `/antilibrary`. Interceptor: bookshelf-load 401 (revoked token) → redirect `/login` + `session-expired-notice`; settings-save 401 → inline error, NOT interceptor (2026-07-25) | ✅ (exceeds story) | story doc "no global 401 handler" note updated (Phase 1). Nuance: interceptor covers page-load 401s, not settings-save 401s |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
@@ -49,13 +51,13 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 
 ### 1. Playwright UI Tests
 - **Home page unauthenticated**: Navigate to `/` -> see "The Stacks" title, subtitle, action buttons
-- **Home page buttons**: "View Antilibrary" and "Add a Book" links present with correct hrefs
+- **Home page buttons**: "About The Stacks" (`/about`) and "Browse the Marketplace" (`/marketplace`) links present with correct hrefs _(corrected 2026-07-25 — #235 replaced the old "View Antilibrary"/"Add a Book" CTAs)_
 - **Top nav authenticated**: Full nav items: Library, Antilibrary, Wish List, Reading Pile, Looking for a Home, Catalogue dropdown, Marketplace dropdown, user display name
 - **Top nav unauthenticated**: Only Catalogue, Marketplace, Sign In
-- **Brand dropdown**: "The Stacks" logo links to `/`, Costs link to `/costs`
+- **Brand dropdown**: "The Stacks" logo links to `/`; single About sub-item → `/about` _(corrected 2026-07-25 — Costs removed as a nav item by #235)_
 - **Catalogue dropdown**: Sub-items Catalogue, Search, Add Book
 - **Marketplace dropdown**: Sub-items Marketplace, Create Listing, My Listings
-- **Admin dropdown (owner only)**: Metrics, Sources, Scrapers
+- **Admin dropdown (owner only)**: Sources, Scrapers, Book Moderation _(corrected 2026-07-25 — in-app Metrics removed by #267; `Metrics` is now a public route)_
 - **Active nav item**: `app-nav__item--active` class on current page
 - **Footer on every page**: `<footer class="app-footer">` with tagline renders on all pages
 - **404 page**: Navigate to `/nonexistent-page` -> "Page Not Found" heading, explanation, "Go Home" button
@@ -104,10 +106,10 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - **Home page**: `initPage Home` -> `( PageHome, Cmd.none )`, no messages, no model
 - **viewHome**: Renders `div.page.page--home` with title, subtitle, action links
 - **pageTitle Home**: Returns "The Stacks"
-- **requiresAuth**: Returns `False` for Home, Login, CostTransparency, Catalogue, BookDetail, MarketplaceBrowse, MarketplaceDetail, BlogArchive, BlogPost, ConfirmEmail, NotFound; `True` for all others
+- **requiresAuth**: Returns `False` for the public set — Home, Login, CostTransparency, Catalogue, BookDetail, MarketplaceBrowse, MarketplaceDetail, BlogArchive, BlogPost, ConfirmEmail, NotFound, plus (added since baseline) Metrics, About, Profile, ProfileShelf, Search, ForgotPassword, ResetPassword (~18 routes, `Main.elm:441-502`); `True` for all others _(corrected 2026-07-25 — guard-matrix test must use the current set)_
 - **initPage guard**: If `requiresAuth route && maybeAuth == Nothing` -> `( PageLogin Login.init, Cmd.none )`
 - **Nav rendering**: `viewNav` pattern-matches `model.auth`:
-  - `Nothing` -> `[Catalogue, MarketplaceBrowse, Login]`
+  - `Nothing` -> Catalogue, Marketplace, About, Sign In _(corrected 2026-07-25 per `MainNavTest.elm`)_
   - `Just auth` -> full shelf nav + dropdowns + UserMenu
 - **Active state**: `navItem` compares `currentRoute == targetRoute` -> `app-nav__item--active`
 - **isSettingsRoute**: Returns True for all Settings* routes
@@ -135,6 +137,7 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - Server-side 401 rate
 
 ## Reviewer Context
+- **2026-07-25:** a global session-expiry interceptor now exists (#173/#178, `Main.elm:857-920` — `handleSessionExpiry`/`forceSessionExpiry`, fed by per-page `SessionExpired` OutMsg): expired-session 401s clear storage and redirect to `/login` with a `session-expired-notice`. This is distinct from the `requiresAuth` guard, which still renders Login **in place** at the protected URL. The audit's old "no global 401 handler" premise is obsolete.
 - The home page currently renders for authenticated users too (no auto-redirect to `/antilibrary`).
 - Swipe wraps around via `modBy` (spec says "does nothing at boundaries" but implementation wraps).
 - The login form URL bar does NOT change to `/login` when the requiresAuth guard fires — login renders at the protected URL.
@@ -453,6 +456,9 @@ none blocked on implementation.
 - [ ] `just verify` passes
 - [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
 - [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
+- [ ] **Audit re-baselined to current code before test-writing** (corrections A–H from the 2026-07-25 re-verification: global interceptor, #235 CTAs/nav, #267 admin, ~18 public routes, ADR-020 route removal) — evidence: regenerated tables dated ≥2026-07-25
+- [ ] **Story docs reconciled**: `US-15.1.1` CTAs updated to shipped About/Marketplace; `US-16.3.1` "no global 401 handler" note updated to shipped interceptor behaviour — evidence: doc diffs
+- [ ] **Form-input preservation (US-16.2.1) verified live** — retained-input assertion in Elm program test + E2E; if live-drive finds a page clearing inputs on failure, the fix ships in-scope — evidence: live-drive artifact + spec file:line
 
 ## Dependencies
 Requires Main.elm routing, SwipeNavigation module, ViewNav rendering, RemoteData pattern.
@@ -462,3 +468,5 @@ testing-agent
 
 ## Progress Notes
 [Updated by agents during execution.]
+
+- **2026-07-25 (Phase 1 — testing-coordinator):** Re-baselined docs + live-drove all 7 stories against a fresh local stack (rebuilt esbuild `app.js`, `STACKS_E2E_TEST_HELPERS=1`, `AGE_GATING_ENABLED=true`, seeded dev DB, `POST /api/test/session` mint helper). **All 7 Pre-Check rows ✅ with live evidence** (see table). Highlights: home CTAs are the shipped #235 About/Marketplace pair; real touch-gesture swipe navigates `/library`→`/antilibrary` and is a no-op on `/search`; footer present on `/`, authed shelf, and 404; 404 tab title "Not Found — The Stacks". **Form-input preservation VERIFIED (no gap):** login retains email/password after a wrong-password failure, and the settings password form retains all 3 fields after a wrong-current-password 422 → Plan Phase 2b contingency (form-preservation fix) is NOT needed. Global session-expiry interceptor (#173/#178) confirmed on a page-load 401 (bookshelf-load with a revoked token → redirect `/login` + `session-expired-notice`); noted it does NOT fire on a settings-save 401 (Profile surfaces inline "Could not save profile."). Docs reconciled: `docs/user_stories/US-15.1.1-home-page.md` (CTAs → About/Marketplace) and `docs/user_stories/US-16.3.1-unauth-redirect.md` ("no global 401 handler" note → shipped interceptor + page-load-vs-save nuance).

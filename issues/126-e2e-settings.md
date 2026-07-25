@@ -33,21 +33,23 @@ it — delete the story from Summary + User Stories above and spin out a feature
 "to verify"; fill verdicts + file:line evidence when this issue is picked up.
 -->
 
+_Static trace re-verified 2026-07-25 (researcher-126). Live-drive column is filled by Plan Phase 1; the two 🟡 stories are built in-scope per the kickoff decision._
+
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-17.1.1 — Settings Index Page | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-17.2.1 — View and Edit Profile | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-17.2.2 — Set Location | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-17.2.3 — Change Password | ⬜ to verify | ⬜ to verify | ⬜ | — |
-| US-17.3.1 — Email Notification Preferences | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-17.1.1 — Settings Index Page | `Route` → `Settings.view` (`Page/Settings.elm:17`) — **7-item** sidebar + mobile `<select>` | ✅ 7 sidebar links: Profile, Password, Notifications, Consent, Privacy, Audit Log (`/settings/*`) + Your Data Insights (→`/me/insights`); `settings-hub__nav-item--active` on the current sub-route (verified "Password"@`/settings/password`); mobile `<select>` renders all 7 options. **Deviation:** `/settings` does NOT redirect to `/settings/profile` — it settles at `/settings` rendering the hub with profile as default content (2026-07-25) | ✅ | Redirect-behaviour note for Phase 5 E2E: assert hub-renders-at-`/settings`, not a `/settings/profile` redirect |
+| US-17.2.1 — View and Edit Profile | `Profile.elm SaveProfile` → `Api.updateProfile` (`Api.elm:1707`) → `PUT /api/settings/profile` (`router.ex:236`) → `Accounts.update_profile/2` → `op.users` → `user.profile_updated` (empty payload, #121) | 🟡 **CG-1 reproduced + BROADER than scoped:** display-name-ONLY save (email unchanged) → `422 invalid_current_password`; email change → `422`, UI shows "Could not save profile."; no current-password input on the Profile page. Root cause `accounts.ex:784` — `update_profile/2` branches on `Map.has_key?(attrs,"email")`, so because the frontend sends `email` on EVERY save with `current_password=""`, ALL UI profile saves 422, not just email changes (2026-07-25) | 🟡→✅ via CG-1 | **Escalation flag:** CG-1 as scoped (email-only) is insufficient — the fix must also let display-name/website-only saves succeed (omit `email` when unchanged, or don't demand a password for a same-email payload). Feeds Plan Phase 2b design |
+| US-17.2.2 — Set Location | `SaveLocation` → `Api.updateLocation` → `PUT /api/settings/location` (`router.ex:237`) → `location_changeset` → `user.location_updated` → `LocationUpdatedHandler` → `GeographicDiscoveryJob` (chain tested) | ✅ Country Code "GB" + City "London" → `PUT /api/settings/location` 200 → "Location saved." (2026-07-25) | ✅ | bg wiring exists contrary to story doc — audit notes it |
+| US-17.2.3 — Change Password | `Password.elm validate` → `Api.updatePassword` → `PUT /api/settings/password` (`router.ex:292`, `:password_change` 3/min) → `change_password/3` (Argon2 verify+hash, revokes sessions #178/#179) → `user.password_changed` | ✅ minted user (`e2e-password`), correct current pw → `PUT /api/settings/password` 200, all 3 fields cleared, "Password changed successfully."; revokes sessions (#178/#179) confirmed via interceptor drive (2026-07-25) | ✅ | — |
+| US-17.3.1 — Email Notification Preferences | Toggles → `Api.updateNotifications` → `PUT /api/settings/notifications` (`router.ex:238`) → `notifications_changeset` → `user.notifications_updated` | 🟡 **CG-2 reproduced:** 4 toggle rows render — Price Drops / New Reviews / Author Updates / Event Alerts — ALL `toggle--off` on load (incl. the two whose schema default is `true`: marketplace, group_invitations → never hydrated). Toggle Price Drops → `PUT /api/settings/notifications` 200 → "Preferences saved." → `toggle--on`. **RELOAD → all render `toggle--off` again** (saved state lost). Confirms `Notifications.init` all-false, no fetch (2026-07-25) | 🟡→✅ via CG-2 | Build in-scope: new auth-gated `GET /api/settings/notifications` + RemoteData hydration (Plan Phases 2a/2b). Label↔field mapping (Price Drops→`notify_wishlist_availability`) confirmed rendering |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
 ## Technical Requirements
 
 ### 1. Playwright UI Tests
-- **Settings hub layout**: Navigate to `/settings` (redirects to `/settings/profile`) -> sidebar with 6 links + main content area
-- **Sidebar items**: Profile, Password, Notifications, Consent, Age Verification, Privacy
+- **Settings hub layout**: Navigate to `/settings` -> hub renders at `/settings` with profile as default content (NO redirect to `/settings/profile` — corrected per Phase 1 live-drive) + sidebar with 7 links + main content area _(corrected 2026-07-25)_
+- **Sidebar items**: Profile, Password, Notifications, Consent, Privacy, Audit Log, Your Data Insights _(corrected 2026-07-25 — Age Verification removed by ADR-020 §2; Audit Log + Insights added since baseline; `Page/Settings.elm:56-65`)_
 - **Active sidebar**: Current sub-page highlighted with `settings-hub__nav-item--active`
 - **Mobile dropdown**: `<select>` element for navigation on mobile
 - **Profile form**: Display Name, Email, Website URL fields with "Save Profile" button
@@ -80,7 +82,8 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - `PUT /api/settings/password` — 422 `current_password and new_password are required`
 - `PUT /api/settings/password` — rate limited (`:password_change` bucket, 3/min)
 - `PUT /api/settings/notifications` — 200 with notification preferences
-- `PUT /api/settings/notifications` — 422 on changeset errors
+- `PUT /api/settings/notifications` — 422 on changeset errors (if the implementation silently ignores invalid values, record `n/a` with rationale)
+- `GET /api/settings/notifications` — 200 with the four `notify_*` fields reflecting stored values; 401 without auth _(added 2026-07-25 — CG-2 build-in-scope, kickoff decision)_
 - All settings endpoints — 401 without auth
 
 ### 4. Database Assertion Tests
@@ -93,11 +96,13 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - Notification defaults: `notify_marketplace: true`, `notify_group_invitations: true`, others false
 
 ### 5. Event Flow Tests
-- `user.profile_updated` emitted with `{ display_name }` on profile save
-- `user.location_updated` emitted with `{ country_code, city }` on location save
+_(corrected 2026-07-25 — #121 made all user-event payloads PII-free; the original payload requirements below were inverted)_
+- `user.profile_updated` emitted with **empty payload** on profile save (PII-free per #121; asserted `accounts_test.exs:446-457`)
+- `user.location_updated` emitted with **empty payload** on location save (asserted `accounts_test.exs:493-506`)
 - `user.password_changed` emitted with empty payload on password change
-- `user.notifications_updated` emitted with all 4 notification fields
-- No handlers currently registered for these events
+- `user.notifications_updated` emitted with **empty payload** (assert `%{}` — currently count-only)
+- Negative emissions: no event row on failed changeset / rolled-back Multi (profile, location, notifications)
+- `user.location_updated` → `LocationUpdatedHandler` → `GeographicDiscoveryJob` (registered + tested, contrary to the original "no handlers" note)
 
 ### 6. Background Job Tests
 - N/A — all settings changes are synchronous
@@ -132,10 +137,10 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
   - Current password empty: validation error
   - Valid: calls `Api.updatePassword`
 - `SaveCompleted (Ok _)` -> resets model to init with `saving = Success ()`
-- **Notifications**: `Notifications.init` -> all toggles false, `saving = NotAsked`
+- **Notifications**: `Notifications.init` -> fetches stored prefs via `Api.getNotifications` (RemoteData: Loading state; toggles render from Success; Failure shows `p.error`, never silently-wrong defaults) _(changed 2026-07-25 — CG-2 build-in-scope replaces the old all-false init)_
 - `TogglePriceDrops`/`ToggleNewReviews`/etc. -> flip boolean, immediately call `savePreferences`
 - `SaveCompleted (Ok _)` -> `saving = Success ()`
-- Note: Preferences not loaded from server on init (starts at defaults)
+- ~~Note: Preferences not loaded from server on init (starts at defaults)~~ _(obsoleted by CG-2 build-in-scope, 2026-07-25)_
 
 ### 12. Metrics & Telemetry Tests
 - Profile update success/failure rates
@@ -149,10 +154,13 @@ Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enu
 - Toggle flip distribution per notification type
 
 ## Reviewer Context
-- The frontend does not currently send `current_password` for email changes — this will fail server-side.
-- Notification toggle labels don't match backend field names (e.g., `priceDrops` -> `notify_wishlist_availability`).
-- Password change rate limit is stricter than auth: 3/min vs 5/min.
-- Notification preferences are NOT loaded from server on page init — they start at default values. This is a known UX gap.
+- ~~The frontend does not currently send `current_password` for email changes — this will fail server-side.~~ **Fixed in-scope by this issue (CG-1, Plan Phases 2a+2b). Phase 1 live-drive found CG-1 BROADER than scoped: `Accounts.update_profile/2` (`accounts.ex:784`) branches on `Map.has_key?(attrs, "email")` and the frontend sends `email` on every save, so ALL UI profile saves 422 — not just email changes. Fix is two-sided: backend treats a same-email payload as no email change (2a); frontend omits `email` when unchanged AND adds a current-password input for real email changes (2b).**
+- **Phase 5 E2E gotcha (Phase 1 finding):** freshly minted `.test` users get a modal onboarding overlay (`[data-testid="onboarding-overlay"]`) that intercepts all form clicks — every settings spec must dismiss it ("Skip") before interacting.
+- **Interceptor nuance (Phase 1 finding):** the #173/#178 session-expiry interceptor covers page-load 401s; a settings-save 401 renders an inline error and stays put. Not a named-story gap — candidate follow-up issue at epic finalization; E2E must not assert interceptor behaviour on save failures.
+- Notification toggle labels don't match backend field names (e.g., `priceDrops` -> `notify_wishlist_availability`) — mapping, not a bug; Phase 1 live-drive confirms rendering.
+- Password change rate limit is stricter than auth: 3/min vs 5/min (`:password_change` bucket; plug-tested since #176; router-integration 429 test still owed).
+- ~~Notification preferences are NOT loaded from server on page init.~~ **Fixed in-scope by this issue (CG-2, Plan Phases 2a/2b): new auth-gated `GET /api/settings/notifications` + RemoteData hydration.**
+- **2026-07-25:** password change revokes all sessions (#178/#179) — E2E must re-authenticate after a password change (`settings.spec.ts:425-451` already isolates for this). Event payloads are PII-free (#121) — payload assertions are `%{}`. Profile has a `handle` field since #211/#212 (tested in `ProfileTest.elm`); fold into the audit, not new scope.
 
 ## Test Audit
 
@@ -452,6 +460,10 @@ code-gap items**, of which punch #14–#21 are blocked on CG-3.
 - [ ] `just verify` passes
 - [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
 - [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
+- [ ] **Audit re-baselined to current code before test-writing** (7-link sidebar, ADR-020 removals, PII-free payload inversion, #176 plug test, #211/#212 handle expansion) — evidence: regenerated tables dated ≥2026-07-25
+- [ ] **CG-1 built + proven live**: email change from the UI with current password succeeds end-to-end — evidence: E2E spec file:line + live-drive artifact
+- [ ] **CG-2 built + proven live**: `GET /api/settings/notifications` + hydrated toggles; toggle → reload → persisted state renders — evidence: controller test + E2E round-trip spec file:line
+- [ ] **gdpr-review PASS recorded for the CG-1/CG-2 diffs** (new user-data read endpoint auth-gated; no new stored/exported data) — evidence: review verdict in the phase report
 
 ## Dependencies
 Requires Accounts context, UserSettingsController, Settings hub Elm layout.
@@ -461,3 +473,5 @@ testing-agent
 
 ## Progress Notes
 [Updated by agents during execution.]
+
+- **2026-07-25 (Phase 1 — testing-coordinator):** Live-drove all 5 settings stories against a fresh local stack (rebuilt esbuild `app.js`, `STACKS_E2E_TEST_HELPERS=1`, seeded dev DB, minted `.test` users via `POST /api/test/session`; dismissed the first-run onboarding overlay before interacting — it intercepts form clicks). **3 ✅ live (hub, location, password); 2 🟡 with reproduced failures (CG-1, CG-2).** Hub: 7 sidebar links + `settings-hub__nav-item--active` on the current sub-route + mobile `<select>`; **`/settings` does NOT redirect to `/settings/profile`** (renders hub at `/settings`). Location save → 200 "Location saved.". Password change (minted user, current pw `e2e-password`) → 200, fields cleared, "Password changed successfully.". **CG-1 reproduced and found BROADER than scoped:** display-name-only save also 422s (`invalid_current_password`) because `Accounts.update_profile/2` (`accounts.ex:784`) routes any payload containing an `email` key through the password-verifying path and the UI always sends `email` — so EVERY UI profile save fails, not just email changes. **CG-2 reproduced:** 4 toggles (Price Drops/New Reviews/Author Updates/Event Alerts) load all-`toggle--off` (ignoring the marketplace/group-invites `true` defaults); toggle→200 "Preferences saved."→`toggle--on`; **reload → all `toggle--off` again** (init never hydrates). Interceptor interaction: a settings-save 401 surfaces inline ("Could not save profile."), NOT the global interceptor (which fires on page-load 401s) — recorded on #125. **Pre-implementation flag:** Plan Phase 2b's CG-1 (email-only current-password field) must be widened so display-name/website-only saves succeed without a password.
