@@ -243,6 +243,243 @@ defmodule Stacks.BooksTest do
     test "returns empty list when no match" do
       assert [] == Books.search_books("ZZZNoMatchZZZ")
     end
+
+    test "matches a multi-word query via plainto_tsquery tokenisation" do
+      book = insert(:book, title: "Elixir in Action")
+      insert(:book_edition, book: book)
+      other = insert(:book, title: "Rust Atomics and Locks")
+      insert(:book_edition, book: other)
+
+      results = Books.search_books("elixir action")
+      titles = Enum.map(results, & &1.title)
+
+      assert "Elixir in Action" in titles
+      refute "Rust Atomics and Locks" in titles
+    end
+
+    # #291 REGRESSION LOCK: the raw query must reach `plainto_tsquery` so titles
+    # with apostrophes/hyphens still match. A prior `String.replace(~r/[^\w\s]/)`
+    # sanitiser mangled "O'Brien" → "OBrien" and "spider-man" → "spiderman",
+    # changing the lexemes and dropping legitimate matches. Injection-safety comes
+    # from Ecto param binding + plainto_tsquery (see search_controller_test.exs
+    # "query edge cases"), not from stripping characters.
+    test "matches a title containing an apostrophe" do
+      book = insert(:book, title: "The Master of O'Brien Manor")
+      insert(:book_edition, book: book)
+      other = insert(:book, title: "Rust Atomics and Locks")
+      insert(:book_edition, book: other)
+
+      results = Books.search_books("O'Brien")
+      titles = Enum.map(results, & &1.title)
+
+      assert "The Master of O'Brien Manor" in titles
+      refute "Rust Atomics and Locks" in titles
+    end
+
+    test "matches a title containing a hyphenated word" do
+      book = insert(:book, title: "The Amazing Spider-Man Chronicles")
+      insert(:book_edition, book: book)
+      other = insert(:book, title: "Rust Atomics and Locks")
+      insert(:book_edition, book: other)
+
+      results = Books.search_books("Spider-Man")
+      titles = Enum.map(results, & &1.title)
+
+      assert "The Amazing Spider-Man Chronicles" in titles
+      refute "Rust Atomics and Locks" in titles
+    end
+
+    # Layer 3 DB-assertion punch (#115 audit #2): prove the two DB mechanisms the
+    # feature rests on — the generated tsvector column and the GIN index — rather
+    # than trusting them via `search_books/2`.
+    test "populates the title_tsv tsvector column on book creation" do
+      book = insert(:book, title: "Elixir in Action")
+
+      %{rows: [[tsv]]} =
+        Repo.query!(
+          "SELECT title_tsv::text FROM op.books WHERE id = $1",
+          [Ecto.UUID.dump!(book.id)]
+        )
+
+      # Column is GENERATED ALWAYS AS to_tsvector('english', title) STORED, so it
+      # is non-null and carries stemmed lexemes with `in` dropped as a stopword.
+      assert tsv =~ "elixir"
+      assert tsv =~ "action"
+      refute tsv =~ "'in'"
+    end
+
+    test "the full-text query uses the title_tsv GIN index" do
+      # On a tiny table the planner prefers a seqscan; disable it within this
+      # sandbox transaction so the plan reflects index availability, then assert
+      # the GIN index (idx_books_title_tsv) is chosen.
+      Repo.query!("SET LOCAL enable_seqscan = off")
+
+      %{rows: rows} =
+        Repo.query!(
+          "EXPLAIN SELECT id FROM op.books WHERE title_tsv @@ plainto_tsquery('english', $1)",
+          ["elixir"]
+        )
+
+      plan = rows |> List.flatten() |> Enum.join("\n")
+      assert plan =~ "idx_books_title_tsv"
+    end
+  end
+
+  # #284 — deep search matches book DESCRIPTIONS (not just titles) under
+  # `scope: :deep`, ranking title matches ahead of description-only matches and
+  # leaving the default (title-only) scope untouched.
+  describe "search_books/2 — deep scope (#284)" do
+    test "deep scope finds a book matched only by its description" do
+      book =
+        insert(:book,
+          title: "Unrelated Title",
+          description: "A sweeping saga of interstellar cartography."
+        )
+
+      insert(:book_edition, book: book)
+
+      # Title-only default must MISS it — the term is only in the description.
+      assert Books.search_books("cartography") == []
+
+      deep_titles =
+        "cartography" |> Books.search_books(scope: :deep) |> Enum.map(& &1.title)
+
+      assert "Unrelated Title" in deep_titles
+    end
+
+    test "title-only default scope ignores description matches" do
+      book =
+        insert(:book, title: "Plain Cover", description: "Deep in the mycology of fungi.")
+
+      insert(:book_edition, book: book)
+
+      assert Books.search_books("mycology") == []
+      assert Books.search_books("mycology", scope: :title) == []
+
+      deep = Books.search_books("mycology", scope: :deep)
+      assert Enum.map(deep, & &1.title) == ["Plain Cover"]
+    end
+
+    test "deep scope ranks a title match ahead of a description-only match" do
+      title_match =
+        insert(:book, title: "Botany Basics", description: "An unrelated blurb.")
+
+      insert(:book_edition, book: title_match)
+
+      desc_match =
+        insert(:book, title: "Field Notes", description: "A guide to botany and plants.")
+
+      insert(:book_edition, book: desc_match)
+
+      titles = "botany" |> Books.search_books(scope: :deep) |> Enum.map(& &1.title)
+
+      assert titles == ["Botany Basics", "Field Notes"]
+    end
+
+    test "deep scope still returns title matches (superset of title scope)" do
+      book = insert(:book, title: "Elixir in Action", description: "About the BEAM.")
+      insert(:book_edition, book: book)
+
+      deep_titles =
+        "Elixir" |> Books.search_books(scope: :deep) |> Enum.map(& &1.title)
+
+      assert "Elixir in Action" in deep_titles
+    end
+
+    # Layer 3 DB-assertion punch (mirrors the title_tsv patterns above): prove the
+    # two DB mechanisms deep search rests on — the generated description_tsv column
+    # and its GIN index — directly, not via search_books/2.
+    test "populates the description_tsv tsvector column on book creation" do
+      book = insert(:book, description: "Interstellar cartography and star charts.")
+
+      %{rows: [[tsv]]} =
+        Repo.query!(
+          "SELECT description_tsv::text FROM op.books WHERE id = $1",
+          [Ecto.UUID.dump!(book.id)]
+        )
+
+      # GENERATED ALWAYS AS to_tsvector('english', coalesce(description,'')) STORED
+      # — non-null, stemmed lexemes, `and` dropped as a stopword.
+      assert tsv =~ "cartographi"
+      assert tsv =~ "star"
+      refute tsv =~ "'and'"
+    end
+
+    test "the deep-search query uses the description_tsv GIN index" do
+      Repo.query!("SET LOCAL enable_seqscan = off")
+
+      %{rows: rows} =
+        Repo.query!(
+          "EXPLAIN SELECT id FROM op.books WHERE description_tsv @@ plainto_tsquery('english', $1)",
+          ["cartography"]
+        )
+
+      plan = rows |> List.flatten() |> Enum.join("\n")
+      assert plan =~ "idx_books_description_tsv"
+    end
+  end
+
+  describe "description_snippets/2" do
+    test "returns a <mark>-highlighted excerpt for a description match" do
+      book =
+        insert(:book,
+          title: "Plain Title",
+          description: "The definitive treatise on interstellar cartography and beyond."
+        )
+
+      snippets = Books.description_snippets([book.id], "cartography")
+
+      assert Map.has_key?(snippets, book.id)
+      snippet = snippets[book.id]
+      assert snippet =~ "<mark>cartography</mark>"
+    end
+
+    test "omits books whose description does not match (title-only hits)" do
+      match = insert(:book, description: "All about mycology.")
+      title_only = insert(:book, title: "mycology", description: "Something unrelated.")
+
+      snippets = Books.description_snippets([match.id, title_only.id], "mycology")
+
+      assert Map.has_key?(snippets, match.id)
+      refute Map.has_key?(snippets, title_only.id)
+    end
+
+    test "returns an empty map for an empty id list" do
+      assert Books.description_snippets([], "anything") == %{}
+    end
+  end
+
+  # #296 REGRESSION LOCK: the catalogue search path (`maybe_search/2`, shared by
+  # `list_catalogue/1` and `list_for_moderation/1`) uses the SAME `plainto_tsquery`
+  # mechanism as `search_books/2` — NOT `ilike` — so there are no `%`/`_` wildcard
+  # semantics to worry about; the raw query is passed via the bound param and
+  # plainto_tsquery treats it as plain text. A prior `String.replace(~r/[^\w\s]/)`
+  # sanitiser was lossy here too ("O'Brien" → "OBrien", "spider-man" → "spiderman"),
+  # degrading legitimate catalogue searches. Sibling of #291.
+  describe "list_catalogue/1 — search" do
+    test "matches a title containing an apostrophe" do
+      insert(:book, title: "The Master of O'Brien Manor")
+      insert(:book, title: "Rust Atomics and Locks")
+
+      {books, total} = Books.list_catalogue(search: "O'Brien")
+      titles = Enum.map(books, & &1.title)
+
+      assert "The Master of O'Brien Manor" in titles
+      refute "Rust Atomics and Locks" in titles
+      assert total == 1
+    end
+
+    test "matches a title containing a hyphenated word" do
+      insert(:book, title: "The Amazing Spider-Man Chronicles")
+      insert(:book, title: "Rust Atomics and Locks")
+
+      {books, total} = Books.list_catalogue(search: "Spider-Man")
+      titles = Enum.map(books, & &1.title)
+
+      assert "The Amazing Spider-Man Chronicles" in titles
+      refute "Rust Atomics and Locks" in titles
+      assert total == 1
+    end
   end
 
   describe "confirm_cover_association/2" do
@@ -567,36 +804,6 @@ defmodule Stacks.BooksTest do
 
       {:ok, event_aggregate_id} = Ecto.UUID.load(raw_id)
       assert event_aggregate_id == edition.id
-    end
-  end
-
-  describe "search_platform/2" do
-    test "returns {books, count} tuple for a matching query" do
-      book = insert(:book, title: "Platform Search Test Book")
-      insert(:book_edition, book: book)
-      user = insert(:user)
-      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
-      insert(:placement, book: book, bookshelf: bookshelf, visibility: "platform")
-
-      {results, count} = Books.search_platform("Platform Search Test", [])
-
-      assert is_list(results)
-      assert is_integer(count)
-      assert count >= 0
-    end
-
-    test "returns {books, count} for an empty query (returns catalogue)" do
-      {results, count} = Books.search_platform("", limit: 5)
-
-      assert is_list(results)
-      assert is_integer(count)
-    end
-
-    test "returns {[], 0} when query matches nothing" do
-      {results, count} = Books.search_platform("XYZNoMatchAtAllXYZ123", [])
-
-      assert results == []
-      assert count == 0
     end
   end
 

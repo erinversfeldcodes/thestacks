@@ -440,6 +440,132 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
+  # ── POST /api/test/book-description (#284 — seed a description-bearing book) ──
+  #
+  # Deep search matches book DESCRIPTIONS, but the seed carries 0 books with a
+  # non-empty description, so the E2E slice needs a helper to insert one. This
+  # writes catalogue metadata only (no user data/PII) and inserts a fresh row, so
+  # the security surface is just the flag gate (404 unless the flag is "1").
+  describe "POST /api/test/book-description with the flag ON" do
+    setup do
+      System.put_env(@flag, "1")
+      :ok
+    end
+
+    test "creates a public book whose description is full-text searchable", %{conn: conn} do
+      conn =
+        post(conn, "/api/test/book-description", %{
+          title: "Zzyzx Deep Anchor",
+          description: "A study of bioluminescent creatures of the deep sea."
+        })
+
+      assert %{"ok" => true, "book_id" => book_id, "title" => "Zzyzx Deep Anchor"} =
+               json_response(conn, 201)
+
+      book = Stacks.Books.get_book_detail(book_id)
+      assert book.description == "A study of bioluminescent creatures of the deep sea."
+      # Public + single primary edition so it surfaces on the platform search.
+      assert book.visibility_tier == "public"
+      assert length(book.editions) == 1
+
+      # Deep search finds it by description; the default title scope does not.
+      deep = Stacks.Books.search_books("bioluminescent", scope: :deep)
+      assert book_id in Enum.map(deep, & &1.id)
+      assert Stacks.Books.search_books("bioluminescent") == []
+    end
+
+    test "generates a unique valid ISBN when none is supplied", %{conn: conn} do
+      first =
+        json_response(
+          post(conn, "/api/test/book-description", %{title: "A", description: "x"}),
+          201
+        )
+
+      second =
+        json_response(
+          post(build_conn(), "/api/test/book-description", %{title: "B", description: "y"}),
+          201
+        )
+
+      assert first["book_id"] != second["book_id"]
+
+      isbn = Stacks.Books.get_book_detail(first["book_id"]).editions |> hd() |> Map.get(:isbn)
+      assert Stacks.Books.valid_isbn_checksum?(isbn)
+    end
+
+    test "auto-generated ISBN carries the recognisable E2E-seed block (Issue #297)", %{conn: conn} do
+      %{"book_id" => book_id} =
+        json_response(
+          post(conn, "/api/test/book-description", %{title: "Marker", description: "z"}),
+          201
+        )
+
+      isbn = Stacks.Books.get_book_detail(book_id).editions |> hd() |> Map.get(:isbn)
+
+      # The reserved synthetic block (978-99999-…) flags the row as E2E-seeded so it
+      # can never be confused with a verified catalogue ISBN; still a well-formed,
+      # checksum-valid ISBN-13 so Books.create accepts it past the ISBN Hard Gate.
+      assert String.starts_with?(isbn, "97899999")
+      assert String.length(isbn) == 13
+      assert Stacks.Books.valid_isbn_checksum?(isbn)
+    end
+
+    test "honours an explicit ISBN", %{conn: conn} do
+      conn =
+        post(conn, "/api/test/book-description", %{
+          title: "Explicit ISBN Book",
+          description: "Deep description here.",
+          isbn: "9781617295027"
+        })
+
+      %{"book_id" => book_id} = json_response(conn, 201)
+      isbn = Stacks.Books.get_book_detail(book_id).editions |> hd() |> Map.get(:isbn)
+      assert isbn == "9781617295027"
+    end
+
+    test "returns 422 for a malformed ISBN", %{conn: conn} do
+      conn =
+        post(conn, "/api/test/book-description", %{
+          title: "Bad ISBN",
+          description: "desc",
+          isbn: "not-an-isbn"
+        })
+
+      assert %{"errors" => _} = json_response(conn, 422)
+    end
+
+    test "returns 404 when required params are missing", %{conn: conn} do
+      conn = post(conn, "/api/test/book-description", %{title: "No description"})
+      assert conn.status == 404
+    end
+  end
+
+  describe "POST /api/test/book-description with the flag OFF (production posture)" do
+    setup do
+      System.delete_env(@flag)
+      :ok
+    end
+
+    test "returns 404 and creates no book", %{conn: conn} do
+      before = Core.Repo.aggregate(Stacks.Books.Book, :count)
+
+      conn =
+        post(conn, "/api/test/book-description", %{title: "Off Book", description: "nope"})
+
+      assert conn.status == 404
+      assert Core.Repo.aggregate(Stacks.Books.Book, :count) == before
+    end
+
+    test "returns 404 even when the flag is present but not exactly \"1\"", %{conn: conn} do
+      System.put_env(@flag, "true")
+
+      conn =
+        post(conn, "/api/test/book-description", %{title: "NotOne", description: "nope"})
+
+      assert conn.status == 404
+    end
+  end
+
   # ── Rate limiting (flag ON) ─────────────────────────────────────────────────
   #
   # On a public preview the endpoint is reachable, so it must be rate-limited

@@ -53,16 +53,76 @@ message BookConfirmResponse {
 }
 
 // SearchResponse is returned for book search queries (GET /api/search?q=...).
-// JSON shape: {query, count, results: [...]}
+// JSON shape: {query, count, results: [...], collection: [...], platform_hits: [...]}
+//
+// The sectioned view is delivered by `collection` (the viewer's own
+// active-placement matches) and `platform_hits` (discoverable platform
+// inventory, each carrying optional source-label metadata). `results` (field 3)
+// is the DEPRECATED flat list — no longer populated as of #298 (see its field
+// comment); the SPA reads only the sectioned fields since #285/#292.
 message SearchResponse {
   // The original search query string.
   string query = 1 [json_name = "query"];
 
-  // Total number of matching results.
+  // Total DISTINCT books returned across both sections — length(collection) +
+  // length(platform_hits). `platform_hits` already excludes the viewer's
+  // collection books (de-duplicated into `collection`), so the two never
+  // overlap and this is a true, non-double-counted total (#298). It is NOT the
+  // length of the deprecated `results` field.
   int32 count = 2 [json_name = "count"];
 
-  // Matching books (with embedded author, editions, primary_edition).
+  // DEPRECATED (#298): kept reserved, no longer populated — always an empty
+  // list on the wire. The SPA never consumed it post-sectioning (it decodes and
+  // drops the field). Field number 3 stays permanently so it is never reused;
+  // the sectioned data lives in `collection` + `platform_hits`.
   repeated stacks.common.v1.Book results = 3 [json_name = "results"];
+
+  // "Your Collection": books the viewer has an active placement of whose title
+  // matches the query. Owned by the viewer, so never source-labelled and never
+  // subject to platform visibility filtering.
+  repeated SearchHit collection = 4 [json_name = "collection"];
+
+  // "On the Platform": platform-visible book matches, each with optional
+  // source-label metadata (looking_for_home / listed). Excludes books already
+  // in the viewer's own collection (de-duplicated into `collection`).
+  repeated SearchHit platform_hits = 5 [json_name = "platform_hits"];
+}
+
+// SearchHit wraps a search result book with optional discovery-source metadata.
+// The label fields are populated ONLY when the provenance is discoverable by
+// design (an always-visible looking_for_home placement, or an active
+// marketplace listing) — never for ordinary private placements.
+// JSON shape: {book: {...}, source: "" | "looking_for_home" | "listed",
+//              owner_handle: "", price: "", bookshelf_name: ""}
+message SearchHit {
+  // The matched book (with embedded author, editions, primary_edition).
+  stacks.common.v1.Book book = 1 [json_name = "book"];
+
+  // Discovery source of this hit. Empty string ("") when the hit carries no
+  // discovery provenance (a plain platform-visible book or a collection book).
+  // "looking_for_home" — an always-visible looking_for_home placement.
+  // "listed" — an active marketplace listing.
+  string source = 2 [json_name = "source"];
+
+  // Public handle of the owner/seller, when `source` is set. Empty otherwise.
+  // Rides the existing public-handle exposure — no new PII path.
+  string owner_handle = 3 [json_name = "owner_handle"];
+
+  // Formatted price (e.g. "R120") for a "listed" hit. Empty string otherwise.
+  string price = 4 [json_name = "price"];
+
+  // The viewer's own bookshelf this book sits on ("library", "wishlist",
+  // "reading_pile", "antilibrary", "looking_for_home") — the "where" behind
+  // US-1.5.1's collection story. Populated for COLLECTION hits only; always
+  // empty ("") on platform_hits (platform provenance is source/handle/price).
+  string bookshelf_name = 5 [json_name = "bookshelf_name"];
+
+  // A `ts_headline`-highlighted description excerpt (#284 deep search),
+  // populated ONLY for a scope=deep hit whose DESCRIPTION matched the query —
+  // the "why this matched" behind US-1.5.2. Empty string ("") for every
+  // title-only hit and for the default (title-only) search scope. The `<mark>`
+  // delimiters wrap the matched lexemes.
+  string snippet = 6 [json_name = "snippet"];
 }
 
 // CatalogueResponse is returned for paginated book catalogue views (GET /api/catalogue).

@@ -9,6 +9,15 @@ defmodule Stacks.ShelvingTest do
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
+  # Places `book` on `user`'s named bookshelf with a real shelf (shelf_id is NOT
+  # NULL). `attrs` may carry :listing_status / :removed_at. Used by the #285
+  # discovery-helper tests below.
+  defp place_on(user, book, shelf_name, attrs \\ []) do
+    bookshelf = insert(:bookshelf, user: user, name: shelf_name)
+    shelf = insert(:shelf, bookshelf: bookshelf)
+    insert(:placement, [book: book, bookshelf: bookshelf, shelf: shelf] ++ attrs)
+  end
+
   defp setup_user_bookshelf_book(_ctx) do
     user = insert(:user)
     bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -726,6 +735,83 @@ defmodule Stacks.ShelvingTest do
     test "returns nil for unknown placement" do
       assert nil == Shelving.spine_data(Ecto.UUID.generate())
     end
+
+    # compute_wear_level branches (shelving.ex:545-548): move_count 0 → :new,
+    # 1-2 → :light, 3-5 → :moderate, 6+ → :heavy. move_count is COUNT(*) of
+    # PlacementHistory rows for the placement's book, so we seed that many
+    # history rows keyed on the book. Boundary values are asserted exactly so
+    # the tests fail if any threshold constant shifts.
+
+    test "wear_level is :light at move_count 1 (lower :light boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 1)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 1
+      assert data.wear_level == :light
+    end
+
+    test "wear_level is :light at move_count 2 (upper :light boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 2)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 2
+      assert data.wear_level == :light
+    end
+
+    test "wear_level is :moderate at move_count 3 (lower :moderate boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 3)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 3
+      assert data.wear_level == :moderate
+    end
+
+    test "wear_level is :moderate at move_count 5 (upper :moderate boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 5)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 5
+      assert data.wear_level == :moderate
+    end
+
+    test "wear_level is :heavy at move_count 6 (lower :heavy boundary)", %{
+      book: book,
+      bookshelf: bookshelf,
+      placement: placement
+    } do
+      seed_move_history(book, bookshelf, 6)
+
+      data = Shelving.spine_data(placement.id)
+      assert data.move_count == 6
+      assert data.wear_level == :heavy
+    end
+  end
+
+  # Inserts `count` PlacementHistory rows for `book`, using a real bookshelf id
+  # for the from_bookshelf/to_bookshelf FKs. move_count is COUNT(*) of these
+  # rows for the book, which is what compute_wear_level reads.
+  defp seed_move_history(book, bookshelf, count) do
+    insert_list(count, :placement_history,
+      book_id: book.id,
+      from_bookshelf: bookshelf.id,
+      to_bookshelf: bookshelf.id
+    )
   end
 
   describe "spine_data/1 — formats from editions" do
@@ -816,6 +902,17 @@ defmodule Stacks.ShelvingTest do
       data = Shelving.spine_data(placement.id)
 
       assert data.formats == []
+    end
+
+    test "page_count is nil when book has no editions" do
+      book = insert(:book)
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      data = Shelving.spine_data(placement.id)
+
+      assert data.page_count == nil
     end
   end
 
@@ -1285,6 +1382,67 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # Event PAYLOAD assertions for move/remove (Issue #114, punch #16).
+  #
+  # The existing "emits placement.moved/removed event" tests assert only the row
+  # COUNT. These pin the emitted PAYLOAD so a regression that fires the right
+  # event type with a wrong/empty payload (or the wrong aggregate) fails.
+  #
+  # The exact payload keys are read from shelving.ex:
+  #   placement.moved   -> %{from_bookshelf: <name>, to_bookshelf: <name>}
+  #   placement.removed -> %{book_id: <uuid>}
+  # (See the Phase 2 report flag: `placement.moved` carries the shelf NAMES, not
+  # ids, and does NOT carry book_id — the aggregate_id is the placement id.)
+  # ---------------------------------------------------------------------------
+
+  describe "move_book/3 — placement.moved payload" do
+    setup :setup_user_bookshelf_book
+
+    test "payload carries the source and destination bookshelf names", %{
+      user: user,
+      placement: placement
+    } do
+      assert {:ok, _} = Shelving.move_book(placement.id, user.id, "wishlist")
+
+      event = latest_event("placement.moved")
+      {:ok, aggregate_id} = Ecto.UUID.load(event.aggregate_id)
+
+      assert aggregate_id == placement.id
+      assert event.payload["from_bookshelf"] == "library"
+      assert event.payload["to_bookshelf"] == "wishlist"
+    end
+  end
+
+  describe "remove_book/2 — placement.removed payload" do
+    setup :setup_user_bookshelf_book
+
+    test "payload carries the removed placement's book_id", %{
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      assert {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      event = latest_event("placement.removed")
+      {:ok, aggregate_id} = Ecto.UUID.load(event.aggregate_id)
+
+      assert aggregate_id == placement.id
+      assert event.payload["book_id"] == book.id
+    end
+  end
+
+  defp latest_event(event_type) do
+    from(e in "event_log",
+      prefix: "op",
+      where: e.event_type == ^event_type,
+      order_by: [desc: e.occurred_at],
+      limit: 1,
+      select: %{aggregate_id: e.aggregate_id, payload: e.payload}
+    )
+    |> Repo.one()
+  end
+
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
@@ -1349,5 +1507,122 @@ defmodule Stacks.ShelvingTest do
       ),
       :count
     )
+  end
+
+  # #285 — discovery helpers backing the sectioned search response.
+  describe "search_collection/3" do
+    setup do
+      user = insert(:user)
+      other = insert(:user)
+      {:ok, user: user, other: other}
+    end
+
+    test "returns the viewer's active-placement title matches only", %{user: user, other: other} do
+      mine = insert(:book, title: "Tidewater Reckoning")
+      place_on(user, mine, "library")
+
+      theirs = insert(:book, title: "Tidewater Currents")
+      place_on(other, theirs, "library")
+
+      results = Shelving.search_collection(user.id, "Tidewater")
+      ids = Enum.map(results, & &1.book.id)
+
+      assert mine.id in ids
+      refute theirs.id in ids
+    end
+
+    test "tags each hit with the bookshelf it sits on", %{user: user} do
+      book = insert(:book, title: "Shelf Tagged")
+      place_on(user, book, "wishlist")
+
+      assert [%{book: hit_book, bookshelf_name: "wishlist"}] =
+               Shelving.search_collection(user.id, "Shelf Tagged")
+
+      assert hit_book.id == book.id
+    end
+
+    test "excludes removed placements", %{user: user} do
+      book = insert(:book, title: "Vanished Copy")
+      place_on(user, book, "library", removed_at: DateTime.utc_now())
+
+      assert Shelving.search_collection(user.id, "Vanished Copy") == []
+    end
+
+    test "returns a book at most once even across multiple shelves", %{user: user} do
+      book = insert(:book, title: "Twice Shelved")
+      place_on(user, book, "library")
+      place_on(user, book, "wishlist")
+
+      results = Shelving.search_collection(user.id, "Twice Shelved")
+
+      assert Enum.count(results, &(&1.book.id == book.id)) == 1
+      # Deterministic: the alphabetically-first shelf name wins ("library" < "wishlist").
+      assert [%{bookshelf_name: "library"}] = results
+    end
+
+    # #298 — deep-scope ranking consistency: mirror `Books.search_books/2` so the
+    # collection section ranks title matches ahead of description-only matches,
+    # rather than ordering purely alphabetically by title (the pre-#298 gap where
+    # a description-only hit with an earlier title could outrank a title match).
+    test "under deep scope, ranks a title match above an alphabetically-earlier description-only match",
+         %{user: user} do
+      # Sorts FIRST alphabetically, but matches only on its description.
+      desc_only =
+        insert(:book, title: "Aardvark Almanac", description: "A field study of zephyr winds.")
+
+      place_on(user, desc_only, "library")
+
+      # Sorts LAST alphabetically, but matches on its TITLE. On a distinct
+      # bookshelf — one user can hold only one bookshelf per name.
+      title_match =
+        insert(:book, title: "Zephyr Chronicles", description: "Nothing relevant here.")
+
+      place_on(user, title_match, "wishlist")
+
+      results = Shelving.search_collection(user.id, "zephyr", scope: :deep)
+      ids = Enum.map(results, & &1.book.id)
+
+      assert ids == [title_match.id, desc_only.id],
+             "the title match must rank ahead of the description-only match under deep scope"
+    end
+  end
+
+  describe "looking_for_home_labels/1" do
+    test "labels only active looking_for_home placements with the owner handle" do
+      owner = insert(:user, handle: "home_seeker")
+      book = insert(:book, title: "Adrift")
+      bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      insert(:placement, book: book, bookshelf: bookshelf, shelf: shelf, listing_status: "active")
+
+      labels = Shelving.looking_for_home_labels([book.id])
+      book_id = book.id
+
+      assert %{^book_id => %{source: "looking_for_home", owner_handle: "home_seeker"}} = labels
+    end
+
+    test "ignores looking_for_home placements without an active listing_status" do
+      owner = insert(:user)
+      book = insert(:book)
+      bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      insert(:placement, book: book, bookshelf: bookshelf, shelf: shelf)
+
+      assert Shelving.looking_for_home_labels([book.id]) == %{}
+    end
+
+    test "ignores active listing_status on a non-LFH bookshelf" do
+      owner = insert(:user)
+      book = insert(:book)
+      bookshelf = insert(:bookshelf, user: owner, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      insert(:placement, book: book, bookshelf: bookshelf, shelf: shelf, listing_status: "active")
+
+      assert Shelving.looking_for_home_labels([book.id]) == %{}
+    end
+
+    test "returns an empty map for no ids" do
+      assert Shelving.looking_for_home_labels([]) == %{}
+    end
   end
 end

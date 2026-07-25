@@ -208,6 +208,7 @@ defmodule StacksWeb.BookController do
       conn.halted ->
         conn
 
+      # Defense-in-depth (#295 d): upstream filter/age-gate should keep :hidden unreachable here; 404 rather than leak.
       Visibility.resolve_visibility(book, viewer) == :hidden ->
         conn |> put_status(404) |> json(%{error: "not_found"})
 

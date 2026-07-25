@@ -20,16 +20,25 @@ defmodule Stacks.Books.BookDetailCache do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
 
-  @doc "Look up a cached book detail. Returns `{:ok, data}` or `{:miss, book_id}`."
+  @doc """
+  Look up a cached book detail. Returns `{:ok, data}` or `{:miss, book_id}`.
+
+  Emits `[:stacks, :book_detail_cache, :hit]` on a live hit and
+  `[:stacks, :book_detail_cache, :miss]` on a cold lookup or an expired entry
+  (expired-as-miss). Telemetry metadata carries `book_id` only — the cache is
+  book-keyed and MUST stay free of user identifiers.
+  """
   @spec get(binary()) :: {:ok, term()} | {:miss, binary()}
   def get(book_id) do
     now = System.monotonic_time(:millisecond)
 
     case :ets.lookup(@table, book_id) do
       [{^book_id, data, inserted_at}] when now - inserted_at < @ttl_ms ->
+        :telemetry.execute([:stacks, :book_detail_cache, :hit], %{count: 1}, %{book_id: book_id})
         {:ok, data}
 
       _ ->
+        :telemetry.execute([:stacks, :book_detail_cache, :miss], %{count: 1}, %{book_id: book_id})
         {:miss, book_id}
     end
   end

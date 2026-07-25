@@ -35,6 +35,8 @@ sources:
             description: Last modification timestamp (UTC).
           - name: title_tsv
             description: Generated tsvector column for full-text search on title.
+          - name: description_tsv
+            description: Generated tsvector column for deep search on description.
 
       - name: book_editions
         description: Physical/digital editions of a work, each carrying a unique ISBN.

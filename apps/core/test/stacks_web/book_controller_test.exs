@@ -7,9 +7,11 @@ defmodule StacksWeb.BookControllerTest do
   # async: false because confirm/merge tests swap Application env for mock HTTP client.
   use CoreWeb.ConnCase, async: false
 
+  import Ecto.Query
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
+  alias Stacks.Books.BookDetailCache
   alias Stacks.Books.MockHttpClient
 
   # Reset the resolver's circuit breakers before each test. :fuse state is
@@ -609,5 +611,146 @@ defmodule StacksWeb.BookControllerTest do
       assert %{"book" => _, "my_writing" => my_writing} = json_response(conn, 200)
       assert my_writing == []
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # GET /api/books/:id — hidden book is not served (Issue #114, punch #3)
+  #
+  # A book's ONLY server-side hidden state is the age gate (a book has no owner,
+  # no block relationship, and its `visibility_tier` always resolves as "public"
+  # for resource visibility — see Stacks.Visibility). `AgeGate.enforce/2`
+  # intercepts an age-gated book for an unverified viewer with a 403 BEFORE the
+  # controller's `resolve_visibility == :hidden -> 404` branch is reached, so the
+  # reachable "hidden book" outcome is a 403 that leaks no book payload.
+  # (The literal :hidden -> 404 branch is defensive/unreachable for books; flagged
+  # in the Phase 2 report.)
+  # ---------------------------------------------------------------------------
+
+  describe "GET /api/books/:id — hidden book is not served" do
+    test "age-gated book (hidden to an unverified viewer) is refused and leaks no payload", %{
+      conn: conn
+    } do
+      user = insert(:user, age_verified: false)
+
+      {book, _edition} =
+        insert_book_with_edition(title: "Restricted", visibility_tier: "age_gated")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      body = json_response(conn, 403)
+      assert body == %{"error" => "age_verification_required"}
+      # The hidden book's detail payload must not appear in a refusal response.
+      refute Map.has_key?(body, "book")
+      refute conn.resp_body =~ "Restricted"
+    end
+
+    test "age-gated book is refused for an unauthenticated viewer", %{conn: conn} do
+      {book, _edition} = insert_book_with_edition(visibility_tier: "age_gated")
+
+      conn = get(conn, "/api/books/#{book.id}")
+
+      assert %{"error" => "age_verification_required"} = json_response(conn, 403)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # GET /api/books/:id — read is side-effect free (Issue #114, punch #4 variant)
+  # ---------------------------------------------------------------------------
+
+  describe "GET /api/books/:id — no events on read" do
+    test "a successful read emits no event_log rows", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      before_count = total_event_count()
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/books/#{book.id}")
+
+      assert json_response(conn, 200)["book"]["id"] == book.id
+      assert total_event_count() == before_count
+    end
+
+    test "an unauthenticated read emits no event_log rows", %{conn: conn} do
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+
+      before_count = total_event_count()
+
+      conn = get(conn, "/api/books/#{book.id}")
+
+      assert json_response(conn, 200)["book"]["id"] == book.id
+      assert total_event_count() == before_count
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # GET /api/books/:id — controller<->cache integration (Issue #114, punch #6)
+  #
+  # First read is a cache miss that populates BookDetailCache; the second read is
+  # a hit served from cache. Proven via the [:stacks, :book_detail_cache, :*]
+  # telemetry the cache emits (Phase 2 instrumentation), not by inspecting
+  # internal cache state.
+  # ---------------------------------------------------------------------------
+
+  describe "GET /api/books/:id — cache miss then hit" do
+    setup do
+      test_pid = self()
+      handler_id = "test-book-detail-cache-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [
+          [:stacks, :book_detail_cache, :miss],
+          [:stacks, :book_detail_cache, :hit]
+        ],
+        fn name, measurements, metadata, _ ->
+          send(test_pid, {:telemetry, name, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+      :ok
+    end
+
+    test "first GET misses and caches; second GET hits", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      BookDetailCache.invalidate(book.id)
+
+      # First request: cold cache -> miss, then populated.
+      conn1 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      assert json_response(conn1, 200)["book"]["id"] == book.id
+
+      assert_receive {:telemetry, [:stacks, :book_detail_cache, :miss], %{count: 1},
+                      %{
+                        book_id: book_id
+                      }},
+                     1_000
+
+      assert book_id == book.id
+
+      # Second request: warm cache -> hit.
+      conn2 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
+      assert json_response(conn2, 200)["book"]["id"] == book.id
+
+      assert_receive {:telemetry, [:stacks, :book_detail_cache, :hit], %{count: 1},
+                      %{
+                        book_id: ^book_id
+                      }},
+                     1_000
+
+      # The warm read must NOT re-query/re-cache: no second miss is emitted.
+      refute_receive {:telemetry, [:stacks, :book_detail_cache, :miss], _, _}, 200
+    end
+  end
+
+  defp total_event_count do
+    Core.Repo.aggregate(from(e in "event_log", prefix: "op"), :count)
   end
 end

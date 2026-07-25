@@ -149,6 +149,7 @@ viewSpine wearLevel placement =
             , author = bookData.author
             , coverImageUrl = bookData.coverUrl
             , hidden = placement.visibility == Just "owner"
+            , hasWriting = placement.hasUserWriting
             }
         ]
 
@@ -256,5 +257,6 @@ viewClickableSpine wearLevel onBookClicked placement =
             , author = Types.Book.authorName bookData
             , coverImageUrl = bookCoverImageUrl bookData
             , hidden = placement.visibility == Just "owner"
+            , hasWriting = placement.hasUserWriting
             }
         ]

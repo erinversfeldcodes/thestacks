@@ -41,6 +41,7 @@ type alias Placement =
     , startedAt : Maybe String
     , finishedAt : Maybe String
     , visibility : Maybe String
+    , hasUserWriting : Bool
     }
 
 
@@ -116,12 +117,19 @@ falls back to the slim shape (with bookshelf\_name, no book).
 -}
 placementDecoder : Decoder Placement
 placementDecoder =
-    -- Capture a top-level `visibility` field regardless of which base placement
-    -- shape matched — the proto base decoders drop unknown fields, so we layer
-    -- the optional visibility read on top.
-    Decode.map2 (\p vis -> { p | visibility = vis })
+    -- Capture top-level `visibility` and `has_user_writing` regardless of which
+    -- base placement shape matched — the proto base decoders drop unknown fields,
+    -- so we layer these optional reads on top. `has_user_writing` (#287) is a
+    -- server-computed flag (not a proto field) that the bookshelf payload adds
+    -- alongside each PlacementDetail; absent/false → no bookmark ribbon.
+    Decode.map3 (\p vis writing -> { p | visibility = vis, hasUserWriting = writing })
         placementBaseDecoder
         (Decode.maybe (Decode.field "visibility" Decode.string))
+        (Decode.oneOf
+            [ Decode.field "has_user_writing" Decode.bool
+            , Decode.succeed False
+            ]
+        )
 
 
 placementBaseDecoder : Decoder Placement
@@ -159,6 +167,7 @@ placementSummaryDecoder =
             , startedAt = Nothing
             , finishedAt = Nothing
             , visibility = Nothing
+            , hasUserWriting = False
             }
         )
         (Decode.oneOf [ Decode.field "book_id" Decode.string, Decode.succeed "" ])
@@ -221,6 +230,7 @@ placementWithBookDecoder =
             , startedAt = emptyToNothing detail.startedAt
             , finishedAt = emptyToNothing detail.finishedAt
             , visibility = Nothing
+            , hasUserWriting = False
             }
         )
         Proto.decodePlacementDetail
@@ -263,6 +273,7 @@ fromProtoBookPlacement bp =
     , startedAt = Nothing
     , finishedAt = Nothing
     , visibility = Nothing
+    , hasUserWriting = False
     }
 
 
@@ -283,4 +294,5 @@ fromProtoPlacementRef pr =
     , startedAt = Nothing
     , finishedAt = Nothing
     , visibility = Nothing
+    , hasUserWriting = False
     }

@@ -389,6 +389,14 @@ defmodule CoreWeb.Router do
     # specs skip the :auth-bucket register/login dance (Issue #192). Hard
     # `.test`-domain allowlist in the controller — never mints a real account.
     post "/session", TestHelperController, :mint_session
+    # Seeds a visible blog-post→book association for a `.test`-domain user so the
+    # spine bookmark-ribbon spec (#287) is deterministic (prod associates via an
+    # async LLM worker). Same hard `.test`-domain allowlist in the controller.
+    post "/book-writing", TestHelperController, :seed_book_writing
+    # Inserts a fresh public book carrying a description so the #284 deep-search
+    # spec can drive a live description match + snippet (the seed has 0
+    # description-bearing books). Catalogue metadata only — no user data/PII.
+    post "/book-description", TestHelperController, :seed_book_description
   end
 
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)

@@ -826,7 +826,16 @@ h4 {
     margin-top: 1rem;
 }
 
+/* A search result is a real <button> (#289) so it is keyboard-operable; reset
+   the native button chrome so it renders as the full-width card row it was. */
 .search-result {
+    appearance: none;
+    background: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    display: block;
+    width: 100%;
     padding: 1rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -836,6 +845,11 @@ h4 {
 
 .search-result:hover {
     background-color: rgba(255, 255, 255, 0.04);
+}
+
+.search-result:focus-visible {
+    outline: 2px solid #d4a029;
+    outline-offset: 2px;
 }
 
 .search-result__title {
@@ -852,6 +866,80 @@ h4 {
 .search-result__year {
     color: var(--text-muted, #a09070);
     font-size: var(--size-xs);
+}
+
+/* The provenance line: the collection shelf ("On your Library shelf") or the
+   platform source ("Listed by … for …" / "Looking for a home on …"). Rendered
+   only for label-bearing hits (#285). */
+.search-result__label {
+    margin-top: 0.35rem;
+    font-size: var(--size-xs);
+    font-style: italic;
+    color: #c8951f;
+}
+
+/* ===== Deep Search (#284) ===== */
+
+/* The "Deep search" toggle sits under the filter panel — a labelled checkbox
+   that opts the query into matching descriptions/reviews (not just titles). */
+.deep-search-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+    color: var(--text-muted, #a09070);
+    font-size: var(--size-sm);
+    cursor: pointer;
+}
+
+.deep-search-toggle__checkbox {
+    cursor: pointer;
+}
+
+/* A deep-search description/review excerpt, shown beneath a result whose match
+   was NOT on the title. The <mark> runs are the query terms ts_headline flagged. */
+.search-result__snippet {
+    margin-top: 0.5rem;
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    line-height: 1.5;
+}
+
+.search-result__mark {
+    background-color: rgba(212, 160, 41, 0.28);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    padding: 0 0.15em;
+}
+
+/* The "via deep search" provenance line — why this result matched at all. */
+.search-result__via-deep {
+    margin-top: 0.2rem;
+    font-size: var(--size-xs);
+    font-style: italic;
+    color: #c8951f;
+}
+
+/* ===== Search Sections (#285) ===== */
+
+/* Two stacked sections — "Your Collection" above "On the Platform" — each a
+   column of result rows under a serif heading. */
+.search-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.search-section + .search-section {
+    margin-top: 2rem;
+}
+
+.search-section__title {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: var(--text-muted, #a09070);
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
 }
 
 /* ===== Filter Panel ===== */
@@ -3142,6 +3230,50 @@ h4 {
     z-index: 1;
 }
 
+/* --- Wear: Softened (well-loved) --- */
+
+/* A well-loved book reads as gently muted and worn at the edges: the spine
+   colour is slightly desaturated and darkened, and a soft corner-wear vignette
+   darkens the four corners. Pristine books carry no treatment. Applied to the
+   spine face so the 3D structure and hover animation are untouched; composes
+   with .book--hidden (owner-private opacity lives on the .book wrapper). */
+.book--softened .book__spine {
+    filter: saturate(0.8) brightness(0.9);
+}
+
+.book--softened .book__spine::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+    background: radial-gradient(ellipse at center,
+        transparent 55%, rgba(0, 0, 0, 0.22) 100%);
+}
+
+/* --- Bookmark ribbon: books the owner has written about (#287) --- */
+
+/* A slim cloth ribbon tucked into the head of the spine and poking a little
+   above the top edge, marking a book the owner has written about. A direct
+   child of the .book wrapper (not the overflow-hidden spine face) so it can
+   extend past the top edge; decorative only — the ", with your notes" aria
+   suffix on the .book element carries the meaning. The swallowtail foot is a
+   clip-path notch so it reads as a ribbon end, not a plain bar. */
+.book__ribbon {
+    position: absolute;
+    top: -7px;
+    right: 22%;
+    width: 7px;
+    height: 26px;
+    background: linear-gradient(180deg,
+        #7c1f2b 0%, #9e2a38 55%, #7c1f2b 100%);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    border-radius: 1px 1px 0 0;
+    z-index: 4;
+    pointer-events: none;
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+}
+
 .book__title {
     writing-mode: vertical-rl;
     text-orientation: mixed;
@@ -3362,22 +3494,11 @@ h4 {
     margin-bottom: 1rem;
 }
 
-.book-overlay__close {
-    display: block;
-    margin-top: 1.5rem;
-    padding: 0.5rem 1.5rem;
-    background: var(--accent);
-    color: var(--text);
-    border: none;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-family: var(--font-body);
-    font-size: var(--size-sm);
-}
-
-.book-overlay__close:hover {
-    background: var(--accent-hover);
-}
+/* NB: the BookDetail overlay's round "×" close button (also `.book-overlay__close`)
+   is fully inline-styled in Page.BookDetail.overlayView; only its
+   `:focus-visible` ring below is stylesheet-driven. The block-button rule that
+   once lived here belonged to a removed Library quick-view and only bled unwanted
+   margin/padding onto the "×", so it was deleted (#295 item c). */
 
 /* ===== Skip Link (Accessibility) ===== */
 

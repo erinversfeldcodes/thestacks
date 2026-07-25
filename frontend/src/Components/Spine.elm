@@ -175,6 +175,7 @@ book :
     , author : String
     , coverImageUrl : Maybe String
     , hidden : Bool
+    , hasWriting : Bool
     }
     -> Html msg
 book config =
@@ -269,6 +270,15 @@ book config =
                 Softened ->
                     ", well-loved"
 
+        -- A book the owner has written about (#287) announces ", with your
+        -- notes" so the bookmark ribbon is not a purely visual signal.
+        notesSuffix =
+            if config.hasWriting then
+                ", with your notes"
+
+            else
+                ""
+
         hiddenSuffix =
             if config.hidden then
                 ", hidden (only visible to you)"
@@ -276,6 +286,9 @@ book config =
             else
                 ""
 
+        -- Suffix order is fixed: pages, wear, notes, hidden — so a screen reader
+        -- hears "…, N pages, well-loved, with your notes, hidden (only visible to
+        -- you)". The exact-label tests in SpineBookTest pin this order.
         ariaLabel =
             "Book: "
                 ++ config.title
@@ -285,18 +298,41 @@ book config =
                 ++ String.fromInt config.pageCount
                 ++ " pages"
                 ++ wearSuffix
+                ++ notesSuffix
                 ++ hiddenSuffix
+
+        -- A well-loved (Softened) book earns a muted, worn treatment via the
+        -- book--softened class (see .book--softened in main.css); Pristine books
+        -- get nothing. Composed alongside book/book--hidden below.
+        wearClass =
+            case config.wearLevel of
+                Pristine ->
+                    ""
+
+                Softened ->
+                    " book--softened"
 
         -- Owner-only placements on an otherwise-visible shelf render as a
         -- faint outline so the owner still sees the book is there but private.
         hiddenAttrs =
             if config.hidden then
-                [ class "book book--hidden"
+                [ class ("book book--hidden" ++ wearClass)
                 , style "opacity" "0.35"
                 ]
 
             else
-                [ class "book" ]
+                [ class ("book" ++ wearClass) ]
+
+        -- Additive bookmark ribbon for a book the owner has written about (#287).
+        -- A direct child of the `.book` container (not the overflow-hidden spine
+        -- face) so it can poke above the top edge like a real ribbon; decorative
+        -- only — the ", with your notes" aria suffix carries the meaning.
+        ribbonEls =
+            if config.hasWriting then
+                [ div [ class "book__ribbon", attribute "aria-hidden" "true" ] [] ]
+
+            else
+                []
     in
     div
         (hiddenAttrs
@@ -308,7 +344,7 @@ book config =
                , attribute "aria-label" ariaLabel
                ]
         )
-        [ div
+        ([ div
             [ class "book__face book__spine"
             , style "background-color" tex.bg
             , style "background-image" bgImage
@@ -327,7 +363,7 @@ book config =
                         [ text config.author ]
                    ]
             )
-        , div
+         , div
             [ class "book__face book__top"
             , style "width" (String.fromInt widthPx ++ "px")
             , style "height" (String.fromInt depth ++ "px")
@@ -336,7 +372,7 @@ book config =
             , style "left" "0"
             ]
             []
-        , div
+         , div
             [ class "book__face book__cover"
             , style "width" (String.fromInt depth ++ "px")
             , style "height" (String.fromInt heightPx ++ "px")
@@ -354,4 +390,6 @@ book config =
             , style "left" (String.fromInt widthPx ++ "px")
             ]
             []
-        ]
+         ]
+            ++ ribbonEls
+        )

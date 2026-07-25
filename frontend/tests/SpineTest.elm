@@ -40,4 +40,24 @@ suite =
             \_ ->
                 spineWidth 9999
                     |> Expect.equal 55
+        , test "480 pages gives 40px (round(480/12))" <|
+            \_ ->
+                spineWidth 480
+                    |> Expect.equal 40
+        , test "540 pages gives 45px (round(540/12))" <|
+            \_ ->
+                spineWidth 540
+                    |> Expect.equal 45
+        , test "660 pages gives 55px (the exact ceiling: round(660/12))" <|
+            \_ ->
+                spineWidth 660
+                    |> Expect.equal 55
+        , test "1000 pages clamps to 55px (round(1000/12) = 83, over the ceiling)" <|
+            \_ ->
+                spineWidth 1000
+                    |> Expect.equal 55
+        , test "width is monotonic through the sloped mid-range (480 < 540)" <|
+            \_ ->
+                spineWidth 480
+                    |> Expect.lessThan (spineWidth 540)
         ]

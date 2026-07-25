@@ -634,12 +634,16 @@ defmodule Stacks.Books do
   defp maybe_search(query, ""), do: query
 
   defp maybe_search(query, search) do
-    safe_query = String.replace(search, ~r/[^\w\s]/, "")
-
+    # Raw query straight to `plainto_tsquery` via the bound param — same rationale
+    # as `search_books/2` (#291): injection-safety comes from Ecto binding +
+    # plainto_tsquery treating input as plain text, NOT from stripping characters.
+    # This path uses `plainto_tsquery` (not `ilike`), so there are no `%`/`_`
+    # wildcard semantics to escape. A prior `String.replace(~r/[^\w\s]/)` sanitiser
+    # was lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" (#296).
     where(
       query,
       [b],
-      fragment("title_tsv @@ plainto_tsquery('english', ?)", ^safe_query)
+      fragment("title_tsv @@ plainto_tsquery('english', ?)", ^search)
     )
   end
 
@@ -687,25 +691,96 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Full-text search on book titles using the stored `title_tsv` tsvector column.
+  Full-text search on books using the stored tsvector columns.
+
   Returns up to `limit` results (default 20).
+
+  ## Options
+
+    * `:limit` — max results (default 20)
+    * `:scope` — `:title` (default) matches `title_tsv` only; `:deep` (#284)
+      ALSO matches `description_tsv`, so a book whose description mentions the
+      query surfaces even when its title does not. Under `:deep`, title matches
+      are ordered ahead of description-only matches (a boolean title-match key,
+      DESC, then title ASC) so the most-relevant hits stay first; the default
+      title scope is unchanged.
+
+  In both scopes the raw query is passed straight to `plainto_tsquery` via the
+  bound param: injection-safety comes from Ecto param binding + `plainto_tsquery`
+  treating its input as plain text (proven by the #115 edge-case suite), NOT from
+  stripping characters. A prior `String.replace(~r/[^\w\s]/)` sanitiser was
+  lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" — which changed the
+  lexemes and dropped legitimate matches (#291).
   """
   @spec search_books(String.t(), keyword()) :: [Book.t()]
   def search_books(query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 20)
-    safe_query = String.replace(query, ~r/[^\w\s]/, "")
+    scope = Keyword.get(opts, :scope, :title)
 
     Book
-    |> where(
-      [b],
-      fragment(
-        "title_tsv @@ plainto_tsquery('english', ?)",
-        ^safe_query
-      )
-    )
+    |> search_scope_where(scope, query)
+    |> search_scope_order(scope, query)
     |> preload([:author, :editions])
     |> limit(^limit)
     |> Repo.all()
+  end
+
+  defp search_scope_where(query_ast, :deep, query) do
+    where(
+      query_ast,
+      [b],
+      fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query) or
+        fragment("description_tsv @@ plainto_tsquery('english', ?)", ^query)
+    )
+  end
+
+  defp search_scope_where(query_ast, _title, query) do
+    where(query_ast, [b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
+  end
+
+  # Under deep scope, rank title matches ahead of description-only matches: the
+  # boolean `title_tsv @@ ...` sorts `true` before `false` under DESC, then title
+  # breaks ties alphabetically. Title scope keeps its implicit (unordered) shape.
+  defp search_scope_order(query_ast, :deep, query) do
+    order_by(
+      query_ast,
+      [b],
+      desc: fragment("(title_tsv @@ plainto_tsquery('english', ?))", ^query),
+      asc: b.title
+    )
+  end
+
+  defp search_scope_order(query_ast, _title, _query), do: query_ast
+
+  @doc """
+  Builds `ts_headline` description snippets for a deep search (#284).
+
+  Given a list of `book_ids` and the raw `query`, returns a map
+  `%{book_id => snippet}` for every book in the list whose `description_tsv`
+  matches — the "why this matched" excerpt behind US-1.5.2. Books whose
+  description does NOT match (title-only hits) are absent from the map, so the
+  caller leaves their snippet empty. The excerpt wraps matched lexemes in
+  `<mark>…</mark>`. Same `plainto_tsquery` injection-safety rationale as
+  `search_books/2`.
+  """
+  @spec description_snippets([binary()], String.t()) :: %{binary() => String.t()}
+  def description_snippets([], _query), do: %{}
+
+  def description_snippets(book_ids, query) when is_list(book_ids) do
+    Book
+    |> where([b], b.id in ^book_ids)
+    |> where([b], fragment("description_tsv @@ plainto_tsquery('english', ?)", ^query))
+    |> select(
+      [b],
+      {b.id,
+       fragment(
+         "ts_headline('english', coalesce(?, ''), plainto_tsquery('english', ?), 'StartSel=<mark>, StopSel=</mark>')",
+         b.description,
+         ^query
+       )}
+    )
+    |> Repo.all()
+    |> Map.new()
   end
 
   @doc """
@@ -767,55 +842,6 @@ defmodule Stacks.Books do
     e ->
       Logger.warning("Books: cover download failed for #{url}: #{Exception.message(e)}")
       {:error, :download_failed}
-  end
-
-  @doc """
-  Searches the platform catalogue for publicly visible books.
-
-  Full-text search is performed against the book title and joined author name.
-  An empty query returns a paginated slice of the full catalogue.
-
-  ## Options
-
-    * `:page` — 1-based page number (default 1)
-    * `:per_page` / `:limit` — items per page (default 24, max 100)
-
-  Returns `{books_list, total_count}`.
-  """
-  @spec search_platform(String.t(), keyword()) :: {[map()], non_neg_integer()}
-  def search_platform(query, opts \\ []) do
-    per_page = min(max(Keyword.get(opts, :per_page, Keyword.get(opts, :limit, 24)), 1), 100)
-    page = max(Keyword.get(opts, :page, 1), 1)
-    offset = (page - 1) * per_page
-
-    base =
-      Book
-      |> join(:left, [b], a in Author, on: a.id == b.author_id)
-      |> preload([:author, :editions])
-
-    filtered =
-      if query == nil or String.trim(query) == "" do
-        base
-      else
-        safe = String.replace(query, ~r/[^\w\s]/, "")
-
-        where(
-          base,
-          [b, a],
-          ilike(b.title, ^"%#{safe}%") or ilike(a.name, ^"%#{safe}%")
-        )
-      end
-
-    total = Repo.aggregate(filtered, :count)
-
-    books =
-      filtered
-      |> order_by([b], asc: b.title)
-      |> limit(^per_page)
-      |> offset(^offset)
-      |> Repo.all()
-
-    {books, total}
   end
 
   @doc """

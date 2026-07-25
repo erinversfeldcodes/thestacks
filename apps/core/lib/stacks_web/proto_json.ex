@@ -124,6 +124,33 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
+  Serializes a search result into the proto `SearchHit` shape (#285).
+
+  Wraps a book (via `search_book/1`) with optional discovery-source provenance.
+  `label` is a map that may carry `:source`, `:owner_handle`, `:price`, and
+  `:bookshelf_name`; each defaults to the empty string (proto3 string default)
+  when absent. The provenance labels (`:source`/`:owner_handle`/`:price`) are set
+  ONLY for discoverable-by-design platform hits (an always-visible
+  `looking_for_home` placement or an active marketplace listing).
+  `:bookshelf_name` is set ONLY for the viewer's own collection hits (the shelf
+  the book sits on) — platform hits leave it empty. `:snippet` is a
+  `ts_headline`-highlighted description excerpt set ONLY for a scope=deep hit
+  whose description matched (#284); every title-only hit leaves it empty. A plain
+  platform book passes `%{}` and carries none of them.
+  """
+  @spec search_hit(map(), map()) :: map()
+  def search_hit(book, label \\ %{}) do
+    %{
+      book: search_book(book),
+      source: Map.get(label, :source, ""),
+      owner_handle: Map.get(label, :owner_handle, ""),
+      price: Map.get(label, :price, ""),
+      bookshelf_name: Map.get(label, :bookshelf_name, ""),
+      snippet: Map.get(label, :snippet, "")
+    }
+  end
+
+  @doc """
   Serializes the embedded book inside a bookshelf placement.
 
   Matches the inline book map in `BookshelfController.format_placement/1` —
@@ -557,13 +584,23 @@ defmodule StacksWeb.ProtoJSON do
 
   Used by BookshelfController to build the `shelves` response shape.
   Each shelf includes its position and the placements visible to the viewer.
+  `writing_book_ids` is any enumerable of book ids the owner has written about
+  (#287); it is normalised to a set internally, so the caller may pass a MapSet
+  (returned unchanged by `MapSet.new/1`) or a plain list. The default `[]` keeps
+  the ribbon flag off for callers that don't compute writing.
   """
-  @spec shelf_with_placements(map(), term()) :: map()
-  def shelf_with_placements(shelf, viewer) do
+  @spec shelf_with_placements(map(), term(), Enumerable.t()) :: map()
+  def shelf_with_placements(shelf, viewer, writing_book_ids \\ []) do
+    writing_set = MapSet.new(writing_book_ids)
+
     visible_placements =
       shelf.placements
       |> Enum.filter(&(Stacks.Visibility.resolve_visibility(&1, viewer) == :visible))
-      |> Enum.map(&placement_detail/1)
+      |> Enum.map(fn placement ->
+        placement
+        |> placement_detail()
+        |> Map.put(:has_user_writing, MapSet.member?(writing_set, placement.book_id))
+      end)
 
     %{id: shelf.id, position: shelf.position, placements: visible_placements}
   end

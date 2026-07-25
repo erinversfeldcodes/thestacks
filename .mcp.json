@@ -2,7 +2,7 @@
   "mcpServers": {
     "project-tools": {
       "command": "bash",
-      "args": ["$CLAUDE_PROJECT_DIR/scripts/mcp/server.sh"]
+      "args": ["${CLAUDE_PROJECT_DIR}/scripts/mcp/server.sh"]
     }
   }
 }

@@ -3,7 +3,10 @@ module Page.BookDetail exposing
     , Model
     , Msg(..)
     , OutMsg(..)
+    , cardFocusId
+    , firstFocusableId
     , init
+    , lastFocusableId
     , overlayView
     , update
     , view
@@ -16,12 +19,12 @@ import Components.AuthorCard as AuthorCard
 import Components.FormatPicker exposing (formatPicker)
 import Components.PlacementCard as Card
 import Components.PriceInfo as PriceInfo
-import Components.RemoveBookModal exposing (removeBookModal)
+import Components.RemoveBookModal as RemoveBookModal exposing (removeBookModal)
 import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
 import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, value)
-import Html.Events exposing (on, onClick, onInput, targetValue)
+import Html.Events exposing (on, onClick, onInput, preventDefaultOn, targetValue)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
@@ -109,6 +112,11 @@ type Msg
     | RecordReadRequested
     | FinishedReadDismissed
     | ProgressFocusReturned
+    | EscapePressed
+    | FocusWrapToFirst
+    | FocusWrapToLast
+    | FocusOn String
+    | FocusWrapNoOp
 
 
 init : String -> Maybe String -> Maybe Route -> ( Model, Cmd Msg )
@@ -301,6 +309,31 @@ update msg model maybeToken =
         CloseOverlay ->
             ( model, Cmd.none, RequestCloseOverlay )
 
+        EscapePressed ->
+            -- Scoped Escape (US-1.4.1): dismiss the TOP-MOST surface first. Only
+            -- when no nested surface is open does Escape close the overlay (via
+            -- RequestCloseOverlay, which Main consumes to return focus to the
+            -- triggering spine). A consumed Escape returns NoOut so the overlay
+            -- stays open.
+            if model.removeModalOpen then
+                ( { model | removeModalOpen = False }, focusElement removeTriggerId, NoOut )
+
+            else
+                case model.progressCard of
+                    Just card ->
+                        if card.editing then
+                            let
+                                ( closedCard, _ ) =
+                                    Card.update Card.CancelClicked card
+                            in
+                            ( { model | progressCard = Just closedCard }, focusProgressBadge closedCard, NoOut )
+
+                        else
+                            ( model, Cmd.none, RequestCloseOverlay )
+
+                    Nothing ->
+                        ( model, Cmd.none, RequestCloseOverlay )
+
         OpenBookshelfMover ->
             ( { model | bookshelfMoverOpen = True }, Cmd.none, NoOut )
 
@@ -407,10 +440,13 @@ update msg model maybeToken =
                         ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
-            ( { model | removeModalOpen = True }, Cmd.none, NoOut )
+            -- Move focus into the destructive dialog, defaulting to the safe
+            -- "Keep It" button.
+            ( { model | removeModalOpen = True }, focusElement RemoveBookModal.cancelButtonId, NoOut )
 
         CloseRemoveModal ->
-            ( { model | removeModalOpen = False }, Cmd.none, NoOut )
+            -- Return focus to the control that opened the dialog.
+            ( { model | removeModalOpen = False }, focusElement removeTriggerId, NoOut )
 
         ConfirmRemove ->
             case ( model.placement, maybeToken ) of
@@ -612,6 +648,18 @@ update msg model maybeToken =
         FinishedReadDismissed ->
             ( { model | finishedReadPrompt = False }, Cmd.none, NoOut )
 
+        FocusWrapToFirst ->
+            ( model, focusElement firstFocusableId, NoOut )
+
+        FocusWrapToLast ->
+            ( model, focusElement lastFocusableId, NoOut )
+
+        FocusOn elementId ->
+            ( model, focusElement elementId, NoOut )
+
+        FocusWrapNoOp ->
+            ( model, Cmd.none, NoOut )
+
 
 focusProgressBadge : Card.Model -> Cmd Msg
 focusProgressBadge card =
@@ -627,6 +675,89 @@ focusProgressBadgeFromModel model =
 
         Nothing ->
             Cmd.none
+
+
+{-| The DOM id of the dialog card — the element focused when the overlay opens
+(#295 item a; see `Main.openOverlay`). The card carries `tabindex -1` and the
+`aria-label "Book details: {title}"`, so a screen reader announces the book on
+open, and the first forward Tab moves to the close button (the card is out of
+the tab order). It is deliberately NOT a focus-trap anchor: the trap still wraps
+between the close button (first control) and the trailing sentinel (last).
+-}
+cardFocusId : String
+cardFocusId =
+    "book-overlay-card"
+
+
+{-| The DOM id of the first focusable CONTROL in the overlay — the close button.
+The focus trap wraps to this id when Tab falls off the trailing sentinel. (The
+element focused on open is the dialog card, `cardFocusId`, not this control.)
+-}
+firstFocusableId : String
+firstFocusableId =
+    "book-overlay-close"
+
+
+{-| The DOM id of the trailing focus sentinel — the last tab stop inside the
+overlay card. Shift+Tab off the first control wraps here; forward Tab off it
+wraps back to the first control. Anchoring "last" to a fixed sentinel keeps the
+trap correct regardless of which content controls the overlay renders.
+-}
+lastFocusableId : String
+lastFocusableId =
+    "book-overlay-focus-sentinel"
+
+
+{-| The DOM id of the "Remove from collection" button — the control that opens
+the remove-confirmation dialog, and where focus returns when it closes.
+-}
+removeTriggerId : String
+removeTriggerId =
+    "book-detail-remove-trigger"
+
+
+{-| Move DOM focus to the given element id, discarding the (ignorable) result.
+-}
+focusElement : String -> Cmd Msg
+focusElement elementId =
+    Browser.Dom.focus elementId
+        |> Task.attempt (\_ -> FocusWrapNoOp)
+
+
+{-| Keydown decoder for the overlay card implementing the Tab focus trap.
+
+It reads `key`, `shiftKey`, and the focused element's `target.id`, and only
+`preventDefault`s (and emits a wrap message) at the two overlay boundaries:
+
+  - forward Tab while on the trailing sentinel → wrap to the first control
+  - Shift+Tab while on the first control → wrap to the trailing sentinel
+
+Every other keydown fails the decoder, so native tab order is preserved for
+all the controls in between and no `preventDefault` is applied.
+
+-}
+trapKeydownDecoder : Decode.Decoder ( Msg, Bool )
+trapKeydownDecoder =
+    Decode.map3 trapDecision
+        (Decode.field "key" Decode.string)
+        (Decode.field "shiftKey" Decode.bool)
+        (Decode.at [ "target", "id" ] Decode.string)
+        |> Decode.andThen identity
+
+
+trapDecision : String -> Bool -> String -> Decode.Decoder ( Msg, Bool )
+trapDecision key shiftKey targetId =
+    if key /= "Tab" then
+        Decode.fail "focus-trap: not a Tab keydown"
+
+    else if not shiftKey && targetId == lastFocusableId then
+        Decode.succeed ( FocusWrapToFirst, True )
+
+    else if shiftKey && targetId == firstFocusableId then
+        Decode.succeed ( FocusWrapToLast, True )
+
+    else
+        Decode.fail "focus-trap: natural tab order"
 
 
 {-| Fold the reading-progress fields returned by the API into the placement,
@@ -668,6 +799,8 @@ view model =
                                 { bookTitle = book.title
                                 , onConfirm = ConfirmRemove
                                 , onCancel = CloseRemoveModal
+                                , onWrapToFirst = FocusOn RemoveBookModal.cancelButtonId
+                                , onWrapToLast = FocusOn RemoveBookModal.confirmButtonId
                                 }
 
                         _ ->
@@ -1202,7 +1335,7 @@ viewMoveState state =
 viewDangerZone : Model -> Html Msg
 viewDangerZone model =
     section [ class "book-detail__section book-detail__danger-zone" ]
-        [ button [ class "btn btn--danger btn--sm", onClick OpenRemoveModal ]
+        [ button [ class "btn btn--danger btn--sm", id removeTriggerId, onClick OpenRemoveModal ]
             [ text "Remove from collection" ]
         , viewRemoveState model.removeState
         ]
@@ -1291,10 +1424,15 @@ overlayView model =
             []
         , div
             [ class "book-overlay__card"
+            , id cardFocusId
             , attribute "role" "dialog"
             , attribute "aria-label" ariaLabel
             , attribute "aria-modal" "true"
             , tabindex -1
+
+            -- Focus trap (US-1.4.1): intercept Tab/Shift+Tab at the overlay
+            -- boundaries so keyboard focus never escapes to the shelf behind.
+            , preventDefaultOn "keydown" trapKeydownDecoder
             , style "position" "relative"
             , style "z-index" "1001"
             , style "max-width" "900px"
@@ -1328,8 +1466,30 @@ overlayView model =
                 ]
                 [ text "×" ]
             , overlayContent model
+            , overlayFocusSentinel
             ]
         ]
+
+
+{-| The trailing focus sentinel — the overlay's last tab stop. It is focusable
+(`tabindex 0`) but visually collapsed. Forward Tab off it wraps to the close
+button (via `trapKeydownDecoder`); Shift+Tab off the close button lands here.
+-}
+overlayFocusSentinel : Html Msg
+overlayFocusSentinel =
+    div
+        [ id lastFocusableId
+        , testId "book-overlay-focus-sentinel"
+        , tabindex 0
+        , attribute "aria-label" "End of book details — press Tab to return to the top"
+        , class "book-overlay__focus-sentinel"
+        , style "position" "absolute"
+        , style "width" "1px"
+        , style "height" "1px"
+        , style "overflow" "hidden"
+        , style "clip" "rect(0 0 0 0)"
+        ]
+        []
 
 
 {-| The inner content of the overlay — reuses the same view logic as the full page
@@ -1364,6 +1524,8 @@ overlayContent model =
                             { bookTitle = book.title
                             , onConfirm = ConfirmRemove
                             , onCancel = CloseRemoveModal
+                            , onWrapToFirst = FocusOn RemoveBookModal.cancelButtonId
+                            , onWrapToLast = FocusOn RemoveBookModal.confirmButtonId
                             }
 
                     _ ->

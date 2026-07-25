@@ -463,6 +463,7 @@ viewPiledBook selectedBookId index placement =
                 , author = Types.Book.authorName bookData
                 , coverImageUrl = bookCoverImageUrl bookData
                 , hidden = placement.visibility == Just "owner"
+                , hasWriting = placement.hasUserWriting
                 }
             ]
         ]

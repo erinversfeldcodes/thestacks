@@ -271,6 +271,24 @@ defmodule StacksWeb.BookshelfControllerTest do
       assert placement["book"]["primary_edition"]["id"] == edition.id
     end
 
+    test "propagates the primary edition's page_count value through the response", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      book = insert(:book)
+      _edition = insert(:book_edition, book: book, is_primary: true, page_count: 450)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
+      assert placement["book"]["primary_edition"]["page_count"] == 450
+    end
+
     test "includes author in book response", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -330,6 +348,49 @@ defmodule StacksWeb.BookshelfControllerTest do
 
         assert %{"bookshelf" => ^name} = json_response(conn, 200)
       end
+    end
+  end
+
+  # The spine bookmark ribbon (#287): each placement carries a server-computed
+  # `has_user_writing` flag — true when the owner has a visible blog-post
+  # association to that book — so the SPA can render the ribbon without a
+  # per-book lookup. The flag is layered onto PlacementDetail (not a proto
+  # field), so it must survive the ProtoJSON serialization for every placement.
+  describe "GET /api/bookshelves/:bookshelf_name — has_user_writing flag (#287)" do
+    test "is true for a book the owner has written a visible association about", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      book = insert(:book)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
+      post = insert(:post, user: user)
+      insert(:post_book_association, post: post, book: book, visible: true)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
+      assert placement["has_user_writing"] == true
+    end
+
+    test "is false for a book the owner has not written about", %{conn: conn} do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      shelf = insert(:shelf, bookshelf: bookshelf)
+      book = insert(:book)
+      _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library")
+
+      resp = json_response(conn, 200)
+      [placement] = all_placements(resp)
+      assert placement["has_user_writing"] == false
     end
   end
 

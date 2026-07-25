@@ -17,6 +17,8 @@ defmodule StacksWeb.TestHelperController do
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.AgeVerification
+  alias Stacks.Blog
+  alias Stacks.Books
   alias Swoosh.Adapters.Local.Storage.Memory
 
   require Logger
@@ -28,6 +30,15 @@ defmodule StacksWeb.TestHelperController do
   # the lookup to this domain guarantees a real user's activation token can never
   # be leaked — even when the flag is on for a public preview carrying real users.
   @e2e_email_domain "@thestacks.test"
+
+  # Reserved synthetic ISBN-13 block that marks a book as E2E-seeded (Issue #297).
+  # Every book created by POST /api/test/book-description WITHOUT an explicit ISBN
+  # carries this 8-digit prefix, so an auto-seeded catalogue row is identifiable at
+  # a glance and can never be confused with a verified, upstream-sourced ISBN. The
+  # `978` Bookland prefix keeps it EAN-13-shaped so it still passes the checksum
+  # gate; the `99999` "registration group" is unallocated by the ISBN agency, so no
+  # real published book can ever legitimately fall inside this block.
+  @e2e_seed_isbn_prefix "97899999"
 
   @doc """
   GET /api/test/confirmation-token?email=<email>
@@ -202,6 +213,146 @@ defmodule StacksWeb.TestHelperController do
         |> put_status(:unprocessable_entity)
         |> json(%{errors: format_errors(changeset)})
     end
+  end
+
+  @doc """
+  POST /api/test/book-writing  body: {"email": <email>, "book_id": <uuid>, "title": <optional>}
+
+  Seeds a blog post authored by the given test user with a VISIBLE manual
+  association to `book_id`, so the E2E suite can drive the spine bookmark-ribbon
+  (#287) deterministically. The production path associates books via an async
+  LLM worker on publish (`BlogAssociationHandler` → `PostBookAssociationWorker`),
+  which is non-deterministic for a browser test — this helper writes the same
+  end state directly via `Blog.associate_book/3` (visible, source `manual`).
+
+  Scoped to `@thestacks.test` emails ONLY (like every other helper here) — a real
+  account can never be in the reserved test TLD, so this can never fabricate
+  writing for a real user even on a public preview with the flag on. Responds
+  `201 {"ok": true, "post_id", "association_id"}` on success, a plain `404` for an
+  out-of-scope email or unknown user, and `422 {"errors": ...}` when the post or
+  association cannot be created.
+  """
+  def seed_book_writing(conn, %{"email" => email, "book_id" => book_id} = params)
+      when is_binary(email) and is_binary(book_id) do
+    title = Map.get(params, "title", "E2E writing about a book")
+
+    with true <- e2e_test_email?(email),
+         %{} = user <- Accounts.get_user_by_email(email),
+         {:ok, post} <-
+           Blog.create_post(user, %{title: title, body: "Seeded by the E2E ribbon spec."}),
+         {:ok, assoc} <- Blog.associate_book(post, book_id) do
+      conn
+      |> put_status(:created)
+      |> json(%{ok: true, post_id: post.id, association_id: assoc.id})
+    else
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: format_errors(changeset)})
+
+      _ ->
+        not_found(conn)
+    end
+  end
+
+  def seed_book_writing(conn, _params), do: not_found(conn)
+
+  @doc """
+  POST /api/test/book-description
+
+  Body `{"title": string, "description": string, "isbn"?: string}` → creates a
+  NEW public, single-edition book (work + primary edition) carrying the given
+  title and description, so the generated `op.books.description_tsv` column
+  populates and the #284 deep-search E2E can drive a live description match +
+  highlighted snippet. When `isbn` is omitted a unique, checksum-valid ISBN-13
+  in the reserved E2E-seed block (`#{@e2e_seed_isbn_prefix}…`, see
+  `generate_valid_isbn13/0`) is generated, so any book this helper seeds is
+  identifiable at a glance and can never masquerade as a verified catalogue row.
+
+  Unlike the other helpers this writes CATALOGUE metadata only — no user data,
+  no PII, no `.test`-domain scoping needed — and it INSERTS a fresh row rather
+  than mutating shared catalogue, so it is safe on a public preview. The
+  E2ETestHelper plug remains the sole gate (404 unless the flag is exactly "1").
+
+  ## Catalogue-pollution containment (Issue #297)
+
+  This is the only `/api/test/*` helper that inserts PUBLIC catalogue rows with
+  a synthetic, unverified ISBN — bypassing the ISBN Hard Gate's Open-Library /
+  Google-Books verification step (CLAUDE.md-non-negotiable in spirit). That
+  bypass is an accepted, DOCUMENTED risk, bounded by two facts verified against
+  the deploy scripts:
+
+    * **The gate never opens in production.** `STACKS_E2E_TEST_HELPERS` is set to
+      `"1"` ONLY in the preview branch of `scripts/deploy-stack.sh` (`STACKS_E2E_TEST_HELPERS="1"`);
+      the `--production` branch forces it empty (`STACKS_E2E_TEST_HELPERS=""`) and
+      the prod deploy additionally runs `fly secrets unset STACKS_E2E_TEST_HELPERS`
+      as defense-in-depth. With the flag off this endpoint is a plain 404, so no
+      unverified book is ever inserted into prod.
+    * **Preview catalogues are ephemeral and disposable.** Each preview runs against
+      a per-PR Neon branch created copy-on-write from `staging`
+      (`-d '{"branch": {"name": "${PREVIEW_NEON_BRANCH}", "parent_id": "${NEON_PARENT_BRANCH_ID}"}…'`
+      in `deploy-stack.sh`) and DELETED at teardown by `scripts/cleanup-preview.sh`
+      (`curl -s -X DELETE …/branches/${branch_id}` → "Neon branch … deleted"). A
+      seeded book therefore lives only in that throwaway branch (or a local dev DB)
+      and is discarded when the PR's preview is cleaned up — it never reaches, and
+      is never copy-on-write-linked to, the shared staging or production catalogue.
+
+  Identifiability makes the residual window auditable: the reserved
+  `#{@e2e_seed_isbn_prefix}` ISBN block flags every auto-seeded row, so an
+  operator inspecting a preview catalogue can tell E2E-seeded books from real
+  ones at a glance without any schema change, new column, or search filter.
+
+  Responds `201 {"ok": true, "book_id": <uuid>, "title": <title>}` on success,
+  or `422 {"errors": ...}` when the book cannot be created (e.g. a supplied ISBN
+  is malformed or already taken).
+  """
+  def seed_book_description(conn, %{"title" => title, "description" => description} = params)
+      when is_binary(title) and is_binary(description) do
+    isbn = Map.get(params, "isbn") || generate_valid_isbn13()
+
+    case Books.create(%{"isbn" => isbn, "title" => title, "description" => description}) do
+      {:ok, book} ->
+        conn
+        |> put_status(:created)
+        |> json(%{ok: true, book_id: book.id, title: book.title})
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{errors: format_errors(changeset)})
+    end
+  end
+
+  def seed_book_description(conn, _params), do: not_found(conn)
+
+  # Generates a fresh, checksum-valid ISBN-13 inside the reserved E2E-seed block
+  # (`@e2e_seed_isbn_prefix`, Issue #297). The four digits after the 8-digit marker
+  # prefix come from a node-monotonic counter (`System.unique_integer/1`, mod 10_000)
+  # so successive calls don't collide on the edition unique-constraint within a node;
+  # the 13th digit is the EAN-13 mod-10 check digit (weights 1,3,1,3… — the same rule
+  # Books enforces). The block is deliberately recognisable, NOT verifiable: it
+  # bypasses the ISBN Hard Gate's Open-Library/Google-Books verification, which is
+  # an accepted, documented risk (see `seed_book_description/2`) precisely because
+  # this helper is gated behind `STACKS_E2E_TEST_HELPERS` (never set in prod) and its
+  # rows live only in ephemeral per-PR preview Neon branches (deleted at cleanup) or
+  # local dev DBs.
+  defp generate_valid_isbn13 do
+    serial =
+      System.unique_integer([:positive])
+      |> rem(10_000)
+      |> Integer.to_string()
+      |> String.pad_leading(4, "0")
+
+    first12 = @e2e_seed_isbn_prefix <> serial
+    digits = first12 |> String.graphemes() |> Enum.map(&String.to_integer/1)
+
+    sum =
+      digits
+      |> Enum.with_index()
+      |> Enum.reduce(0, fn {d, i}, acc -> acc + d * if(rem(i, 2) == 0, do: 1, else: 3) end)
+
+    check = rem(10 - rem(sum, 10), 10)
+    first12 <> Integer.to_string(check)
   end
 
   # Unique default address in the reserved E2E domain — mirrors uniqueEmail()

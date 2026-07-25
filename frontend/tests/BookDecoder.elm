@@ -250,4 +250,54 @@ suite =
 
                     Err err ->
                         Expect.fail (Decode.errorToString err)
+        , test "bookPageCount is Nothing when the book has no primary edition" <|
+            \_ ->
+                let
+                    result =
+                        Decode.decodeString bookDecoder minimalBookJson
+                in
+                case result of
+                    Ok book ->
+                        Expect.equal Nothing (bookPageCount book)
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
+        , test "bookPageCount is Nothing when the primary edition omits page_count" <|
+            \_ ->
+                let
+                    json =
+                        """
+                        {
+                            "id": "book-no-pages",
+                            "title": "Pageless Edition",
+                            "author": {
+                                "id": "author-np",
+                                "name": "Anon"
+                            },
+                            "editions": [
+                                {
+                                    "id": "ed-np",
+                                    "isbn": "0306406152",
+                                    "is_primary": true
+                                }
+                            ],
+                            "primary_edition": {
+                                "id": "ed-np",
+                                "isbn": "0306406152",
+                                "is_primary": true
+                            },
+                            "edition_count": 1,
+                            "visibility_tier": "public"
+                        }
+                        """
+
+                    result =
+                        Decode.decodeString bookDecoder json
+                in
+                case result of
+                    Ok book ->
+                        Expect.equal Nothing (bookPageCount book)
+
+                    Err err ->
+                        Expect.fail (Decode.errorToString err)
         ]

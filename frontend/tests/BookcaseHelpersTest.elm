@@ -22,7 +22,7 @@ import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
-import TestHelpers exposing (libraryProgram, placementWithPages, simulateBookshelfResponse, testPlacement)
+import TestHelpers exposing (libraryProgram, placementWithPages, simulateBookshelfResponse, testBook, testPlacement)
 import Types.Placement exposing (Placement)
 
 
@@ -34,6 +34,7 @@ suite =
         , groupIntoRowsAtProductionWidth
         , minShelfRowsPadding
         , productionWidthDrivenThroughThePage
+        , noPageCountFallsBackToMinimumWidth
         ]
 
 
@@ -186,8 +187,52 @@ productionWidthDrivenThroughThePage =
                     )
 
 
+{-| When a placement's book has no page count, `viewShelfRow` (via the private
+`viewSpine`) feeds `Maybe.withDefault 200 (bookPageCount bk)` into
+`Components.Spine.spineWidth`, and `spineWidth 200` clamps to the 35px floor.
+This pins that fallback at the render level: a missing page count must still
+produce a real, minimum-width spine — not a zero-width or absent one. Both the
+"book present but page-count absent" and the "no book at all" branches of
+`viewSpine` route through the same 200-default, so both render at 35px.
+-}
+noPageCountFallsBackToMinimumWidth : Test
+noPageCountFallsBackToMinimumWidth =
+    describe "a book with no page count falls back to the 35px minimum spine width"
+        [ test "primary edition without a page_count renders at 35px" <|
+            \_ ->
+                viewShelfRow Softened [ noPagePlacement ]
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "book" ]
+                    |> Query.has [ Selector.style "width" "35px" ]
+        , test "a placement with no book at all still renders a 35px spine" <|
+            \_ ->
+                viewShelfRow Softened [ booklessPlacement ]
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "book" ]
+                    |> Query.has [ Selector.style "width" "35px" ]
+        ]
+
+
 
 -- FIXTURES
+
+
+{-| A placement whose book has neither editions nor a primary edition, so
+`bookPageCount` returns `Nothing` and the render falls back to the 200-default.
+-}
+noPagePlacement : Placement
+noPagePlacement =
+    { testPlacement
+        | id = "placement-nopage"
+        , book = Just { testBook | editions = [], primaryEdition = Nothing }
+    }
+
+
+{-| A placement with no book at all — the `Nothing` branch of `viewSpine`.
+-}
+booklessPlacement : Placement
+booklessPlacement =
+    { testPlacement | id = "placement-bookless", book = Nothing }
 
 
 {-| Books at the `spineWidth` floor: 35px + 2px gap = 37px each.

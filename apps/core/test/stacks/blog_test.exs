@@ -398,4 +398,47 @@ defmodule Stacks.BlogTest do
       assert Repo.get!(Blog.Post, other_post.id).visibility == "platform"
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # book_ids_with_user_writing/2 — the spine bookmark-ribbon signal (#287)
+  # ---------------------------------------------------------------------------
+
+  describe "book_ids_with_user_writing/2" do
+    test "returns the ids of books the user has written a visible association about" do
+      user = insert(:user)
+      written = insert(:book)
+      unwritten = insert(:book)
+      post = insert(:post, user: user)
+      insert(:post_book_association, post: post, book: written, visible: true)
+
+      result = Blog.book_ids_with_user_writing(user.id, [written.id, unwritten.id])
+
+      assert MapSet.member?(result, written.id)
+      refute MapSet.member?(result, unwritten.id)
+    end
+
+    test "excludes invisible (unconfirmed) associations" do
+      user = insert(:user)
+      book = insert(:book)
+      post = insert(:post, user: user)
+      insert(:post_book_association, post: post, book: book, visible: false)
+
+      assert Blog.book_ids_with_user_writing(user.id, [book.id]) == MapSet.new()
+    end
+
+    test "excludes another user's writing about the same book" do
+      user = insert(:user)
+      other = insert(:user)
+      book = insert(:book)
+      other_post = insert(:post, user: other)
+      insert(:post_book_association, post: other_post, book: book, visible: true)
+
+      assert Blog.book_ids_with_user_writing(user.id, [book.id]) == MapSet.new()
+    end
+
+    test "empty book_ids short-circuits to the empty set" do
+      user = insert(:user)
+      assert Blog.book_ids_with_user_writing(user.id, []) == MapSet.new()
+    end
+  end
 end

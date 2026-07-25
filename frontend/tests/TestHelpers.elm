@@ -1,6 +1,7 @@
 module TestHelpers exposing
     ( BookDetailTestModel
     , ReadingPileTestModel
+    , bookDetailOverlayProgramWithOut
     , bookDetailProgram
     , bookDetailProgramWithOut
     , bookshelfProgram
@@ -146,6 +147,7 @@ testPlacement =
     , startedAt = Nothing
     , finishedAt = Nothing
     , visibility = Nothing
+    , hasUserWriting = False
     }
 
 
@@ -943,20 +945,9 @@ searchEffects msg model maybeToken =
             if count == model.debounceCount && not (String.isEmpty model.query) then
                 let
                     booksEffect =
-                        case maybeToken of
-                            Just token ->
-                                SimulatedEffect.Http.request
-                                    { method = "GET"
-                                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                    , url = "/api/books/search?q=" ++ model.query
-                                    , body = SimulatedEffect.Http.emptyBody
-                                    , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted (Decode.list bookDecoder)
-                                    , timeout = Nothing
-                                    , tracker = Nothing
-                                    }
-
-                            Nothing ->
-                                SimulatedEffect.Cmd.none
+                        -- The scope follows the current toggle state (#284): deep
+                        -- appends `&scope=deep`, default emits no param.
+                        searchBooksEffect model.query model.deepSearch maybeToken
 
                     readersEffect =
                         SimulatedEffect.Http.request
@@ -976,7 +967,49 @@ searchEffects msg model maybeToken =
             else
                 SimulatedEffect.Cmd.none
 
+        Search.DeepSearchToggled deep ->
+            -- Mirror `Page.Search.update`: flipping the toggle with a non-empty
+            -- query re-fires ONLY the book search, under the new scope. `model` is
+            -- the pre-update model, whose `query` the toggle does not change; the
+            -- new scope comes from the Msg's `deep` value, not `model.deepSearch`.
+            if String.isEmpty model.query then
+                SimulatedEffect.Cmd.none
+
+            else
+                searchBooksEffect model.query deep maybeToken
+
         _ ->
+            SimulatedEffect.Cmd.none
+
+
+{-| The book-search SimulatedEffect, shared by the debounce and deep-toggle paths
+so the mirror URL (`/api/search?q=…` + optional `&scope=deep`) and the reused
+`Api.searchResponseDecoder` can never drift from the real wire (#284/#292). Fires
+nothing without a token (book search is authenticated-only).
+-}
+searchBooksEffect : String -> Bool -> Maybe String -> SimulatedEffect Search.Msg
+searchBooksEffect query deep maybeToken =
+    case maybeToken of
+        Just token ->
+            SimulatedEffect.Http.request
+                { method = "GET"
+                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                , url =
+                    "/api/search?q="
+                        ++ query
+                        ++ (if deep then
+                                "&scope=deep"
+
+                            else
+                                ""
+                           )
+                , body = SimulatedEffect.Http.emptyBody
+                , expect = SimulatedEffect.Http.expectJson Search.SearchCompleted Api.searchResponseDecoder
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        Nothing ->
             SimulatedEffect.Cmd.none
 
 
@@ -1680,5 +1713,34 @@ bookDetailProgramWithOut bookId maybeToken maybePreviousRoute =
                 in
                 ( { page = newModel, lastOut = out }, bookDetailEffects msg newModel maybeToken )
         , view = \model -> BookDetail.view model.page
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
+{-| Like `bookDetailProgramWithOut`, but renders `BookDetail.overlayView` (the
+modal chrome: backdrop, close button, focus sentinel) instead of the routed
+`view`. Records the page's `OutMsg` so a test can assert that dismissing the
+overlay via the X button or a backdrop click emits `RequestCloseOverlay`.
+-}
+bookDetailOverlayProgramWithOut : String -> Maybe String -> Maybe Route -> ProgramDefinition () BookDetailTestModel BookDetail.Msg (SimulatedEffect BookDetail.Msg)
+bookDetailOverlayProgramWithOut bookId maybeToken maybePreviousRoute =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        BookDetail.init bookId maybeToken maybePreviousRoute
+                in
+                ( { page = model, lastOut = BookDetail.NoOut }
+                , bookDetailInitEffects bookId maybeToken
+                )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, out ) =
+                        BookDetail.update msg model.page maybeToken
+                in
+                ( { page = newModel, lastOut = out }, bookDetailEffects msg newModel maybeToken )
+        , view = \model -> BookDetail.overlayView model.page
         }
         |> ProgramTest.withSimulatedEffects identity
