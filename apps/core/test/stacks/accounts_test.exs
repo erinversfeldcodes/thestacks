@@ -443,6 +443,52 @@ defmodule Stacks.AccountsTest do
       assert event_count("user.profile_updated") == before_count + 1
     end
 
+    test "same email + empty current_password is a profile-only update (CG-1)" do
+      # The settings UI sends the user's current email on every save. A payload
+      # whose email equals the current email is NOT an email change, so it must
+      # not demand current_password — it routes through the plain profile path.
+      user = insert(:user, email: "same@example.com", display_name: "Old Name")
+      before_count = event_count("user.profile_updated")
+
+      assert {:ok, updated} =
+               Accounts.update_profile(user, %{
+                 "email" => "same@example.com",
+                 "display_name" => "New Name",
+                 "current_password" => ""
+               })
+
+      assert updated.display_name == "New Name"
+      assert updated.email == "same@example.com"
+      # Emits the plain profile-updated event with the PII-free ({}) payload.
+      assert event_count("user.profile_updated") == before_count + 1
+      assert latest_payload("user.profile_updated", user.id) == %{}
+    end
+
+    test "same email compares case-insensitively (CG-1)" do
+      # auth resolves identity case-insensitively (get_user_by_email/1 downcases),
+      # so a differently-cased same email is still no change.
+      user = insert(:user, email: "Same@Example.com", display_name: "Old Name")
+
+      assert {:ok, updated} =
+               Accounts.update_profile(user, %{
+                 "email" => "same@example.com",
+                 "display_name" => "New Name",
+                 "current_password" => ""
+               })
+
+      assert updated.display_name == "New Name"
+    end
+
+    test "different email + empty current_password still fails (CG-1 guard)" do
+      user = insert(:user, email: "old@example.com")
+
+      assert {:error, :invalid_password} =
+               Accounts.update_profile(user, %{
+                 "email" => "different@example.com",
+                 "current_password" => ""
+               })
+    end
+
     test "user.profile_updated payload carries no PII (UUID-only)" do
       # GDPR (Issue #121): the display_name is PII and must NOT be written into
       # op.event_log. The event carries only the aggregate_id — the payload is

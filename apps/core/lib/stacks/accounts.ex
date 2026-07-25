@@ -781,7 +781,7 @@ defmodule Stacks.Accounts do
   @spec update_profile(User.t(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t() | :invalid_password | :argon2_busy}
   def update_profile(%User{} = user, attrs) do
-    if Map.has_key?(attrs, "email") do
+    if email_change?(user, attrs) do
       update_profile_with_email(user, attrs)
     else
       changeset = profile_changeset(user, attrs)
@@ -792,6 +792,26 @@ defmodule Stacks.Accounts do
       |> tap_emit_handle_claimed(changeset)
     end
   end
+
+  # A payload carries an email CHANGE only when it includes an "email" key whose
+  # normalised value differs from the user's current email. The settings UI sends
+  # the current email on every profile save, so a same-email payload must NOT be
+  # treated as a change (that would demand current_password on ordinary profile
+  # edits). auth resolves identity case-insensitively (get_user_by_email/1
+  # downcases), so we compare downcased/trimmed on both sides — storage does not
+  # downcase on write (registration/email_changeset cast the raw value), an
+  # inconsistency flagged in the #126 report.
+  defp email_change?(%User{email: current}, attrs) do
+    case Map.get(attrs, "email") do
+      nil -> false
+      incoming -> normalise_email(incoming) != normalise_email(current)
+    end
+  end
+
+  defp normalise_email(value) when is_binary(value),
+    do: value |> String.trim() |> String.downcase()
+
+  defp normalise_email(value), do: value
 
   # NO-PII: emit ONLY the fact that a handle was set/changed — never the handle
   # value (public but unbounded cardinality; telemetry is warehouse-adjacent).

@@ -87,6 +87,22 @@ defmodule StacksWeb.UserSettingsController do
     |> json(%{error: "current_password and new_password are required"})
   end
 
+  @doc """
+  GET /api/settings/notifications — return the current user's stored notification
+  preferences so the settings screen hydrates from saved values instead of
+  hardcoded defaults. Read-only: emits no event.
+  """
+  def show_notifications(conn, _params) do
+    user = Guardian.Plug.current_resource(conn)
+
+    json(conn, %{
+      notify_wishlist_availability: user.notify_wishlist_availability,
+      notify_marketplace: user.notify_marketplace,
+      notify_group_invitations: user.notify_group_invitations,
+      notify_event_matches: user.notify_event_matches
+    })
+  end
+
   @doc "PUT /api/settings/notifications — toggle notification preferences."
   def update_notifications(conn, params) do
     user = Guardian.Plug.current_resource(conn)

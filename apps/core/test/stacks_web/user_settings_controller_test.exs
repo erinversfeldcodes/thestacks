@@ -124,6 +124,38 @@ defmodule StacksWeb.UserSettingsControllerTest do
       conn = put(conn, "/api/settings/profile", %{display_name: "X"})
       assert json_response(conn, 401)
     end
+
+    test "saves a display_name change when email equals the current email and no password (CG-1)",
+         %{conn: conn} do
+      # The settings UI sends the current email on every profile save; a same-email
+      # payload must NOT be treated as an email change and must NOT demand a
+      # current_password.
+      user = insert(:user, email: "same@example.com", display_name: "Old Name")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/profile", %{
+          email: "same@example.com",
+          display_name: "New Name",
+          current_password: ""
+        })
+
+      assert %{"display_name" => "New Name", "email" => "same@example.com"} =
+               json_response(conn, 200)
+    end
+
+    test "still 422s a genuinely different email without current_password (CG-1 guard)",
+         %{conn: conn} do
+      user = insert(:user, email: "old@example.com")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/profile", %{email: "different@example.com", current_password: ""})
+
+      assert %{"error" => "invalid_current_password"} = json_response(conn, 422)
+    end
   end
 
   describe "PUT /api/settings/location" do
@@ -287,6 +319,48 @@ defmodule StacksWeb.UserSettingsControllerTest do
 
     test "returns 401 when not authenticated", %{conn: conn} do
       conn = put(conn, "/api/settings/notifications", %{notify_marketplace: true})
+      assert json_response(conn, 401)
+    end
+  end
+
+  describe "GET /api/settings/notifications" do
+    test "returns the four notify_* fields for the authed user", %{conn: conn} do
+      user = insert(:user)
+
+      conn = conn |> auth_conn(user) |> get("/api/settings/notifications")
+
+      assert %{
+               "notify_wishlist_availability" => _,
+               "notify_marketplace" => _,
+               "notify_group_invitations" => _,
+               "notify_event_matches" => _
+             } = json_response(conn, 200)
+    end
+
+    test "reflects stored DB values, not schema defaults", %{conn: conn} do
+      # Invert every field away from its schema default so a hardcoded-default
+      # response would fail: defaults are wishlist=false, marketplace=true,
+      # group_invitations=true, event_matches=false.
+      user =
+        insert(:user,
+          notify_wishlist_availability: true,
+          notify_marketplace: false,
+          notify_group_invitations: false,
+          notify_event_matches: true
+        )
+
+      conn = conn |> auth_conn(user) |> get("/api/settings/notifications")
+
+      assert %{
+               "notify_wishlist_availability" => true,
+               "notify_marketplace" => false,
+               "notify_group_invitations" => false,
+               "notify_event_matches" => true
+             } = json_response(conn, 200)
+    end
+
+    test "returns 401 when not authenticated", %{conn: conn} do
+      conn = get(conn, "/api/settings/notifications")
       assert json_response(conn, 401)
     end
   end
