@@ -3,18 +3,26 @@ port module Main exposing
     , Auth
     , ExternalAuthOutcome(..)
     , LoginEffect(..)
+    , Msg(..)
+    , Page(..)
     , PendingLogout
     , StoredAuthResolution(..)
     , adoptExternalAuth
     , decodeConfig
     , decodeFlags
+    , decodeSwipe
+    , initPage
     , loginEffects
     , main
     , parkPending
     , renewAuthToken
+    , requiresAuth
     , resolveRecheck
     , shouldShowOnboarding
+    , viewFooter
+    , viewHome
     , viewNav
+    , viewNotFound
     )
 
 import Animation.Transition as Transition exposing (transitionClass)
