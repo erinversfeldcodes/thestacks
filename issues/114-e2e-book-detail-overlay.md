@@ -32,7 +32,7 @@ it — delete the story from Summary + User Stories above and spin out a feature
 
 | User Story | Happy-path hops (file:line) | Live-drive result | Verdict | Resolution |
 |-----------|------------------------------|-------------------|---------|------------|
-| US-1.4.1 — Open a Book's Detail Overlay | ⬜ to verify | ⬜ to verify | ⬜ | — |
+| US-1.4.1 — Open a Book's Detail Overlay | Spine click → `Main.openOverlay` (`frontend/src/Main.elm:2365`; records `triggerSpineId = "spine-<id>"` at `:2377`) → `GET /api/books/:id` via `:optional_auth` → `StacksWeb.BookController.show/2` (`apps/core/lib/stacks_web/controllers/book_controller.ex:185`, `cached_or_fetch/1` at `:197`) → `BookDetail.overlayView` (`frontend/src/Main.elm:2856`) renders hero/about/reviews/prices/author/writing/shelf-actions. Dismissal (X/backdrop/Escape) → `RequestCloseOverlay` OutMsg → overlay closed at `Main.elm:2093` (button/backdrop) and `:2180` (Escape). Focus contract: focus-on-open lands on `book-overlay-close`, sentinel-anchored Tab trap (`frontend/src/Page/BookDetail.elm:1421` `preventDefaultOn "keydown"` + trailing sentinel `:1467`), focus-return to the triggering spine (`Main.elm:2085`). | Live keyboard-walk 2026-07-24 (Progress Notes): overlay opens over the blurred shelf with the URL unchanged; Tab cycles close→content→sentinel→close and never escapes to the shelf behind; Escape is scoped (remove-modal/progress-form first, then the overlay); focus returns to the triggering spine on close. Driven by the `--project=chromium` E2E suite (`book-detail.spec.ts` + `shelf-actions.spec.ts`, 29 passing) and the 36 `BookDetailProgramTest` cases. | ✅ | Built end-to-end. Two kickoff-approved (2026-07-23) in-scope builds landed: (a) the Elm overlay focus trap + focus-return (the US-1.4.1 a11y contract, no ports), (b) `BookDetailCache` hit/miss telemetry. Revision 1 (ux P2 a11y) added scoped Escape, remove-modal dialog semantics + two-element focus trap + focus-on-"Keep It" + focus-return, and the sentinel aria-label. 3/3 reviews (elm, elixir, ux) APPROVED; residual P3s tracked in #295. |
 
 Verdict: ✅ implemented (built end-to-end + observed live) · 🟡 partial (enumerate missing hops) · ❌ missing (build in-scope or de-scope).
 
@@ -263,9 +263,9 @@ N/A — cover images are pre-stored URLs in `edition.cover_image_url`. No runtim
 
 ## Test Audit
 
-_Baseline test-coverage map for this issue (13 layers × user story, happy/sad columns), generated 2026-07-08. This is the pre-implementation baseline — `❌`/`⚠️` cells are the work queue. Regenerate as tests land; the issue is Done when this audit is green (see Definition of Done)._
+_Test-coverage map for this issue (13 layers × user story, happy/sad columns). Regenerated to the shipped state after implementation — every cell re-verified by grep/Read against the merged suites (commits `454dfd8b` + `56a21f58` + `045a7168` and the intervening baseline-closing merges). The issue is Done when this audit is green (see Definition of Done)._
 
-Last regenerated: 2026-07-08 (baseline, pre-implementation — Issue #114)
+Last regenerated: 2026-07-24 (post-implementation — Issue #114, shipped state)
 
 Legend: ✅ = exists | ⚠️ = exists but shallow | ❌ = missing | n/a = not applicable
 
@@ -308,26 +308,27 @@ The audit therefore baselines real coverage rather than marking blanket
 
 | Layer       | US-1.4.1 |
 |-------------|----------|
-| Elixir      | ⚠️ (strong controller + context + cache coverage; gaps: hidden-visibility→404 at HTTP, moved/removed event payloads, audit-log on move/remove, no-events-on-read, Multi rollback, controller↔cache integration) |
+| Elixir      | ✅ (controller + context + cache fully covered: hidden-book-not-served/403-no-leak, moved/removed event payloads, audit-log on move/remove, no-events-on-read, Multi rollback, controller↔cache integration via telemetry) |
 | Elm unit    | ✅ (`BookDecoder.elm` — 12 tests covering Book/edition/author/visibility-tier decoding; page state lives in program tests) |
-| Elm program | ⚠️ (`BookDetailProgramTest` 11 + `BookDetailAvailabilityTest` 4 = strong view rendering; move/remove **success/failure** transitions and `CloseOverlay`→`RequestCloseOverlay` OutMsg untested) |
+| Elm program | ✅ (`BookDetailProgramTest` 36 + `BookDetailAvailabilityTest` 4: view rendering + move/remove **success & failure** transitions + `CloseOverlay`→`RequestCloseOverlay` OutMsg + focus trap + scoped Escape + remove-modal dialog semantics/trap) |
 | Python      | n/a — vision service not involved in the read-only detail overlay |
-| E2E         | ⚠️ (open-overlay, all-sections, format toggle, move-success, remove-flow, add-to-collection covered; **close (X/backdrop/Escape), focus trap, move/remove failure, error states, unauth prompt, hidden-404** all absent) |
-| dbt         | ⚠️ (staging models exist + `placement.moved`→`mart_community_read_count` refresh tested; no relationships/FK tests; `placement.removed` does **not** trigger a refresh — code gap) |
+| E2E         | ✅ (open-overlay, all-sections, format toggle, move-success, remove-flow, add-to-collection + close (X/backdrop/Escape) with URL-unchanged, focus contract, move/remove failure, error/loading states, unauth prompt; 29 passing across `book-detail.spec.ts` + `shelf-actions.spec.ts` on `--project=chromium`) |
+| dbt         | ✅ (staging models + `placement.moved`/`placement.removed`→`mart_community_read_count` refresh tested; `relationships` FK tests present in `schema.yml`) |
 
-**Existing test inventory (verified by grep/read):**
-- `apps/core/test/stacks_web/book_controller_test.exs` — `GET /api/books/:id` (200 with full JSON, placement, my_writing, editions, primary_edition, community_read_count; 404; 403 age-gated; 200 age-verified; optional-auth null placement; visibility gates; my_writing variants).
+**Shipped test inventory (verified by grep/read 2026-07-24):**
+- `apps/core/test/stacks_web/book_controller_test.exs` — `GET /api/books/:id` (200 with full JSON, placement, my_writing, editions, primary_edition, community_read_count; 404; 403 age-gated; 200 age-verified; optional-auth null placement; visibility gates; my_writing variants) **plus** the shipped additions: `describe "hidden book is not served"` (`:629` — age-gated book refused for authed + unauthed viewer, payload/title not leaked, `:630`/`:650`), `describe "no events on read"` (`:663` — successful + unauthenticated read each assert `event_log` count unchanged, `:664`/`:679`), `describe "cache miss then hit"` (`:700` — first GET fires `[:stacks, :book_detail_cache, :miss]` then second fires `:hit` with no second miss, via telemetry, `:721`).
 - `apps/core/test/stacks_web/bookshelf_placement_controller_test.exs` — move (200/403/422/401), delete (204/403/404/401), formats (200/403/422/401), create (201/422/401), mine, visibility, progress.
-- `apps/core/test/stacks/shelving_test.exs` — `move_book/3` (history + `placement.moved` count), `remove_book/2` (removed_at + `placement.removed` count), unauthorized paths, `place_book/3` payload.
+- `apps/core/test/stacks/shelving_test.exs` — `move_book/3` history + audit-log (`:167`), atomicity/rollback (`describe :235` — a step failure rolls back placement update + history + event + audit, `:236`); `remove_book/2` removed_at + audit-log (`:473`) + rollback (`:637`); `describe "move_book/3 — placement.moved payload"` (`:1390` — asserts aggregate_id == placement.id, `from_bookshelf`/`to_bookshelf` **names**), `describe "remove_book/2 — placement.removed payload"` (`:1408` — asserts `book_id`); unauthorized paths; `place_book/3` payload.
 - `apps/core/test/stacks/books_test.exs` — `get_book_detail/1` (loads with preloads; nil for nonexistent), `primary_edition/1`.
 - `apps/core/test/stacks/books/book_detail_cache_test.exs` — get miss/put+get hit/invalidate/invalidate_all/TTL expiry (5 tests).
+- `apps/core/test/stacks/book_detail_cache_telemetry_test.exs` — **shipped**: `describe "get/1 telemetry"` (5 tests) — `:miss` on cold lookup, `:hit` after put, `:miss` on expired-as-miss, cold-then-warm miss→hit ordering, and a GDPR test pinning `Map.keys(metadata) == [:book_id]` for both events (`:46`–`:112`).
 - `apps/core/test/stacks/books/handlers/cache_invalidation_handler_test.exs` — invalidation on `book.created`, `book.cover_confirmed`, `blog.associations_suggested`; ignores unrelated.
-- `apps/core/test/stacks/feeds/handlers/placement_handler_test.exs` — `placement.created`/`.moved`/`.removed` → `RegenerateFeedJob` enqueue.
-- `apps/core/test/stacks/upload_dbt_test.exs` — `placement.moved` → `mart_community_read_count` refresh (and standalone).
+- `apps/core/test/stacks/feeds/handlers/placement_handler_test.exs` — `placement.created`/`.moved`/`.removed` → `RegenerateFeedJob` enqueue (`:147` removed describe).
+- `apps/core/test/stacks/upload_dbt_test.exs` — `placement.moved` (`:206`) **and** `placement.removed` (`:220` — "placement.removed enqueues community read count refresh") → `mart_community_read_count` refresh.
 - `apps/core/test/stacks/visibility_test.exs` — `resolve_visibility/2` incl. age-gate → `:hidden`/`:visible`.
-- `frontend/tests/Page/BookDetailProgramTest.elm` (11) + `frontend/tests/Page/BookDetailAvailabilityTest.elm` (4) + `frontend/tests/BookDecoder.elm` (12).
-- `e2e/tests/book-detail.spec.ts` (6), `book-interaction.spec.ts` (open overlay), `shelf-actions.spec.ts` (move/remove/add), `editions.spec.ts`, `age-gate.spec.ts`.
-- `dbt/models/staging/schema.yml` — `stg_bookshelf_placements` (+ `accepted_values` on `reading_status`) and `stg_bookshelf_placement_history` (generic column tests only).
+- `frontend/tests/Page/BookDetailProgramTest.elm` (36) + `frontend/tests/Page/BookDetailAvailabilityTest.elm` (4) + `frontend/tests/BookDecoder.elm` (12).
+- `e2e/tests/book-detail.spec.ts` (22), `e2e/tests/shelf-actions.spec.ts` (7), `book-interaction.spec.ts`, `editions.spec.ts`, `age-gate.spec.ts`.
+- `dbt/models/staging/schema.yml` — `stg_bookshelf_placements` (`accepted_values` on `reading_status`; `relationships` on `book_id`→`stg_books`, `bookshelf_id`→`stg_bookshelves`, `:215`+) and `stg_bookshelf_placement_history` (`relationships` on `book_id`→`stg_books`, `from_bookshelf`/`to_bookshelf`→`stg_bookshelves`, `:272`+).
 
 ---
 
@@ -335,14 +336,14 @@ The audit therefore baselines real coverage rather than marking blanket
 
 | Status | Count |
 |--------|-------|
-| ✅ STRONG | **6** |
-| ⚠️ shallow | **7** |
-| ❌ missing | **2** |
+| ✅ STRONG | **15** |
+| ⚠️ shallow | **0** |
+| ❌ missing | **0** |
 | n/a (covered higher up / not applicable / by-design) | **11** |
 
-26 cells total (13 layers × happy/sad). This is the pre-implementation
-baseline; Issue #114's DoD requires regenerating this audit to 0 ❌ / 0 ⚠️
-after the punch list lands.
+26 cells total (13 layers × happy/sad). Shipped state: **0 ❌ / 0 ⚠️** — every
+applicable cell is `✅`, every non-applicable cell is `n/a`-with-rationale. All
+16 punch-list items are dispositioned below.
 
 ---
 
@@ -352,7 +353,7 @@ after the punch list lands.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.4.1 | ✅ book_controller_test.exs — "returns 200 with book JSON when book exists" (asserts id, title, visibility_tier, primary_edition.isbn, editions list, edition_count, community_read_count), "returns placement data when user has an active placement", "returns 200 for age_gated book when user is age_verified"; move/remove/formats happy: bookshelf_placement_controller_test.exs — "returns 200 when user moves own placement", "returns 204 when user deletes own placement", "returns 200 with updated formats", "returns 201 with placement on valid bookshelf and book_id". | ✅ | ⚠️ book_controller_test.exs — "returns 404 when book does not exist", "returns 403 for age_gated book when user is not age_verified"; bookshelf_placement_controller_test.exs — move "returns 422 when bookshelf parameter is missing"/"403 non-owner", delete "404 nonexistent"/"403 non-owner", formats "422 missing"/"422 not-array"/"403 non-owner". **GAP:** Issue §2/US §4 require a **hidden-visibility book → 404** at the HTTP layer — no such test exists (`GET /api/books/:id` for a book whose visibility resolves to `:hidden`; note book `visibility_tier` is only `public`/`age_gated`, so the hidden path is via `Visibility.resolve_visibility`, untested through the controller). | ⚠️ |
+| 1.4.1 | ✅ book_controller_test.exs — "returns 200 with book JSON when book exists" (asserts id, title, visibility_tier, primary_edition.isbn, editions list, edition_count, community_read_count), "returns placement data when user has an active placement", "returns 200 for age_gated book when user is age_verified"; move/remove/formats happy: bookshelf_placement_controller_test.exs — "returns 200 when user moves own placement", "returns 204 when user deletes own placement", "returns 200 with updated formats", "returns 201 with placement on valid bookshelf and book_id". | ✅ | ✅ book_controller_test.exs — "returns 404 for a missing book" (`:184`), "returns 403 for age_gated book when user is not age_verified" (`:126`/`:535`); bookshelf_placement_controller_test.exs — move "returns 422 when bookshelf parameter is missing"/"403 non-owner", delete "404 nonexistent"/"403 non-owner", formats "422 missing"/"422 not-array"/"403 non-owner". **Hidden-book path:** `describe "GET /api/books/:id — hidden book is not served"` (`:629`) proves the *reachable* hidden outcome — an age-gated book (a book's only server-side hidden state) is refused with 403 for both authed (`:630`) and unauthenticated (`:650`) viewers, and the refusal leaks no `book` payload (`refute Map.has_key?(body, "book")`, `refute resp_body =~ title`). The literal `resolve_visibility == :hidden -> 404` branch (`book_controller.ex:211`) is **n/a — defensively unreachable for books**: `AgeGate.enforce` (`:192`) intercepts with 403 first, and books have no owner/block and always resolve `visibility_tier` to public/age_gated (Phase 2 flag, Progress Notes 2026-07-24). | ✅ |
 
 #### Layer 2: Auth & Middleware Guards
 
@@ -364,13 +365,13 @@ after the punch list lands.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.4.1 | ✅ books_test.exs — `get_book_detail/1` "returns book with preloads" + `primary_edition/1`; shelving_test.exs — move "moves placement to new bookshelf and writes history" (asserts `bookshelf.name` change + `history.from_bookshelf`), "creates history record in PlacementHistory table", remove "sets removed_at on the placement"; formats update via controller test; placement lookup via book_controller_test.exs "returns placement data ...". | ✅ | ⚠️ books_test.exs — `get_book_detail/1` "returns nil for nonexistent book"; shelving_test.exs — move/remove unauthorized. **GAP:** Issue §3 "Ecto.Multi Transactions: Move (update + history insert + event emit) all atomic; Remove (soft-delete + event + audit log) all atomic" — no **rollback/atomicity** test (e.g. forcing the history insert or event step to fail and asserting the placement update is rolled back). | ⚠️ |
+| 1.4.1 | ✅ books_test.exs — `get_book_detail/1` "returns book with preloads" + `primary_edition/1`; shelving_test.exs — move "moves placement to new bookshelf and writes history" (asserts `bookshelf.name` change + `history.from_bookshelf`), "creates history record in PlacementHistory table", remove "sets removed_at on the placement"; formats update via controller test; placement lookup via book_controller_test.exs "returns placement data ...". | ✅ | ✅ books_test.exs — `get_book_detail/1` "returns nil for nonexistent book"; shelving_test.exs — move/remove unauthorized. **Ecto.Multi atomicity now covered:** `describe "move_book/3 — atomicity / rollback"` (`:235`) — "a step failure rolls back the placement update, history, event, and audit" (`:236`); the abandon path has a matching rollback test ("a step failure rolls back the abandon (no history, event, or audit, placement unmoved)", `:637`); rejected place/move each assert no placement/history/event/audit row (`:332`/`:347`). | ✅ |
 
 #### Layer 4: Event Flow & Lifecycle
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.4.1 | ⚠️ shelving_test.exs — "emits placement.moved event" and "emits placement.removed event" (both assert event **count** +1 only); handlers: placement_handler_test.exs — `placement.moved` "enqueues jobs for both source and destination bookshelves" + `placement.removed` "handles nil bookshelf name gracefully"; upload_dbt_test.exs — "placement.moved enqueues community read count refresh". **GAP:** Issue §4 requires the `placement.moved` payload `%{from_bookshelf, to_bookshelf}` and `placement.removed` payload to be asserted — only `placement.created` has a payload-shape test (shelving_test.exs "placement.created payload includes the book's visibility_tier"). | ⚠️ | ❌ Two Issue-§4 assertions have **zero** tests: (a) "No Events on Read — `GET /api/books/:id` emits no events" (no read-path event-absence test in book_controller_test.exs or events_test.exs); (b) "Move creates audit log entry / Remove creates audit log entry" — no audit-log assertion tied to move/remove (no `audit`/`AuditLog` reference in shelving_test.exs). | ❌ |
+| 1.4.1 | ✅ **Payloads now asserted:** shelving_test.exs `describe "move_book/3 — placement.moved payload"` (`:1390`) — "payload carries the source and destination bookshelf names" asserts `aggregate_id == placement.id`, `payload["from_bookshelf"] == "library"`, `payload["to_bookshelf"] == "wishlist"`; `describe "remove_book/2 — placement.removed payload"` (`:1408`) — "payload carries the removed placement's book_id" asserts `payload["book_id"] == book.id`. These match the real emits (`shelving.ex:328`-`:332` moved, `:458`-`:462` removed). Handlers: placement_handler_test.exs — `placement.moved`/`.removed` describes (`:69`/`:147`); upload_dbt_test.exs — moved+removed refresh. | ✅ | ✅ **No-events-on-read:** book_controller_test.exs `describe "GET /api/books/:id — no events on read"` (`:663`) — "a successful read emits no event_log rows" (`:664`) and "an unauthenticated read emits no event_log rows" (`:679`) both assert `total_event_count()` unchanged before/after. **Audit-log:** shelving_test.exs "writes an audit-log entry for the move (:audit Multi step)" (`:167`) and "writes an audit-log entry for the removal (:audit Multi step)" (`:473`). | ✅ |
 
 #### Layer 5: Background Jobs (Oban)
 
@@ -394,25 +395,25 @@ after the punch list lands.
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.4.1 | ⚠️ book_detail_cache_test.exs — the cache **mechanism** is well tested: "returns {:miss, book_id} for uncached entries", "returns cached data" (put+get hit), TTL expiry ("expired entries return :miss"). **GAP:** Issue §8 requires **controller↔cache integration** — first `GET /api/books/:id` = cache miss → DB → cached; second fetch = cache hit → no DB query. No test wires `BookController.show/2` to the cache or asserts DB-query count on hit vs miss. | ⚠️ | ✅ cache_invalidation_handler_test.exs — invalidation on `book.created`, `book.cover_confirmed`, `blog.associations_suggested`, and "ignores unrelated events"; book_detail_cache_test.exs — `invalidate/1`, `invalidate_all/0`, TTL expiry. **Note (by design, not a gap):** `CacheInvalidationHandler` does **not** invalidate on `placement.moved`/`.removed` — correct, since `BookDetailCache` holds book metadata while placement is per-user and fetched separately; Issue §8's "invalidated after move/remove" assumption does not apply to this cache. | ✅ |
+| 1.4.1 | ✅ book_detail_cache_test.exs — the cache **mechanism** is well tested: "returns {:miss, book_id} for uncached entries", "returns cached data" (put+get hit), TTL expiry ("expired entries return :miss"). **Controller↔cache integration now covered:** book_controller_test.exs `describe "GET /api/books/:id — cache miss then hit"` (`:700`) — "first GET misses and caches; second GET hits" (`:721`) attaches `[:stacks, :book_detail_cache, :miss|:hit]` and asserts the first request fires `:miss` (populating the cache) and the second fires `:hit`, with `refute_receive` proving no second miss (the warm read is served from cache, not re-fetched). The cache is wired into the controller at `book_controller.ex:198` (`cached_or_fetch/1`) → `:241` (`put`). | ✅ | ✅ cache_invalidation_handler_test.exs — invalidation on `book.created`, `book.cover_confirmed`, `blog.associations_suggested`, and "ignores unrelated events"; book_detail_cache_test.exs — `invalidate/1`, `invalidate_all/0`, TTL expiry. **Note (by design, not a gap):** `CacheInvalidationHandler` does **not** invalidate on `placement.moved`/`.removed` — correct, since `BookDetailCache` holds book metadata while placement is per-user and fetched separately; Issue §8's "invalidated after move/remove" assumption does not apply to this cache. | ✅ |
 
 #### Layer 9: dbt Model Dependencies
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.4.1 | ✅ `dbt/models/staging/schema.yml` — `stg_bookshelf_placements` (proto-generated; `not_null`+`unique` on id, `accepted_values` on `reading_status`) and `stg_bookshelf_placement_history` exist and expose `bookshelf_id`/`removed_at`/`from_bookshelf`/`to_bookshelf`; upload_dbt_test.exs — "placement.moved enqueues community read count refresh" wires `DbtRefreshHandler` → `mart_community_read_count` (consumed by `BookController.show/2`). | ✅ | ❌ (a) No `relationships` tests: `stg_bookshelf_placements.book_id → stg_books.id` / `bookshelf_id → stg_bookshelves.id`, `stg_bookshelf_placement_history.from_bookshelf|to_bookshelf → stg_bookshelves.id` (schema.yml is proto-generated — fixes must go via `mix proto.sync` generator or a singular test under `dbt/tests/`). (b) **CODE GAP:** `DbtRefreshHandler`'s `@refresh_map` maps only `placement.created` and `placement.moved` — **`placement.removed` triggers no refresh**, so `mart_community_read_count` goes stale after a remove. Issue §9 ("After Remove: DbtRefreshHandler triggered by placement.removed") assumes a mapping that does not exist. | ❌ |
+| 1.4.1 | ✅ `dbt/models/staging/schema.yml` — `stg_bookshelf_placements` (proto-generated; `not_null`+`unique` on id, `accepted_values` on `reading_status`) and `stg_bookshelf_placement_history` exist and expose `bookshelf_id`/`removed_at`/`from_bookshelf`/`to_bookshelf`; upload_dbt_test.exs — "placement.moved enqueues community read count refresh" (`:206`) wires `DbtRefreshHandler` → `mart_community_read_count` (consumed by `BookController.show/2`). | ✅ | ✅ (a) **`relationships` FK tests present** in `schema.yml`: `stg_bookshelf_placements.book_id → ref('stg_books')` and `bookshelf_id → ref('stg_bookshelves')` (`:215`+); `stg_bookshelf_placement_history.book_id → ref('stg_books')`, `from_bookshelf`/`to_bookshelf → ref('stg_bookshelves')` (`:272`+). (b) **CODE GAP closed:** `DbtRefreshHandler.@refresh_map` now maps `"placement.removed" => ["mart_community_read_count"]` (`dbt_refresh_handler.ex:38`), and upload_dbt_test.exs "placement.removed enqueues community read count refresh" (`:220`) proves it — `mart_community_read_count` (which filters `removed_at is null`) is recomputed after a remove. | ✅ |
 
 #### Layer 10: Elm Frontend State Machine
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.4.1 | ⚠️ BookDetailProgramTest.elm — "loading_state", "success_renders_all_sections" (hero/about/reviews/prices/author-card/writing/shelf-actions), "format_toggle", "shelf_mover_flow" (open→cancel), "remove_modal_flow" (open→Keep It), "placement_loaded", "aria_regions", "section_content", "rating_display"; BookDetailAvailabilityTest.elm — availability section (4); BookDecoder.elm — Book/edition/author/visibility decoding. **GAP:** the **success** transitions are untested: `ConfirmMove` → `MoveCompleted (Ok _)` → `currentBookshelf` updates + shelf mover closes; `ConfirmRemove` → `RemoveCompleted (Ok _)` → `NavigateTo previousRoute` OutMsg. | ⚠️ | ⚠️ BookDetailProgramTest.elm — "failure_renders_error" (500 → "Could not load this book. Please try again."), "forbidden_triggers_age_gate" (403 → age gate + Go Back dismiss). **GAP:** `MoveCompleted (Err _)` → "Failed to move book...", `RemoveCompleted (Err _)` → "Failed to remove book...", and `CloseOverlay` → `RequestCloseOverlay` OutMsg (X / backdrop / Escape dismiss) are untested. | ⚠️ |
+| 1.4.1 | ✅ BookDetailProgramTest.elm (36) — view rendering ("loading_state", "success_renders_all_sections", "format_toggle", "shelf_mover_flow", "remove_modal_flow", "placement_loaded", "aria_regions", "section_content", "rating_display"); **success transitions now covered:** "move_confirm_happy: SelectBookshelf then ConfirmMove then MoveCompleted Ok updates currentBookshelf, closes the mover, and shows success" (`:665`) and "remove_confirm_happy: ConfirmRemove then RemoveCompleted Ok emits OutMsg NavigateTo previousRoute" (`:690`); the four no-op guards ("confirm_move_no_placement/no_token", "confirm_remove_no_placement/no_token", `:738`-`:790`). BookDetailAvailabilityTest.elm — availability section (4); BookDecoder.elm — Book/edition/author/visibility decoding. | ✅ | ✅ BookDetailProgramTest.elm — "failure_renders_error" (500), "forbidden_triggers_age_gate" (403 → age gate + Go Back); **failure + dismiss now covered:** "move_completed_error: a failed PUT renders the move failure message" (`:288`), "remove_completed_error: a failed DELETE renders the remove failure message" (`:709`), "close_overlay_x: clicking the X button emits RequestCloseOverlay" (`:329`), "close_overlay_backdrop: clicking the backdrop emits RequestCloseOverlay" (`:344`); focus trap (`:365`-`:425`: boundaries, forward/reverse wrap, natural pass-through, non-Tab); scoped Escape (`:102`-`:139`: consumed-modal / consumed-progress / unconsumed→RequestCloseOverlay); remove-modal dialog semantics + two-element trap (`:154`-`:214`). | ✅ |
 
 #### Layer 11: Operational Metrics
 
 | US    | Happy Path | Verdict | Sad Path | Verdict |
 |-------|------------|---------|----------|---------|
-| 1.4.1 | n/a — per-route latency and status-code counters for `GET /api/books/:id`, move, and remove are covered by the SLO gate (`scripts/check-slo-gate.sh` scrapes `/internal/metrics` post-deploy) plus automatic Phoenix endpoint / Ecto query telemetry. Per project convention, per-US repetition of firing tests adds no guarantee. | n/a | ⚠️ Issue §11 / US §13 explicitly list `cache.hit{cache="BookDetailCache"}` / `cache.miss` / `cache.hit_ratio` metrics and flag them "not yet instrumented — verify events exist when added". `BookDetailCache` emits no telemetry today (no `:telemetry.execute` in `book_detail_cache.ex`; no cache metric in any telemetry test). Needs a decision: instrument hit/miss + add firing tests (pattern: `upload_telemetry_test.exs`), or formally descope and reclassify n/a. **Partially blocked on instrumentation (feature gap, not just test gap).** | ⚠️ |
+| 1.4.1 | n/a — per-route latency and status-code counters for `GET /api/books/:id`, move, and remove are covered by the SLO gate (`scripts/check-slo-gate.sh` scrapes `/internal/metrics` post-deploy) plus automatic Phoenix endpoint / Ecto query telemetry. Per project convention, per-US repetition of firing tests adds no guarantee. | n/a | ✅ **Instrumented + firing tests.** `BookDetailCache.get/1` now emits `[:stacks, :book_detail_cache, :hit]` on a live hit and `[:stacks, :book_detail_cache, :miss]` on a cold lookup **and** an expired entry (expired-as-miss) — `book_detail_cache.ex:37`/`:41`. Five firing tests in `book_detail_cache_telemetry_test.exs` (`describe "get/1 telemetry"`, `:46`-`:112`) cover cold-miss, hit-after-put, expired-as-miss, cold→warm miss→hit ordering, and a GDPR test pinning metadata to `[:book_id]` only (no user FK). GDPR lens = n/a: metadata carries `book_id` only. | ✅ |
 
 #### Layer 12: Performance & Usability Metrics
 
@@ -428,88 +429,86 @@ after the punch list lands.
 
 ---
 
-### Punch list (baseline — 0 items resolved)
+### Punch list (16 items — all dispositioned)
 
-Every ❌/⚠️ cell converted to numbered items. No tests were written or
-modified during this audit (pre-implementation baseline). Items #8 and #16
-are **code gaps** that exceed a test-only issue and, per the scope-lock
-rule, may spin out as new issues.
+Every baseline ❌/⚠️ cell, with its shipped disposition. Six items were
+already closed by intervening merges before the epic (verified at kickoff
+2026-07-23); the rest landed across Phases 1–3 + revision 1. Items #1 and #15's
+hidden-book slice resolve as **n/a-with-rationale** (a book has no reachable
+`:hidden` state — the age gate 403s first); everything else is a landed ✅.
 
-| # | Cell | What's needed | Where it belongs |
-|--:|------|---------------|------------------|
-| 1 | L1 US-1.4.1 sad | HTTP test: `GET /api/books/:id` for a book whose visibility resolves to `:hidden` returns 404 (Issue §2 / US §4 — hidden book must not leak) | `apps/core/test/stacks_web/book_controller_test.exs` |
-| 2 | L3 US-1.4.1 sad | `Ecto.Multi` rollback/atomicity: force the history-insert or event-emit step to fail in `move_book/3` (and the event/audit step in `remove_book/2`) and assert the placement change is rolled back | `apps/core/test/stacks/shelving_test.exs` |
-| 3 | L4 US-1.4.1 happy | Extend the two "emits placement.*" tests to assert payload: `placement.moved` carries `%{from_bookshelf, to_bookshelf, book_id}`; `placement.removed` carries the book/bookshelf ids — not just event count | `apps/core/test/stacks/shelving_test.exs` |
-| 4 | L4 US-1.4.1 sad | No-events-on-read: `GET /api/books/:id` inserts no `event_log` row (assert count unchanged before/after) | `apps/core/test/stacks_web/book_controller_test.exs` (or `events_test.exs`) |
-| 5 | L4 US-1.4.1 sad | Audit-log assertion: `move_book/3` and `remove_book/2` each write an `audit_log` entry (Issue §4 "Move/Remove creates audit log entry") — or confirm-and-descope if move/remove are not audit-logged by design | `apps/core/test/stacks/shelving_test.exs` |
-| 6 | L8 US-1.4.1 happy | Controller↔cache integration: first `GET /api/books/:id` = miss → DB → cached; second = hit → no DB query (assert via `BookDetailCache.get/1` state and/or Ecto query telemetry count) | `apps/core/test/stacks_web/book_controller_test.exs` |
-| 7 | L9 US-1.4.1 sad | dbt `relationships` tests: `stg_bookshelf_placements.book_id → stg_books.id`, `bookshelf_id → stg_bookshelves.id`; `stg_bookshelf_placement_history.from_bookshelf|to_bookshelf → stg_bookshelves.id` — via `mix proto.sync` generator (schema.yml is proto-generated) or singular tests under `dbt/tests/singular/` | `dbt/tests/singular/` or proto-sync generator |
-| 8 | L9 US-1.4.1 sad | **CODE GAP:** `placement.removed` triggers no dbt refresh. Add `"placement.removed" => ["mart_community_read_count"]` to `DbtRefreshHandler.@refresh_map` and a test in upload_dbt_test.exs — or formally descope §9's remove-refresh claim. **Exceeds test-only scope → likely a new issue.** | `apps/core/lib/stacks/workers/dbt_refresh_handler.ex` + `apps/core/test/stacks/upload_dbt_test.exs` |
-| 9 | L10 US-1.4.1 happy | Elm program tests for the move/remove **success** paths: `ConfirmMove` → `MoveCompleted (Ok _)` updates `currentBookshelf` + closes shelf mover; `ConfirmRemove` → `RemoveCompleted (Ok _)` fires `NavigateTo previousRoute` OutMsg | `frontend/tests/Page/BookDetailProgramTest.elm` |
-| 10 | L10 US-1.4.1 sad | Elm program tests for failure + dismiss: `MoveCompleted (Err _)` → "Failed to move book...", `RemoveCompleted (Err _)` → "Failed to remove book...", `CloseOverlay` → `RequestCloseOverlay` OutMsg | `frontend/tests/Page/BookDetailProgramTest.elm` |
-| 11 | E2E (L1/L10 sad) | Playwright close-overlay flows: X button, backdrop click, and Escape key each dismiss the overlay; focus returns to the triggering spine button; URL never changes | `e2e/tests/book-detail.spec.ts` |
-| 12 | E2E (L2/accessibility) | Playwright focus trap: Tab cycles within the overlay (does not escape to the shelf behind), first focusable element focused on open, Shift+Tab reverses | `e2e/tests/book-detail.spec.ts` |
-| 13 | E2E (L1 sad) | Playwright move/remove **failure**: mock move 403/422 → "Failed to move book. Please try again."; mock remove failure → "Failed to remove book. Please try again." | `e2e/tests/shelf-actions.spec.ts` |
-| 14 | E2E (L1 sad) | Playwright error + loading states: mock `GET /api/books/:id` 404 and 500 → "Could not load this book. Please try again."; loading skeleton/spinner shown before the response | `e2e/tests/book-detail.spec.ts` |
-| 15 | E2E (L2 sad) | Playwright unauthenticated overlay: view a public book without auth → "Sign In or Register" prompt shown, no Move/Remove/Add actions; and hidden book → "Could not load this book" (404) | `e2e/tests/book-detail.spec.ts` |
-| 16 | L11 US-1.4.1 sad | Decide + implement: instrument `BookDetailCache` hit/miss telemetry (+ `book_detail_request_count`) and add firing tests (pattern: `upload_telemetry_test.exs`), or formally descope §11 and reclassify n/a. **Partially blocked on instrumentation — the counters do not exist in `book_detail_cache.ex` yet.** | `apps/core/lib/stacks/books/book_detail_cache.ex` + new telemetry test |
+| # | Cell | What was needed | Disposition (shipped) |
+|--:|------|-----------------|------------------------|
+| 1 | L1 US-1.4.1 sad | HTTP test: hidden-visibility book → 404 | **n/a — unreachable for books.** A book's only server-side hidden state is the age gate, which `AgeGate.enforce` (`book_controller.ex:192`) 403s **before** the `:hidden -> 404` branch (`:211`). Covered the reachable equivalent: `describe "hidden book is not served"` proves the 403 refusal leaks no payload (book_controller_test.exs `:629`-`:657`). |
+| 2 | L3 US-1.4.1 sad | `Ecto.Multi` rollback/atomicity for move/remove | ✅ **Closed pre-epic.** shelving_test.exs `describe "move_book/3 — atomicity / rollback"` (`:235`) + abandon rollback (`:637`) + rejected-place/move no-side-effect tests (`:332`/`:347`). |
+| 3 | L4 US-1.4.1 happy | Assert `placement.moved`/`.removed` payloads, not just counts | ✅ **Landed (Phase 2).** shelving_test.exs `:1390` (moved → `from_bookshelf`/`to_bookshelf` **names** + placement-id aggregate) + `:1408` (removed → `book_id`). NOTE: `placement.moved` carries shelf names and NO `book_id` (aggregate_id is the placement id) — tests assert the actual emit; adding `book_id` would be a prod change (follow-up if wanted). |
+| 4 | L4 US-1.4.1 sad | No-events-on-read | ✅ **Landed (Phase 2).** book_controller_test.exs `describe "no events on read"` (`:663`) — authed + unauthed reads each assert `event_log` count unchanged. |
+| 5 | L4 US-1.4.1 sad | Audit-log on move/remove | ✅ **Closed pre-epic.** shelving_test.exs `:167` (move) + `:473` (remove) assert the `:audit` Multi step. |
+| 6 | L8 US-1.4.1 happy | Controller↔cache integration (miss → cache → hit) | ✅ **Landed (Phase 2).** book_controller_test.exs `describe "cache miss then hit"` (`:700`) proves miss-then-hit via `[:stacks, :book_detail_cache, :*]` telemetry + `refute_receive` of a second miss. |
+| 7 | L9 US-1.4.1 sad | dbt `relationships` FK tests | ✅ **Closed pre-epic.** `schema.yml` relationships on `stg_bookshelf_placements` (`:215`+) and `stg_bookshelf_placement_history` (`:272`+). |
+| 8 | L9 US-1.4.1 sad | **CODE GAP:** `placement.removed` triggers no dbt refresh | ✅ **Closed pre-epic.** `dbt_refresh_handler.ex:38` maps `placement.removed → mart_community_read_count`; upload_dbt_test.exs `:220` proves the enqueue. |
+| 9 | L10 US-1.4.1 happy | Elm move/remove **success** paths | ✅ **Landed.** BookDetailProgramTest.elm "move_confirm_happy" (`:665`) + "remove_confirm_happy" (`:690`). |
+| 10 | L10 US-1.4.1 sad | Elm move/remove failure + `CloseOverlay` OutMsg | ✅ **Landed (Phase 1).** "move_completed_error" (`:288`), "remove_completed_error" (`:709`), "close_overlay_x" (`:329`), "close_overlay_backdrop" (`:344`). |
+| 11 | E2E (L1/L10 sad) | Playwright close-overlay (X/backdrop/Escape), focus-return, URL-unchanged | ✅ **Landed (Phase 3).** book-detail.spec.ts `describe "dismissal"` (`:137`) + `describe "focus contract"` (`:185`) — X/backdrop/Escape close with URL-unchanged before+after, focus-return to the triggering spine. |
+| 12 | E2E (L2/a11y) | Playwright focus trap (Tab containment, focus-on-open, Shift+Tab) | ✅ **Landed (Phase 3).** book-detail.spec.ts focus-contract describe — focus-on-open on `book-overlay-close`, Tab never escapes, sentinel↔close forward/reverse wraps. Non-vacuity proven: commenting out `trapKeydownDecoder` makes the wrap test fail. |
+| 13 | E2E (L1 sad) | Playwright move/remove failure | ✅ **Landed (Phase 3).** shelf-actions.spec.ts "move failure (403)" (`:304`) + "remove failure (500)" (`:332`). |
+| 14 | E2E (L1 sad) | Playwright error + loading states | ✅ **Landed (Phase 3).** book-detail.spec.ts `describe "load and error states"` (`:289`) — 404/500 → "Could not load this book…", delayed-response loading state. |
+| 15 | E2E (L2 sad) | Playwright unauth prompt (+ hidden→404) | ✅ **Landed (Phase 3), hidden slice n/a.** book-detail.spec.ts `describe "unauthenticated"` (`:378`) — public overlay shows "Sign In or Register", no owner actions. Hidden-book→404 E2E is **n/a** (books have no reachable hidden state; the unit layer covers 403-no-leak — see punch item 1 above). |
+| 16 | L11 US-1.4.1 sad | Instrument `BookDetailCache` hit/miss telemetry + firing tests | ✅ **Landed (Phase 2).** `book_detail_cache.ex:37`/`:41` emit `:hit`/`:miss` (expired-as-miss); 5 firing tests in `book_detail_cache_telemetry_test.exs` (`:46`-`:112`) incl. a GDPR keys-only test. |
 
 ---
 
 ### Verdict
 
-**Baseline established — audit NOT yet resolved.** State across the
-13-layer × 1-US matrix (26 cells):
+**Audit GREEN — shipped state.** State across the 13-layer × 1-US matrix
+(26 cells):
 
-- **6 ✅ STRONG** — API happy path, auth guards (happy + sad), DB happy
-  path, cache invalidation/TTL (sad), and dbt happy path (staging models +
-  `placement.moved` refresh).
-- **7 ⚠️ shallow** — hidden-visibility→404 untested at HTTP; Multi rollback
-  untested; `placement.moved`/`.removed` event **payloads** unasserted;
-  controller↔cache integration untested; Elm move/remove success + failure
-  transitions and `CloseOverlay` OutMsg untested; `BookDetailCache` metrics
-  uninstrumented.
-- **2 ❌ missing** — no-events-on-read + audit-log-on-move/remove (L4 sad);
-  dbt relationships/FK tests + the `placement.removed`-refresh code gap
-  (L9 sad).
+- **15 ✅ STRONG** — API (happy + sad, incl. hidden-book-not-served/403-no-leak),
+  auth guards (happy + sad), DB (happy + Multi rollback sad), event flow
+  (moved/removed payloads + no-events-on-read + audit-log), cache (controller↔cache
+  integration + invalidation), dbt (staging + relationships FK + moved/removed
+  refresh), Elm (move/remove success + failure + `CloseOverlay` OutMsg + focus
+  trap + scoped Escape + remove-modal dialog), and cache hit/miss telemetry (sad).
+- **0 ⚠️ / 0 ❌** — all 16 punch-list items dispositioned (13 landed as tests,
+  3 closed pre-epic by intervening merges, and the hidden-book→404 slice is
+  n/a-with-rationale: a book has no reachable `:hidden` state).
 - **11 n/a** — background jobs (read view triggers none), external services,
   storage (pre-stored URLs), performance/usability (SLO gate), cost
   tracking (no external spend), and operational-metrics happy path (SLO
   gate + automatic Phoenix/Ecto telemetry).
 
-**Headline findings:**
-1. **Server-side coverage is genuinely strong** — `book_controller_test.exs`
-   and `bookshelf_placement_controller_test.exs` exercise every endpoint's
-   200/401/403/404/422 branches — but two contract points the issue names
-   are untested: **hidden-visibility → 404** at the controller and the
-   **event payloads** for `placement.moved`/`.removed` (only counts are
-   asserted).
-2. **Two real code gaps** surfaced (not just test gaps): (a)
-   `DbtRefreshHandler` never refreshes `mart_community_read_count` on
-   `placement.removed`, so the community read count goes stale after a
-   remove; (b) `BookDetailCache` emits no hit/miss telemetry despite US §11
-   listing those metrics. Both likely warrant follow-up issues under the
-   scope-lock rule.
-3. **The overlay's dismissal contract is untested end-to-end** — the
-   defining behaviour of US-1.4.1 (X / backdrop-click / Escape close, focus
-   return, focus trap, URL-unchanged) has **no** Playwright coverage, and
-   the corresponding Elm `CloseOverlay` → `RequestCloseOverlay` OutMsg is
-   likewise untested. Move-success is well covered (shelf-actions.spec.ts);
-   move/remove **failure** and book-load **error** states are not.
+**Headline findings (shipped):**
+1. **Server-side coverage is complete for the named contract** — the two
+   previously-untested points are now covered: the reachable **hidden-book
+   refusal** (403, no payload leak; the literal `:hidden→404` branch is
+   defensively unreachable for books) and the **event payloads** for
+   `placement.moved` (shelf names + placement-id aggregate) / `placement.removed`
+   (`book_id`).
+2. **Two in-scope builds landed** (kickoff-approved 2026-07-23): the Elm overlay
+   **focus trap + focus-return** (the US-1.4.1 a11y contract, sentinel-anchored,
+   no ports) and **`BookDetailCache` hit/miss telemetry** (`book_id`-only
+   metadata, GDPR-clean). The two baseline code gaps (`placement.removed` dbt
+   refresh; cache telemetry) are both closed.
+3. **The overlay's dismissal contract is now covered end-to-end** — X /
+   backdrop / Escape close, focus-return, focus trap, and URL-unchanged are all
+   driven live (`book-detail.spec.ts`), with the Elm `CloseOverlay` →
+   `RequestCloseOverlay` OutMsg and move/remove failure + book-load error states
+   covered at the program-test layer. Revision 1 added scoped Escape and
+   remove-modal dialog semantics/focus, all live-verified.
 
-**Test runner totals at baseline (not re-run during this audit):**
-Elixir — book/placement/shelving/cache/handler suites across ~8 files;
-Elm — `BookDetailProgramTest` (11) + `BookDetailAvailabilityTest` (4) +
-`BookDecoder` (12); Playwright — `book-detail.spec.ts` (6) plus overlapping
-`book-interaction`/`shelf-actions`/`editions`/`age-gate` specs; dbt —
-generic column tests on the two placement staging models. Punch list:
-**16 items**, of which #8 and #16 are partially blocked on code/instrumentation.
+**Test runner totals (verified 2026-07-24):**
+Elixir — scoped run 152 tests, 0 failures (book/placement/shelving/cache/handler
++ new telemetry suite); Elm — `BookDetailProgramTest` (36) +
+`BookDetailAvailabilityTest` (4) + `BookDecoder` (12), full elm-test 1020 green;
+Playwright — `book-detail.spec.ts` (22) + `shelf-actions.spec.ts` (7) = **29
+passing** on `--project=chromium`; dbt — staging models with relationships +
+`accepted_values` tests. Punch list: **16 items, all dispositioned (0 open).**
 ## Definition of Done
-- [ ] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local`
-- [ ] No flaky tests
-- [ ] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — each happy path built end-to-end and observed working on a live stack; any 🟡/❌ story is built in-scope or de-scoped (Summary edited + spin-out issue). No named story reaches GREEN via `n/a (see #NNN)`.
-- [ ] **Test audit (embedded above) is GREEN** — every 13-layer × user-story cell is `✅` or `n/a`-with-rationale; 0 `❌`, 0 `⚠️` (all punch-list items resolved). Regenerate the embedded audit tables + tally as the final step so the section reflects the shipped state.
-- [ ] `just verify` passes
+- [x] All test cases enumerated in the Test Suites / Technical Requirements above are implemented and passing with `TEST_TARGET=local` — 2026-07-24: Elixir scoped run 152 tests / 0 failures; `elm-test` full suite 1020 / 0 (incl. `BookDetailProgramTest` 36); Playwright `--project=chromium` 29 passing (`book-detail.spec.ts` 22 + `shelf-actions.spec.ts` 7).
+- [x] No flaky tests — 2026-07-24: repeated green runs across implementation, TC verification (ALL PASS), and reviewer re-runs (elm + elixir APPROVED, ux APPROVED on re-review after revision 1); `check-e2e-vacuous-guards.sh` clean and the focus-trap E2E proven non-vacuous (fails when `trapKeydownDecoder` is disabled, restored to green).
+- [x] **Feature-Completeness Pre-Check (above) is ✅ for every named user story** — 2026-07-24: US-1.4.1 built end-to-end (spine-click → overlay → dismissal/focus contract) and driven live (keyboard-walk + 29 E2E). No named story reaches GREEN via `n/a (see #NNN)`.
+- [x] **Test audit (embedded above) is GREEN** — 2026-07-24: regenerated to shipped state; 15 ✅ / 0 ⚠️ / 0 ❌ / 11 n/a; all 16 punch-list items dispositioned.
+- [x] `just verify` passes — evidence: `just run just verify` → exit 0 on the quiescent integrated tree 2026-07-24 ~16:22 (elixir `2888 tests, 0 failures`, elm `Passed: 1031`, dbt `PASS=237`, checkpoint gates all pass; log: scratchpad/verify-quiescent-post287.log)
 
 ## Dependencies
 - Seeded books with full metadata (editions, authors, reviews, prices)
