@@ -485,9 +485,9 @@ function field(page: Page, labelText: string) {
   return page
     .locator(".form-field")
     .filter({
-      has: page.locator(".form-field__label", {
-        hasText: new RegExp(`^${labelText}$`),
-      }),
+      // :text-is() = exact-text match without a dynamically-built RegExp
+      // (semgrep detect-non-literal-regexp; labels contain no quotes).
+      has: page.locator(`.form-field__label:text-is("${labelText}")`),
     })
     .locator("input");
 }
@@ -569,7 +569,9 @@ test.describe("Settings — Hub layout & navigation", () => {
       await page
         .locator(".settings-hub__nav-link", { hasText: item.label })
         .click();
-      await page.waitForURL(new RegExp(`${item.path}$`));
+      // Glob string (baseURL-anchored) instead of a dynamically-built RegExp
+      // (semgrep detect-non-literal-regexp); paths are hardcoded literals.
+      await page.waitForURL(`**${item.path}`);
       // The hub chrome persists across the sub-route change...
       await expect(page.getByTestId("settings-hub")).toBeVisible();
       // ...and the clicked item is the one marked active (viewSidebarItem
@@ -621,7 +623,8 @@ test.describe("Settings — Auth guard (UI)", () => {
       // The settings hub must NOT be reachable while unauthenticated.
       await expect(page.getByTestId("settings-hub")).toHaveCount(0);
       // The URL is unchanged — the guard renders login in place, no redirect.
-      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      // Exact path string (baseURL-resolved) instead of a dynamic RegExp.
+      await expect(page).toHaveURL(path);
     }
   });
 });
