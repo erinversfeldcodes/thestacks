@@ -91,9 +91,23 @@ defmodule Stacks.Accounts do
   def profile_changeset(user, attrs) do
     user
     |> cast(attrs, [:display_name, :website_url, :handle])
+    |> drop_blank_handle_change()
     |> validate_length(:website_url, max: 500)
     # No-op unless :handle is being changed — keeps other profile updates unaffected.
     |> validate_handle()
+  end
+
+  # An empty/blank handle param casts to a nil change on the NOT NULL handle
+  # column. validate_handle/1's validators skip nil changes, so without this the
+  # nil reaches the UPDATE and violates the NOT NULL constraint (Postgrex 23502 →
+  # 500). A real handle change is never to nil, so a nil handle change
+  # unambiguously means "absent/blank input" — drop it so the save is a
+  # no-handle-change (preserving the #211 validation path for real changes).
+  defp drop_blank_handle_change(changeset) do
+    case fetch_change(changeset, :handle) do
+      {:ok, nil} -> delete_change(changeset, :handle)
+      _ -> changeset
+    end
   end
 
   @doc "Changeset for email update. Requires current_password to be verified externally."

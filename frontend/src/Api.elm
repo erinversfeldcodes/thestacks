@@ -65,6 +65,7 @@ module Api exposing
     , deleteAccount
     , deleteComment
     , dismissAssociation
+    , encodeProfileBody
     , foldProgress
     , forgotPassword
     , getAdminSources
@@ -80,6 +81,7 @@ module Api exposing
     , getListings
     , getMyListings
     , getMyPlacements
+    , getNotifications
     , getOnboardingStatus
     , getPostComments
     , getPrivacySettings
@@ -1698,9 +1700,21 @@ type ProfileError
 
 
 {-| PUT /api/settings/profile — update display name, email, website URL, and handle.
+
+`emailChanged` decides whether the email/current-password pair is sent at all
+(see `encodeProfileBody`): an ordinary profile edit omits both so the server
+treats it as a profile-only update rather than an email change.
+
 -}
 updateProfile :
-    { displayName : String, email : String, websiteUrl : String, handle : String }
+    { displayName : String
+    , email : String
+    , websiteUrl : String
+    , handle : String
+    , currentPassword : String
+    , emailChanged : Bool
+    , handleChanged : Bool
+    }
     -> String
     -> (Result ProfileError String -> msg)
     -> Cmd msg
@@ -1709,20 +1723,61 @@ updateProfile body token toMsg =
         { method = "PUT"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/settings/profile"
-        , body =
-            Http.jsonBody
-                (Requests.encodeUpdateProfileRequest
-                    { displayName = body.displayName
-                    , email = body.email
-                    , websiteUrl = body.websiteUrl
-                    , currentPassword = ""
-                    , handle = body.handle
-                    }
-                )
+        , body = Http.jsonBody (encodeProfileBody body)
         , expect = expectProfile toMsg
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+{-| Body for `PUT /api/settings/profile`.
+
+Each key that can be left unchanged is sent ONLY when it actually changed:
+
+  - `handle` is omitted unless edited. The field can render empty for a session
+    that carries no handle locally (e.g. an injected/minted session), and a
+    blank `handle` would otherwise write NULL over the user's real handle (the
+    column is NOT NULL — the server 500s). Omitting an unchanged handle keeps
+    the stored value; a genuine edit is still sent and server-validated.
+  - `email` + `current_password` are omitted unless the email changed. The
+    server treats a payload without an `email` key as a profile-only update
+    (`Accounts.update_profile/2` → `email_change?/2`), so an ordinary edit never
+    demands the current password.
+
+The proto-generated `Requests.encodeUpdateProfileRequest` always emits every
+field and so cannot express this conditional omission; the body is built here.
+
+-}
+encodeProfileBody :
+    { displayName : String
+    , email : String
+    , websiteUrl : String
+    , handle : String
+    , currentPassword : String
+    , emailChanged : Bool
+    , handleChanged : Bool
+    }
+    -> Encode.Value
+encodeProfileBody body =
+    Encode.object
+        (List.concat
+            [ [ ( "display_name", Encode.string body.displayName )
+              , ( "website_url", Encode.string body.websiteUrl )
+              ]
+            , if body.handleChanged then
+                [ ( "handle", Encode.string body.handle ) ]
+
+              else
+                []
+            , if body.emailChanged then
+                [ ( "email", Encode.string body.email )
+                , ( "current_password", Encode.string body.currentPassword )
+                ]
+
+              else
+                []
+            ]
+        )
 
 
 {-| Keep the structured `{"errors": ...}` payload a 422 carries so the caller
@@ -1823,6 +1878,41 @@ type alias NotificationPreferences =
     , authorUpdates : Bool
     , eventAlerts : Bool
     }
+
+
+{-| GET /api/settings/notifications — the current user's stored notification
+preferences, so the settings screen hydrates from saved values instead of
+hardcoded defaults. The endpoint always returns all four booleans (never null),
+so a strict field decoder is safe.
+-}
+getNotifications :
+    String
+    -> (Result Http.Error NotificationPreferences -> msg)
+    -> Cmd msg
+getNotifications token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/settings/notifications"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg notificationPreferencesDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Decode the four notification flags. Label↔field mapping mirrors
+`updateNotifications`' encoder exactly: priceDrops↔notify\_wishlist\_availability,
+newReviews↔notify\_marketplace, authorUpdates↔notify\_group\_invitations,
+eventAlerts↔notify\_event\_matches.
+-}
+notificationPreferencesDecoder : Decoder NotificationPreferences
+notificationPreferencesDecoder =
+    Decode.map4 NotificationPreferences
+        (Decode.field "notify_wishlist_availability" Decode.bool)
+        (Decode.field "notify_marketplace" Decode.bool)
+        (Decode.field "notify_group_invitations" Decode.bool)
+        (Decode.field "notify_event_matches" Decode.bool)
 
 
 {-| PUT /api/settings/notifications — update notification preferences.

@@ -8,6 +8,7 @@ defmodule Stacks.AccountsTest do
   alias Core.Repo
   alias Stacks.Accounts
   alias Stacks.Accounts.AuthTokenFamily
+  alias Stacks.Accounts.User
   alias Stacks.Events.EventLog
   alias Stacks.Social
 
@@ -547,6 +548,41 @@ defmodule Stacks.AccountsTest do
                })
 
       assert event_count("user.profile_updated") == before_count
+    end
+
+    test "an empty handle is treated as no change (no NULL write on the NOT NULL handle column)" do
+      # Regression: handle "" casts to a nil change; validate_handle skips nil, so
+      # without dropping it the UPDATE writes NULL into op.users.handle (NOT NULL)
+      # → Postgrex 23502 → 500. An empty/blank handle must mean "no change".
+      user = insert(:user)
+      original_handle = user.handle
+
+      assert {:ok, updated} =
+               Accounts.update_profile(user, %{"display_name" => "New Name", "handle" => ""})
+
+      assert updated.display_name == "New Name"
+      assert updated.handle == original_handle
+      assert Repo.get!(User, user.id).handle == original_handle
+    end
+
+    test "an empty handle on the email-change path is treated as no change" do
+      # The email-change Multi runs the same profile_changeset, so a blank handle
+      # must not NULL the column there either (the Multi rolls back cleanly on the
+      # 23502, but the save still 500s without the guard).
+      user =
+        insert(:user, email: "old@example.com", password_hash: Argon2.hash_pwd_salt("pass123"))
+
+      original_handle = user.handle
+
+      assert {:ok, updated} =
+               Accounts.update_profile(user, %{
+                 "email" => "new@example.com",
+                 "current_password" => "pass123",
+                 "handle" => ""
+               })
+
+      assert updated.email == "new@example.com"
+      assert updated.handle == original_handle
     end
   end
 

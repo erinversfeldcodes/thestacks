@@ -669,7 +669,11 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             ( PageSettingsPassword Password.init, Cmd.none )
 
         SettingsNotifications ->
-            ( PageSettingsNotifications Notifications.init, Cmd.none )
+            let
+                ( model, cmd ) =
+                    Notifications.init maybeToken
+            in
+            ( PageSettingsNotifications model, Cmd.map NotificationsMsg cmd )
 
         MarketplaceBrowse ->
             let

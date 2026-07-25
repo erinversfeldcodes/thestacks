@@ -18,7 +18,11 @@ import Types.User exposing (User)
 type alias Model =
     { displayName : String
     , handle : String
+    , initialHandle : String
     , email : String
+    , initialEmail : String
+    , currentPassword : String
+    , currentPasswordError : Maybe String
     , websiteUrl : String
     , countryCode : String
     , city : String
@@ -31,6 +35,7 @@ type Msg
     = SetDisplayName String
     | SetHandle String
     | SetEmail String
+    | SetCurrentPassword String
     | SetWebsiteUrl String
     | SetCountryCode String
     | SetCity String
@@ -44,13 +49,41 @@ init : User -> Model
 init user =
     { displayName = user.displayName
     , handle = user.handle
+    , initialHandle = user.handle
     , email = user.email
+    , initialEmail = user.email
+    , currentPassword = ""
+    , currentPasswordError = Nothing
     , websiteUrl = ""
     , countryCode = Maybe.withDefault "" user.countryCode
     , city = Maybe.withDefault "" user.city
     , savingProfile = NotAsked
     , savingLocation = NotAsked
     }
+
+
+{-| The email is only a _change_ when it differs from the stored value, compared
+the way the server compares it (trimmed + case-insensitive — see
+`Accounts.email_change?/2`). Only a real change requires the current password.
+-}
+emailChanged : Model -> Bool
+emailChanged model =
+    normaliseEmail model.email /= normaliseEmail model.initialEmail
+
+
+normaliseEmail : String -> String
+normaliseEmail =
+    String.trim >> String.toLower
+
+
+{-| The handle is only a _change_ when the field differs from the stored value.
+An untouched field is never sent — for a session that carries no handle locally
+the field renders empty, and sending `""` would write NULL over the real handle
+(NOT NULL column → server 500). A genuine edit is sent and server-validated.
+-}
+handleChanged : Model -> Bool
+handleChanged model =
+    model.handle /= model.initialHandle
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
@@ -63,7 +96,10 @@ update msg model maybeToken =
             ( { model | handle = val, savingProfile = NotAsked }, Cmd.none )
 
         SetEmail val ->
-            ( { model | email = val, savingProfile = NotAsked }, Cmd.none )
+            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none )
+
+        SetCurrentPassword val ->
+            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none )
 
         SetWebsiteUrl val ->
             ( { model | websiteUrl = val, savingProfile = NotAsked }, Cmd.none )
@@ -75,35 +111,59 @@ update msg model maybeToken =
             ( { model | city = val, savingLocation = NotAsked }, Cmd.none )
 
         SaveProfile ->
-            case maybeToken of
-                Just token ->
-                    ( { model | savingProfile = Loading }
-                    , Api.updateProfile
-                        { displayName = model.displayName
-                        , email = model.email
-                        , websiteUrl = model.websiteUrl
-                        , handle = model.handle
-                        }
-                        token
-                        SaveProfileCompleted
-                    )
+            if emailChanged model && String.isEmpty (String.trim model.currentPassword) then
+                -- Changing the email requires the current password; block the
+                -- save and surface an inline message rather than sending a
+                -- request the server would reject.
+                ( { model | currentPasswordError = Just "Please enter your current password to change your email." }
+                , Cmd.none
+                )
 
-                Nothing ->
-                    ( model, Cmd.none )
+            else
+                case maybeToken of
+                    Just token ->
+                        ( { model | savingProfile = Loading, currentPasswordError = Nothing }
+                        , Api.updateProfile
+                            { displayName = model.displayName
+                            , email = model.email
+                            , websiteUrl = model.websiteUrl
+                            , handle = model.handle
+                            , currentPassword = model.currentPassword
+                            , emailChanged = emailChanged model
+                            , handleChanged = handleChanged model
+                            }
+                            token
+                            SaveProfileCompleted
+                        )
+
+                    Nothing ->
+                        ( model, Cmd.none )
 
         SaveProfileCompleted result ->
             case result of
                 Ok normalisedHandle ->
-                    -- The 200 body echoes the server-normalised (lowercased) handle;
-                    -- reflect it so the field shows exactly what was stored.
-                    ( { model
-                        | savingProfile = Success ()
-                        , handle =
+                    let
+                        -- The 200 body echoes the server-normalised (lowercased)
+                        -- handle. An omitted-handle save (unchanged field) still
+                        -- echoes the real stored handle, so a session that
+                        -- rendered an empty field now settles on the true value.
+                        settledHandle =
                             if normalisedHandle == "" then
                                 model.handle
 
                             else
                                 normalisedHandle
+                    in
+                    -- Reflect the settled handle in the field and rebaseline both
+                    -- the handle and email so a following untouched save omits
+                    -- them. Also clear the (now consumed) password field.
+                    ( { model
+                        | savingProfile = Success ()
+                        , initialEmail = model.email
+                        , currentPassword = ""
+                        , currentPasswordError = Nothing
+                        , handle = settledHandle
+                        , initialHandle = settledHandle
                       }
                     , Cmd.none
                     )
@@ -175,6 +235,7 @@ view model =
                     ]
                     []
                 ]
+            , viewCurrentPasswordField model
             , div [ class "form-field" ]
                 [ label [ class "form-field__label" ] [ text "Website URL" ]
                 , input
@@ -221,6 +282,37 @@ view model =
             , viewFeedback model.savingLocation "Location saved." "Could not save location. Please try again."
             ]
         ]
+
+
+{-| The current-password prompt only appears once the email field actually
+differs from the stored value — an ordinary profile edit never sees it. When a
+save is blocked for a missing password, the inline error renders beneath it.
+-}
+viewCurrentPasswordField : Model -> Html Msg
+viewCurrentPasswordField model =
+    if emailChanged model then
+        div [ class "form-field" ]
+            [ label [ class "form-field__label" ] [ text "Current Password" ]
+            , input
+                [ type_ "password"
+                , class "form-field__input"
+                , value model.currentPassword
+                , onInput SetCurrentPassword
+                , placeholder "Confirm your current password"
+                ]
+                []
+            , p [ class "form-field__hint" ]
+                [ text "Confirm your current password to change your email address." ]
+            , case model.currentPasswordError of
+                Just message ->
+                    p [ class "form-field__error" ] [ text message ]
+
+                Nothing ->
+                    text ""
+            ]
+
+    else
+        text ""
 
 
 viewSaveButton : RemoteData e () -> Msg -> String -> Html Msg
@@ -272,14 +364,20 @@ viewProfileFeedback saving =
             text ""
 
 
-{-| A non-validation profile save failure. The endpoint can return 503 with a
-`retry-after` when Argon2 is under backpressure (an email change hashes the
-current password), so that case gets its own "try again shortly" copy; anything
-else is a generic save error.
+{-| A non-validation profile save failure. A wrong current password on an email
+change comes back as a 422 with `{"error": "invalid_current_password"}` (no
+`errors` map, so `expectProfile` classifies it as a request failure, not a field
+validation) — surface the same copy the Password page uses. The endpoint can
+also return 503 with a `retry-after` when Argon2 is under backpressure (an email
+change hashes the current password), so that case gets its own "try again
+shortly" copy; anything else is a generic save error.
 -}
 profileRequestErrorText : Http.Error -> String
 profileRequestErrorText err =
     case err of
+        Http.BadStatus 422 ->
+            "Current password is incorrect."
+
         Http.BadStatus 503 ->
             "The server is busy right now. Please try again in a moment."
 

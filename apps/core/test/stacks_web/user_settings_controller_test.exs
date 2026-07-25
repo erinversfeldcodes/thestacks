@@ -156,6 +156,24 @@ defmodule StacksWeb.UserSettingsControllerTest do
 
       assert %{"error" => "invalid_current_password"} = json_response(conn, 422)
     end
+
+    test "handle \"\" is treated as no change and does not 500 (NOT NULL handle column)",
+         %{conn: conn} do
+      # Regression: an empty handle casts to a nil change that validate_handle
+      # skips, which — without a guard — writes NULL into the NOT NULL handle
+      # column (Postgrex 23502 → 500). The settings UI always sends handle, so a
+      # display-name-only save must succeed with the handle unchanged.
+      user = insert(:user)
+      original_handle = user.handle
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/profile", %{display_name: "New Name", handle: ""})
+
+      assert %{"display_name" => "New Name", "handle" => ^original_handle} =
+               json_response(conn, 200)
+    end
   end
 
   describe "PUT /api/settings/location" do
