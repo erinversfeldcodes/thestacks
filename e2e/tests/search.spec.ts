@@ -651,16 +651,48 @@ test.describe("Deep search (#284)", () => {
     return { title, titleTerm, descTerm };
   }
 
+  /**
+   * A freshly-minted, placement-free user gets the GLOBAL onboarding overlay,
+   * whose backdrop intercepts every click (it would eat the toggle click). Place
+   * one shared-seed catalogue book on the viewer's library to satisfy the
+   * onboarding check so the overlay stays hidden — the same suppression the
+   * gdpr / privacy / audit-log specs use. The placed book carries none of this
+   * spec's globally-unique query terms, so it never pollutes the assertions.
+   */
+  async function suppressOnboarding(
+    request: APIRequestContext,
+    token: string,
+  ): Promise<void> {
+    const resp = await request.get("/api/catalogue?per_page=1");
+    const data = await resp.json();
+    const book = ((data.books ?? []) as Array<{ id: string }>)[0];
+    assertSeedOrSkip(
+      book !== undefined,
+      "catalogue empty — cannot place a book to suppress onboarding",
+    );
+    const place = await request.post("/api/bookshelves/library/placements", {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { book_id: book.id },
+    });
+    expect(place.status(), "place a book to suppress the onboarding overlay").toBe(
+      201,
+    );
+  }
+
   test("a description-only match surfaces only under deep search, with a highlighted snippet and 'via deep search' label", async ({
     page,
     request,
   }) => {
     const viewer = await mintOrSkip(request);
     const { title, descTerm } = await seedDescribedBook(request);
+    await suppressOnboarding(request, viewer.token);
     await injectSession(page, viewer);
 
     await page.goto("/search");
     await page.getByTestId("search-page").waitFor({ timeout: 5000 });
+    // The onboarding overlay must be gone, or its backdrop silently eats the
+    // toggle click (a placement-free viewer would otherwise see it).
+    await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
 
     // Default (title-only) search for a term that lives ONLY in the description
     // finds nothing → the book is absent. (The term is globally unique, so no
@@ -696,10 +728,12 @@ test.describe("Deep search (#284)", () => {
   }) => {
     const viewer = await mintOrSkip(request);
     const { title, titleTerm } = await seedDescribedBook(request);
+    await suppressOnboarding(request, viewer.token);
     await injectSession(page, viewer);
 
     await page.goto("/search");
     await page.getByTestId("search-page").waitFor({ timeout: 5000 });
+    await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
 
     // Deep search ON, but query a term that lives in the TITLE (not the
     // description): the match is on the title, so ts_headline yields no
