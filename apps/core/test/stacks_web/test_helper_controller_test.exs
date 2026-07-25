@@ -493,6 +493,23 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert Stacks.Books.valid_isbn_checksum?(isbn)
     end
 
+    test "auto-generated ISBN carries the recognisable E2E-seed block (Issue #297)", %{conn: conn} do
+      %{"book_id" => book_id} =
+        json_response(
+          post(conn, "/api/test/book-description", %{title: "Marker", description: "z"}),
+          201
+        )
+
+      isbn = Stacks.Books.get_book_detail(book_id).editions |> hd() |> Map.get(:isbn)
+
+      # The reserved synthetic block (978-99999-…) flags the row as E2E-seeded so it
+      # can never be confused with a verified catalogue ISBN; still a well-formed,
+      # checksum-valid ISBN-13 so Books.create accepts it past the ISBN Hard Gate.
+      assert String.starts_with?(isbn, "97899999")
+      assert String.length(isbn) == 13
+      assert Stacks.Books.valid_isbn_checksum?(isbn)
+    end
+
     test "honours an explicit ISBN", %{conn: conn} do
       conn =
         post(conn, "/api/test/book-description", %{
