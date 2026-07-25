@@ -950,16 +950,14 @@ defmodule Stacks.Accounts do
 
     case result do
       {:ok, updated} ->
+        # UUID-only payload: notification preferences are personal data and must
+        # not enter op.event_log (GDPR — Issue #121). Consumers read the current
+        # preferences from the user record via aggregate_id.
         Events.emit_safe(%{
           event_type: "user.notifications_updated",
           aggregate_type: "user",
           aggregate_id: updated.id,
-          payload: %{
-            notify_wishlist_availability: updated.notify_wishlist_availability,
-            notify_marketplace: updated.notify_marketplace,
-            notify_group_invitations: updated.notify_group_invitations,
-            notify_event_matches: updated.notify_event_matches
-          }
+          payload: %{}
         })
 
         {:ok, updated}

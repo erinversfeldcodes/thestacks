@@ -321,6 +321,20 @@ defmodule StacksWeb.UserSettingsControllerTest do
       conn = put(conn, "/api/settings/notifications", %{notify_marketplace: true})
       assert json_response(conn, 401)
     end
+
+    test "returns 422 when a notify_* value is not a boolean", %{conn: conn} do
+      # A non-boolean value is a cast error on notifications_changeset, so the
+      # controller returns 422 with field errors. (Only UNKNOWN keys are silently
+      # ignored — a known key with an uncastable value is a real 422.)
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> put("/api/settings/notifications", %{notify_marketplace: "banana"})
+
+      assert %{"errors" => %{"notify_marketplace" => [_ | _]}} = json_response(conn, 422)
+    end
   end
 
   describe "GET /api/settings/notifications" do

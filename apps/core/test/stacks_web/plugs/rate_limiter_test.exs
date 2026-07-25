@@ -4,6 +4,7 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
 
   import Stacks.Factory
 
+  alias Stacks.Accounts.Guardian
   alias StacksWeb.Plugs.RateLimiter
 
   setup do
@@ -432,6 +433,42 @@ defmodule StacksWeb.Plugs.RateLimiterTest do
       :timer.sleep(50)
 
       assert :ets.lookup(:rate_limiter, {"fresh_key", :global}) != []
+    end
+  end
+
+  # ── Router integration: password-change bucket end-to-end (#126 Phase 3) ──────
+  #
+  # The tests above drive RateLimiter.call/2 directly. This one proves the
+  # :rate_limit_password_change pipeline is actually wired to
+  # PUT /api/settings/password: the 4th request in the window (bucket pinned to 3
+  # in setup) is halted with 429 by the real endpoint pipeline. A wrong
+  # current_password is used so the first three requests 422 at the controller
+  # WITHOUT mutating the user or revoking sessions — the limiter runs after auth
+  # but before the controller, so those still count toward the bucket.
+  describe "PUT /api/settings/password through the router pipeline" do
+    test "the 4th password change in the window is rate-limited (429)", %{conn: conn} do
+      user = insert(:user)
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+
+      # Fixed remote_ip in a range disjoint from the other tests in this file so
+      # no ETS bucket bleed; no fly-client-ip header, so the limiter keys on it.
+      authed = fn c ->
+        %{c | remote_ip: {203, 0, 113, 250}}
+        |> put_req_header("authorization", "Bearer #{token}")
+      end
+
+      body = %{current_password: "wrong-password", new_password: "newpassword456"}
+
+      # First 3 requests pass the limiter — they 422 at the controller on the
+      # wrong current_password (importantly NOT 429).
+      for _ <- 1..3 do
+        c = conn |> authed.() |> put("/api/settings/password", body)
+        assert json_response(c, 422)
+      end
+
+      # 4th request in the same window is halted by the limiter.
+      c = conn |> authed.() |> put("/api/settings/password", body)
+      assert %{"error" => "rate_limit_exceeded"} = json_response(c, 429)
     end
   end
 end

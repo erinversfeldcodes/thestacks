@@ -501,6 +501,53 @@ defmodule Stacks.AccountsTest do
       refute Map.has_key?(payload, "display_name")
       assert payload == %{}
     end
+
+    test "does not emit user.profile_updated when the changeset is invalid" do
+      # An over-length website_url fails validation before Repo.update, so
+      # tap_emit_profile_updated/1 sees {:error, changeset} and emits nothing.
+      user = insert(:user)
+      before_count = event_count("user.profile_updated")
+
+      assert {:error, _changeset} =
+               Accounts.update_profile(user, %{"website_url" => String.duplicate("a", 501)})
+
+      assert event_count("user.profile_updated") == before_count
+    end
+
+    test "does not emit user.profile_updated when an email change is rejected (wrong current_password)" do
+      # A genuine email change with a wrong current_password fails at
+      # verify_password, before the Multi runs — its emit_event step never fires.
+      user = insert(:user, email: "old@example.com")
+      before_count = event_count("user.profile_updated")
+
+      assert {:error, :invalid_password} =
+               Accounts.update_profile(user, %{
+                 "email" => "new@example.com",
+                 "current_password" => "wrong"
+               })
+
+      assert event_count("user.profile_updated") == before_count
+    end
+
+    test "does not emit user.profile_updated when the email Multi rolls back (duplicate email)" do
+      # Correct current_password, but the new email is already taken: the :email
+      # step's unique_constraint fails, so the whole transaction — including the
+      # :emit_event step — rolls back and no event is written.
+      taken = insert(:user, email: "taken@example.com")
+
+      user =
+        insert(:user, email: "old@example.com", password_hash: Argon2.hash_pwd_salt("pass123"))
+
+      before_count = event_count("user.profile_updated")
+
+      assert {:error, _} =
+               Accounts.update_profile(user, %{
+                 "email" => taken.email,
+                 "current_password" => "pass123"
+               })
+
+      assert event_count("user.profile_updated") == before_count
+    end
   end
 
   describe "update_location/2" do
@@ -549,6 +596,17 @@ defmodule Stacks.AccountsTest do
       refute Map.has_key?(payload, "city")
       refute Map.has_key?(payload, "country_code")
       assert payload == %{}
+    end
+
+    test "does not emit user.location_updated when the country_code is invalid" do
+      # A 3-char country_code fails validate_length before Repo.update, so the
+      # {:error, changeset} branch returns without emitting.
+      user = insert(:user)
+      before_count = event_count("user.location_updated")
+
+      assert {:error, _changeset} = Accounts.update_location(user, %{"country_code" => "GBR"})
+
+      assert event_count("user.location_updated") == before_count
     end
   end
 
@@ -796,7 +854,7 @@ defmodule Stacks.AccountsTest do
       assert {:ok, _} = Accounts.update_notifications(user, %{"unknown_pref" => true})
     end
 
-    test "emits user.notifications_updated event with current preference values" do
+    test "emits user.notifications_updated event on success" do
       user = insert(:user, notify_wishlist_availability: false, notify_marketplace: false)
       before_count = event_count("user.notifications_updated")
 
@@ -806,6 +864,56 @@ defmodule Stacks.AccountsTest do
       })
 
       assert event_count("user.notifications_updated") == before_count + 1
+    end
+
+    test "does not emit user.notifications_updated when the changeset is invalid" do
+      # A non-boolean value for a notify_* field is a cast error, so Repo.update
+      # returns {:error, changeset} and no event is emitted.
+      user = insert(:user)
+      before_count = event_count("user.notifications_updated")
+
+      assert {:error, _changeset} =
+               Accounts.update_notifications(user, %{"notify_marketplace" => "banana"})
+
+      assert event_count("user.notifications_updated") == before_count
+    end
+
+    test "a freshly inserted user has the expected notification defaults" do
+      # Schema defaults (op.users): marketplace + group invitations default ON;
+      # wishlist availability + event matches default OFF. The settings screen
+      # hydrates from these via GET /api/settings/notifications.
+      user = insert(:user)
+
+      assert user.notify_marketplace == true
+      assert user.notify_group_invitations == true
+      assert user.notify_wishlist_availability == false
+      assert user.notify_event_matches == false
+    end
+
+    test "user.notifications_updated payload carries no PII (UUID-only)" do
+      # GDPR (Issue #121): notification preferences are personal data and must NOT
+      # be written into op.event_log. Consumers re-read the preferences from the
+      # user record, so the event payload stays empty — matching the sibling
+      # profile_updated / location_updated / password_changed events.
+      user =
+        insert(:user,
+          notify_wishlist_availability: false,
+          notify_marketplace: false,
+          notify_group_invitations: false,
+          notify_event_matches: false
+        )
+
+      assert {:ok, _} =
+               Accounts.update_notifications(user, %{
+                 "notify_wishlist_availability" => true,
+                 "notify_marketplace" => true,
+                 "notify_group_invitations" => true,
+                 "notify_event_matches" => true
+               })
+
+      payload = latest_payload("user.notifications_updated", user.id)
+      refute Map.has_key?(payload, "notify_marketplace")
+      assert payload == %{}
     end
   end
 
