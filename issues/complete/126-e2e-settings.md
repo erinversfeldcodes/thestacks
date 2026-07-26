@@ -16,8 +16,7 @@ Validate the settings hub sidebar navigation, profile form save with display nam
 - Does this issue combine unrelated concerns? No (all settings-related).
 
 ## Wiring
-- [ ] This issue includes router wiring and is user-facing when complete.
-- [x] This issue is implementation only. Wired by issue #___ (test-only issue).
+Primarily a validation/test issue on already-wired surfaces; one piece of router wiring was delivered in-scope (auth-gated `GET /api/settings/notifications`, commit 0bb73dcb) and is user-facing via the hydrated notification toggles.
 
 ## Feature-Completeness Pre-Check
 <!--

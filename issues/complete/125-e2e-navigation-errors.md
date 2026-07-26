@@ -16,8 +16,7 @@ Validate the full navigation and error handling surface: home page render, authe
 - Does this issue combine unrelated concerns? No (all navigation/error UX).
 
 ## Wiring
-- [ ] This issue includes router wiring and is user-facing when complete.
-- [x] This issue is implementation only. Wired by issue #___ (test-only issue).
+Implementation-only (validation/test issue) — no new router wiring; the navigation and error surfaces it validates were already wired and user-facing.
 
 ## Feature-Completeness Pre-Check
 <!--
