@@ -15,7 +15,17 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Elixir / Erlang
-            elixir_1_18
+            #
+            # Wire Elixir onto OTP 28 explicitly. Bare `pkgs.elixir_1_18` is
+            # built against nixpkgs' DEFAULT beam (OTP 27), so the elixir
+            # wrapper runs `mix`/`iex`/dialyzer on OTP 27 regardless of which
+            # standalone `erlang_*` is also on PATH — the wrapper ignores it.
+            # That made local `mix dialyzer` build an OTP-27 PLT while CI, the
+            # prod Docker image (hexpm/elixir:1.18.4-erlang-28.x), and this
+            # flake's own `erlang_28` all run OTP 28, so dialyzer results
+            # diverged (Issue #300). `beam.packages.erlang_28.elixir_1_18`
+            # binds Elixir 1.18.4 to OTP 28, aligning local == CI == prod.
+            beam.packages.erlang_28.elixir_1_18
             erlang_28
             rebar3
 

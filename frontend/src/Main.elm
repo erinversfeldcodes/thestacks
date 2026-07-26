@@ -3,18 +3,26 @@ port module Main exposing
     , Auth
     , ExternalAuthOutcome(..)
     , LoginEffect(..)
+    , Msg(..)
+    , Page(..)
     , PendingLogout
     , StoredAuthResolution(..)
     , adoptExternalAuth
     , decodeConfig
     , decodeFlags
+    , decodeSwipe
+    , initPage
     , loginEffects
     , main
     , parkPending
     , renewAuthToken
+    , requiresAuth
     , resolveRecheck
     , shouldShowOnboarding
+    , viewFooter
+    , viewHome
     , viewNav
+    , viewNotFound
     )
 
 import Animation.Transition as Transition exposing (transitionClass)
@@ -661,7 +669,11 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             ( PageSettingsPassword Password.init, Cmd.none )
 
         SettingsNotifications ->
-            ( PageSettingsNotifications Notifications.init, Cmd.none )
+            let
+                ( model, cmd ) =
+                    Notifications.init maybeToken
+            in
+            ( PageSettingsNotifications model, Cmd.map NotificationsMsg cmd )
 
         MarketplaceBrowse ->
             let

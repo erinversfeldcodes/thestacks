@@ -71,11 +71,7 @@ defmodule Stacks.Events.PayloadContract do
     "user.profile_visibility_changed" => %{version: 1, keys: ~w(visibility)},
     "user.location_updated" => %{version: 1, keys: ~w()},
     "user.password_changed" => %{version: 1, keys: ~w()},
-    "user.notifications_updated" => %{
-      version: 1,
-      keys:
-        ~w(notify_event_matches notify_group_invitations notify_marketplace notify_wishlist_availability)
-    },
+    "user.notifications_updated" => %{version: 1, keys: ~w()},
     "user.visibility_recap_completed" => %{
       version: 1,
       keys: ~w(bookshelves_capped new_visibility placements_capped posts_capped)

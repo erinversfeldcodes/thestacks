@@ -1,12 +1,12 @@
 module Page.Settings.Notifications exposing
     ( Model
-    , Msg
+    , Msg(..)
     , init
     , update
     , view
     )
 
-import Api
+import Api exposing (NotificationPreferences)
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
@@ -14,63 +14,58 @@ import Http
 import Types.RemoteData exposing (RemoteData(..))
 
 
+{-| The preferences hydrate from the server (`GET /api/settings/notifications`)
+rather than rendering hardcoded defaults: showing toggles at silently-wrong
+values would let a user "confirm" a state that is not what is stored. Toggles
+only render once the real values load; a load failure shows an error instead.
+-}
 type alias Model =
-    { priceDrops : Bool
-    , newReviews : Bool
-    , authorUpdates : Bool
-    , eventAlerts : Bool
+    { prefs : RemoteData Http.Error NotificationPreferences
     , saving : RemoteData Http.Error ()
     }
 
 
 type Msg
-    = TogglePriceDrops
+    = Loaded (Result Http.Error NotificationPreferences)
+    | TogglePriceDrops
     | ToggleNewReviews
     | ToggleAuthorUpdates
     | ToggleEventAlerts
     | SaveCompleted (Result Http.Error ())
 
 
-init : Model
-init =
-    { priceDrops = False
-    , newReviews = False
-    , authorUpdates = False
-    , eventAlerts = False
-    , saving = NotAsked
-    }
+init : Maybe String -> ( Model, Cmd Msg )
+init maybeToken =
+    ( { prefs = Loading, saving = NotAsked }
+    , case maybeToken of
+        Just token ->
+            Api.getNotifications token Loaded
+
+        Nothing ->
+            Cmd.none
+    )
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
 update msg model maybeToken =
     case msg of
+        Loaded (Ok prefs) ->
+            ( { model | prefs = Success prefs }, Cmd.none )
+
+        Loaded (Err err) ->
+            ( { model | prefs = Failure err }, Cmd.none )
+
         TogglePriceDrops ->
-            let
-                newModel =
-                    { model | priceDrops = not model.priceDrops, saving = NotAsked }
-            in
-            ( newModel, savePreferences newModel maybeToken )
+            flipAndSave model maybeToken (\prefs -> { prefs | priceDrops = not prefs.priceDrops })
 
         ToggleNewReviews ->
-            let
-                newModel =
-                    { model | newReviews = not model.newReviews, saving = NotAsked }
-            in
-            ( newModel, savePreferences newModel maybeToken )
+            flipAndSave model maybeToken (\prefs -> { prefs | newReviews = not prefs.newReviews })
 
         ToggleAuthorUpdates ->
-            let
-                newModel =
-                    { model | authorUpdates = not model.authorUpdates, saving = NotAsked }
-            in
-            ( newModel, savePreferences newModel maybeToken )
+            flipAndSave model maybeToken (\prefs -> { prefs | authorUpdates = not prefs.authorUpdates })
 
         ToggleEventAlerts ->
-            let
-                newModel =
-                    { model | eventAlerts = not model.eventAlerts, saving = NotAsked }
-            in
-            ( newModel, savePreferences newModel maybeToken )
+            flipAndSave model maybeToken (\prefs -> { prefs | eventAlerts = not prefs.eventAlerts })
 
         SaveCompleted result ->
             case result of
@@ -81,18 +76,30 @@ update msg model maybeToken =
                     ( { model | saving = Failure err }, Cmd.none )
 
 
-savePreferences : Model -> Maybe String -> Cmd Msg
-savePreferences model maybeToken =
+{-| Flip one preference on the loaded values and immediately auto-save. A toggle
+is a no-op until the preferences have loaded — there is nothing to flip yet.
+-}
+flipAndSave : Model -> Maybe String -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg )
+flipAndSave model maybeToken flip =
+    case model.prefs of
+        Success prefs ->
+            let
+                newPrefs =
+                    flip prefs
+            in
+            ( { model | prefs = Success newPrefs, saving = NotAsked }
+            , savePreferences newPrefs maybeToken
+            )
+
+        _ ->
+            ( model, Cmd.none )
+
+
+savePreferences : NotificationPreferences -> Maybe String -> Cmd Msg
+savePreferences prefs maybeToken =
     case maybeToken of
         Just token ->
-            Api.updateNotifications
-                { priceDrops = model.priceDrops
-                , newReviews = model.newReviews
-                , authorUpdates = model.authorUpdates
-                , eventAlerts = model.eventAlerts
-                }
-                token
-                SaveCompleted
+            Api.updateNotifications prefs token SaveCompleted
 
         Nothing ->
             Cmd.none
@@ -106,23 +113,45 @@ view model =
             [ h2 [ class "settings-section__title" ] [ text "Notification Preferences" ]
             , p [ class "settings-section__desc" ]
                 [ text "Choose which notifications you would like to receive." ]
-            , viewToggle "Price Drops" model.priceDrops TogglePriceDrops
-            , viewToggle "New Reviews" model.newReviews ToggleNewReviews
-            , viewToggle "Author Updates" model.authorUpdates ToggleAuthorUpdates
-            , viewToggle "Event Alerts" model.eventAlerts ToggleEventAlerts
+            , viewPreferences model.prefs
             ]
-        , case model.saving of
-            Failure _ ->
-                p [ class "error" ]
-                    [ text "Could not save notification preferences. Please try again." ]
-
-            Success _ ->
-                p [ class "success" ]
-                    [ text "Preferences saved." ]
-
-            _ ->
-                text ""
+        , viewSaveFeedback model.saving
         ]
+
+
+viewPreferences : RemoteData Http.Error NotificationPreferences -> Html Msg
+viewPreferences prefs =
+    case prefs of
+        Success loaded ->
+            div [ class "notification-toggles" ]
+                [ viewToggle "Price Drops" loaded.priceDrops TogglePriceDrops
+                , viewToggle "New Reviews" loaded.newReviews ToggleNewReviews
+                , viewToggle "Author Updates" loaded.authorUpdates ToggleAuthorUpdates
+                , viewToggle "Event Alerts" loaded.eventAlerts ToggleEventAlerts
+                ]
+
+        Failure _ ->
+            p [ class "error" ]
+                [ text "Could not load your notification preferences. Please refresh to try again." ]
+
+        _ ->
+            p [ class "settings-section__desc" ]
+                [ text "Loading your preferences…" ]
+
+
+viewSaveFeedback : RemoteData Http.Error () -> Html Msg
+viewSaveFeedback saving =
+    case saving of
+        Failure _ ->
+            p [ class "error" ]
+                [ text "Could not save notification preferences. Please try again." ]
+
+        Success _ ->
+            p [ class "success" ]
+                [ text "Preferences saved." ]
+
+        _ ->
+            text ""
 
 
 viewToggle : String -> Bool -> Msg -> Html Msg

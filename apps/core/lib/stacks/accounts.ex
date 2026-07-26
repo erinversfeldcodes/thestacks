@@ -91,9 +91,23 @@ defmodule Stacks.Accounts do
   def profile_changeset(user, attrs) do
     user
     |> cast(attrs, [:display_name, :website_url, :handle])
+    |> drop_blank_handle_change()
     |> validate_length(:website_url, max: 500)
     # No-op unless :handle is being changed — keeps other profile updates unaffected.
     |> validate_handle()
+  end
+
+  # An empty/blank handle param casts to a nil change on the NOT NULL handle
+  # column. validate_handle/1's validators skip nil changes, so without this the
+  # nil reaches the UPDATE and violates the NOT NULL constraint (Postgrex 23502 →
+  # 500). A real handle change is never to nil, so a nil handle change
+  # unambiguously means "absent/blank input" — drop it so the save is a
+  # no-handle-change (preserving the #211 validation path for real changes).
+  defp drop_blank_handle_change(changeset) do
+    case fetch_change(changeset, :handle) do
+      {:ok, nil} -> delete_change(changeset, :handle)
+      _ -> changeset
+    end
   end
 
   @doc "Changeset for email update. Requires current_password to be verified externally."
@@ -781,7 +795,7 @@ defmodule Stacks.Accounts do
   @spec update_profile(User.t(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t() | :invalid_password | :argon2_busy}
   def update_profile(%User{} = user, attrs) do
-    if Map.has_key?(attrs, "email") do
+    if email_change?(user, attrs) do
       update_profile_with_email(user, attrs)
     else
       changeset = profile_changeset(user, attrs)
@@ -792,6 +806,26 @@ defmodule Stacks.Accounts do
       |> tap_emit_handle_claimed(changeset)
     end
   end
+
+  # A payload carries an email CHANGE only when it includes an "email" key whose
+  # normalised value differs from the user's current email. The settings UI sends
+  # the current email on every profile save, so a same-email payload must NOT be
+  # treated as a change (that would demand current_password on ordinary profile
+  # edits). auth resolves identity case-insensitively (get_user_by_email/1
+  # downcases), so we compare downcased/trimmed on both sides — storage does not
+  # downcase on write (registration/email_changeset cast the raw value), an
+  # inconsistency flagged in the #126 report.
+  defp email_change?(%User{email: current}, attrs) do
+    case Map.get(attrs, "email") do
+      nil -> false
+      incoming -> normalise_email(incoming) != normalise_email(current)
+    end
+  end
+
+  defp normalise_email(value) when is_binary(value),
+    do: value |> String.trim() |> String.downcase()
+
+  defp normalise_email(value), do: value
 
   # NO-PII: emit ONLY the fact that a handle was set/changed — never the handle
   # value (public but unbounded cardinality; telemetry is warehouse-adjacent).
@@ -930,16 +964,14 @@ defmodule Stacks.Accounts do
 
     case result do
       {:ok, updated} ->
+        # UUID-only payload: notification preferences are personal data and must
+        # not enter op.event_log (GDPR — Issue #121). Consumers read the current
+        # preferences from the user record via aggregate_id.
         Events.emit_safe(%{
           event_type: "user.notifications_updated",
           aggregate_type: "user",
           aggregate_id: updated.id,
-          payload: %{
-            notify_wishlist_availability: updated.notify_wishlist_availability,
-            notify_marketplace: updated.notify_marketplace,
-            notify_group_invitations: updated.notify_group_invitations,
-            notify_event_matches: updated.notify_event_matches
-          }
+          payload: %{}
         })
 
         {:ok, updated}

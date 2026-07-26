@@ -250,13 +250,13 @@ jobs:
           path: |
             deps
             _build
-          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: mix-${{ runner.os }}-
+          key: mix-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: priv/plts
-          key: dialyzer-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: dialyzer-${{ runner.os }}-
+          key: dialyzer-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: dialyzer-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-
       - run: mix deps.get
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
@@ -307,8 +307,8 @@ jobs:
           path: |
             deps
             _build
-          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: mix-${{ runner.os }}-
+          key: mix-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-
       - run: mix deps.get
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -497,8 +497,8 @@ jobs:
           path: |
             deps
             _build
-          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: mix-${{ runner.os }}-
+          key: mix-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-otp${{ needs.versions.outputs.otp }}-elixir${{ needs.versions.outputs.elixir }}-
       - name: Install Elixir deps
         env:
           MIX_ENV: dev

@@ -15,7 +15,7 @@ defmodule Core.MixProject do
       aliases: aliases(),
       deps: deps(),
       test_coverage: [tool: ExCoveralls, minimum_coverage: 80],
-      dialyzer: [ignore_warnings: ".dialyzer_ignore.exs"]
+      dialyzer: [ignore_warnings: ".dialyzer_ignore.exs", list_unused_filters: true]
     ]
   end
 

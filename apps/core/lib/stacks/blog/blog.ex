@@ -378,10 +378,15 @@ defmodule Stacks.Blog do
   Same association semantics as `list_posts_for_book_by_user/2` (visible
   association authored by the user, drafts included), but batched: one query for a
   whole shelf so rendering N spines costs no N+1 lookups. An empty `book_ids`
-  short-circuits to the empty set without a query.
+  short-circuits to an empty list without a query.
+
+  Returns a distinct list rather than a `MapSet` — opaque `MapSet.t()` in a
+  cross-module contract trips dialyzer's opacity check on OTP 28 (the same
+  false-positive `shelf_with_placements/3` shed in 22dcd53f); the sole consumer
+  normalises via `MapSet.new/1` anyway.
   """
-  @spec book_ids_with_user_writing(String.t(), [String.t()]) :: MapSet.t()
-  def book_ids_with_user_writing(_user_id, []), do: MapSet.new()
+  @spec book_ids_with_user_writing(String.t(), [String.t()]) :: [String.t()]
+  def book_ids_with_user_writing(_user_id, []), do: []
 
   def book_ids_with_user_writing(user_id, book_ids) do
     from(a in PostBookAssociation,
@@ -392,7 +397,6 @@ defmodule Stacks.Blog do
       distinct: true
     )
     |> Repo.all()
-    |> MapSet.new()
   end
 
   # ---------------------------------------------------------------------------

@@ -80,6 +80,11 @@ FAILED=()
 
 # ── Elixir ────────────────────────────────────────────────────────────────────
 if has_group elixir; then
+    # Toolchain drift guard (Issue #300): fail early if the flake's Elixir/OTP
+    # has drifted from .versions — CI's nix-less runner can't check the flake,
+    # so this is the only place the divergence is caught.
+    if ! run_group "elixir: version-drift" bash scripts/check-version-drift.sh; then FAILED+=(elixir-version-drift); fi
+
     echo -e "\n${CYAN}${BOLD}=== elixir: deps ===${RESET}"
     mix deps.get
 
