@@ -479,10 +479,10 @@ not re-run in this phase). Punch list: **0 items open.**
 
 | Change (file:line) | Data class | Erasure | Export | Leak (event/audit/dbt) | Gate | Verdict |
 |---|---|---|---|---|---|---|
-| `GET /settings/notifications` (router.ex:238, `show_notifications/2`) — commit 8791c98c | personal (4 behavioural booleans) | ✓ columns on `op.users`, deleted with user row | — no new stored data | ✓ read-only, no emit | ✓ `[:api, :authenticated]` (router.ex:193) | PASS |
-| `update_profile/2` same-email tolerance + `drop_blank_handle_change` (accounts.ex) — 8791c98c/6b167b8f | no new data | unchanged | unchanged | ✓ emits existing PII-free `user.profile_updated %{}` (test-asserted) | ✓ password gate for real email changes preserved (test-locked both layers); `profile_changeset` does not cast `:email` so a same-email payload cannot rewrite storage | PASS |
-| CG-1/CG-2 frontend (Api.elm, Profile/Notifications pages) — 6b167b8f | no storage | n/a | n/a | ✓ no events; one new authed read | ✓ current_password sent over the existing authed channel only | PASS |
-| `user.notifications_updated` payload → `%{}` (accounts.ex + payload_contract.ex) — 8ce44a85 | — | — | — | ✓ **net removal** of personal data from new `event_log` rows (#121-consistent; version kept, no consumer) | — | PASS |
+| `GET /settings/notifications` (router.ex:238, `show_notifications/2`) — commit 0bb73dcb | personal (4 behavioural booleans) | ✓ columns on `op.users`, deleted with user row | — no new stored data | ✓ read-only, no emit | ✓ `[:api, :authenticated]` (router.ex:193) | PASS |
+| `update_profile/2` same-email tolerance + `drop_blank_handle_change` (accounts.ex) — 0bb73dcb/7f059a60 | no new data | unchanged | unchanged | ✓ emits existing PII-free `user.profile_updated %{}` (test-asserted) | ✓ password gate for real email changes preserved (test-locked both layers); `profile_changeset` does not cast `:email` so a same-email payload cannot rewrite storage | PASS |
+| CG-1/CG-2 frontend (Api.elm, Profile/Notifications pages) — 7f059a60 | no storage | n/a | n/a | ✓ no events; one new authed read | ✓ current_password sent over the existing authed channel only | PASS |
+| `user.notifications_updated` payload → `%{}` (accounts.ex + payload_contract.ex) — 7b5ca24b | — | — | — | ✓ **net removal** of personal data from new `event_log` rows (#121-consistent; version kept, no consumer) | — | PASS |
 
 **Pre-existing residue (predates this epic, logged in epic state for follow-up):** `GDPR.Export.export_user_data/2` user block omits `notify_*` ×4, `website_url`, `country_code`, `city`, `handle` (export.ex:67-80) — personal data missing from export; to be filed via create-issue at epic finalization.
 
