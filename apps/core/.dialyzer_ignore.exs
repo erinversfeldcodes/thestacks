@@ -1,28 +1,24 @@
-# Ignore ExUnit function warnings in test support modules.
-# With MIX_ENV=test, elixirc_paths includes test/support/ — dialyzer checks
-# the compiled beams but can't resolve ExUnit internal functions.
+# Dialyzer ignore filters — re-baselined empirically on OTP 28 / Elixir 1.18.4
+# for Issue #300 (local and CI now share the flake's OTP-28 toolchain, so the
+# warning set is finally identical). `list_unused_filters: true` in mix.exs
+# halts if any filter here is unnecessary, keeping this list honest — the six
+# filters below were removed because an OTP-28 `mix dialyzer` skips nothing
+# through them (each was an "Unnecessary Skip", matching zero warnings):
 #
-# NimbleTOTP is not included in the dialyzer PLT (it uses compile-time macros
-# that don't expose standard @spec metadata). Suppress unknown-function warnings.
+#   ~r/Function NimbleTOTP\./                         — no longer emitted on OTP 28
+#   ~r/Unknown type: NimbleTOTP\./                    — no longer emitted on OTP 28
+#   ~r/Unknown type: Stacks\.AdminSession\.t/         — no longer emitted on OTP 28
+#   ~r/Unknown type: Stacks\.MFA\.UserMFA\.t/         — no longer emitted on OTP 28
+#   ~r/admin_auth_controller\.ex.*pattern_match_cov/  — no longer emitted on OTP 28
+#   ~r/Postgrex\.Extensions\.Interval\./              — no longer emitted on OTP 28
 #
-# Ecto.Schema generates t() via __using__ macros; dialyzer doesn't resolve the
-# macro-expanded type definitions for AdminSession and UserMFA, producing
-# spurious unknown-type warnings.
+# If a future OTP/dep bump reintroduces one of these, dialyzer will flag the
+# real warning — re-add the specific filter then, with a fresh justification.
 #
-# The {error, _} catch-all in AdminAuthController.authenticate/2 is intentional
-# defensive programming — it normalises any future Accounts.authenticate error
-# to :invalid_credentials. Dialyzer correctly identifies it as currently
-# unreachable given the function's typespec, but we keep it for safety.
-#
-# postgrex 0.22.x generates extension modules (e.g. Interval) at compile time
-# via macros. Dialyzer cannot resolve the macro-generated private functions
-# called from type_module.ex, producing spurious call_to_missing warnings.
+# Kept (needed on OTP 28):
+# With MIX_ENV=test, elixirc_paths includes test/support/ — dialyzer checks the
+# compiled beams but can't resolve ExUnit's internal functions. This filter
+# absorbs those (7 warnings at last baseline) and is the only necessary entry.
 [
-  ~r/Function ExUnit\./,
-  ~r/Function NimbleTOTP\./,
-  ~r/Unknown type: NimbleTOTP\./,
-  ~r/Unknown type: Stacks\.AdminSession\.t/,
-  ~r/Unknown type: Stacks\.MFA\.UserMFA\.t/,
-  ~r/admin_auth_controller\.ex.*pattern_match_cov/,
-  ~r/Postgrex\.Extensions\.Interval\./
+  ~r/Function ExUnit\./
 ]
