@@ -413,8 +413,8 @@ defmodule Stacks.BlogTest do
 
       result = Blog.book_ids_with_user_writing(user.id, [written.id, unwritten.id])
 
-      assert MapSet.member?(result, written.id)
-      refute MapSet.member?(result, unwritten.id)
+      assert written.id in result
+      refute unwritten.id in result
     end
 
     test "excludes invisible (unconfirmed) associations" do
@@ -423,7 +423,7 @@ defmodule Stacks.BlogTest do
       post = insert(:post, user: user)
       insert(:post_book_association, post: post, book: book, visible: false)
 
-      assert Blog.book_ids_with_user_writing(user.id, [book.id]) == MapSet.new()
+      assert Blog.book_ids_with_user_writing(user.id, [book.id]) == []
     end
 
     test "excludes another user's writing about the same book" do
@@ -433,12 +433,12 @@ defmodule Stacks.BlogTest do
       other_post = insert(:post, user: other)
       insert(:post_book_association, post: other_post, book: book, visible: true)
 
-      assert Blog.book_ids_with_user_writing(user.id, [book.id]) == MapSet.new()
+      assert Blog.book_ids_with_user_writing(user.id, [book.id]) == []
     end
 
-    test "empty book_ids short-circuits to the empty set" do
+    test "empty book_ids short-circuits to an empty list" do
       user = insert(:user)
-      assert Blog.book_ids_with_user_writing(user.id, []) == MapSet.new()
+      assert Blog.book_ids_with_user_writing(user.id, []) == []
     end
   end
 end
