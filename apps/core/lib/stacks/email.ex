@@ -157,8 +157,18 @@ defmodule Stacks.Email do
            password_reset_sent_at: nil
          })
          |> Repo.update() do
-      {:ok, updated} -> {:ok, updated}
-      {:error, changeset} -> {:error, changeset}
+      {:ok, updated} ->
+        # A reset is the recovery path for a *compromised* account, so it must
+        # revoke every existing session — otherwise the attacker's token
+        # outlives the credential the victim just changed. Mirrors the
+        # authenticated change-password path (`UserSettingsController`), which
+        # has always done this (Issue #179, Phase 2b); the reset path did not,
+        # leaving the victim less safe than the success message implies.
+        Accounts.revoke_all_user_sessions(updated.id)
+        {:ok, updated}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 

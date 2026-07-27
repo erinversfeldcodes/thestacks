@@ -39,4 +39,40 @@ test.describe("Security headers — SPA CSP regression guard", () => {
         `Got connect-src: ${connectSrc}`
     ).toContain("r2.cloudflarestorage.com");
   });
+
+  test("CSP img-src allows the Open Library cover redirect chain", async ({
+    page,
+  }) => {
+    const response = await page.goto("/upload");
+    const csp = response!.headers()["content-security-policy"];
+    expect(csp, "SPA must set a Content-Security-Policy header").toBeTruthy();
+
+    const imgSrcMatch = csp!.match(/img-src([^;]*)/);
+    expect(imgSrcMatch, "CSP must declare an img-src directive").not.toBeNull();
+    const imgSrc = imgSrcMatch![1];
+
+    // covers.openlibrary.org 302s to archive.org, which 302s again to
+    // iaNNNNNN.us.archive.org. CSP is enforced on the REDIRECT TARGET, so
+    // listing only the first host silently blocks every Open Library cover:
+    // curl fetches the image fine while the browser renders a broken frame.
+    //
+    // NOTE this asserts the header, not that a cover renders — a structure
+    // gate, deliberately. A behavioural test is impossible against current
+    // seed data: 200 of 201 seeded editions have NO cover_image_url at all
+    // (see the seed-cover gap in the campaign plan), so there is no seeded
+    // book whose cover could fail to load. Promote this to an
+    // image-actually-loads assertion once seeds carry covers.
+    for (const host of [
+      "https://covers.openlibrary.org",
+      "https://archive.org",
+      "https://*.us.archive.org",
+    ]) {
+      expect(
+        imgSrc,
+        `img-src must allow ${host} — Open Library covers redirect ` +
+          `covers.openlibrary.org -> archive.org -> *.us.archive.org and CSP ` +
+          `blocks an unlisted redirect target. Got img-src: ${imgSrc}`
+      ).toContain(host);
+    }
+  });
 });

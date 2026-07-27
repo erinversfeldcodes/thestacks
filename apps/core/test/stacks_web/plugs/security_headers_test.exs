@@ -35,5 +35,30 @@ defmodule StacksWeb.Plugs.SecurityHeadersTest do
                "<account>.r2.cloudflarestorage.com); without it the browser " <>
                "blocks the PUT and uploads fail silently. Got: #{connect_src}"
     end
+
+    test "CSP img-src allows the Open Library cover REDIRECT TARGETS", %{conn: conn} do
+      opts = SecurityHeaders.init([])
+      result = SecurityHeaders.call(conn, opts)
+      [csp] = get_resp_header(result, "content-security-policy")
+
+      [_, img_src] = Regex.run(~r/img-src([^;]*)/, csp)
+
+      # covers.openlibrary.org 302s to archive.org, which 302s again to
+      # iaNNNNNN.us.archive.org. CSP is enforced on the redirect target, so
+      # listing only the first host blocks every cover — the failure is
+      # invisible server-side (curl fetches the image fine) and total in the
+      # browser. All three hosts are required for one cover to render.
+      for host <- [
+            "https://covers.openlibrary.org",
+            "https://archive.org",
+            "https://*.us.archive.org"
+          ] do
+        assert String.contains?(img_src, host),
+               "img-src must allow #{host} — Open Library covers redirect " <>
+                 "covers.openlibrary.org -> archive.org -> *.us.archive.org, and " <>
+                 "CSP blocks the redirect target if it is not listed. " <>
+                 "Got: #{img_src}"
+      end
+    end
   end
 end

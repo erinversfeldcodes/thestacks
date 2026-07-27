@@ -4,6 +4,8 @@ defmodule Stacks.EmailTest do
 
   import Stacks.Factory
 
+  alias Stacks.Accounts
+  alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Email
 
   # A user whose confirmation token has been persisted the way
@@ -112,6 +114,39 @@ defmodule Stacks.EmailTest do
 
     test "returns {:error, :invalid} with an invalid token" do
       assert {:error, :invalid} = Email.reset_password("bad-token", "newpassword123")
+    end
+
+    # A reset is the recovery path for a compromised account, so any session
+    # minted under the OLD password must die with it. Without this the victim
+    # completes the flow, sees "Your password has been reset", and the
+    # attacker's token keeps working — verified live on a preview stack before
+    # this test existed.
+    test "revokes every live session so a pre-reset token cannot outlive the password" do
+      user = insert(:user)
+      fid = Ecto.UUID.generate()
+
+      {:ok, _family} =
+        Accounts.open_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-before-reset",
+          session_started_at: DateTime.utc_now()
+        })
+
+      refute Core.Repo.get(AuthTokenFamily, fid).revoked_at,
+             "precondition: the family must start live, or this test proves nothing"
+
+      Email.send_password_reset(user.email)
+      token = Core.Repo.reload!(user).password_reset_token
+
+      assert {:ok, _} = Email.reset_password(token, "newpassword123")
+
+      assert Core.Repo.get(AuthTokenFamily, fid).revoked_at,
+             "the session family minted before the reset is still live"
+
+      assert {:error, :session_revoked} =
+               Accounts.check_token_family(fid, "jti-before-reset", to_string(user.id)),
+             "the pre-reset token still authenticates after a password reset"
     end
 
     test "returns {:error, :expired} with an expired token" do
