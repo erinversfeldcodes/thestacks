@@ -21,4 +21,3 @@ currency = "ZAR"
 [rate_limit]
 requests_per_minute = 6
 retry_after_seconds = 60
-respect_robots_txt = true
