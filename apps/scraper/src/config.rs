@@ -63,16 +63,16 @@ pub struct RateLimitConfig {
     pub requests_per_minute: u32,
     #[serde(default = "default_retry_after")]
     pub retry_after_seconds: u64,
-    #[serde(default = "default_respect_robots")]
-    pub respect_robots_txt: bool,
+    // NOTE: there is deliberately no `respect_robots_txt` field. It existed as a
+    // per-store boolean defaulting to true, which meant any TOML could opt itself
+    // out of robots.txt compliance. Compliance is a hard rule (owner, 2026-07-27),
+    // so the flag is gone rather than merely defaulted — the engine always checks.
+    // Removing the field is backward-compatible: serde ignores the unknown key in
+    // any TOML that still carries it.
 }
 
 fn default_retry_after() -> u64 {
     60
-}
-
-fn default_respect_robots() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

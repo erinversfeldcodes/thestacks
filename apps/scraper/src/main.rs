@@ -237,7 +237,6 @@ currency = "ZAR"
 
 [rate_limit]
 requests_per_minute = 60
-respect_robots_txt = false
 "#,
         )
         .unwrap();

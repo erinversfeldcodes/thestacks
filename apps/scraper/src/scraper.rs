@@ -83,12 +83,23 @@ impl Engine {
         let domain =
             extract_domain(&config.source.url).unwrap_or_else(|| config.source.url.clone());
 
-        // Rate limiting check.
-        self.rate_limiter
-            .check_and_record(&domain, config.rate_limit.requests_per_minute)?;
-
-        // robots.txt check (skipped in mock mode).
-        if config.rate_limit.respect_robots_txt && !self.mock {
+        // robots.txt is consulted FIRST, before the rate limiter.
+        //
+        // The order used to be reversed, which spent a rate-limit slot on a request
+        // we then refused to make — so a disallowed store could exhaust its own
+        // budget without ever reaching the network. Asking permission before taking
+        // a ticket is also the only order in which the returned `Crawl-delay` can
+        // inform the rate-limit decision below.
+        //
+        // There is deliberately no config flag to skip this: compliance with
+        // robots.txt is a hard rule, and a rule a TOML can switch off is not one.
+        // Mock mode skips it because it never touches the network at all.
+        let policy = if self.mock {
+            crate::robots::RobotsPolicy {
+                allowed: true,
+                crawl_delay_secs: None,
+            }
+        } else {
             // Normalise the base URL before stripping so a trailing slash doesn't
             // cause strip_prefix to fail (e.g. "https://store.com/" vs "/search?q=…").
             let base = config.source.url.trim_end_matches('/');
@@ -97,13 +108,32 @@ impl Engine {
                     "search URL '{search_url}' does not begin with source URL '{base}'"
                 ))
             })?;
-            let allowed = self.robots.is_allowed(&config.source.url, path).await?;
-            if !allowed {
-                return Err(ScraperError::RobotsDisallowed {
-                    url: search_url.clone(),
-                });
-            }
+            self.robots.policy(&config.source.url, path).await?
+        };
+
+        if !policy.allowed {
+            // Stop here. Per the owner's rule the store's configuration stays in
+            // place, so if the disallow is ever lifted this simply starts working
+            // again — we do not fall back to another path or another tier.
+            return Err(ScraperError::RobotsDisallowed {
+                url: search_url.clone(),
+            });
         }
+
+        // A declared `Crawl-delay` wins whenever it is stricter than our own
+        // configured rate. Previously it was parsed and discarded on the grounds
+        // that the TOML's `requests_per_minute` was authoritative — but that let a
+        // config out-request what the site asked for. Exclusive Books declares
+        // `Crawl-delay: 10`, i.e. 6 req/min, while its TOML asks for 10.
+        let effective_rpm = match policy.crawl_delay_secs {
+            Some(secs) if secs > 0 => {
+                let robots_rpm = (60 / secs).max(1);
+                robots_rpm.min(config.rate_limit.requests_per_minute)
+            }
+            _ => config.rate_limit.requests_per_minute,
+        };
+
+        self.rate_limiter.check_and_record(&domain, effective_rpm)?;
 
         let html = self.fetch_html(store_id, &search_url).await?;
         self.parse_result(isbn, store_id, config, &html, &search_url)
@@ -259,7 +289,6 @@ currency = "ZAR"
 
 [rate_limit]
 requests_per_minute = 10
-respect_robots_txt = false
 "#,
         )
         .unwrap()
@@ -287,7 +316,6 @@ currency = "ZAR"
 
 [rate_limit]
 requests_per_minute = 10
-respect_robots_txt = false
 "#,
         )
         .unwrap()
@@ -409,7 +437,6 @@ currency = "ZAR"
 
 [rate_limit]
 requests_per_minute = 60
-respect_robots_txt = false
 "#,
         )
         .unwrap()
@@ -436,7 +463,6 @@ currency = "ZAR"
 
 [rate_limit]
 requests_per_minute = 60
-respect_robots_txt = false
 "#,
         )
         .unwrap()
@@ -465,7 +491,6 @@ currency = "ZAR"
 
 [rate_limit]
 requests_per_minute = 60
-respect_robots_txt = false
 "#,
         )
         .unwrap()
@@ -615,7 +640,6 @@ price = ".price"
 
 [rate_limit]
 requests_per_minute = 2
-respect_robots_txt = false
 "#,
         )
         .unwrap();
