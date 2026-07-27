@@ -1086,4 +1086,64 @@ Repo.insert_all(
   on_conflict: :nothing
 )
 
+# ── Bookstores (price-scrape targets) ───────────────────────────────────────
+# `TriggerPriceScrapeJob` scrapes `Prices.all_stores()`, which reads THIS table
+# — not the TOML files under `apps/scraper/scrapers/za/`. With the table empty
+# the job logs "nothing to scrape (stores=0)" and returns :ok, so it has been
+# green-and-idle nightly since it was written and `op.price_snapshots` has
+# never held a single row. Seeding the targets is what makes the pipeline
+# capable of producing anything at all.
+#
+# A row here declares intent to scrape; a matching TOML under
+# `apps/scraper/scrapers/za/` supplies the selectors. `scraper_module` is the
+# TOML basename, so the two stay linked by name. Rows whose TOML does not exist
+# yet are still useful: they make the gap visible in `all_stores()` rather than
+# invisible in an empty table.
+#
+# Owner-specified target list, 2026-07-27. No PII, no user FK.
+#
+# ⚠️ OPERATIONAL CONSEQUENCE OF SEEDING THIS TABLE. The nightly batch scrape is
+# `stale_isbns(7) x all_stores()`. With these 12 rows and the current catalogue
+# that is 200 x 12 = ~2,400 outbound requests, and each TOML sets
+# `requests_per_minute = 10` per store — so a first full batch is on the order
+# of 20 hours of wall clock and would hammer twelve small independent
+# bookshops. Before enabling the cron against the full list: cap the batch
+# size, and prove ONE store end to end first (see the campaign plan's
+# "do one before eleven"). Several of these are one-person shops.
+bookstore_targets = [
+  {9001, "Loot", "https://www.loot.co.za", "loot", false},
+  {9002, "Wordsworth Books", "https://www.wordsworth.co.za", "wordsworth", true},
+  {9003, "The Book Lounge", "https://booklounge.co.za", "book_lounge", true},
+  {9004, "Exclusive Books", "https://www.exclusivebooks.co.za", "exclusive_books", true},
+  {9005, "Clarke's Bookshop", "https://clarkesbooks.co.za", "clarkes_books", true},
+  {9006, "Kalk Bay Books", "https://kalkbaybooks.co.za", "kalk_bay_books", true},
+  {9007, "Love Books", "http://www.lovebooks.co.za", "love_books", true},
+  {9008, "Bridge Books", "https://bridgebooks.co.za", "bridge_books", true},
+  {9009, "Skoobs Theatre of Books", "http://www.skoobs.co.za", "skoobs", true},
+  {9010, "Ike's Books", "http://ikesbooks.com", "ikes_books", true},
+  {9011, "Fortunate Finds", "https://fortunatefinds.co.za", "fortunate_finds", true},
+  {9012, "Stellenbosch Books", "https://stellenboschbooks.co.za", "stellenbosch_books", true}
+]
+
+Repo.insert_all(
+  "bookstores",
+  Enum.map(bookstore_targets, fn {n, name, url, module, physical} ->
+    %{
+      id: Seeds.uuid(n),
+      name: name,
+      website_url: url,
+      # The scraper resolves the search path from its own TOML; this template
+      # records the ISBN-substitution contract the job relies on.
+      search_template: "{isbn}",
+      has_physical: physical,
+      country_code: "ZA",
+      scraper_module: module,
+      created_at: jan_01,
+      updated_at: jan_01
+    }
+  end),
+  prefix: "op",
+  on_conflict: :nothing
+)
+
 IO.puts("Seeds loaded successfully.")
