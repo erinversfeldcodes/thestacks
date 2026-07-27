@@ -52,7 +52,13 @@ defmodule Mix.Tasks.Proto.Sync do
     end
   end
 
-  defp run_generate(manifest, descriptor, repo_root) do
+  # Public only as a testable seam. `run/1` resolves its root with
+  # `find_repo_root/0`, which means the generate path can only be exercised
+  # against the real working tree — and a test that did so deleted developers'
+  # freshly generated migrations. Taking the root as an argument lets a test
+  # write into a tmp directory instead.
+  @doc false
+  def run_generate(manifest, descriptor, repo_root) do
     core_root = Path.join(repo_root, "apps/core")
     dbt_root = Path.join(repo_root, "dbt/models/staging")
     migrations_dir = Path.join(core_root, "priv/repo/migrations")

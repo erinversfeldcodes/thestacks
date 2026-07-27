@@ -11,6 +11,8 @@ deps/
 .elixir_ls/
 core-*.tar
 erl_crash.dump
+# ExUnit's `@tag :tmp_dir` scratch space, created relative to the app root.
+apps/core/tmp/
 
 # Elm
 elm-stuff/
