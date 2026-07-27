@@ -19,7 +19,11 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandler do
     if isbn do
       Logger.info("BookCreatedHandler: enqueuing price scrape for isbn=#{isbn} book=#{book_id}")
 
-      case %{isbn: isbn, book_id: book_id}
+      # Only the ISBN is passed. A price belongs to an edition, and the ISBN *is*
+      # the edition's natural key, so the job resolves it — sending `book_id`
+      # would name a work that may have many ISBNs and could not say which one
+      # was priced.
+      case %{isbn: isbn}
            |> TriggerPriceScrapeJob.new()
            |> Oban.insert() do
         {:ok, _job} ->

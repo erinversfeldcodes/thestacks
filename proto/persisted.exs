@@ -993,7 +993,12 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
+        # Derived from book_edition_id at the single write site; see the proto
+        # comment. Kept because buf breaking is FILE-strict and field numbers
+        # are forever.
         book_id: %{belongs_to: Stacks.Books.Book},
+        # The real grain: a price is a fact about an edition, not a work.
+        book_edition_id: %{belongs_to: Stacks.Books.BookEdition, null: false},
         store_id: %{belongs_to: Stacks.Enrichment.Bookstore},
         currency: %{default: "ZAR"}
       }

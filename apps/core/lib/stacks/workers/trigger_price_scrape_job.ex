@@ -4,9 +4,12 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
   ## Modes
 
-  - **Single ISBN:** `%{isbn: "978...", book_id: "uuid"}` — scrapes this ISBN
-    at all stores.
-  - **Batch:** `%{batch: true}` — finds all stale ISBNs and scrapes them.
+  - **Single ISBN:** `%{isbn: "978...")` — scrapes this ISBN at all stores.
+    `book_edition_id` may be supplied when the caller already knows it.
+  - **Batch:** `%{batch: true}` — finds all stale editions and scrapes them.
+
+  Prices are recorded against the **edition**, since an ISBN names an edition and
+  shops stock whichever editions they stock, at different prices.
 
   Results are pushed to `PricePipeline` (Broadway) for batched persistence.
 
@@ -16,6 +19,8 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
   """
 
   use Oban.Worker, queue: :scraper, max_attempts: 3
+
+  import Ecto.Query, only: [from: 2]
 
   require Logger
 
@@ -40,21 +45,43 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
     end
   end
 
-  def perform(%Oban.Job{args: %{"isbn" => isbn, "book_id" => book_id}}) do
+  # An ISBN identifies an *edition*, not a work — a work has many ISBNs (Exclusive
+  # Books stocks six for The Name of the Rose). So the edition is what gets priced.
+  # Callers may pass `book_edition_id` when they already know it (the batch path
+  # does); otherwise it is resolved from the ISBN, which is the edition's natural
+  # key. A `book_id` in the args is ignored: it cannot say which edition was meant.
+  def perform(%Oban.Job{args: %{"isbn" => isbn} = args}) do
     Logger.info("TriggerPriceScrapeJob: scraping isbn=#{isbn}")
-    stores = Prices.all_stores()
 
-    if Enum.empty?(stores) do
-      Logger.info("TriggerPriceScrapeJob: no stores configured, skipping")
-      :ok
-    else
-      scrape_all([%{isbn: isbn, book_id: book_id}], stores)
+    case args["book_edition_id"] || edition_id_for_isbn(isbn) do
+      nil ->
+        # Not an error: the edition row may not exist yet, or the ISBN may have
+        # been removed. The nightly batch walks editions directly and will pick
+        # it up once it exists, so discarding beats retrying five times.
+        Logger.info("TriggerPriceScrapeJob: no edition for isbn=#{isbn}, skipping")
+        :ok
+
+      book_edition_id ->
+        stores = Prices.all_stores()
+
+        if Enum.empty?(stores) do
+          Logger.info("TriggerPriceScrapeJob: no stores configured, skipping")
+          :ok
+        else
+          scrape_all([%{isbn: isbn, book_edition_id: book_edition_id}], stores)
+        end
     end
   end
 
   def perform(%Oban.Job{args: args}) do
     Logger.warning("TriggerPriceScrapeJob: unrecognized args: #{inspect(args)}")
     :ok
+  end
+
+  defp edition_id_for_isbn(isbn) do
+    Core.Repo.one(
+      from(be in Stacks.Books.BookEdition, where: be.isbn == ^isbn, select: be.id, limit: 1)
+    )
   end
 
   defp scrape_all(isbn_entries, stores) do
@@ -91,7 +118,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
   defp do_scrape_all(isbn_entries, stores) do
     client = Application.get_env(:core, :scraper_client, Stacks.Enrichment.ScraperClient)
 
-    for %{isbn: isbn, book_id: book_id} <- isbn_entries,
+    for %{isbn: isbn, book_edition_id: book_edition_id} <- isbn_entries,
         store <- stores do
       store_name = store.scraper_module || store.name
 
@@ -101,7 +128,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
           {:ok,
            %{
-             "book_id" => book_id,
+             "book_edition_id" => book_edition_id,
              "store_id" => store.id,
              "price_cents" => response["price_cents"],
              "currency" => response["currency"] || "ZAR",

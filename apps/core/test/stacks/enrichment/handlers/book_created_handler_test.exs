@@ -6,7 +6,7 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
   alias Stacks.Workers.TriggerPriceScrapeJob
 
   describe "handle_event/1" do
-    test "enqueues TriggerPriceScrapeJob for book.created with ISBN" do
+    test "enqueues TriggerPriceScrapeJob keyed on the ISBN alone" do
       book_id = Ecto.UUID.generate()
 
       event = %{
@@ -18,10 +18,11 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
 
       assert :ok = BookCreatedHandler.handle_event(event)
 
-      assert_enqueued(
-        worker: TriggerPriceScrapeJob,
-        args: %{isbn: "9780743273565", book_id: book_id}
-      )
+      # No `book_id`: a price belongs to an edition, and the ISBN is the edition's
+      # natural key. Passing the work would name something with potentially many
+      # ISBNs, which cannot say which edition was priced — so the job resolves the
+      # edition from the ISBN instead.
+      assert_enqueued(worker: TriggerPriceScrapeJob, args: %{isbn: "9780743273565"})
     end
 
     test "skips enqueue when no ISBN in payload" do
