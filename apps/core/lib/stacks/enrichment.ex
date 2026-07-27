@@ -86,7 +86,16 @@ defmodule Stacks.Enrichment do
 
   # ── PriceSnapshot ──────────────────────────────────────────────────────────
 
-  @price_snapshot_required_fields [:book_id, :store_id, :price_cents, :scraped_at]
+  # `book_edition_id` is the grain: a price belongs to an edition, not a work.
+  # `book_id` is required too, but it is derived from the edition by
+  # `Prices.upsert_snapshot/1` rather than supplied — see the note there.
+  @price_snapshot_required_fields [
+    :book_edition_id,
+    :book_id,
+    :store_id,
+    :price_cents,
+    :scraped_at
+  ]
   @price_snapshot_optional_fields [:currency, :in_stock, :url]
 
   @doc "Changeset for creating or updating a price snapshot."
@@ -96,8 +105,10 @@ defmodule Stacks.Enrichment do
     |> cast(attrs, @price_snapshot_required_fields ++ @price_snapshot_optional_fields)
     |> validate_required(@price_snapshot_required_fields)
     |> validate_number(:price_cents, greater_than_or_equal_to: 0)
+    |> foreign_key_constraint(:book_edition_id)
     |> foreign_key_constraint(:book_id)
     |> foreign_key_constraint(:store_id)
+    |> unique_constraint([:book_edition_id, :store_id])
   end
 
   # ── BookstoreEvent ─────────────────────────────────────────────────────────

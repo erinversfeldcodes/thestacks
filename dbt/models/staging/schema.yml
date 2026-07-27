@@ -932,6 +932,10 @@ models:
         description: Url.
       - name: scraped_at
         description: Scraped at.
+      - name: book_edition_id
+        description: Book edition id.
+        tests:
+          - not_null
 
   - name: stg_review_snapshots
     description: >

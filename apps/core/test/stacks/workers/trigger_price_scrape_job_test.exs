@@ -17,9 +17,8 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
 
   describe "perform/1 with single ISBN" do
     test "scrapes a single ISBN across all stores" do
-      book = insert(:book)
+      _edition = insert(:book_edition, isbn: "9780743273565")
       store = insert(:bookstore)
-      _edition = insert(:book_edition, book: book, isbn: "9780743273565")
 
       MockScraperClient.put_response("9780743273565", store.scraper_module, {
         :ok,
@@ -34,13 +33,57 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
         }
       })
 
-      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565", book_id: book.id})
+      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565"})
       assert :ok = perform_job(TriggerPriceScrapeJob, job.changes.args)
     end
 
     test "returns ok when no stores configured" do
-      book = insert(:book)
-      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565", book_id: book.id})
+      _edition = insert(:book_edition, isbn: "9780743273565")
+      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565"})
+      assert :ok = perform_job(TriggerPriceScrapeJob, job.changes.args)
+    end
+  end
+
+  describe "perform/1 edition resolution" do
+    test "skips without scraping when the ISBN matches no edition" do
+      # An ISBN names an edition, so with no edition row there is nothing to price.
+      # This must not reach the scraper at all — issuing an outbound request for a
+      # book we do not hold would spend a store's rate-limit budget for nothing.
+      store = insert(:bookstore)
+      MockScraperClient.put_response("9789999999999", store.scraper_module, {:error, :timeout})
+
+      job = TriggerPriceScrapeJob.new(%{isbn: "9789999999999"})
+
+      # `:ok` is itself the discriminating assertion here: the store's mocked
+      # response for this ISBN is a :timeout, so had the job called out at all,
+      # every request would have failed and `evaluate_outcome/1` would have
+      # returned {:error, "all scrape requests failed"} instead.
+      assert :ok = perform_job(TriggerPriceScrapeJob, job.changes.args)
+    end
+
+    test "prefers an explicitly supplied book_edition_id over resolving the ISBN" do
+      # The batch path already knows the edition; it should not pay for a lookup.
+      edition = insert(:book_edition, isbn: "9780743273565")
+      store = insert(:bookstore)
+
+      MockScraperClient.put_response("9780743273565", store.scraper_module, {
+        :ok,
+        %{
+          "isbn" => "9780743273565",
+          "store" => store.scraper_module,
+          "price_cents" => 12_345,
+          "currency" => "ZAR",
+          "in_stock" => true,
+          "url" => "https://example.com/book"
+        }
+      })
+
+      job =
+        TriggerPriceScrapeJob.new(%{
+          isbn: "9780743273565",
+          book_edition_id: edition.id
+        })
+
       assert :ok = perform_job(TriggerPriceScrapeJob, job.changes.args)
     end
   end
@@ -63,7 +106,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
       # The `:scraper_fuse` is now owned by ScraperClient. The job no longer has
       # its own fuse guard — it treats {:error, :circuit_open} from the client
       # the same as any other scrape failure.
-      book = insert(:book)
+      _edition = insert(:book_edition, isbn: "9780743273565")
       store = insert(:bookstore)
 
       MockScraperClient.put_response(
@@ -72,7 +115,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
         {:error, :circuit_open}
       )
 
-      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565", book_id: book.id})
+      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565"})
 
       assert {:error, "all scrape requests failed"} =
                perform_job(TriggerPriceScrapeJob, job.changes.args)
@@ -81,7 +124,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
 
   describe "scraper failure" do
     test "melts fuse on scraper error and returns ok when not all fail" do
-      book = insert(:book)
+      _edition = insert(:book_edition, isbn: "9780743273565")
       store1 = insert(:bookstore)
       store2 = insert(:bookstore)
 
@@ -100,17 +143,17 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
         }
       })
 
-      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565", book_id: book.id})
+      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565"})
       assert :ok = perform_job(TriggerPriceScrapeJob, job.changes.args)
     end
 
     test "returns error when all scrape requests fail" do
-      book = insert(:book)
+      _edition = insert(:book_edition, isbn: "9780743273565")
       store = insert(:bookstore)
 
       MockScraperClient.put_response("9780743273565", store.scraper_module, {:error, :timeout})
 
-      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565", book_id: book.id})
+      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565"})
 
       assert {:error, "all scrape requests failed"} =
                perform_job(TriggerPriceScrapeJob, job.changes.args)

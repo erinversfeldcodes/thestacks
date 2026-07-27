@@ -48,45 +48,51 @@ defmodule Stacks.Enrichment.PricePipeline do
     results =
       Enum.map(messages, fn message ->
         case Prices.upsert_snapshot(message.data) do
-          {:ok, _snapshot} -> {:ok, message}
-          {:error, changeset} -> {:error, message, changeset}
+          # Carry the snapshot through: it is the only place both the edition and
+          # its derived work id are known, and the event payload needs the work.
+          # Reading `message.data[:book_id]` here used to supply that, but the
+          # message no longer carries a work id by design.
+          {:ok, snapshot} -> {:ok, message, snapshot}
+          {:error, :unknown_edition} -> {:error, message, "unknown book_edition_id"}
+          {:error, changeset} -> {:error, message, inspect(changeset.errors)}
         end
       end)
 
     {successes, failures} =
       Enum.split_with(results, fn
-        {:ok, _} -> true
+        {:ok, _, _} -> true
         _ -> false
       end)
 
     unless successes == [] do
-      first_book_id =
-        successes
-        |> List.first()
-        |> elem(1)
-        |> Map.get(:data)
-        |> Map.get(:book_id, Ecto.UUID.generate())
+      snapshots = Enum.map(successes, fn {:ok, _msg, snapshot} -> snapshot end)
+      book_ids = snapshots |> Enum.map(& &1.book_id) |> Enum.uniq()
 
       Events.emit_safe(%{
         event_type: "enrichment.prices_scraped",
         aggregate_type: "enrichment",
-        aggregate_id: first_book_id,
+        aggregate_id: List.first(book_ids),
+        # Deliberately still `book_ids` only. Adding `book_edition_ids` would be
+        # more precise, but `PayloadContract` pins this event at version 1 with
+        # exactly these keys, so widening it needs a version bump plus an Upcaster
+        # clause. The consumers here are dbt refreshes keyed on the work, which
+        # `book_ids` serves — so the bump is a follow-up, not a prerequisite.
         payload: %{
-          count: Enum.count(successes),
-          book_ids: successes |> Enum.map(fn {:ok, msg} -> msg.data[:book_id] end) |> Enum.uniq()
+          count: Enum.count(snapshots),
+          book_ids: book_ids
         },
         metadata: %{actor: "system:price_pipeline"}
       })
     end
 
     failed_messages =
-      Enum.flat_map(failures, fn {:error, msg, changeset} ->
-        Logger.warning("PricePipeline: failed to upsert snapshot: #{inspect(changeset.errors)}")
+      Enum.flat_map(failures, fn {:error, msg, reason} ->
+        Logger.warning("PricePipeline: failed to upsert snapshot: #{reason}")
 
         [Broadway.Message.failed(msg, "upsert failed")]
       end)
 
-    success_messages = Enum.map(successes, fn {:ok, msg} -> msg end)
+    success_messages = Enum.map(successes, fn {:ok, msg, _snapshot} -> msg end)
     success_messages ++ failed_messages
   end
 
@@ -100,12 +106,15 @@ defmodule Stacks.Enrichment.PricePipeline do
   end
 
   defp validate_price_data(data) when is_map(data) do
-    with {:ok, book_id} <- fetch_field(data, "book_id"),
+    # `book_edition_id` is required and `book_id` is deliberately absent: the
+    # write site derives it from the edition, so accepting one here would let a
+    # producer supply a work that disagrees with the edition it priced.
+    with {:ok, book_edition_id} <- fetch_field(data, "book_edition_id"),
          {:ok, store_id} <- fetch_field(data, "store_id"),
          {:ok, price_cents} <- fetch_field(data, "price_cents") do
       {:ok,
        %{
-         book_id: book_id,
+         book_edition_id: book_edition_id,
          store_id: store_id,
          price_cents: price_cents,
          currency: Map.get(data, "currency", "ZAR"),

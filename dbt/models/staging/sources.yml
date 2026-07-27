@@ -299,13 +299,23 @@ sources:
             description: Last modification timestamp (UTC).
 
       - name: price_snapshots
-        description: Point-in-time price observations from bookstore scrapers.
+        description: >
+          Point-in-time price observations from bookstore scrapers, one row per
+          (edition, store). A price is a fact about an edition, not a work —
+          shops stock whichever edition they stock, at different prices.
         freshness: null
         columns:
           - name: id
             description: Primary key (UUID).
+          - name: book_edition_id
+            description: >
+              FK to book_editions. The real grain: uniqueness is
+              (book_edition_id, store_id).
           - name: book_id
-            description: FK to books.
+            description: >
+              FK to books. Derived from the edition at the single write site,
+              never supplied by callers; retained because proto field numbers
+              cannot be reused.
           - name: store_id
             description: FK to bookstores.
           - name: price_cents

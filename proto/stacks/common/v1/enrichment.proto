@@ -199,7 +199,17 @@ message PriceSnapshot {
   // UUID of the price snapshot record.
   string id = 1 [json_name = "id"];
 
-  // Foreign key to the book being priced.
+  // Foreign key to the work being priced.
+  //
+  // DERIVED, NOT AUTHORITATIVE. A price is a fact about an edition, not a work:
+  // shops stock whichever edition they stock, at different prices (Exclusive
+  // Books carries six ISBNs of The Name of the Rose, two of them Spanish, at
+  // different prices). `book_edition_id` below is the real key.
+  //
+  // This field is retained because proto field numbers are forever and
+  // `buf breaking` is set to FILE, so it cannot be removed. It is populated by
+  // `Prices.upsert_snapshot/1` from the edition, at the single write site, so
+  // the two can never disagree — callers do not supply it.
   string book_id = 2 [json_name = "book_id"];
 
   // Foreign key to the bookstore where the price was found.
@@ -219,6 +229,13 @@ message PriceSnapshot {
 
   // When the price was scraped.
   google.protobuf.Timestamp scraped_at = 8 [json_name = "scraped_at"];
+
+  // Foreign key to the specific edition priced. THIS IS THE REAL KEY.
+  //
+  // Snapshots are unique on (book_edition_id, store_id). Keying on the work
+  // instead meant pricing one edition marked every edition of that work as
+  // freshly scraped, so the others could never be priced at all.
+  string book_edition_id = 9 [json_name = "book_edition_id"];
 }
 
 // BookstoreEvent represents an event listing scraped from a bookstore website.

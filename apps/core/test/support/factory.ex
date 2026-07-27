@@ -376,13 +376,19 @@ defmodule Stacks.Factory do
   end
 
   def price_snapshot_factory do
+    # The edition is the grain, and `book` must be *that edition's* book — the
+    # two columns describe one relationship, so building them independently would
+    # manufacture rows the production write path cannot produce.
+    edition = build(:book_edition)
+
     %PriceSnapshot{
       price_cents: 29_900,
       currency: "ZAR",
       in_stock: true,
       url: "https://example.com/book",
       scraped_at: DateTime.utc_now(),
-      book: build(:book),
+      book_edition: edition,
+      book: edition.book,
       store: build(:bookstore)
     }
   end
