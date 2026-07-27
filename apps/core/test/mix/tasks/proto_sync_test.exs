@@ -727,89 +727,131 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
   end
 
-  describe "run/1 generate mode" do
+  describe "generate mode writes into the root it is given" do
     @tag :tmp_dir
-    test "run([]) generates ecto schemas, dbt models, and migrations", %{tmp_dir: tmp_dir} do
-      # Set up a minimal repo structure in tmp_dir
-      proto_dir = Path.join(tmp_dir, "proto")
-      File.mkdir_p!(proto_dir)
+    test "generates ecto schemas, dbt models, schema.yml and migrations", %{tmp_dir: tmp_dir} do
+      # Reads come from the real repo (buf needs the actual .proto files); every
+      # *write* goes to tmp_dir. The predecessor of this test instead ran the
+      # whole task with `File.cd!(@repo_root)`, which generated into the working
+      # tree and then deleted untracked `_add_*_to_*` migrations to tidy up —
+      # silently destroying migrations a developer had just generated for an
+      # in-flight proto change. It also asserted nothing about migrations
+      # despite saying it did.
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      descriptor = Descriptor.parse!(@repo_root)
 
-      # Copy the real persisted.exs and proto files so buf build works
-      # Instead, we'll test by calling run from the real repo root
-      # by temporarily changing CWD
-      original_cwd = File.cwd!()
+      core_root = Path.join(tmp_dir, "apps/core")
+      dbt_root = Path.join(tmp_dir, "dbt/models/staging")
+      migrations_dir = Path.join(core_root, "priv/repo/migrations")
 
-      try do
-        File.cd!(@repo_root)
-        ProtoSync.run([])
+      # Seed the real migrations so the run sees the true drift state (none).
+      # Two reasons this matters: the migration writer does not mkdir_p its own
+      # output directory (`generate_delta_migration/3` calls File.write! directly),
+      # and against an *empty* directory every column of every table reads as
+      # missing — which builds a delta filename out of all ~35 `users` columns and
+      # dies with :enametoolong. Migration naming and content are covered by the
+      # "generate_migration paths" and "delta migration orchestration" blocks;
+      # this test is about run_generate writing where it is told to.
+      File.mkdir_p!(migrations_dir)
 
-        # Verify ecto schemas were generated
-        manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      Path.join(@repo_root, "apps/core/priv/repo/migrations")
+      |> File.cp_r!(migrations_dir)
 
-        Enum.each(manifest.tables, fn table ->
-          ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
-          assert File.exists?(ecto_path), "Expected #{ecto_path} to exist"
+      # schema.yml is merge-only: it carries hand-written descriptions, so an
+      # absent file is skipped rather than created. Seed it so the merge path runs.
+      File.mkdir_p!(dbt_root)
 
-          # Tables with `skip_dbt: true` are infra plumbing (e.g. cache.*)
-          # and do not have a dbt staging model.
-          if Map.get(table, :skip_dbt, false) do
-            dbt_path = Path.join([@repo_root, "dbt/models/staging", table.dbt_path])
+      File.cp!(
+        Path.join(@repo_root, "dbt/models/staging/schema.yml"),
+        Path.join(dbt_root, "schema.yml")
+      )
 
-            refute File.exists?(dbt_path),
-                   "Expected #{dbt_path} NOT to exist (skip_dbt: true)"
-          else
-            dbt_path = Path.join([@repo_root, "dbt/models/staging", table.dbt_path])
-            assert File.exists?(dbt_path), "Expected #{dbt_path} to exist"
+      ProtoSync.run_generate(manifest, descriptor, tmp_dir)
+
+      Enum.each(manifest.tables, fn table ->
+        unless Map.get(table, :skip_ecto, false) do
+          ecto_path = Path.join(core_root, table.ecto_path)
+
+          assert File.exists?(ecto_path),
+                 "expected #{table.table_name} ecto schema at #{ecto_path}"
+        end
+
+        dbt_path = Path.join(dbt_root, table.dbt_path)
+
+        if Map.get(table, :skip_dbt, false) do
+          refute File.exists?(dbt_path),
+                 "#{table.table_name} sets skip_dbt: true but a staging model was written"
+        else
+          assert File.exists?(dbt_path),
+                 "expected #{table.table_name} staging model at #{dbt_path}"
+        end
+      end)
+
+      # Assert the merge produced real content, not merely that a file is present
+      # — it was seeded, so existence alone would pass even if the merge no-oped.
+      schema_yml = Path.join(dbt_root, "schema.yml") |> File.read!()
+      assert schema_yml =~ "stg_price_snapshots"
+      assert schema_yml =~ "book_edition_id"
+
+      assert File.exists?(Path.join(core_root, "lib/stacks/gen/proto_json.ex"))
+
+      # With the committed migrations seeded there is no drift, so no new
+      # migration should appear. That is the same property `--check` asserts, and
+      # it is worth asserting on the *write* path too: a generator that emitted a
+      # spurious ADD COLUMN here would produce a mystery migration on every
+      # developer's `mix proto.sync`.
+      seeded =
+        Path.join(@repo_root, "apps/core/priv/repo/migrations") |> File.ls!() |> Enum.sort()
+
+      assert File.ls!(migrations_dir) |> Enum.sort() == seeded,
+             "generate mode invented a migration when the manifest and migrations already agree"
+    end
+
+    @tag :tmp_dir
+    test "every write lands under the given root, never in the working tree", %{tmp_dir: tmp_dir} do
+      # The discriminating assertion is on the *paths the generator reports*, not
+      # on the working tree afterwards. Comparing the tree before and after would
+      # be vacuous: with no drift, a run against the real root rewrites generated
+      # files byte-identically and adds no migration, so `git status` is unchanged
+      # and the check passes even when the root argument is being ignored.
+      #
+      # Note tmp_dir lives *inside* @repo_root (apps/core/tmp/…), so "contains the
+      # repo root" proves nothing either — the test requires each path to be under
+      # tmp_dir specifically.
+      real_migrations = Path.join(@repo_root, "apps/core/priv/repo/migrations")
+      File.mkdir_p!(Path.join(tmp_dir, "apps/core/priv/repo/migrations"))
+      File.cp_r!(real_migrations, Path.join(tmp_dir, "apps/core/priv/repo/migrations"))
+      File.mkdir_p!(Path.join(tmp_dir, "dbt/models/staging"))
+
+      File.cp!(
+        Path.join(@repo_root, "dbt/models/staging/schema.yml"),
+        Path.join(tmp_dir, "dbt/models/staging/schema.yml")
+      )
+
+      manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
+      descriptor = Descriptor.parse!(@repo_root)
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          ProtoSync.run_generate(manifest, descriptor, tmp_dir)
+        end)
+
+      reported =
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.flat_map(fn line ->
+          case Regex.run(~r/^(?:Generated|Updated)(?: migration)? (\/.+)$/, line) do
+            [_, path] -> [path]
+            _ -> []
           end
         end)
 
-        # The cache tables are the only current `skip_dbt: true` users.
-        # Sanity-check the manifest shape hasn't drifted.
-        cache_entries =
-          Enum.filter(manifest.tables, &Map.get(&1, :skip_dbt, false))
+      refute reported == [], "generate mode reported no writes at all"
 
-        assert Enum.any?(cache_entries, &(&1.table_name == "isbn_resolver_cache"))
-        assert Enum.any?(cache_entries, &(&1.table_name == "title_search_cache"))
-      after
-        File.cd!(original_cwd)
+      escaped = Enum.reject(reported, &String.starts_with?(&1, tmp_dir))
 
-        # Clean up untracked ADD COLUMN migrations generated during this test run.
-        # Note: gen/ is NOT cleaned up — it is the canonical schema location now.
-        # We use `git status` to exclude committed migrations from cleanup so that
-        # legitimately-added ADD COLUMN migrations in the same branch are preserved.
-        today = Date.utc_today() |> Date.to_iso8601() |> String.replace("-", "")
-
-        {git_status, _} =
-          System.cmd("git", ["status", "--porcelain", "apps/core/priv/repo/migrations/"],
-            cd: @repo_root
-          )
-
-        untracked_migrations =
-          git_status
-          |> String.split("\n", trim: true)
-          |> Enum.filter(&String.starts_with?(&1, "??"))
-          |> Enum.map(fn line -> Path.basename(String.trim(String.slice(line, 3, 9999))) end)
-
-        Path.join([@repo_root, "apps/core/priv/repo/migrations"])
-        |> File.ls!()
-        |> Enum.filter(fn file ->
-          # Remove untracked ADD COLUMN drift migrations generated today.
-          # Match ONLY the proto.sync ADD COLUMN naming pattern
-          # (`add_<fields>_to_<table>`) so hand-written migrations with
-          # other shapes (e.g. `move_cache_tables_to_cache_schema`) are
-          # preserved. Previously this matched everything-not-_create_,
-          # which silently deleted unstaged move/alter migrations
-          # authored by the developer in the same day.
-          String.starts_with?(file, today) and
-            String.contains?(file, "_add_") and
-            String.contains?(file, "_to_") and
-            file in untracked_migrations
-        end)
-        |> Enum.each(fn file ->
-          Path.join([@repo_root, "apps/core/priv/repo/migrations", file])
-          |> File.rm!()
-        end)
-      end
+      assert escaped == [],
+             "generate mode wrote outside the root it was given: #{inspect(escaped)}"
     end
   end
 
