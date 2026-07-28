@@ -124,27 +124,200 @@ the easy half, and shipping it alone produced a column that reads as a feature.
 
 ### ❌ What is left, and neither is a code gap I closed alone
 
-1. **The review queue has no admin UI.** `GET /api/admin/removal-requests` and the two
-   decision endpoints are live and tested; nothing in Elm calls them. **This is the same
-   built-but-unreachable shape as the items above** — the server half is done and the queue
-   is still invisible to the owner in practice. Add it to `Page/Admin/*` alongside the
-   existing `/admin/sources` surface.
-   ⚠️ **Naming hazard, do not collapse:** `PUT /sources/:id/approve` **publishes** a
+1. ~~**The review queue has no admin UI.**~~ **Done.** `Page/Admin/RemovalRequests.elm` at
+   `/admin/removal-requests`, owner-only, in the Admin nav dropdown, with 20 tests and CSS.
+   Deliberately **not** flag-gated: a business waiting to be delisted is waiting now,
+   whatever else ships dark.
+   ⚠️ **Naming hazard, honoured throughout:** `PUT /sources/:id/approve` **publishes** a
    listing; `PUT /removal-requests/:id/honour` **takes one down**. Same-sounding, opposite
-   effect, same row. The endpoints and context functions are deliberately named for what
-   happens to the *listing* (honour / decline), and a test asserts they are distinguishable.
+   effect, same row. Nothing on the page says "approve" or "reject" — the buttons are
+   **"Remove the listing"** and **"Keep the listing"**, named for what happens to the
+   *listing* rather than for the reviewer's verdict, and a test asserts no control is
+   labelled "Approve". Removal takes two clicks and the confirmation names the business;
+   keeping does not, because making both two-step trains reviewers to click through.
 
-2. ⛔ **None of the three has been driven live.** Every G-item's DoD in this plan is the
-   **render check** — the value appearing in a browser — and all three are verified by test
-   and compile only. That is explicitly *not* the bar this plan sets, and the campaign's own
-   lesson is that code-reading and green tests both lie about reachability. In particular:
-   - **G5's drag-and-drop cannot be validated by unit tests at all.** The pure move
-     functions are tested hard; whether a drop actually fires in a browser is untested.
-   - G4's subscribe link needs a real feed reader, or at least a real 200 from the handle URL.
-   - G6's form needs one end-to-end submission of each outcome.
+2. **The live drive is done — and it found a ⛔ that every test missed.** See the section
+   below. G4's link render is the one item still not driven.
 
-   Stand up a preview (`bash scripts/deploy-preview.sh`), drive all three, and record
-   "N of M driven" per the Drive section of `docs/agents/staff-engineer-agent.md`.
+### 🔴 The live drive, 2026-07-28 — 2 of 3 driven, one ⛔ found and fixed
+
+Preview: `https://stacks-core-pr-feat-staff-engineer.fly.dev`, seeded.
+
+| Surface | Driven | Verdict |
+|---|---|---|
+| **G6** removal form, both outcomes | ✅ | Works. Pending path returned the "still visible" copy with `removed` absent; verified path returned the "removed straight away" copy. **But the page had no CSS at all** — see below |
+| **G5** organiser, add + reorder | ✅ | ⛔ **Broken on the first click.** Fixed; see below |
+| **G5** drag-and-drop | ✅ | ⛔ **Completely broken.** Fixed; see below |
+| **G4** subscribe link render | ❌ | Not driven — see below. Endpoint answers; the anchor was never seen on a page |
+| **G6** admin review queue | ❌ | Built this session (tests + probe), deployed after the last preview build — not yet driven |
+
+**G4 is blocked by a seed gap, not by code.** Both seeded users carry
+`profile_visibility: "owner"` (`seeds.exs`), so **no seeded user has a publicly visible
+profile** and `/u/:handle` 404s for every viewer. The subscribe anchor also needs a
+`platform`-visible *bookshelf* for `has_feed`. Neither exists in the fixture, so the surface is
+undrivable as seeded — the same class of gap as the zero-row `discovered_sources` fixed earlier
+in Wave 0. Also worth knowing: the preview seed **suffixes handles**
+(`platform_owner` → `platform_owner_5289f3`), so a hardcoded handle 404s and looks like a bug.
+Fix is a seed change — one user with a platform profile and one platform bookshelf — filed
+rather than smuggled into this pass.
+
+#### ⛔ Adding a shelf deleted every book from the page
+
+Clicking "Add a shelf" on a 19-book library dropped the bookcase to its empty state —
+*"Your library is waiting"* — with no error. The shelf was created correctly; the books were
+gone from the view.
+
+**Root cause, one line:** `ShelfController.shelf_json/1` returned `placements: []`
+**hardcoded**, for every shelf, whatever was on it. `Page.Bookshelf.reloadShelves` refetched
+through that endpoint after every mutation and repainted the bookcase from the answer.
+
+Three symptoms, one cause:
+1. Every book vanishes from the bookcase after add / remove / reorder.
+2. The organiser labels a 19-book shelf "empty".
+3. `Remove` becomes **enabled** on a shelf holding books — offering a destructive action the
+   server refuses with 422, which is precisely the hazard the component's own docs say must
+   not be offered.
+
+⚠️ **Why 1227 Elm tests and 35 backend tests all passed through it.** Each side of the wire
+was self-consistent: the server returned exactly the shape it documented, and the client
+decoded that shape correctly. The lie lived *between* them, in a field whose type was right
+and whose value was always false. `Api.getShelves`'s own doc comment asserted "the payload
+shape is the same one the public-profile path already decodes" — true of the shape, false of
+the contents, and that sentence is what made it look checked.
+
+**The fix, in leverage order:**
+- `reloadShelves` now calls `Api.getBookshelf` — byte-identical to the initial load, so the
+  two paths cannot drift apart again, and `visibility` stops being carried forward stale.
+- `shelf_json/1` no longer carries a `placements` key **at all**. Populating it honestly
+  would mean visibility-resolving every placement, which is `BookshelfController.show`'s job
+  — a second answer to the same question. An absent key breaks a decoder loudly; an empty
+  one lies quietly.
+- `Api.getShelves` deleted. Its only caller was the broken path.
+- Guards: a controller test asserting the key stays **absent** even for a shelf holding books
+  (**mutation-probed** — restoring `placements: []` fails it with its own message), and
+  `e2e/tests/shelf-organiser.spec.ts`, which asserts **the books are still on the page** after
+  each mutation. A suite that counted only shelf rows would have passed throughout — that is
+  the transferable lesson, and it is written into the spec's header.
+
+#### ⛔ Drag-and-drop had never worked, in any browser
+
+The arrows worked; the drag did nothing. Not a rendering or a CSS problem — a one-word bug:
+
+```elm
+preventDefaultOn "dragover"  -->  Html.Events.preventDefaultOn event (succeed ( DragEnd, True ))
+```
+
+`dragover` must call `preventDefault` or the browser refuses the drop, and the message it
+carried was picked as an irrelevant placeholder. It was not irrelevant. `DragEnd` clears
+`dragging`, and **`dragover` fires continuously** while the pointer is over a row — so
+`dragging` was always `Nothing` by the time `drop` arrived, `DropOn`'s `Nothing` branch
+returned silently, and no drop ever reordered anything.
+
+**Isolated on the preview rather than reasoned about**, because the first synthetic attempt
+proved nothing:
+
+| Sequence | Result |
+|---|---|
+| `dragstart` → `dragover` → `drop` | nothing happens |
+| `dragstart` → `drop` (dragover skipped) | **reorders correctly**, 19 spines intact |
+
+That pair of runs is the whole diagnosis. A CDP mouse drag also did nothing, which was *not*
+usable evidence — synthetic mouse input does not initiate a native HTML5 drag, so that run
+could not distinguish a broken feature from an untestable one. Worth remembering: the tooling
+failing and the feature failing look identical.
+
+Fixed with an inert `DragOver` message. The irony worth keeping: the old code's comment called
+that handler *"pure ceremony"* — the ceremony was fine, the message it carried was fatal.
+
+⚠️ **This plan's own claim that "G5's drag-and-drop cannot be validated by unit tests at all"
+was wrong, and that assumption is what let this ship.** The *native event generation* is not
+unit-testable; the *wiring* very much is. `Test.Html.Event.simulate` on a `dragover` asserting
+the emitted message is `DragOver` fails immediately on the old code — four such tests now
+exist, and the `dragover` one is **mutation-probed** (restoring `DragEnd` fails it with
+`Ok DragEnd` vs `Ok DragOver`). The E2E spec also drags for real via Playwright's `dragTo`.
+
+Correcting the general lesson: **"it needs a browser" is usually a claim about one narrow
+layer, and the layers either side of it are testable.** Accepting the claim wholesale is what
+left the only untested path as the only broken one.
+
+#### 🟧 Two surfaces shipped with no CSS whatsoever
+
+`/listing-removal` and the shelf organiser both rendered as raw browser chrome — bulleted
+`<li>`s, default grey buttons, labels running into inputs — against the dark-academic
+wallpaper. The BEM class names were all present and correct in the Elm; `frontend/css/main.css`
+had **zero** matching rules (`grep -c` = 0 for `listing-removal`, `shelf-organiser` and
+`bookshelf__organiser`).
+
+Written now, following the existing `login-card` pattern (plus `profile__shelf-feed`, G4's
+subscribe link, which the sweep below caught in the same state).
+
+⚠️ **This is its own defect class, adjacent to built-but-not-wired: markup that names a style
+that does not exist.** Nothing in the suite can catch it — the classes *are* present, so every
+`Selector.class` assertion passes. A test asserting `getComputedStyle` is non-default would;
+none exists.
+
+#### 🟧 A pre-existing SECURITY test was vacuous
+
+`BookshelfReadOnlyTest.noAddShelfControl` asserted a read-only view exposes no *"Add shelf"*
+button. The button says **"Add a shelf"**. So the test passed by matching nothing anywhere on
+the page — and would have kept passing if the organiser had leaked into a read-only view,
+which is the single thing it exists to prevent. (The guard itself holds: `viewOrganiser`
+returns `text ""` when `readOnly`. Only the *evidence* was missing.)
+
+Repointed onto `data-testid` anchors, which survive copy edits, and split into two: the
+`shelf-add` control and the organiser panel. **Mutation-probed** — replacing the `readOnly`
+guard with `if False` fails both.
+
+⚠️ **A copy edit silently disarmed a SECURITY assertion.** Any test matching on user-visible
+prose is one wording change away from vacuous. This is the sixth vacuous test found in this
+campaign and the first that was not self-inflicted, which suggests the sweep is worth widening
+to every `Selector.text`-based negative assertion in the suite.
+
+#### 🟧 The sweep: 398 of 777 Elm class literals have no CSS rule
+
+Ran it rather than guessing, because "worth a sweep" is how a finding gets lost:
+
+```
+Elm class literals: 777    CSS class selectors: 463    with no rule anywhere: 398
+```
+
+`frontend/css/main.css` is the **only** stylesheet source (verified — everything under
+`apps/core/priv/static/assets/` is build output), so the set difference is meaningful.
+Spot-checked with fixed-string matching to rule out an extraction artefact:
+`book-detail__ai-label`, `book-detail__author-card`, `book-detail__availability-price`,
+`profile__shelf-feed` and `form-field__label` (used in 4 modules) are all genuinely unstyled.
+
+Largest groups: `book-detail` (45), `insights` (34), `profile` (15), `page` (15),
+`marketplace-detail` (15), `upload-verify` (12), `blog-post` (12).
+
+**Not all 398 are bugs** — a wrapper class used only as a JS/test hook needs no rule, and
+`data-testid` is the project's convention for that but was not always used. The number is a
+*starting inventory*, not a defect count, and separating the two needs a pass per component
+group. **Filed as its own issue rather than folded in here**: it is a Wave-9-scale polish
+sweep, and three of the four surfaces this session touched were in the list, which is what
+makes it worth tracking rather than fixing opportunistically.
+
+### ▶ What a fresh pass should pick up, in order
+
+1. **Deploy a preview and drive the two undriven surfaces**: the drag fix and
+   `/admin/removal-requests`. The last preview build predates both. Both are covered by
+   mutation-probed tests, so this is confirmation, not discovery — but the whole lesson of this
+   session is that "covered by tests" and "works" are different claims.
+   `SKIP_VISION=1 STACKS_SKIP_RESOLVER_PREFLIGHT=1 bash scripts/deploy-preview.sh`, then log in
+   as `owner@thestacks.app` / `dev-password-123` and store a **flat** `stacks-auth` blob.
+   The queue needs a parked request: `POST /api/listings/removal` with an email whose domain
+   does **not** match a listing's — `hello@gmail.test` against a seeded `discovered_source`.
+2. **Fix the G4 seed gap** (above), then drive the subscribe anchor and fetch the Atom URL.
+3. **Run the new E2E spec against the preview** — `e2e/tests/shelf-organiser.spec.ts` has never
+   executed anywhere. `cd e2e && BASE_URL=… npx playwright test --project=setup` then
+   `--project=chromium -g "Shelf organiser"`. Its drag case uses Playwright's `dragTo`, the
+   only path that issues real HTML5 drag events.
+4. **File the two sweeps** as issues: the 398 orphan CSS classes, and `Selector.text`-based
+   negative assertions that a copy edit can disarm.
+
+⚠️ **Everything from this session is uncommitted — the commit was denied.** `just verify` is
+exit 0. Use `git commit -- <paths>`; `AGENTS.md`, `docs/agents/orchestrator-agent.md` and
+`.claude/skills/finalize-pr/` are modified by something else and must not be swept in.
 
 ### Still parked, deliberately, and not blocking
 
@@ -173,11 +346,24 @@ the easy half, and shipping it alone produced a column that reads as a feature.
    a URL in it is permanent — key events by id and carry no payload where possible.
 7. **`update_all`'s `:returning` came back nil.** Select the ids first; do not rely on a
    driver capability that fails silently.
-8. ⚠️ **Vacuous tests are the recurring self-inflicted wound — five this session.** ISBN
-   check digits, the limit-ordering decoys, the geocoding cap, and twice a *comment* claimed
-   a guard that a probe showed was not load-bearing (`moveTo`'s clamp; the "off-by-one" it
-   supposedly prevented). **Probe every load-bearing assertion.** Writing the reason in a
-   comment is not evidence the reason is true.
+8. ⚠️ **Vacuous tests are the recurring wound — six this session, and the sixth was not
+   mine.** ISBN check digits, the limit-ordering decoys, the geocoding cap, twice a *comment*
+   claiming a guard a probe showed was not load-bearing (`moveTo`'s clamp; the "off-by-one" it
+   supposedly prevented) — and `BookshelfReadOnlyTest`'s SECURITY assertion, disarmed
+   by a copy edit (`"Add shelf"` vs `"Add a shelf"`). **Probe every load-bearing assertion**, and
+   prefer `data-testid` over prose in any negative assertion. Writing the reason in a comment is
+   not evidence the reason is true.
+9. ⚠️ **A payload field can be structurally valid and always false**, and no test on either
+   side of the wire will see it — the server returns the shape it documents, the client
+   decodes it correctly. Prefer an **absent key to an empty one**: a missing key breaks a
+   decoder loudly, `[]` is indistinguishable from real emptiness. And if an endpoint cannot
+   answer honestly for a field without duplicating another endpoint's logic, it does not own
+   that field — that is the signal to drop it, not to stub it.
+10. ⚠️ **A `preventDefaultOn` message must be inert.** Reusing a meaningful one "because only
+   preventDefault matters" is how drag-and-drop stayed broken behind 28 green tests.
+11. ⚠️ **A synthetic/CDP mouse drag does not initiate a native HTML5 drag**, so a failed
+   synthetic drag cannot distinguish a broken feature from untestable tooling. Isolate the
+   sequence instead (fire `drop` with and without `dragover`); use Playwright's `dragTo` in E2E.
 
 ## Amendment log
 
@@ -188,6 +374,7 @@ the easy half, and shipping it alone produced a column that reads as a feature.
 | 2026-07-27 | 🟧 **ROOT H narrowed then closed** — challenged correctly by the owner; all three non-staleness cases made event-driven. This removes the correctness argument for `min_machines_running = 1`; see Wave 0e/E5. |
 | 2026-07-28 | **Wave 0b resolved** — G1/G4/G5/G6 specified; G4 and G6 server halves built and merged (`a435e2b2`); **G1 removed from Wave 0b** as not promotable. `docs/user_stories/US-3.1.1-third-spaces-map.md` written, all six of its decisions taken. |
 | 2026-07-28 | **G1 brought fully in** (owner: *"let's bring it all in"*). Steps 1–4 done — coordinates + indexes, Nominatim behind a swappable seam, approval-driven producer, **ADR 022**. Bookshops geocoded (7/10). Chain proven live: `third_spaces` 0→1 with `nearest_bookshop_km` 0.678 km. The 500 m rule became **two tiers** (distance OR curation). `discovered_sources` 0→5 seeded, closing G3's zero-row cause. Added `just proto-sync-all` + a changeset-coverage guard. **See ▶ RESUME HERE above.** |
+| 2026-07-28 | **The live drive ran, and found two ⛔ bugs no test could see.** (1) `shelf_json/1` returned a hardcoded `placements: []`, so every shelf mutation repainted the owner's bookcase **empty** — 19 books vanished, a full shelf read "empty", and Remove lit up on a shelf the server refuses to delete. (2) **Drag-and-drop had never worked in any browser**: `preventDefaultOn "dragover"` carried `DragEnd`, which cleared the drag state that `dropOn` depends on. Both fixed and mutation-probed; (1) proven live. Also: three surfaces shipped with **zero CSS** (sweep found **398 of 777** Elm classes have no rule), the **admin removal queue UI** landed, and a **pre-existing SECURITY test was vacuous** (matched `"Add shelf"`; button says `"Add a shelf"`). This plan's claim that drag-and-drop "cannot be validated by unit tests at all" was **wrong**, and that assumption is what let it ship. **See ▶ RESUME HERE above.** |
 | 2026-07-28 | **Waves 0c and 0d closed** — C3, C4, P7 and P9 built; P3 half-stale (its real defect was a fabricated registry key); P8 already done. `just run just verify` exit 0. ⚠️ **Wave 0 as a whole is still open: 0b remains** — an earlier report of mine said "Wave 0 is closed" and meant only these six items. |
 | 2026-07-28 | **Wave 0e added** — production domain cutover. Six items, four wrong in production today. ⚠️ Two of the six reported items were *not* what the report described (E1's RSS half, E5's severity), and my own first framing of **E2 was overstated as ⛔ and is corrected in place to 🟧** — the root `robots.txt`/`ai.txt` are repository-level declarations, not unserved website files. |
 
