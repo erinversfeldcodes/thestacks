@@ -24,6 +24,7 @@ defmodule StacksWeb.ProtoJSON do
   require Logger
 
   alias Stacks.Books
+  alias Stacks.Feeds
   alias StacksWeb.ProtoJSON.Gen
 
   # Shared user field lists — used by user/1 and listing_seller/1 for consistency.
@@ -630,10 +631,15 @@ defmodule StacksWeb.ProtoJSON do
       # out of a public payload — a stranger has no business learning that a shelf is
       # group-visible rather than simply absent.
       #
-      # The predicate mirrors `Feeds.resolve_platform_bookshelf/2` exactly: only a
-      # platform-visible bookshelf has a feed. Anything else 403s, and a link that 403s
-      # is a broken promise rather than a feature.
-      bookshelves: Enum.map(shelves, &%{name: &1.name, has_feed: &1.visibility == "platform"})
+      # ⚠️ Delegates to `Feeds.feed_eligible?/1` rather than repeating the predicate. This
+      # line used to hardcode `visibility == "platform"` under a comment promising it
+      # "mirrors Feeds.resolve_platform_bookshelf/2 exactly" — and then the feed side was
+      # fixed to accept `public` too, which would have left this offering no link for a
+      # bookshelf whose feed works. A link that 403s is a broken promise; a working feed
+      # nobody is told about is a feature that may as well not exist. One function, both
+      # answers.
+      bookshelves:
+        Enum.map(shelves, &%{name: &1.name, has_feed: Feeds.feed_eligible?(&1.visibility)})
     }
   end
 

@@ -570,6 +570,31 @@ defmodule StacksWeb.ProfileControllerTest do
       assert [%{"name" => "library", "has_feed" => true}] = body["bookshelves"]
     end
 
+    test "true for a public bookshelf — the flag tracks the feed, not one visibility string" do
+      # ⛔ Was `false`, while `GET /api/feeds/u/:handle/library` for the same shelf 403'd. Both
+      # sides hardcoded `visibility == "platform"`, so the *most* shared tier was told it had no
+      # feed and refused one if it asked anyway.
+      #
+      # Both now call `Feeds.feed_eligible?/1`. Asserting through the **controller** rather than
+      # the predicate is deliberate: the defect was two call sites agreeing on a wrong rule, and
+      # a unit test on the shared function cannot detect a caller that stops using it.
+      target = insert(:user, handle: "public_reader", profile_visibility: "platform")
+      shelf = insert(:bookshelf, user: target, name: "library", visibility: "public")
+      viewer = insert(:user)
+
+      body =
+        build_conn() |> auth_conn(viewer) |> get("/api/u/public_reader") |> json_response(200)
+
+      assert [%{"name" => "library", "has_feed" => true}] = body["bookshelves"],
+             "a public bookshelf was advertised as having no feed: " <>
+               inspect(body["bookshelves"])
+
+      # And the advertised link actually resolves — the pairing is the guarantee.
+      feed = build_conn() |> get("/api/feeds/u/public_reader/library")
+      assert response(feed, 200)
+      assert shelf.visibility == "public"
+    end
+
     test "false for a group-visible bookshelf the viewer can see", %{conn: conn} do
       # ⚠️ The case that makes the flag necessary rather than decorative. An
       # owner-visible shelf is dropped from the payload entirely, so a stranger never

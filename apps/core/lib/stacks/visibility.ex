@@ -503,6 +503,32 @@ defmodule Stacks.Visibility do
   defp batch_viewer_id(_viewer), do: nil
 
   @doc """
+  Is `visibility` at least as exposed as `minimum` on the Audience ladder?
+
+  `owner < group < platform < public`, exposure ascending. Use this wherever a feature is
+  gated on "shared at least this widely" instead of writing an equality check.
+
+  ⚠️ **Added because an equality check silently inverted a gate.** `Stacks.Feeds` tested
+  `visibility != "platform"` to decide feed eligibility, so a bookshelf on the **most** shared
+  tier (`public`) was refused the feed a *less* shared `platform` one was served — exposure and
+  function running in opposite directions. An equality test against one rung of a ladder is
+  almost always this bug; it only looks right while that rung happens to be the top one in use.
+
+  An unknown visibility is treated as exposure 0 (the most private reading), matching
+  `validate_visibility_ceiling/3` — so a typo fails closed rather than opening a feed.
+
+      iex> Stacks.Visibility.at_least?("public", "platform")
+      true
+      iex> Stacks.Visibility.at_least?("group", "platform")
+      false
+
+  """
+  @spec at_least?(String.t(), String.t()) :: boolean()
+  def at_least?(visibility, minimum) do
+    Map.get(@audience_exposure, visibility, 0) >= Map.get(@audience_exposure, minimum, 0)
+  end
+
+  @doc """
   Validates that a child resource visibility is not MORE EXPOSED than its parent
   (the ceiling rule). On the Audience ladder
   `owner < group < platform < public` (exposure ascending), the child's exposure

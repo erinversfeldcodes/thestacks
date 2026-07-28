@@ -72,7 +72,7 @@ defmodule StacksWeb.FeedController do
       {:error, :not_public} ->
         conn
         |> put_status(403)
-        |> json(%{error: "Feed is only available for platform-visible bookshelves"})
+        |> json(%{error: "Feed is only available for bookshelves shared with the platform"})
     end
   end
 end

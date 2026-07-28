@@ -13,6 +13,7 @@ defmodule Stacks.Feeds do
   alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.Shelving
   alias Stacks.Shelving.PlacementHistory
+  alias Stacks.Visibility
 
   require Logger
 
@@ -46,7 +47,7 @@ defmodule Stacks.Feeds do
   @spec fetch_feed(binary(), String.t()) ::
           {:ok, String.t(), String.t()} | {:error, :not_found | :not_public}
   def fetch_feed(user_id, bookshelf_name) do
-    with {:ok, bookshelf} <- resolve_platform_bookshelf(user_id, bookshelf_name) do
+    with {:ok, bookshelf} <- resolve_shared_bookshelf(user_id, bookshelf_name) do
       case get_cached(bookshelf.id) do
         {:ok, xml, etag} -> {:ok, xml, etag}
         :miss -> render_and_serve(bookshelf)
@@ -74,7 +75,7 @@ defmodule Stacks.Feeds do
           {:ok, String.t(), String.t()}
           | {:error, :not_found | :not_public | {:cache_write_failed, Ecto.Changeset.t()}}
   def regenerate(user_id, bookshelf_name) do
-    with {:ok, bookshelf} <- resolve_platform_bookshelf(user_id, bookshelf_name) do
+    with {:ok, bookshelf} <- resolve_shared_bookshelf(user_id, bookshelf_name) do
       {xml, etag} = render_feed(bookshelf)
 
       case cache_writer().(bookshelf.id, xml, etag) do
@@ -119,13 +120,44 @@ defmodule Stacks.Feeds do
     )
   end
 
+  @doc """
+  Does a bookshelf at this visibility have an Atom feed?
+
+  **The single source of truth for that question**, because two callers need it and they must not
+  answer it differently: this module decides whether to *serve* the feed, and
+  `StacksWeb.ProtoJSON.public_profile/2` decides whether to *offer a subscribe link*. If the two
+  disagree in one direction a reader is shown a link that 403s; in the other, a working feed is
+  never advertised.
+
+  ⚠️ **They did disagree.** Both hardcoded `visibility == "platform"`, with a comment in
+  `proto_json.ex` promising it "mirrors `Feeds.resolve_platform_bookshelf/2` exactly" — an
+  invariant maintained by duplication and a comment, which is to say not maintained. Fixing the
+  ladder bug in one place would silently have broken the pair. Calling one function makes the
+  mirror structural.
+  """
+  @spec feed_eligible?(String.t()) :: boolean()
+  def feed_eligible?(visibility), do: Visibility.at_least?(visibility, "platform")
+
   # ── Private helpers ────────────────────────────────────────────────────────
 
-  defp resolve_platform_bookshelf(user_id, bookshelf_name) do
+  # Feed eligibility is "shared at least as widely as `platform`", not "is exactly `platform`".
+  #
+  # ⛔ It used to be the latter (`visibility != "platform"`), which refused a feed to a bookshelf
+  # on the **most** shared tier — `public` — while serving one for the *less* shared `platform`.
+  # Exposure and function ran in opposite directions. The `:not_public` atom is what hid it: it
+  # reads as correct at every call site, and both rejection tests only ever covered `owner` and
+  # `group`, so the literally-public case was never exercised.
+  #
+  # `Visibility.at_least?/2` treats an unknown value as most-private, so a typo fails closed.
+  defp resolve_shared_bookshelf(user_id, bookshelf_name) do
     case Shelving.get_bookshelf(user_id, bookshelf_name) do
-      nil -> {:error, :not_found}
-      %{visibility: visibility} when visibility != "platform" -> {:error, :not_public}
-      bookshelf -> {:ok, bookshelf}
+      nil ->
+        {:error, :not_found}
+
+      %{visibility: visibility} = bookshelf ->
+        if feed_eligible?(visibility),
+          do: {:ok, bookshelf},
+          else: {:error, :not_public}
     end
   end
 
