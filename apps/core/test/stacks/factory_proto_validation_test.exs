@@ -85,9 +85,13 @@ defmodule Stacks.FactoryProtoValidationTest do
           unscrapable_reason)a},
     price_snapshot: {Stacks.Enrichment.PriceSnapshot, ~w()a},
     bookstore_event: {Stacks.Enrichment.BookstoreEvent, ~w()a},
+    # `nearest_bookshop_km` is computed at geocode time, never fixture data: a factory
+    # that pre-populated it would make every seeded space look like it had already been
+    # paired with a bookshop, and the 500 m filter would pass for the wrong reason.
     third_space:
       {Stacks.Enrichment.ThirdSpace,
-       ~w(instagram_url description discovered_via last_active_at opted_out_at)a},
+       ~w(instagram_url description discovered_via last_active_at opted_out_at
+          nearest_bookshop_km)a},
     third_space_event: {Stacks.Enrichment.ThirdSpaceEvent, ~w(recurrence)a},
     partner:
       {Stacks.Partners.Partner,

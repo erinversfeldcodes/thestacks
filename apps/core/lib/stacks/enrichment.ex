@@ -180,63 +180,161 @@ defmodule Stacks.Enrichment do
 
   # ── Queries ──────────────────────────────────────────────────────────────────
 
-  # Known city coordinates for Haversine geo filtering (MVP — no PostGIS).
-  @city_coords %{
-    "Cape Town" => {-33.9249, 18.4241},
-    "Johannesburg" => {-26.2041, 28.0473},
-    "Pretoria" => {-25.7479, 28.2293},
-    "Durban" => {-29.8587, 31.0218},
-    "Stellenbosch" => {-33.9321, 18.8602},
-    "Franschhoek" => {-33.8734, 19.1169}
-  }
-
   @doc """
   Lists third spaces with upcoming events preloaded.
 
-  Options:
-    * `:lat`, `:lng`, `:radius_km` — filter by distance from a point (uses city lookup)
+  ## Options
+
+    * `:lat`, `:lng`, `:radius_km` — spaces within a radius of a point
+    * `:north`, `:south`, `:east`, `:west` — spaces inside a viewport (the map's query)
+    * `:near_bookshop_km` — only spaces at most this far from a bookshop (US-3.1.1's
+      500 m rule is `near_bookshop_km: 0.5`)
+    * `:types` — restrict to these space types (the reader's category filter)
     * `:limit` — max results (default 20)
+
+  ## What this used to do, and why the shape changed
+
+  Three defects, all of which a live `GET /api/third-spaces` was exposed to:
+
+  1. A space's position came from looking its **`city` string** up in a hardcoded
+     six-entry map, so anything outside those six cities was silently dropped and two
+     spaces in one city were treated as equidistant. The endpoint advertised
+     `lat`/`lng`/`radius_km` and could not honour them.
+  2. **`limit` was applied before filtering.** The query took the first 20 rows in
+     unspecified order and *then* filtered by radius, so the nearest space could be
+     invisible while a far one showed. Ordering now happens in SQL over the filtered
+     set, and the limit is applied last.
+  3. Opted-out spaces were returned. A business that asked to be delisted stayed on
+     the map (US-2.5.3).
+
+  Coordinates are now real columns, so filtering is a **bounding box in SQL** — indexed
+  by `idx_third_spaces_lat_lng` — with a Haversine refinement in memory over that
+  bounded set. A box is a superset of the circle it encloses, so refining afterwards is
+  exact, and it keeps the expensive trigonometry off every row in the table.
   """
   @spec list_third_spaces(keyword()) :: [ThirdSpace.t()]
   def list_third_spaces(opts \\ []) do
-    now = DateTime.utc_now()
     limit = Keyword.get(opts, :limit, 20)
 
-    spaces =
-      ThirdSpace
-      |> limit(^limit)
-      |> Repo.all()
+    ThirdSpace
+    |> where([s], s.opted_out == false or is_nil(s.opted_out))
+    |> filter_types(Keyword.get(opts, :types))
+    |> filter_near_bookshop(Keyword.get(opts, :near_bookshop_km))
+    |> filter_bounds(bounds_for(opts))
+    |> Repo.all()
+    |> refine_by_radius(opts)
+    |> Enum.take(limit)
+    |> preload_upcoming_events()
+  end
 
+  defp filter_types(query, nil), do: query
+  defp filter_types(query, []), do: query
+  defp filter_types(query, types) when is_list(types), do: where(query, [s], s.type in ^types)
+
+  # The 500 m rule filters on a scalar computed at geocode time. Recomputing
+  # space-to-bookshop distances per request is the query that would eventually force
+  # PostGIS for the wrong reason.
+  #
+  # `is_nil` is excluded deliberately: a space whose proximity has not been computed is
+  # not known to be near a bookshop, and guessing yes would put it on the map on the
+  # strength of missing data.
+  defp filter_near_bookshop(query, nil), do: query
+
+  defp filter_near_bookshop(query, km) when is_number(km),
+    do: where(query, [s], not is_nil(s.nearest_bookshop_km) and s.nearest_bookshop_km <= ^km)
+
+  # Derives the SQL bounding box from whichever geo option was supplied. A radius query
+  # gets a box that encloses its circle; the Haversine pass then trims the corners.
+  defp bounds_for(opts) do
+    lat = Keyword.get(opts, :lat)
+    lng = Keyword.get(opts, :lng)
+    radius = Keyword.get(opts, :radius_km)
+
+    cond do
+      is_number(lat) and is_number(lng) and is_number(radius) ->
+        box_around(lat, lng, radius)
+
+      viewport?(opts) ->
+        {Keyword.get(opts, :south), Keyword.get(opts, :north), Keyword.get(opts, :west),
+         Keyword.get(opts, :east)}
+
+      true ->
+        nil
+    end
+  end
+
+  defp viewport?(opts) do
+    Enum.all?([:north, :south, :east, :west], &is_number(Keyword.get(opts, &1)))
+  end
+
+  # One degree of latitude is ~111 km everywhere; a degree of longitude shrinks with
+  # cos(lat), so the box must widen as it approaches the poles or it clips the circle.
+  defp box_around(lat, lng, radius_km) do
+    dlat = radius_km / 111.0
+    # Guard the cosine: at the poles the longitude span is the whole globe, and
+    # dividing by ~0 would produce an infinite delta.
+    cos_lat = max(:math.cos(deg_to_rad(lat)), 0.01)
+    dlng = radius_km / (111.0 * cos_lat)
+
+    {lat - dlat, lat + dlat, lng - dlng, lng + dlng}
+  end
+
+  defp filter_bounds(query, nil), do: order_by(query, [s], asc: s.name)
+
+  defp filter_bounds(query, {south, north, west, east}) do
+    query
+    |> where([s], not is_nil(s.latitude) and not is_nil(s.longitude))
+    |> where([s], s.latitude >= ^south and s.latitude <= ^north)
+    |> apply_longitude_bounds(west, east)
+    |> order_by([s], asc: s.name)
+  end
+
+  # ⚠️ Antimeridian. A viewport spanning ±180° arrives with `east < west`, and a plain
+  # `between` then matches nothing — silently, which is the worst way to be wrong. The
+  # box becomes two: west→180 and -180→east. US-3.1.1 §1 explicitly puts "drag across
+  # the globe to Shanghai" in scope, so this is a real case, not a curiosity.
+  defp apply_longitude_bounds(query, west, east) when west <= east,
+    do: where(query, [s], s.longitude >= ^west and s.longitude <= ^east)
+
+  defp apply_longitude_bounds(query, west, east),
+    do: where(query, [s], s.longitude >= ^west or s.longitude <= ^east)
+
+  # Exact radius test over the box-bounded set. Skipped entirely for a viewport query —
+  # a viewport IS the filter there, and trimming it to a circle would hide pins the
+  # reader can plainly see space for.
+  defp refine_by_radius(spaces, opts) do
+    lat = Keyword.get(opts, :lat)
+    lng = Keyword.get(opts, :lng)
+    radius = Keyword.get(opts, :radius_km)
+
+    if is_number(lat) and is_number(lng) and is_number(radius) do
+      Enum.filter(spaces, fn s ->
+        is_number(s.latitude) and is_number(s.longitude) and
+          haversine_km(lat, lng, s.latitude, s.longitude) <= radius
+      end)
+    else
+      spaces
+    end
+  end
+
+  # One query for all upcoming events, grouped in memory — not a preload per space.
+  defp preload_upcoming_events([]), do: []
+
+  defp preload_upcoming_events(spaces) do
+    now = DateTime.utc_now()
     space_ids = Enum.map(spaces, & &1.id)
 
     events_by_space =
       from(e in ThirdSpaceEvent,
-        where: e.space_id in ^space_ids,
-        where: e.event_date > ^now,
+        where: e.space_id in ^space_ids and e.event_date > ^now,
         order_by: [asc: e.event_date]
       )
       |> Repo.all()
       |> Enum.group_by(& &1.space_id)
 
-    spaces =
-      Enum.map(spaces, fn space ->
-        Map.put(space, :upcoming_events, Map.get(events_by_space, space.id, []))
-      end)
-
-    case {Keyword.get(opts, :lat), Keyword.get(opts, :lng), Keyword.get(opts, :radius_km)} do
-      {lat, lng, radius_km} when is_number(lat) and is_number(lng) and is_number(radius_km) ->
-        Enum.filter(spaces, &within_radius?(&1, lat, lng, radius_km))
-
-      _ ->
-        spaces
-    end
-  end
-
-  defp within_radius?(space, lat, lng, radius_km) do
-    case Map.get(@city_coords, space.city) do
-      {city_lat, city_lng} -> haversine_km(lat, lng, city_lat, city_lng) <= radius_km
-      nil -> false
-    end
+    Enum.map(spaces, fn space ->
+      Map.put(space, :upcoming_events, Map.get(events_by_space, space.id, []))
+    end)
   end
 
   @earth_radius_km 6371.0
