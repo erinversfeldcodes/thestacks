@@ -18,7 +18,14 @@ defmodule Stacks.CircuitBreakers do
   | `:searxng_fuse`     | SearXNG discovery      | 5 in 60 s       | 5 min    |
   | `:r2_fuse`          | Cloudflare R2 storage  | 5 in 60 s       | 5 min    |
 
-  Per-store fuses are deferred to a follow-on issue.
+  Plus one fuse **per bookstore** (`:scraper_store_fuse_<store>`, same thresholds as
+  `:scraper_fuse`), created on first use via `store_fuse/1`. `:scraper_fuse` covers
+  the sidecar being unreachable — genuinely service-wide — while a store fuse
+  covers *that shop* failing. Without the split, one bad shop stopped price
+  scraping for all twelve, and kept doing so, since most causes recur on every
+  attempt. Store fuses are **not probed**: the only way to probe a bookshop is to
+  request from it, which is what the open circuit exists to prevent, so they
+  recover on the `{:reset, Ms}` backstop.
 
   ## Telemetry
 
@@ -67,6 +74,22 @@ defmodule Stacks.CircuitBreakers do
   @standard_spec {{:standard, 5, 60_000}, {:reset, 300_000}}
   # 3 failures in 60 s → open for 15 min (scraper is slower to recover)
   @scraper_spec {{:standard, 3, 60_000}, {:reset, 900_000}}
+
+  # Per-store fuses use the same thresholds as the service fuse: a hostile or
+  # broken shop is worth backing off from for as long as an unhealthy sidecar.
+  @store_spec @scraper_spec
+
+  # Upper bound on distinct per-store fuses.
+  #
+  # `:fuse` keys circuits by atom, and atoms are never garbage collected, so
+  # deriving one per store name is an unbounded-growth vector — store rows are
+  # operator-supplied and can be added at runtime. Past the cap, callers fall back
+  # to the shared service fuse: degraded isolation, but atom-table exhaustion is
+  # impossible by construction rather than merely unlikely. 256 is far above any
+  # realistic bookshop count (twelve are seeded today).
+  @max_store_fuses 256
+
+  @store_fuse_prefix "scraper_store_fuse_"
 
   @fuses [
     vision_fuse: @standard_spec,
@@ -124,6 +147,97 @@ defmodule Stacks.CircuitBreakers do
     end)
 
     :ok
+  end
+
+  @doc """
+  Fuse name for one bookstore's scraper circuit, installed on first use.
+
+  ## Why per-store
+
+  `:scraper_fuse` is shared by every store, and 3 failures open it for 15 minutes.
+  With twelve seeded shops that means **one bad shop stops price scraping for all
+  of them** — and since most causes recur on every attempt (a hostile site, a
+  broken selector, a rate limit), it would keep reopening. Store-scoped circuits
+  confine the damage to the store that caused it.
+
+  The two fuses cover different failure domains and both are consulted:
+
+  - `:scraper_fuse` — the sidecar itself is unreachable or rejecting us. Genuinely
+    service-wide, so keeping it shared is correct.
+  - this fuse — *this shop* is failing: an upstream HTTP error, a rate limit, a
+    missing config, or an extractor that cannot parse its pages.
+
+  Returns `:scraper_fuse` if `@max_store_fuses` distinct stores have already been
+  seen, so a pathological number of store rows cannot exhaust the atom table.
+  """
+  @spec store_fuse(String.t() | atom() | nil) :: atom()
+  def store_fuse(nil), do: :scraper_fuse
+
+  def store_fuse(store_name) do
+    key = store_name |> to_string() |> slugify()
+
+    case fuse_atom(key) do
+      nil ->
+        :scraper_fuse
+
+      name ->
+        ensure_installed(name, @store_spec)
+        name
+    end
+  end
+
+  # Only ever resolves an atom that already exists, or creates one while the
+  # registry is below its cap. `String.to_atom/1` is reached at most
+  # @max_store_fuses times per node.
+  defp fuse_atom(key) do
+    name = @store_fuse_prefix <> key
+
+    try do
+      String.to_existing_atom(name)
+    rescue
+      ArgumentError ->
+        if store_fuse_count() < @max_store_fuses do
+          String.to_atom(name)
+        else
+          Logger.warning(
+            "CircuitBreakers: #{@max_store_fuses} per-store fuses already allocated; " <>
+              "falling back to the shared :scraper_fuse for #{key}"
+          )
+
+          nil
+        end
+    end
+  end
+
+  defp store_fuse_count do
+    :persistent_term.get({__MODULE__, :store_fuse_count}, 0)
+  end
+
+  defp ensure_installed(name, spec) do
+    case :fuse.ask(name, :sync) do
+      {:error, :not_found} ->
+        :fuse.install(name, spec)
+
+        :persistent_term.put(
+          {__MODULE__, :store_fuse_count},
+          store_fuse_count() + 1
+        )
+
+        Logger.debug("CircuitBreakers: installed #{name}")
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  # Store identifiers are paths like "za/exclusive_books"; normalise to something
+  # readable in logs and telemetry rather than hashing.
+  defp slugify(name) do
+    name
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "_")
+    |> String.trim("_")
   end
 
   @doc """
@@ -429,6 +543,20 @@ defmodule Stacks.CircuitBreakers do
         Logger.info("CircuitBreakers: #{fuse_name} recovered via probe")
         state
 
+      # No probe exists for this fuse, so there is nothing to retry — it recovers
+      # on the `{:reset, Ms}` backstop instead. Per-store fuses are deliberately in
+      # this category: the only way to probe a bookshop is to make a request to it,
+      # which is precisely what the open circuit exists to avoid. Rescheduling here
+      # would log every 15s for the full 15-minute window and never succeed.
+      {:error, :no_probe} ->
+        :telemetry.execute(
+          [:stacks, :fuse, :probe_failed],
+          %{},
+          %{fuse_name: fuse_name, reason: :no_probe}
+        )
+
+        state
+
       {:error, reason} ->
         :telemetry.execute(
           [:stacks, :fuse, :probe_failed],
@@ -451,7 +579,9 @@ defmodule Stacks.CircuitBreakers do
     probe_fn = Map.get(overrides, fuse_name) || Map.get(@probes, fuse_name)
 
     if is_nil(probe_fn) do
-      Logger.warning("CircuitBreakers: no probe configured for #{fuse_name}")
+      # Debug, not warning: for per-store fuses this is the designed state, not a
+      # misconfiguration. They recover on the backstop timer.
+      Logger.debug("CircuitBreakers: no probe configured for #{fuse_name}")
       {:error, :no_probe}
     else
       probe_fn.()
