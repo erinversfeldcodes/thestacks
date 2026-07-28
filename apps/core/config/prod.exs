@@ -1,7 +1,10 @@
 import Config
 
 config :core, CoreWeb.Endpoint,
-  url: [host: "thestacks.fly.dev", port: 443, scheme: "https"],
+  # runtime.exs overwrites :url from PHX_HOST, so this is the build-time
+  # fallback only. Kept in step with the real domain so a misconfigured deploy
+  # fails over to the right host rather than a stale one.
+  url: [host: "readinginthestacks.com", port: 443, scheme: "https"],
   cache_static_manifest: "priv/static/cache_manifest.json",
   server: true
 
