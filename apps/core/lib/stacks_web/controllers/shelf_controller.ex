@@ -106,13 +106,25 @@ defmodule StacksWeb.ShelfController do
     end
   end
 
+  # ⚠️ Deliberately does NOT carry a `placements` key.
+  #
+  # It used to carry `placements: []` — hardcoded, for every shelf, however many books were
+  # on it. A client that decoded this endpoint therefore got a structurally valid answer
+  # that was factually wrong, and the SPA repainted an owner's bookcase from it after every
+  # shelf mutation: the books disappeared, a full shelf read as "empty", and the delete
+  # affordance lit up on a shelf the server refuses to delete.
+  #
+  # Populating it honestly would mean visibility-resolving every placement, which is
+  # `BookshelfController.show`'s job (`ProtoJSON.shelf_with_placements/3`) — duplicating
+  # that here would be a second answer to the same question. So this endpoint answers only
+  # what it owns: shelf identity and order. Callers that need the books ask for the
+  # bookshelf. An absent key fails loudly at the decoder; an empty one lies quietly.
   defp shelf_json(shelf) do
     %{
       id: shelf.id,
       bookshelf_id: shelf.bookshelf_id,
       position: shelf.position,
-      created_at: shelf.created_at,
-      placements: []
+      created_at: shelf.created_at
     }
   end
 end

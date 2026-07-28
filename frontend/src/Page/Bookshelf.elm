@@ -375,6 +375,12 @@ handleOrganiser subMsg model =
         ( ShelfOrganiser.DragEnd, _, _ ) ->
             ( { model | organiser = { dragging = Nothing } }, Cmd.none, NoOut )
 
+        ( ShelfOrganiser.DragOver, _, _ ) ->
+            -- ⚠️ Must leave `dragging` alone. `dragover` fires continuously while a row is
+            -- hovered, so anything that clears the drag state here makes every drop a
+            -- silent no-op — which is exactly the bug this clause replaced.
+            ( model, Cmd.none, NoOut )
+
         ( ShelfOrganiser.DropOn targetId, Just token, Success shelves ) ->
             case model.organiser.dragging of
                 Just draggedId ->
@@ -428,15 +434,26 @@ moveToId draggedId targetId shelves =
             shelves
 
 
+{-| Refetch after a shelf mutation.
+
+⚠️ **Uses `getBookshelf` — the same call as the initial load — and that is the whole point.**
+This used to call `Api.getShelves` (`GET /api/bookshelves/:name/shelves`), whose payload
+carried a hardcoded empty `placements` list for every shelf. So adding, removing or
+reordering a shelf repainted the bookcase from placement-less shelves: nineteen books
+vanished, the organiser labelled a full shelf "empty", and `Remove` became enabled on a
+shelf the server would refuse to delete. Found by driving a preview; no unit test on either
+side of the wire could see it, because each half was self-consistent.
+
+Refetching the whole bookshelf also picks up `visibility` rather than carrying the stale
+value forward, and means there is exactly one shape and one decoder for "this bookshelf's
+shelves" — the two paths cannot drift apart again.
+
+-}
 reloadShelves : Model -> Cmd Msg
 reloadShelves model =
     case model.token of
         Just token ->
-            Api.getShelves model.config.apiName
-                token
-                (ShelvesLoaded (requestKey model.config)
-                    << Result.map (\shelves -> { shelves = shelves, visibility = model.visibility })
-                )
+            Api.getBookshelf model.config.apiName token (ShelvesLoaded (requestKey model.config))
 
         Nothing ->
             Cmd.none

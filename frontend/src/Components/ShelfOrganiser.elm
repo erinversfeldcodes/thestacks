@@ -64,6 +64,7 @@ type Msg
     | MoveDown String
     | DragStart String
     | DragEnd
+    | DragOver
     | DropOn String
 
 
@@ -263,9 +264,22 @@ classIf cond name =
         class ""
 
 
-{-| `dragover` must be prevented or the browser refuses the drop — the one piece of HTML5
-drag-and-drop that is pure ceremony and silently breaks the feature if omitted.
+{-| `dragover` must be prevented or the browser refuses the drop.
+
+⚠️ **It must carry `DragOver`, which does nothing — not `DragEnd`, which cancels the drag.**
+This originally sent `DragEnd` on the reasoning that the message was irrelevant and only
+`preventDefault` mattered. It was not irrelevant: `DragEnd` clears `dragging`, and `dragover`
+fires _continuously_ while the pointer is over a row, so `dragging` was always `Nothing` by
+the time `drop` arrived. `DropOn`'s `Nothing` branch then returned silently and **no drop ever
+reordered anything**. Drag-and-drop could not have worked in any browser.
+
+Proven on a preview, 2026-07-28: `dragstart` → `drop` reorders; `dragstart` → `dragover` →
+`drop` does nothing. The difference is this one message.
+
+So `DragOver` exists purely to be inert, and that is the point — a message with no handler
+body is safe here, whereas reusing a meaningful one is not.
+
 -}
 preventDefaultOn : String -> Html.Attribute Msg
 preventDefaultOn event =
-    Html.Events.preventDefaultOn event (Decode.succeed ( DragEnd, True ))
+    Html.Events.preventDefaultOn event (Decode.succeed ( DragOver, True ))
