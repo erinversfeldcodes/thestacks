@@ -23,6 +23,28 @@ pub struct RobotsPolicy {
     pub allowed: bool,
     /// `Crawl-delay` from the matching group, if declared.
     pub crawl_delay_secs: Option<u32>,
+    /// The `Disallow` pattern that blocked this path — `Some` **only** when
+    /// `allowed` is false, so the field means exactly one thing and cannot be
+    /// misread as "the rule we matched".
+    ///
+    /// Carried because a block needs to be *observable state* on the store rather
+    /// than a silent skip: without the rule, an operator seeing a blocked store has
+    /// no way to tell whether the disallow was narrow (`/search`) or total (`/`),
+    /// and therefore no way to know whether the store is permanently unscrapable or
+    /// merely needs a different path.
+    pub blocked_by: Option<String>,
+}
+
+impl RobotsPolicy {
+    /// The policy for "nothing restricts us" — no document, no matching group, or a
+    /// 4xx on robots.txt (RFC 9309 §2.3.1.3).
+    pub fn unrestricted() -> Self {
+        Self {
+            allowed: true,
+            crawl_delay_secs: None,
+            blocked_by: None,
+        }
+    }
 }
 
 /// One `User-agent` group from a robots.txt document.
@@ -166,18 +188,8 @@ fn classify_status(status: u16) -> StatusVerdict {
 /// Apply a resolved robots.txt document to a path.
 fn evaluate(doc: &RobotsDoc, path: &str) -> RobotsPolicy {
     let txt = match doc {
-        RobotsDoc::Absent => {
-            return RobotsPolicy {
-                allowed: true,
-                crawl_delay_secs: None,
-            };
-        }
-        RobotsDoc::Rules(t) if t.trim().is_empty() => {
-            return RobotsPolicy {
-                allowed: true,
-                crawl_delay_secs: None,
-            };
-        }
+        RobotsDoc::Absent => return RobotsPolicy::unrestricted(),
+        RobotsDoc::Rules(t) if t.trim().is_empty() => return RobotsPolicy::unrestricted(),
         RobotsDoc::Rules(t) => t,
     };
     parse_and_apply(txt, path)
@@ -208,14 +220,12 @@ fn parse_and_apply(txt: &str, request_path: &str) -> RobotsPolicy {
         .or_else(|| groups.iter().find(|g| g.wildcard));
 
     let Some(group) = group else {
-        return RobotsPolicy {
-            allowed: true,
-            crawl_delay_secs: None,
-        };
+        return RobotsPolicy::unrestricted();
     };
 
-    // §2.2.2: longest matching pattern wins; Allow wins ties.
-    let mut best: Option<(usize, bool)> = None;
+    // §2.2.2: longest matching pattern wins; Allow wins ties. The winning pattern is
+    // carried alongside the verdict so a disallow can name the rule that caused it.
+    let mut best: Option<(usize, bool, &str)> = None;
     for (pattern, allowed) in &group.rules {
         if !path_matches(pattern, request_path) {
             continue;
@@ -224,17 +234,24 @@ fn parse_and_apply(txt: &str, request_path: &str) -> RobotsPolicy {
         let replaces = match best {
             None => true,
             // Allow replaces at equal-or-greater length; Disallow only when strictly longer.
-            Some((s, _)) if *allowed => spec >= s,
-            Some((s, _)) => spec > s,
+            Some((s, _, _)) if *allowed => spec >= s,
+            Some((s, _, _)) => spec > s,
         };
         if replaces {
-            best = Some((spec, *allowed));
+            best = Some((spec, *allowed, pattern));
         }
     }
 
+    let allowed = best.is_none_or(|(_, allowed, _)| allowed);
+
     RobotsPolicy {
-        allowed: best.is_none_or(|(_, allowed)| allowed),
+        allowed,
         crawl_delay_secs: group.crawl_delay_secs,
+        // Only populated on a disallow — see the field's doc comment.
+        blocked_by: match best {
+            Some((_, false, pattern)) => Some(format!("Disallow: {pattern}")),
+            _ => None,
+        },
     }
 }
 
@@ -404,6 +421,47 @@ mod tests {
         assert!(!apply(robots, "/admin/users").allowed);
 
         assert!(!apply("User-agent: *\nDisallow: /\n", "/search").allowed);
+    }
+
+    #[test]
+    fn test_blocked_by_names_the_rule_that_blocked_us() {
+        // A block has to be recordable as observable state on the store, and the rule
+        // is what makes it actionable: `/search` means try another path, `/` means the
+        // store is unscrapable. Without the rule an operator cannot tell them apart.
+        let narrow = apply("User-agent: *\nDisallow: /search\n", "/search");
+        assert!(!narrow.allowed);
+        assert_eq!(narrow.blocked_by.as_deref(), Some("Disallow: /search"));
+
+        let total = apply("User-agent: *\nDisallow: /\n", "/events");
+        assert!(!total.allowed);
+        assert_eq!(total.blocked_by.as_deref(), Some("Disallow: /"));
+    }
+
+    #[test]
+    fn test_blocked_by_reports_the_winning_rule_not_the_first_match() {
+        // §2.2.2 picks the longest match, so the recorded rule must be the one that
+        // actually decided the verdict — reporting the first match would name a rule
+        // that was overruled.
+        let robots = "User-agent: *\nDisallow: /a\nAllow: /a/b\nDisallow: /a/b/c\n";
+        let policy = apply(robots, "/a/b/c/x");
+        assert!(!policy.allowed);
+        assert_eq!(policy.blocked_by.as_deref(), Some("Disallow: /a/b/c"));
+    }
+
+    #[test]
+    fn test_blocked_by_is_none_when_allowed() {
+        // The field means exactly one thing: "the rule that blocked us". Populating it
+        // on an allow would make it read as "the rule we matched" and invite a caller
+        // to record a block that never happened.
+        assert_eq!(
+            apply("User-agent: *\nAllow: /\n", "/events").blocked_by,
+            None
+        );
+        assert_eq!(
+            apply("User-agent: *\nDisallow: /admin\n", "/events").blocked_by,
+            None
+        );
+        assert_eq!(RobotsPolicy::unrestricted().blocked_by, None);
     }
 
     #[test]

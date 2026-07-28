@@ -2,7 +2,10 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
   use Core.DataCase, async: true
   use Oban.Testing, repo: Core.Repo
 
+  alias Core.Repo
+  alias Stacks.Enrichment.Bookstore
   alias Stacks.Enrichment.Events
+  alias Stacks.Enrichment.MockScraperClient
   alias Stacks.Workers.DiscoverBookstoreEventsJob
 
   import Stacks.Factory
@@ -21,6 +24,119 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
       job = %Oban.Job{args: %{"batch" => true}}
       assert :ok = DiscoverBookstoreEventsJob.perform(job)
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Compliance — the egress (campaign C3) and the recorded block (C4)
+  # ---------------------------------------------------------------------------
+
+  describe "compliance: the events page is fetched through the compliant egress" do
+    setup do
+      on_exit(&MockScraperClient.clear/0)
+      :ok
+    end
+
+    test "a store with no scraper config is never fetched" do
+      # The guarantee is structural, not a policy check: the egress is keyed by scraper
+      # config, which supplies the base URL and the rate limit. No config means no
+      # declared crawl policy, so the store cannot be fetched at all.
+      store = insert(:bookstore, scraper_module: nil, website_url: "https://example.test")
+
+      assert :ok = DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"batch" => true}})
+
+      refute_any_fetch_of(store)
+    end
+
+    test "a robots disallow is recorded on the store with the rule that caused it" do
+      store = insert(:bookstore, scraper_module: "za/test_store")
+
+      MockScraperClient.put_page(
+        "za/test_store",
+        "/events",
+        {:error, {:robots_blocked, "Disallow: /"}}
+      )
+
+      assert :ok =
+               DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
+
+      reloaded = Repo.get!(Bookstore, store.id)
+
+      assert reloaded.robots_blocked_path == "/events"
+      assert reloaded.robots_blocked_rule == "Disallow: /"
+
+      assert reloaded.robots_blocked_at,
+             "a block with no timestamp cannot be re-checked, so it would be permanent"
+    end
+
+    test "a disallow does not fail the job, because retrying cannot succeed" do
+      # Reporting a disallow as an error would melt the store's fuse on every run, for
+      # a condition that recurs by definition — and the shared service fuse with it.
+      store = insert(:bookstore, scraper_module: "za/test_store")
+
+      MockScraperClient.put_page(
+        "za/test_store",
+        "/events",
+        {:error, {:robots_blocked, "Disallow: /events"}}
+      )
+
+      assert :ok =
+               DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
+    end
+
+    test "a later successful fetch clears the block, so a lifted disallow resumes" do
+      # Without this the store stays marked blocked forever and "re-checked on the probe
+      # cadence" is a claim with nothing behind it.
+      store =
+        insert(:bookstore,
+          scraper_module: "za/test_store",
+          robots_blocked_path: "/events",
+          robots_blocked_rule: "Disallow: /",
+          robots_blocked_at: DateTime.utc_now()
+        )
+
+      MockScraperClient.put_page(
+        "za/test_store",
+        "/events",
+        {:ok, %{status: 200, body: "<h2>A Reading</h2><p>2026-09-01</p>"}}
+      )
+
+      assert :ok =
+               DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
+
+      reloaded = Repo.get!(Bookstore, store.id)
+
+      assert is_nil(reloaded.robots_blocked_path)
+      assert is_nil(reloaded.robots_blocked_rule)
+
+      assert is_nil(reloaded.robots_blocked_at),
+             "all three move together — a half-cleared block reads as 'blocked, reason unknown'"
+    end
+
+    test "a 404 events page is data, not a failure" do
+      # Plenty of shops have no /events page. Treating that as a failure would melt the
+      # store's fuse for a condition that is simply true of the shop.
+      store = insert(:bookstore, scraper_module: "za/test_store")
+      MockScraperClient.put_page("za/test_store", "/events", {:ok, %{status: 404, body: ""}})
+
+      assert :ok =
+               DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
+
+      assert is_nil(Repo.get!(Bookstore, store.id).robots_blocked_path),
+             "a missing page is not a robots block"
+    end
+  end
+
+  # Asserts directly on the egress rather than on a downstream side effect: "no events
+  # were persisted" would also hold if the fetch happened and returned nothing
+  # parseable, which is the wrong-selector failure mode wearing the right answer's face.
+  defp refute_any_fetch_of(store) do
+    fetched = Enum.map(MockScraperClient.fetches(), fn {s, _p} -> s end)
+
+    refute store.scraper_module in fetched,
+           "store #{store.name} was fetched despite having no scraper config"
+
+    refute nil in fetched,
+           "a fetch was attempted with a nil store key — the config gate did not hold"
   end
 
   describe "parse_events/2" do
@@ -78,17 +194,13 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
   end
 
-  describe "build_events_url/1" do
-    test "appends /events to website URL" do
-      assert DiscoverBookstoreEventsJob.build_events_url("https://example.com") ==
-               "https://example.com/events"
-    end
-
-    test "handles trailing slash" do
-      assert DiscoverBookstoreEventsJob.build_events_url("https://example.com/") ==
-               "https://example.com/events"
-    end
-  end
+  # `build_events_url/1` and its two tests were removed when the job moved onto the
+  # scraper's compliant egress. It concatenated a caller-supplied host with "/events";
+  # the egress now resolves a *relative* path against the store's configured base URL,
+  # which is what stops a caller steering the rate-limited, robots-checked channel at
+  # another host. The trailing-slash handling those tests covered lives in Rust's
+  # `fetch_path` (`trim_end_matches('/')`) and is tested there, so no coverage was lost
+  # — the behaviour moved rather than disappeared.
 
   describe "parse_events/2 edge cases" do
     test "parses h3 tags as well as h2" do
