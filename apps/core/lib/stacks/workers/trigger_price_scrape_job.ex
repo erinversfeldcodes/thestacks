@@ -27,6 +27,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
   alias Stacks.Enrichment.PricePipeline
   alias Stacks.Enrichment.Prices
   alias Stacks.Monitoring
+  alias Stacks.Workers.BuildScraperIndexJob
 
   @impl true
   def perform(%Oban.Job{args: %{"batch" => true}}) do
@@ -212,6 +213,34 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
     )
 
     {:determined, :robots_blocked}
+  end
+
+  # The store needs an ISBN index and none exists. Build one, then this ISBN resolves
+  # on the next attempt.
+  #
+  # This is what keeps the four index-needing shops working without depending on a
+  # schedule: the index lives in the scraper service's process and dies with it, so a
+  # restart would otherwise leave them unpriceable until the nightly rebuild. Reacting
+  # to the outcome makes the cron a belt-and-braces refresh rather than the only path.
+  #
+  # Not counted as a failure: nothing is broken, we simply cannot answer yet.
+  defp interpret(%{"outcome" => "SCRAPE_OUTCOME_INDEX_REQUIRED"}, ctx) do
+    %{isbn: isbn, store_name: store_name} = ctx
+
+    Monitoring.record_success(store_name, "scraper_config")
+
+    # Deduplicated by Oban, so a hundred lookups against an unindexed store enqueue
+    # one build rather than a hundred.
+    %{store: store_name}
+    |> BuildScraperIndexJob.new(unique: [period: 3600, fields: [:worker, :args]])
+    |> Oban.insert()
+
+    Logger.info(
+      "TriggerPriceScrapeJob: #{store_name} needs an ISBN index for isbn=#{isbn}; " <>
+        "build enqueued"
+    )
+
+    {:determined, :index_required}
   end
 
   # Our extractor is broken for this store. Recorded against per-source health

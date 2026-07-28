@@ -208,6 +208,7 @@ mod outcome {
     pub const NOT_STOCKED: &str = "SCRAPE_OUTCOME_NOT_STOCKED";
     pub const ROBOTS_BLOCKED: &str = "SCRAPE_OUTCOME_ROBOTS_BLOCKED";
     pub const EXTRACTOR_FAILED: &str = "SCRAPE_OUTCOME_EXTRACTOR_FAILED";
+    pub const INDEX_REQUIRED: &str = "SCRAPE_OUTCOME_INDEX_REQUIRED";
 }
 
 /// Decide whether an engine error is a *determination* or a *failure*.
@@ -233,12 +234,12 @@ fn outcome_for_error(e: &ScraperError) -> Option<&'static str> {
         // most common one once pricing is per-edition.
         ScraperError::NotStocked { .. } => Some(outcome::NOT_STOCKED),
 
-        // We cannot ask this store about this ISBN yet — a gap in our capability,
-        // not a fact about the book. Reported as an extractor failure so it counts
-        // against this store's own circuit and shows up in per-source health,
-        // rather than being mistaken for "not stocked" and recorded as a price of
-        // nothing.
-        ScraperError::IndexRequired { .. } => Some(outcome::EXTRACTOR_FAILED),
+        // We cannot ask this store about this ISBN yet. Its own outcome rather than
+        // an extractor failure, because it is *actionable*: the caller builds the
+        // index and retries, instead of recording a defect against a store that is
+        // working fine. Still emphatically not NOT_STOCKED — we do not know whether
+        // the shop carries the book.
+        ScraperError::IndexRequired { .. } => Some(outcome::INDEX_REQUIRED),
 
         // We fetched a page and our selector found nothing. Our defect, but a
         // per-store one — it says nothing about the health of the service, so it
@@ -503,17 +504,18 @@ mod tests {
     }
 
     #[test]
-    fn needing_an_index_is_not_reported_as_not_stocked() {
-        // We do not know whether the shop has the book, only that we cannot ask.
-        // Reporting NOT_STOCKED here would record a false negative as though it were
-        // a fact about the shop's stock.
+    fn needing_an_index_is_actionable_and_not_not_stocked() {
+        // Its own outcome, so the caller can build the index and retry. Reporting
+        // NOT_STOCKED would record a false negative as a fact about the shop's stock;
+        // reporting EXTRACTOR_FAILED would blame a store that is working fine.
         let e = ScraperError::IndexRequired {
             store: "za/wordsworth".to_string(),
             isbn: "9780723263661".to_string(),
         };
         let verdict = outcome_for_error(&e);
-        assert_eq!(verdict, Some(outcome::EXTRACTOR_FAILED));
+        assert_eq!(verdict, Some(outcome::INDEX_REQUIRED));
         assert_ne!(verdict, Some(outcome::NOT_STOCKED));
+        assert_ne!(verdict, Some(outcome::EXTRACTOR_FAILED));
     }
 
     #[test]
