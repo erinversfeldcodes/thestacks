@@ -285,7 +285,7 @@ if config_env() == :prod do
         You can generate one by calling: mix phx.gen.secret
         """
 
-    host = System.get_env("PHX_HOST") || "thestacks.fly.dev"
+    host = System.get_env("PHX_HOST") || "readinginthestacks.com"
     port = String.to_integer(System.get_env("PORT") || "4000")
 
     config :core, CoreWeb.Endpoint,

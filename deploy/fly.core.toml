@@ -10,7 +10,12 @@ kill_timeout = "5s"
   release_command = "/app/bin/core eval 'Stacks.Release.migrate()'"
 
 [env]
-  PHX_HOST = "thestacks.fly.dev"
+  # The production domain (certs linked to this app). Phoenix builds absolute
+  # URLs from this — confirmation and password-reset links above all.
+  # NOTE: scripts/deploy-stack.sh sets PHX_HOST as a Fly *secret*, which
+  # overrides this [env] value. Both are kept correct so a bare `fly deploy`
+  # and a scripted deploy agree; previews get "${CORE_APP}.fly.dev" instead.
+  PHX_HOST = "readinginthestacks.com"
   PORT = "4000"
   ECTO_IPV6 = "true"
   SEARXNG_URL = "http://thestacks-searxng.internal:8080"
@@ -20,6 +25,19 @@ kill_timeout = "5s"
   force_https = true
   auto_stop_machines = true
   auto_start_machines = true
+  # Scale to zero when idle. `0` is CORRECT, not merely tolerated: Oban's Cron
+  # plugin fires only while a node is up and does not backfill, which used to
+  # make this look like a correctness risk — but every non-staleness case (price
+  # refresh, scraper index build, listing expiry, source discovery) was made
+  # event-driven during the 2026-07-27 campaign, and ImageRetentionJob is a
+  # safety net rather than a guarantee. Nothing breaks by scaling to zero.
+  #
+  # The remaining cost is purely LATENCY: a cold hit 502s while the machine
+  # boots, which reads as a broken site and is also the `auth.setup` E2E flake
+  # (#171/#177). Raising this to 1 is the fix and is deferred by decision
+  # (owner, 2026-07-28) — to be addressed with latency work, not correctness.
+  #
+  # ⚠️ Do not reason backwards from this line to "the crons are reliable".
   min_machines_running = 0
 
   [http_service.concurrency]
