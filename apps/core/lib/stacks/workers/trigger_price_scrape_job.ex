@@ -159,6 +159,11 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
     Monitoring.record_success(store_name, "scraper_config")
 
+    # This ISBN demonstrably resolves at this store, which is exactly what a canary
+    # needs to be. If it ever stops resolving, what we believe about the store is no
+    # longer supported by evidence.
+    Prices.note_canary(store, ctx.isbn)
+
     {:ok,
      %{
        "book_edition_id" => edition_id,
@@ -173,10 +178,23 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
   # The shop does not carry this edition. A correct, permanent answer — the source
   # is healthy, there is simply no price to record.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_NOT_STOCKED"}, ctx) do
-    %{isbn: isbn, store_name: store_name} = ctx
+    %{isbn: isbn, store: store, store_name: store_name} = ctx
 
     Monitoring.record_success(store_name, "scraper_config")
-    Logger.debug("TriggerPriceScrapeJob: #{store_name} does not stock isbn=#{isbn}")
+
+    # An ordinary edition going out of stock is normal. The *canary* going missing is
+    # not: it is an ISBN we previously priced here, so its disappearance means the
+    # store changed underneath us in a way capability detection cannot see — the
+    # platform still answers and still looks the same, but the mapping has stopped
+    # working. `canary_failed/2` clears the capability so it is re-derived.
+    case Prices.canary_failed(store, isbn) do
+      :ok ->
+        :ok
+
+      :not_canary ->
+        Logger.debug("TriggerPriceScrapeJob: #{store_name} does not stock isbn=#{isbn}")
+    end
+
     {:determined, :not_stocked}
   end
 
