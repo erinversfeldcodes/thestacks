@@ -10,6 +10,12 @@ select
     has_physical,
     country_code,
     scraper_module,
+    price_source,
+    isbn_location,
+    lookup_mode,
+    capability_probed_at,
+    canary_isbn,
+    robots_blocked_path,
     created_at,
     updated_at
 from {{ source('op', 'bookstores') }}
