@@ -94,6 +94,51 @@ def issue_path(num):
     hits = glob.glob(f"issues/{int(num):03d}-*.md") + glob.glob(f"issues/complete/{int(num):03d}-*.md")
     return hits[0] if hits else None
 
+def epic_rollup(num):
+    """Walk the hierarchy the orchestrator already maintains, so this script reports the real
+    state instead of a second opinion about it:
+
+        campaign state (this file)  ->  plans/<root>-<slug>-epic-state.json  ->  plans/NNN-*-state.json
+
+    A wave becomes ONE epic issue; epic mode spins out children and records them in `children`
+    with `depends_on` / `merged`; each child has its own per-phase state file. Returns a
+    one-line summary, or None when the item is not an epic (a plain issue, or not started).
+    """
+    hits = glob.glob(f"plans/{int(num)}-*-epic-state.json")
+    if not hits:
+        return None
+    try:
+        epic = json.load(open(hits[0]))
+    except Exception:
+        return f"epic state unreadable: {hits[0]}"
+    children = epic.get("children") or {}
+    done = [c for c, v in children.items() if (v.get("status") or "").lower() in DONE]
+    merged = [c for c, v in children.items() if v.get("merged")]
+    blocked = [c for c, v in children.items() if (v.get("status") or "").lower() == "blocked"]
+    phases = []
+    for cnum, cval in children.items():
+        sf = cval.get("state_file")
+        if sf and os.path.exists(sf):
+            try:
+                cs = json.load(open(sf))
+                ph = cs.get("phases") or {}
+                cdone = sum(1 for v in ph.values() if (v.get("status") or "").lower() in DONE)
+                if ph:
+                    phases.append(f"#{cnum} {cdone}/{len(ph)}ph")
+            except Exception:
+                pass
+    bits = [f"children {len(done)}/{len(children)} done, {len(merged)} merged"]
+    if blocked:
+        bits.append(f"blocked: {', '.join(sorted(blocked))}")
+    if epic.get("ready_set"):
+        bits.append("ready: " + ", ".join(str(x) for x in epic["ready_set"]))
+    if phases:
+        bits.append(" ".join(phases))
+    if epic.get("discovered_issues"):
+        bits.append(f"discovered mid-epic: {len(epic['discovered_issues'])}")
+    bits.append("PR opened" if epic.get("pr_opened") else "PR not opened")
+    return " | ".join(bits)
+
 def dod_boxes(path):
     """Returns (unchecked, checked_without_evidence) from the Definition of Done section."""
     unchecked, no_ev, in_dod = [], [], False
@@ -188,6 +233,10 @@ for wname in sorted(waves, key=lambda w: (len(w), w)):
         print(f"{badge} {iname}{ref}: {item.get('title','')} [{item.get('status','unknown')}]{extra}")
         if note:
             print(f"      ↳ {note[:120]}")
+        if issue_num:
+            roll = epic_rollup(issue_num)
+            if roll:
+                print(f"      ⤷ epic #{issue_num}: {roll}")
     print()
 
 pending = state.get("human_decisions_pending") or []

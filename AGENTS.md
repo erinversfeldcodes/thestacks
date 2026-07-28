@@ -122,14 +122,14 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 - `staff-campaign` — the Staff Engineer's **Mode D**: the full range applied across the codebase,
   composed into one sequenced **Remediation Plan** (root-cause clusters, leverage ranking,
   dependency-ordered waves). The only mode that synthesises the others; plans, never implements.
-- `staff-execute` — the Staff Engineer's **Mode E**: builds a campaign's plan wave by wave. **The
-  only mode that writes production code.** Runs until `just wave-status <slug>` reports the wave
-  green, stopping for exactly three things — an untaken decision, an irreversible action, or a
-  discovery that changes the plan's shape — and never to report progress. Every item gets a real
-  `issues/NNN-*.md` before any code, and progress lives in `plans/<slug>-state.json` so a fresh pass
-  resumes without being told anything. Added 2026-07-28: Modes A–D all end at a report, so "now
-  implement the plan" had no harness and drifted into continuous pausing plus waves declared
-  finished that weren't.
+- `staff-execute` — the Staff Engineer's **Mode E**: gets a campaign's plan built by turning each
+  wave into **one epic issue** and driving the orchestrator's **Epic Parallel Execution** — it does
+  **not** reimplement execution. Its contribution is the persona's bar written into the epic's DoD
+  (live drive, mutation probe, wiring trace, `gdpr-review` where the diff touches user data) plus a
+  Mode B shadow review before the PR. Runs until `just wave-status <slug>` is green; stops only at
+  epic mode's batched stops plus a plan-shape discovery — never to report progress. Added
+  2026-07-28: Modes A–D end at a report, and Mode D emitted *waves of ad-hoc labels* rather than
+  epics, so the campaign could not hand off to the ticket-driven flow that works.
 - `staff-phase-audit` — the Staff Engineer's assessment of a **phase** of
   `docs/implementation-mapping.md` against `notes/` and against reality. Uniquely asks whether the
   **story set itself** is complete (missing recovery/unhappy-path/second-actor stories), alongside

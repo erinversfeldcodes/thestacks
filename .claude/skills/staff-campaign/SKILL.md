@@ -157,8 +157,17 @@ coverage table, reconnaissance numbers, root findings clustered with their sympt
 the ladder-wins group, dependency-ordered waves of issues, what's deliberately excluded, and what
 the whole thing costs and buys.
 
-Then, **on human approval only**: issues via `create-issue` in dependency order, handed to the
-orchestrator for execution.
+Then, **on human approval only**: **one epic issue per wave** via `create-issue`, in dependency
+order, each wave's items recorded as **phases inside its epic** (not as invented ticket files — the
+orchestrator spins out the real children during its own flow, and a cited `#NNN` with no backing
+file is its own defect). Execution is **Mode E (`staff-execute`)**, which forms the epics, writes
+the persona's bar into their DoD, and drives the orchestrator's Epic Parallel Execution — the flow
+that already works and is ticket-driven.
+
+⚠️ **Emitting waves of ad-hoc labels instead of epics is what broke the 2026-07-27 handoff.** `G1`,
+`G4`, `C3`, `P7` are a work-unit type no tooling here reads: no issue file, no DoD, no state. The
+campaign could not hand off to the machinery that works, so the plan was carried by hand and
+execution happened outside any harness.
 
 ## Guardrails
 
