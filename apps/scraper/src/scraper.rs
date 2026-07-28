@@ -10,6 +10,21 @@ use std::collections::HashMap;
 /// User-agent string for HTTP requests.
 const USER_AGENT: &str = "TheStacksScraper/0.1 (+https://thestacks.app/scraper)";
 
+/// How long to wait when a bulk sweep hits a store's rate limit.
+///
+/// The limiter uses a sliding 60-second window, so a wait shorter than the window
+/// risks spinning. Only the index build waits; a price lookup surfaces the limit to
+/// its caller instead of holding a request open.
+const RATE_LIMIT_BACKOFF_SECS: u64 = 7;
+
+/// Most pages of `/products.json` to walk when building a store's ISBN index.
+///
+/// At 250 products per page this covers 5,000 titles, which is comfortably above the
+/// independent bookshops on the target list. The cap exists so a shop with an
+/// unexpectedly enormous catalogue costs a known maximum instead of an open-ended
+/// sweep; a store that needs more than this is a decision, not a default.
+const MAX_INDEX_PAGES: u32 = 20;
+
 /// Requests per minute to actually use: the stricter of what robots.txt asks for
 /// and what the store config declares.
 ///
@@ -58,6 +73,13 @@ pub struct Engine {
     /// deliberate: a replatformed shop gets re-observed rather than remembered
     /// wrongly.
     capabilities: dashmap::DashMap<String, Capability>,
+    /// Per-store ISBN→product-path index, built on demand for stores that cannot be
+    /// addressed by ISBN directly.
+    ///
+    /// In-process and transient: it dies with the node and is never persisted, which
+    /// is what keeps it a lookup aid rather than a copy of someone's catalogue. It
+    /// holds only ISBNs and paths — no titles, prices, descriptions or images.
+    indexes: dashmap::DashMap<String, std::collections::HashMap<String, String>>,
 }
 
 impl Engine {
@@ -75,6 +97,7 @@ impl Engine {
             fixtures: HashMap::new(),
             mock: false,
             capabilities: dashmap::DashMap::new(),
+            indexes: dashmap::DashMap::new(),
         })
     }
 
@@ -90,6 +113,7 @@ impl Engine {
             fixtures,
             mock: true,
             capabilities: dashmap::DashMap::new(),
+            indexes: dashmap::DashMap::new(),
         }
     }
 
@@ -171,7 +195,7 @@ impl Engine {
         store_id: &str,
         config: &ScraperConfig,
     ) -> Result<PriceResult, ScraperError> {
-        let capability = self.capability_for(store_id, config).await;
+        let capability = self.capability_for(store_id, config).await?;
 
         match capability.price_source {
             PriceSource::None => self.scrape(isbn, store_id, config).await,
@@ -190,21 +214,32 @@ impl Engine {
     /// shop is re-observed rather than remembered wrongly. A scheduled re-probe with
     /// a canary assertion is the remaining half of this (P3) and belongs in the
     /// Elixir side, which owns scheduling.
-    pub async fn capability_for(&self, store_id: &str, config: &ScraperConfig) -> Capability {
+    pub async fn capability_for(
+        &self,
+        store_id: &str,
+        config: &ScraperConfig,
+    ) -> Result<Capability, ScraperError> {
         // Mock mode must keep exercising the legacy fixture path: detection would
         // make real requests, and the fixtures are HTML, not product JSON.
         if self.mock {
-            return Capability::none();
+            return Ok(Capability::none());
         }
 
         if let Some(cached) = self.capabilities.get(store_id) {
-            return cached.value().clone();
+            return Ok(cached.value().clone());
         }
 
-        let detected = self
-            .detect_capability(config)
-            .await
-            .unwrap_or_else(|_| Capability::none());
+        // Errors are propagated, never folded into `Capability::none()`.
+        //
+        // That fold was a silent-wrong-behaviour bug, observed live: a rate-limited
+        // detection became "this store has no product API", which routed the scrape
+        // to the legacy CSS-selector path, produced a price-parse failure against
+        // HTML, melted the store's fuse, and persisted `price_source: "none"` as a
+        // fact about a shop that demonstrably has a Shopify API.
+        //
+        // "We could not observe" and "we observed nothing" are different claims, and
+        // only the second is worth recording.
+        let detected = self.detect_capability(config).await?;
 
         self.capabilities
             .insert(store_id.to_string(), detected.clone());
@@ -217,7 +252,7 @@ impl Engine {
             detected.lookup_mode
         );
 
-        detected
+        Ok(detected)
     }
 
     /// Look up one ISBN at one store using its observed platform capability.
@@ -284,10 +319,54 @@ impl Engine {
                 }
             }
 
-            // Everything else needs an ISBN→URL index we have not built. Explicitly
-            // *not* reported as "not stocked": we do not know whether the shop has
-            // the book, only that we cannot currently ask, and recording a guess
-            // would poison the data with false negatives.
+            // The ISBN is on the product but the handle is not it, so the product
+            // cannot be addressed directly. Build an ISBN→path index once, then use
+            // it. Four of the six Shopify targets are in this category (Wordsworth,
+            // Stellenbosch, Bridge, Clarke's).
+            (PriceSource::ShopifyProductsJson, LookupMode::LocalIndex)
+                if capability.isbn_location != platform::IsbnLocation::None =>
+            {
+                match self.index_lookup(isbn, store_id).await? {
+                    Some(path) => {
+                        let (status, body) = self.fetch_path(config, &format!("{path}.js")).await?;
+
+                        match status {
+                            200 => platform::shopify_product_js(&body, config.currency())?,
+                            // The index said this path exists and it no longer does —
+                            // the catalogue moved under us. Not "not stocked": we
+                            // cannot tell, and guessing would write a false negative.
+                            404 => {
+                                self.indexes.remove(store_id);
+
+                                return Err(ScraperError::IndexRequired {
+                                    store: store_id.to_string(),
+                                    isbn: isbn.to_string(),
+                                });
+                            }
+                            other => {
+                                return Err(ScraperError::PriceParse(format!(
+                                    "unexpected HTTP {other} from {path}.js"
+                                )));
+                            }
+                        }
+                    }
+
+                    // The whole catalogue was enumerated and this ISBN is not in it.
+                    // That is a real answer: the shop does not carry this edition.
+                    None => {
+                        return Err(ScraperError::NotStocked {
+                            store: store_id.to_string(),
+                            isbn: isbn.to_string(),
+                        });
+                    }
+                }
+            }
+
+            // No ISBN anywhere on this store's products, or no product API at all.
+            // Explicitly *not* reported as "not stocked": we do not know whether the
+            // shop has the book, only that we cannot ask. Fuzzy title matching is the
+            // remaining path and it needs our catalogue, which this service does not
+            // have — so it belongs a layer up.
             _ => {
                 return Err(ScraperError::IndexRequired {
                     store: store_id.to_string(),
@@ -316,6 +395,108 @@ impl Engine {
         })
     }
 
+    /// Look up a product path for `isbn` in this store's index.
+    ///
+    /// Consults the index; never builds it. See `build_index/2` for why.
+    async fn index_lookup(
+        &self,
+        isbn: &str,
+        store_id: &str,
+    ) -> Result<Option<String>, ScraperError> {
+        if let Some(index) = self.indexes.get(store_id) {
+            return Ok(index.get(isbn).cloned());
+        }
+
+        // No index yet, and building one here would be wrong: the sweep needs up to
+        // MAX_INDEX_PAGES requests, and the per-store rate limit is 10/min — so an
+        // inline build takes minutes and, worse, fails outright rather than waiting.
+        // Measured against Wordsworth: capability detection plus the first index page
+        // exhausted the budget and the request returned `rate limit exceeded`.
+        //
+        // Building belongs in `build_index/3`, driven on its own cadence. Until an
+        // index exists, say so — `IndexRequired`, never `NotStocked`, because we do
+        // not know whether the shop has the book.
+        Err(ScraperError::IndexRequired {
+            store: store_id.to_string(),
+            isbn: isbn.to_string(),
+        })
+    }
+
+    /// Build a store's ISBN→path index by walking `/products.json`.
+    ///
+    /// Separate from the lookup path on purpose: this is a bulk operation costing up
+    /// to `MAX_INDEX_PAGES` requests against a shop limited to a few per minute, so it
+    /// must run on its own cadence and never inside a price request.
+    ///
+    /// Retains only `(isbn, path)`. No titles, prices, descriptions or images, and
+    /// nothing is persisted — the map lives in this process and dies with it, which is
+    /// what keeps it a lookup aid rather than a copy of someone's catalogue.
+    pub async fn build_index(
+        &self,
+        store_id: &str,
+        config: &ScraperConfig,
+    ) -> Result<usize, ScraperError> {
+        // Paginated over /products.json, which is the only way to reach a product whose
+        // handle is not its ISBN. Pagination confirmed at 250 per page.
+        let mut index = std::collections::HashMap::new();
+
+        for page in 1..=MAX_INDEX_PAGES {
+            let path = format!("/products.json?limit=250&page={page}");
+
+            // A bulk sweep must *wait* for the rate limit, not fail on it. A single
+            // price lookup rightly returns an error and lets the caller back off, but
+            // a 20-page walk against a shop limited to a few requests a minute will
+            // hit the limit by design — treating that as failure is what made an
+            // inline build impossible. Measured against Wordsworth: capability
+            // detection plus one page exhausted the budget.
+            let (status, body) = loop {
+                match self.fetch_path(config, &path).await {
+                    Ok(response) => break response,
+                    Err(ScraperError::RateLimitExceeded { .. }) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMIT_BACKOFF_SECS))
+                            .await;
+                    }
+                    Err(e) => return Err(e),
+                }
+            };
+
+            if status != 200 {
+                break;
+            }
+
+            let listings = platform::shopify_products_json(&body)?;
+
+            if listings.is_empty() {
+                break;
+            }
+
+            // Retain everything *found* here, but only as (isbn → path): no titles,
+            // prices or descriptions, and nothing is persisted. Filtering to ISBNs we
+            // hold is impossible in this service — it does not know our catalogue —
+            // so minimality is achieved by what the entry can hold, not by the filter.
+            for entry in platform::index_entries(&listings, &|_| true) {
+                index.insert(entry.isbn, entry.product_path);
+            }
+
+            let page_was_full = listings.len() == 250;
+
+            if !page_was_full {
+                break;
+            }
+        }
+
+        tracing::info!(
+            "built ISBN index for store={} with {} entries",
+            store_id,
+            index.len()
+        );
+
+        let size = index.len();
+        self.indexes.insert(store_id.to_string(), index);
+
+        Ok(size)
+    }
+
     /// Observe what a store can do, with two cheap requests.
     ///
     /// Platform is derived rather than configured because bookshops replatform, and
@@ -326,19 +507,28 @@ impl Engine {
         config: &ScraperConfig,
     ) -> Result<Capability, ScraperError> {
         // Shopify first: it is 6 of 10 targets, so it is the likelier hit.
-        if let Ok((200, body)) = self.fetch_path(config, "/products.json?limit=50").await {
-            if let Ok(listings) = platform::shopify_products_json(&body) {
+        //
+        // A transport or rate-limit failure is propagated rather than treated as
+        // "not Shopify" — concluding absence from a failed question is how a
+        // rate-limited probe came to be recorded as a shop having no product API.
+        // Only a genuine non-200, or a 200 with nothing usable in it, is evidence.
+        let (shopify_status, shopify_body) =
+            self.fetch_path(config, "/products.json?limit=50").await?;
+
+        if shopify_status == 200 {
+            if let Ok(listings) = platform::shopify_products_json(&shopify_body) {
                 if !listings.is_empty() {
                     return Ok(platform::classify_shopify(&listings));
                 }
             }
         }
 
-        if let Ok((200, body)) = self
+        let (woo_status, woo_body) = self
             .fetch_path(config, "/wp-json/wc/store/v1/products?per_page=30")
-            .await
-        {
-            return Ok(platform::classify_woo(&body));
+            .await?;
+
+        if woo_status == 200 {
+            return Ok(platform::classify_woo(&woo_body));
         }
 
         // Neither API answered. Recorded as a fact about the store rather than
