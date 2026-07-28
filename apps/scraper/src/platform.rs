@@ -423,6 +423,65 @@ pub fn classify_woo(sample: &str) -> Capability {
     }
 }
 
+/// One entry of an ISBN→product-path index: a pointer, nothing more.
+///
+/// Deliberately carries no title, description, image or price. The owner's
+/// constraint is explicit — *"we aren't aiming to replicate their entire catalog on
+/// this site"* — and the compilation-copyright analysis says the same: bulk-retaining
+/// a shop's catalogue is more exposed than targeted per-ISBN lookups. So the sweep is
+/// transient and only the pointer survives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexEntry {
+    pub isbn: String,
+    /// Path relative to the store root, e.g. `/products/some-handle`.
+    pub product_path: String,
+    /// Which rung of the ladder produced the ISBN, so a shop whose ISBNs come only
+    /// from prose can be treated with appropriate suspicion.
+    pub isbn_source: IsbnLocation,
+}
+
+/// Build index entries from one page of a Shopify catalogue.
+///
+/// `retain` decides which ISBNs survive. Passing the ISBNs we already hold is what
+/// keeps this a pointer index rather than a copy of someone's catalogue: everything
+/// else is dropped before it is ever persisted.
+pub fn index_entries(
+    listings: &[ShopifyListing],
+    retain: &dyn Fn(&str) -> bool,
+) -> Vec<IndexEntry> {
+    listings
+        .iter()
+        .filter_map(|listing| {
+            let (isbn, source) = isbn_from_listing(listing)?;
+
+            if !retain(&isbn) {
+                return None;
+            }
+
+            Some(IndexEntry {
+                isbn,
+                product_path: format!("/products/{}", listing.handle),
+                isbn_source: source,
+            })
+        })
+        .collect()
+}
+
+/// Listings that carry no ISBN at all, paired with the title needed to match them.
+///
+/// These are the residual for stores like Ike's (0/50 products with an ISBN) where
+/// fuzzy title matching is the only remaining path. Returned as
+/// `(product_path, title)` so the matcher never sees, and cannot accidentally
+/// persist, anything else from the listing.
+pub fn unmatched_titles(listings: &[ShopifyListing]) -> Vec<(String, String)> {
+    listings
+        .iter()
+        .filter(|l| isbn_from_listing(l).is_none())
+        .filter(|l| !l.title.trim().is_empty())
+        .map(|l| (format!("/products/{}", l.handle), l.title.clone()))
+        .collect()
+}
+
 /// Convert a decimal price string (`"215.00"`, `"215"`, `"215.5"`) to cents.
 fn decimal_string_to_cents(s: &str) -> Option<i64> {
     let trimmed = s.trim();
@@ -788,6 +847,96 @@ mod tests {
         assert_eq!(cap.price_source, PriceSource::WooStoreApi);
         assert_eq!(cap.isbn_location, IsbnLocation::None);
         assert_eq!(cap.lookup_mode, LookupMode::LocalIndex);
+    }
+
+    #[test]
+    fn index_retains_only_isbns_we_hold() {
+        // The owner's constraint made mechanical: the sweep is transient and only
+        // pointers for books we already have survive it.
+        let listings = shopify_products_json(WORDSWORTH_PRODUCTS_JSON).unwrap();
+        let held = |isbn: &str| isbn == "9780723263661";
+
+        let entries = index_entries(&listings, &held);
+
+        assert_eq!(entries.len(), 1, "only the held ISBN should be retained");
+        assert_eq!(entries[0].isbn, "9780723263661");
+        assert_eq!(entries[0].product_path, "/products/peter-rabbit-book");
+        assert_eq!(entries[0].isbn_source, IsbnLocation::Sku);
+    }
+
+    #[test]
+    fn index_entries_carry_no_catalogue_content() {
+        // A pointer is 60-odd bytes: an ISBN, a path, and which rung found it. There
+        // is deliberately nowhere to put a title, price or description, so a future
+        // change cannot quietly start retaining them.
+        let listings = shopify_products_json(WORDSWORTH_PRODUCTS_JSON).unwrap();
+        let entries = index_entries(&listings, &|_| true);
+
+        assert_eq!(entries.len(), 2);
+        // Compile-time guarantee, asserted here so the intent is documented: the
+        // struct's whole surface is these three fields.
+        let IndexEntry {
+            isbn,
+            product_path,
+            isbn_source,
+        } = entries[0].clone();
+        assert!(!isbn.is_empty() && !product_path.is_empty());
+        assert_ne!(isbn_source, IsbnLocation::None);
+    }
+
+    #[test]
+    fn index_skips_listings_with_no_isbn() {
+        let listings = vec![ShopifyListing {
+            handle: "second-hand-find".to_string(),
+            title: "Some Old Book".to_string(),
+            price_cents: Some(18_000),
+            sku: None,
+            barcode: None,
+            body: Some("<p>A lovely used copy.</p>".to_string()),
+        }];
+
+        assert_eq!(index_entries(&listings, &|_| true), vec![]);
+    }
+
+    #[test]
+    fn unmatched_titles_are_the_residual_for_fuzzy_matching() {
+        // Ike's Books had no ISBN on any of 50 sampled products, so title matching is
+        // the only path left there.
+        let listings = vec![
+            ShopifyListing {
+                handle: "has-isbn".to_string(),
+                title: "Known Book".to_string(),
+                price_cents: None,
+                sku: Some("9780723263661".to_string()),
+                barcode: None,
+                body: None,
+            },
+            ShopifyListing {
+                handle: "no-isbn".to_string(),
+                title: "The Name of the Rose".to_string(),
+                price_cents: None,
+                sku: None,
+                barcode: None,
+                body: None,
+            },
+            ShopifyListing {
+                handle: "untitled".to_string(),
+                title: "   ".to_string(),
+                price_cents: None,
+                sku: None,
+                barcode: None,
+                body: None,
+            },
+        ];
+
+        assert_eq!(
+            unmatched_titles(&listings),
+            vec![(
+                "/products/no-isbn".to_string(),
+                "The Name of the Rose".to_string()
+            )],
+            "only ISBN-less, actually-titled listings are candidates for matching"
+        );
     }
 
     #[test]
