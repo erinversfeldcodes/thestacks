@@ -8,8 +8,43 @@ package stacks.internal.v1;
 message ScrapeRequest {
   // ISBN (digits only, no hyphens).
   string isbn = 1 [json_name = "isbn"];
-  // Store identifier (e.g. "za/exclusive_books", "za/takealot").
+  // Store identifier (e.g. "za/exclusive_books").
   string store = 2 [json_name = "store"];
+
+  // Where to find the product, when the caller already knows.
+  //
+  // Two of the target shops carry no ISBN anywhere on their products (Ike's: 0 of 50
+  // sampled; Love Books: 0 of 30), so no amount of enumeration can map an ISBN to a
+  // product there. Fuzzy title matching is the only remaining path, and it has to run
+  // caller-side because that is where the catalogue of what we hold lives — this
+  // service knows the shop but not our books.
+  //
+  // When set, the service fetches this path and skips ISBN resolution entirely.
+  optional string product_path = 3 [json_name = "product_path"];
+}
+
+// POST /catalogue/titles — request the titles of products this store lists.
+message CatalogueTitlesRequest {
+  // Store identifier.
+  string store = 1 [json_name = "store"];
+}
+
+// One listed product, reduced to what title matching needs.
+//
+// Deliberately just a path and a title: no price, description or image. The caller
+// matches titles against its own catalogue and keeps only the resulting pointer, so
+// there is never a copy of the shop's catalogue anywhere.
+message CatalogueTitle {
+  // Path relative to the store root, e.g. "/products/some-handle".
+  string product_path = 1 [json_name = "product_path"];
+  // Product title as the store lists it.
+  string title = 2 [json_name = "title"];
+}
+
+// Response from POST /catalogue/titles.
+message CatalogueTitlesResponse {
+  // Products that carry no extractable ISBN — the residual needing title matching.
+  repeated CatalogueTitle titles = 1 [json_name = "titles"];
 }
 
 // What a scrape attempt concluded.

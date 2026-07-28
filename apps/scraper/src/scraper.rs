@@ -25,6 +25,34 @@ const RATE_LIMIT_BACKOFF_SECS: u64 = 7;
 /// sweep; a store that needs more than this is a decision, not a default.
 const MAX_INDEX_PAGES: u32 = 20;
 
+/// Build a `PriceResult` from an extracted price. One place, so the URL shape and the
+/// deliberately-absent `selector_match_rate` cannot drift between call sites.
+fn price_result(
+    isbn: &str,
+    store_id: &str,
+    config: &ScraperConfig,
+    price: platform::ProductPrice,
+) -> PriceResult {
+    let base = config.source.url.trim_end_matches('/');
+
+    PriceResult {
+        isbn: isbn.to_string(),
+        store: store_id.to_string(),
+        price_cents: Some(price.price_cents),
+        currency: price.currency,
+        in_stock: price.in_stock,
+        url: price
+            .handle
+            .as_deref()
+            .map(|h| format!("{base}/products/{h}")),
+        title: price.title,
+        // Meaningless without selectors: nothing was matched by CSS. Left None rather
+        // than a fabricated 1.0, which would report perfect extraction health for a
+        // path that has no selectors to match.
+        selector_match_rate: None,
+    }
+}
+
 /// Requests per minute to actually use: the stricter of what robots.txt asks for
 /// and what the store config declares.
 ///
@@ -194,13 +222,19 @@ impl Engine {
         isbn: &str,
         store_id: &str,
         config: &ScraperConfig,
+        product_path: Option<&str>,
     ) -> Result<PriceResult, ScraperError> {
         let capability = self.capability_for(store_id, config).await?;
 
         match capability.price_source {
-            PriceSource::None => self.scrape(isbn, store_id, config).await,
+            // A supplied path still needs the platform parser, so it takes priority
+            // over the legacy fallback even where no product API was detected.
+            PriceSource::None if product_path.is_none() => {
+                self.scrape(isbn, store_id, config).await
+            }
+
             _ => {
-                self.scrape_via_platform(isbn, store_id, config, &capability)
+                self.scrape_via_platform(isbn, store_id, config, &capability, product_path)
                     .await
             }
         }
@@ -267,7 +301,31 @@ impl Engine {
         store_id: &str,
         config: &ScraperConfig,
         capability: &Capability,
+        product_path: Option<&str>,
     ) -> Result<PriceResult, ScraperError> {
+        // A caller-supplied path short-circuits ISBN resolution entirely. This is the
+        // only way to price the two shops that carry no ISBN on any product: the
+        // caller matched a title against its own catalogue and is telling us where to
+        // look. We do not second-guess it — the match was made with information this
+        // service does not have.
+        if let Some(path) = product_path {
+            let (status, body) = self.fetch_path(config, &format!("{path}.js")).await?;
+
+            return match status {
+                200 => {
+                    let price = platform::shopify_product_js(&body, config.currency())?;
+                    Ok(price_result(isbn, store_id, config, price))
+                }
+                404 => Err(ScraperError::NotStocked {
+                    store: store_id.to_string(),
+                    isbn: isbn.to_string(),
+                }),
+                other => Err(ScraperError::PriceParse(format!(
+                    "unexpected HTTP {other} from {path}.js"
+                ))),
+            };
+        }
+
         let price = match (capability.price_source, capability.lookup_mode) {
             // The handle *is* the ISBN, so one request addresses the product and a
             // 404 is the store telling us it does not carry this edition.
@@ -375,24 +433,55 @@ impl Engine {
             }
         };
 
-        let base = config.source.url.trim_end_matches('/');
+        Ok(price_result(isbn, store_id, config, price))
+    }
 
-        Ok(PriceResult {
-            isbn: isbn.to_string(),
-            store: store_id.to_string(),
-            price_cents: Some(price.price_cents),
-            currency: price.currency,
-            in_stock: price.in_stock,
-            url: price
-                .handle
-                .as_deref()
-                .map(|h| format!("{base}/products/{h}")),
-            title: price.title,
-            // Meaningless without selectors: nothing was matched by CSS. Left as
-            // None rather than a fabricated 1.0, which would report perfect
-            // extraction health for a path that has no selectors to match.
-            selector_match_rate: None,
-        })
+    /// List products that carry no extractable ISBN, with their titles.
+    ///
+    /// The residual for shops where no ISBN appears on any product, so title matching
+    /// is the only path. Returns paths and titles only — the caller matches against
+    /// its own catalogue and keeps just the pointer, so no copy of the shop's
+    /// catalogue exists anywhere.
+    pub async fn catalogue_titles(
+        &self,
+        config: &ScraperConfig,
+    ) -> Result<Vec<(String, String)>, ScraperError> {
+        let mut out = Vec::new();
+
+        for page in 1..=MAX_INDEX_PAGES {
+            let path = format!("/products.json?limit=250&page={page}");
+
+            // Bulk sweep: waits on the rate limit rather than failing, as the index
+            // build does and for the same reason.
+            let (status, body) = loop {
+                match self.fetch_path(config, &path).await {
+                    Ok(response) => break response,
+                    Err(ScraperError::RateLimitExceeded { .. }) => {
+                        tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMIT_BACKOFF_SECS))
+                            .await;
+                    }
+                    Err(e) => return Err(e),
+                }
+            };
+
+            if status != 200 {
+                break;
+            }
+
+            let listings = platform::shopify_products_json(&body)?;
+
+            if listings.is_empty() {
+                break;
+            }
+
+            out.extend(platform::unmatched_titles(&listings));
+
+            if listings.len() != 250 {
+                break;
+            }
+        }
+
+        Ok(out)
     }
 
     /// Look up a product path for `isbn` in this store's index.
