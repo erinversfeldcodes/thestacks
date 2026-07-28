@@ -29,7 +29,8 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
           "currency" => "ZAR",
           "in_stock" => true,
           "url" => "https://example.com/book/9780743273565",
-          "selector_match_rate" => 0.95
+          "selector_match_rate" => 0.95,
+          "outcome" => "SCRAPE_OUTCOME_PRICED"
         }
       })
 
@@ -74,7 +75,8 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
           "price_cents" => 12_345,
           "currency" => "ZAR",
           "in_stock" => true,
-          "url" => "https://example.com/book"
+          "url" => "https://example.com/book",
+          "outcome" => "SCRAPE_OUTCOME_PRICED"
         }
       })
 
@@ -85,6 +87,77 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
         })
 
       assert :ok = perform_job(TriggerPriceScrapeJob, job.changes.args)
+    end
+  end
+
+  describe "scrape outcomes" do
+    setup do
+      edition = insert(:book_edition, isbn: "9780743273565")
+      %{edition: edition, store: insert(:bookstore)}
+    end
+
+    defp respond(store, outcome, extra \\ %{}) do
+      MockScraperClient.put_response(
+        "9780743273565",
+        store.scraper_module,
+        {:ok,
+         Map.merge(
+           %{
+             "isbn" => "9780743273565",
+             "store" => store.scraper_module,
+             "currency" => "ZAR",
+             "outcome" => outcome
+           },
+           extra
+         )}
+      )
+    end
+
+    defp run_scrape do
+      job = TriggerPriceScrapeJob.new(%{isbn: "9780743273565"})
+      perform_job(TriggerPriceScrapeJob, job.changes.args)
+    end
+
+    test "a robots.txt block is not a failure", %{store: store} do
+      # The reason the outcome field exists. A disallowed path recurs on *every*
+      # attempt, and `ScraperClient` melts a fuse shared by all stores on any
+      # non-200 — so treating this as a failure would open the breaker for 15
+      # minutes and disable price scraping for every other shop, repeatedly.
+      respond(store, "SCRAPE_OUTCOME_ROBOTS_BLOCKED", %{
+        "detail" => "robots.txt disallows https://example.com/search?q=9780743273565"
+      })
+
+      assert :ok = run_scrape()
+    end
+
+    test "not stocked is a real answer, not a failure", %{store: store} do
+      # Shops stock whichever editions they stock. With per-edition pricing most
+      # (edition, store) pairs legitimately have no price, so if this counted as a
+      # failure the breaker would never close.
+      respond(store, "SCRAPE_OUTCOME_NOT_STOCKED")
+
+      assert :ok = run_scrape()
+    end
+
+    test "an extractor failure is a failure", %{store: store} do
+      respond(store, "SCRAPE_OUTCOME_EXTRACTOR_FAILED", %{
+        "detail" => "price selector matched nothing: .product-price"
+      })
+
+      assert {:error, "all scrape requests failed"} = run_scrape()
+    end
+
+    test "a response that cannot say what it concluded is treated as a failure",
+         %{store: store} do
+      # Fail safe, not open: a missing outcome means an older scraper or a bug, and
+      # neither is evidence that nothing went wrong.
+      MockScraperClient.put_response(
+        "9780743273565",
+        store.scraper_module,
+        {:ok, %{"isbn" => "9780743273565", "store" => store.scraper_module, "currency" => "ZAR"}}
+      )
+
+      assert {:error, "all scrape requests failed"} = run_scrape()
     end
   end
 
@@ -139,7 +212,8 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
           "currency" => "ZAR",
           "in_stock" => true,
           "url" => "https://example.com/book",
-          "selector_match_rate" => 0.9
+          "selector_match_rate" => 0.9,
+          "outcome" => "SCRAPE_OUTCOME_PRICED"
         }
       })
 
