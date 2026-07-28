@@ -104,3 +104,8 @@ config :core, Stacks.Email.Mailer, adapter: Swoosh.Adapters.Test
 config :core, :sse_max_timeout_ms, 500
 
 config :logger, level: :warning
+
+# Reading a book's prices refreshes stale ones in the background. Off by default in
+# tests so ordinary reads do not enqueue jobs every other test would have to account
+# for; the lazy-refresh tests switch it on explicitly.
+config :core, :lazy_price_refresh, false
