@@ -1547,8 +1547,55 @@ built-but-not-wired shape ROOT G is about, committed by the person writing the R
 is worth recording rather than quietly fixing: the instrument that caught it was the **zero-row sweep**,
 not the 30 tests written alongside the feature.
 
-**Closing it needs a decision, not just code.** Coordinates for eleven real bookshops must come from
-somewhere, and the two options are not equivalent:
+### ✅ CLOSED 2026-07-28 — geocoded (owner chose "geocode them"), and the chain is proven live
+
+`Stacks.Workers.GeocodeBookstoresJob` — weekly cron, **strictly serial**, `@throttle_ms 1_100`,
+`@batch_size 25`, skips online-only shops (`has_physical: false` — a website is not a place) and never
+overwrites an existing coordinate.
+
+⚠️ **The throttle replaced a guarantee, so it is asserted, not commented.** `Nominatim`'s docs said the
+**absence** of a batch entry point was what honoured the ~1 req/sec policy. This job *is* that entry
+point, so a test asserts `default_throttle_ms() >= 1_000` — lowering it to speed up a backfill now fails
+a test with a message explaining whose service it protects. Probe confirmed: dropping it to 200 ms
+reddens exactly that test.
+
+**Run for real against Nominatim: 7 of 10 physical shops positioned.** Spot-checked and plausible — Kalk
+Bay Books at `-34.125, 18.450`, Love Books in Melville, Stellenbosch Books in Stellenbosch, Clarke's at
+`-33.925, 18.416`.
+
+**Then the full chain, proven end to end** (`op.discovered_sources` was also never seeded — G3's
+zero-row cause — so five real pending sources were added; approval is a human act and remains the only
+producer):
+
+| Step | Observed |
+|---|---|
+| `op.third_spaces` | **0 → 1** — "Truth Coffee Roasting" |
+| Geocoded | `-33.9282267, 18.4227333` |
+| `nearest_bookshop_km` | **0.678 km**, computed against the real geocoded shops |
+| `third_space.created` | emitted, `geocoded: true` |
+| `list_third_spaces(near_bookshop_km: 5.0)` | **1 row** |
+| `list_third_spaces(near_bookshop_km: 0.5)` | **0 rows** — correctly excluded at 678 m |
+
+⚠️ **A product finding from the live data, not a bug: 500 m may be too tight.** Truth Coffee is 678 m
+from Clarke's Bookshop — a genuinely walkable pairing and exactly the kind of place US-3.1.1 §1 describes
+("somewhere to buy a book and somewhere to sit with it"), and the rule excludes it. The filter is working
+and discriminating correctly; the *threshold* is the question. Worth revisiting against real geography
+before the map ships, because at 500 m the page may be empty in cities where it should not be. Left as
+specified rather than quietly widened — changing a story's stated rule is the owner's call.
+
+**Two data gaps recorded rather than papered over:**
+- **3 of 10 physical shops did not geocode** (Fortunate Finds, Ike's Books, **The Book Lounge** — a
+  well-known Cape Town shop). Cause: `op.bookstores` has **no city or address**, so the query is only
+  `"<name>, ZA"`. Adding a `city` field would likely fix all three; deliberately not done here to avoid
+  more proto churn mid-wave. Those shops simply do not participate in pairing until positioned.
+- **Chains resolve to one branch**, as predicted in the job's docs and now observed: Wordsworth Books
+  geocoded to `23.37°E` (Garden Route), not Cape Town. Per-branch rows are a data-model change, not a
+  geocoding one.
+
+---
+
+**The decision this replaced.** Coordinates for eleven real bookshops had to come from somewhere, and
+the two options were not equivalent:
 - **Geocode them** — reuses `Stacks.Geocoding`, so the addresses are authoritative rather than guessed.
   ⚠️ But it requires a *batch* entry point, and `Stacks.Geocoding.Nominatim`'s docs currently claim the
   **absence** of one is the structural guarantee that honours the ~1 req/sec policy. Adding it means
