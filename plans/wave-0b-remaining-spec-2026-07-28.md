@@ -1,5 +1,10 @@
 # Wave 0b — what still needs specifying (G1, G4, G5, G6)
 
+> ⚠️ **SUPERSEDED 2026-07-28.** All decisions here were taken and have been folded into
+> `plans/staff-campaign-2026-07-27.md` (Wave 0b's "resolution" section) and, for G1, into
+> `docs/user_stories/US-3.1.1-third-spaces-map.md`. **Read those, not this.** This file is retained
+> only for the per-item analysis and the zero-row counts behind the rulings.
+
 **Date:** 2026-07-28 · **Status:** investigation complete, decisions open
 **Purpose:** these four were filed as "wire what is already built". Investigating them shows
 that only **one** actually is. The others need scope or design decisions first, and one needs
