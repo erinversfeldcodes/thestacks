@@ -76,6 +76,20 @@ config :core, Oban,
        # turn over fast enough to justify daily. Sundays 05:00, clear of the nightly
        # jobs.
        {"0 5 * * 0", Stacks.Workers.MatchStoreCatalogueJob},
+       # Fills in coordinates for physical bookshops that have none, so the 500 m
+       # third-space pairing rule can be computed at all (US-3.1.1). Weekly, not nightly:
+       # it is a gap-filler that skips shops already positioned, so once the table is
+       # geocoded almost every run does nothing.
+       #
+       # ⚠️ A catch-up, NOT a guarantee. Per ROOT H, cron only fires while a node runs,
+       # so a shop added while the machine is scaled to zero waits for the next window.
+       # That is acceptable here because a missing coordinate degrades gracefully — the
+       # shop is excluded from the pairing scan rather than mispositioned — which is
+       # exactly why this is a cron and the third-space producer is event-driven.
+       #
+       # Sundays 06:00, clear of the catalogue sweep at 05:00, and it self-throttles to
+       # ~1 req/sec to honour Nominatim's usage policy.
+       {"0 6 * * 0", Stacks.Workers.GeocodeBookstoresJob},
        # Sweeps expired rows from cache.isbn_resolver_cache and
        # cache.title_search_cache. Runs at 03:30 UTC in the low-traffic
        # window between ImageRetentionJob (02:00) and RSSLivenessJob (03:00).
