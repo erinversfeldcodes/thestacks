@@ -15,6 +15,16 @@ defmodule Stacks.Enrichment.MockScraperClient do
   @behaviour Stacks.Enrichment.ScraperClientBehaviour
 
   @impl true
+  def build_index(_store_name) do
+    # Stubbed rather than simulated, and deliberately without touching the Agent: the
+    # index is a property of the Rust service's own process, so there is nothing
+    # meaningful for a mock to model, and requiring the Agent would make every test
+    # that merely triggers a rebuild start one. Tests that care assert on the
+    # *decision* to rebuild — the enqueued job — not on a fabricated entry count.
+    Application.get_env(:core, :mock_index_build_result, {:ok, 0})
+  end
+
+  @impl true
   def scrape(isbn, store_name) do
     responses = Process.get(__MODULE__, [])
 
