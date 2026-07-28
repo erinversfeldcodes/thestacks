@@ -124,17 +124,12 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
       case client.scrape(isbn, store_name) do
         {:ok, response} ->
-          Monitoring.record_success(store_name, "scraper_config")
-
-          {:ok,
-           %{
-             "book_edition_id" => book_edition_id,
-             "store_id" => store.id,
-             "price_cents" => response["price_cents"],
-             "currency" => response["currency"] || "ZAR",
-             "in_stock" => response["in_stock"],
-             "url" => response["url"]
-           }}
+          interpret(response, %{
+            isbn: isbn,
+            store: store,
+            store_name: store_name,
+            edition_id: book_edition_id
+          })
 
         {:error, reason} ->
           Monitoring.record_failure(store_name, "scraper_config", inspect(reason))
@@ -146,5 +141,89 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
           {:error, reason}
       end
     end
+  end
+
+  # A 200 no longer implies a price. The scraper distinguishes what it *concluded*
+  # from whether it *worked*, because the two used to collapse into one HTTP 500 —
+  # and `ScraperClient` melts a fuse shared by every store on any non-200. A shop
+  # that permanently forbids our path, or simply does not stock a book, would
+  # otherwise disable price scraping everywhere, repeatedly.
+  defp interpret(%{"outcome" => "SCRAPE_OUTCOME_PRICED"} = response, ctx) do
+    %{store: store, store_name: store_name, edition_id: edition_id} = ctx
+
+    Monitoring.record_success(store_name, "scraper_config")
+
+    {:ok,
+     %{
+       "book_edition_id" => edition_id,
+       "store_id" => store.id,
+       "price_cents" => response["price_cents"],
+       "currency" => response["currency"] || "ZAR",
+       "in_stock" => response["in_stock"],
+       "url" => response["url"]
+     }}
+  end
+
+  # The shop does not carry this edition. A correct, permanent answer — the source
+  # is healthy, there is simply no price to record.
+  defp interpret(%{"outcome" => "SCRAPE_OUTCOME_NOT_STOCKED"}, ctx) do
+    %{isbn: isbn, store_name: store_name} = ctx
+
+    Monitoring.record_success(store_name, "scraper_config")
+    Logger.debug("TriggerPriceScrapeJob: #{store_name} does not stock isbn=#{isbn}")
+    {:determined, :not_stocked}
+  end
+
+  # robots.txt forbids the path. Also not a failure: the store's configuration
+  # stays in place so this resolves itself if the rule is lifted. Logged at warning
+  # because it means we will never get a price here until then.
+  defp interpret(%{"outcome" => "SCRAPE_OUTCOME_ROBOTS_BLOCKED"} = response, ctx) do
+    %{isbn: isbn, store_name: store_name} = ctx
+
+    Monitoring.record_success(store_name, "scraper_config")
+
+    Logger.warning(
+      "TriggerPriceScrapeJob: robots.txt blocks #{store_name} for isbn=#{isbn}: " <>
+        "#{response["detail"]}"
+    )
+
+    {:determined, :robots_blocked}
+  end
+
+  # Our extractor is broken for this store. Recorded against per-source health
+  # rather than the shared breaker, since it says nothing about service health.
+  defp interpret(%{"outcome" => "SCRAPE_OUTCOME_EXTRACTOR_FAILED"} = response, ctx) do
+    %{isbn: isbn, store_name: store_name} = ctx
+
+    detail = response["detail"] || "no detail"
+    Monitoring.record_failure(store_name, "scraper_config", detail)
+
+    Logger.warning(
+      "TriggerPriceScrapeJob: extractor failed for #{store_name} isbn=#{isbn}: #{detail}"
+    )
+
+    {:error, :extractor_failed}
+  end
+
+  # An absent or unrecognised outcome is treated as a failure: a response that
+  # cannot say what it concluded is not evidence that nothing went wrong. This also
+  # catches a scraper deployed older than this contract.
+  defp interpret(response, ctx) do
+    %{isbn: isbn, store_name: store_name} = ctx
+
+    outcome = response["outcome"]
+
+    Monitoring.record_failure(
+      store_name,
+      "scraper_config",
+      "unrecognised outcome #{inspect(outcome)}"
+    )
+
+    Logger.warning(
+      "TriggerPriceScrapeJob: unrecognised outcome #{inspect(outcome)} from #{store_name} " <>
+        "for isbn=#{isbn} — treating as failure"
+    )
+
+    {:error, {:unrecognised_outcome, outcome}}
   end
 end

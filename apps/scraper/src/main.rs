@@ -10,6 +10,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 use stacks_scraper::{
+    error::ScraperError,
     proto::generated::scraper::{ConfigReloadResponse, ScrapeRequest, ScrapeResponse},
     scraper::Engine,
     stores::StoreRegistry,
@@ -89,12 +90,19 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
         }
     };
 
+    // The HTTP status says whether the *service* worked; `outcome` says what the
+    // scrape *concluded*. Keeping those separate is the point: previously every
+    // error became a 500, and the caller melts a circuit breaker shared by all
+    // stores on any non-200 — so a shop that permanently forbids our path via
+    // robots.txt, or simply does not stock a book, took price scraping down for
+    // every other shop as well.
     match state
         .engine
         .scrape(&payload.isbn, &payload.store, &config)
         .await
     {
-        Ok(result) => Json(ScrapeResponse {
+        // Reached a page and read a price.
+        Ok(result) if result.price_cents.is_some() => Json(ScrapeResponse {
             isbn: result.isbn,
             store: result.store,
             price_cents: result.price_cents,
@@ -103,21 +111,133 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
             url: result.url,
             title: result.title,
             selector_match_rate: result.selector_match_rate,
+            outcome: outcome::PRICED.to_string(),
+            detail: None,
         })
         .into_response(),
-        Err(e) => {
-            tracing::error!(
-                "scrape error for store={} isbn={}: {}",
+
+        // Reached a page but came away with no price. Deliberately reported as an
+        // extractor failure rather than "not stocked": on a search-based config the
+        // two are indistinguishable, and guessing "not stocked" would quietly
+        // record false negatives instead of surfacing a broken selector.
+        Ok(result) => {
+            tracing::warn!(
+                "scrape found no price for store={} isbn={}",
                 payload.store,
-                payload.isbn,
-                e
+                payload.isbn
             );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
-            )
-                .into_response()
+
+            Json(ScrapeResponse {
+                outcome: outcome::EXTRACTOR_FAILED.to_string(),
+                detail: Some("page fetched but no price could be extracted".to_string()),
+                ..empty_response(&result.isbn, &result.store, &result.currency)
+            })
+            .into_response()
         }
+
+        Err(e) => match outcome_for_error(&e) {
+            // The service worked and reached a determination. 200, with the
+            // conclusion in `outcome` — `thiserror`'s Display already reads well
+            // enough to serve as the diagnostic detail.
+            Some(concluded) => {
+                tracing::info!(
+                    "scrape concluded {} for store={} isbn={}: {}",
+                    concluded,
+                    payload.store,
+                    payload.isbn,
+                    e
+                );
+
+                Json(ScrapeResponse {
+                    outcome: concluded.to_string(),
+                    detail: Some(e.to_string()),
+                    ..empty_response(&payload.isbn, &payload.store, config.currency())
+                })
+                .into_response()
+            }
+
+            None => {
+                tracing::error!(
+                    "scrape error for store={} isbn={}: {}",
+                    payload.store,
+                    payload.isbn,
+                    e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+                    .into_response()
+            }
+        },
+    }
+}
+
+/// Wire values for `ScrapeOutcome`. proto3 JSON serialises enums by name, and the
+/// Rust codegen maps them to `String`, so these are the contract.
+mod outcome {
+    pub const PRICED: &str = "SCRAPE_OUTCOME_PRICED";
+    pub const ROBOTS_BLOCKED: &str = "SCRAPE_OUTCOME_ROBOTS_BLOCKED";
+    pub const EXTRACTOR_FAILED: &str = "SCRAPE_OUTCOME_EXTRACTOR_FAILED";
+}
+
+/// Decide whether an engine error is a *determination* or a *failure*.
+///
+/// `Some(outcome)` — the service did its job and arrived at an answer, so the
+/// response is HTTP 200 carrying that outcome. `None` — the service or the network
+/// failed, so it is a 5xx.
+///
+/// This is the single place that decision is made, and it matters more than it
+/// looks: the caller melts a circuit breaker **shared by every store** on any
+/// non-200, and that breaker opens for 15 minutes after 3 failures. Classifying a
+/// permanent, expected condition (robots.txt forbids the path; the shop does not
+/// carry the book) as a failure would let one store disable price scraping for all
+/// of them — and, worse, would do so repeatedly, since the condition recurs on
+/// every single attempt.
+fn outcome_for_error(e: &ScraperError) -> Option<&'static str> {
+    match e {
+        // Permanent and correct until the site's rules change. Configuration is
+        // retained, so it starts working again by itself if the rule is lifted.
+        ScraperError::RobotsDisallowed { .. } => Some(outcome::ROBOTS_BLOCKED),
+
+        // We fetched a page and our selector found nothing. Our defect, but a
+        // per-store one — it says nothing about the health of the service, so it
+        // belongs in per-source health tracking rather than the shared breaker.
+        ScraperError::PriceNotFound { .. } => Some(outcome::EXTRACTOR_FAILED),
+
+        // Everything else is a genuine failure of the service or the network:
+        // rate-limit exhaustion, an upstream HTTP error, an unreachable robots.txt,
+        // a malformed config, IO. Listed explicitly rather than caught by a
+        // wildcard so that adding a variant to ScraperError forces a decision here
+        // instead of silently defaulting to "failure".
+        ScraperError::ConfigParse(_)
+        | ScraperError::ConfigNotFound(_)
+        | ScraperError::InvalidConfig(_)
+        | ScraperError::PriceParse(_)
+        | ScraperError::SelectorParse(_)
+        | ScraperError::Http(_)
+        | ScraperError::RobotsFetchFailed { .. }
+        | ScraperError::RateLimitExceeded { .. }
+        | ScraperError::AuthFailed(_)
+        | ScraperError::StoreNotFound(_)
+        | ScraperError::Io(_) => None,
+    }
+}
+
+/// A response carrying no price, for outcomes that are not `PRICED`. Callers fill
+/// in `outcome` and `detail`.
+fn empty_response(isbn: &str, store: &str, currency: &str) -> ScrapeResponse {
+    ScrapeResponse {
+        isbn: isbn.to_string(),
+        store: store.to_string(),
+        price_cents: None,
+        currency: currency.to_string(),
+        in_stock: None,
+        url: None,
+        title: None,
+        selector_match_rate: None,
+        outcome: String::new(),
+        detail: None,
     }
 }
 
@@ -213,6 +333,50 @@ mod tests {
     use tower::util::ServiceExt;
 
     const TEST_SECRET: &str = "test-hmac-secret";
+
+    // The mock engine bypasses robots.txt entirely, so the handler's
+    // determination-vs-failure branch cannot be reached over HTTP. These exercise
+    // the classifier directly, which is where the decision actually lives.
+    #[test]
+    fn robots_disallow_is_a_determination_not_a_failure() {
+        // The whole reason this distinction exists: a disallowed path recurs on
+        // every attempt, so reporting it as a failure would melt the fuse shared by
+        // all stores, over and over, and take price scraping down everywhere.
+        let e = ScraperError::RobotsDisallowed {
+            url: "https://exclusivebooks.co.za/search?q=9780156001311".to_string(),
+        };
+        assert_eq!(outcome_for_error(&e), Some(outcome::ROBOTS_BLOCKED));
+    }
+
+    #[test]
+    fn a_missing_price_is_our_bug_but_still_not_a_service_failure() {
+        let e = ScraperError::PriceNotFound {
+            selector: ".product-price".to_string(),
+        };
+        assert_eq!(outcome_for_error(&e), Some(outcome::EXTRACTOR_FAILED));
+    }
+
+    #[test]
+    fn service_and_network_faults_stay_failures() {
+        // These are the only cases that should count against the circuit breaker.
+        for e in [
+            ScraperError::RateLimitExceeded {
+                domain: "example.com".to_string(),
+            },
+            ScraperError::RobotsFetchFailed {
+                domain: "kalkbaybooks.co.za".to_string(),
+                reason: "HTTP 503".to_string(),
+            },
+            ScraperError::InvalidConfig("no price selector".to_string()),
+            ScraperError::StoreNotFound("za/nope".to_string()),
+        ] {
+            assert_eq!(
+                outcome_for_error(&e),
+                None,
+                "expected {e} to be treated as a service failure"
+            );
+        }
+    }
 
     fn make_test_state() -> AppState {
         let registry = StoreRegistry::new();

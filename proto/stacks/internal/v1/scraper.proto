@@ -12,6 +12,38 @@ message ScrapeRequest {
   string store = 2 [json_name = "store"];
 }
 
+// What a scrape attempt concluded.
+//
+// The point of this enum is to separate two things that used to be
+// indistinguishable, because every scrape error became an HTTP 500 carrying a
+// stringified message:
+//
+//   - a *determination* — the shop genuinely does not carry this ISBN, or
+//     robots.txt forbids the path. Permanent, correct, and worth storing.
+//   - a *failure* — our extractor broke, or the network did. A defect to fix.
+//
+// Collapsing them was not merely untidy. `ScraperClient` melts the shared
+// `:scraper_fuse` on any non-200, and that fuse opens for 15 minutes after 3
+// failures across ALL stores — so a shop that permanently disallows our path,
+// or simply does not stock a book, would take price scraping down for every
+// other shop too.
+enum ScrapeOutcome {
+  // Unset. Treated as a failure by consumers: a response that cannot say what
+  // it concluded is not evidence that nothing is wrong.
+  SCRAPE_OUTCOME_UNSPECIFIED = 0;
+  // A price was found; price_cents is set.
+  SCRAPE_OUTCOME_PRICED = 1;
+  // The store does not carry this ISBN. A real answer, not an error — shops
+  // stock whichever editions they stock.
+  SCRAPE_OUTCOME_NOT_STOCKED = 2;
+  // robots.txt forbids the path we would need. The store's configuration is
+  // retained so this resolves itself if the rule is ever lifted.
+  SCRAPE_OUTCOME_ROBOTS_BLOCKED = 3;
+  // The page was fetched but we could not extract a price from it. This is our
+  // bug, and the only one of these that should count against the circuit breaker.
+  SCRAPE_OUTCOME_EXTRACTOR_FAILED = 4;
+}
+
 // Response from POST /scrape.
 message ScrapeResponse {
   // ISBN (echoed from request).
@@ -30,6 +62,13 @@ message ScrapeResponse {
   optional string title = 7 [json_name = "title"];
   // CSS selector match confidence 0.0–1.0 (absent if not applicable).
   optional double selector_match_rate = 8 [json_name = "selector_match_rate"];
+  // What this attempt concluded. Determinations (NOT_STOCKED, ROBOTS_BLOCKED)
+  // are returned with HTTP 200 precisely so they do not read as service
+  // failures; only genuine failures use a 5xx.
+  ScrapeOutcome outcome = 9 [json_name = "outcome"];
+  // Why, when the outcome is not PRICED. Human-facing diagnostic only — never
+  // parsed. Consumers branch on `outcome`.
+  optional string detail = 10 [json_name = "detail"];
 }
 
 // POST /config/reload — request body (empty; no parameters required).
