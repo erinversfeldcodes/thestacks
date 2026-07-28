@@ -125,6 +125,7 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :optional_auth]
     get "/third-spaces", ThirdSpaceController, :index
     get "/books/:id/availability", BookAvailabilityController, :show
+    get "/books/:id/prices", BookPriceController, :show
     get "/books/:id", BookController, :show
     get "/catalogue", CatalogueController, :index
     get "/listings", ListingController, :index

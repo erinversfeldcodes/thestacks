@@ -17,9 +17,11 @@ module TestHelpers exposing
     , simulateBookDetailResponse
     , simulateBookDetailResponseWithPlacement
     , simulateBookDetailResponseWithVisibility
+    , simulateBookPricesResponse
     , simulateBookResponse
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
+    , simulateEmptyBookPricesResponse
     , simulateMergeFormatResponse
     , simulateMultiShelfResponse
     , simulatePlacementVisibilityResponse
@@ -510,6 +512,52 @@ simulateAuthErrorResponse statusCode =
         , headers = Dict.empty
         }
         ""
+
+
+{-| An HTTP response for `GET /api/books/:id/prices`.
+
+Two editions of one work at one store, which is the case the endpoint exists to
+represent: shops stock whichever editions they stock, at different prices.
+
+-}
+simulateBookPricesResponse : String -> Http.Response String
+simulateBookPricesResponse bookId =
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId ++ "/prices"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        """
+        {"prices": [
+          {"book_edition_id": "ed-1", "isbn": "9780749397050",
+           "format_label": "Paperback", "store_id": "st-1",
+           "store_name": "Exclusive Books", "price_cents": 40000,
+           "currency": "ZAR", "in_stock": true,
+           "url": "https://exclusivebooks.co.za/products/9780749397050",
+           "scraped_at": "2026-07-28T06:00:00Z"},
+          {"book_edition_id": "ed-2", "isbn": "9788497592581",
+           "format_label": "Paperback", "store_id": "st-1",
+           "store_name": "Exclusive Books", "price_cents": 41100,
+           "currency": "ZAR", "in_stock": true,
+           "url": "https://exclusivebooks.co.za/products/9788497592581",
+           "scraped_at": "2026-07-28T06:00:00Z"}
+        ]}
+        """
+
+
+{-| An empty price response — a book nothing has priced yet, which is the honest
+default for most of the catalogue.
+-}
+simulateEmptyBookPricesResponse : String -> Http.Response String
+simulateEmptyBookPricesResponse bookId =
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId ++ "/prices"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        """{"prices": []}"""
 
 
 {-| Create an HTTP response containing a book detail JSON payload with no placement.
@@ -1245,6 +1293,21 @@ bookDetailInitEffects bookId maybeToken =
                     , url = "/api/books/" ++ bookId ++ "/availability"
                     , body = SimulatedEffect.Http.emptyBody
                     , expect = SimulatedEffect.Http.expectJson BookDetail.AvailabilityLoaded decodeAvailabilityResponse
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+                , SimulatedEffect.Http.request
+                    { method = "GET"
+                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                    , url = "/api/books/" ++ bookId ++ "/prices"
+                    , body = SimulatedEffect.Http.emptyBody
+
+                    -- The real decoder, not a copy. `decodeAvailabilityResponse`
+                    -- above is a hand-mirrored duplicate of BookDetail's, which is
+                    -- a second source of truth that can drift silently; reusing the
+                    -- exported one means a decoder change cannot pass here while
+                    -- failing in production.
+                    , expect = SimulatedEffect.Http.expectJson BookDetail.PricesLoaded BookDetail.pricesDecoder
                     , timeout = Nothing
                     , tracker = Nothing
                     }

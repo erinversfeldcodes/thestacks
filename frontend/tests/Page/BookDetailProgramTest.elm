@@ -26,6 +26,8 @@ import TestHelpers
         , bookDetailProgramWithOut
         , simulateBookDetailResponse
         , simulateBookDetailResponseWithPlacement
+        , simulateBookPricesResponse
+        , simulateEmptyBookPricesResponse
         , testBook
         , testPlacement
         )
@@ -50,6 +52,7 @@ suite =
         , shelfMoverOpenSelectConfirmFlow
         , removeModalOpenConfirmFlow
         , sectionContentDetails
+        , pricesRenderPerEdition
         , placementLoadedShowsCurrentBookshelf
         , ariaRegionsPresent
         , ratingDisplayWithoutPlacement
@@ -588,12 +591,41 @@ sectionContentDetails =
                     [ Selector.text "Storygraph" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Reddit" ]
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001/prices"
+                    (simulateEmptyBookPricesResponse "book-test-001")
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "No price data yet" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Charles Duhigg" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Not yet rated" ]
+
+
+pricesRenderPerEdition : Test
+pricesRenderPerEdition =
+    test "prices_loaded: a price renders per edition, cheapest store first" <|
+        \() ->
+            -- The counterpart to the empty case. Without this the suite would only
+            -- ever prove the placeholder renders — which is what it did while the
+            -- page fetched no prices at all.
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponse "book-test-001" testBook)
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001/prices"
+                    (simulateBookPricesResponse "book-test-001")
+                -- Both editions of the work, each named by its own ISBN. Shops stock
+                -- whichever editions they stock, at different prices.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Paperback (9780749397050)" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Paperback (9788497592581)" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.text "Exclusive Books" ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.text "No price data yet" ]
 
 
 placementLoadedShowsCurrentBookshelf : Test

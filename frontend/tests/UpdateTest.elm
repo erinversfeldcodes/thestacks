@@ -33,6 +33,7 @@ libraryInit =
 bookDetailInit : BookDetail.Model
 bookDetailInit =
     { book = Loading
+    , prices = NotAsked
     , placement = Nothing
     , bookshelfMoverOpen = False
     , removeModalOpen = False

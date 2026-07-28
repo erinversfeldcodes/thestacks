@@ -20,6 +20,7 @@ defmodule Stacks.Enrichment.Prices do
   alias Stacks.Books.BookEdition
   alias Stacks.Enrichment
   alias Stacks.Enrichment.{Bookstore, PriceSnapshot}
+  alias Stacks.Workers.TriggerPriceScrapeJob
 
   # ── Snapshots ─────────────────────────────────────────────────────────────
 
@@ -95,6 +96,88 @@ defmodule Stacks.Enrichment.Prices do
     |> where([_ps, be], be.book_id == ^book_id)
     |> order_by([ps], desc: ps.scraped_at)
     |> Repo.all()
+  end
+
+  @doc """
+  Prices for a work, refreshing any that are stale in the background.
+
+  This is the read path, and it is what replaces the nightly sweep. The sweep was
+  `stale_isbns(7) x all_stores()` with no cap — ~2,400 requests taking on the order
+  of 20 hours against eleven mostly one-person bookshops, for prices nobody may
+  ever look at. Fetching on read instead means outbound load tracks actual reader
+  interest rather than catalogue size times wall clock.
+
+  Returns immediately with whatever is already stored, stale or not: a price from
+  last week is far more useful than a spinner, and the refreshed value appears on
+  the next view. Enqueued work is deduplicated by Oban's `unique` option, so a
+  popular book being viewed a hundred times does not enqueue a hundred scrapes.
+
+  Rows carry the edition's ISBN and format and the store's name, not bare ids: the
+  page groups prices by edition and names the shop, and resolving those per row in
+  the view would be an N+1 the context can answer in one join.
+  """
+  @spec prices_for_work(String.t(), keyword()) :: [map()]
+  def prices_for_work(book_id, opts \\ []) do
+    ttl_days = Keyword.get(opts, :ttl_days, 7)
+    prices = latest_prices(book_id)
+
+    if refresh_enabled?() do
+      enqueue_refreshes(book_id, prices, ttl_days)
+    end
+
+    from(ps in PriceSnapshot,
+      join: be in BookEdition,
+      on: be.id == ps.book_edition_id,
+      left_join: bs in Bookstore,
+      on: bs.id == ps.store_id,
+      where: be.book_id == ^book_id,
+      order_by: [asc: be.isbn, asc: ps.price_cents],
+      select: %{
+        book_edition_id: ps.book_edition_id,
+        isbn: be.isbn,
+        format_label: be.format_label,
+        store_id: ps.store_id,
+        store_name: bs.name,
+        price_cents: ps.price_cents,
+        currency: ps.currency,
+        in_stock: ps.in_stock,
+        url: ps.url,
+        scraped_at: ps.scraped_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  defp refresh_enabled? do
+    # Off in :test so reads do not enqueue jobs that tests must then account for;
+    # a dedicated test sets it true to prove the enqueue actually happens.
+    Application.get_env(:core, :lazy_price_refresh, true)
+  end
+
+  # Editions of this work that have no price, or a price older than the TTL.
+  defp enqueue_refreshes(book_id, prices, ttl_days) do
+    cutoff = DateTime.add(DateTime.utc_now(), -ttl_days, :day)
+
+    fresh_edition_ids =
+      prices
+      |> Enum.filter(&(DateTime.compare(&1.scraped_at, cutoff) == :gt))
+      |> MapSet.new(& &1.book_edition_id)
+
+    from(be in BookEdition,
+      where: be.book_id == ^book_id,
+      select: %{id: be.id, isbn: be.isbn}
+    )
+    |> Repo.all()
+    |> Enum.reject(&MapSet.member?(fresh_edition_ids, &1.id))
+    |> Enum.each(fn edition ->
+      %{isbn: edition.isbn, book_edition_id: edition.id}
+      |> TriggerPriceScrapeJob.new(
+        # One pending refresh per edition at a time. Without this a popular book
+        # would enqueue a scrape on every page view.
+        unique: [period: 3600, fields: [:worker, :args]]
+      )
+      |> Oban.insert()
+    end)
   end
 
   @doc """
