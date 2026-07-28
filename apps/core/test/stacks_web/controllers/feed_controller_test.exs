@@ -99,14 +99,30 @@ defmodule StacksWeb.FeedControllerTest do
       assert %{"error" => "Bookshelf not found"} = json_response(conn, 404)
     end
 
-    test "returns 403 for non-platform-visible bookshelf", %{conn: conn} do
+    test "returns 403 for a bookshelf the reader has not shared", %{conn: conn} do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
       conn = get(conn, "/api/feeds/#{user.id}/library")
 
+      # The status is the contract; the sentence is copy. This asserted the exact phrase
+      # "platform-visible", which broke the moment the message had to cover `public` too —
+      # the same brittleness that let a SECURITY assertion elsewhere pass by matching nothing.
       assert %{"error" => error} = json_response(conn, 403)
-      assert String.contains?(error, "platform-visible")
+      assert is_binary(error) and error != ""
+    end
+
+    test "serves the feed for a bookshelf shared MORE widely than platform", %{conn: conn} do
+      # ⛔ Returned 403. The eligibility check was `visibility != "platform"` — an equality
+      # test against one rung of the `owner < group < platform < public` ladder — so the most
+      # shared tier was refused what a less shared one was granted.
+      user = insert(:user)
+      _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
+
+      conn = get(conn, "/api/feeds/#{user.id}/library")
+
+      assert response(conn, 200)
+      assert conn |> get_resp_header("content-type") |> hd() =~ "application/atom+xml"
     end
   end
 

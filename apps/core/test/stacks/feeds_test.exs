@@ -72,6 +72,33 @@ defmodule Stacks.FeedsTest do
       assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library")
     end
 
+    test "serves a feed for a public-visibility bookshelf" do
+      # ⛔ It did not. `resolve_platform_bookshelf/2` tested `visibility != "platform"`, an
+      # equality check where the ladder needs a comparison — so a bookshelf on the **most**
+      # shared tier (`public`) was refused its feed with `:not_public` while the *less* shared
+      # `platform` was served one. Exposure and function ran in opposite directions.
+      #
+      # The atom name is what hid it: `{:error, :not_public}` returned for the literally public
+      # case reads as correct in every call site and in both existing rejection tests above,
+      # which only ever covered `owner` and `group`. `public` was never tested.
+      #
+      # `Stacks.Visibility.audience_levels/0` is `owner < group < platform < public`, and
+      # `@valid_visibilities` is that whole list — so `public` is a reachable state for any
+      # bookshelf, not a hypothetical.
+      user = insert(:user, display_name: "Ada")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
+      author = insert(:author, name: "Donna Tartt")
+      book = insert(:book, title: "The Secret History", author: author)
+      _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library"),
+             "a bookshelf the reader marked public is refused the feed a platform one gets"
+
+      assert is_binary(etag)
+      assert String.contains?(xml, "The Secret History")
+    end
+
     test "returns valid XML with empty bookshelf" do
       user = insert(:user, display_name: "Test User")
       _bookshelf = insert(:bookshelf, user: user, name: "wishlist", visibility: "platform")
