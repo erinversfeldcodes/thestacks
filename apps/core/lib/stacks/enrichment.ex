@@ -160,7 +160,10 @@ defmodule Stacks.Enrichment do
     # dropped in silence. That is exactly what happened when these three were added.
     :latitude,
     :longitude,
-    :nearest_bookshop_km
+    :nearest_bookshop_km,
+    # Owner-writable curation, and the second tier of the 500 m rule — see the proto.
+    :curated,
+    :curated_note
   ]
 
   @doc "Changeset for creating or updating a third space."
@@ -244,17 +247,54 @@ defmodule Stacks.Enrichment do
   defp filter_types(query, []), do: query
   defp filter_types(query, types) when is_list(types), do: where(query, [s], s.type in ^types)
 
-  # The 500 m rule filters on a scalar computed at geocode time. Recomputing
-  # space-to-bookshop distances per request is the query that would eventually force
-  # PostGIS for the wrong reason.
+  # ── The 500 m rule, in two tiers ────────────────────────────────────────────
   #
-  # `is_nil` is excluded deliberately: a space whose proximity has not been computed is
-  # not known to be near a bookshop, and guessing yes would put it on the map on the
-  # strength of missing data.
+  # ⚠️ **500 m is a rule of thumb, not a cutoff** (owner, 2026-07-28): *"further away
+  # should only be included if the ratings are high."* So proximity and quality trade
+  # off, and a single `<=` was the wrong shape:
+  #
+  #   tier 1 — within `near_bookshop_km`: qualifies on distance alone.
+  #   tier 2 — beyond it but within `curated_within_km`: qualifies only if `curated`.
+  #
+  # Observed live and the reason this changed: Truth Coffee Roasting sits **678 m** from
+  # Clarke's Bookshop — walkable, and exactly the pairing US-3.1.1 §1 describes — and a
+  # hard 500 m cutoff excluded it. The filter was working correctly; the *rule* was too
+  # blunt.
+  #
+  # There is still an outer bound, because "curated" cannot mean "any distance": a
+  # wonderful café 40 km from the nearest bookshop is not an answer to "where can I read
+  # near here". `@curated_within_km` is that bound.
+  #
+  # Filtering on a scalar computed at geocode time, not a per-request recomputation —
+  # that would be the query that eventually forces PostGIS for the wrong reason.
+  #
+  # `is_nil` is excluded from both tiers deliberately: a space whose proximity has not
+  # been computed is not *known* to be near a bookshop, and treating missing data as a
+  # pass would put it on the map on the strength of nothing.
+  @curated_within_km 2.0
+
   defp filter_near_bookshop(query, nil), do: query
 
-  defp filter_near_bookshop(query, km) when is_number(km),
-    do: where(query, [s], not is_nil(s.nearest_bookshop_km) and s.nearest_bookshop_km <= ^km)
+  defp filter_near_bookshop(query, km) when is_number(km) do
+    outer = max(km, @curated_within_km)
+
+    where(
+      query,
+      [s],
+      not is_nil(s.nearest_bookshop_km) and
+        (s.nearest_bookshop_km <= ^km or
+           (s.curated == true and s.nearest_bookshop_km <= ^outer))
+    )
+  end
+
+  @doc """
+  The outer bound for curated spaces beyond the primary radius.
+
+  Exposed so the rule is inspectable rather than a number buried in a query — and so a
+  test can assert it is finite, which is what stops "curated" quietly meaning "anywhere".
+  """
+  @spec curated_within_km() :: float()
+  def curated_within_km, do: @curated_within_km
 
   # Derives the SQL bounding box from whichever geo option was supplied. A radius query
   # gets a box that encloses its circle; the Haversine pass then trims the corners.
