@@ -625,7 +625,15 @@ defmodule StacksWeb.ProtoJSON do
       website_url: user.website_url,
       city: user.city,
       country_code: user.country_code,
-      bookshelves: Enum.map(shelves, &%{name: &1.name})
+      # `has_feed`, not `visibility`. The client's actual question is "may I offer a
+      # subscribe link here?", and answering that directly keeps the visibility ladder
+      # out of a public payload — a stranger has no business learning that a shelf is
+      # group-visible rather than simply absent.
+      #
+      # The predicate mirrors `Feeds.resolve_platform_bookshelf/2` exactly: only a
+      # platform-visible bookshelf has a feed. Anything else 403s, and a link that 403s
+      # is a broken promise rather than a feature.
+      bookshelves: Enum.map(shelves, &%{name: &1.name, has_feed: &1.visibility == "platform"})
     }
   end
 

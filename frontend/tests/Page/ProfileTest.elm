@@ -29,8 +29,8 @@ sampleProfile =
     , city = "London"
     , countryCode = "GB"
     , bookshelves =
-        [ ProfileShelfSummary "library"
-        , ProfileShelfSummary "wishlist"
+        [ ProfileShelfSummary "library" False
+        , ProfileShelfSummary "wishlist" False
         ]
     }
 
@@ -128,7 +128,7 @@ suite =
                                 , websiteUrl = "https://a.dev"
                                 , city = "London"
                                 , countryCode = "GB"
-                                , bookshelves = [ ProfileShelfSummary "library" ]
+                                , bookshelves = [ ProfileShelfSummary "library" False ]
                                 }
                             )
             , test "tolerates null/absent optional fields incl. display_name (no false not-found)" <|

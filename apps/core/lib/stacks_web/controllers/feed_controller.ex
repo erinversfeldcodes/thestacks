@@ -8,10 +8,14 @@ defmodule StacksWeb.FeedController do
 
   use CoreWeb, :controller
 
+  alias Stacks.Accounts
   alias Stacks.Feeds
 
   @doc """
-  GET /api/feeds/:user_id/:bookshelf_name — serves Atom XML for a public bookshelf.
+  GET /api/feeds/u/:handle/:bookshelf_name — serves Atom XML for a public bookshelf.
+
+  The handle form is canonical; `/api/feeds/:user_id/:bookshelf_name` still resolves for
+  anything holding a direct link.
 
   Serves the persisted `op.feed_cache` row on a hit; on a miss it generates the
   feed, fills the cache, and serves the fresh result (`Feeds.fetch_feed/2`).
@@ -21,6 +25,28 @@ defmodule StacksWeb.FeedController do
   Returns 404 if the bookshelf does not exist.
   Returns 403 if the bookshelf is not platform-visible.
   """
+  def show(conn, %{"handle" => handle, "bookshelf_name" => bookshelf_name}) do
+    # Handle-addressed, and this is the clause the SPA uses.
+    #
+    # ⚠️ The reason G4 had no client call was not that nobody wrote one: profiles are
+    # addressed by **handle** everywhere (`/u/:handle`, `GET /api/u/:handle`), while this
+    # controller was keyed only by **user_id**. A page showing someone's bookshelves has
+    # their handle and not their UUID, so it could not construct a feed URL at all — the
+    # chain was broken at the *contract*, one layer below the missing call.
+    #
+    # It is also the better URL to hand a person: `/api/feeds/u/erin/library` is legible
+    # and checkable, where a UUID is neither.
+    case Accounts.get_user_by_handle(handle) do
+      nil ->
+        conn
+        |> put_status(404)
+        |> json(%{error: "Reader not found"})
+
+      user ->
+        show(conn, %{"user_id" => user.id, "bookshelf_name" => bookshelf_name})
+    end
+  end
+
   def show(conn, %{"user_id" => user_id, "bookshelf_name" => bookshelf_name}) do
     case Feeds.fetch_feed(user_id, bookshelf_name) do
       {:ok, xml, etag} ->

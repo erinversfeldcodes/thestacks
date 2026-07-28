@@ -117,6 +117,11 @@ defmodule CoreWeb.Router do
   # Public feeds — no auth required (Atom XML)
   scope "/api", StacksWeb do
     pipe_through [:api, :rate_limit_public]
+    # Handle-addressed and canonical: a page showing someone's bookshelves knows their
+    # handle, not their UUID, which is why no client could build a feed URL before.
+    # Declared first so "u" is not swallowed as a :user_id.
+    get "/feeds/u/:handle/:bookshelf_name", FeedController, :show
+    # Retained for any direct link already in a reader.
     get "/feeds/:user_id/:bookshelf_name", FeedController, :show
   end
 

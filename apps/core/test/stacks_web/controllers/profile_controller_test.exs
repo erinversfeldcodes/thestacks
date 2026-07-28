@@ -555,4 +555,60 @@ defmodule StacksWeb.ProfileControllerTest do
       0 -> acc
     end
   end
+
+  describe "has_feed on each bookshelf summary (G4)" do
+    test "true for a platform-visible bookshelf", %{conn: conn} do
+      # The client uses this to decide whether to offer a subscribe link. Sent rather than
+      # derived, so the rule lives beside `Feeds.resolve_platform_bookshelf/2` instead of
+      # being duplicated in Elm.
+      target = insert(:user, handle: "feedreader", profile_visibility: "platform")
+      insert(:bookshelf, user: target, name: "library", visibility: "platform")
+      viewer = insert(:user)
+
+      body = conn |> auth_conn(viewer) |> get("/api/u/feedreader") |> json_response(200)
+
+      assert [%{"name" => "library", "has_feed" => true}] = body["bookshelves"]
+    end
+
+    test "false for a group-visible bookshelf the viewer can see", %{conn: conn} do
+      # ⚠️ The case that makes the flag necessary rather than decorative. An
+      # owner-visible shelf is dropped from the payload entirely, so a stranger never
+      # sees one — but a *group*-visible shelf IS shown to a member and has **no feed**,
+      # because only platform visibility produces one. Without the flag the client would
+      # offer that member a subscribe link that 403s.
+      owner = insert(:user, handle: "group_reader", profile_visibility: "platform")
+      group = insert(:group, owner: owner)
+      member = insert(:user)
+      insert(:group_member, group: group, user: member)
+
+      insert(:bookshelf,
+        user: owner,
+        name: "library",
+        visibility: "group",
+        visibility_group_id: group.id
+      )
+
+      body = conn |> auth_conn(member) |> get("/api/u/group_reader") |> json_response(200)
+
+      assert [%{"name" => "library", "has_feed" => false}] = body["bookshelves"],
+             "a group-visible shelf was advertised as having a feed: " <>
+               inspect(body["bookshelves"])
+    end
+
+    test "the payload does not leak the visibility tier itself", %{conn: conn} do
+      # A stranger has no business learning that a shelf is group-visible rather than
+      # simply absent. `has_feed` answers the client's question without saying more.
+      target = insert(:user, handle: "discreet", profile_visibility: "platform")
+      insert(:bookshelf, user: target, name: "library", visibility: "platform")
+      viewer = insert(:user)
+
+      body = conn |> auth_conn(viewer) |> get("/api/u/discreet") |> json_response(200)
+      [shelf] = body["bookshelves"]
+
+      assert Map.has_key?(shelf, "has_feed")
+
+      refute Map.has_key?(shelf, "visibility"),
+             "the public profile payload now exposes the visibility ladder"
+    end
+  end
 end
