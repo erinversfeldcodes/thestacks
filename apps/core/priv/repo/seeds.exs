@@ -1205,34 +1205,55 @@ Repo.insert_all(
 # TTL-driven fetches (plan P6) precisely so load tracks reader interest instead
 # of catalogue size x wall clock. Until that lands, do not enable the cron
 # against the full list. Several of these are one-person shops.
+# {id, name, url, scraper_module, has_physical, unscrapable_reason}
+#
+# ⚠️ `scraper_module` is nil unless a TOML config actually exists under
+# `apps/scraper/scrapers/`. It is the Rust registry's **key**, so a value naming a
+# config that has not been written yet is not "pending" — it is a guaranteed
+# `404 store not found` on every lookup, and the client melts that store's fuse each
+# time. Nine of these rows used to carry such a key. `scraper_module_keys_test.exs`
+# now enforces the correspondence in both directions.
+#
+# `unscrapable_reason` is set where the shop has been *investigated and ruled out*, so
+# the research is banked rather than repeated. A nil reason with a nil module means
+# "not yet configured"; a non-nil reason means "do not bother".
 bookstore_targets = [
-  {9001, "Loot", "https://www.loot.co.za", "za/loot", false},
-  {9002, "Wordsworth Books", "https://www.wordsworth.co.za", "za/wordsworth", true},
-  {9003, "The Book Lounge", "https://booklounge.co.za", "za/book_lounge", true},
+  {9001, "Loot", "https://www.loot.co.za", nil, false, "no product JSON API"},
+  {9002, "Wordsworth Books", "https://www.wordsworth.co.za", "za/wordsworth", true, nil},
+  {9003, "The Book Lounge", "https://booklounge.co.za", nil, true, nil},
   # Bare domain, not www: www.exclusivebooks.co.za answers 301 while the bare
   # host answers 200, so every request through www would cost two round trips.
-  {9004, "Exclusive Books", "https://exclusivebooks.co.za", "za/exclusive_books", true},
-  {9005, "Clarke's Bookshop", "https://clarkesbooks.co.za", "za/clarkes_books", true},
-  {9006, "Kalk Bay Books", "https://kalkbaybooks.co.za", "za/kalk_bay_books", true},
-  {9007, "Love Books", "http://www.lovebooks.co.za", "za/love_books", true},
-  {9008, "Bridge Books", "https://bridgebooks.co.za", "za/bridge_books", true},
+  {9004, "Exclusive Books", "https://exclusivebooks.co.za", "za/exclusive_books", true, nil},
+  {9005, "Clarke's Bookshop", "https://clarkesbooks.co.za", nil, true, nil},
+  {9006, "Kalk Bay Books", "https://kalkbaybooks.co.za", nil, true,
+   "homepage 503 and no product API (/products.json and Woo Store API both 404) — re-probe"},
+  {9007, "Love Books", "http://www.lovebooks.co.za", nil, true,
+   "WooCommerce, but no ISBN in sku (0/30 sampled)"},
+  {9008, "Bridge Books", "https://bridgebooks.co.za", nil, true, nil},
   # 9009 was Skoobs Theatre of Books. Removed 2026-07-28: skoobs.co.za and
   # www.skoobs.co.za both return NXDOMAIN, so the domain no longer exists and the
   # shop appears to have closed. Kept as a comment rather than silently dropped so
   # the gap in the id sequence is explained, and so it is not re-added from the
   # owner's original list without re-checking DNS.
-  {9010, "Ike's Books", "http://ikesbooks.com", "za/ikes_books", true},
-  {9011, "Fortunate Finds", "https://fortunatefinds.co.za", "za/fortunate_finds", true},
-  {9012, "Stellenbosch Books", "https://stellenboschbooks.co.za", "za/stellenbosch_books", true}
+  {9010, "Ike's Books", "http://ikesbooks.com", nil, true,
+   "Shopify, but no ISBN in any field across 50 sampled products"},
+  {9011, "Fortunate Finds", "https://fortunatefinds.co.za", nil, true,
+   "WooCommerce Store API disabled (404)"},
+  {9012, "Stellenbosch Books", "https://stellenboschbooks.co.za", nil, true, nil}
 ]
 
 Repo.insert_all(
   "bookstores",
-  Enum.map(bookstore_targets, fn {n, name, url, module, physical} ->
+  Enum.map(bookstore_targets, fn {n, name, url, module, physical, unscrapable} ->
     %{
       id: Seeds.uuid(n),
       name: name,
       website_url: url,
+      # "none" is a *conclusion*, so it is only set where a reason backs it. Leaving
+      # price_source nil elsewhere lets the capability probe write what it observes,
+      # which is the only thing allowed to author these fields.
+      price_source: if(unscrapable, do: "none"),
+      unscrapable_reason: unscrapable,
       # Left nil deliberately. It used to say "{isbn}", recording an
       # ISBN-substitution contract that does not exist: Shopify's storefront
       # search matches an ISBN in no field, so six of these stores can never be

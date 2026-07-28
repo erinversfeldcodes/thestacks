@@ -72,9 +72,17 @@ defmodule Stacks.FactoryProtoValidationTest do
     # is exactly the stale-configuration failure deriving capability exists to avoid.
     # `search_template` is likewise deliberately nil — it recorded an
     # ISBN-substitution contract that does not exist on Shopify.
+    # Every skipped field here is *observed or authored* state rather than fixture
+    # data: the capability fields are written only by the probe, the robots_* fields
+    # only by `Prices.record_robots_block/3`, and `unscrapable_reason` only by a human
+    # who has investigated the shop. A factory that pre-populated any of them would
+    # make every test start with a store that looks blocked, ruled out, or already
+    # probed — so the tests that care set them explicitly instead.
     bookstore:
       {Stacks.Enrichment.Bookstore,
-       ~w(search_template price_source isbn_location lookup_mode capability_probed_at canary_isbn robots_blocked_path)a},
+       ~w(search_template price_source isbn_location lookup_mode capability_probed_at
+          canary_isbn robots_blocked_path robots_blocked_rule robots_blocked_at
+          unscrapable_reason)a},
     price_snapshot: {Stacks.Enrichment.PriceSnapshot, ~w()a},
     bookstore_event: {Stacks.Enrichment.BookstoreEvent, ~w()a},
     third_space:
