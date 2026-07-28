@@ -31,6 +31,7 @@ Agents are plain .md files. Invoke the Orchestrator as:
 | protobuf-agent | docs/agents/protobuf-agent.md | Proto files, buf, code generation, upcasting |
 | security-agent | docs/agents/security-agent.md | GDPR, auth, AI safety, scanning, threat model |
 | principle-engineer | docs/agents/principle-engineer-agent.md | Code quality audit, architectural review |
+| staff-engineer | docs/agents/staff-engineer-agent.md | Design conscience — stewardship surveys (Design Ledger), simplification, test-truthfulness audits, phase assessments, advisory shadow reviews; Ousterhout/Zen/Czaplicki-Feldman-Kelley-Cro lens; economy + shift-detection-left; evidence by read, run, **and driving the product itself** |
 | testing-coordinator | docs/agents/testing-coordinator-agent.md | 12-layer test strategy, 4 environments |
 
 ### Review Agents
@@ -84,12 +85,17 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 | Protobuf, proto, buf, schema contract, code generation, upcasting | protobuf-agent |
 | GDPR, security, auth, Guardian, JWT, AI safety, rate limiting, scanning | security-agent |
 | code quality, architecture review, tech debt, standards compliance | principle-engineer |
+| design review, design debt, taste, simplification, deletion, deep module, legibility, refactor direction, stewardship, over-mocked tests, "do these tests guarantee anything", phase assessment, roadmap drift, missing user stories, product coherence, aesthetic drift, "is this delightful", "would we love this" | staff-engineer |
 | testing, E2E, Playwright, elm-program-test, chaos, load, k6 | testing-coordinator |
 | UX, usability, mobile, responsive, accessibility experience, delight, tone, copy | ux-reviewer |
 | API shape, event payload, decoder, contract, breaking change, JSON shape, inter-service | contract-reviewer |
 
 ## Shared Standards
 - Code quality: docs/agents/standards/code-quality.md
+- **Code-quality exemplars (the calibration set): docs/agents/reference/exemplars.md** — real code
+  and talks by Czaplicki, Feldman, Kelley, and Cro, used to judge "is this good enough?" by
+  comparison rather than assertion. Citations must be fetched and verified before use, never
+  quoted from memory.
 - Testing: docs/agents/standards/testing.md
 - Security: docs/agents/standards/security.md
 - Protobuf: docs/agents/standards/protobuf.md
@@ -107,6 +113,28 @@ Stack-specific reviewers. Each critiques code against three axes: (1) task DoD, 
 - `completion-audit` — the epic-wide **adversarial** "prove it is NOT done" gate over the whole
   deliverable; gates the orchestrator's Phase 3. Automates the "is this really done?" sweep.
 - `verify-and-followup` — run the gates, report with evidence, file residuals as tracked issues.
+- `staff-review` — the Staff Engineer's **advisory** shadow review of a diff (design/taste +
+  test-truthfulness lens, not a gate); runs inside `finalize-pr` before the PR body is written,
+  and on demand via `/staff-review`.
+- `staff-survey` — the Staff Engineer's stewardship pass over **existing** code: rewrite sketches,
+  simplification candidates goal-checked against `notes/`, and mutation-probed test verdicts
+  (KEEP/STRENGTHEN/REWRITE/REMOVE). Produces a Design Ledger; issues only after a human stop.
+- `staff-campaign` — the Staff Engineer's **Mode D**: the full range applied across the codebase,
+  composed into one sequenced **Remediation Plan** (root-cause clusters, leverage ranking,
+  dependency-ordered waves). The only mode that synthesises the others; plans, never implements.
+- `staff-execute` — the Staff Engineer's **Mode E**: builds a campaign's plan wave by wave. **The
+  only mode that writes production code.** Runs until `just wave-status <slug>` reports the wave
+  green, stopping for exactly three things — an untaken decision, an irreversible action, or a
+  discovery that changes the plan's shape — and never to report progress. Every item gets a real
+  `issues/NNN-*.md` before any code, and progress lives in `plans/<slug>-state.json` so a fresh pass
+  resumes without being told anything. Added 2026-07-28: Modes A–D all end at a report, so "now
+  implement the plan" had no harness and drifted into continuous pausing plus waves declared
+  finished that weren't.
+- `staff-phase-audit` — the Staff Engineer's assessment of a **phase** of
+  `docs/implementation-mapping.md` against `notes/` and against reality. Uniquely asks whether the
+  **story set itself** is complete (missing recovery/unhappy-path/second-actor stories), alongside
+  a built-and-genuinely-tested roll-up. Commissions `feature-completeness` and `test-audit` as
+  inputs rather than duplicating them.
 
 ## Canonical References
 - Architecture: docs/technical-architecture.md
