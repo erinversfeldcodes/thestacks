@@ -972,6 +972,52 @@ all_placements = user1_placements ++ user2_placements
 
 Repo.insert_all("bookshelf_placements", all_placements, prefix: "op", on_conflict: :nothing)
 
+# ── Replay placement events for seeded rows ─────────────────────────────────
+#
+# Every placement above is written with `insert_all`, which bypasses
+# `Shelving.place_book/3` and therefore emits nothing. That is the systemic
+# reason `op.feed_cache` held **zero rows in every environment**: the only thing
+# that writes it is `RegenerateFeedJob`, which only ever runs off a
+# `placement.created` event. The feature was built, deployed, and tested — and
+# had never once produced a row, because no seeded placement ever announced
+# itself. The same silence applies to any future event-driven consumer of
+# placements, so this is fixed once here rather than per feature.
+#
+# Driven off the rows that actually landed rather than the in-memory lists, so
+# it covers every `insert_all` site above (E2E users included) and cannot drift
+# from them. `emit_safe/1` because a fixture must not abort a seed run.
+#
+# Requires an Oban queue to actually deliver: under `seed_live/0` on a preview
+# the jobs run, whereas a bare `mix run seeds.exs` writes the events and leaves
+# the jobs queued. The events are the contract; delivery is the environment's.
+seeded_placements =
+  Repo.all(
+    from p in Stacks.Shelving.Placement,
+      join: b in Stacks.Shelving.Bookshelf,
+      on: b.id == p.bookshelf_id,
+      select: %{
+        id: p.id,
+        book_id: p.book_id,
+        bookshelf: b.name,
+        visibility: p.visibility
+      }
+  )
+
+Enum.each(seeded_placements, fn p ->
+  Stacks.Events.emit_safe(%{
+    event_type: "placement.created",
+    aggregate_type: "placement",
+    aggregate_id: p.id,
+    payload: %{
+      book_id: p.book_id,
+      bookshelf: p.bookshelf,
+      visibility_tier: p.visibility
+    }
+  })
+end)
+
+IO.puts("  emitted placement.created for #{length(seeded_placements)} seeded placements")
+
 # ── Placement History ───────────────────────────────────────────────────────
 
 Repo.insert_all(

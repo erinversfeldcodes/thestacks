@@ -12,6 +12,18 @@ defmodule Stacks.Workers.RegenerateFeedJob do
   without writing a row.
   """
 
+  # NOTE: deliberately NOT `unique:`. Placing N books enqueues N identical
+  # regenerations, which is wasteful but harmless — the job recomputes the whole
+  # feed and upserts one row per bookshelf, so the end state is correct either way.
+  #
+  # Deduping is tempting and is a trap worth writing down. Oban warns that unique
+  # `states` omitting `:executing` "may break uniqueness", and the obvious fix —
+  # adding `:executing` — introduces a LOST UPDATE here: a regeneration that is
+  # already running may have read the placements before the newest one committed,
+  # so collapsing the newest event into it drops that book from the feed until
+  # something else triggers a regeneration. Any dedup must therefore exclude
+  # `:executing` (and accept the warning), or debounce rather than deduplicate.
+  # Not worth it for a batch path; revisit only with that analysis in hand.
   use Oban.Worker, queue: :default, max_attempts: 3
 
   require Logger
