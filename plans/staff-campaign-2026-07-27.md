@@ -109,6 +109,79 @@ This is a **zero-row instance of exactly the ROOT G shape** — built halfway, w
 inside the wave that was meant to eliminate that class. Worth stating plainly: the schema change was
 the easy half, and shipping it alone produced a column that reads as a feature.
 
+## ▶ RESUME HERE — 2026-07-28. Three items close Wave 0, all Elm-side
+
+Everything below is verified against the tree, so a fresh session can act without re-deriving it.
+`just run just verify` is **exit 0** at this point; nothing is half-landed.
+
+**The pattern all three share:** the server is finished and tested, and `frontend/src/Api.elm` contains
+**no call to it**. That is ROOT G's dominant shape, so the DoD for each is the **zero-row/render check** —
+the value appears in a browser — not a passing test.
+
+### G4 — feeds client call · **S** · do this first
+
+- **Endpoint, live:** `GET /api/feeds/:user_id/:bookshelf_name` → `FeedController.show` (`router.ex:120`),
+  public, no auth, returns Atom XML.
+- **State:** `op.feed_cache` **has rows** (3–5 locally after a seed), so the zero-row check passes the
+  moment a client calls it. Server side proven; see the G4 section above.
+- **Missing:** any call in `Api.elm`, and a surface. A feed is a *link a reader copies into a reader app*,
+  so this is likely an anchor on the bookshelf/profile page rather than a fetch — decide that first,
+  because "call the endpoint from Elm" may be the wrong shape for a subscribe link.
+- ⚠️ **Two conformance holes are separate issues, not this one:** no `<link rel="self">` (RFC 4287) and
+  no per-entry link, so a reader cannot click through from their feed reader. Do not silently fold them in.
+
+### G6 — business opt-out form · **M**
+
+- **Endpoint, live:** `POST /api/opt-out` → `OptOutController.create` (`router.ex:107`).
+- **Server side DONE** (`a435e2b2`): `Discovery.record_removal_request/2` with
+  `email_domain_matches_source?/2` — a matching contact-email domain auto-excludes, anything else records
+  `exclusion_requested_at` and parks for owner review with the listing still live.
+- **Decided:** a standalone submission form carrying a contact address (owner, 2026-07-28).
+- **Missing:** the form page, the owner review queue, and extending the verified path to the
+  `third_space` row — **soft-delete** via `opted_out`/`opted_out_at`, never a hard delete, because
+  discovery re-finds sources continuously and a deleted business would be rediscovered and re-listed.
+  `list_third_spaces/1` already excludes `opted_out` spaces, so the read side is done.
+
+### G5 — shelf organisation UI · **L** · largest, do last or on its own
+
+- **Endpoints, all live and tested** (35 backend tests): `GET`/`POST`
+  `/api/bookshelves/:bookshelf_name/shelves`, `DELETE /api/shelves/:id`,
+  `PUT /api/bookshelves/:bookshelf_name/shelves/reorder` (`router.ex:224-227`).
+- **State:** `op.shelves` has **90 seeded rows**. All of it unreachable — `Api.elm` has bookshelf-level
+  calls only (`:159`, `:831`, `:1571`, `:2423`), nothing for the shelf sub-resource.
+- **Decided:** build **both** drag-and-drop *and* explicit controls, **split by action**
+  (create/delete, then reorder/move) so each ships with both input methods. Drag-only was never cheaper —
+  it needs a keyboard path regardless, and explicit controls *are* that path.
+- ⚠️ **Terminology, do not conflate:** a **bookshelf** is a named virtual collection (library,
+  antilibrary…); a **shelf** is a physical row within it (`op.shelves`, no `name` column). This item is
+  about *shelves*.
+
+### Still open, deliberately, and not blocking Wave 0
+
+| Item | Why it is parked |
+|---|---|
+| **G3 evidence** | Mechanism fixed and 5 pending sources now seeded, so `/admin/sources` has rows. Proving discovery *end to end* needs a real Brave API key in a deployed environment |
+| **G1 steps 5–6** | Elm port + map page, a later wave. Gated on rows existing, which they now do |
+| **E4** remove `noindex` | Wave 9 launch gate; its blocker E2 is cleared |
+| **`DiscoverBookstoreEventsJob` schedule** | Deliberate: starting it crawls real bookshops, several one-person operations. Owner's call |
+| **Bookshop branches + `city`** | Data-model gap — chains need per-branch rows; 3 shops did not geocode for want of a city. Same root cause |
+
+### ⚠️ Gotchas this session paid for — read before touching a proto field
+
+1. **`just run just proto-sync-all`** does all four codegen steps and names the four manual follow-ons.
+   Use it instead of remembering the order.
+2. **A hand-written changeset silently drops a new column.** Now guarded by
+   `changeset_field_coverage_test.exs` — but the guard only helps if the suite runs.
+3. **dbt `source-has-all-columns` caught me three times.** Every new column needs an entry in
+   `dbt/models/staging/sources.yml`.
+4. **`git add` a generated migration immediately** — `mix test` deletes untracked `_add_*_to_*` files.
+   `proto-sync-all` now does this.
+5. **`proto.sync` can emit two migrations in the same second**, and Ecto rejects duplicate versions.
+   Bump one timestamp by hand.
+6. **Vacuous tests are the recurring self-inflicted wound.** Three this session (ISBN check digits, the
+   limit-ordering decoys, the geocoding cap) all passed with the feature deleted. **Probe every
+   load-bearing assertion**; do not trust a green test you just wrote.
+
 ## Amendment log
 
 | Date | Change |
@@ -117,6 +190,7 @@ the easy half, and shipping it alone produced a column that reads as a feature.
 | 2026-07-27 | Waves 0c/0d added — robots.txt compliance made structural, price fetch rebuilt on the capability probe. G2 proven live (first `price_snapshots` row ever). ⚠️ **Recorded as "completed" at the time; a 2026-07-28 code check found 0d has four open items and that C3/C4 were orphaned. See the Wave 0 status table above.** |
 | 2026-07-27 | 🟧 **ROOT H narrowed then closed** — challenged correctly by the owner; all three non-staleness cases made event-driven. This removes the correctness argument for `min_machines_running = 1`; see Wave 0e/E5. |
 | 2026-07-28 | **Wave 0b resolved** — G1/G4/G5/G6 specified; G4 and G6 server halves built and merged (`a435e2b2`); **G1 removed from Wave 0b** as not promotable. `docs/user_stories/US-3.1.1-third-spaces-map.md` written, all six of its decisions taken. |
+| 2026-07-28 | **G1 brought fully in** (owner: *"let's bring it all in"*). Steps 1–4 done — coordinates + indexes, Nominatim behind a swappable seam, approval-driven producer, **ADR 022**. Bookshops geocoded (7/10). Chain proven live: `third_spaces` 0→1 with `nearest_bookshop_km` 0.678 km. The 500 m rule became **two tiers** (distance OR curation). `discovered_sources` 0→5 seeded, closing G3's zero-row cause. Added `just proto-sync-all` + a changeset-coverage guard. **See ▶ RESUME HERE above.** |
 | 2026-07-28 | **Waves 0c and 0d closed** — C3, C4, P7 and P9 built; P3 half-stale (its real defect was a fabricated registry key); P8 already done. `just run just verify` exit 0. ⚠️ **Wave 0 as a whole is still open: 0b remains** — an earlier report of mine said "Wave 0 is closed" and meant only these six items. |
 | 2026-07-28 | **Wave 0e added** — production domain cutover. Six items, four wrong in production today. ⚠️ Two of the six reported items were *not* what the report described (E1's RSS half, E5's severity), and my own first framing of **E2 was overstated as ⛔ and is corrected in place to 🟧** — the root `robots.txt`/`ai.txt` are repository-level declarations, not unserved website files. |
 
@@ -1702,7 +1776,10 @@ Four defects surfaced that were not in the original G1 description:
    is discarded without error. Every space was created unpositioned until the cast list was updated. Worth
    knowing: **this will happen again** on the next proto field added to a hand-cast schema.
 
-## Deferred steps 4–6 — dependency order preserved
+## Deferred steps 5–6 — dependency order preserved
+
+⚠️ **Step 4 is DONE** (ADR 022, 2026-07-28) — it was in this section when written and is not
+any more. Only the Elm port and the map page remain deferred.
 
 ⚠️ **Why this section exists.** G1 was removed from Wave 0b on 2026-07-28 with a stated reason, and a check
 on 2026-07-28 found it had landed in **no future wave** — the identical "moved and then untracked" pattern
@@ -1720,9 +1797,15 @@ fixing in Wave 7 (ROOT D) rather than left to be rediscovered.
 
 ⛔ **The mapping also documents a producer that has never existed.** `:2115` lists
 `DiscoverThirdSpacesJob` as *"Scheduled (weekly)"*. There is **no such module** anywhere in
-`apps/core/lib` and no crontab entry. That is why `op.third_spaces` is 0 — not a fixture gap, an absent
+`apps/core/lib` and no crontab entry. That is why `op.third_spaces` was 0 — not a fixture gap, an absent
 producer that the documentation asserts is running. Same defect class as ROOT D, at its most expensive:
 the doc says the pipeline exists, so nobody looks.
+
+✅ **Resolved differently than the mapping implies.** The producer now exists as
+`Discovery.create_third_space/1`, driven by **approval**, not by a weekly job — because US-3.1.1 §4 makes
+human approval the only permissible producer. So the mapping's `DiscoverThirdSpacesJob` row should be
+**deleted**, not implemented; a scheduled scraper writing that table is the design the story rejects.
+Fold into Wave 7 (ROOT D) with the phase-label fix.
 
 ⛔ **`GET /api/third-spaces` is live and its geo contract is unkeepable.** The route exists
 (`router.ex:126`) and the controller accepts `lat`, `lng` and `radius_km`
