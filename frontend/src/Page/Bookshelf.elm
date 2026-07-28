@@ -17,9 +17,10 @@ import Api
 import Components.AgeGate exposing (ageGate)
 import Components.BookList as BookList
 import Components.RSSLink as RSSLink
+import Components.ShelfOrganiser as ShelfOrganiser
 import Components.Spine exposing (WearLevel(..))
 import Components.ViewModeToggle as ViewModeToggle exposing (ShelfViewMode(..))
-import Html exposing (Html, a, div, p, text)
+import Html exposing (Html, a, div, h2, p, text)
 import Html.Attributes exposing (attribute, class, href)
 import Http
 import Navigation.Route exposing (Route(..))
@@ -148,6 +149,12 @@ type alias Model =
     , viewMode : ShelfViewMode
     , sortState : BookList.SortState
     , token : Maybe String
+
+    -- Shelf organisation (US-1.7.1 / #190, G5). `organiserBusy` gates every control while
+    -- a mutation is in flight, so two conflicting orders cannot be queued.
+    , organiser : ShelfOrganiser.State
+    , organiserBusy : Bool
+    , organiserError : Maybe String
     }
 
 
@@ -187,6 +194,8 @@ type Msg
     | RSSLinkMsg RSSLink.Msg
     | ViewModeChanged ShelfViewMode
     | SortColumnClicked BookList.SortColumn
+    | OrganiserMsg ShelfOrganiser.Msg
+    | ShelfMutated (Result Http.Error ())
 
 
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
@@ -226,6 +235,9 @@ init config maybeToken userId =
       , viewMode = SpineView
       , sortState = { column = BookList.Title, direction = BookList.Asc }
       , token = maybeToken
+      , organiser = ShelfOrganiser.init
+      , organiserBusy = False
+      , organiserError = Nothing
       }
     , apiCmd
     )
@@ -302,6 +314,150 @@ update msg model =
                         BookList.Asc
             in
             ( { model | sortState = { column = column, direction = newDirection } }, Cmd.none, NoOut )
+
+        OrganiserMsg subMsg ->
+            handleOrganiser subMsg model
+
+        ShelfMutated (Ok ()) ->
+            -- Refetch rather than trusting the local order. A create assigns a position the
+            -- client never chose, and a delete renumbers — so the server's answer is the
+            -- only trustworthy one, and the extra round trip is cheap on a rare action.
+            ( { model | organiserBusy = False, organiserError = Nothing }
+            , reloadShelves model
+            , NoOut
+            )
+
+        ShelfMutated (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                -- Refetch on failure too: the optimistic reorder below already moved the
+                -- row, so leaving it there would show an order the server rejected.
+                ( { model | organiserBusy = False, organiserError = Just (mutationError err) }
+                , reloadShelves model
+                , NoOut
+                )
+
+
+{-| Shelf organisation, split out so `update` stays flat.
+
+Reorders are **optimistic** — the row moves immediately and the full order is sent — because
+a reorder with a round trip of latency before anything moves feels broken. Create and delete
+are not optimistic: both change positions the server assigns, so guessing would show a
+number that is about to change.
+
+-}
+handleOrganiser : ShelfOrganiser.Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+handleOrganiser subMsg model =
+    case ( subMsg, model.token, model.shelves ) of
+        ( ShelfOrganiser.AddShelf, Just token, _ ) ->
+            ( { model | organiserBusy = True }
+            , Api.createShelf model.config.apiName token ShelfMutated
+            , NoOut
+            )
+
+        ( ShelfOrganiser.RemoveShelf id, Just token, _ ) ->
+            ( { model | organiserBusy = True }
+            , Api.deleteShelf id token ShelfMutated
+            , NoOut
+            )
+
+        ( ShelfOrganiser.MoveUp id, Just token, Success shelves ) ->
+            persistOrder (ShelfOrganiser.moveUp id shelves) token model
+
+        ( ShelfOrganiser.MoveDown id, Just token, Success shelves ) ->
+            persistOrder (ShelfOrganiser.moveDown id shelves) token model
+
+        ( ShelfOrganiser.DragStart id, _, _ ) ->
+            ( { model | organiser = { dragging = Just id } }, Cmd.none, NoOut )
+
+        ( ShelfOrganiser.DragEnd, _, _ ) ->
+            ( { model | organiser = { dragging = Nothing } }, Cmd.none, NoOut )
+
+        ( ShelfOrganiser.DropOn targetId, Just token, Success shelves ) ->
+            case model.organiser.dragging of
+                Just draggedId ->
+                    -- Drop resolves to the same pure move the buttons use, so the two
+                    -- affordances cannot disagree about what a move means.
+                    persistOrder
+                        (moveToId draggedId targetId shelves)
+                        token
+                        { model | organiser = { dragging = Nothing } }
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        _ ->
+            -- No token, or shelves not loaded: nothing to organise. Silent because the
+            -- controls are not rendered in that state, so reaching here is a stale click.
+            ( model, Cmd.none, NoOut )
+
+
+{-| Apply an already-computed order locally and persist the whole list.
+-}
+persistOrder : List Shelf -> String -> Model -> ( Model, Cmd Msg, OutMsg )
+persistOrder reordered token model =
+    ( { model | shelves = Success reordered, organiserBusy = True, organiserError = Nothing }
+    , Api.reorderShelves
+        model.config.apiName
+        (ShelfOrganiser.orderedIds reordered)
+        token
+        ShelfMutated
+    , NoOut
+    )
+
+
+{-| Move `draggedId` to wherever `targetId` currently sits.
+-}
+moveToId : String -> String -> List Shelf -> List Shelf
+moveToId draggedId targetId shelves =
+    let
+        indexOf id =
+            shelves
+                |> List.indexedMap (\i shelf -> ( i, shelf.id ))
+                |> List.filter (\( _, shelfId ) -> shelfId == id)
+                |> List.head
+                |> Maybe.map Tuple.first
+    in
+    case ( indexOf draggedId, indexOf targetId ) of
+        ( Just from, Just to ) ->
+            ShelfOrganiser.moveTo from to shelves
+
+        _ ->
+            shelves
+
+
+reloadShelves : Model -> Cmd Msg
+reloadShelves model =
+    case model.token of
+        Just token ->
+            Api.getShelves model.config.apiName
+                token
+                (ShelvesLoaded (requestKey model.config)
+                    << Result.map (\shelves -> { shelves = shelves, visibility = model.visibility })
+                )
+
+        Nothing ->
+            Cmd.none
+
+
+{-| A mutation failure in the reader's terms.
+-}
+mutationError : Http.Error -> String
+mutationError err =
+    case err of
+        Http.BadStatus 422 ->
+            "That shelf still has books on it. Move them elsewhere first."
+
+        Http.BadStatus 403 ->
+            "That shelf is not yours to change."
+
+        Http.BadStatus 404 ->
+            "That shelf no longer exists."
+
+        _ ->
+            "Could not save that change. Please try again."
 
 
 
@@ -432,7 +588,52 @@ viewBookshelfFromShelves model shelves =
                         |> List.map (viewShelfRowClickable model.config.wearLevel BookClicked)
             in
             div [ class "bookshelf" ]
-                [ viewBookcase (minShelfRows 4 shelfRows) ]
+                [ viewBookcase (minShelfRows 4 shelfRows)
+                , viewOrganiser model shelves
+                ]
+
+
+{-| The shelf organiser (US-1.7.1 / #190), for the owner only.
+
+⚠️ **A separate panel, deliberately not a change to the spine layout.** The bookcase
+auto-flows placements into visual rows and does _not_ surface the physical `op.shelves`
+boundaries — a documented presentation choice (#151), noted in `SpineView` above. Rendering
+spines per shelf to make organisation visible would quietly reverse that decision. So this
+manages the physical shelves alongside the bookcase instead of reshaping it.
+
+Hidden when `readOnly` (someone else's bookshelf) or when there is no token: organising
+another reader's shelves is not a thing, and the controls would 403.
+
+-}
+viewOrganiser : Model -> List Shelf -> Html Msg
+viewOrganiser model shelves =
+    if model.config.readOnly || model.token == Nothing then
+        text ""
+
+    else
+        div [ class "bookshelf__organiser", testId "shelf-organiser" ]
+            [ h2 [ class "bookshelf__organiser-title" ] [ text "Shelves" ]
+            , p [ class "bookshelf__organiser-hint" ]
+                [ text
+                    ("These are the physical shelves in this bookcase. Drag a row, or use "
+                        ++ "the arrows, to reorder them."
+                    )
+                ]
+            , case model.organiserError of
+                Just message ->
+                    p [ class "bookshelf__organiser-error", testId "shelf-organiser-error" ]
+                        [ text message ]
+
+                Nothing ->
+                    text ""
+            , Html.map OrganiserMsg
+                (ShelfOrganiser.view
+                    { shelves = shelves
+                    , state = model.organiser
+                    , busy = model.organiserBusy
+                    }
+                )
+            ]
 
 
 {-| The bookcase inner width (~996px) used to pack book spines into rows. A new
