@@ -19,6 +19,8 @@ select
     robots_blocked_rule,
     robots_blocked_at,
     unscrapable_reason,
+    latitude,
+    longitude,
     created_at,
     updated_at
 from {{ source('op', 'bookstores') }}

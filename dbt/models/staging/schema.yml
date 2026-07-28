@@ -848,6 +848,10 @@ models:
         description: Robots blocked at.
       - name: unscrapable_reason
         description: Unscrapable reason.
+      - name: latitude
+        description: Latitude.
+      - name: longitude
+        description: Longitude.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -1046,6 +1050,12 @@ models:
         description: Opted out.
       - name: opted_out_at
         description: Opted out at.
+      - name: latitude
+        description: Latitude.
+      - name: longitude
+        description: Longitude.
+      - name: nearest_bookshop_km
+        description: Nearest bookshop km.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

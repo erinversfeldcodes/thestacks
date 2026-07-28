@@ -320,7 +320,14 @@ defmodule Stacks.Factory do
       website_url: "https://example.com",
       scraper_module: sequence(:scraper_module, &"za/store_#{&1}"),
       has_physical: true,
-      country_code: "ZA"
+      country_code: "ZA",
+      # ⚠️ Deliberately ~7 km from the `:third_space` factory's default point, not the
+      # same one. The 500 m pairing rule is the thing most proximity tests are about,
+      # and if the two defaults coincided every space would sit 0 km from every
+      # bookshop — so those tests would pass without asserting anything. A test that
+      # wants the rule satisfied must position one of them on purpose.
+      latitude: -33.9500,
+      longitude: 18.5000
     }
   end
 
@@ -342,6 +349,11 @@ defmodule Stacks.Factory do
       type: "cafe",
       city: "Cape Town",
       country_code: "ZA",
+      # A fixed point (central Cape Town), deliberately NOT a sequence: geo tests
+      # assert on distances, and a per-space offset would make every radius assertion
+      # depend on insertion order. Tests that care about position set it explicitly.
+      latitude: -33.9249,
+      longitude: 18.4241,
       website_url: "https://example.com",
       verified: false
     }

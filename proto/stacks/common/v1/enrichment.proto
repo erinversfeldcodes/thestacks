@@ -272,6 +272,16 @@ message Bookstore {
   // Free text on purpose: this is a note for a human operator, and an enum would have
   // to be extended for every new way a shop turns out to be unscrapable.
   string unscrapable_reason = 18 [json_name = "unscrapable_reason"];
+
+  // ── Location ────────────────────────────────────────────────────────────
+  //
+  // The 500 m rule pairs a third space with a bookshop, so it needs coordinates
+  // on BOTH sides. `op.bookstores` had `country_code` and a website and nothing
+  // positional, which is why the rule could not be computed at all.
+  // Decimal degrees, WGS 84. Null until geocoded.
+  double latitude = 19 [json_name = "latitude"];
+  // Decimal degrees, WGS 84. Null until geocoded.
+  double longitude = 20 [json_name = "longitude"];
 }
 
 // PriceSnapshot represents a scraped price for a book at a store.
@@ -389,6 +399,37 @@ message ThirdSpace {
 
   // When the space opted out.
   google.protobuf.Timestamp opted_out_at = 15 [json_name = "opted_out_at"];
+
+  // ── Location ────────────────────────────────────────────────────────────
+  //
+  // Real coordinates, replacing a `city` string looked up in a hardcoded
+  // six-entry map. `Enrichment.within_radius?/4` resolved a space's position by
+  // that lookup, so any space outside those six cities was silently dropped and
+  // two spaces in one city were treated as equidistant — while
+  // `GET /api/third-spaces` advertised `lat`/`lng`/`radius_km`. The endpoint was
+  // live with a contract it could not keep; 0 rows were all that hid it.
+  //
+  // `double`, not a geography type: a viewport IS a bounding box, so the primary
+  // query is two `between` clauses, and the 500 m rule is a Haversine expression
+  // that `Enrichment.haversine_km/4` already implements. PostGIS buys nothing
+  // until real geometry is needed (US-3.1.1 §5).
+  // Decimal degrees, WGS 84. Null until geocoded.
+  double latitude = 16 [json_name = "latitude"];
+  // Decimal degrees, WGS 84. Null until geocoded. Range -180..180, so a viewport that
+  // crosses the antimeridian arrives with east < west — see `filter_bounds/2`.
+  double longitude = 17 [json_name = "longitude"];
+
+  // Kilometres to the nearest bookshop, computed once at geocode time.
+  //
+  // Precomputed deliberately. The 500 m rule is the page's premise, so filtering
+  // on it happens on every pan; recomputing space-to-bookshop distances across a
+  // viewport per request is exactly the query that would later force PostGIS for
+  // the wrong reason. Stored as a scalar, the filter is `where <= 0.5`.
+  //
+  // Null means "not yet computed" — distinct from "no bookshop near", which is a
+  // large number. A space that failed to geocode must stay visible to the owner
+  // rather than silently vanishing from the queue.
+  double nearest_bookshop_km = 18 [json_name = "nearest_bookshop_km"];
 
   // When this record was created.
   google.protobuf.Timestamp created_at = 12 [json_name = "created_at"];
