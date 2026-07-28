@@ -1094,32 +1094,61 @@ Repo.insert_all(
 # never held a single row. Seeding the targets is what makes the pipeline
 # capable of producing anything at all.
 #
-# A row here declares intent to scrape; a matching TOML under
-# `apps/scraper/scrapers/za/` supplies the selectors. `scraper_module` is the
-# TOML basename, so the two stay linked by name. Rows whose TOML does not exist
-# yet are still useful: they make the gap visible in `all_stores()` rather than
-# invisible in an empty table.
+# A row here declares intent to scrape. It deliberately does NOT declare *how*:
+# the scraper service derives each store's platform, where its ISBNs live, and
+# whether a per-ISBN lookup is possible, by observing the site (two requests,
+# cached). Bookshops replatform, and a stored `platform = "shopify"` turns that
+# into a silent outage indistinguishable from "we don't stock it".
 #
 # Owner-specified target list, 2026-07-27. No PII, no user FK.
 #
-# ⚠️ OPERATIONAL CONSEQUENCE OF SEEDING THIS TABLE. The nightly batch scrape is
-# `stale_isbns(7) x all_stores()`. With these 12 rows and the current catalogue
-# that is 200 x 12 = ~2,400 outbound requests, and each TOML sets
-# `requests_per_minute = 10` per store — so a first full batch is on the order
-# of 20 hours of wall clock and would hammer twelve small independent
-# bookshops. Before enabling the cron against the full list: cap the batch
-# size, and prove ONE store end to end first (see the campaign plan's
-# "do one before eleven"). Several of these are one-person shops.
+# ── Measured capability, 2026-07-28 ────────────────────────────────────────
+# Sampled 50 products per Shopify store, 30 per WooCommerce store. Recorded here
+# so nobody re-probes needlessly; the service still derives it at runtime.
+#
+#   exclusivebooks    Shopify   handle == sku == ISBN 50/50 → DIRECT per-ISBN
+#                               lookup via /products/<isbn>.js. 404 = not stocked.
+#                               ⚠️ robots.txt DISALLOWS /search (the path the old
+#                               config used) and declares Crawl-delay: 10.
+#   booklounge        Woo       sku is an ISBN 30/30; Store API ?search=<isbn>
+#                               returns exactly one correct hit → NATIVE SEARCH.
+#   wordsworth        Shopify   sku 46/50, handle 0/50 → needs a local ISBN index
+#   stellenboschbooks Shopify   sku 50/50, handle 0/50 → needs a local ISBN index
+#   bridgebooks       Shopify   sku 49/50; ISBN is *inside* 37/50 handles but the
+#                               handle is not equal to it, so direct lookup 404s
+#   clarkesbooks      Shopify   ISBN only in free-text body 35/50
+#   ikesbooks         Shopify   NO ISBN anywhere in 50 products
+#   lovebooks         Woo       NO ISBN in sku (0/30)
+#   loot              —         no product JSON API
+#   fortunatefinds    —         Woo Store API disabled (404)
+#   kalkbaybooks      —         homepage 503; /products.json and Store API both
+#                               404, so the server answers but has no product API
+#
+# Shopify's storefront search matches an ISBN in NO field — proven against four
+# stores using ISBNs they demonstrably stock — so there is no search-based
+# fallback for any of the six Shopify shops.
+#
+# ⚠️ OPERATIONAL CONSEQUENCE OF SEEDING THIS TABLE. The nightly batch is
+# `stale_isbns(7) x all_stores()` with no cap. Prices are moving to lazy,
+# TTL-driven fetches (plan P6) precisely so load tracks reader interest instead
+# of catalogue size x wall clock. Until that lands, do not enable the cron
+# against the full list. Several of these are one-person shops.
 bookstore_targets = [
   {9001, "Loot", "https://www.loot.co.za", "loot", false},
   {9002, "Wordsworth Books", "https://www.wordsworth.co.za", "wordsworth", true},
   {9003, "The Book Lounge", "https://booklounge.co.za", "book_lounge", true},
-  {9004, "Exclusive Books", "https://www.exclusivebooks.co.za", "exclusive_books", true},
+  # Bare domain, not www: www.exclusivebooks.co.za answers 301 while the bare
+  # host answers 200, so every request through www would cost two round trips.
+  {9004, "Exclusive Books", "https://exclusivebooks.co.za", "exclusive_books", true},
   {9005, "Clarke's Bookshop", "https://clarkesbooks.co.za", "clarkes_books", true},
   {9006, "Kalk Bay Books", "https://kalkbaybooks.co.za", "kalk_bay_books", true},
   {9007, "Love Books", "http://www.lovebooks.co.za", "love_books", true},
   {9008, "Bridge Books", "https://bridgebooks.co.za", "bridge_books", true},
-  {9009, "Skoobs Theatre of Books", "http://www.skoobs.co.za", "skoobs", true},
+  # 9009 was Skoobs Theatre of Books. Removed 2026-07-28: skoobs.co.za and
+  # www.skoobs.co.za both return NXDOMAIN, so the domain no longer exists and the
+  # shop appears to have closed. Kept as a comment rather than silently dropped so
+  # the gap in the id sequence is explained, and so it is not re-added from the
+  # owner's original list without re-checking DNS.
   {9010, "Ike's Books", "http://ikesbooks.com", "ikes_books", true},
   {9011, "Fortunate Finds", "https://fortunatefinds.co.za", "fortunate_finds", true},
   {9012, "Stellenbosch Books", "https://stellenboschbooks.co.za", "stellenbosch_books", true}
@@ -1132,9 +1161,13 @@ Repo.insert_all(
       id: Seeds.uuid(n),
       name: name,
       website_url: url,
-      # The scraper resolves the search path from its own TOML; this template
-      # records the ISBN-substitution contract the job relies on.
-      search_template: "{isbn}",
+      # Left nil deliberately. It used to say "{isbn}", recording an
+      # ISBN-substitution contract that does not exist: Shopify's storefront
+      # search matches an ISBN in no field, so six of these stores can never be
+      # searched that way. How a store is queried is now derived from its observed
+      # platform, not declared here, and a template that cannot work is worse than
+      # no template — it reads as a working configuration.
+      search_template: nil,
       has_physical: physical,
       country_code: "ZA",
       scraper_module: module,
