@@ -85,6 +85,13 @@ expectedAuth route =
         About ->
             False
 
+        -- Unauthenticated on purpose. US-2.5.3: removal "does not require account
+        -- creation" — a business that never asked to be listed must not have to sign up
+        -- in order to leave. This branch existing is the deliberate decision that
+        -- exhaustiveness forces.
+        ListingRemoval ->
+            False
+
         Catalogue ->
             False
 

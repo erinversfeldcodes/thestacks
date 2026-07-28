@@ -36,6 +36,7 @@ module Api exposing
     , PublicProfile
     , PublicProfileSummary
     , RegisterError(..)
+    , RemovalOutcome(..)
     , RiskInference
     , SearchSections
     , ShelfVisibilitySetting
@@ -117,6 +118,7 @@ module Api exposing
     , rejectSource
     , removeBook
     , requestExport
+    , requestListingRemoval
     , resetPassword
     , saveConsent
     , saveWritingAssistantConsent
@@ -430,6 +432,67 @@ resetPassword body toMsg =
                 )
         , expect = Http.expectWhatever toMsg
         }
+
+
+{-| The outcome of a listing-removal request.
+
+Two outcomes, kept distinct on purpose. A request from an address on the listing's own
+domain is applied immediately; anything else is recorded and waits for a human. Telling a
+business their listing is gone when it is still live would be worse than telling them it
+is pending, so the caller must not be able to collapse these into "success".
+
+-}
+type RemovalOutcome
+    = Removed
+    | PendingReview
+
+
+{-| POST /api/opt-out — ask for a business listing to be removed.
+
+Unauthenticated by design (US-2.5.3: "does not require account creation"). The contact
+address is how the request is verified: a matching domain is applied at once, anything
+else is queued for review.
+
+404 means no listing matches the URL, 422 means the address was not a valid email.
+
+-}
+requestListingRemoval :
+    { url : String, email : String, reason : String }
+    -> (Result Http.Error RemovalOutcome -> msg)
+    -> Cmd msg
+requestListingRemoval body toMsg =
+    Http.post
+        { url = baseUrl ++ "/api/opt-out"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "url", Encode.string body.url )
+                    , ( "email", Encode.string body.email )
+                    , ( "reason", Encode.string body.reason )
+                    ]
+                )
+        , expect = Http.expectJson toMsg removalOutcomeDecoder
+        }
+
+
+removalOutcomeDecoder : Decoder RemovalOutcome
+removalOutcomeDecoder =
+    Decode.field "status" Decode.string
+        |> Decode.andThen
+            (\status ->
+                case status of
+                    "removed" ->
+                        Decode.succeed Removed
+
+                    "pending_review" ->
+                        Decode.succeed PendingReview
+
+                    other ->
+                        -- Fails rather than defaulting. An unrecognised status defaulting
+                        -- to Removed would tell a business their listing is gone on the
+                        -- strength of a value we do not understand.
+                        Decode.fail ("unknown removal status: " ++ other)
+            )
 
 
 {-| True when an `Http.Error` is an authentication failure (HTTP 401) from an
