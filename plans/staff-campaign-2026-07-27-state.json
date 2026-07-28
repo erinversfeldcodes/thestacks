@@ -1,0 +1,123 @@
+{
+  "campaign": "staff-campaign-2026-07-27",
+  "plan": "plans/staff-campaign-2026-07-27.md",
+  "created_at": "2026-07-27T00:00:00Z",
+  "updated_at": "2026-07-28T22:40:00Z",
+  "status": "in_progress",
+  "current_wave": "0",
+  "_why": [
+    "Retrofitted 2026-07-28 after the campaign twice claimed a wave complete when it was not.",
+    "The prose plan cannot answer 'is this wave done?' — this file can, via scripts/wave-status.sh.",
+    "Items with no `issue` are recorded as 'informal': work done directly off the plan with no",
+    "issues/NNN-*.md behind it. That is exactly the gap that made false completion claims cheap,",
+    "so wave-status.sh treats an informal item marked done as a violation unless `note` justifies it.",
+    "Not backfilling issue files retroactively for already-shipped Wave 0 items: they are landed and",
+    "verified, and inventing DoDs after the fact would be documentation theatre. New work gets a real",
+    "issue file first — see docs/agents/staff-engineer-agent.md Mode E."
+  ],
+  "waves": {
+    "0": {
+      "title": "Prerequisites — evidence gaps, reachability breaks, domain cutover",
+      "status": "in_progress",
+      "items": {
+        "C3": {
+          "title": "Route the events job through the compliant egress",
+          "status": "complete",
+          "issue": null,
+          "note": "informal — landed pre-retrofit; POST /fetch on scraper + ScraperClient.fetch_page/2, mutation-probed",
+          "informal": true
+        },
+        "C4": {
+          "title": "robots_blocked becomes a store state",
+          "status": "complete",
+          "issue": null,
+          "note": "informal — landed pre-retrofit; record_robots_block/3 + clear_robots_block/1, probed",
+          "informal": true
+        },
+        "P3": {
+          "title": "Canary assertion + scraper_module coupling",
+          "status": "complete",
+          "issue": null,
+          "note": "informal — half stale on inspection; the canary was already wired, the 'coupling' hid a real defect",
+          "informal": true
+        },
+        "P7": {
+          "title": "Edition discovery from Open Library, capped",
+          "status": "complete",
+          "issue": null,
+          "note": "informal — ISBNResolver.editions_for_work/1 + DiscoverEditionsJob, event-driven off book.created",
+          "informal": true
+        },
+        "P8": {
+          "title": "Oban job rebuilds the index on a cadence",
+          "status": "complete",
+          "issue": null,
+          "note": "informal — STALE finding: already done before the campaign (cron 30 4 * * * + event-driven)",
+          "informal": true
+        },
+        "P9": {
+          "title": "Record unscrapable targets as :none with a reason",
+          "status": "complete",
+          "issue": null,
+          "note": "informal — bigger than filed: nine of eleven seeded stores named a nonexistent scraper config",
+          "informal": true
+        },
+        "G1": {
+          "title": "Third spaces — coordinates, geocoder, producer, ADR 022",
+          "status": "in_progress",
+          "issue": null,
+          "note": "steps 1-4 done and proven live (third_spaces 0->1, nearest_bookshop_km 0.678). Steps 5-6 (Elm port + map page) NOT started — deferred to a later wave by owner decision, needs its own issue file",
+          "blocked_on": null
+        },
+        "G3": {
+          "title": "Source discovery — prove the chain end to end",
+          "status": "blocked",
+          "issue": null,
+          "blocked_on": "needs a real Brave API key in a deployed environment; rows now exist but the UI that shows them is unreachable (#303)",
+          "note": "evidence gap, not a code gap"
+        },
+        "G4": {
+          "title": "RSS feeds reachable from the profile",
+          "status": "in_progress",
+          "issue": null,
+          "note": "endpoint + has_feed + anchor built and unit-tested; feed ladder bug fixed (public bookshelves were refused a feed). NOT DRIVEN: the subscribe anchor has never been seen rendered on a page"
+        },
+        "G5": {
+          "title": "Shelf organisation reachable from the client",
+          "status": "complete",
+          "issue": null,
+          "note": "informal — driven live 2026-07-28: add/reorder/drag all work, 19 spines survive. Two bugs found and fixed live (hardcoded placements:[]; dragover cancelling the drag), both mutation-probed",
+          "informal": true
+        },
+        "G6": {
+          "title": "Business opt-out — form, soft-delete, review queue",
+          "status": "in_progress",
+          "issue": null,
+          "note": "form + both outcomes driven live; API queue driven end to end (approve -> park -> honour -> 409). The admin UI is built but UNREACHABLE in the SPA — #303"
+        },
+        "0e": {
+          "title": "Domain cutover (PHX_HOST, MetricsPusher, /.env probes, noindex)",
+          "status": "complete",
+          "issue": null,
+          "note": "informal — PHX_HOST was in 4 places, not 3; the 4th (deploy-stack.sh:810 Fly secret) overrode fly.toml",
+          "informal": true
+        }
+      }
+    },
+    "1": {
+      "title": "Not yet started — see plans/staff-campaign-2026-07-27.md",
+      "status": "not_started",
+      "items": {}
+    }
+  },
+  "human_decisions_pending": [
+    "G1 steps 5-6 (Elm port + map page): confirm the wave they belong to, then file an issue",
+    "DiscoverBookstoreEventsJob scheduling: starting it crawls real bookshops, several one-person operations — owner's call",
+    "Whether a platform-visibility bookshelf should be served by an UNAUTHENTICATED feed URL at all (the ladder says platform = signed-in only; the feed route is public). Pre-existing; not changed unilaterally"
+  ],
+  "notes": [
+    "2026-07-28: #301 (398 orphan CSS classes), #302 (prose negative assertions), #303 (SPA cannot reach any admin endpoint) filed.",
+    "2026-07-28: #303 invalidates the earlier Wave 0 claim that seeding discovered_sources closed G3's evidence gap — the rows exist and the API serves them, but no UI can reach them.",
+    "A preview redeploy DELETES and recreates the Neon branch from staging, so anything seeded into a preview survives exactly one deploy."
+  ]
+}

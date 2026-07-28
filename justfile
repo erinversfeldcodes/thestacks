@@ -488,3 +488,13 @@ observe-down:
 render-gate:
     docker compose -f infra/local-observability/docker-compose.yml up -d
     scripts/dashboard-render-gate.sh
+
+# Is a staff-campaign wave actually done? Reads plans/<slug>-state.json and refuses
+# unbacked completion claims (no issue file, open DoD boxes, a wave "done" with open
+# items). Exists because campaign-level completion used to be prose an agent asserted
+# and a human had to challenge — twice, wrongly. Ask the tree, not the agent.
+#   just wave-status                          # newest campaign
+#   just wave-status staff-campaign-2026-07-27
+#   just wave-status staff-campaign-2026-07-27 --next
+wave-status *ARGS:
+    @bash scripts/wave-status.sh {{ARGS}}
