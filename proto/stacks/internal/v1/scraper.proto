@@ -47,6 +47,59 @@ message CatalogueTitlesResponse {
   repeated CatalogueTitle titles = 1 [json_name = "titles"];
 }
 
+// Request for POST /fetch — retrieve one page through the compliant egress.
+//
+// Exists so that callers which need a store's *page* rather than its price do not
+// have to build their own HTTP request, because doing so bypasses robots.txt and the
+// rate limiter. The events discovery job did exactly that (a bare Finch GET with no
+// robots check, no rate limit and no fuse), which is why this message exists.
+//
+// Deliberately keyed by `store` and not by URL: the config supplies the base URL and
+// the rate limit, so a store with no scraper config CANNOT be fetched at all. That is
+// the point — no configuration means no declared crawl policy, and guessing one is
+// how a compliance rule becomes advisory.
+message FetchPageRequest {
+  // Store identifier, e.g. "za/exclusive_books". Must exist in the registry.
+  string store = 1 [json_name = "store"];
+  // Path relative to the store root, e.g. "/events". Must begin with "/".
+  string path = 2 [json_name = "path"];
+}
+
+// How a page fetch ended.
+//
+// Deliberately NOT `ScrapeOutcome`. A page fetch cannot be "priced", "not stocked" or
+// "index required", and reusing that enum here would let the contract encode three
+// nonsense states — the most expensive place to allow one. Two outcomes are all this
+// operation has.
+enum FetchOutcome {
+  // Never sent. Present because proto3 requires a zero value; treating "unset" as
+  // success is exactly the trap this enum exists to avoid.
+  FETCH_OUTCOME_UNSPECIFIED = 0;
+
+  // The page was fetched. `status` carries the upstream HTTP status, which may itself
+  // be a 404 — that is data about the store, not a failure of the fetch.
+  FETCH_OUTCOME_FETCHED = 1;
+
+  // robots.txt disallows this path. The caller must record it and stop; retrying
+  // cannot succeed, and treating it as an error melts the shared fuse every time.
+  FETCH_OUTCOME_ROBOTS_BLOCKED = 2;
+}
+
+// Response from POST /fetch.
+message FetchPageResponse {
+  // Upstream HTTP status. 404 is data, not an error — the page may not exist.
+  // Zero when nothing was fetched (i.e. ROBOTS_BLOCKED).
+  int32 status = 1 [json_name = "status"];
+  // Response body, empty unless the outcome is FETCHED.
+  string body = 2 [json_name = "body"];
+  // Why this fetch ended the way it did.
+  FetchOutcome outcome = 3 [json_name = "outcome"];
+  // The `Disallow:` line that blocked us, set only when outcome is ROBOTS_BLOCKED.
+  // Recorded on the store so a block is observable state rather than a silent skip,
+  // and so an operator can tell a narrow disallow from a total one.
+  string robots_rule = 4 [json_name = "robots_rule"];
+}
+
 // What a scrape attempt concluded.
 //
 // The point of this enum is to separate two things that used to be

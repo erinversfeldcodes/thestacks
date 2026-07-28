@@ -21,8 +21,12 @@ pub enum ScraperError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
-    #[error("robots.txt disallows scraping {url}")]
-    RobotsDisallowed { url: String },
+    // `rule` carries the `Disallow:` line that caused the refusal. Without it a caller
+    // recording the block has no way to distinguish a narrow disallow (`/search`) from
+    // a total one (`/`) — i.e. whether the store is permanently unscrapable or merely
+    // needs a different path. See `RobotsPolicy::blocked_by`.
+    #[error("robots.txt disallows scraping {url} ({rule})")]
+    RobotsDisallowed { url: String, rule: String },
 
     #[error("robots.txt fetch failed for {domain}: {reason}")]
     RobotsFetchFailed { domain: String, reason: String },

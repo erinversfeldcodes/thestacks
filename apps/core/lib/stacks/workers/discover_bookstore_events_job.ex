@@ -7,6 +7,26 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
 
   For each store, fetches the events page, parses event data, and links to
   known authors when an author name matches the event title or description.
+
+  ## Compliance
+
+  The page is fetched through `ScraperClient.fetch_page/2`, which is the scraper
+  service's single compliant egress: robots.txt is consulted first, then the rate
+  limiter, and both circuit breakers gate the call.
+
+  ⚠️ This job previously issued a **bare `Finch.build(:get, "\#{website_url}/events")`**
+  with no robots check, no rate limit and no fuse — a direct violation of the project's
+  hard rule that robots.txt stops a scrape. It was never scheduled, so nothing was
+  actually fetched non-compliantly, but the violation sat in the code waiting for
+  whoever wired the job up. Fixing the egress before that happened is the whole point:
+  the next person to schedule this will not think to check.
+
+  A robots disallow is recorded on the store (`Prices.record_robots_block/3`) and the
+  job **stops for that store** — it does not retry, and it does not try another path.
+  A later successful fetch clears the block, so a lifted disallow resumes by itself.
+
+  Only stores with a scraper config can be fetched at all, because the config supplies
+  the base URL and the rate limit. A store without one is skipped and says so.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -14,7 +34,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   require Logger
 
   alias Stacks.Books.Author
-  alias Stacks.Enrichment.{Events, Prices}
+  alias Stacks.Enrichment.{Events, Prices, ScraperClient}
   alias Stacks.Monitoring
 
   @impl true
@@ -32,9 +52,18 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   end
 
   def perform(%Oban.Job{args: %{"batch" => true}}) do
-    stores =
-      Prices.all_stores()
-      |> Enum.filter(& &1.website_url)
+    # `scrapeable_stores/0`, not `all_stores/0`: the compliant egress is keyed by scraper
+    # config, which supplies the base URL *and* the rate limit. A store with a website
+    # but no config cannot be fetched at all — deliberately, since no config means no
+    # declared crawl policy and guessing one is how the hard rule becomes advisory.
+    stores = Prices.scrapeable_stores()
+    skipped = length(Prices.all_stores()) - length(stores)
+
+    if skipped > 0 do
+      Logger.info(
+        "DiscoverBookstoreEventsJob: skipping #{skipped} store(s) with no scraper config"
+      )
+    end
 
     Logger.info("DiscoverBookstoreEventsJob: processing #{length(stores)} stores in batch")
 
@@ -43,15 +72,51 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
     :ok
   end
 
+  # The path fetched on every store. Relative, because the compliant egress resolves
+  # it against the store's *configured* base URL rather than trusting a caller-supplied
+  # host — see `ScraperClient.fetch_page/2`.
+  @events_path "/events"
+
+  # The single-store entry point reaches here via `all_stores/0`, so unlike the batch
+  # path it can still be handed a store with no registry key. Refuse explicitly rather
+  # than asking the service about `null` — that produces a 404 whose message blames the
+  # store rather than the missing config.
+  defp discover_for_store(%{scraper_module: nil} = store) do
+    Logger.info(
+      "DiscoverBookstoreEventsJob: #{store.name || store.id} has no scraper config; " <>
+        "not fetching (no config means no declared crawl policy)"
+    )
+
+    :ok
+  end
+
   defp discover_for_store(store) do
     store_name = store.name || store.id
-    events_url = build_events_url(store.website_url)
 
-    case fetch_page(events_url) do
-      {:ok, body} ->
+    case ScraperClient.fetch_page(store.scraper_module, @events_path) do
+      {:ok, %{status: 200, body: body}} ->
+        # A successful fetch is also the evidence that any recorded block has lifted.
+        # Clearing here rather than on a separate schedule is what makes the block
+        # self-healing without a second moving part.
+        Prices.clear_robots_block(store)
         Monitoring.record_success(store_name, "event_source")
-        events = parse_events(body, store)
-        persist_events(events, store)
+        persist_events(parse_events(body, store), store)
+
+      # 404 is data: plenty of shops have no /events page. Recording it as a failure
+      # would melt the store's fuse for a condition that is simply true of that shop.
+      {:ok, %{status: 404}} ->
+        Logger.debug("DiscoverBookstoreEventsJob: no events page at #{store_name}")
+        :ok
+
+      {:ok, %{status: status}} ->
+        Monitoring.record_failure(store_name, "event_source", "HTTP #{status}")
+        {:error, {:unexpected_status, status}}
+
+      # A determination, not a failure. Record it and stop for this store: retrying
+      # cannot succeed, and reporting it as an error would melt a fuse on every run.
+      {:error, {:robots_blocked, rule}} ->
+        Prices.record_robots_block(store, @events_path, rule)
+        :ok
 
       {:error, reason} ->
         Monitoring.record_failure(store_name, "event_source", inspect(reason))
@@ -62,31 +127,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
 
         {:error, reason}
     end
-  end
-
-  @doc false
-  def build_events_url(website_url) do
-    base = String.trim_trailing(website_url, "/")
-    "#{base}/events"
-  end
-
-  defp fetch_page(url) do
-    req = Finch.build(:get, url, [{"Accept", "text/html"}])
-
-    case Finch.request(req, Stacks.Finch, receive_timeout: 15_000) do
-      {:ok, %Finch.Response{status: 200, body: body}} ->
-        {:ok, body}
-
-      {:ok, %Finch.Response{status: status}} ->
-        {:error, {:unexpected_status, status}}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  rescue
-    e ->
-      Logger.warning("DiscoverBookstoreEventsJob: fetch_page failed: #{Exception.message(e)}")
-      {:error, {:request_failed, Exception.message(e)}}
   end
 
   @doc """

@@ -22,6 +22,41 @@ defmodule Stacks.Enrichment.MockScraperClient do
   @impl true
   def scrape(isbn, store_name, _product_path), do: scrape(isbn, store_name)
 
+  @doc """
+  Mock page fetch, keyed on `{store_name, path}` via `put_page/3`.
+
+  Defaults to a 200 with an empty body rather than a plausible events page: a caller
+  that gets fixture HTML it did not ask for cannot tell "parsed nothing" from "fetched
+  nothing", and the tests that care about parsing call `parse_events/2` directly.
+
+  Register `{:error, {:robots_blocked, rule}}` to exercise the disallow path — that is
+  the branch that must record the block and stop, and it is the one worth testing.
+  """
+  @impl true
+  def fetch_page(store_name, path) do
+    # Recorded so a test can assert a store was *never* fetched. Asserting absence via
+    # a downstream side effect (no events persisted) would also pass if the fetch
+    # happened and merely returned nothing parseable — which is the wrong-selector
+    # failure mode in disguise.
+    Process.put({__MODULE__, :fetches}, fetches() ++ [{store_name, path}])
+
+    pages = Process.get({__MODULE__, :pages}, [])
+
+    case Enum.find(pages, fn {s, p, _} -> s == store_name and p == path end) do
+      {_, _, response} -> response
+      nil -> {:ok, %{status: 200, body: ""}}
+    end
+  end
+
+  @doc "Register a `fetch_page/2` response for a specific store + path."
+  def put_page(store_name, path, response) do
+    pages = Process.get({__MODULE__, :pages}, [])
+    Process.put({__MODULE__, :pages}, [{store_name, path, response} | pages])
+  end
+
+  @doc "Every `fetch_page/2` call made in this process, as `{store_name, path}`, in order."
+  def fetches, do: Process.get({__MODULE__, :fetches}, [])
+
   @impl true
   def build_index(_store_name) do
     # Stubbed rather than simulated, and deliberately without touching the Agent: the
@@ -64,5 +99,7 @@ defmodule Stacks.Enrichment.MockScraperClient do
   @doc "Clear all registered responses for the current process."
   def clear do
     Process.delete(__MODULE__)
+    Process.delete({__MODULE__, :pages})
+    Process.delete({__MODULE__, :fetches})
   end
 end

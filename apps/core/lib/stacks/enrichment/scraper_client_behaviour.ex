@@ -12,6 +12,25 @@ defmodule Stacks.Enrichment.ScraperClientBehaviour do
               {:ok, non_neg_integer()} | {:error, term()}
 
   @doc """
+  Fetch one page from a configured store through the compliant egress.
+
+  The **only** sanctioned way to retrieve a store's page. Building an HTTP request to
+  a store directly bypasses robots.txt, the rate limiter and the circuit breakers —
+  which is precisely what `DiscoverBookstoreEventsJob` used to do.
+
+  `path` must be relative and begin with `/`. Only stores with a scraper config can be
+  fetched: no config means no declared crawl policy, and guessing one is how a hard
+  rule becomes advisory.
+
+  `{:error, {:robots_blocked, rule}}` is a determination, not a failure — the caller
+  must record it and stop rather than retry or fall back to another path. `rule` is the
+  `Disallow:` line responsible, so a narrow block can be told from a total one.
+  """
+  @callback fetch_page(store_name :: String.t(), path :: String.t()) ::
+              {:ok, %{status: integer(), body: String.t()}}
+              | {:error, {:robots_blocked, String.t()} | term()}
+
+  @doc """
   Titles of products this store lists that carry no extractable ISBN.
 
   The residual for shops where no product carries an ISBN, so title matching is the
