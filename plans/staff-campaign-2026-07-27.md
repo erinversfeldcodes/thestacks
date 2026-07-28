@@ -12,7 +12,7 @@ claim.
 | Sub-wave | Verdict | What is actually left |
 |---|---|---|
 | **Wave 0** | ✅ **COMPLETE** | Both items landed *and* tested. Session revocation lives in `Stacks.Email.reset_password/2` (`email.ex:167`), not the controller the plan suggested; `email_test.exs:124` asserts a pre-reset token then fails with `:session_revoked`. CSP carries `https://archive.org https://*.us.archive.org` (`security_headers.ex:17`) |
-| **Wave 0b** | ❌ **INCOMPLETE — the only outstanding sub-wave.** Verified against code 2026-07-28 | Four items; see the table below. G1 deferred by decision, not pending |
+| **Wave 0b** | ❌ **INCOMPLETE — the only outstanding sub-wave.** Re-verified against code 2026-07-28 | G5, G4-client and G6-UI all still have **no client call at all**; G3 has an evidence gap; G1's data layer + ADR are **in** (steps 1–4) with the port and page in a later wave, and one ⛔ chain break of my own — see the zero-row sweep |
 | **Wave 0c** | ✅ **COMPLETE** | C1/C2/C5/C6/C7/C8 done 2026-07-27; **C3 and C4 completed 2026-07-28** after being found orphaned — see below |
 | **Wave 0d** | ✅ **COMPLETE** | P1–P10 all done. ⚠️ Three of the four items recorded as "remaining" were **already done and the note was stale** — see the closure table |
 | **Wave 0e** | ✅ **COMPLETE** | E1/E2/E3 done; E5 decided (stays `0`); **E4 deliberately held for the launch gate**; E6 optional and skipped |
@@ -29,7 +29,7 @@ because 0b is the wave that makes built features *reachable*.
 | **G4** | RSS feeds | ✅ done and proven — `op.feed_cache` populated | ⛔ **no `/feeds` call in `Api.elm`.** Plus two conformance holes filed separately (no `rel="self"`, no per-entry link) | S |
 | **G6** | Business opt-out | ✅ server done (`a435e2b2`) — domain-verified removal requests | ⛔ **no page and no client call.** Needs the submission form, the owner review queue, and extending the verified path to the `third_space` row (soft-delete) | M |
 | **G3** | Source discovery | ✅ cause found and fixed — was cron-only, now also event-driven off `book.created` | 🟧 **zero-row DoD unproven: `op.discovered_sources` = 0.** The mechanism is wired; nothing has exercised it against a real Brave API key. Not a code gap — an evidence gap | S |
-| **G1** | Third spaces | — | ✅ **deferred by owner decision.** ⚠️ Was in **no** future wave until 2026-07-28 — now homed under **Deferred with a home**, with its dependency order fixed and the contradictory Wave 1 "wire the page" entry struck | → deferred |
+| **G1** | Third spaces | ✅ coordinates, geocoder, producer, **ADR 022** (steps 1–4) | ⛔ **no bookshop has coordinates**, so the 500 m rule can never fire — my own chain break. Then steps 5–6 (Elm port, map page) in a later wave, gated on rows existing | S then M |
 
 **Zero-row sweep, local DB immediately after a from-scratch seed:**
 
@@ -1523,6 +1523,83 @@ to a later wave rather than being renamed Wave 0.
 accepted `lat`/`lng`/`radius_km`; approved space-like sources now become positioned rows, so the endpoint
 returns correct geo-filtered results instead of nothing. That is real value independent of steps 4–6 —
 which is the test for whether a split is honest rather than convenient.
+
+### ⛔ Zero-row sweep, 2026-07-28 — steps 1–3 are built and have produced nothing
+
+Run immediately after the work landed, because "the tests pass" is not the DoD this plan asks for:
+
+| Table | Rows | Reading |
+|---|---|---|
+| `op.third_spaces` | **0** | Expected *downstream* of G3: `discovered_sources` = 0, so there has been nothing to approve |
+| `op.third_spaces` positioned | **0** | Same cause |
+| **`op.bookstores` positioned** | **0** | ⛔ **My own chain break — see below** |
+| `op.discovered_sources` | **0** | G3's standing evidence gap |
+
+⛔ **I added the 500 m pairing rule and left it unable to ever fire.** `create_third_space/1` computes
+`nearest_bookshop_km` by scanning bookshops *that have coordinates*. **No seeded bookshop has any** — I
+added `latitude`/`longitude` to `op.bookstores` and never populated them. So the scan always returns
+`[]`, the field is always `nil`, and `list_third_spaces(near_bookshop_km: 0.5)` correctly refuses to
+treat `nil` as "near" — which means **the filter that is the page's entire premise can never return a
+row**.
+
+Every unit test passes, because each one sets the coordinates it needs. This is exactly the
+built-but-not-wired shape ROOT G is about, committed by the person writing the ROOT G section, and it
+is worth recording rather than quietly fixing: the instrument that caught it was the **zero-row sweep**,
+not the 30 tests written alongside the feature.
+
+**Closing it needs a decision, not just code.** Coordinates for eleven real bookshops must come from
+somewhere, and the two options are not equivalent:
+- **Geocode them** — reuses `Stacks.Geocoding`, so the addresses are authoritative rather than guessed.
+  ⚠️ But it requires a *batch* entry point, and `Stacks.Geocoding.Nominatim`'s docs currently claim the
+  **absence** of one is the structural guarantee that honours the ~1 req/sec policy. Adding it means
+  adding a real throttle and testing it — the guarantee cannot be downgraded silently.
+- **Seed literal coordinates** — no throttle needed, but it hardcodes approximations for real
+  businesses, and a wrong coordinate is worse than none: it places a shop somewhere it is not and the
+  500 m rule then pairs the wrong things.
+
+## Step 4 — ADR 022, and a reasoning failure worth recording
+
+**Written, not deferred:** `docs/decisions/022-map-tiles-and-geocoding-provider.md`. The terms were
+fetched and read on 2026-07-28 after the owner challenged the justification I had recorded.
+
+⚠️ **My original reason for rejecting Google was circular and I should not have written it.** I wrote
+that Google's terms "require Google's own map alongside, which contradicts the tile decision below" —
+a claim that contradicted a decision made two paragraphs earlier *in the same document*. The owner
+asked the obvious question — *"shouldn't we be able to place Google's map to the left of the cork
+board?"* — and the answer was yes. A decision is not a constraint, and dressing one as the other is how
+a preference acquires the authority of a rule.
+
+**On reading the sources, two of my three objections dissolved:**
+
+| Objection | Verdict |
+|---|---|
+| "Terms restrict caching coordinates" | ❌ **Wrong.** 30 days applies to *temporary* caching; lat/lng may be cached **indefinitely** "solely to support direct, end-user facing functionality of the customer application that initiated the request" — exactly our case. `nearest_bookshop_km` is fine to keep |
+| "Requires Google's own map alongside" | ❌ **Wrong shape.** The policy is narrower: results *displayed on a map* must be on a Google map; displayed otherwise, attribution suffices |
+| "Conflicts with the strict CSP" | ✅ **Correct, and decisive** — see the chain below |
+
+**What actually rules Google out is a three-link chain, every link cited in the ADR:**
+
+> Google **Geocoding** → its policy requires results *displayed on a map* to be shown on a **Google
+> map** → Google Maps JS requires **`'unsafe-eval'`** in `script-src`, even in *Google's own
+> recommended strict CSP* → `unsafe-eval` is forbidden outright (`CLAUDE.md:144`,
+> `security.md:139`); the live policy is `script-src 'self'`.
+
+**The best consequence: the CSP does not change at all.** Proxied tiles keep `img-src 'self'`, so this
+decision costs nothing in the policy — the strongest form the outcome could take.
+
+⚠️ **Escape hatch, recorded so nobody re-derives it:** Google Geocoding *is* usable where results are
+**not displayed on a map** (attribution suffices) — a list, an admin queue. It is the *map* that
+forecloses Google, not the geocoding, and `Stacks.Geocoding` still supports that case.
+
+**Deliberately left open:** *which* non-Google tile provider. That turns on each provider's stance on
+proxying — several restrict it or reserve it for paid tiers — and choosing one without reading those
+terms would repeat precisely the mistake this ADR corrects. Vector tiles proxy less cleanly than
+raster; worth knowing before the shortlist.
+
+**The transferable lesson.** Two of three objections were written from memory and were wrong; the one
+that held needed a *chain* of three verified facts to state correctly. The persona's own rule —
+never cite a source from memory — applies to terms of service exactly as it does to code exemplars,
+and this is the second time in this campaign that fetching beat recalling.
 
 ## What steps 1–3 actually fixed, beyond adding columns
 
