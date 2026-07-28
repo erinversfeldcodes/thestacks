@@ -368,6 +368,25 @@ defmodule Stacks.Enrichment.Prices do
 
   def canary_failed(_store, _isbn), do: :not_canary
 
+  @doc """
+  Stores whose observed capability says they need a local ISBN index.
+
+  Only stores that have actually been observed to need one. A store with no
+  observation yet is excluded deliberately: its capability is derived on the next
+  scrape, and sweeping a shop's whole catalogue on a guess is exactly the bulk
+  harvesting this design avoids.
+  """
+  @spec stores_needing_index() :: [Bookstore.t()]
+  def stores_needing_index do
+    Repo.all(
+      from b in Bookstore,
+        where: b.lookup_mode == "local_index" and not is_nil(b.scraper_module),
+        # A store with no ISBN anywhere cannot be indexed at all — fuzzy title
+        # matching is its only path, and that is not this sweep's job.
+        where: b.isbn_location != "none"
+    )
+  end
+
   # ── Stores ────────────────────────────────────────────────────────────────
 
   @doc """

@@ -96,10 +96,64 @@ defmodule Stacks.Enrichment.ScraperClient do
 
   defp melt_if_extractor_failed(_decoded, _store_fuse, _isbn, _store_name), do: :ok
 
+  @impl true
+  def build_index(store_name) do
+    case configured_client() do
+      __MODULE__ -> do_build_index(store_name)
+      client -> client.build_index(store_name)
+    end
+  end
+
+  # Only the service fuse gates this, not the store's. A store fuse opens because
+  # *price lookups* are failing there, and rebuilding the index is often the fix — so
+  # letting the store's own breaker block the repair would be self-defeating.
+  defp do_build_index(store_name) do
+    with :ok <- ask(@fuse_name) do
+      # Minutes, not seconds: the sweep waits on the shop's rate limit by design.
+      index_request(store_name)
+      |> Finch.request(Stacks.Finch, receive_timeout: 600_000)
+      |> handle_index_response(store_name)
+    end
+  end
+
+  defp index_request(store_name) do
+    path = "/index/build"
+
+    Finch.build(
+      :post,
+      "#{base_url()}#{path}",
+      [{"content-type", "application/json"}, {"X-Internal-Token", auth_token("POST", path)}],
+      Jason.encode!(%{isbn: "", store: store_name})
+    )
+  end
+
+  defp handle_index_response({:ok, %Finch.Response{status: 200, body: body}}, _store_name) do
+    case Jason.decode(body) do
+      {:ok, %{"entries" => n}} -> {:ok, n}
+      _ -> {:error, :unexpected_response}
+    end
+  end
+
+  defp handle_index_response({:ok, %Finch.Response{status: status, body: body}}, store_name) do
+    # Service fuse only: an index build says nothing about one store's prices.
+    CircuitBreakers.melt(@fuse_name)
+    Logger.warning("ScraperClient: index build HTTP #{status} for #{store_name}: #{body}")
+    {:error, {:http, status}}
+  end
+
+  defp handle_index_response({:error, reason}, store_name) do
+    CircuitBreakers.melt(@fuse_name)
+    Logger.warning("ScraperClient: index build failed for #{store_name}: #{inspect(reason)}")
+    {:error, reason}
+  end
+
+  defp base_url do
+    Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
+  end
+
   defp build_scraper_request(isbn, store_name) do
-    base_url = Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
     path = "/scrape"
-    url = "#{base_url}#{path}"
+    url = "#{base_url()}#{path}"
     body = Jason.encode!(%ScrapeRequest{isbn: isbn, store: store_name})
     token = auth_token("POST", path)
 
