@@ -239,15 +239,22 @@ provider to `img-src`".
 3. **Self-hosted tile rendering** — correct long-term, a project of its own, and explicitly not a gate
    on this story.
 
-**The ADR must record which branch was taken and why** — specifically the provider, the terms clause
-consulted, and, if branch 2, that reader IPs and viewports are disclosed to a named third party. If it
-is branch 2 the privacy policy needs the third party named in it, which is a launch-gate item, not a
-detail.
+✅ **SETTLED by ADR 022** (`docs/decisions/022-map-tiles-and-geocoding-provider.md`), written
+2026-07-28 against the fetched sources rather than deferred. Branch 1 (proxy) is taken, and the CSP
+therefore does **not** change — `script-src 'self'` and `img-src 'self'` both stand.
 
-⚠️ **Do not pick the provider inside this story's implementation.** Branch 1 vs 2 turns entirely on a
-terms-of-service reading, so the provider choice is the ADR's subject and the ADR precedes the build.
-Vector tiles (MapLibre) proxy less cleanly than raster tiles do — worth knowing before the ADR, since
-it can flip the branch.
+⚠️ **Google Maps is ruled out, but not for the reason this document originally gave.** Two of the
+three objections dissolved on reading the terms: the caching limit does not bind us (lat/lng may be
+stored **indefinitely** for end-user-facing features), and "requires a Google map alongside" was the
+wrong shape of claim. What survives is a verified chain — Google Geocoding's policy requires results
+*shown on a map* to be on a **Google map**; Google Maps JS requires **`'unsafe-eval'`** even in
+Google's own recommended strict CSP; `unsafe-eval` is forbidden outright by `CLAUDE.md:144` and
+`security.md:139`. See the ADR for the citations.
+
+⚠️ **Still open, and deliberately so: *which* non-Google tile provider.** That turns on each
+provider's own stance on proxying, which several restrict or reserve for paid tiers — and picking one
+without reading those terms would repeat exactly the mistake ADR 022 exists to correct. Vector tiles
+proxy less cleanly than raster, which is worth knowing before the shortlist.
 
 ### Geospatial queries
 

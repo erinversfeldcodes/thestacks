@@ -14,30 +14,19 @@ defmodule Stacks.Geocoding do
   `:isbn_http_client` and `:scraper_client`, which is the project's existing idiom for
   exactly this.
 
-  ⚠️ **Google Geocoding implements this behaviour but is not a config-only swap.** Two
-  separate things, previously and wrongly bundled together:
+  ⚠️ **Google Geocoding cannot be swapped in for this story — see ADR 022.** Not for the
+  reason an earlier version of this comment gave (which was circular), and not because of
+  the caching terms (which permit indefinite lat/lng storage for end-user-facing features
+  like ours). The actual chain, each link verified 2026-07-28:
 
-  1. **"It requires Google's own map alongside" is not an obstacle.** Show Google's map —
-     that is the normal, supported combination, and it satisfies the requirement. It
-     conflicts only with the *decision* recorded in US-3.1.1 §5 (proxied, non-Google
-     tiles), and a decision can be revisited. What it actually costs is the reason §5
-     went the other way: Google's map JS runs **in the reader's browser**, so every
-     reader's IP and viewport goes to Google on every pan and **cannot be proxied**. That
-     makes Google a processor to name in the privacy policy and probably a consent
-     question, plus it needs `script-src`/`connect-src` in a deliberately strict CSP —
-     ⚠️ and whether it needs `unsafe-eval`, which `CLAUDE.md` forbids outright, must be
-     checked rather than assumed.
+      Google Geocoding → its policy requires results *displayed on a map* to be shown on a
+      **Google map** → Google Maps JS requires **`'unsafe-eval'`** in `script-src`, even in
+      Google's own recommended strict CSP → `unsafe-eval` is forbidden outright
+      (`CLAUDE.md:144`, `security.md:139`); the live policy is `script-src 'self'`.
 
-  2. **The caching terms are the constraint that does NOT dissolve.** This design
-     *persists* coordinates in `op.third_spaces` and derives `nearest_bookshop_km` from
-     them at write time. Google's terms limit retention of returned content, so permanent
-     storage plus a derived column is the part that needs a terms reading — and it is
-     unaffected by which map is displayed.
-
-  Neither point makes Google wrong; both make it a licensing decision rather than a
-  configuration one. ⚠️ **The specifics of Google's current terms are deliberately not
-  asserted here** — they change, and the tiles ADR must read them rather than inherit a
-  summary written from memory.
+  Google Geocoding *is* usable where results are **not displayed on a map** — attribution
+  suffices there. So this seam is genuinely provider-agnostic for a list or an admin queue;
+  it is the map that forecloses Google, not the geocoding.
 
   ## The contract
 
