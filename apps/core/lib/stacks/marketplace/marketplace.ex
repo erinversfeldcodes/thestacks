@@ -79,6 +79,43 @@ defmodule Stacks.Marketplace do
   end
 
   # ---------------------------------------------------------------------------
+  # Expiry as a read-time truth
+  # ---------------------------------------------------------------------------
+
+  # A listing past `expires_at` is expired whether or not anything has written that
+  # down yet.
+  #
+  # `ListingExpiryJob` used to be the only thing that made it so, which made a cron
+  # entry load-bearing for *correctness* rather than freshness: with the platform
+  # scaling to zero the job may not fire, and an expired listing then showed as
+  # available and could still be bought. Deriving it on read removes that dependency —
+  # the job stays as tidy-up so stored state eventually matches, but nothing depends on
+  # it having run.
+
+  defp unexpired(query) do
+    now = DateTime.utc_now()
+
+    where(query, [l], l.status == "active" and (is_nil(l.expires_at) or l.expires_at > ^now))
+  end
+
+  # Normalises a loaded listing's status in memory. No write: reads must not, and the
+  # answer is derivable, so persisting it would be a second source of truth.
+  #
+  # Applied to single reads because callers act on `listing.status` — accepting an offer
+  # on an expired listing should be refused, and it is the read that has to say so.
+  defp with_effective_status(nil), do: nil
+
+  defp with_effective_status(%Listing{status: "active", expires_at: %DateTime{} = at} = listing) do
+    if DateTime.compare(at, DateTime.utc_now()) == :gt do
+      listing
+    else
+      %{listing | status: "expired"}
+    end
+  end
+
+  defp with_effective_status(%Listing{} = listing), do: listing
+
+  # ---------------------------------------------------------------------------
   # Read
   # ---------------------------------------------------------------------------
 
@@ -88,6 +125,7 @@ defmodule Stacks.Marketplace do
     Listing
     |> Repo.get(id)
     |> Repo.preload([:book, :seller])
+    |> with_effective_status()
   end
 
   @doc "Returns active listings, most recently listed first. Limited to `limit` (default 50)."
@@ -96,7 +134,7 @@ defmodule Stacks.Marketplace do
     limit = Keyword.get(opts, :limit, @default_limit)
 
     Listing
-    |> where([l], l.status == "active")
+    |> unexpired()
     |> order_by([l], desc: l.listed_at)
     |> limit(^limit)
     |> preload([:book, :seller])
@@ -119,7 +157,8 @@ defmodule Stacks.Marketplace do
   def active_listing_labels(book_ids) when is_list(book_ids) do
     Listing
     |> join(:inner, [l], s in assoc(l, :seller))
-    |> where([l], l.status == "active" and l.book_id in ^book_ids)
+    |> unexpired()
+    |> where([l], l.book_id in ^book_ids)
     |> order_by([l], desc: l.listed_at)
     |> select([l, s], {l.book_id, s.handle, l.price_cents, l.currency})
     |> Repo.all()
@@ -161,6 +200,9 @@ defmodule Stacks.Marketplace do
     |> limit(^limit)
     |> preload([:book, :seller])
     |> Repo.all()
+    # A seller's own list keeps expired entries — they need to see them to relist —
+    # but each must *say* it is expired.
+    |> Enum.map(&with_effective_status/1)
   end
 
   # ---------------------------------------------------------------------------

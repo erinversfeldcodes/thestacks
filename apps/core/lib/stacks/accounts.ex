@@ -24,6 +24,7 @@ defmodule Stacks.Accounts do
   alias Stacks.Accounts.ReservedHandles
   alias Stacks.Accounts.User
   alias Stacks.Events
+  alias Stacks.GDPR.Deletion
   alias Stacks.Social.UserBlock
   alias Stacks.Workers.VisibilityRecapJob
 
@@ -454,8 +455,66 @@ defmodule Stacks.Accounts do
   """
   @spec register(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def register(attrs) do
+    # Reap abandoned signups on the way in, so this does not depend on a nightly job.
+    #
+    # `ExpiredUnverifiedAccountsJob` was the only thing erasing accounts that never
+    # confirmed their email, which made a cron entry the sole guarantee for a *retention*
+    # obligation — and nothing user-triggered could substitute, because the person who
+    # abandoned a signup by definition never comes back. With the platform scaling to
+    # zero, that job may not fire at all.
+    #
+    # Registration is the right moment for two reasons. It is the event most correlated
+    # with signup abandonment, so the work arrives roughly in proportion to the debt.
+    # And an abandoned account currently *blocks* a real one: someone re-registering the
+    # same address gets "email has already been taken" for an account nobody owns.
+    reap_abandoned_signups(attrs)
+
     attrs = maybe_assign_owner_role(attrs)
     do_register(attrs, 2)
+  end
+
+  # Erases the abandoned signup for this email, if there is one, plus a small batch of
+  # others.
+  #
+  # Bounded and synchronous-but-cheap: an unverified account has never logged in, so it
+  # carries no bookshelves, placements, comments or sessions. Failures are swallowed —
+  # a registration must not fail because someone else's abandoned signup could not be
+  # erased. The nightly job stays as a backstop.
+  @reap_batch 5
+
+  defp reap_abandoned_signups(attrs) do
+    email = attrs[:email] || attrs["email"]
+
+    ids =
+      (abandoned_id_for_email(email) ++ expired_unverified_ids())
+      |> Enum.uniq()
+      |> Enum.take(@reap_batch)
+
+    Enum.each(ids, fn id ->
+      Deletion.delete_user_data(id,
+        reason: "unverified account expired — email never confirmed within TTL",
+        actor: "system:registration_reap"
+      )
+    end)
+  rescue
+    error ->
+      Logger.warning("Accounts.register: could not reap abandoned signups: #{inspect(error)}")
+      :ok
+  end
+
+  # Deliberately ignores the TTL: if someone is registering this exact address, the
+  # earlier unconfirmed attempt is abandoned regardless of how recent it is, and holding
+  # the address hostage for 24 hours serves nobody.
+  defp abandoned_id_for_email(nil), do: []
+
+  defp abandoned_id_for_email(email) do
+    normalised = email |> to_string() |> String.downcase() |> String.trim()
+
+    Repo.all(
+      from u in User,
+        where: fragment("lower(?)", u.email) == ^normalised and u.email_confirmed == false,
+        select: u.id
+    )
   end
 
   # The handle is auto-assigned at registration (maybe_put_handle) and its only
@@ -1291,13 +1350,22 @@ defmodule Stacks.Accounts do
     end
   end
 
+  # Mirrors the caller's key style rather than always writing a string key.
+  #
+  # It used to `Map.put(attrs, "role", …)` unconditionally, so atom-keyed attrs became
+  # a mixed-key map and Ecto refused to cast it: `expected params to be a map with
+  # atoms or string keys, got a map with mixed keys`. That only bites when the new user
+  # is the *first* one — the owner branch — which is why the controller (string keys
+  # from JSON) never hit it, and why nothing noticed.
   defp maybe_assign_owner_role(attrs) do
-    user_count = Repo.aggregate(User, :count, :id)
-
-    if user_count == 0 do
-      Map.put(attrs, "role", "owner")
+    if Repo.aggregate(User, :count, :id) == 0 do
+      put_role(attrs, "owner")
     else
       attrs
     end
   end
+
+  defp put_role(attrs, role) when is_map_key(attrs, :email), do: Map.put(attrs, :role, role)
+
+  defp put_role(attrs, role), do: Map.put(attrs, "role", role)
 end
