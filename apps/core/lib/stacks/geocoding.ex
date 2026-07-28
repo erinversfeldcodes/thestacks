@@ -14,11 +14,30 @@ defmodule Stacks.Geocoding do
   `:isbn_http_client` and `:scraper_client`, which is the project's existing idiom for
   exactly this.
 
-  ⚠️ **Google Geocoding is not a drop-in despite implementing this behaviour.** Its
-  terms restrict caching coordinates and generally require Google's own map to be shown
-  alongside — which contradicts the tile ruling in US-3.1.1 §5 (proxied, non-Google
-  tiles). Adopting it is a licensing decision, not a configuration one, and belongs in
-  the tiles ADR rather than here.
+  ⚠️ **Google Geocoding implements this behaviour but is not a config-only swap.** Two
+  separate things, previously and wrongly bundled together:
+
+  1. **"It requires Google's own map alongside" is not an obstacle.** Show Google's map —
+     that is the normal, supported combination, and it satisfies the requirement. It
+     conflicts only with the *decision* recorded in US-3.1.1 §5 (proxied, non-Google
+     tiles), and a decision can be revisited. What it actually costs is the reason §5
+     went the other way: Google's map JS runs **in the reader's browser**, so every
+     reader's IP and viewport goes to Google on every pan and **cannot be proxied**. That
+     makes Google a processor to name in the privacy policy and probably a consent
+     question, plus it needs `script-src`/`connect-src` in a deliberately strict CSP —
+     ⚠️ and whether it needs `unsafe-eval`, which `CLAUDE.md` forbids outright, must be
+     checked rather than assumed.
+
+  2. **The caching terms are the constraint that does NOT dissolve.** This design
+     *persists* coordinates in `op.third_spaces` and derives `nearest_bookshop_km` from
+     them at write time. Google's terms limit retention of returned content, so permanent
+     storage plus a derived column is the part that needs a terms reading — and it is
+     unaffected by which map is displayed.
+
+  Neither point makes Google wrong; both make it a licensing decision rather than a
+  configuration one. ⚠️ **The specifics of Google's current terms are deliberately not
+  asserted here** — they change, and the tiles ADR must read them rather than inherit a
+  summary written from memory.
 
   ## The contract
 
