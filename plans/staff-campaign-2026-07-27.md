@@ -109,78 +109,75 @@ This is a **zero-row instance of exactly the ROOT G shape** — built halfway, w
 inside the wave that was meant to eliminate that class. Worth stating plainly: the schema change was
 the easy half, and shipping it alone produced a column that reads as a feature.
 
-## ▶ RESUME HERE — 2026-07-28. Three items close Wave 0, all Elm-side
+## ▶ RESUME HERE — 2026-07-28 (updated). Wave 0b's three G-items are BUILT
 
-Everything below is verified against the tree, so a fresh session can act without re-deriving it.
-`just run just verify` is **exit 0** at this point; nothing is half-landed.
+`just run just verify` is **exit 0**. Nothing is half-landed.
 
-**The pattern all three share:** the server is finished and tested, and `frontend/src/Api.elm` contains
-**no call to it**. That is ROOT G's dominant shape, so the DoD for each is the **zero-row/render check** —
-the value appears in a browser — not a passing test.
+### ✅ Done since the last resume point
 
-### G4 — feeds client call · **S** · do this first
+| Item | Commit | What landed |
+|---|---|---|
+| **G4** feeds | `d9d4a9a8` | ⚠️ The blocker was not a missing call: profiles are addressed by **handle**, the feed endpoint was keyed by **user_id**, so the URL was unbuildable from the page. Added `GET /api/feeds/u/:handle/:bookshelf_name` (canonical, declared before the UUID route so `u` is not swallowed as an id), plus `has_feed` on each bookshelf summary and an anchor — not a fetch — on the profile |
+| **G6** removal form | `9707b599`, `155d187a` | The ⛔ half first: a verified removal excluded the *source* and left the `third_space` on the map. Now soft-deleted (`opted_out`), never hard-deleted, because discovery re-finds and would re-list. Plus `/listing-removal`, unauthenticated, and the discreet "Is this your business?" link |
+| **G6** review queue | `0ef9491d` | Parked requests were in **no payload at all** — invisible to the only person who could act. `pending_removal_requests/0` + `honour`/`decline` endpoints |
+| **G5** shelves | `703cc82e` | `Api.elm` now has all four shelf calls, so 90 seeded rows and 35 backend tests are reachable. Drag **and** arrow buttons, both driving the same pure `moveUp`/`moveDown`/`moveTo` |
 
-- **Endpoint, live:** `GET /api/feeds/:user_id/:bookshelf_name` → `FeedController.show` (`router.ex:120`),
-  public, no auth, returns Atom XML.
-- **State:** `op.feed_cache` **has rows** (3–5 locally after a seed), so the zero-row check passes the
-  moment a client calls it. Server side proven; see the G4 section above.
-- **Missing:** any call in `Api.elm`, and a surface. A feed is a *link a reader copies into a reader app*,
-  so this is likely an anchor on the bookshelf/profile page rather than a fetch — decide that first,
-  because "call the endpoint from Elm" may be the wrong shape for a subscribe link.
-- ⚠️ **Two conformance holes are separate issues, not this one:** no `<link rel="self">` (RFC 4287) and
-  no per-entry link, so a reader cannot click through from their feed reader. Do not silently fold them in.
+### ❌ What is left, and neither is a code gap I closed alone
 
-### G6 — business opt-out form · **M**
+1. **The review queue has no admin UI.** `GET /api/admin/removal-requests` and the two
+   decision endpoints are live and tested; nothing in Elm calls them. **This is the same
+   built-but-unreachable shape as the items above** — the server half is done and the queue
+   is still invisible to the owner in practice. Add it to `Page/Admin/*` alongside the
+   existing `/admin/sources` surface.
+   ⚠️ **Naming hazard, do not collapse:** `PUT /sources/:id/approve` **publishes** a
+   listing; `PUT /removal-requests/:id/honour` **takes one down**. Same-sounding, opposite
+   effect, same row. The endpoints and context functions are deliberately named for what
+   happens to the *listing* (honour / decline), and a test asserts they are distinguishable.
 
-- **Endpoint, live:** `POST /api/opt-out` → `OptOutController.create` (`router.ex:107`).
-- **Server side DONE** (`a435e2b2`): `Discovery.record_removal_request/2` with
-  `email_domain_matches_source?/2` — a matching contact-email domain auto-excludes, anything else records
-  `exclusion_requested_at` and parks for owner review with the listing still live.
-- **Decided:** a standalone submission form carrying a contact address (owner, 2026-07-28).
-- **Missing:** the form page, the owner review queue, and extending the verified path to the
-  `third_space` row — **soft-delete** via `opted_out`/`opted_out_at`, never a hard delete, because
-  discovery re-finds sources continuously and a deleted business would be rediscovered and re-listed.
-  `list_third_spaces/1` already excludes `opted_out` spaces, so the read side is done.
+2. ⛔ **None of the three has been driven live.** Every G-item's DoD in this plan is the
+   **render check** — the value appearing in a browser — and all three are verified by test
+   and compile only. That is explicitly *not* the bar this plan sets, and the campaign's own
+   lesson is that code-reading and green tests both lie about reachability. In particular:
+   - **G5's drag-and-drop cannot be validated by unit tests at all.** The pure move
+     functions are tested hard; whether a drop actually fires in a browser is untested.
+   - G4's subscribe link needs a real feed reader, or at least a real 200 from the handle URL.
+   - G6's form needs one end-to-end submission of each outcome.
 
-### G5 — shelf organisation UI · **L** · largest, do last or on its own
+   Stand up a preview (`bash scripts/deploy-preview.sh`), drive all three, and record
+   "N of M driven" per the Drive section of `docs/agents/staff-engineer-agent.md`.
 
-- **Endpoints, all live and tested** (35 backend tests): `GET`/`POST`
-  `/api/bookshelves/:bookshelf_name/shelves`, `DELETE /api/shelves/:id`,
-  `PUT /api/bookshelves/:bookshelf_name/shelves/reorder` (`router.ex:224-227`).
-- **State:** `op.shelves` has **90 seeded rows**. All of it unreachable — `Api.elm` has bookshelf-level
-  calls only (`:159`, `:831`, `:1571`, `:2423`), nothing for the shelf sub-resource.
-- **Decided:** build **both** drag-and-drop *and* explicit controls, **split by action**
-  (create/delete, then reorder/move) so each ships with both input methods. Drag-only was never cheaper —
-  it needs a keyboard path regardless, and explicit controls *are* that path.
-- ⚠️ **Terminology, do not conflate:** a **bookshelf** is a named virtual collection (library,
-  antilibrary…); a **shelf** is a physical row within it (`op.shelves`, no `name` column). This item is
-  about *shelves*.
+### Still parked, deliberately, and not blocking
 
-### Still open, deliberately, and not blocking Wave 0
-
-| Item | Why it is parked |
+| Item | Why |
 |---|---|
-| **G3 evidence** | Mechanism fixed and 5 pending sources now seeded, so `/admin/sources` has rows. Proving discovery *end to end* needs a real Brave API key in a deployed environment |
-| **G1 steps 5–6** | Elm port + map page, a later wave. Gated on rows existing, which they now do |
-| **E4** remove `noindex` | Wave 9 launch gate; its blocker E2 is cleared |
-| **`DiscoverBookstoreEventsJob` schedule** | Deliberate: starting it crawls real bookshops, several one-person operations. Owner's call |
-| **Bookshop branches + `city`** | Data-model gap — chains need per-branch rows; 3 shops did not geocode for want of a city. Same root cause |
+| **G3 evidence** | 5 pending sources now seeded so `/admin/sources` has rows; proving discovery end-to-end needs a real Brave key in a deployed environment |
+| **G1 steps 5–6** | Elm port + map page, a later wave. ADR 022 settled the tile/geocoder question; rows now exist |
+| **E4** remove `noindex` | Wave 9 launch gate; blocker E2 cleared |
+| **`DiscoverBookstoreEventsJob` schedule** | Starting it crawls real bookshops, several one-person operations. Owner's call |
+| **Bookshop branches + `city`** | Data-model gap: chains need per-branch rows, and 3 shops did not geocode for want of a city. Same root cause |
+| **RSS conformance** | No `<link rel="self">` (RFC 4287), no per-entry link. Filed separately, not folded into G4 |
 
-### ⚠️ Gotchas this session paid for — read before touching a proto field
+### ⚠️ Gotchas this session paid for
 
-1. **`just run just proto-sync-all`** does all four codegen steps and names the four manual follow-ons.
-   Use it instead of remembering the order.
-2. **A hand-written changeset silently drops a new column.** Now guarded by
-   `changeset_field_coverage_test.exs` — but the guard only helps if the suite runs.
-3. **dbt `source-has-all-columns` caught me three times.** Every new column needs an entry in
-   `dbt/models/staging/sources.yml`.
-4. **`git add` a generated migration immediately** — `mix test` deletes untracked `_add_*_to_*` files.
-   `proto-sync-all` now does this.
-5. **`proto.sync` can emit two migrations in the same second**, and Ecto rejects duplicate versions.
-   Bump one timestamp by hand.
-6. **Vacuous tests are the recurring self-inflicted wound.** Three this session (ISBN check digits, the
-   limit-ordering decoys, the geocoding cap) all passed with the feature deleted. **Probe every
-   load-bearing assertion**; do not trust a green test you just wrote.
+1. **`just run just proto-sync-all`** — all four codegen steps plus the four manual
+   follow-ons it cannot do. Use it instead of remembering the order.
+2. **A hand-written changeset silently drops a new column.** Guarded now by
+   `changeset_field_coverage_test.exs`; the guard only helps if the suite runs.
+3. **dbt `source-has-all-columns` caught me three times.** Every new column needs an entry
+   in `dbt/models/staging/sources.yml`.
+4. **`git add` a generated migration immediately** — `mix test` deletes untracked
+   `_add_*_to_*` files. `proto-sync-all` does this now.
+5. **`proto.sync` can emit two migrations in the same second**; Ecto rejects duplicate
+   versions. Bump one timestamp by hand.
+6. **The PII lint will refuse free text in an event payload.** `event_log` is immutable, so
+   a URL in it is permanent — key events by id and carry no payload where possible.
+7. **`update_all`'s `:returning` came back nil.** Select the ids first; do not rely on a
+   driver capability that fails silently.
+8. ⚠️ **Vacuous tests are the recurring self-inflicted wound — five this session.** ISBN
+   check digits, the limit-ordering decoys, the geocoding cap, and twice a *comment* claimed
+   a guard that a probe showed was not load-bearing (`moveTo`'s clamp; the "off-by-one" it
+   supposedly prevented). **Probe every load-bearing assertion.** Writing the reason in a
+   comment is not evidence the reason is true.
 
 ## Amendment log
 
