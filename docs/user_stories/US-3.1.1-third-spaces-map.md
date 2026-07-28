@@ -147,15 +147,34 @@ The hardest open question, because the obvious source is encumbered:
 
 | Option | Cost | Constraint |
 |---|---|---|
-| **Google Places ratings** | Paid per request | Terms restrict caching and generally require Google's own map alongside — which conflicts with self-hosted tiles |
+| **Google Places ratings** | Paid per request | Terms restrict caching the returned content. ⚠️ Also generally require Google's own map alongside — which is a *choice* (show Google's map), not an obstacle; see the correction below |
 | **Rank by what we have** | Free | Proximity to a bookshop, count of upcoming events, whether any user has placed a book there. Defensible and honest, but not "well-regarded" |
 | **Readers rate spaces** | Free | A feature in its own right (auth, moderation, abuse) — and cold-start empty |
 | **Owner curates** | Free | Does not scale past one city, but is *accurate*, and matches the "small posters" framing |
 
 **Ruling: owner-curated for the launch city, ranked by our own signals elsewhere.** The cork board
 shows "a handful", not a leaderboard — curation suits that framing, and it avoids both a paid
-dependency and a cold-start rating system. Google Places is rejected outright, not deferred: its terms
-require Google's own map alongside the ratings, which contradicts the tile decision below.
+dependency and a cold-start rating system.
+
+⚠️ **Correction (2026-07-28).** An earlier draft said Google Places was "rejected outright" because its
+terms require Google's own map alongside, "which contradicts the tile decision below". That reasoning was
+circular — it contradicted a *decision made in this same document*, and the obvious answer is the one the
+owner gave: put Google's map on the left of the cork board. That satisfies the requirement.
+
+So Google is **not** ruled out on that ground. What choosing it actually costs, and what should decide it:
+
+- **The real trade is privacy, not permissibility.** Google's map JS runs in the reader's browser, so
+  every reader's IP and viewport reaches Google on every pan, and **cannot be proxied** — which is exactly
+  what §5's proxy ruling was protecting. That makes Google a processor to name in the privacy policy and
+  probably a consent question, and it needs CSP entries in a deliberately strict policy. ⚠️ Whether it
+  needs `unsafe-eval` — forbidden outright by `CLAUDE.md` — must be checked, not assumed.
+- **The caching terms are separate and survive the map choice**, because ratings would be *stored*
+  alongside a space rather than fetched per render.
+- **Cost scales differently.** Geocoding is per approval (rare, human-paced); map loads are per reader
+  session. Those are very different volumes on a paid plan.
+
+The ruling above stands on its own merits — curation suits "a handful", and it avoids a paid dependency
+and a cold-start problem — **not** on Google being impermissible.
 
 What this obliges:
 - A **`curated` / `curated_note` field** on `third_space`, owner-writable. The note is what the poster
