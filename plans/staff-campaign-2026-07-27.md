@@ -1506,9 +1506,31 @@ that lost C3 and C4 for a fortnight. Worse, the plan contained a *contradiction*
 forbids. Both have been struck above. A deferral without a home is not a decision, it is an omission with
 better paperwork — so this is the home.
 
-**Scope note:** US-3.1.1 is a **Phase 4** story per `docs/implementation-mapping.md`. It is not being
-promoted into this Phase 1 plan. It is recorded here so it is findable, with its dependency order fixed,
-because the specification work is done and would otherwise rot.
+**Scope note — and ⛔ a phase inversion in the mapping.** `docs/implementation-mapping.md:48` files
+US-3.1.1 under **Phase 4**. But `:1472` records **US-9.4.2 (User-Submitted Third Spaces), Phase 3**, whose
+stated dependency is *"US-3.1.1 (Third Spaces cork board exists)"* — and its frontend is a "Pin a new
+space" button **on that cork board**. So a Phase 4 story blocks a Phase 3 story, and the dependency runs
+backwards through the phase order. The Phase 4 label is wrong; the need is Phase 3 or earlier. Worth
+fixing in Wave 7 (ROOT D) rather than left to be rediscovered.
+
+⛔ **The mapping also documents a producer that has never existed.** `:2115` lists
+`DiscoverThirdSpacesJob` as *"Scheduled (weekly)"*. There is **no such module** anywhere in
+`apps/core/lib` and no crontab entry. That is why `op.third_spaces` is 0 — not a fixture gap, an absent
+producer that the documentation asserts is running. Same defect class as ROOT D, at its most expensive:
+the doc says the pipeline exists, so nobody looks.
+
+⛔ **`GET /api/third-spaces` is live and its geo contract is unkeepable.** The route exists
+(`router.ex:126`) and the controller accepts `lat`, `lng` and `radius_km`
+(`third_space_controller.ex:13-16`). The filter behind it, `Enrichment.within_radius?/4`, resolves a
+space's position by looking its **`city` string** up in a hardcoded **six-entry** `@city_coords` map
+(`enrichment.ex:184-191`) — so any space outside those six cities is silently dropped, and two spaces in
+the same city are treated as equidistant. It measures distance from a city centroid while advertising
+distance from a point.
+
+**This makes the ordering below a correctness constraint, not a preference.** Right now 0 rows mask the
+defect. **Building the producer (step 3) before the columns (step 1) would convert "empty" into "silently
+wrong" — rung 8, the worst rung on the ladder** — because a live endpoint would start returning confident,
+incorrect answers. Steps 1 and 2 are not preparatory tidying; they are what stops step 3 shipping a bug.
 
 **The story is fully specified.** `docs/user_stories/US-3.1.1-third-spaces-map.md` — all six open decisions
 taken (reader-facing category filters; owner-curated "well-regarded" with no stars anywhere; `third_space`
