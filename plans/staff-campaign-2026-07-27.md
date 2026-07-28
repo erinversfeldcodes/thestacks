@@ -13,28 +13,64 @@ claim.
 |---|---|---|
 | **Wave 0** | ✅ **COMPLETE** | Both items landed *and* tested. Session revocation lives in `Stacks.Email.reset_password/2` (`email.ex:167`), not the controller the plan suggested; `email_test.exs:124` asserts a pre-reset token then fails with `:session_revoked`. CSP carries `https://archive.org https://*.us.archive.org` (`security_headers.ex:17`) |
 | **Wave 0b** | ❌ **INCOMPLETE** | G5 (both affordances), G6 form UI + `third_space` removal path, G4's Elm client call, G3 diagnosis. G1 deferred by decision, not pending |
-| **Wave 0c** | 🟡 **COMPLETE AS SCOPED** | C1/C2/C5/C6/C7/C8 done. **But C3 and C4 were deferred into 0d and never given work rows there** — see below |
-| **Wave 0d** | ❌ **INCOMPLETE** | P3 partial, P7 not started, P8 partial, P9 not started, **plus the orphaned C3 and C4** |
+| **Wave 0c** | ✅ **COMPLETE** | C1/C2/C5/C6/C7/C8 done 2026-07-27; **C3 and C4 completed 2026-07-28** after being found orphaned — see below |
+| **Wave 0d** | ✅ **COMPLETE** | P1–P10 all done. ⚠️ Three of the four items recorded as "remaining" were **already done and the note was stale** — see the closure table |
 | **Wave 0e** | ✅ **COMPLETE** | E1/E2/E3 done; E5 decided (stays `0`); **E4 deliberately held for the launch gate**; E6 optional and skipped |
 
-### ⛔ C3 and C4 were lost in the hand-off from 0c to 0d
+### ✅ Wave 0 closed — 2026-07-28. What each item actually turned out to be
+
+`just run just verify` exit 0 (all gates including 240 dbt tests and `lint-dbt`).
+
+| Item | Filed as | What it was | Evidence |
+|---|---|---|---|
+| **C3** | route the events job through the compliant egress | ✅ **real and unbuilt** | New `POST /fetch` on the scraper, `ScraperClient.fetch_page/2`, job rewired. Probe: removing the config gate fails "a store with no scraper config is never fetched" |
+| **C4** | `robots_blocked` becomes a store state | ✅ **real and unbuilt** — the column existed, nothing wrote it | `record_robots_block/3` + `clear_robots_block/1`, two new proto fields. Probe: dropping the clear call fails "a lifted disallow resumes" |
+| **P3** | canary assertion + delete the `scraper_module` coupling | 🟡 **half stale.** The canary *was* wired (`trigger_price_scrape_job.ex:166,191`) and tested. The coupling was not a coupling — but hid a real defect | See below |
+| **P7** | edition discovery from Open Library, capped | ✅ **real and unbuilt** | `ISBNResolver.editions_for_work/1` (fetch capped at 50, one page) + `DiscoverEditionsJob` (creation capped at 10), event-driven off `book.created` |
+| **P8** | an Oban job must rebuild the index on a cadence | ❌ **stale** — already done | Cron `30 4 * * *` **and** event-driven on `SCRAPE_OUTCOME_INDEX_REQUIRED` with Oban dedup (`trigger_price_scrape_job.ex:230`) |
+| **P9** | record the four unscrapable targets as `:none` with a reason | ✅ **real and unbuilt**, and bigger than filed | New `unscrapable_reason` field; **nine of eleven** seeded stores named a nonexistent config |
+
+**P3's real defect, which the filed description pointed away from.**
+`store.scraper_module || store.name` (`trigger_price_scrape_job.ex:124`) substituted a **display name**
+("Exclusive Books") for a path-derived registry key ("za/exclusive_books"). Those never match, so every
+ISBN × unconfigured-store pair was a guaranteed `404 store not found` — and because the client melts a
+fuse on a non-200, **a store nobody had configured could open the breaker for stores that were**. The
+fallback existed to be safe and was the opposite. Replaced by `Prices.scrapeable_stores/0`, which filters
+in the query so a new caller gets it right without knowing.
+
+**P9 was the same defect at rest.** Nine of eleven seeded stores carried a `scraper_module` naming a TOML
+that does not exist, and `scraper_module_keys_test.exs` *deliberately permitted* it — "a store whose
+config has not been written yet, which is expected and visible". It was neither: it was nine guaranteed
+404s. The invariant is now enforced pre-merge in both directions (`scraper_module` is non-nil **iff** a
+TOML exists), which converts a silent runtime failure into a rung-3 one.
+
+⚠️ **A vacuous test of my own, caught by a probe.** The P7 creation-cap test used hand-typed sequential
+ISBNs whose **check digits were wrong**, so every one was refused by the ISBN hard gate before the cap was
+consulted — `created <= 10` held because `created` was 0, and the test passed with the cap **deleted**. It
+now generates valid ISBN-13s and fails with `got 20` when the cap is removed. Recording it because the
+probe was aimed at the cap and found the test instead; without it this would have shipped as coverage.
+
+**Not done, deliberately:** `DiscoverBookstoreEventsJob` remains **unscheduled**. C3's scope was the
+egress, and the plan's own rule was "fix the egress *before* anything wires this job up". Scheduling it
+starts crawling real bookshops, several of them one-person operations — a deliberate act, not a side
+effect of closing a compliance item. The wiring belongs to whoever turns the events feature on.
+
+### How C3 and C4 were lost in the hand-off from 0c to 0d
 
 Both are *mentioned* in Wave 0d's prose and neither has a row, a size, or a status. That is how they
 went unbuilt while both waves read as done — the same "moved and then untracked" pattern this campaign
 warns about for issues.
 
-**C3 — still an unguarded egress.** `discover_bookstore_events_job.ex:74` is still a bare
-`Finch.build(:get, url, [{"Accept", "text/html"}])`: no robots check, no rate limiter, no fuse. It
-violates the hard rule.
+**C3 — was an unguarded egress; fixed 2026-07-28.** `discover_bookstore_events_job.ex:74` was a bare
+`Finch.build(:get, url, [{"Accept", "text/html"}])`: no robots check, no rate limiter, no fuse.
 
 ⚠️ **Severity is real but latent, and the reason matters:** the job has **no enqueue site and is absent
 from the crontab** — the only references to `DiscoverBookstoreEventsJob` anywhere are its own log
 lines. So nothing is being scraped non-compliantly today. The rule stands as originally written:
 **fix the egress before anything wires this job up.** Whoever wires it will not think to check.
 
-**C4 — a column that nothing populates.** `robots_blocked_path` exists as proto field 15 and as a
-generated schema field (`gen/enrichment/bookstore.ex:26`), and **nothing in `apps/core/lib` writes or
-reads it**. Two of the three intended fields (`matching_rule`, `observed_at`) were never added, and the
+**C4 — was a column that nothing populates; fixed 2026-07-28.** `robots_blocked_path` existed as proto
+field 15 and as a generated schema field, and **nothing in `apps/core/lib` wrote or read it**. Two of the three intended fields (`matching_rule`, `observed_at`) were never added, and the
 probe-cadence re-check does not exist, so a `robots_blocked` store cannot resume by itself.
 
 This is a **zero-row instance of exactly the ROOT G shape** — built halfway, wired to nothing — sitting
@@ -49,6 +85,7 @@ the easy half, and shipping it alone produced a column that reads as a feature.
 | 2026-07-27 | Waves 0c/0d added — robots.txt compliance made structural, price fetch rebuilt on the capability probe. G2 proven live (first `price_snapshots` row ever). ⚠️ **Recorded as "completed" at the time; a 2026-07-28 code check found 0d has four open items and that C3/C4 were orphaned. See the Wave 0 status table above.** |
 | 2026-07-27 | 🟧 **ROOT H narrowed then closed** — challenged correctly by the owner; all three non-staleness cases made event-driven. This removes the correctness argument for `min_machines_running = 1`; see Wave 0e/E5. |
 | 2026-07-28 | **Wave 0b resolved** — G1/G4/G5/G6 specified; G4 and G6 server halves built and merged (`a435e2b2`); **G1 removed from Wave 0b** as not promotable. `docs/user_stories/US-3.1.1-third-spaces-map.md` written, all six of its decisions taken. |
+| 2026-07-28 | **Wave 0 CLOSED** — C3, C4, P7 and P9 built; P3 half-stale (its real defect was a fabricated registry key); P8 already done. `just run just verify` exit 0. |
 | 2026-07-28 | **Wave 0e added** — production domain cutover. Six items, four wrong in production today. ⚠️ Two of the six reported items were *not* what the report described (E1's RSS half, E5's severity), and my own first framing of **E2 was overstated as ⛔ and is corrected in place to 🟧** — the root `robots.txt`/`ai.txt` are repository-level declarations, not unserved website files. |
 
 ## The frame
