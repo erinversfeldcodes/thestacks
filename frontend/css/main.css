@@ -4492,3 +4492,559 @@ h4 {
 .book-detail__status--success {
     color: var(--accent-hover, #5a9a6e);
 }
+
+/* ===== Shelf Organiser (US-1.7.1 / #190) ===== */
+
+/*
+ * Sits below the bookcase on the owner's own bookshelf. A panel rather than a restyling of
+ * the spines: the bookcase auto-flows placements into visual rows and deliberately does not
+ * surface physical `op.shelves` boundaries (#151), so organisation is managed alongside it.
+ *
+ * These rules were missing entirely when the component shipped — the BEM classes existed
+ * with nothing behind them, so the organiser rendered as raw browser chrome (bulleted list,
+ * default grey buttons) on top of the wallpaper.
+ */
+
+.bookshelf__organiser {
+    max-width: 1040px;
+    margin: 1.5rem auto 3rem;
+    padding: 1.25rem 1.5rem;
+    background: rgba(26, 18, 8, 0.72);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+}
+
+.bookshelf__organiser-title {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    color: var(--text);
+    letter-spacing: 0.04em;
+    margin: 0 0 0.25rem;
+}
+
+.bookshelf__organiser-hint {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    margin: 0 0 1rem;
+}
+
+.bookshelf__organiser-error {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: #d99a6c;
+    background: rgba(155, 105, 48, 0.15);
+    border-left: 2px solid #9b6930;
+    padding: 0.5rem 0.75rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
+}
+
+.shelf-organiser__list {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.shelf-organiser__row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--shelf-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    /* The row is draggable; the grab cursor is the only affordance saying so. */
+    cursor: grab;
+    transition: background 0.2s, box-shadow 0.2s, opacity 0.2s;
+}
+
+.shelf-organiser__row:hover {
+    background: #4a3527;
+    box-shadow: var(--shadow-sm);
+}
+
+/* The dragged row stays visible but recedes, so the gap it will leave is readable. */
+.shelf-organiser__row--dragging {
+    opacity: 0.45;
+    cursor: grabbing;
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.shelf-organiser__handle {
+    color: var(--text-muted);
+    font-size: var(--size-lg);
+    line-height: 1;
+    cursor: grab;
+}
+
+.shelf-organiser__label {
+    flex: 1;
+    font-family: var(--font-heading);
+    font-size: var(--size-base);
+    color: var(--text);
+}
+
+.shelf-organiser__count {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+}
+
+.shelf-organiser__move,
+.shelf-organiser__remove,
+.shelf-organiser__add {
+    font-family: var(--font-body);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.shelf-organiser__move {
+    /* Square, and large enough to be a comfortable target — these are the keyboard path. */
+    width: 2rem;
+    height: 2rem;
+    font-size: var(--size-base);
+    line-height: 1;
+}
+
+.shelf-organiser__remove {
+    padding: 0.35rem 0.7rem;
+    font-size: var(--size-sm);
+}
+
+.shelf-organiser__move:hover:not(:disabled),
+.shelf-organiser__add:hover:not(:disabled) {
+    background: rgba(74, 124, 89, 0.25);
+    border-color: var(--accent);
+}
+
+.shelf-organiser__remove:hover:not(:disabled) {
+    background: rgba(155, 105, 48, 0.25);
+    border-color: #9b6930;
+    color: #e8c9a8;
+}
+
+.shelf-organiser__move:focus-visible,
+.shelf-organiser__remove:focus-visible,
+.shelf-organiser__add:focus-visible {
+    outline: 2px solid var(--accent-hover);
+    outline-offset: 2px;
+}
+
+/*
+ * Disabled is a real state here, not decoration: `up` on the first row, `down` on the last,
+ * and `remove` on a shelf that still holds books (the server refuses that with 422). It has
+ * to read as unavailable rather than broken.
+ */
+.shelf-organiser__move:disabled,
+.shelf-organiser__remove:disabled,
+.shelf-organiser__add:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.shelf-organiser__add {
+    padding: 0.5rem 1rem;
+    font-size: var(--size-sm);
+    letter-spacing: 0.04em;
+}
+
+/* ===== Listing Removal — "Is this your business?" (US-2.5.3) ===== */
+
+/*
+ * Deliberately unauthenticated: a shop owner who never asked to be listed should not have to
+ * create an account in order to leave. Styled as a parchment card in the same family as the
+ * login card, because it is the same kind of surface — a single short form for someone who
+ * arrived from outside and has one thing to do.
+ */
+
+.listing-removal {
+    max-width: 34rem;
+    margin: 3rem auto;
+    padding: 2rem 2.25rem;
+    background: linear-gradient(160deg, #f2ead7, #e4d8bd);
+    border: 1px solid #c8b89a;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    color: #2c1f0e;
+}
+
+.listing-removal h1 {
+    font-family: var(--font-heading);
+    font-size: var(--size-3xl);
+    color: #3d2610;
+    margin: 0 0 0.75rem;
+}
+
+.listing-removal__intro,
+.listing-removal__hint {
+    font-family: var(--font-body);
+    color: #5c4a32;
+}
+
+.listing-removal__intro {
+    font-size: var(--size-base);
+    line-height: 1.55;
+    margin: 0 0 1.5rem;
+}
+
+.listing-removal__field {
+    margin-bottom: 1.25rem;
+}
+
+.listing-removal__field label {
+    display: block;
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    color: #6b5a45;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+}
+
+.listing-removal__input,
+.listing-removal__textarea {
+    width: 100%;
+    padding: 0.7rem 0.75rem;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid #c8b89a;
+    border-radius: 3px;
+    color: #2c1f0e;
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.listing-removal__textarea {
+    resize: vertical;
+    min-height: 4.5rem;
+}
+
+.listing-removal__input::placeholder {
+    color: #a09580;
+    font-style: italic;
+}
+
+.listing-removal__input:focus,
+.listing-removal__textarea:focus {
+    outline: none;
+    border-color: #8b4513;
+    box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.15);
+}
+
+/* Explains why an address is asked for, so the field reads as the thing that decides how
+ * fast the request is honoured rather than as data collection. */
+.listing-removal__hint {
+    font-size: var(--size-sm);
+    line-height: 1.45;
+    margin: 0.4rem 0 0;
+    font-style: italic;
+}
+
+.listing-removal__error {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: #7a3b12;
+    background: rgba(155, 105, 48, 0.14);
+    border-left: 2px solid #9b6930;
+    padding: 0.5rem 0.75rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
+}
+
+.listing-removal__submit {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #5c3a1e;
+    border-radius: 3px;
+    background: linear-gradient(135deg, #5c3a1e, #3d2610);
+    color: #f5eed6;
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.listing-removal__submit:hover:not(:disabled) {
+    background: linear-gradient(135deg, #6b4525, #4a2e15);
+    box-shadow: 0 2px 12px rgba(92, 58, 30, 0.3);
+}
+
+.listing-removal__submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.listing-removal__alt {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: #5c4a32;
+    text-align: center;
+    margin: 1.25rem 0 0;
+}
+
+.listing-removal__alt a {
+    color: #8b4513;
+    text-decoration: underline;
+}
+
+/*
+ * The two outcomes are styled apart on purpose, matching the copy. Telling a business owner
+ * their listing is gone when it is still live is a worse failure than telling them there is
+ * a wait — they would stop checking. Green reads as settled; amber reads as in-progress.
+ */
+
+.listing-removal__done,
+.listing-removal__pending {
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    line-height: 1.55;
+}
+
+.listing-removal__done {
+    background: rgba(74, 124, 89, 0.14);
+    border-left: 3px solid var(--accent);
+}
+
+.listing-removal__pending {
+    background: rgba(155, 105, 48, 0.14);
+    border-left: 3px solid #9b6930;
+}
+
+.listing-removal__lede {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    color: #3d2610;
+    margin: 0 0 0.5rem;
+}
+
+.listing-removal__done p:last-child,
+.listing-removal__pending p:last-child {
+    margin: 0;
+    color: #5c4a32;
+}
+
+/* ===== Profile bookshelf feed link (US-9.4.1, campaign G4) ===== */
+
+/*
+ * The "Feed" affordance beside a platform-visible bookshelf on a public profile. An anchor,
+ * not a fetch: a feed reader wants the URL, and a reader who clicks gets the Atom document.
+ * Only rendered when the bookshelf is platform-visible (`has_feed`), so its presence is
+ * itself the signal that the shelf is public.
+ *
+ * Styled quietly on purpose — it sits next to the bookshelf name and must not compete with
+ * it. Discovered unstyled during the 2026-07-28 drive, along with the organiser and the
+ * removal form.
+ */
+
+.profile__shelf-feed {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.45rem;
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.profile__shelf-feed:hover,
+.profile__shelf-feed:focus-visible {
+    color: var(--accent-hover);
+    border-color: var(--accent);
+    background: rgba(74, 124, 89, 0.15);
+}
+
+/* ===== Admin: shared states ===== */
+
+/*
+ * `admin__error` and `admin__loading` were already used by the source-approval and
+ * scraper-health pages with no rules behind them — found by the 2026-07-28 orphan-class
+ * sweep, not by any test. Added here rather than scoped to one page because all three admin
+ * surfaces render them.
+ */
+
+.admin__loading {
+    font-family: var(--font-body);
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.admin__error {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: #d99a6c;
+    background: rgba(155, 105, 48, 0.15);
+    border-left: 2px solid #9b6930;
+    padding: 0.6rem 0.85rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
+}
+
+/* ===== Admin: removal-request queue (US-2.5.3, campaign G6) ===== */
+
+/*
+ * ⚠️ The destructive action here — "Remove the listing" — is the one that takes a real
+ * business off the map, and the page sits one nav item away from `/admin/sources`, whose
+ * primary button *publishes* a listing. So the two are styled apart deliberately: removal is
+ * amber-bordered and needs a second click, keeping is quiet and immediate. Matching their
+ * styling would make two opposite actions look interchangeable.
+ */
+
+.removal-queue__list {
+    list-style: none;
+    margin: 1.5rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.removal-queue__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.removal-queue__detail {
+    flex: 1 1 20rem;
+    min-width: 0;
+}
+
+.removal-queue__name {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: var(--text);
+}
+
+.removal-queue__type {
+    margin-left: 0.6rem;
+    padding: 0.1rem 0.4rem;
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.removal-queue__url {
+    display: block;
+    margin-top: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: var(--size-sm);
+    color: var(--accent-hover);
+    /* A long URL must not push the decision buttons off the row. */
+    overflow-wrap: anywhere;
+}
+
+.removal-queue__asked {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    margin: 0.4rem 0 0;
+}
+
+/* The address is what the reviewer actually judges, so it is the emphasis in that line. */
+.removal-queue__email {
+    color: var(--text);
+    font-family: var(--font-mono);
+}
+
+.removal-queue__actions,
+.removal-queue__confirm {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.removal-queue__remove,
+.removal-queue__keep,
+.removal-queue__confirm-yes,
+.removal-queue__confirm-no {
+    padding: 0.5rem 0.9rem;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+/* Amber, not red: it is a considered action, not an alarm. */
+.removal-queue__remove,
+.removal-queue__confirm-yes {
+    background: rgba(155, 105, 48, 0.18);
+    border: 1px solid #9b6930;
+    color: #e8c9a8;
+}
+
+.removal-queue__remove:hover:not(:disabled),
+.removal-queue__confirm-yes:hover:not(:disabled) {
+    background: rgba(155, 105, 48, 0.32);
+}
+
+.removal-queue__keep,
+.removal-queue__confirm-no {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.removal-queue__keep:hover:not(:disabled),
+.removal-queue__confirm-no:hover:not(:disabled) {
+    background: rgba(74, 124, 89, 0.22);
+    border-color: var(--accent);
+}
+
+.removal-queue__remove:focus-visible,
+.removal-queue__keep:focus-visible,
+.removal-queue__confirm-yes:focus-visible,
+.removal-queue__confirm-no:focus-visible {
+    outline: 2px solid var(--accent-hover);
+    outline-offset: 2px;
+}
+
+.removal-queue__remove:disabled,
+.removal-queue__keep:disabled,
+.removal-queue__confirm-yes:disabled,
+.removal-queue__confirm-no:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* The confirmation names the business, so a misplaced click is visible before it lands. */
+.removal-queue__confirm {
+    padding: 0.6rem 0.85rem;
+    background: rgba(155, 105, 48, 0.12);
+    border: 1px solid #9b6930;
+    border-radius: var(--radius-md);
+}
+
+.removal-queue__confirm-text {
+    margin: 0 0.5rem 0 0;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text);
+}
