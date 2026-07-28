@@ -1,3 +1,8 @@
+---
+name: staff-execute
+description: Build a staff-campaign's plan by turning each approved wave into ONE epic issue and driving the orchestrator's Epic Parallel Execution — it does not reimplement execution. Contributes the Staff Engineer persona's bar (live drive, mutation probe, wiring trace, gdpr-review) written into the epic's DoD, plus a shadow review before the PR. Runs until `just wave-status` is green, stopping only at epic mode's batched stops. Use for "/staff-execute", "implement the campaign plan", "complete wave N", "build the remediation plan", or after a campaign's Stage 6 has been approved.
+---
+
 # staff-execute
 
 The Staff Engineer's **Mode E** — get a campaign's plan built, by **driving the orchestrator**, not
