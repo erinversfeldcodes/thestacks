@@ -156,6 +156,16 @@ defmodule Stacks.Enrichment.Prices do
     Application.get_env(:core, :lazy_price_refresh, true)
   end
 
+  # Editions refreshed per read. Deliberately small.
+  #
+  # One page view fans out to (editions × stores) outbound requests. Open Library
+  # reports 76 distinct ISBN-13s for The Name of the Rose, and there are eleven
+  # seeded stores — so an uncapped fan-out turns a single view of a
+  # much-republished classic into ~800 requests against mostly one-person
+  # bookshops. The primary edition plus a few others is what a reader can actually
+  # use on one page; the rest arrive over subsequent views.
+  @max_editions_per_refresh 5
+
   # Editions of this work that have no price, or a price older than the TTL.
   defp enqueue_refreshes(book_id, prices, ttl_days) do
     cutoff = DateTime.add(DateTime.utc_now(), -ttl_days, :day)
@@ -167,10 +177,14 @@ defmodule Stacks.Enrichment.Prices do
 
     from(be in BookEdition,
       where: be.book_id == ^book_id,
+      # Primary edition first: it is the one the page leads with, so it is the one
+      # worth spending the first requests on.
+      order_by: [desc: be.is_primary, asc: be.isbn],
       select: %{id: be.id, isbn: be.isbn}
     )
     |> Repo.all()
     |> Enum.reject(&MapSet.member?(fresh_edition_ids, &1.id))
+    |> Enum.take(@max_editions_per_refresh)
     |> Enum.each(fn edition ->
       %{isbn: edition.isbn, book_edition_id: edition.id}
       |> TriggerPriceScrapeJob.new(

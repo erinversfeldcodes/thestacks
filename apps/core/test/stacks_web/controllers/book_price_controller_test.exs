@@ -112,6 +112,45 @@ defmodule StacksWeb.BookPriceControllerTest do
       assert_enqueued(worker: TriggerPriceScrapeJob, args: %{book_edition_id: edition.id})
     end
 
+    test "caps the fan-out for a much-republished work", %{conn: conn} do
+      # Open Library reports 76 distinct ISBN-13s for The Name of the Rose. With
+      # eleven seeded stores, an uncapped fan-out turns one page view into ~800
+      # outbound requests against mostly one-person bookshops.
+      book = insert(:book)
+
+      Enum.each(1..12, fn i ->
+        insert(:book_edition,
+          book: book,
+          isbn: "97800000000#{String.pad_leading(to_string(i), 2, "0")}",
+          is_primary: i == 1
+        )
+      end)
+
+      conn |> get("/api/books/#{book.id}/prices") |> json_response(200)
+
+      enqueued = all_enqueued(worker: TriggerPriceScrapeJob)
+      assert length(enqueued) == 5, "expected the fan-out to be capped, got #{length(enqueued)}"
+    end
+
+    test "spends the first requests on the primary edition", %{conn: conn} do
+      # It is the edition the page leads with, so it is the one worth pricing first.
+      book = insert(:book)
+      primary = insert(:book_edition, book: book, isbn: "9780000000099", is_primary: true)
+
+      Enum.each(1..10, fn i ->
+        insert(:book_edition,
+          book: book,
+          isbn: "97800000000#{String.pad_leading(to_string(i), 2, "0")}",
+          is_primary: false
+        )
+      end)
+
+      conn |> get("/api/books/#{book.id}/prices") |> json_response(200)
+
+      isbns = all_enqueued(worker: TriggerPriceScrapeJob) |> Enum.map(& &1.args["isbn"])
+      assert primary.isbn in isbns
+    end
+
     test "repeated views do not pile up duplicate scrapes", %{conn: conn} do
       # A popular book is viewed constantly. Without Oban's uniqueness this would
       # enqueue one scrape per page view.
