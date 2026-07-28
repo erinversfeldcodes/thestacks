@@ -70,6 +70,12 @@ config :core, Oban,
        # 04:30 UTC, half an hour after the price batch, so a rebuild is not competing
        # with price lookups for the same per-domain rate limit.
        {"30 4 * * *", Stacks.Workers.BuildScraperIndexJob},
+       # Title matching for the two shops that carry no ISBN on any product, so no
+       # enumeration can identify their products. Weekly rather than nightly: it is a
+       # full catalogue sweep plus a fetch per match, and these shops' stock does not
+       # turn over fast enough to justify daily. Sundays 05:00, clear of the nightly
+       # jobs.
+       {"0 5 * * 0", Stacks.Workers.MatchStoreCatalogueJob},
        # Sweeps expired rows from cache.isbn_resolver_cache and
        # cache.title_search_cache. Runs at 03:30 UTC in the low-traffic
        # window between ImageRetentionJob (02:00) and RSSLivenessJob (03:00).

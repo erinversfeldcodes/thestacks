@@ -369,6 +369,24 @@ defmodule Stacks.Enrichment.Prices do
   def canary_failed(_store, _isbn), do: :not_canary
 
   @doc """
+  Stores that must be matched by title because no product carries an ISBN.
+
+  `isbn_location == "none"` with a working product API: the shop can be enumerated but
+  its products cannot be identified by ISBN, so titles are the only handle. Measured
+  for Ike's Books (0 of 50 products) and Love Books (0 of 30).
+  """
+  @spec stores_needing_title_match() :: [Bookstore.t()]
+  def stores_needing_title_match do
+    Repo.all(
+      from b in Bookstore,
+        where: b.isbn_location == "none" and not is_nil(b.scraper_module),
+        # A shop with no product API cannot be enumerated at all, so there are no
+        # titles to match against.
+        where: not is_nil(b.price_source) and b.price_source != "none"
+    )
+  end
+
+  @doc """
   Stores whose observed capability says they need a local ISBN index.
 
   Only stores that have actually been observed to need one. A store with no

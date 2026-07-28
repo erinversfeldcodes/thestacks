@@ -15,6 +15,14 @@ defmodule Stacks.Enrichment.MockScraperClient do
   @behaviour Stacks.Enrichment.ScraperClientBehaviour
 
   @impl true
+  def catalogue_titles(_store_name) do
+    Application.get_env(:core, :mock_catalogue_titles, {:ok, []})
+  end
+
+  @impl true
+  def scrape(isbn, store_name, _product_path), do: scrape(isbn, store_name)
+
+  @impl true
   def build_index(_store_name) do
     # Stubbed rather than simulated, and deliberately without touching the Agent: the
     # index is a property of the Rust service's own process, so there is nothing
