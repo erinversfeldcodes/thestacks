@@ -29,7 +29,7 @@ because 0b is the wave that makes built features *reachable*.
 | **G4** | RSS feeds | ✅ done and proven — `op.feed_cache` populated | ⛔ **no `/feeds` call in `Api.elm`.** Plus two conformance holes filed separately (no `rel="self"`, no per-entry link) | S |
 | **G6** | Business opt-out | ✅ server done (`a435e2b2`) — domain-verified removal requests | ⛔ **no page and no client call.** Needs the submission form, the owner review queue, and extending the verified path to the `third_space` row (soft-delete) | M |
 | **G3** | Source discovery | ✅ cause found and fixed — was cron-only, now also event-driven off `book.created` | 🟧 **zero-row DoD unproven: `op.discovered_sources` = 0.** The mechanism is wired; nothing has exercised it against a real Brave API key. Not a code gap — an evidence gap | S |
-| **G1** | Third spaces | — | ✅ **deferred by owner decision**, not outstanding. Story specified, all six decisions taken; the route lands only when the data does | — |
+| **G1** | Third spaces | — | ✅ **deferred by owner decision.** ⚠️ Was in **no** future wave until 2026-07-28 — now homed under **Deferred with a home**, with its dependency order fixed and the contradictory Wave 1 "wire the page" entry struck | → deferred |
 
 **Zero-row sweep, local DB immediately after a from-scratch seed:**
 
@@ -1181,8 +1181,11 @@ siblings of live features**, not dead ends. They move to **Wave 6a** as wiring w
 **Still delete** (genuinely dead, no story wants them):
 | Delete `RecalculateWearJob` (it only logs; real logic is inline in `Shelving`) and `ConfirmDeletionJob` (stub) + tests; correct the mapping's "or on shelf-move events" hedge | F | S |
 | Collapse `Route.Settings` into `SettingsProfile` (6 sites); fold `LogoutCompleted` into the existing `FocusResult` no-op idiom; delete `open_token_family/1` in favour of `rotate_token_family/1`; inline the 3 phantom CSS tokens; fix `Consent.elm`'s 2 raw `data-testid` calls | F | S |
-| **Wire `Page/ThirdSpaces.elm`** (route + import + init/view branches) — capability wanted, shape missing | F | S |
-| **Wire the shelf-organization UI (#190)** — the backend is complete (35 tests) but `Api.elm` calls **no** `/shelves` endpoint; needs create / delete / reorder / move-to-shelf affordances. ⚠️ Note `ShelfMover` is about *bookshelves*, not physical *shelves* — don't mistake it for this | F/#190 | M |
+| ~~Wire `Page/ThirdSpaces.elm`~~ — ⛔ **STRUCK 2026-07-28. Do not do this.** Routing the page is what the
+G1 ruling forbids until the data exists: `third_spaces` = 0 and neither `op.third_spaces` nor
+`op.bookstores` has lat/lng, so the route would put a permanently empty map on the main nav. Sized `S`
+here because only the wiring was counted; the story it serves is not S. See **Deferred with a home** | F | — |
+| ~~Wire the shelf-organization UI (#190)~~ — **MOVED to Wave 0b** (2026-07-28), where it is scoped as both drag-and-drop and explicit controls, split by action. Left struck here because this entry predates Wave 0b's insertion and duplicating it is how work gets done twice or not at all | F | → 0b |
 | **Introduce `Stacks.Config` (#091)** as the home for the consolidated `{n,unit}→seconds` helper and the ~12 knobs with no non-default setter — the issue and the campaign's duplication finding are the same work | F/#091 | S |
 
 ⚠️ **These three plus reading-progress make four instances of "backend built, UI never wired."** That is a
@@ -1493,6 +1496,47 @@ them block the **beta** and the **Phase 2 vision work**, per `notes/` Milestones
 | **#025** — the vision-model benchmark (`benchmark/` + annotated corpus). Gates the Milestone E redesign **and** the re-costing that W-16 forces | — | L |
 | **E4** — remove `noindex, nofollow` from `apps/core/priv/static/index.html:6`. ⛔ **Blocked on Wave 0e's E2** — doing this while the served `robots.txt` lacks the AI-crawler groups opens the site to every crawler that file was written to exclude | 0e | XS |
 | **E2 verification** — re-fetch `/robots.txt` from the live domain and confirm the served bytes carry the crawler groups. The zero-row check's equivalent for a static asset: *what the server returns*, not what the repo contains | 0e | XS |
+
+# Deferred with a home — G1 / US-3.1.1 (added 2026-07-28)
+
+⚠️ **Why this section exists.** G1 was removed from Wave 0b on 2026-07-28 with a stated reason, and a check
+on 2026-07-28 found it had landed in **no future wave** — the identical "moved and then untracked" pattern
+that lost C3 and C4 for a fortnight. Worse, the plan contained a *contradiction*: Wave 1 still carried
+"Wire `Page/ThirdSpaces.elm` (route + import)" sized `S`, which is precisely the action the deferral
+forbids. Both have been struck above. A deferral without a home is not a decision, it is an omission with
+better paperwork — so this is the home.
+
+**Scope note:** US-3.1.1 is a **Phase 4** story per `docs/implementation-mapping.md`. It is not being
+promoted into this Phase 1 plan. It is recorded here so it is findable, with its dependency order fixed,
+because the specification work is done and would otherwise rot.
+
+**The story is fully specified.** `docs/user_stories/US-3.1.1-third-spaces-map.md` — all six open decisions
+taken (reader-facing category filters; owner-curated "well-regarded" with no stars anywhere; `third_space`
+created **only** by source approval; one narrow Elm port; hosted tiles **proxied** so no reader IP reaches a
+third party; plain lat/lng + bounding box, not PostGIS).
+
+**Dependency order — the wiring is last, not first.** This ordering is the whole point of the deferral:
+
+| # | Work | Why it must precede the next | Size |
+|---|---|---|---|
+| 1 | **`latitude`/`longitude` on `op.third_spaces` *and* `op.bookstores`** — `.proto` + `persisted.exs` + `mix proto.sync` | The 500 m rule cannot be computed at all without them. Contracts before consumers | S |
+| 2 | **Geocode at approval, and store nearest-bookshop distance** | Precomputed, not per-request — recomputing across a viewport on every pan is the query that would later force PostGIS for the wrong reason | M |
+| 3 | **`Discovery.approve_source/1` creates the `third_space`** — the only producer | Until this exists the table stays at 0 rows and every downstream surface is empty | M |
+| 4 | **ADR: tile provider + proxy-vs-direct**, incl. the terms clause consulted | Must be merged *before* the map is built; if direct, the privacy policy needs the third party named (a launch-gate item) | S |
+| 5 | **The narrow Elm port** — camera/pins out, viewport/click in, debounce in Elm | The project's first port; sets the precedent every later argument will cite | M |
+| 6 | **Route the page + cork board** — the item Wave 1 wanted to do first | ⛔ Lands **only** when 1–3 have produced rows. This is the gate | M |
+
+**Two findings banked from the specification pass, worth keeping even if the story slips:**
+- `Stacks.Enrichment.haversine_km/4` (`enrichment.ex:244`) is already written and correct; it is useless
+  only because `within_radius?/4` joins against a hardcoded **six-entry** `@city_coords` map. Step 1 makes
+  existing code work rather than adding new code.
+- **Antimeridian panning breaks a naive bounding box** (`east < west` past ±180°), and §1 explicitly puts
+  "drag across the globe to Shanghai" in scope. Two boxes, with a test — a plain `between` returns nothing
+  there and fails silently.
+
+**`Page/ThirdSpaces.elm` must not be deleted in the meantime.** It appears in ROOT F's dead-code list
+(item 5) because it is unreachable, which is true but misleading: the capability is wanted and specified,
+so it is *unwired*, not dead. Deleting it would throw away 171 LOC that step 6 needs.
 
 # Deliberately not in this plan
 Age-gate Verify affordance (withdrawn, ADR-020 §2 — only the stale *mapping reference* is in Wave 7) ·
