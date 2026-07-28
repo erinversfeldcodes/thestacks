@@ -33,7 +33,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
   def perform(%Oban.Job{args: %{"batch" => true}}) do
     Logger.info("TriggerPriceScrapeJob: starting batch scrape")
     stale = Prices.stale_isbns(7)
-    stores = Prices.all_stores()
+    stores = Prices.scrapeable_stores()
 
     if Enum.empty?(stale) or Enum.empty?(stores) do
       Logger.info(
@@ -63,7 +63,7 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
         :ok
 
       book_edition_id ->
-        stores = Prices.all_stores()
+        stores = Prices.scrapeable_stores()
 
         if Enum.empty?(stores) do
           Logger.info("TriggerPriceScrapeJob: no stores configured, skipping")
@@ -121,7 +121,10 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
     for %{isbn: isbn, book_edition_id: book_edition_id} <- isbn_entries,
         store <- stores do
-      store_name = store.scraper_module || store.name
+      # No `|| store.name` fallback: the display name is not a registry key and never
+      # matches one, so the fallback only ever produced a guaranteed 404 that melted the
+      # store's fuse. `scrapeable_stores/0` guarantees this is non-nil.
+      store_name = store.scraper_module
 
       case client.scrape(isbn, store_name) do
         {:ok, response} ->

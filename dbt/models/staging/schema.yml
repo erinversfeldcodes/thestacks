@@ -842,6 +842,12 @@ models:
         description: Canary isbn.
       - name: robots_blocked_path
         description: Robots blocked path.
+      - name: robots_blocked_rule
+        description: Robots blocked rule.
+      - name: robots_blocked_at
+        description: Robots blocked at.
+      - name: unscrapable_reason
+        description: Unscrapable reason.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

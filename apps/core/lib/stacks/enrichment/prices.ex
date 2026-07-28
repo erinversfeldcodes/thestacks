@@ -267,6 +267,71 @@ defmodule Stacks.Enrichment.Prices do
     end
   end
 
+  @doc """
+  Record that robots.txt blocks `path` for this store, with the rule responsible.
+
+  A block is **observable state**, not a silent skip. Before this existed the column
+  was present and nothing wrote it, so a store forbidden by robots.txt looked
+  identical to one that simply had no prices yet — and an operator had no way to learn
+  which, or why.
+
+  Per the owner's rule the store's configuration is deliberately left in place, so if
+  the disallow is ever lifted the store resumes by itself. `robots_blocked_at` is what
+  makes that re-checkable: the block is a dated observation, not a verdict.
+
+  Returns `:ok` regardless — recording a block must never be what turns a handled
+  determination into a failure.
+  """
+  @spec record_robots_block(map(), String.t(), String.t()) :: :ok
+  def record_robots_block(store, path, rule) do
+    if store.robots_blocked_path == path and store.robots_blocked_rule == rule do
+      # Same block as last time: refresh only the observation time, and stay quiet.
+      # Logging every recurrence would bury the first occurrence in noise, and a block
+      # recurs on every attempt by definition.
+      update_store(store, %{robots_blocked_at: DateTime.utc_now()})
+    else
+      Logger.warning(
+        "Prices: #{store.name} blocked by robots.txt at #{path} (#{rule}) — " <>
+          "configuration retained so it resumes if the rule is lifted"
+      )
+
+      update_store(store, %{
+        robots_blocked_path: path,
+        robots_blocked_rule: rule,
+        robots_blocked_at: DateTime.utc_now()
+      })
+    end
+  end
+
+  @doc """
+  Clear a store's robots block after a successful fetch.
+
+  The other half of `record_robots_block/3`, and the half that makes the block
+  self-healing: without it, a disallow lifted next month would leave the store
+  permanently marked as blocked, and "re-checked on the probe cadence" would be a
+  claim with nothing behind it.
+
+  A no-op when no block is recorded, so callers can call it unconditionally on success
+  rather than checking first — the error case is defined out of existence.
+  """
+  @spec clear_robots_block(map()) :: :ok
+  def clear_robots_block(%{robots_blocked_path: nil}), do: :ok
+
+  def clear_robots_block(store) do
+    Logger.info(
+      "Prices: #{store.name} is no longer blocked by robots.txt " <>
+        "(was #{store.robots_blocked_path}, #{store.robots_blocked_rule}) — resuming"
+    )
+
+    # All three move together: a half-cleared block would read as "still blocked,
+    # reason unknown".
+    update_store(store, %{
+      robots_blocked_path: nil,
+      robots_blocked_rule: nil,
+      robots_blocked_at: nil
+    })
+  end
+
   defp log_capability_change(store, attrs) do
     Logger.info(
       "Prices: #{store.name} capability changed — " <>
@@ -413,5 +478,30 @@ defmodule Stacks.Enrichment.Prices do
   @spec all_stores() :: [Bookstore.t()]
   def all_stores do
     Repo.all(Bookstore)
+  end
+
+  @doc """
+  Stores the scraper service can actually be asked about.
+
+  `scraper_module` is the scraper's **registry key** (`"za/exclusive_books"`), not a
+  label — it names a TOML config that supplies the base URL, the selectors and the rate
+  limit. A store without one cannot be addressed at all: the service answers
+  `404 store not found`, and there is no fallback that could work.
+
+  Exists because callers kept reaching for `all_stores/0` and then improvising. The
+  worst improvisation was `store.scraper_module || store.name` in
+  `TriggerPriceScrapeJob`, which substituted the **display name** ("Exclusive Books")
+  for a registry key that is path-derived ("za/exclusive_books"). Those never match, so
+  every ISBN × unconfigured-store pair produced a guaranteed 404 — and because the
+  client melts a fuse on a non-200, a store nobody had configured could open the
+  breaker for stores that were. The failure was silent in the sense that mattered:
+  it looked like the shop was down.
+
+  Filtering in the query rather than at each call site means a new caller gets this
+  right by default instead of having to know.
+  """
+  @spec scrapeable_stores() :: [Bookstore.t()]
+  def scrapeable_stores do
+    Repo.all(from b in Bookstore, where: not is_nil(b.scraper_module))
   end
 end
