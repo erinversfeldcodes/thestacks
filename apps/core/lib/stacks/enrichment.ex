@@ -158,6 +158,9 @@ defmodule Stacks.Enrichment do
     # project are hand-written on purpose (see the moduledoc) — which means `proto.sync`
     # adding a column does NOT make it writable, and a field missing from this list is
     # dropped in silence. That is exactly what happened when these three were added.
+    #
+    # ⚠️ Now guarded: `Stacks.ChangesetFieldCoverageTest` calls this changeset with every
+    # schema field and fails if any is dropped, so the trap is pre-merge rather than silent.
     :latitude,
     :longitude,
     :nearest_bookshop_km,
