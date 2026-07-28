@@ -37,6 +37,7 @@ module Api exposing
     , PublicProfileSummary
     , RegisterError(..)
     , RemovalOutcome(..)
+    , RemovalRequest
     , RiskInference
     , SearchSections
     , ShelfVisibilitySetting
@@ -64,6 +65,7 @@ module Api exposing
     , createShelf
     , deactivateListing
     , declineInvitation
+    , declineRemovalRequest
     , deleteAccount
     , deleteComment
     , deleteShelf
@@ -90,10 +92,11 @@ module Api exposing
     , getPrivacySettings
     , getProfile
     , getProfileShelf
-    , getShelves
+    , getRemovalRequests
     , getSourceHealth
     , getTransparencyMetrics
     , getUserPlacements
+    , honourRemovalRequest
     , initUpload
     , inviteToGroup
     , isNotFound
@@ -2822,29 +2825,6 @@ getProfile maybeToken handle toMsg =
         }
 
 
-{-| The owner's physical shelves within one of their bookshelves.
-
-⚠️ **Terminology, because conflating these is easy and expensive:** a _bookshelf_ is a
-named virtual collection (library, antilibrary…); a _shelf_ is a physical horizontal row
-inside it (`op.shelves`). This is the shelf sub-resource.
-
-`GET /api/bookshelves/:bookshelfName/shelves`. Reuses `shelvesResponseDecoder` — the
-payload shape is the same one the public-profile path already decodes.
-
--}
-getShelves : String -> String -> (Result Http.Error (List Shelf) -> msg) -> Cmd msg
-getShelves bookshelfName token toMsg =
-    Http.request
-        { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg shelvesResponseDecoder
-        , timeout = Nothing
-        , tracker = Nothing
-        }
-
-
 {-| Add a shelf to the bottom of a bookshelf.
 
 `POST /api/bookshelves/:bookshelfName/shelves`. Takes no body: position is the server's
@@ -3052,6 +3032,86 @@ fromProtoSourceAdminListResponse proto =
 adminSourcesResponseDecoder : Decoder AdminSourcesResponse
 adminSourcesResponseDecoder =
     Decode.map fromProtoSourceAdminListResponse ProtoSourceResp.decodeSourceAdminListResponse
+
+
+{-| A business waiting on a human decision about its listing (US-2.5.3, campaign G6).
+
+`GET /api/admin/removal-requests`. A removal request whose contact address was not on the
+listing's own domain cannot be auto-verified, so it parks with `exclusion_requested_at` set
+and the listing **still live** until someone rules on it.
+
+`email` is the whole reason a human is looking — it is what the reviewer judges. Without it
+the queue is a list of names.
+
+-}
+type alias RemovalRequest =
+    { id : String
+    , name : String
+    , url : String
+    , sourceType : String
+    , email : Maybe String
+    , requestedAt : Maybe String
+    }
+
+
+removalRequestDecoder : Decoder RemovalRequest
+removalRequestDecoder =
+    Decode.map6 RemovalRequest
+        (Decode.field "id" Decode.string)
+        (Decode.field "name" Decode.string)
+        (Decode.field "url" Decode.string)
+        (Decode.field "type" Decode.string)
+        (Decode.maybe (Decode.field "exclusion_email" Decode.string))
+        (Decode.maybe (Decode.field "requested_at" Decode.string))
+
+
+{-| GET /api/admin/removal-requests — the pending queue, oldest first.
+-}
+getRemovalRequests : String -> (Result Http.Error (List RemovalRequest) -> msg) -> Cmd msg
+getRemovalRequests token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/removal-requests"
+        , body = Http.emptyBody
+        , expect =
+            Http.expectJson toMsg (Decode.field "requests" (Decode.list removalRequestDecoder))
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/admin/removal-requests/:id/honour — **take the listing down.**
+
+⚠️ **Not `approveSource`.** `approveSource` _publishes_ a listing; this unpublishes one. Two
+actions that sound alike, act on the same row, and do opposite things — so both the endpoint
+and this function are named for what happens to the _listing_, not for the reviewer's verdict
+on the request. Read the name twice before wiring a button to it.
+
+-}
+honourRemovalRequest : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+honourRemovalRequest requestId token toMsg =
+    removalDecision requestId "honour" token toMsg
+
+
+{-| PUT /api/admin/removal-requests/:id/decline — the listing stays up.
+-}
+declineRemovalRequest : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+declineRemovalRequest requestId token toMsg =
+    removalDecision requestId "decline" token toMsg
+
+
+removalDecision : String -> String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+removalDecision requestId action token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/removal-requests/" ++ requestId ++ "/" ++ action
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
 
 {-| GET /api/admin/sources — fetch paginated admin sources, optionally filtered by status.

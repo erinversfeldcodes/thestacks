@@ -50,6 +50,7 @@ type Route
     | AdminSourceApproval
     | AdminScraperConfig
     | AdminBookModeration
+    | AdminRemovalRequests
     | Groups
     | GroupDetail String
     | Profile String
@@ -97,6 +98,7 @@ parser =
         , Parser.map AdminSourceApproval (s "admin" </> s "sources")
         , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
         , Parser.map AdminBookModeration (s "admin" </> s "book-moderation")
+        , Parser.map AdminRemovalRequests (s "admin" </> s "removal-requests")
         , Parser.map GroupDetail (s "groups" </> string)
         , Parser.map Groups (s "groups")
         , Parser.map ProfileShelf (s "u" </> string </> string)
@@ -218,6 +220,9 @@ toPath route =
 
         AdminBookModeration ->
             "/admin/book-moderation"
+
+        AdminRemovalRequests ->
+            "/admin/removal-requests"
 
         Groups ->
             "/groups"

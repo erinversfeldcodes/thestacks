@@ -131,6 +131,9 @@ expectedAuth route =
         AdminBookModeration ->
             True
 
+        AdminRemovalRequests ->
+            True
+
         Groups ->
             True
 
@@ -194,6 +197,7 @@ allRoutes =
     , ( "AdminSourceApproval", AdminSourceApproval )
     , ( "AdminScraperConfig", AdminScraperConfig )
     , ( "AdminBookModeration", AdminBookModeration )
+    , ( "AdminRemovalRequests", AdminRemovalRequests )
     , ( "Groups", Groups )
     , ( "GroupDetail", GroupDetail "g1" )
     , ( "Profile", Profile "handle" )
@@ -243,12 +247,12 @@ suite =
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "18 public routes and 23 protected routes are enumerated" <|
+            [ test "18 public routes and 24 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 18, 23 )
+                        |> Expect.equal ( 18, 24 )
             ]
         , describe "initPage redirect guard"
             [ test "a protected route with no auth renders the Login page (login-at-URL)" <|

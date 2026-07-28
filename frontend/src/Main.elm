@@ -44,6 +44,7 @@ import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSetti
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.About as AboutPage
 import Page.Admin.BookModeration as AdminBookModeration
+import Page.Admin.RemovalRequests as AdminRemovalRequests
 import Page.Admin.ScraperConfig as AdminScraperConfig
 import Page.Admin.SourceApproval as AdminSourceApproval
 import Page.Blog.Archive as BlogArchive
@@ -205,6 +206,7 @@ type Page
     | PageAdminSourceApproval AdminSourceApproval.Model
     | PageAdminScraperConfig AdminScraperConfig.Model
     | PageAdminBookModeration AdminBookModeration.Model
+    | PageAdminRemovalRequests AdminRemovalRequests.Model
     | PageGroups Groups.Model
     | PageGroupsDetail GroupsDetail.Model
     | PageProfile ProfilePage.Model
@@ -801,6 +803,19 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             else
                 ( PageNotFound, Cmd.none )
 
+        Route.AdminRemovalRequests ->
+            -- Owner-only, and NOT flag-gated: a business waiting to be delisted is waiting
+            -- now, whatever else ships dark.
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminRemovalRequests.init maybeToken
+                in
+                ( PageAdminRemovalRequests subModel, Cmd.map AdminRemovalRequestsMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
         Groups ->
             let
                 auth =
@@ -1184,6 +1199,7 @@ type Msg
     | AdminSourceApprovalMsg AdminSourceApproval.Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminBookModerationMsg AdminBookModeration.Msg
+    | AdminRemovalRequestsMsg AdminRemovalRequests.Msg
     | GroupsMsg Groups.Msg
     | GroupsDetailMsg GroupsDetail.Msg
     | PublicProfileMsg ProfilePage.Msg
@@ -2050,6 +2066,28 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        AdminRemovalRequestsMsg subMsg ->
+            case model.page of
+                PageAdminRemovalRequests subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token model.auth
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminRemovalRequests.update subMsg subModel maybeToken
+                    in
+                    case outMsg of
+                        AdminRemovalRequests.NoOut ->
+                            ( { model | page = PageAdminRemovalRequests newSubModel }
+                            , Cmd.map AdminRemovalRequestsMsg subCmd
+                            )
+
+                        AdminRemovalRequests.SessionExpired ->
+                            handleSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
         GroupsMsg subMsg ->
             case model.page of
                 PageGroups subModel ->
@@ -2712,6 +2750,9 @@ pageTitle route =
         Route.AdminBookModeration ->
             "Book Moderation — The Stacks"
 
+        Route.AdminRemovalRequests ->
+            "Removal Requests — The Stacks"
+
         Groups ->
             "My Groups — The Stacks"
 
@@ -2786,6 +2827,7 @@ viewNav route maybeAuth userMenu =
                                 [ ( Route.AdminSourceApproval, "Sources" )
                                 , ( Route.AdminScraperConfig, "Scrapers" )
                                 , ( Route.AdminBookModeration, "Book Moderation" )
+                                , ( Route.AdminRemovalRequests, "Removal Requests" )
                                 ]
 
                           else
@@ -2956,6 +2998,9 @@ viewPage model =
 
         PageAdminBookModeration subModel ->
             Html.map AdminBookModerationMsg (AdminBookModeration.view subModel)
+
+        PageAdminRemovalRequests subModel ->
+            Html.map AdminRemovalRequestsMsg (AdminRemovalRequests.view subModel)
 
         PageGroups subModel ->
             Html.map GroupsMsg (Groups.view subModel)
