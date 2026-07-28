@@ -321,6 +321,21 @@ sources:
             description: >
               Set when robots.txt forbids the path we would need. Configuration is
               retained so the store resumes by itself if the rule is lifted.
+          - name: robots_blocked_rule
+            description: >
+              The Disallow line that blocked us, e.g. "Disallow: /search" or
+              "Disallow: /". Distinguishes a narrow block (try another path) from a
+              total one (the store is unscrapable), which the path alone cannot.
+          - name: robots_blocked_at
+            description: >
+              When the block was last observed. Makes a block re-checkable rather than
+              permanent: these three are written and cleared together.
+          - name: unscrapable_reason
+            description: >
+              Why this store cannot be priced, when price_source is "none". Free text
+              for a human operator — banks the research so the same shop is not
+              re-investigated from scratch. Null means "not yet configured" rather than
+              "ruled out".
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at

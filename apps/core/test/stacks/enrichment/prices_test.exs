@@ -251,6 +251,35 @@ defmodule Stacks.Enrichment.PricesTest do
     end
   end
 
+  describe "scrapeable_stores/0" do
+    test "excludes stores with no scraper registry key" do
+      # `scraper_module` is the scraper's registry key, not a label. A store without one
+      # cannot be addressed at all — the service answers 404 — and because the client
+      # melts a fuse on a non-200, including it could open the breaker for stores that
+      # ARE configured. So the exclusion is about protecting the working stores, not
+      # just about tidiness.
+      addressable = insert(:bookstore, name: "Configured", scraper_module: "za/configured")
+      orphan = insert(:bookstore, name: "No Config", scraper_module: nil)
+
+      keys = Prices.scrapeable_stores() |> Enum.map(& &1.id)
+
+      assert addressable.id in keys
+      refute orphan.id in keys
+    end
+
+    test "every returned store has a non-nil registry key" do
+      # The guarantee callers rely on: `TriggerPriceScrapeJob` no longer has a
+      # `|| store.name` fallback, so a nil key here would pass `nil` to the client.
+      insert(:bookstore, scraper_module: nil)
+      insert(:bookstore, scraper_module: "za/some_store")
+
+      for store <- Prices.scrapeable_stores() do
+        refute is_nil(store.scraper_module),
+               "scrapeable_stores/0 returned an unaddressable store"
+      end
+    end
+  end
+
   describe "record_capability/2" do
     test "records what was observed, with a timestamp" do
       store = insert(:bookstore, price_source: nil, isbn_location: nil, lookup_mode: nil)

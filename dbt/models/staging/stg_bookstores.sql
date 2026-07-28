@@ -16,6 +16,9 @@ select
     capability_probed_at,
     canary_isbn,
     robots_blocked_path,
+    robots_blocked_rule,
+    robots_blocked_at,
+    unscrapable_reason,
     created_at,
     updated_at
 from {{ source('op', 'bookstores') }}
