@@ -99,7 +99,8 @@ defmodule Stacks.CircuitBreakers do
     scraper_fuse: @scraper_spec,
     brave_fuse: @standard_spec,
     searxng_fuse: @standard_spec,
-    r2_fuse: @standard_spec
+    r2_fuse: @standard_spec,
+    nominatim_fuse: @standard_spec
   ]
 
   # Probe functions keyed by fuse atom.

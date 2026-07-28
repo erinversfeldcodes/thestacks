@@ -11,8 +11,15 @@ defmodule Stacks.Discovery do
 
   alias Core.Repo
   alias Stacks.Enrichment
+  alias Stacks.Enrichment.Bookstore
   alias Stacks.Enrichment.DiscoveredSource
+  alias Stacks.Enrichment.ThirdSpace
   alias Stacks.Events
+  alias Stacks.Geocoding
+
+  require Logger
+
+  import Stacks.Enrichment, only: [third_space_changeset: 2]
 
   # ---------------------------------------------------------------------------
   # Create
@@ -237,25 +244,173 @@ defmodule Stacks.Discovery do
             attrs
           end
 
-        case update_source_status(source, attrs) do
-          {:ok, updated} = result ->
-            Events.emit_safe(%{
-              event_type: event_type,
-              aggregate_type: "discovered_source",
-              aggregate_id: updated.id,
-              payload: %{status: to_string(target_status)}
-            })
-
-            result
-
-          error ->
-            error
-        end
+        source
+        |> update_source_status(attrs)
+        |> after_transition(target_status, event_type)
 
       %DiscoveredSource{} ->
         {:error, :invalid_transition}
     end
   end
+
+  # The side effects of a successful transition, extracted so `transition_source/3` stays
+  # flat. Pattern-matching the two outcomes in function heads also means the failure path
+  # cannot accidentally fall through the success path's effects.
+  defp after_transition({:ok, updated} = result, target_status, event_type) do
+    Events.emit_safe(%{
+      event_type: event_type,
+      aggregate_type: "discovered_source",
+      aggregate_id: updated.id,
+      payload: %{status: to_string(target_status)}
+    })
+
+    # Approval is the only producer of `op.third_spaces` — see `create_third_space/1`.
+    if target_status == "approved", do: create_third_space(updated)
+
+    result
+  end
+
+  defp after_transition(error, _target_status, _event_type), do: error
+
+  # ---------------------------------------------------------------------------
+  # Third-space production (US-3.1.1)
+  # ---------------------------------------------------------------------------
+
+  # Source types that describe a place a reader could sit in. `bookshop` is excluded on
+  # purpose: bookshops live in `op.bookstores` and are the *other* side of the 500 m
+  # pairing, so making one a third space too would let a shop satisfy the rule by being
+  # near itself.
+  @space_like_types ~w(community event_source)
+
+  # Maps a discovered-source type onto the `op.space_type` enum. Coarse by necessity —
+  # discovery knows "community", not "garden" — so an owner refines it afterwards. Being
+  # honest about coarseness beats guessing a specific category from a URL.
+  @type_for_source %{"community" => "community_centre", "event_source" => "cafe"}
+
+  @doc """
+  Creates the `third_space` for a newly approved source.
+
+  ⚠️ **This is the only producer of `op.third_spaces`, deliberately.** These are real
+  businesses with real reputations, and listing one that no human has looked at is
+  precisely the harm US-2.5.3 exists to remedy — so approval is the gate, and there is no
+  discovery job that writes the table directly.
+
+  It also fixes a documentation lie: `implementation-mapping.md:2115` listed a
+  `DiscoverThirdSpacesJob` as "Scheduled (weekly)". No such module has ever existed,
+  which is why the table sat at zero rows while the docs asserted a running pipeline.
+
+  Geocoding happens **here, at approval**, not at render time:
+
+    * it is human-paced, so Nominatim's ~1 req/sec policy is honoured structurally;
+    * the nearest-bookshop distance is computed once and stored, so the 500 m filter is
+      a scalar comparison rather than a per-pan recomputation across the viewport.
+
+  A space that cannot be geocoded is still created, with null coordinates. That is a
+  real state and must stay visible to the owner: silently discarding it would lose an
+  approval the owner explicitly made, and `list_third_spaces/1` already excludes
+  unpositioned spaces from geo queries, so it cannot leak onto the map as if positioned.
+
+  Returns `:ok` regardless. A failure here must not roll back an approval the owner
+  performed — the source is approved either way, and a missing space can be retried.
+  """
+  @spec create_third_space(DiscoveredSource.t()) :: :ok
+  def create_third_space(%DiscoveredSource{type: type} = source)
+      when type in @space_like_types do
+    if space_exists?(source.url) do
+      # Approval is idempotent from the owner's side, so re-approving must not create a
+      # second listing for the same business.
+      :ok
+    else
+      insert_third_space(source)
+    end
+  end
+
+  def create_third_space(_source), do: :ok
+
+  defp insert_third_space(source) do
+    city = source_city(source)
+
+    attrs = %{
+      name: source.name,
+      type: Map.get(@type_for_source, source.type, "cafe"),
+      city: city,
+      website_url: source.url,
+      discovered_via: source.discovered_via || "source_approval",
+      verified: false
+    }
+
+    attrs = Map.merge(attrs, position_for(attrs))
+
+    %ThirdSpace{}
+    |> third_space_changeset(attrs)
+    |> Repo.insert()
+    |> case do
+      {:ok, space} ->
+        Events.emit_safe(%{
+          event_type: "third_space.created",
+          aggregate_type: "third_space",
+          aggregate_id: space.id,
+          payload: %{source_id: source.id, geocoded: not is_nil(space.latitude)}
+        })
+
+        :ok
+
+      {:error, changeset} ->
+        Logger.warning(
+          "Discovery: could not create third space for #{source.url}: #{inspect(changeset.errors)}"
+        )
+
+        :ok
+    end
+  end
+
+  # Geocode, then pair with the nearest bookshop. Returns an empty map when geocoding
+  # fails, so the space is created unpositioned rather than not created.
+  defp position_for(attrs) do
+    case Geocoding.geocode(Geocoding.query_for(attrs)) do
+      {:ok, %{latitude: lat, longitude: lng}} ->
+        %{
+          latitude: lat,
+          longitude: lng,
+          nearest_bookshop_km: nearest_bookshop_km(lat, lng)
+        }
+
+      {:error, reason} ->
+        Logger.info(
+          "Discovery: could not geocode #{inspect(attrs[:name])} (#{inspect(reason)}); " <>
+            "creating the space unpositioned so the approval is not lost"
+        )
+
+        %{}
+    end
+  end
+
+  # Distance to the closest bookshop that has coordinates, or nil when none do.
+  #
+  # nil is meaningfully different from a large number: it means "not computed", and
+  # `list_third_spaces/1` refuses to treat it as "near", so a space cannot reach the map
+  # on the strength of missing data.
+  defp nearest_bookshop_km(lat, lng) do
+    Repo.all(
+      from b in Bookstore,
+        where: not is_nil(b.latitude) and not is_nil(b.longitude),
+        select: {b.latitude, b.longitude}
+    )
+    |> Enum.map(fn {blat, blng} -> Enrichment.haversine_km(lat, lng, blat, blng) end)
+    |> case do
+      [] -> nil
+      distances -> Enum.min(distances)
+    end
+  end
+
+  defp space_exists?(url) do
+    Repo.exists?(from s in ThirdSpace, where: s.website_url == ^url)
+  end
+
+  # Discovery does not capture a city, so it is inferred from the source's own record
+  # where present. Left nil rather than guessed when absent — a wrong city makes the
+  # geocoding query worse, not better.
+  defp source_city(source), do: Map.get(source, :city)
 
   # ---------------------------------------------------------------------------
   # Opt-out

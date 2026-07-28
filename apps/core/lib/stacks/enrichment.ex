@@ -147,7 +147,20 @@ defmodule Stacks.Enrichment do
     :verified,
     :last_active_at,
     :opted_out,
-    :opted_out_at
+    :opted_out_at,
+    # ⚠️ Position is optional, not required. A space that could not be geocoded must
+    # still be creatable: the owner approved it, and discarding the row would lose a
+    # human decision because a third-party geocoder had no match. `list_third_spaces/1`
+    # excludes unpositioned spaces from geo queries, so an incomplete row cannot render
+    # as though its location were known.
+    #
+    # These live here rather than in the generated schema because changesets in this
+    # project are hand-written on purpose (see the moduledoc) — which means `proto.sync`
+    # adding a column does NOT make it writable, and a field missing from this list is
+    # dropped in silence. That is exactly what happened when these three were added.
+    :latitude,
+    :longitude,
+    :nearest_bookshop_km
   ]
 
   @doc "Changeset for creating or updating a third space."
@@ -339,7 +352,16 @@ defmodule Stacks.Enrichment do
 
   @earth_radius_km 6371.0
 
-  defp haversine_km(lat1, lng1, lat2, lng2) do
+  @doc """
+  Great-circle distance in kilometres between two points.
+
+  Public because two contexts need it: the map's radius refinement here, and
+  `Discovery.create_third_space/1`'s nearest-bookshop pairing. It was private and unused
+  for months while `within_radius?/4` fed it coordinates from a hardcoded six-entry city
+  map — the function was correct all along; only its inputs were wrong.
+  """
+  @spec haversine_km(number(), number(), number(), number()) :: float()
+  def haversine_km(lat1, lng1, lat2, lng2) do
     dlat = deg_to_rad(lat2 - lat1)
     dlng = deg_to_rad(lng2 - lng1)
     rlat1 = deg_to_rad(lat1)
