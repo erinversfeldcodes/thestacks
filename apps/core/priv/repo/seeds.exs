@@ -1272,4 +1272,53 @@ Repo.insert_all(
   on_conflict: :nothing
 )
 
+# ── Discovered sources ──────────────────────────────────────────────────────
+#
+# ⚠️ `op.discovered_sources` had **never held a row in any environment** (campaign G3).
+# The nightly `DiscoverAuthorSourcesJob` was the only thing that wrote it, and it
+# *creates* rather than refreshes — so a cron that may not fire meant the admin approval
+# UI at `/admin/sources` had never had anything to approve, and the feature could not be
+# demonstrated, reviewed or tested end to end.
+#
+# Seeded as `pending_review` on purpose, not `approved`. Approval is a **human** act and
+# the only producer of `op.third_spaces` (US-3.1.1 §4) — seeding approved rows would both
+# bypass that gate and skip the geocoding that approval performs. Left pending, these give
+# the owner something real to approve, and approving one exercises the whole chain:
+#
+#   approve_source → geocode → third_space (+ nearest_bookshop_km) → the map's 500 m filter
+#
+# Real Cape Town and Johannesburg places, because a geocoder has to be able to find them
+# for the chain to mean anything.
+discovered_source_rows = [
+  {9101, "Truth Coffee Roasting", "community", "https://truth.coffee"},
+  {9102, "Haas Collective", "community", "https://haascollective.com"},
+  {9103, "Company's Garden", "community", "https://www.capetown.gov.za/companysgarden"},
+  {9104, "The Book Lounge Events", "event_source", "https://booklounge.co.za/events"},
+  {9105, "Bertrams Inner City Farm", "community", "https://bertramsfarm.example"}
+]
+
+Repo.insert_all(
+  "discovered_sources",
+  Enum.map(discovered_source_rows, fn {n, name, type, url} ->
+    %{
+      id: Seeds.uuid(n),
+      name: name,
+      type: type,
+      url: url,
+      status: "pending_review",
+      # Mid-range: these came from a geographic sweep, not a hand-curated list, and a
+      # fabricated 0.95 would misrepresent how much the scorer actually knows.
+      confidence: 0.6,
+      discovered_via: "seed:geographic_sweep",
+      discovered_at: jan_10,
+      created_at: jan_10,
+      updated_at: jan_10
+    }
+  end),
+  prefix: "op",
+  on_conflict: :nothing
+)
+
+IO.puts("  seeded #{length(discovered_source_rows)} pending discovered sources for review")
+
 IO.puts("Seeds loaded successfully.")
