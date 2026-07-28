@@ -90,15 +90,21 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
         }
     };
 
-    // The HTTP status says whether the *service* worked; `outcome` says what the
-    // scrape *concluded*. Keeping those separate is the point: previously every
-    // error became a 500, and the caller melts a circuit breaker shared by all
-    // stores on any non-200 — so a shop that permanently forbids our path via
-    // robots.txt, or simply does not stock a book, took price scraping down for
-    // every other shop as well.
+    // Two things are going on here, and both are deliberate.
+    //
+    // `scrape_auto` rather than `scrape`: it routes to the store's *observed*
+    // platform API and only falls back to CSS selectors for the two targets that
+    // have no product JSON API at all. Calling `scrape` here is what previously left
+    // the platform adapters built but unreachable.
+    //
+    // And the HTTP status says whether the *service* worked while `outcome` says
+    // what the scrape *concluded*. Previously every error became a 500, and the
+    // caller melts a circuit breaker shared by all stores on any non-200 — so a shop
+    // that permanently forbids our path via robots.txt, or simply does not stock a
+    // book, took price scraping down for every other shop too.
     match state
         .engine
-        .scrape(&payload.isbn, &payload.store, &config)
+        .scrape_auto(&payload.isbn, &payload.store, &config)
         .await
     {
         // Reached a page and read a price.
@@ -177,6 +183,7 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
 /// Rust codegen maps them to `String`, so these are the contract.
 mod outcome {
     pub const PRICED: &str = "SCRAPE_OUTCOME_PRICED";
+    pub const NOT_STOCKED: &str = "SCRAPE_OUTCOME_NOT_STOCKED";
     pub const ROBOTS_BLOCKED: &str = "SCRAPE_OUTCOME_ROBOTS_BLOCKED";
     pub const EXTRACTOR_FAILED: &str = "SCRAPE_OUTCOME_EXTRACTOR_FAILED";
 }
@@ -199,6 +206,17 @@ fn outcome_for_error(e: &ScraperError) -> Option<&'static str> {
         // Permanent and correct until the site's rules change. Configuration is
         // retained, so it starts working again by itself if the rule is lifted.
         ScraperError::RobotsDisallowed { .. } => Some(outcome::ROBOTS_BLOCKED),
+
+        // The shop does not carry this ISBN. A real answer worth storing, and the
+        // most common one once pricing is per-edition.
+        ScraperError::NotStocked { .. } => Some(outcome::NOT_STOCKED),
+
+        // We cannot ask this store about this ISBN yet — a gap in our capability,
+        // not a fact about the book. Reported as an extractor failure so it counts
+        // against this store's own circuit and shows up in per-source health,
+        // rather than being mistaken for "not stocked" and recorded as a price of
+        // nothing.
+        ScraperError::IndexRequired { .. } => Some(outcome::EXTRACTOR_FAILED),
 
         // We fetched a page and our selector found nothing. Our defect, but a
         // per-store one — it says nothing about the health of the service, so it
@@ -346,6 +364,33 @@ mod tests {
             url: "https://exclusivebooks.co.za/search?q=9780156001311".to_string(),
         };
         assert_eq!(outcome_for_error(&e), Some(outcome::ROBOTS_BLOCKED));
+    }
+
+    #[test]
+    fn not_stocked_is_a_determination() {
+        // Now reachable for real: a Shopify store whose handle is the ISBN answers
+        // 404 for an edition it does not carry. Measured — /products/9780156001311.js
+        // returns 404 at Exclusive Books while /products/9780749397050.js returns 200
+        // at R400.00.
+        let e = ScraperError::NotStocked {
+            store: "za/exclusive_books".to_string(),
+            isbn: "9780156001311".to_string(),
+        };
+        assert_eq!(outcome_for_error(&e), Some(outcome::NOT_STOCKED));
+    }
+
+    #[test]
+    fn needing_an_index_is_not_reported_as_not_stocked() {
+        // We do not know whether the shop has the book, only that we cannot ask.
+        // Reporting NOT_STOCKED here would record a false negative as though it were
+        // a fact about the shop's stock.
+        let e = ScraperError::IndexRequired {
+            store: "za/wordsworth".to_string(),
+            isbn: "9780723263661".to_string(),
+        };
+        let verdict = outcome_for_error(&e);
+        assert_eq!(verdict, Some(outcome::EXTRACTOR_FAILED));
+        assert_ne!(verdict, Some(outcome::NOT_STOCKED));
     }
 
     #[test]
