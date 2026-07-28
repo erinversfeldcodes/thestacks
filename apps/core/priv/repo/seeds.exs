@@ -642,6 +642,23 @@ Repo.insert_all("book_editions", edition_rows, prefix: "op", on_conflict: :nothi
 
 bookshelf_names = ["antilibrary", "library", "wishlist", "reading_pile", "looking_for_home"]
 
+# Bookshelves the demo users share publicly.
+#
+# `Components.RSSLink` renders nothing unless a bookshelf is `visibility: "platform"`,
+# and every seeded bookshelf was `"owner"` — so the RSS affordance (US-6.1) had never
+# appeared in any seeded environment and the story had never been drivable. A shelf
+# somebody shares is also the realistic default for a demo fixture: a platform with no
+# public shelves cannot demonstrate discovery, following, or feeds.
+#
+# Deliberately not all of them: `wishlist` and `looking_for_home` stay owner-only so the
+# *private* path stays represented too, and so the RSSLink negative case (icon absent)
+# is still exercisable.
+public_bookshelf_names = ["library", "antilibrary", "reading_pile"]
+
+bookshelf_visibility = fn name ->
+  if name in public_bookshelf_names, do: "platform", else: "owner"
+end
+
 bookshelf_rows =
   Enum.flat_map([{1, 301}, {2, 306}], fn {user_n, start_idx} ->
     Enum.with_index(bookshelf_names, fn name, i ->
@@ -649,7 +666,7 @@ bookshelf_rows =
         id: Seeds.uuid(start_idx + i),
         user_id: Seeds.uuid(user_n),
         name: name,
-        visibility: "owner",
+        visibility: bookshelf_visibility.(name),
         created_at: jan_01,
         updated_at: jan_01
       }
@@ -670,6 +687,8 @@ e2e_bookshelf_rows =
         id: Seeds.uuid(shelf_base + i),
         user_id: Seeds.uuid(user_idx),
         name: name,
+        # E2E users keep private shelves: several specs assert owner-only behaviour, and
+        # flipping them to platform would change what those specs are testing.
         visibility: "owner",
         created_at: jan_01,
         updated_at: jan_01

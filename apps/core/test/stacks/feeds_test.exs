@@ -281,4 +281,103 @@ defmodule Stacks.FeedsTest do
       assert names == ["feed_cache_bookshelf_id_unique_index"]
     end
   end
+
+  describe "US-6.1 entry content" do
+    setup do
+      user = insert(:user)
+      library = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      %{user: user, library: library}
+    end
+
+    defp place(bookshelf, book, opts \\ []) do
+      insert(:placement, Keyword.merge([bookshelf: bookshelf, book: book], opts))
+    end
+
+    test "carries the cover as an enclosure", %{user: user, library: library} do
+      # US-6.1 asks each entry to carry a cover thumbnail. It is what makes a feed
+      # browsable in a reader rather than a list of sentences.
+      book = insert(:book)
+
+      insert(:book_edition,
+        book: book,
+        cover_image_url: "https://covers.openlibrary.org/b/id/99-M.jpg",
+        is_primary: true
+      )
+
+      place(library, book)
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      assert xml =~ ~s(rel="enclosure")
+      assert xml =~ "covers.openlibrary.org/b/id/99-M.jpg"
+    end
+
+    test "omits the enclosure rather than emitting an empty one", %{user: user, library: library} do
+      # Most seeded editions have no cover: 200 of 201 measured. An empty href would be
+      # invalid Atom and would render as a broken image in a reader.
+      book = insert(:book)
+      insert(:book_edition, book: book, cover_image_url: nil, is_primary: true)
+      place(library, book)
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      refute xml =~ ~s(rel="enclosure")
+    end
+
+    test "says 'moved' for a book that arrived from another shelf", %{
+      user: user,
+      library: library
+    } do
+      # US-6.1 names two verbs: "Erin moved The Secret History to Library" **or**
+      # "Erin added Piranesi to the Reading Pile". Every entry used to say "added", so a
+      # move — the more interesting signal, and the one a follower wants — read as an
+      # acquisition.
+      antilibrary = insert(:bookshelf, user: user, name: "antilibrary", visibility: "owner")
+      book = insert(:book, title: "The Secret History")
+      place(library, book)
+
+      insert(:placement_history,
+        book_id: book.id,
+        from_bookshelf: antilibrary.id,
+        to_bookshelf: library.id
+      )
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      assert xml =~ "The Secret History"
+      assert xml =~ "moved to Library"
+      refute xml =~ "added to Library"
+    end
+
+    test "says 'added' for a book with no move history", %{user: user, library: library} do
+      book = insert(:book, title: "Piranesi")
+      place(library, book)
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      assert xml =~ "added to Library"
+      refute xml =~ "moved to Library"
+    end
+
+    test "a move onto a *different* shelf does not make this one say moved",
+         %{user: user, library: library} do
+      # The history row must be scoped to this bookshelf. Without that scoping any book
+      # that had ever moved anywhere would read as "moved" on every shelf it sits on.
+      other = insert(:bookshelf, user: user, name: "reading_pile", visibility: "owner")
+      third = insert(:bookshelf, user: user, name: "wishlist", visibility: "owner")
+      book = insert(:book)
+      place(library, book)
+
+      insert(:placement_history,
+        book_id: book.id,
+        from_bookshelf: third.id,
+        to_bookshelf: other.id
+      )
+
+      {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")
+
+      assert xml =~ "added to Library"
+      refute xml =~ "moved to Library"
+    end
+  end
 end
