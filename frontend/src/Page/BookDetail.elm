@@ -8,6 +8,7 @@ module Page.BookDetail exposing
     , init
     , lastFocusableId
     , overlayView
+    , pricesDecoder
     , update
     , view
     )
@@ -67,6 +68,7 @@ type alias Model =
     , entryAnimationActive : Bool
     , isAuthenticated : Bool
     , availability : RemoteData Http.Error (List AvailabilityItem)
+    , prices : RemoteData Http.Error PriceInfo.PriceData
     , placementVisibility : Visibility
     , previousVisibility : Visibility
     , shelfCeiling : Visibility
@@ -105,6 +107,7 @@ type Msg
     | DismissAgeGate
     | CloseOverlay
     | AvailabilityLoaded (Result Http.Error (List AvailabilityItem))
+    | PricesLoaded (Result Http.Error PriceInfo.PriceData)
     | PlacementVisibilitySelected String
     | PlacementVisibilityUpdated (Result Http.Error String)
     | ProgressCardMsg Card.Msg
@@ -127,6 +130,9 @@ init bookId maybeToken maybePreviousRoute =
 
         availabilityCmd =
             fetchAvailability bookId maybeToken
+
+        pricesCmd =
+            fetchPrices bookId maybeToken
     in
     ( { book = Loading
       , placement = Nothing
@@ -144,6 +150,7 @@ init bookId maybeToken maybePreviousRoute =
       , entryAnimationActive = True
       , isAuthenticated = maybeToken /= Nothing
       , availability = Loading
+      , prices = Loading
 
       -- Placement visibility defaults to "platform" (the DB default); the shelf
       -- ceiling defaults to the most permissive ("public") so nothing is greyed
@@ -156,7 +163,7 @@ init bookId maybeToken maybePreviousRoute =
       , progressSaveState = NotAsked
       , finishedReadPrompt = False
       }
-    , Cmd.batch [ bookCmd, availabilityCmd ]
+    , Cmd.batch [ bookCmd, availabilityCmd, pricesCmd ]
     )
 
 
@@ -194,6 +201,120 @@ availabilityDecoder =
                 (Decode.field "isbn" Decode.string)
             )
         )
+
+
+fetchPrices : String -> Maybe String -> Cmd Msg
+fetchPrices bookId maybeToken =
+    let
+        headers =
+            case maybeToken of
+                Just token ->
+                    [ Http.header "Authorization" ("Bearer " ++ token) ]
+
+                Nothing ->
+                    []
+    in
+    Http.request
+        { method = "GET"
+        , headers = headers
+        , url = "/api/books/" ++ bookId ++ "/prices"
+        , body = Http.emptyBody
+        , expect = Http.expectJson PricesLoaded pricesDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| One flat row per (edition, store), as the API returns it.
+
+Grouping into editions happens here rather than server-side: it is a presentation
+concern, and the flat shape is the honest wire format for what is stored.
+
+-}
+type alias PriceRow =
+    { isbn : String
+    , formatLabel : String
+    , storeName : String
+    , priceCents : Int
+    , buyUrl : String
+    , scrapedAt : String
+    }
+
+
+pricesDecoder : Decode.Decoder PriceInfo.PriceData
+pricesDecoder =
+    Decode.field "prices" (Decode.list priceRowDecoder)
+        |> Decode.map groupPricesByEdition
+
+
+priceRowDecoder : Decode.Decoder PriceRow
+priceRowDecoder =
+    Decode.map6 PriceRow
+        (Decode.field "isbn" Decode.string)
+        (Decode.oneOf
+            [ Decode.field "format_label" Decode.string
+            , Decode.succeed "Edition"
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "store_name" Decode.string
+            , Decode.succeed "Unknown store"
+            ]
+        )
+        (Decode.field "price_cents" Decode.int)
+        (Decode.oneOf [ Decode.field "url" Decode.string, Decode.succeed "" ])
+        (Decode.oneOf [ Decode.field "scraped_at" Decode.string, Decode.succeed "" ])
+
+
+groupPricesByEdition : List PriceRow -> PriceInfo.PriceData
+groupPricesByEdition rows =
+    { editions =
+        rows
+            |> List.map .isbn
+            |> uniqueStrings
+            |> List.map (editionPricesFor rows)
+    , lastUpdated =
+        rows |> List.map .scrapedAt |> List.maximum |> Maybe.withDefault ""
+    }
+
+
+editionPricesFor : List PriceRow -> String -> PriceInfo.EditionPrices
+editionPricesFor rows isbn =
+    let
+        matching =
+            List.filter (\row -> row.isbn == isbn) rows
+    in
+    { formatLabel =
+        matching |> List.head |> Maybe.map .formatLabel |> Maybe.withDefault "Edition"
+    , isbn = isbn
+    , stores = matching |> List.map toStoreListing |> List.sortBy .priceZar
+    }
+
+
+toStoreListing : PriceRow -> PriceInfo.StoreListing
+toStoreListing row =
+    { storeName = row.storeName
+
+    -- Cents become rand only at the edge. Storage and the wire use cents because
+    -- that is what shops report, and it avoids rounding drift.
+    , priceZar = toFloat row.priceCents / 100
+    , buyUrl = row.buyUrl
+    , trend = ""
+    }
+
+
+uniqueStrings : List String -> List String
+uniqueStrings items =
+    List.foldr
+        (\item acc ->
+            if List.member item acc then
+                acc
+
+            else
+                item :: acc
+        )
+        []
+        items
 
 
 routeToBookshelf : Maybe Route -> String
@@ -479,6 +600,12 @@ update msg model maybeToken =
 
         AvailabilityLoaded (Err err) ->
             ( { model | availability = Failure err }, Cmd.none, NoOut )
+
+        PricesLoaded (Ok priceData) ->
+            ( { model | prices = Success priceData }, Cmd.none, NoOut )
+
+        PricesLoaded (Err err) ->
+            ( { model | prices = Failure err }, Cmd.none, NoOut )
 
         ToggleFormat format ->
             let
@@ -818,7 +945,7 @@ viewBook model book =
         ([ viewHero model book
          , viewAboutSection book
          , viewReviewsSection
-         , viewPricesSection
+         , viewPricesSection model
          , viewAvailabilitySection model
          , viewAuthorSection book
          , viewWritingSection
@@ -1164,9 +1291,9 @@ viewReviewsSection =
 {-| Price info section — delegates to the PriceInfo component.
 Currently passes NotAsked since the API does not yet provide per-book prices.
 -}
-viewPricesSection : Html Msg
-viewPricesSection =
-    PriceInfo.view NotAsked
+viewPricesSection : Model -> Html Msg
+viewPricesSection model =
+    PriceInfo.view model.prices
 
 
 viewAvailabilitySection : Model -> Html Msg

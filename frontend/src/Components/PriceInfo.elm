@@ -1,12 +1,13 @@
-module Components.PriceInfo exposing (view)
+module Components.PriceInfo exposing (EditionPrices, PriceData, StoreListing, view)
 
 {-| Per-book price information component.
 
 Displays prices grouped by edition/format, sorted lowest first,
 with store names, ZAR prices, and external buy links.
 
-Since the API does not yet return per-book price data, this component
-renders a placeholder. When the API is extended, pass real data as props.
+Fed from `GET /api/books/:id/prices`, which returns one row per
+(edition, store) — shops stock whichever edition they stock, at different
+prices, so a work can legitimately show several.
 
 -}
 
@@ -44,8 +45,8 @@ type alias PriceData =
 
 {-| Render the price information section for a book.
 
-Takes a RemoteData-wrapped PriceData. When the API does not yet provide
-price enrichment, pass NotAsked to show the placeholder.
+Takes a RemoteData-wrapped PriceData. `NotAsked` renders the placeholder,
+which is still the right state for a book nothing has priced yet.
 
 -}
 view : RemoteData e PriceData -> Html msg
