@@ -263,6 +263,12 @@ SANITISED="${PREVIEW_COMPONENT}"
 if [[ "$PROD_MODE" -eq 1 ]]; then
     CORE_APP="${CORE_APP:-thestacks-core}"
     MODAL_APP="${MODAL_APP:-thestacks-vision}"
+    # Prod serves on a custom domain whose certs are linked to this app, so
+    # PHX_HOST must be that domain and NOT "${CORE_APP}.fly.dev" — Phoenix
+    # generates absolute URLs from it, and email confirmation / password-reset
+    # links are the ones a user actually clicks. Overridable for a prod-mode
+    # deploy to a differently-named app.
+    PHX_HOST_VALUE="${PROD_PHX_HOST:-readinginthestacks.com}"
     # Prod uses the existing production DB via DATABASE_URL — not a Neon
     # branch. Suppress branch creation by clearing NEON_STAGING_API_KEY
     # locally so the preview-branch block below is a no-op.
@@ -662,17 +668,26 @@ fi
 # break a PR's E2E — if it fails we simply don't set the push URL on core.
 if [[ "$PROD_MODE" -eq 1 ]]; then
     VM_APP="${VM_APP:-thestacks-victoriametrics}"
-    VM_HOST="${VM_APP}.internal"
 else
     VM_APP="${PREVIEW_VM_APP}"
-    # The preview VM is a 6PN-only `[[services]]` app. Direct-instance
-    # `<app>.internal:8428` is connection-refused (the port is only exposed via
-    # fly-proxy, not on the instance's 6PN address), but the Flycast address routes
-    # through fly-proxy and works — proven for BOTH the core push (Finch, inet6
-    # pool) and Grafana's datasource. So preview addresses the VM via `.flycast`,
-    # with a private Flycast IP allocated after the app exists (below).
-    VM_HOST="${VM_APP}.flycast"
 fi
+# The VM is a 6PN-only `[[services]]` app in BOTH environments. Direct-instance
+# `<app>.internal:8428` is connection-refused — the port is only exposed via
+# fly-proxy, not on the instance's 6PN address — but the Flycast address routes
+# through fly-proxy and works, for the core push (Finch, inet6 pool) and for
+# Grafana's datasource alike. A private Flycast IP is allocated below.
+#
+# ⚠️ This applied to preview only until 2026-07-28, and prod used `.internal`.
+# The failure was silent and actively misleading: Mint tries IPv6 first, gets
+# `:econnrefused`, then falls back to IPv4 (`inet4: true` is its default), where
+# the AAAA-only 6PN name yields `:nxdomain` — so the logged error named DNS while
+# the real fault was connectivity. Prod had logged
+# `MetricsPusher: push failed: nxdomain` every 15s since the ADR-021 cutover,
+# with no metrics ingested at all. Verified on the live node before the fix:
+# `getent hosts` resolved, `:inet.getaddr(h, :inet6)` returned the VM's 6PN
+# address, `:inet.getaddr(h, :inet)` returned nxdomain, and
+# `:gen_tcp.connect(h, 8428, [:inet6])` returned `{:error, :econnrefused}`.
+VM_HOST="${VM_APP}.flycast"
 VM_INTERNAL_URL="http://${VM_HOST}:8428"
 METRICS_PUSH_URL=""
 
@@ -683,12 +698,15 @@ if [[ "$PROD_MODE" -eq 0 ]]; then
 fi
 ensure_fly_app "${VM_APP}"
 
-# Preview: allocate a private Flycast IPv6 so `<app>.flycast` resolves and the
+# Allocate a private Flycast IPv6 so `<app>.flycast` resolves and the
 # fly-proxy-routed :8428 service is reachable (VM_HOST above). Idempotent — a
-# repeat allocation is a no-op. Prod reaches the VM via `.internal` and needs none.
-if [[ "$PROD_MODE" -eq 0 ]]; then
-    fly ips allocate-v6 --private --app "${VM_APP}" 2>&1 | grep -v "^Error" || true
-fi
+# repeat allocation is a no-op.
+#
+# ⚠️ This was guarded to preview until 2026-07-28, on the belief that prod
+# reached the VM via `.internal`. It did not: prod's VM app had NO IPs allocated
+# at all, so neither address worked and the metrics push failed continuously.
+# Both environments need this.
+fly ips allocate-v6 --private --app "${VM_APP}" 2>&1 | grep -v "^Error" || true
 
 # VM needs a data volume at /victoria-metrics-data. Preview recreated it fresh
 # with the app; prod creates it once. Match fly.core.toml's primary_region.
@@ -728,8 +746,10 @@ fi
 #   • PREVIEW — ephemeral per-PR Grafana → the preview VM, so the browser
 #     dashboard-render E2E (e2e/tests/dashboards.spec.ts) can load each dashboard
 #     and prove it renders live data. Torn down by cleanup-preview.sh.
-# Grafana reaches the 6PN VM via `.internal` server-side (Grafana is Go — its
-# resolver handles the IPv6-only name natively, unlike the app's Erlang/Finch).
+# Grafana reaches the 6PN VM via the same Flycast host the core push uses. The
+# earlier claim that `.internal` worked here "because Grafana is Go" was wrong:
+# the obstacle is that :8428 is not exposed on the instance's 6PN address at all,
+# which no resolver can work around. Both clients need fly-proxy.
 # Non-fatal: a Grafana hiccup must not break the core deploy. Preview only deploys
 # Grafana when the VM came up (nothing to point at otherwise). The preview Grafana
 # URL is deterministic (https://${PREVIEW_GRAFANA_APP}.fly.dev) — the CI browser
@@ -737,7 +757,13 @@ fi
 _deploy_grafana=0
 if [[ "$PROD_MODE" -eq 1 ]]; then
     GRAFANA_APP="${GRAFANA_APP:-thestacks-grafana}"
-    GRAFANA_VM_URL="http://thestacks-victoriametrics.internal:8428"
+    # ⚠️ Was hardcoded to `thestacks-victoriametrics.internal:8428` until
+    # 2026-07-28. That address is connection-refused on the instance's 6PN
+    # (see VM_HOST above), so prod dashboards had no reachable datasource —
+    # the same root cause as the metrics push, and the prior comment here
+    # ("Grafana is Go — its resolver handles the IPv6-only name") misread a
+    # connectivity failure as a resolver one. Use the same Flycast host.
+    GRAFANA_VM_URL="${VM_INTERNAL_URL}"
     _deploy_grafana=1
 elif [[ -n "$METRICS_PUSH_URL" ]]; then
     GRAFANA_APP="${PREVIEW_GRAFANA_APP}"
@@ -807,7 +833,7 @@ fly secrets set \
     VISION_HMAC_SECRET="${VISION_HMAC_SECRET:-}" \
     CLOAK_KEY="${CLOAK_KEY:-}" \
     VISION_SERVICE_URL="${VISION_SERVICE_URL}" \
-    PHX_HOST="${CORE_APP}.fly.dev" \
+    PHX_HOST="${PHX_HOST_VALUE:-${CORE_APP}.fly.dev}" \
     RATE_LIMIT_AUTH="60" \
     ${EFFECTIVE_DATABASE_URL:+DATABASE_URL="${EFFECTIVE_DATABASE_URL}"} \
     ${R2_ACCOUNT_ID:+R2_ACCOUNT_ID="${R2_ACCOUNT_ID}"} \
