@@ -292,6 +292,40 @@ pub struct Capability {
     pub lookup_mode: LookupMode,
 }
 
+impl PriceSource {
+    /// Wire value. The proto documents these strings, so the mapping lives beside
+    /// the enum rather than at the serialisation site.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            PriceSource::ShopifyProductsJson => "shopify_products_json",
+            PriceSource::WooStoreApi => "woo_store_api",
+            PriceSource::None => "none",
+        }
+    }
+}
+
+impl IsbnLocation {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            IsbnLocation::Handle => "handle",
+            IsbnLocation::Sku => "sku",
+            IsbnLocation::Barcode => "barcode",
+            IsbnLocation::Body => "body",
+            IsbnLocation::None => "none",
+        }
+    }
+}
+
+impl LookupMode {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            LookupMode::Direct => "direct",
+            LookupMode::NativeSearch => "native_search",
+            LookupMode::LocalIndex => "local_index",
+        }
+    }
+}
+
 impl Capability {
     /// Nothing usable. Recorded as a fact about the store, not treated as a
     /// misconfiguration to retry forever.

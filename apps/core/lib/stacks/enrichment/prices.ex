@@ -16,6 +16,8 @@ defmodule Stacks.Enrichment.Prices do
 
   import Ecto.Query
 
+  require Logger
+
   alias Core.Repo
   alias Stacks.Books.BookEdition
   alias Stacks.Enrichment
@@ -204,6 +206,85 @@ defmodule Stacks.Enrichment.Prices do
       distinct: true
     )
     |> Repo.all()
+  end
+
+  @doc """
+  Record what a store was observed to be capable of.
+
+  Capability is **derived, never declared**. Bookshops replatform — WooCommerce to
+  Shopify, a theme change that moves the ISBN out of `sku` — and a hand-set platform
+  turns that into a silent outage indistinguishable from "we don't stock it". The
+  scraper reports what it observed on every response, so `capability_probed_at`
+  stays current without a separate probe schedule and a replatform surfaces on the
+  next scrape rather than the next sweep.
+
+  Writes only when something actually changed, so an unchanged observation does not
+  churn `updated_at` on every scrape. Returns `:ok` regardless: failing to record an
+  observation must never fail the scrape that produced it.
+  """
+  @spec record_capability(Bookstore.t(), map() | nil) :: :ok
+  def record_capability(_store, nil), do: :ok
+
+  def record_capability(store, capability) when is_map(capability) do
+    attrs = %{
+      price_source: capability["price_source"],
+      isbn_location: capability["isbn_location"],
+      lookup_mode: capability["lookup_mode"],
+      capability_probed_at: DateTime.utc_now()
+    }
+
+    changed? =
+      store.price_source != attrs.price_source or
+        store.isbn_location != attrs.isbn_location or
+        store.lookup_mode != attrs.lookup_mode
+
+    cond do
+      changed? ->
+        log_capability_change(store, attrs)
+        update_store(store, attrs)
+
+      # Refresh the timestamp periodically even when nothing changed, so a stale
+      # `probed_at` genuinely means "not observed lately" rather than "unchanged".
+      stale_observation?(store) ->
+        update_store(store, attrs)
+
+      true ->
+        :ok
+    end
+  end
+
+  defp log_capability_change(store, attrs) do
+    Logger.info(
+      "Prices: #{store.name} capability changed — " <>
+        "source #{inspect(store.price_source)}→#{inspect(attrs.price_source)}, " <>
+        "isbn_at #{inspect(store.isbn_location)}→#{inspect(attrs.isbn_location)}, " <>
+        "lookup #{inspect(store.lookup_mode)}→#{inspect(attrs.lookup_mode)}"
+    )
+  end
+
+  defp stale_observation?(%{capability_probed_at: nil}), do: true
+
+  defp stale_observation?(%{capability_probed_at: at}) do
+    DateTime.compare(at, DateTime.add(DateTime.utc_now(), -1, :day)) == :lt
+  end
+
+  defp update_store(store, attrs) do
+    store
+    |> Ecto.Changeset.change(attrs)
+    |> Repo.update()
+    |> case do
+      {:ok, _} ->
+        :ok
+
+      {:error, changeset} ->
+        # Deliberately swallowed: an observation is a side-benefit of the scrape, and
+        # losing it must not turn a successful price into a failure.
+        Logger.warning(
+          "Prices: could not record capability for #{store.name}: #{inspect(changeset.errors)}"
+        )
+
+        :ok
+    end
   end
 
   # ── Stores ────────────────────────────────────────────────────────────────

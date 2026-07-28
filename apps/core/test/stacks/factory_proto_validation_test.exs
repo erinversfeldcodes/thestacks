@@ -64,7 +64,14 @@ defmodule Stacks.FactoryProtoValidationTest do
       {Stacks.Enrichment.DiscoveredSource,
        ~w(confidence approved_at excluded_at exclusion_email config_generated)a},
     review_snapshot: {Stacks.Enrichment.ReviewSnapshot, ~w()a},
-    bookstore: {Stacks.Enrichment.Bookstore, ~w(search_template)a},
+    # The capability fields are unset until the scraper *observes* the store. A
+    # factory that fabricated them would assert a platform we never measured, which
+    # is exactly the stale-configuration failure deriving capability exists to avoid.
+    # `search_template` is likewise deliberately nil — it recorded an
+    # ISBN-substitution contract that does not exist on Shopify.
+    bookstore:
+      {Stacks.Enrichment.Bookstore,
+       ~w(search_template price_source isbn_location lookup_mode capability_probed_at canary_isbn robots_blocked_path)a},
     price_snapshot: {Stacks.Enrichment.PriceSnapshot, ~w()a},
     bookstore_event: {Stacks.Enrichment.BookstoreEvent, ~w()a},
     third_space:

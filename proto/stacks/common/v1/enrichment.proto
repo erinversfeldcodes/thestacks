@@ -192,6 +192,41 @@ message Bookstore {
 
   // When this record was last updated.
   google.protobuf.Timestamp updated_at = 9 [json_name = "updated_at"];
+
+  // ── Observed capability ──────────────────────────────────────────────────
+  //
+  // What this store can actually do, as measured rather than declared. Every
+  // field below is written by the capability probe and must never be
+  // hand-authored: bookshops replatform, and a hand-set platform turns that into
+  // a silent outage indistinguishable from "we don't stock it".
+
+  // Which product API answered, e.g. "shopify_products_json", "woo_store_api",
+  // "none". Free-form rather than an enum because the scraper service owns the
+  // vocabulary and adding a platform should not require a proto change here.
+  string price_source = 10 [json_name = "price_source"];
+
+  // Where the ISBN was found on this store's products: "handle", "sku",
+  // "barcode", "body", or "none".
+  string isbn_location = 11 [json_name = "isbn_location"];
+
+  // How one ISBN becomes one product: "direct" (the handle is the ISBN, so a 404
+  // means not stocked), "native_search" (the platform's search matches the ISBN),
+  // or "local_index" (an ISBN→URL index must be built first).
+  string lookup_mode = 12 [json_name = "lookup_mode"];
+
+  // When the capability above was last observed. A stale timestamp is the signal
+  // to re-probe; a null one means never probed.
+  google.protobuf.Timestamp capability_probed_at = 13 [json_name = "capability_probed_at"];
+
+  // An ISBN this store is known to carry, used as a canary. If it stops resolving
+  // the store has changed underneath us — a replatform, a theme change, or a
+  // moved ISBN — and the capability must be re-derived rather than trusted.
+  string canary_isbn = 14 [json_name = "canary_isbn"];
+
+  // Set when robots.txt forbids the path we would need, together with the rule
+  // that forbade it. Configuration is deliberately retained so that if the rule is
+  // ever lifted this store simply starts working again.
+  string robots_blocked_path = 15 [json_name = "robots_blocked_path"];
 }
 
 // PriceSnapshot represents a scraped price for a book at a store.

@@ -124,6 +124,12 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
       case client.scrape(isbn, store_name) do
         {:ok, response} ->
+          # Every response carries what the service observed this store to be
+          # capable of. Persisting it here means the observation's timestamp stays
+          # current from ordinary work, with no separate probe schedule — so a
+          # replatformed shop is re-derived on the next scrape.
+          Prices.record_capability(store, response["capability"])
+
           interpret(response, %{
             isbn: isbn,
             store: store,

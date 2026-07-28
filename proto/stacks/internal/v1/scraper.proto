@@ -69,6 +69,27 @@ message ScrapeResponse {
   // Why, when the outcome is not PRICED. Human-facing diagnostic only — never
   // parsed. Consumers branch on `outcome`.
   optional string detail = 10 [json_name = "detail"];
+
+  // What the service observed this store to be capable of while serving this
+  // request.
+  //
+  // Reported on every scrape rather than through a separate probe endpoint, so the
+  // observation rides along with work already being done and its timestamp stays
+  // current for free. A replatform therefore shows up on the next scrape rather
+  // than waiting for a scheduled sweep.
+  optional StoreCapability capability = 11 [json_name = "capability"];
+}
+
+// What a store was observed to be capable of. Strings rather than enums because the
+// scraper service owns this vocabulary; adding a platform should not require a
+// coordinated proto change in every consumer.
+message StoreCapability {
+  // Which product API answered: "shopify_products_json", "woo_store_api", "none".
+  string price_source = 1 [json_name = "price_source"];
+  // Where the ISBN lives: "handle", "sku", "barcode", "body", "none".
+  string isbn_location = 2 [json_name = "isbn_location"];
+  // How one ISBN becomes one product: "direct", "native_search", "local_index".
+  string lookup_mode = 3 [json_name = "lookup_mode"];
 }
 
 // POST /config/reload — request body (empty; no parameters required).
