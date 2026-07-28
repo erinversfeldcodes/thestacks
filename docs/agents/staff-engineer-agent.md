@@ -1497,11 +1497,33 @@ This is not bookkeeping, it is the fix for three observed failures at once:
 | Pausing to report progress | There is a current artifact to read, so nothing has to be narrated to stay resumable |
 | Work units nobody could audit (`G1`, `G4`, `G5`, `G6` had no issue file at all) | Every item names its issue; `wave-status` fails on a done item without one |
 
-⚠️ **Every item must be a real `issues/NNN-*.md`, not a plan-local label.** Ad-hoc work units are
-the inverse of the project's own "never cite a `#NNN` with no backing file" rule: a `#NNN` with no
-file is a phantom reference, and a work unit with no file is an unauditable claim. Both end the same
-way — a completion nobody can check. `wave-status` permits `"informal": true` **only** to record
-pre-existing unaudited items, and counts them so the debt cannot hide.
+⛔ **A wave is delivered as ONE EPIC ISSUE, not as a list of plan-local labels. This is the
+handoff defect, and it is the reason execution drifted.**
+
+The orchestrator's proven input has always been **a ticket — an epic** — which its Epic Parallel
+Execution flow spins out into child issues *during* the flow (`docs/agents/orchestrator-agent.md` →
+*Epic Parallel Execution*: child DAG in `child_order`, per-level parallel worktrees, `just ci` as
+the integration gate, two batched stops). That flow has a track record.
+
+Mode D emitted **waves of ad-hoc labels** (`G1`, `G4`, `C3`, `P7`) instead: a work-unit type nothing
+in this project reads, with no issue file, no DoD and no state. So the campaign could not hand off
+to the machinery that works, and a human ended up carrying labels by hand into an agent that wanted
+a ticket. Everything downstream followed from that — unauditable completion claims, and an execution
+phase improvised outside any harness.
+
+So at Stage 6:
+- **one epic issue per wave**, created via `create-issue`, in dependency order;
+- the wave's items become **phases documented inside that epic** — ⚠️ *not* invented ticket files,
+  and never a cited `#NNN` with no backing file. The orchestrator creates the real children itself,
+  which is where that breakdown belongs;
+- the state file's `items[*].issue` names the epic, giving the roll-up
+  campaign → `plans/<root>-<slug>-epic-state.json` → per-child `plans/NNN-*-state.json`, which is
+  exactly what `just wave-status` walks;
+- execution is then **Mode E (`staff-execute`)**, whose whole job is to form those epics, write the
+  persona's bar into their DoD, and drive the orchestrator — *not* to reimplement it.
+
+`wave-status` permits `"informal": true` **only** to record pre-existing unaudited items, and counts
+them so the debt cannot hide.
 
 ### Coverage honesty
 
