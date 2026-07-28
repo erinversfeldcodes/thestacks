@@ -12,12 +12,44 @@ claim.
 | Sub-wave | Verdict | What is actually left |
 |---|---|---|
 | **Wave 0** | ✅ **COMPLETE** | Both items landed *and* tested. Session revocation lives in `Stacks.Email.reset_password/2` (`email.ex:167`), not the controller the plan suggested; `email_test.exs:124` asserts a pre-reset token then fails with `:session_revoked`. CSP carries `https://archive.org https://*.us.archive.org` (`security_headers.ex:17`) |
-| **Wave 0b** | ❌ **INCOMPLETE** | G5 (both affordances), G6 form UI + `third_space` removal path, G4's Elm client call, G3 diagnosis. G1 deferred by decision, not pending |
+| **Wave 0b** | ❌ **INCOMPLETE — the only outstanding sub-wave.** Verified against code 2026-07-28 | Four items; see the table below. G1 deferred by decision, not pending |
 | **Wave 0c** | ✅ **COMPLETE** | C1/C2/C5/C6/C7/C8 done 2026-07-27; **C3 and C4 completed 2026-07-28** after being found orphaned — see below |
 | **Wave 0d** | ✅ **COMPLETE** | P1–P10 all done. ⚠️ Three of the four items recorded as "remaining" were **already done and the note was stale** — see the closure table |
 | **Wave 0e** | ✅ **COMPLETE** | E1/E2/E3 done; E5 decided (stays `0`); **E4 deliberately held for the launch gate**; E6 optional and skipped |
 
-### ✅ Wave 0 closed — 2026-07-28. What each item actually turned out to be
+### ❌ What is still outstanding in Wave 0 — verified against code, 2026-07-28
+
+⚠️ **Wave 0 is NOT closed.** Waves 0, 0c, 0d and 0e are; **Wave 0b is not**, and an earlier report of
+mine said "Wave 0 is closed" when it meant "the six 0c/0d items are closed". The distinction matters
+because 0b is the wave that makes built features *reachable*.
+
+| # | Item | Server/back end | What is missing | Size |
+|---|---|---|---|---|
+| **G5** | Shelf organisation (#190) | ✅ done — 35 tests, full CRUD, **90 seeded `op.shelves` rows** | ⛔ **no `/shelves` client call exists at all.** `Api.elm` has bookshelf-level calls only (`:159`, `:831`, `:1571`, `:2423`) — nothing for the physical-shelf sub-resource. Decided: drag-and-drop **and** explicit controls, split by action | L |
+| **G4** | RSS feeds | ✅ done and proven — `op.feed_cache` populated | ⛔ **no `/feeds` call in `Api.elm`.** Plus two conformance holes filed separately (no `rel="self"`, no per-entry link) | S |
+| **G6** | Business opt-out | ✅ server done (`a435e2b2`) — domain-verified removal requests | ⛔ **no page and no client call.** Needs the submission form, the owner review queue, and extending the verified path to the `third_space` row (soft-delete) | M |
+| **G3** | Source discovery | ✅ cause found and fixed — was cron-only, now also event-driven off `book.created` | 🟧 **zero-row DoD unproven: `op.discovered_sources` = 0.** The mechanism is wired; nothing has exercised it against a real Brave API key. Not a code gap — an evidence gap | S |
+| **G1** | Third spaces | — | ✅ **deferred by owner decision**, not outstanding. Story specified, all six decisions taken; the route lands only when the data does | — |
+
+**Zero-row sweep, local DB immediately after a from-scratch seed:**
+
+| Table | Rows | Reading |
+|---|---|---|
+| `op.feed_cache` | **3–4** | G4's server side works. ⚠️ Timing-dependent, see caveat below |
+| `op.shelves` | **90** | G5's backend has data; nothing can reach it |
+| `op.discovered_sources` | **0** | G3 unproven |
+| `op.third_spaces` / `third_space_events` | **0** | G1, expected — deferred |
+| `op.bookstore_events` | **0** | Expected: the events job is deliberately unscheduled (C3) |
+| `op.price_snapshots` | **0** locally | Proven on a **preview** earlier (first row ever); local is 0 because no scrape ran here |
+
+⚠️ **Caveat on the `feed_cache` number, because it is not a stable 4.** `mix run seeds.exs` exits while
+Oban jobs are still in flight: after the last run, `oban_jobs` held **214 completed and 6 still
+`executing`** RegenerateFeedJob rows, and the E2E user's `library` feed was among the six — hence 3 rather
+than 4. So the local count is 3–4 depending on timing, and the *reliable* proof of G4 is the deployed path
+(`seed_live/0` on a node where Oban keeps running), not this one. Worth knowing before anyone treats a
+local count as the DoD.
+
+### ✅ Waves 0c and 0d closed — 2026-07-28. What each item actually turned out to be
 
 `just run just verify` exit 0 (all gates including 240 dbt tests and `lint-dbt`).
 
@@ -85,7 +117,7 @@ the easy half, and shipping it alone produced a column that reads as a feature.
 | 2026-07-27 | Waves 0c/0d added — robots.txt compliance made structural, price fetch rebuilt on the capability probe. G2 proven live (first `price_snapshots` row ever). ⚠️ **Recorded as "completed" at the time; a 2026-07-28 code check found 0d has four open items and that C3/C4 were orphaned. See the Wave 0 status table above.** |
 | 2026-07-27 | 🟧 **ROOT H narrowed then closed** — challenged correctly by the owner; all three non-staleness cases made event-driven. This removes the correctness argument for `min_machines_running = 1`; see Wave 0e/E5. |
 | 2026-07-28 | **Wave 0b resolved** — G1/G4/G5/G6 specified; G4 and G6 server halves built and merged (`a435e2b2`); **G1 removed from Wave 0b** as not promotable. `docs/user_stories/US-3.1.1-third-spaces-map.md` written, all six of its decisions taken. |
-| 2026-07-28 | **Wave 0 CLOSED** — C3, C4, P7 and P9 built; P3 half-stale (its real defect was a fabricated registry key); P8 already done. `just run just verify` exit 0. |
+| 2026-07-28 | **Waves 0c and 0d closed** — C3, C4, P7 and P9 built; P3 half-stale (its real defect was a fabricated registry key); P8 already done. `just run just verify` exit 0. ⚠️ **Wave 0 as a whole is still open: 0b remains** — an earlier report of mine said "Wave 0 is closed" and meant only these six items. |
 | 2026-07-28 | **Wave 0e added** — production domain cutover. Six items, four wrong in production today. ⚠️ Two of the six reported items were *not* what the report described (E1's RSS half, E5's severity), and my own first framing of **E2 was overstated as ⛔ and is corrected in place to 🟧** — the root `robots.txt`/`ai.txt` are repository-level declarations, not unserved website files. |
 
 ## The frame
