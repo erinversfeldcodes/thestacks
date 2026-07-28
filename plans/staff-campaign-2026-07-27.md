@@ -1497,7 +1497,56 @@ them block the **beta** and the **Phase 2 vision work**, per `notes/` Milestones
 | **E4** — remove `noindex, nofollow` from `apps/core/priv/static/index.html:6`. ⛔ **Blocked on Wave 0e's E2** — doing this while the served `robots.txt` lacks the AI-crawler groups opens the site to every crawler that file was written to exclude | 0e | XS |
 | **E2 verification** — re-fetch `/robots.txt` from the live domain and confirm the served bytes carry the crawler groups. The zero-row check's equivalent for a static asset: *what the server returns*, not what the repo contains | 0e | XS |
 
-# Deferred with a home — G1 / US-3.1.1 (added 2026-07-28)
+# G1 / US-3.1.1 — brought in, and where the line was drawn (2026-07-28)
+
+**Owner decision:** *"let's bring it all in"*, with two constraints — build geocoding cheap now
+(Nominatim) but easy to swap to Google later, and *"do everything that makes sense to happen in wave 0
+as part of wave 0 and subsequent steps in later waves if needed, however it needs to be thoroughly
+documented in the plan."*
+
+**The line I drew, and why.** Wave 0b's premise is *"wire what is already built"*. Steps 1–3 make the
+**data exist** — they finish a table, a producer and a live endpoint that were already half-built, and
+they close a rung-8 correctness risk. Steps 4–6 are **new construction**: a third-party ADR, the
+project's first Elm port, and a page that does not exist. That is a different kind of work, so it goes
+to a later wave rather than being renamed Wave 0.
+
+| Step | Where it landed | Why there |
+|---|---|---|
+| **1** lat/lng + `nearest_bookshop_km` on both tables, indexed | ✅ **Wave 0** (`2f4288cb`) | A proto contract change: cheapest early, additive forever. Also made a **live** endpoint's advertised contract honourable |
+| **2** Geocoding at approval, provider-swappable | ✅ **Wave 0** | Prerequisite of 3, and the thing that turns an approval into a position |
+| **3** `approve_source/1` creates the `third_space` — the only producer | ✅ **Wave 0** | The rung-8 gate: producing rows *before* 1–2 would turn "empty" into "silently wrong" on a live endpoint |
+| **4** Tiles ADR (provider, proxy-vs-direct, terms clause) | ⏭ **later wave** | A licensing and privacy decision needing a terms reading, not code. Must precede any tile code but blocks nothing in Wave 0 |
+| **5** The narrow Elm port | ⏭ **later wave** | The project's **first** port; sets a precedent every later argument will cite. Wants its own review, not a footnote in a data-layer wave |
+| **6** Route the page + cork board | ⏭ **later wave** | ⛔ Gated on 1–3 having produced rows in a real environment. Routing an empty map onto the main nav promises what it cannot deliver |
+
+**What Wave 0 now delivers on its own, without the map.** `GET /api/third-spaces` is live and already
+accepted `lat`/`lng`/`radius_km`; approved space-like sources now become positioned rows, so the endpoint
+returns correct geo-filtered results instead of nothing. That is real value independent of steps 4–6 —
+which is the test for whether a split is honest rather than convenient.
+
+## What steps 1–3 actually fixed, beyond adding columns
+
+Four defects surfaced that were not in the original G1 description:
+
+1. ⛔ **`limit` was applied before filtering** in `list_third_spaces/1`. The query took N rows in
+   unspecified order and *then* filtered by radius, so **the nearest space could be invisible while a far
+   one showed**. ⚠️ My first test for this was **vacuous** — the bounding box filters in SQL, so
+   out-of-city decoys never reached the limit. The probe caught it; the real test places decoys in the
+   **box corners** (inside the box, outside the circle) and fails with the fix removed.
+2. ⛔ **Opted-out spaces were returned.** A business that asked to be delisted stayed on the map — the
+   exact harm US-2.5.3 exists to remedy.
+3. 🟧 **The `op.space_type` enum could not express the story's categories.** It was
+   `{reading_group, cafe, bookshop, festival, market}` — an *events* taxonomy from the discovery stories —
+   against US-3.1.1 §3's eleven *places-to-read* categories. **Only `cafe` overlapped.** The category
+   filter was unbuildable as specified, and nothing had compared the two lists because they were written
+   by different stories months apart. Extended additively; the original five are still in use.
+4. 🟧 **The hand-written changeset silently dropped the new columns.** Changesets in `Stacks.Enrichment`
+   are hand-written *on purpose* so validation survives schema regeneration — which means
+   `mix proto.sync` adding a column does **not** make it writable, and a field missing from the cast list
+   is discarded without error. Every space was created unpositioned until the cast list was updated. Worth
+   knowing: **this will happen again** on the next proto field added to a hand-cast schema.
+
+## Deferred steps 4–6 — dependency order preserved
 
 ⚠️ **Why this section exists.** G1 was removed from Wave 0b on 2026-07-28 with a stated reason, and a check
 on 2026-07-28 found it had landed in **no future wave** — the identical "moved and then untracked" pattern
