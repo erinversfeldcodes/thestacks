@@ -57,6 +57,61 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     """
   end
 
+  # Budget for the descriptive part of an ADD COLUMN migration name, in bytes.
+  #
+  # Two hard ceilings sit downstream of it and both used to be reachable: a
+  # filename is capped at 255 bytes by most filesystems, and the module name
+  # becomes an **atom**, which the BEAM caps at 255 bytes. The name is built from
+  # every added column, so adding many fields to a wide table at once blew past
+  # both — `mix proto.sync` died with `File.Error … file name too long` while
+  # generating `add_email_display_name_…_handle_to_users` from all ~35 `users`
+  # columns. 120 leaves ample room for the timestamp, the `.exs` suffix and the
+  # `Core.Repo.Migrations.` module prefix.
+  @slug_budget 120
+
+  @doc """
+  Descriptive slug for an ADD COLUMN migration: `add_<columns>_to_<table>`.
+
+  The single source of truth for this name. It used to be derived independently
+  here and in `Mix.Tasks.Proto.Sync.generate_delta_migration/3` — the filename in
+  one place, the module name in the other — so capping either alone would have
+  silently desynchronised them.
+
+  When the column list would exceed `@slug_budget`, as many names as fit are kept
+  and the remainder is summarised, so the name stays descriptive and, more
+  importantly, deterministic: the same field set always produces the same slug.
+  """
+  def add_columns_slug(new_fields, table_name) do
+    suffix = "_to_#{table_name}"
+    names = Enum.map(new_fields, & &1.name)
+    full = "add_" <> Enum.join(names, "_") <> suffix
+
+    if byte_size(full) <= @slug_budget do
+      full
+    else
+      # Reserve room for the "_and_N_more" summary before deciding what fits.
+      reserved = byte_size(suffix) + byte_size("add_") + byte_size("_and_#{length(names)}_more")
+      {kept, dropped} = split_within(names, @slug_budget - reserved)
+      "add_" <> Enum.join(kept, "_") <> "_and_#{length(dropped)}_more" <> suffix
+    end
+  end
+
+  # Keep whole names only, and always keep at least one so the slug never
+  # degenerates to `add__and_35_more_to_users`.
+  defp split_within([first | rest], budget) do
+    {kept, dropped} =
+      Enum.reduce(rest, {[first], []}, fn name, {kept, dropped} ->
+        if dropped == [] and
+             byte_size(Enum.join(kept ++ [name], "_")) <= budget do
+          {kept ++ [name], dropped}
+        else
+          {kept, dropped ++ [name]}
+        end
+      end)
+
+    {kept, dropped}
+  end
+
   @doc """
   Generates an Ecto migration module for ALTER TABLE ADD COLUMN statements.
 
@@ -64,8 +119,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   """
   def generate_add_columns(table, new_fields, timestamp) do
     overrides = Map.get(table, :field_overrides, %{})
-    slug = Enum.map_join(new_fields, "_", & &1.name)
-    module_name = migration_module_name("add_#{slug}_to_#{table.table_name}", timestamp)
+    module_name = migration_module_name(add_columns_slug(new_fields, table.table_name), timestamp)
 
     column_lines =
       new_fields

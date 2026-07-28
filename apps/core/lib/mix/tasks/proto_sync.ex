@@ -206,9 +206,13 @@ defmodule Mix.Tasks.Proto.Sync do
       timestamp = MigrationGenerator.generate_timestamp()
       content = MigrationGenerator.generate_add_columns(table, new_fields, timestamp)
 
-      slug = Enum.map_join(new_fields, "_", & &1.name)
-      filename = "#{timestamp}_add_#{slug}_to_#{table.table_name}.exs"
-      path = Path.join(migrations_dir, filename)
+      # Same slug the module name is built from, so filename and module can never
+      # disagree — and capped, because it is derived from every added column.
+      slug = MigrationGenerator.add_columns_slug(new_fields, table.table_name)
+      path = Path.join(migrations_dir, "#{timestamp}_#{slug}.exs")
+      # The Ecto and dbt writers mkdir_p their own destinations; this one assumed
+      # the directory already existed.
+      File.mkdir_p!(migrations_dir)
       File.write!(path, content)
       Mix.shell().info("Generated migration #{path}")
     else
