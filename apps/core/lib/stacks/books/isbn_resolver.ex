@@ -28,7 +28,22 @@ defmodule Stacks.Books.ISBNResolver do
 
   @open_library_url "https://openlibrary.org/api/books"
   @open_library_search_url "https://openlibrary.org/search.json"
+  @open_library_works_url "https://openlibrary.org/works"
   @google_books_url "https://www.googleapis.com/books/v1/volumes"
+
+  # How many edition records to ask Open Library for in one page, and the only page
+  # we ask for.
+  #
+  # `editions.json` is paginated, and a popular work has a lot of them — the seed work
+  # measured during planning had **151 editions carrying 76 distinct ISBN-13s**. Walking
+  # every page would turn one book's arrival into an unbounded number of requests
+  # against a free service that has been generous to this project.
+  #
+  # So: one request, first page, hard cap. The consequence is deliberate and worth
+  # stating — for a work with more editions than this we discover *a* subset, not all of
+  # them. That is the right trade because editions are a long tail whose head is what
+  # readers actually own, and Open Library returns them roughly newest-first.
+  @max_editions_per_work 50
 
   # Hard deadline for the parallel OL + GB race. Each individual upstream
   # has its own HTTP client timeout, but this cap protects the upload job
@@ -737,6 +752,65 @@ defmodule Stacks.Books.ISBNResolver do
         "title=#{inspect(best_meta.title)} score=#{Float.round(best_score, 2)};#{runner_up_str}"
     )
   end
+
+  @doc """
+  ISBN-13s of the other editions of an Open Library **work**.
+
+  A work is the abstract book; an edition is a particular printing with its own ISBN.
+  Shops stock whichever edition they stock, so knowing a work's editions is what lets a
+  price lookup find the copy a reader can actually buy — Exclusive Books carries six
+  ISBNs of *The Name of the Rose*, two of them Spanish.
+
+  Lives here rather than in a worker so it reuses this module's Open Library fuse and
+  its injectable HTTP client. A new module making its own request would be a second
+  egress to the same upstream with its own failure behaviour — the mistake that left
+  `DiscoverBookstoreEventsJob` bypassing robots.txt for months.
+
+  Returns ISBN-13s only, deduplicated, capped at `#{@max_editions_per_work}`. ISBN-10s
+  are deliberately dropped: the ISBN hard gate is expressed in 13s, and returning a
+  mixture would push the normalising decision onto every caller.
+
+  `{:error, :circuit_open}` when the Open Library fuse is blown, so a caller can tell
+  "no editions" from "could not ask".
+  """
+  @spec editions_for_work(String.t()) :: {:ok, [String.t()]} | {:error, error_reason()}
+  def editions_for_work(work_id) when is_binary(work_id) and work_id != "" do
+    case :fuse.ask(@open_library_fuse, :sync) do
+      :ok -> do_editions_request(work_id)
+      :blown -> {:error, :circuit_open}
+    end
+  end
+
+  def editions_for_work(_work_id), do: {:error, :not_found}
+
+  defp do_editions_request(work_id) do
+    url = "#{@open_library_works_url}/#{work_id}/editions.json?limit=#{@max_editions_per_work}"
+
+    case make_request(url) do
+      {:ok, body} ->
+        {:ok, parse_edition_isbns(body)}
+
+      {:error, reason} ->
+        Stacks.CircuitBreakers.melt(@open_library_fuse)
+        {:error, reason}
+    end
+  end
+
+  # `entries[].isbn_13` is a list per edition, and either key may be absent or `null`
+  # on sparse records — hence `list_or_empty/1` rather than `Map.get/3` defaults.
+  defp parse_edition_isbns(%{"entries" => entries}) when is_list(entries) do
+    entries
+    |> Enum.flat_map(fn
+      entry when is_map(entry) -> entry |> Map.get("isbn_13") |> list_or_empty()
+      _ -> []
+    end)
+    |> Enum.map(&String.replace(&1, ~r/[^0-9Xx]/, ""))
+    |> Enum.filter(&(String.length(&1) == 13))
+    |> Enum.uniq()
+    |> Enum.take(@max_editions_per_work)
+  end
+
+  defp parse_edition_isbns(_), do: []
 
   defp resolve_open_library(isbn) do
     case :fuse.ask(@open_library_fuse, :sync) do

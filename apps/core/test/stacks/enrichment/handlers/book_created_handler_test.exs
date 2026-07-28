@@ -6,6 +6,7 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
 
   alias Stacks.Enrichment.Handlers.BookCreatedHandler
   alias Stacks.Workers.DiscoverAuthorSourcesJob
+  alias Stacks.Workers.DiscoverEditionsJob
   alias Stacks.Workers.TriggerPriceScrapeJob
 
   describe "handle_event/1" do
@@ -69,6 +70,59 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
     test "catch-all clause handles events without matching structure" do
       assert :ok = BookCreatedHandler.handle_event(%{event_type: "something.else"})
       refute_enqueued(worker: TriggerPriceScrapeJob)
+    end
+  end
+
+  describe "edition discovery" do
+    test "enqueues edition discovery keyed on the work, not the ISBN" do
+      book_id = Ecto.UUID.generate()
+
+      assert :ok =
+               BookCreatedHandler.handle_event(%{
+                 event_type: "book.created",
+                 aggregate_type: "book",
+                 aggregate_id: book_id,
+                 payload: %{"isbn" => "9780743273565"}
+               })
+
+      # The inverse of TriggerPriceScrapeJob's key, deliberately: a price is a fact about
+      # one edition, whereas the edition *list* is a fact about the work. Keying this by
+      # ISBN would ask "which editions does this edition have".
+      assert_enqueued(worker: DiscoverEditionsJob, args: %{book_id: book_id})
+    end
+
+    test "does not re-enqueue the same work within the day" do
+      # A work's Open Library edition list does not change on the timescale of a book
+      # being added twice, and a re-run would spend its creation cap rediscovering rows
+      # that already exist.
+      book_id = Ecto.UUID.generate()
+
+      event = %{
+        event_type: "book.created",
+        aggregate_type: "book",
+        aggregate_id: book_id,
+        payload: %{"isbn" => "9780743273565"}
+      }
+
+      Enum.each(1..3, fn _ -> BookCreatedHandler.handle_event(event) end)
+
+      enqueued =
+        all_enqueued(worker: DiscoverEditionsJob)
+        |> Enum.filter(&(&1.args["book_id"] == book_id))
+
+      assert length(enqueued) == 1
+    end
+
+    test "skips edition discovery when the payload carries no ISBN" do
+      assert :ok =
+               BookCreatedHandler.handle_event(%{
+                 event_type: "book.created",
+                 aggregate_type: "book",
+                 aggregate_id: Ecto.UUID.generate(),
+                 payload: %{"title" => "No ISBN"}
+               })
+
+      refute_enqueued(worker: DiscoverEditionsJob)
     end
   end
 
