@@ -179,4 +179,29 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
                perform_job(RegenerateFeedJob, %{"bookshelf_name" => "library"})
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Batch enqueue — N placements on one bookshelf converge on one row
+  # ---------------------------------------------------------------------------
+
+  describe "batch enqueue" do
+    test "repeated regenerations of the same bookshelf leave exactly one row" do
+      # The job is deliberately not `unique:` (see its @moduledoc note), so a bulk
+      # placement enqueues one job per book. That is safe only because the job
+      # recomputes and upserts: the end state must be one row no matter how many
+      # times it runs. This is the property that makes the missing dedup a
+      # performance question rather than a correctness one.
+      user = insert(:user, profile_visibility: "platform")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "Repeatedly Regenerated")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      args = %{"user_id" => user.id, "bookshelf_name" => "library"}
+
+      for _ <- 1..10, do: assert(:ok = perform_job(RegenerateFeedJob, args))
+
+      assert [row] = cache_rows(bookshelf.id)
+      assert row.atom_xml =~ "Repeatedly Regenerated"
+    end
+  end
 end
