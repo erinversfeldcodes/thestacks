@@ -58,6 +58,7 @@ import Page.CostTransparency as CostTransparency
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Page.Insights as Insights
+import Page.ListingRemoval as ListingRemoval
 import Page.Login as Login
 import Page.Marketplace.Browse as MarketplaceBrowse
 import Page.Marketplace.CreateListing as CreateListing
@@ -191,6 +192,7 @@ type Page
     | PageCostTransparency CostTransparency.Model
     | PageMetrics MetricsPage.Model
     | PageAbout
+    | PageListingRemoval ListingRemoval.Model
     | PageCatalogue Catalogue.Model
     | PageMarketplaceBrowse MarketplaceBrowse.Model
     | PageMarketplaceCreate CreateListing.Model
@@ -464,6 +466,12 @@ requiresAuth route =
         About ->
             False
 
+        -- Unauthenticated by design: US-2.5.3 says removal "does not require account
+        -- creation". A shop owner who never asked to be listed must not have to sign up
+        -- in order to leave.
+        ListingRemoval ->
+            False
+
         Catalogue ->
             False
 
@@ -633,6 +641,9 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
 
         About ->
             ( PageAbout, Cmd.none )
+
+        ListingRemoval ->
+            ( PageListingRemoval ListingRemoval.init, Cmd.none )
 
         Catalogue ->
             let
@@ -1161,6 +1172,7 @@ type Msg
     | CostTransparencyMsg CostTransparency.Msg
     | MetricsMsg MetricsPage.Msg
     | CatalogueMsg Catalogue.Msg
+    | ListingRemovalMsg ListingRemoval.Msg
     | MarketplaceBrowseMsg MarketplaceBrowse.Msg
     | CreateListingMsg CreateListing.Msg
     | MyListingsMsg MyListings.Msg
@@ -1749,6 +1761,20 @@ update msg model =
                     in
                     ( { model | page = PageMetrics newSubModel }
                     , Cmd.map MetricsMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        ListingRemovalMsg subMsg ->
+            case model.page of
+                PageListingRemoval subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            ListingRemoval.update subMsg subModel
+                    in
+                    ( { model | page = PageListingRemoval newSubModel }
+                    , Cmd.map ListingRemovalMsg subCmd
                     )
 
                 _ ->
@@ -2644,6 +2670,9 @@ pageTitle route =
         About ->
             "About — The Stacks"
 
+        ListingRemoval ->
+            "Remove a listing — The Stacks"
+
         Catalogue ->
             "Catalogue — The Stacks"
 
@@ -2887,6 +2916,9 @@ viewPage model =
 
         PageAbout ->
             AboutPage.view
+
+        PageListingRemoval subModel ->
+            Html.map ListingRemovalMsg (ListingRemoval.view subModel)
 
         PageCatalogue subModel ->
             Html.map CatalogueMsg (Catalogue.view subModel)

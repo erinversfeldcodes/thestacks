@@ -9,11 +9,12 @@ module Page.ThirdSpaces exposing
     , view
     )
 
-import Html exposing (Html, button, div, h3, li, p, text, ul)
-import Html.Attributes exposing (class)
+import Html exposing (Html, a, button, div, h3, li, p, text, ul)
+import Html.Attributes exposing (class, href)
 import Html.Events exposing (onClick)
 import Http
 import Json.Decode as Decode
+import Navigation.Route as Route
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -168,4 +169,14 @@ viewSpaceDetail space =
                     space.upcomingEvents
                 )
         , button [ class "btn btn--ghost", onClick CloseDetail ] [ text "Close" ]
+
+        -- US-2.5.3: "Every listing carries a discreet 'Is this your business?' link."
+        -- Discreet is the specification, not a style preference — this is a listing the
+        -- business never asked for, so the way out should be findable without being an
+        -- apology plastered across the card.
+        , a
+            [ class "third-spaces__claim"
+            , href (Route.toPath Route.ListingRemoval)
+            ]
+            [ text "Is this your business?" ]
         ]
