@@ -130,7 +130,20 @@ Repo.insert_all(
       handle: "test_user",
       password_hash: Argon2.hash_pwd_salt("dev-password-456"),
       role: "user",
-      profile_visibility: "owner",
+      # ⚠️ The one seeded reader with a **publicly viewable profile**, and it exists for the
+      # same reason `public_bookshelf_names` does below.
+      #
+      # That fix was half-applied. Making three bookshelves `platform` was meant to make the
+      # RSS affordance (US-6.1) drivable, but every seeded user kept `profile_visibility:
+      # "owner"` — so `/u/:handle` 404s for *every* viewer, including an authenticated one,
+      # and the page the subscribe link lives on could never be reached. The feed link had
+      # still never been seen in any seeded environment; only the reason had moved one level
+      # up. Confirmed on a preview 2026-07-28: `/u/platform_owner…` → "Reader not found".
+      #
+      # Deliberately just this one: user 1 (the owner) stays `owner`, so the private-profile
+      # path and the 404-for-a-hidden-profile case both stay represented — the same balance
+      # `public_bookshelf_names` strikes by leaving `wishlist` private.
+      profile_visibility: "platform",
       age_verified: false,
       email_confirmed: true,
       country_code: "ZA",
