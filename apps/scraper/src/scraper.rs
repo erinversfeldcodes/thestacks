@@ -1,5 +1,6 @@
 use crate::config::ScraperConfig;
 use crate::error::ScraperError;
+use crate::platform::{self, Capability, LookupMode, PriceSource};
 use crate::price::{extract_in_stock, extract_price, extract_text};
 use crate::rate_limiter::RateLimiter;
 use crate::robots::RobotsChecker;
@@ -8,6 +9,19 @@ use std::collections::HashMap;
 
 /// User-agent string for HTTP requests.
 const USER_AGENT: &str = "TheStacksScraper/0.1 (+https://thestacks.app/scraper)";
+
+/// Requests per minute to actually use: the stricter of what robots.txt asks for
+/// and what the store config declares.
+///
+/// A declared `Crawl-delay` wins whenever it is stricter — Exclusive Books asks for
+/// 10 s (6/min) while its config asks for 10/min. Shared by every fetch path so the
+/// two cannot drift apart.
+fn effective_rpm(policy: &crate::robots::RobotsPolicy, configured: u32) -> u32 {
+    match policy.crawl_delay_secs {
+        Some(secs) if secs > 0 => (60 / secs).max(1).min(configured),
+        _ => configured,
+    }
+}
 
 /// A single price result for one ISBN at one store.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -39,6 +53,11 @@ pub struct Engine {
     fixtures: HashMap<String, String>,
     /// True when running in mock mode (no real HTTP calls).
     mock: bool,
+    /// Observed platform capability per store, so detection costs two requests
+    /// once rather than on every scrape. Rebuilt from scratch on restart, which is
+    /// deliberate: a replatformed shop gets re-observed rather than remembered
+    /// wrongly.
+    capabilities: dashmap::DashMap<String, Capability>,
 }
 
 impl Engine {
@@ -55,6 +74,7 @@ impl Engine {
             rate_limiter: RateLimiter::new(),
             fixtures: HashMap::new(),
             mock: false,
+            capabilities: dashmap::DashMap::new(),
         })
     }
 
@@ -69,6 +89,7 @@ impl Engine {
             rate_limiter: RateLimiter::new(),
             fixtures,
             mock: true,
+            capabilities: dashmap::DashMap::new(),
         }
     }
 
@@ -125,18 +146,259 @@ impl Engine {
         // that the TOML's `requests_per_minute` was authoritative — but that let a
         // config out-request what the site asked for. Exclusive Books declares
         // `Crawl-delay: 10`, i.e. 6 req/min, while its TOML asks for 10.
-        let effective_rpm = match policy.crawl_delay_secs {
-            Some(secs) if secs > 0 => {
-                let robots_rpm = (60 / secs).max(1);
-                robots_rpm.min(config.rate_limit.requests_per_minute)
-            }
-            _ => config.rate_limit.requests_per_minute,
-        };
+        let effective_rpm = effective_rpm(&policy, config.rate_limit.requests_per_minute);
 
         self.rate_limiter.check_and_record(&domain, effective_rpm)?;
 
         let html = self.fetch_html(store_id, &search_url).await?;
         self.parse_result(isbn, store_id, config, &html, &search_url)
+    }
+
+    /// Scrape one ISBN, choosing the mechanism from the store's observed capability.
+    ///
+    /// This is the entry point the service calls. The cascade is deliberately the
+    /// same shape as the ISBN resolver and the vision pipeline, so it inherits an
+    /// idiom already maintained here:
+    ///
+    /// 1. **Platform API** when one was detected — structured JSON, no selectors.
+    /// 2. **Legacy CSS selectors** only when no product API exists at all. That is
+    ///    genuinely all there is for `loot.co.za` and `fortunatefinds.co.za`; it is
+    ///    *not* a fallback for Shopify stores, whose storefront search cannot match
+    ///    an ISBN in any field, so falling back there would only burn requests.
+    pub async fn scrape_auto(
+        &self,
+        isbn: &str,
+        store_id: &str,
+        config: &ScraperConfig,
+    ) -> Result<PriceResult, ScraperError> {
+        let capability = self.capability_for(store_id, config).await;
+
+        match capability.price_source {
+            PriceSource::None => self.scrape(isbn, store_id, config).await,
+            _ => {
+                self.scrape_via_platform(isbn, store_id, config, &capability)
+                    .await
+            }
+        }
+    }
+
+    /// The store's capability, detected once and cached for the process lifetime.
+    ///
+    /// Cached because detection costs two requests against a shop, and store fuses
+    /// exist precisely to keep request volume down. Not cached *permanently* in any
+    /// durable sense: a restart re-derives it, which is the point — a replatformed
+    /// shop is re-observed rather than remembered wrongly. A scheduled re-probe with
+    /// a canary assertion is the remaining half of this (P3) and belongs in the
+    /// Elixir side, which owns scheduling.
+    pub async fn capability_for(&self, store_id: &str, config: &ScraperConfig) -> Capability {
+        // Mock mode must keep exercising the legacy fixture path: detection would
+        // make real requests, and the fixtures are HTML, not product JSON.
+        if self.mock {
+            return Capability::none();
+        }
+
+        if let Some(cached) = self.capabilities.get(store_id) {
+            return cached.value().clone();
+        }
+
+        let detected = self
+            .detect_capability(config)
+            .await
+            .unwrap_or_else(|_| Capability::none());
+
+        self.capabilities
+            .insert(store_id.to_string(), detected.clone());
+
+        tracing::info!(
+            "detected capability for store={}: source={:?} isbn_at={:?} lookup={:?}",
+            store_id,
+            detected.price_source,
+            detected.isbn_location,
+            detected.lookup_mode
+        );
+
+        detected
+    }
+
+    /// Look up one ISBN at one store using its observed platform capability.
+    ///
+    /// This replaces the CSS-selector path, which cannot work on 6 of 10 targets:
+    /// Shopify's storefront search does not index ISBNs in any field — proven
+    /// against four stores using ISBNs they demonstrably stock — so
+    /// `query_template = "{isbn}"` never matches there.
+    pub async fn scrape_via_platform(
+        &self,
+        isbn: &str,
+        store_id: &str,
+        config: &ScraperConfig,
+        capability: &Capability,
+    ) -> Result<PriceResult, ScraperError> {
+        let price = match (capability.price_source, capability.lookup_mode) {
+            // The handle *is* the ISBN, so one request addresses the product and a
+            // 404 is the store telling us it does not carry this edition.
+            (PriceSource::ShopifyProductsJson, LookupMode::Direct) => {
+                let (status, body) = self
+                    .fetch_path(config, &format!("/products/{isbn}.js"))
+                    .await?;
+
+                match status {
+                    200 => platform::shopify_product_js(&body, config.currency())?,
+                    404 => {
+                        return Err(ScraperError::NotStocked {
+                            store: store_id.to_string(),
+                            isbn: isbn.to_string(),
+                        });
+                    }
+                    other => {
+                        return Err(ScraperError::PriceParse(format!(
+                            "unexpected HTTP {other} from /products/{isbn}.js"
+                        )));
+                    }
+                }
+            }
+
+            // WooCommerce's Store API search matches `sku`, so no local index is
+            // needed. An empty result set means not stocked.
+            (PriceSource::WooStoreApi, LookupMode::NativeSearch) => {
+                let (status, body) = self
+                    .fetch_path(
+                        config,
+                        &format!("/wp-json/wc/store/v1/products?search={isbn}"),
+                    )
+                    .await?;
+
+                if status != 200 {
+                    return Err(ScraperError::PriceParse(format!(
+                        "unexpected HTTP {status} from the Store API"
+                    )));
+                }
+
+                match platform::woo_search(&body, isbn, config.currency())? {
+                    Some(price) => price,
+                    None => {
+                        return Err(ScraperError::NotStocked {
+                            store: store_id.to_string(),
+                            isbn: isbn.to_string(),
+                        });
+                    }
+                }
+            }
+
+            // Everything else needs an ISBN→URL index we have not built. Explicitly
+            // *not* reported as "not stocked": we do not know whether the shop has
+            // the book, only that we cannot currently ask, and recording a guess
+            // would poison the data with false negatives.
+            _ => {
+                return Err(ScraperError::IndexRequired {
+                    store: store_id.to_string(),
+                    isbn: isbn.to_string(),
+                });
+            }
+        };
+
+        let base = config.source.url.trim_end_matches('/');
+
+        Ok(PriceResult {
+            isbn: isbn.to_string(),
+            store: store_id.to_string(),
+            price_cents: Some(price.price_cents),
+            currency: price.currency,
+            in_stock: price.in_stock,
+            url: price
+                .handle
+                .as_deref()
+                .map(|h| format!("{base}/products/{h}")),
+            title: price.title,
+            // Meaningless without selectors: nothing was matched by CSS. Left as
+            // None rather than a fabricated 1.0, which would report perfect
+            // extraction health for a path that has no selectors to match.
+            selector_match_rate: None,
+        })
+    }
+
+    /// Observe what a store can do, with two cheap requests.
+    ///
+    /// Platform is derived rather than configured because bookshops replatform, and
+    /// a stored `platform = "shopify"` turns that into a silent outage
+    /// indistinguishable from "not stocked".
+    pub async fn detect_capability(
+        &self,
+        config: &ScraperConfig,
+    ) -> Result<Capability, ScraperError> {
+        // Shopify first: it is 6 of 10 targets, so it is the likelier hit.
+        if let Ok((200, body)) = self.fetch_path(config, "/products.json?limit=50").await {
+            if let Ok(listings) = platform::shopify_products_json(&body) {
+                if !listings.is_empty() {
+                    return Ok(platform::classify_shopify(&listings));
+                }
+            }
+        }
+
+        if let Ok((200, body)) = self
+            .fetch_path(config, "/wp-json/wc/store/v1/products?per_page=30")
+            .await
+        {
+            return Ok(platform::classify_woo(&body));
+        }
+
+        // Neither API answered. Recorded as a fact about the store rather than
+        // retried as a misconfiguration — loot.co.za and fortunatefinds.co.za are
+        // genuinely in this category.
+        Ok(Capability::none())
+    }
+
+    /// Fetch a path from a store, honouring robots.txt and the rate limit.
+    ///
+    /// The single compliant egress for anything this service requests from a shop.
+    /// Both the legacy selector path and the platform adapters go through it, so
+    /// there is one place that can be audited for the owner's robots.txt rule
+    /// rather than one per call site — which is how the events job ended up
+    /// scraping with no robots check at all.
+    ///
+    /// Returns the HTTP status alongside the body, because for the platform
+    /// adapters **404 is meaningful data** (`/products/<isbn>.js` returning 404 is
+    /// how a Shopify store says "we do not carry this ISBN"), not an error to
+    /// propagate.
+    pub async fn fetch_path(
+        &self,
+        config: &ScraperConfig,
+        path: &str,
+    ) -> Result<(u16, String), ScraperError> {
+        let base = config.source.url.trim_end_matches('/');
+        let url = format!("{base}{path}");
+        let domain =
+            extract_domain(&config.source.url).unwrap_or_else(|| config.source.url.clone());
+
+        // robots.txt first, then the rate limit — see `scrape` for why that order
+        // matters and why there is no flag to skip it.
+        let policy = if self.mock {
+            crate::robots::RobotsPolicy {
+                allowed: true,
+                crawl_delay_secs: None,
+            }
+        } else {
+            self.robots.policy(&config.source.url, path).await?
+        };
+
+        if !policy.allowed {
+            return Err(ScraperError::RobotsDisallowed { url });
+        }
+
+        let effective_rpm = effective_rpm(&policy, config.rate_limit.requests_per_minute);
+
+        self.rate_limiter.check_and_record(&domain, effective_rpm)?;
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(ScraperError::Http)?;
+
+        let status = response.status().as_u16();
+        let body = response.text().await.map_err(ScraperError::Http)?;
+
+        Ok((status, body))
     }
 
     /// Fetch HTML — either from fixtures (mock mode) or real HTTP.
