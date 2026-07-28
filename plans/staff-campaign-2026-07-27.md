@@ -149,17 +149,30 @@ Preview: `https://stacks-core-pr-feat-staff-engineer.fly.dev`, seeded.
 | **G5** organiser, add + reorder | ✅ | ⛔ **Broken on the first click.** Fixed; see below |
 | **G5** drag-and-drop | ✅ | ⛔ **Completely broken.** Fixed; see below |
 | **G4** subscribe link render | ❌ | Not driven — see below. Endpoint answers; the anchor was never seen on a page |
-| **G6** admin review queue | ❌ | Built this session (tests + probe), deployed after the last preview build — not yet driven |
+| **G6** admin review queue (API) | ✅ | Driven end to end via a real MFA-verified admin session — see below |
+| **G6** admin review queue (in the SPA) | ⛔ | **Unreachable — and so are the three pre-existing admin pages.** #303 |
 
-**G4 is blocked by a seed gap, not by code.** Both seeded users carry
-`profile_visibility: "owner"` (`seeds.exs`), so **no seeded user has a publicly visible
-profile** and `/u/:handle` 404s for every viewer. The subscribe anchor also needs a
-`platform`-visible *bookshelf* for `has_feed`. Neither exists in the fixture, so the surface is
-undrivable as seeded — the same class of gap as the zero-row `discovered_sources` fixed earlier
-in Wave 0. Also worth knowing: the preview seed **suffixes handles**
-(`platform_owner` → `platform_owner_5289f3`), so a hardcoded handle 404s and looks like a bug.
-Fix is a seed change — one user with a platform profile and one platform bookshelf — filed
-rather than smuggled into this pass.
+**G4 was blocked by a seed gap, not by code — and the gap was a *half-applied fix*. Now closed.**
+
+Both seeded users carried `profile_visibility: "owner"`, so `/u/:handle` 404s for **every**
+viewer, authenticated or not. The subscribe anchor lives on that page, so it could never be
+reached.
+
+The instructive part: `seeds.exs:646` already documents this exact defect for the *bookshelf*
+half — *"every seeded bookshelf was `owner` — so the RSS affordance (US-6.1) had never appeared
+in any seeded environment and the story had never been drivable"* — and fixes it by making
+`library`/`antilibrary`/`reading_pile` `platform`. But the profile half was left `owner`, so
+**the affordance still could not be seen; only the reason moved one level up.** A fix that
+addresses one link in a chain and stops is indistinguishable from no fix at all from the user's
+side. Fixed by making user 2 (`test_user`) `platform`-visible, keeping user 1 private so the
+hidden-profile path stays represented.
+
+⚠️ **Correction to an earlier claim in this plan: the preview seed does *not* suffix handles.**
+`platform_owner_5289f3` is **inherited staging data** — the preview branches staging by Neon
+copy-on-write and only reseeds when `seeds.exs` changes, and that row's handle was written by
+the `20260714200500` backfill, which mirrors `Accounts.generate_handle/1`
+(slug + `"_"` + 6 hex). `seeds.exs` itself writes a bare `platform_owner`. So a hardcoded
+handle can still 404 on a preview, but the cause is the inherited branch, not the seed.
 
 #### ⛔ Adding a shelf deleted every book from the page
 
@@ -240,6 +253,57 @@ Correcting the general lesson: **"it needs a browser" is usually a claim about o
 layer, and the layers either side of it are testable.** Accepting the claim wholesale is what
 left the only untested path as the only broken one.
 
+#### ⛔ The SPA cannot reach ANY admin endpoint — filed as #303
+
+Trying to drive the new queue in a browser returned **401**. Not from my page's endpoint — from
+`GET /api/admin/sources`, the *pre-existing* source-approval page's own endpoint, with a fresh
+owner token. That is what showed it is systemic.
+
+`frontend/src/` contains **zero** matches for `admin_session`, `adminToken`, `verify_mfa` or
+`mfa`. All four admin pages pass the ordinary Guardian token to endpoints behind
+`pipeline :admin` → `AdminAuthPipeline` (requires `typ: "admin_session"`, IP- and boot_id-bound)
+→ `RequireMFA` (verified within 30 min). **Four admin surfaces are built, routed, tested and
+unreachable.**
+
+⚠️ **This is the wiring-trace defect class at the auth layer, and it invalidates a claim made
+earlier in this campaign.** Wave 0 recorded "`discovered_sources` 0→5 seeded, closing G3's
+zero-row cause" — the rows exist and the API serves them, but **nobody could ever have seen them
+in the UI**. Seeding data does not make a surface reachable; I checked the row count and inferred
+the rest, which is exactly the inference this campaign keeps catching in others.
+
+**The server half is fine, and I proved it rather than assuming it.** Driving the real MFA flow
+by hand (`mfa/setup` → `mfa/confirm` → `admin/auth/login` → `verify_mfa`) yielded an admin token,
+and then the whole G6 loop end to end on the live preview:
+
+| Step | Result |
+|---|---|
+| approve source (`Truth Coffee Roasting`) | `200 approved` — and it geocoded, confirming the G1 chain |
+| `POST /api/opt-out` from `someone@gmail.test` (mismatched domain) | parked, with the "we verify these by hand" copy |
+| `GET /api/admin/removal-requests` | `total: 1`, carrying name, URL **and the contact address** |
+| `PUT …/honour` | `200 {"outcome": "removed"}` |
+| queue after | `total: 0` |
+| `PUT …/honour` again | **409**, not 404 — the distinction the tests assert |
+| DB | `third_spaces.opted_out = true`, `discovered_sources.status = 'excluded'` |
+
+So G6's server side is **verified live**; only the client auth path is missing, and it was already
+missing for three other pages.
+
+⚠️ **Encoding trap worth carrying forward:** the MFA provisioning URI gives the TOTP secret as
+**base32**, but `mfa_confirm` runs `Base.decode64/1` on it. Sending base32 straight through returns
+`422 invalid_code` — which reads as clock skew or a bad code and sends you hunting in the wrong
+place. Base32-decode, then base64-encode the raw bytes.
+
+⚠️ **A preview redeploy destroys everything seeded into it.** `scripts/deploy-stack.sh` **deletes
+and recreates** the Neon branch from `staging` each time (`Deleting stale branch
+preview/feat-staff-engineer…`). The 5 sources I seeded in an earlier session were gone; MFA
+enrolment does not survive either. Any "I seeded it on the preview" evidence has a shelf life of
+exactly one deploy.
+
+⚠️ **I misread a 401 as "no data" for several minutes**, because I wrote `(body.sources || [])`
+and reported `approvedCount: 0`. Defaulting an error to an empty collection is the same failure as
+the `if (count > 0)` guards this campaign keeps flagging — and I did it while hunting for exactly
+that pattern. Check the status code before the body.
+
 #### 🟧 Two surfaces shipped with no CSS whatsoever
 
 `/listing-removal` and the shelf organiser both rendered as raw browser chrome — bulleted
@@ -293,7 +357,7 @@ Largest groups: `book-detail` (45), `insights` (34), `profile` (15), `page` (15)
 **Not all 398 are bugs** — a wrapper class used only as a JS/test hook needs no rule, and
 `data-testid` is the project's convention for that but was not always used. The number is a
 *starting inventory*, not a defect count, and separating the two needs a pass per component
-group. **Filed as its own issue rather than folded in here**: it is a Wave-9-scale polish
+group. **Filed as #301** rather than folded in here: it is a Wave-9-scale polish
 sweep, and three of the four surfaces this session touched were in the list, which is what
 makes it worth tracking rather than fixing opportunistically.
 
@@ -307,13 +371,21 @@ makes it worth tracking rather than fixing opportunistically.
    as `owner@thestacks.app` / `dev-password-123` and store a **flat** `stacks-auth` blob.
    The queue needs a parked request: `POST /api/listings/removal` with an email whose domain
    does **not** match a listing's — `hello@gmail.test` against a seeded `discovered_source`.
-2. **Fix the G4 seed gap** (above), then drive the subscribe anchor and fetch the Atom URL.
+2. ~~Fix the G4 seed gap.~~ **Done** — `test_user` is now `profile_visibility: "platform"`
+   (`seeds.exs`). Still to drive: the subscribe anchor on `/u/test_user` and a fetch of the Atom
+   URL. ⚠️ **Needs a preview whose seed actually re-ran** — the preview only reseeds when
+   `seeds.exs` changes, and inherits staging by Neon copy-on-write otherwise, so an older branch
+   will still show `profile_visibility: "owner"` and 404.
 3. **Run the new E2E spec against the preview** — `e2e/tests/shelf-organiser.spec.ts` has never
    executed anywhere. `cd e2e && BASE_URL=… npx playwright test --project=setup` then
    `--project=chromium -g "Shelf organiser"`. Its drag case uses Playwright's `dragTo`, the
    only path that issues real HTML5 drag events.
-4. **File the two sweeps** as issues: the 398 orphan CSS classes, and `Selector.text`-based
-   negative assertions that a copy edit can disarm.
+4. ~~File the two sweeps as issues.~~ **Done — #301** (398 orphan CSS classes) and **#302**
+   (prose-matching negative assertions). ⚠️ #302 records something the sweep taught: the obvious
+   mechanical check — "is the string absent from `frontend/src/`?" — **would have missed the real
+   defect**, because `"Add a shelf"` *is* in source; only the assertion's `"Add shelf"` was not.
+   Detecting that class needs fuzzy near-match, or the convention (`data-testid` for feature
+   guards, paired positive assertion for copy).
 
 ⚠️ **Everything from this session is uncommitted — the commit was denied.** `just verify` is
 exit 0. Use `git commit -- <paths>`; `AGENTS.md`, `docs/agents/orchestrator-agent.md` and
