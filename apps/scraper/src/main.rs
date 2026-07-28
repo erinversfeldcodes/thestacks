@@ -13,7 +13,7 @@ use stacks_scraper::{
     error::ScraperError,
     proto::generated::scraper::{
         CatalogueTitle, CatalogueTitlesRequest, CatalogueTitlesResponse, ConfigReloadResponse,
-        ScrapeRequest, ScrapeResponse, StoreCapability,
+        FetchPageRequest, FetchPageResponse, ScrapeRequest, ScrapeResponse, StoreCapability,
     },
     scraper::Engine,
     stores::StoreRegistry,
@@ -211,6 +211,13 @@ mod outcome {
     pub const INDEX_REQUIRED: &str = "SCRAPE_OUTCOME_INDEX_REQUIRED";
 }
 
+/// Wire values for `FetchOutcome` — a page fetch's outcomes, which are not a scrape's.
+/// Kept separate from `outcome` above so the two cannot be mixed at a call site.
+mod fetch_outcome {
+    pub const FETCHED: &str = "FETCH_OUTCOME_FETCHED";
+    pub const ROBOTS_BLOCKED: &str = "FETCH_OUTCOME_ROBOTS_BLOCKED";
+}
+
 /// Decide whether an engine error is a *determination* or a *failure*.
 ///
 /// `Some(outcome)` — the service did its job and arrived at an answer, so the
@@ -381,6 +388,82 @@ async fn catalogue_titles(
     }
 }
 
+/// POST /fetch — retrieve one page for a configured store, compliantly.
+///
+/// Exists so that callers wanting a store's *page* rather than its price do not build
+/// their own HTTP request. `DiscoverBookstoreEventsJob` did exactly that — a bare
+/// `Finch.build(:get, "#{website_url}/events")` with no robots check, no rate limiter
+/// and no fuse — which is the compliance hole this closes.
+///
+/// Keyed by store, not URL: the config supplies the base URL and the rate limit, so a
+/// store with no scraper config cannot be fetched at all. That is deliberate — no
+/// config means no declared crawl policy, and guessing one turns a hard rule into an
+/// advisory one.
+///
+/// A robots disallow is **200 with `outcome: ROBOTS_BLOCKED`**, not an error status:
+/// it is a determination about the store, and the caller must record it and stop
+/// rather than retry. Returning 5xx here would melt the shared fuse on every attempt
+/// for a condition that recurs by definition — the same reasoning as `outcome_for_error`.
+async fn fetch_page(
+    State(state): State<AppState>,
+    Json(payload): Json<FetchPageRequest>,
+) -> Response {
+    let config = match state.registry.get(&payload.store) {
+        Ok(c) => c,
+        Err(e) => {
+            return (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))).into_response();
+        }
+    };
+
+    // Reject a path that isn't one. Without this, `path: "https://evil.test/x"` would be
+    // concatenated onto the base URL, and a caller could steer our compliant egress at
+    // an arbitrary host — the rate limit and robots check would apply to the *configured*
+    // domain while the request went somewhere else.
+    if !payload.path.starts_with('/') || payload.path.starts_with("//") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "path must be absolute and begin with a single '/'"})),
+        )
+            .into_response();
+    }
+
+    match state.engine.fetch_path(&config, &payload.path).await {
+        Ok((status, body)) => Json(FetchPageResponse {
+            status: status as i32,
+            body,
+            outcome: fetch_outcome::FETCHED.to_string(),
+            robots_rule: String::new(),
+        })
+        .into_response(),
+
+        Err(ScraperError::RobotsDisallowed { url, rule }) => {
+            tracing::info!(
+                "robots.txt disallows {} for store={} ({})",
+                url,
+                payload.store,
+                rule
+            );
+
+            Json(FetchPageResponse {
+                status: 0,
+                body: String::new(),
+                outcome: fetch_outcome::ROBOTS_BLOCKED.to_string(),
+                robots_rule: rule,
+            })
+            .into_response()
+        }
+
+        Err(e) => {
+            tracing::error!("fetch failed for store={}: {}", payload.store, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    }
+}
+
 async fn config_reload(State(state): State<AppState>) -> Response {
     match state.registry.load_from_dir(&state.scrapers_dir) {
         Ok(n) => Json(ConfigReloadResponse { loaded: n as i32 }).into_response(),
@@ -436,6 +519,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/config/reload", post(config_reload))
         .route("/index/build", post(index_build))
         .route("/catalogue/titles", post(catalogue_titles))
+        .route("/fetch", post(fetch_page))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             hmac_auth_middleware,
@@ -486,6 +570,7 @@ mod tests {
         // all stores, over and over, and take price scraping down everywhere.
         let e = ScraperError::RobotsDisallowed {
             url: "https://exclusivebooks.co.za/search?q=9780156001311".to_string(),
+            rule: "Disallow: /search".to_string(),
         };
         assert_eq!(outcome_for_error(&e), Some(outcome::ROBOTS_BLOCKED));
     }
@@ -590,6 +675,7 @@ requests_per_minute = 60
             .route("/config/reload", post(config_reload))
             .route("/index/build", post(index_build))
             .route("/catalogue/titles", post(catalogue_titles))
+            .route("/fetch", post(fetch_page))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 hmac_auth_middleware,
@@ -686,6 +772,91 @@ requests_per_minute = 60
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // ------------------------------------------------------------------
+    // /fetch — the compliant egress for page fetches (C3)
+    // ------------------------------------------------------------------
+
+    /// Build a `/fetch` request. `token` omitted means no auth header at all.
+    fn fetch_req(body: &str, token: Option<String>) -> Request<Body> {
+        let mut b = Request::builder()
+            .method("POST")
+            .uri("/fetch")
+            .header("content-type", "application/json");
+
+        if let Some(t) = token {
+            b = b.header("x-internal-token", t);
+        }
+
+        b.body(Body::from(body.to_string())).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_fetch_without_token_returns_401() {
+        let app = make_app(make_test_state());
+        let req = fetch_req(r#"{"store":"za/test_store","path":"/events"}"#, None);
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_unknown_store_returns_404() {
+        // A store with no scraper config cannot be fetched at all. That is the
+        // guarantee: no config means no declared crawl policy, and this endpoint
+        // refuses rather than guessing one.
+        let app = make_app(make_test_state());
+        let token = generate_token("POST", "/fetch", TEST_SECRET).unwrap();
+        let req = fetch_req(
+            r#"{"store":"za/nonexistent","path":"/events"}"#,
+            Some(token),
+        );
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_rejects_a_path_that_steers_at_another_host() {
+        // The path is concatenated onto the configured base URL, so an absolute URL
+        // or a protocol-relative one would send the request somewhere else while the
+        // robots check and rate limit still applied to the *configured* domain —
+        // turning the compliant egress into an open proxy.
+        for hostile in [
+            r#"{"store":"za/test_store","path":"https://evil.test/x"}"#,
+            r#"{"store":"za/test_store","path":"//evil.test/x"}"#,
+            r#"{"store":"za/test_store","path":"events"}"#,
+            r#"{"store":"za/test_store","path":""}"#,
+        ] {
+            let app = make_app(make_test_state());
+            let token = generate_token("POST", "/fetch", TEST_SECRET).unwrap();
+
+            let resp = app.oneshot(fetch_req(hostile, Some(token))).await.unwrap();
+
+            assert_eq!(
+                resp.status(),
+                StatusCode::BAD_REQUEST,
+                "path was accepted but must be rejected: {hostile}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_accepts_a_relative_path_for_a_configured_store() {
+        // The store check must happen for a well-formed path too — i.e. rejection
+        // above is about the path, not a blanket refusal that would make the
+        // previous test pass for the wrong reason.
+        let app = make_app(make_test_state());
+        let token = generate_token("POST", "/fetch", TEST_SECRET).unwrap();
+        let req = fetch_req(r#"{"store":"za/test_store","path":"/events"}"#, Some(token));
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_ne!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "a well-formed relative path must not be rejected as malformed"
+        );
     }
 
     // ------------------------------------------------------------------

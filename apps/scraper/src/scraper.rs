@@ -168,10 +168,7 @@ impl Engine {
         // robots.txt is a hard rule, and a rule a TOML can switch off is not one.
         // Mock mode skips it because it never touches the network at all.
         let policy = if self.mock {
-            crate::robots::RobotsPolicy {
-                allowed: true,
-                crawl_delay_secs: None,
-            }
+            crate::robots::RobotsPolicy::unrestricted()
         } else {
             // Normalise the base URL before stripping so a trailing slash doesn't
             // cause strip_prefix to fail (e.g. "https://store.com/" vs "/search?q=…").
@@ -190,6 +187,7 @@ impl Engine {
             // again — we do not fall back to another path or another tier.
             return Err(ScraperError::RobotsDisallowed {
                 url: search_url.clone(),
+                rule: policy.blocked_by.clone().unwrap_or_default(),
             });
         }
 
@@ -651,16 +649,16 @@ impl Engine {
         // robots.txt first, then the rate limit — see `scrape` for why that order
         // matters and why there is no flag to skip it.
         let policy = if self.mock {
-            crate::robots::RobotsPolicy {
-                allowed: true,
-                crawl_delay_secs: None,
-            }
+            crate::robots::RobotsPolicy::unrestricted()
         } else {
             self.robots.policy(&config.source.url, path).await?
         };
 
         if !policy.allowed {
-            return Err(ScraperError::RobotsDisallowed { url });
+            return Err(ScraperError::RobotsDisallowed {
+                url,
+                rule: policy.blocked_by.clone().unwrap_or_default(),
+            });
         }
 
         let effective_rpm = effective_rpm(&policy, config.rate_limit.requests_per_minute);

@@ -146,6 +146,91 @@ defmodule Stacks.Enrichment.ScraperClient do
   defp melt_if_extractor_failed(_decoded, _store_fuse, _isbn, _store_name), do: :ok
 
   @impl true
+  def fetch_page(store_name, path) do
+    case configured_client() do
+      __MODULE__ -> do_fetch_page(store_name, path)
+      client -> client.fetch_page(store_name, path)
+    end
+  end
+
+  # A single page fetch through the scraper's compliant egress — robots.txt, then the
+  # rate limiter, then the request. Callers must never build their own HTTP request to
+  # a store: `DiscoverBookstoreEventsJob` did (a bare Finch GET, no robots check, no
+  # rate limit, no fuse), which is the hole this closes.
+  #
+  # Gated by BOTH fuses, unlike the bulk sweeps: this is a per-store read on a normal
+  # cadence, so a store that is failing should stop being asked — exactly the case the
+  # store fuse exists for.
+  #
+  # `{:error, {:robots_blocked, rule}}` is a *determination*, not a failure: the caller
+  # records it and stops. Deliberately not melting either fuse, because a disallow
+  # recurs on every attempt by definition and melting on it would take every other
+  # store down with it.
+  defp do_fetch_page(store_name, path) do
+    store_fuse = CircuitBreakers.store_fuse(store_name)
+
+    with :ok <- ask(@fuse_name),
+         :ok <- ask(store_fuse) do
+      endpoint = "/fetch"
+
+      Finch.build(
+        :post,
+        "#{base_url()}#{endpoint}",
+        [
+          {"content-type", "application/json"},
+          {"X-Internal-Token", auth_token("POST", endpoint)}
+        ],
+        Jason.encode!(%{store: store_name, path: path})
+      )
+      |> Finch.request(Stacks.Finch, receive_timeout: 30_000)
+      |> handle_fetch_response(store_name, store_fuse)
+    end
+  end
+
+  # No `store_fuse` here: on a 200 the store answered, so nothing about it is failing.
+  # An unrecognised outcome below is a client/sidecar contract mismatch, which melts the
+  # *service* fuse — melting the store's would blame the shop for our own bug.
+  defp handle_fetch_response({:ok, %Finch.Response{status: 200, body: body}}, store, _store_fuse) do
+    case Jason.decode(body) do
+      {:ok, %{"outcome" => "FETCH_OUTCOME_ROBOTS_BLOCKED", "robots_rule" => rule}} ->
+        Logger.info("ScraperClient: robots.txt blocks #{store} (#{rule})")
+        {:error, {:robots_blocked, rule}}
+
+      {:ok, %{"outcome" => "FETCH_OUTCOME_FETCHED", "status" => status, "body" => page}} ->
+        {:ok, %{status: status, body: page}}
+
+      # An unrecognised outcome is a contract mismatch between this client and the
+      # sidecar, which is a service problem rather than a store problem.
+      other ->
+        CircuitBreakers.melt(@fuse_name)
+        Logger.warning("ScraperClient: unexpected fetch response for #{store}: #{inspect(other)}")
+        {:error, :unexpected_response}
+    end
+  end
+
+  defp handle_fetch_response({:ok, %Finch.Response{status: 401}}, store, _store_fuse) do
+    CircuitBreakers.melt(@fuse_name)
+    Logger.warning("ScraperClient: fetch unauthorised for #{store} — check the shared secret")
+    {:error, {:http, 401}}
+  end
+
+  defp handle_fetch_response(
+         {:ok, %Finch.Response{status: status, body: body}},
+         store,
+         store_fuse
+       ) do
+    CircuitBreakers.melt(store_fuse)
+    Logger.warning("ScraperClient: fetch HTTP #{status} for #{store}: #{body}")
+    {:error, {:http, status}}
+  end
+
+  defp handle_fetch_response({:error, reason}, store, _store_fuse) do
+    CircuitBreakers.melt(@fuse_name)
+    Logger.warning("ScraperClient: fetch failed for #{store}: #{inspect(reason)}")
+    {:error, reason}
+  end
+
+  @impl true
   def build_index(store_name) do
     case configured_client() do
       __MODULE__ -> do_build_index(store_name)

@@ -238,7 +238,40 @@ message Bookstore {
   // Set when robots.txt forbids the path we would need, together with the rule
   // that forbade it. Configuration is deliberately retained so that if the rule is
   // ever lifted this store simply starts working again.
+  //
+  // These three move together and are cleared together: a block is a single
+  // observation, and a half-cleared one would read as "still blocked, reason
+  // unknown". `Prices.record_robots_block/3` and `clear_robots_block/1` are the only
+  // writers, so that invariant lives in one place.
   string robots_blocked_path = 15 [json_name = "robots_blocked_path"];
+
+  // The `Disallow:` line that blocked us, e.g. "Disallow: /search" or "Disallow: /".
+  //
+  // Without it a blocked store is unactionable: an operator cannot tell whether the
+  // shop forbade one path (try another) or the whole site (stop configuring it). The
+  // path alone does not carry that, because the same path can be blocked by rules of
+  // very different scope.
+  string robots_blocked_rule = 16 [json_name = "robots_blocked_rule"];
+
+  // When the block was last observed.
+  //
+  // Present so the block is *re-checkable* rather than permanent. robots.txt is not a
+  // contract a site is held to forever; a disallow lifted next month should let this
+  // store resume by itself, and without a timestamp there is no way to know a block
+  // is stale rather than current.
+  google.protobuf.Timestamp robots_blocked_at = 17 [json_name = "robots_blocked_at"];
+
+  // Why this store cannot be priced, when `price_source` is "none".
+  //
+  // A verdict without a reason is not actionable: "none" alone cannot distinguish a
+  // shop with no product API from one whose API exists but exposes no ISBN, and those
+  // want completely different follow-up (nothing, versus a title-matching pass). It
+  // also stops the same shop being re-investigated from scratch every few months —
+  // the research cost is real and this is where it is banked.
+  //
+  // Free text on purpose: this is a note for a human operator, and an enum would have
+  // to be extended for every new way a shop turns out to be unscrapable.
+  string unscrapable_reason = 18 [json_name = "unscrapable_reason"];
 }
 
 // PriceSnapshot represents a scraped price for a book at a store.
