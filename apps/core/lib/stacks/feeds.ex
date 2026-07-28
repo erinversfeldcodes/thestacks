@@ -7,9 +7,12 @@ defmodule Stacks.Feeds do
   events fire, and served by `FeedController` with ETag caching.
   """
 
+  import Ecto.Query, only: [from: 2]
+
   alias Core.Repo
   alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.Shelving
+  alias Stacks.Shelving.PlacementHistory
 
   require Logger
 
@@ -148,9 +151,39 @@ defmodule Stacks.Feeds do
 
   defp render_feed(bookshelf) do
     placements = Shelving.get_bookshelf_books(bookshelf.user_id, bookshelf.name)
-    xml = build_atom_xml(bookshelf, placements)
+    xml = build_atom_xml(bookshelf, placements, moved_book_ids(bookshelf, placements))
     etag = compute_etag(xml)
     {xml, etag}
+  end
+
+  # Books that *arrived* on this bookshelf from another one.
+  #
+  # US-6.1 asks for entries reading "Erin moved The Secret History to Library" **or**
+  # "Erin added Piranesi to the Reading Pile" — two verbs. Every entry used to say
+  # "added", so a move (the more interesting signal, and the one a follower actually
+  # wants) was reported as an acquisition.
+  #
+  # One query for the whole feed rather than one per entry: a shelf can hold hundreds
+  # of books and a feed is regenerated on every placement event.
+  #
+  # Returns a plain list, not a MapSet. Under OTP 28 dialyzer reports
+  # `call_without_opaque` when a MapSet built from `Repo.all`'s `any()` result crosses a
+  # function boundary — the same issue that made `book_ids_with_user_writing` return a
+  # list (b76fa3f3). The moved set is small (books that changed shelf, not the whole
+  # shelf), so a list membership check costs nothing here.
+  defp moved_book_ids(_bookshelf, []), do: []
+
+  defp moved_book_ids(bookshelf, placements) do
+    book_ids = Enum.map(placements, & &1.book_id)
+
+    Repo.all(
+      from h in PlacementHistory,
+        where:
+          h.book_id in ^book_ids and h.to_bookshelf == ^bookshelf.id and
+            not is_nil(h.from_bookshelf),
+        select: h.book_id,
+        distinct: true
+    )
   end
 
   # The cache writer is injectable (defaulting to `put_cache/3`) so tests can
@@ -160,7 +193,7 @@ defmodule Stacks.Feeds do
     Application.get_env(:core, :feed_cache_writer, &put_cache/3)
   end
 
-  defp build_atom_xml(bookshelf, placements) do
+  defp build_atom_xml(bookshelf, placements, moved_ids) do
     display_name = feed_display_name(bookshelf.user)
 
     updated =
@@ -170,7 +203,7 @@ defmodule Stacks.Feeds do
       |> Enum.max(DateTime, fn -> DateTime.utc_now() end)
       |> DateTime.to_iso8601()
 
-    entries = Enum.map_join(placements, "\n", &build_entry(&1, bookshelf.name))
+    entries = Enum.map_join(placements, "\n", &build_entry(&1, bookshelf.name, moved_ids))
 
     """
     <?xml version="1.0" encoding="utf-8"?>
@@ -187,7 +220,7 @@ defmodule Stacks.Feeds do
     |> String.trim()
   end
 
-  defp build_entry(placement, bookshelf_name) do
+  defp build_entry(placement, bookshelf_name, moved_ids) do
     book = placement.book
     title = if book, do: book.title, else: "Unknown Book"
 
@@ -203,8 +236,11 @@ defmodule Stacks.Feeds do
         do: DateTime.to_iso8601(placement.placed_at),
         else: DateTime.to_iso8601(DateTime.utc_now())
 
+    verb = if placement.book_id in moved_ids, do: "moved", else: "added"
+
     summary =
-      "#{escape_xml(title)} by #{escape_xml(author_name)} added to #{humanize_bookshelf(bookshelf_name)}"
+      "#{escape_xml(title)} by #{escape_xml(author_name)} #{verb} to " <>
+        "#{humanize_bookshelf(bookshelf_name)}"
 
     """
       <entry>
@@ -214,10 +250,36 @@ defmodule Stacks.Feeds do
         <summary>#{summary}</summary>
         <author>
           <name>#{escape_xml(author_name)}</name>
-        </author>#{isbn_link(isbn)}
+        </author>#{cover_link(placement.book)}#{isbn_link(isbn)}
       </entry>\
     """
   end
+
+  # The cover, as an Atom enclosure.
+  #
+  # US-6.1 asks each entry to carry a cover thumbnail, and it is what makes a feed
+  # browsable in a reader rather than a list of sentences. Taken from the primary
+  # edition where there is one, since that is the edition the shelf displays.
+  defp cover_link(nil), do: ""
+
+  defp cover_link(book) do
+    book
+    |> primary_cover_url()
+    |> case do
+      nil ->
+        ""
+
+      url ->
+        "\n    <link rel=\"enclosure\" type=\"image/jpeg\" href=\"#{escape_xml(url)}\" />"
+    end
+  end
+
+  defp primary_cover_url(%{editions: editions}) when is_list(editions) do
+    primary = Enum.find(editions, & &1.is_primary) || List.first(editions)
+    primary && primary.cover_image_url
+  end
+
+  defp primary_cover_url(_book), do: nil
 
   defp primary_isbn(nil), do: nil
 
