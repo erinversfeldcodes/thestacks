@@ -301,6 +301,73 @@ defmodule Stacks.Enrichment.Prices do
     end
   end
 
+  @doc """
+  Note that an ISBN priced successfully at this store, keeping it as the canary.
+
+  ## Why a canary at all
+
+  Capability detection notices a replatform only when the *detected* values change.
+  It cannot notice the subtler failure: the platform stays Shopify, the probe still
+  answers, but the shop's theme moves the ISBN out of `handle` for new products, or
+  re-slugs its catalogue. Detection reports the same capability while every lookup
+  quietly returns "not stocked".
+
+  A canary closes that: an ISBN we have *actually priced here* must keep resolving.
+  When it stops, the capability is suspect regardless of what detection says, so it
+  is cleared and re-derived on the next scrape rather than trusted.
+
+  Only set when absent or when it changes, so this costs no write on the common path.
+  """
+  @spec note_canary(Bookstore.t(), String.t()) :: :ok
+  def note_canary(%{canary_isbn: isbn}, isbn), do: :ok
+
+  def note_canary(store, isbn) when is_binary(isbn) do
+    store
+    |> Ecto.Changeset.change(%{canary_isbn: isbn})
+    |> Repo.update()
+    |> case do
+      {:ok, _} -> :ok
+      {:error, _} -> :ok
+    end
+  end
+
+  def note_canary(_store, _isbn), do: :ok
+
+  @doc """
+  React to the canary failing to resolve.
+
+  The store still answers and its platform still looks the same, but an ISBN we
+  previously priced here no longer resolves — so what we believe about this store is
+  no longer supported by evidence. Clearing the capability forces the next scrape to
+  re-derive it instead of continuing to use a mapping that has stopped working.
+
+  Deliberately does nothing when the ISBN is not the canary: an ordinary edition
+  going out of stock is normal and says nothing about the store.
+  """
+  @spec canary_failed(Bookstore.t(), String.t()) :: :ok | :not_canary
+  def canary_failed(%{canary_isbn: canary} = store, isbn)
+      when canary == isbn and is_binary(canary) do
+    Logger.warning(
+      "Prices: canary #{canary} stopped resolving at #{store.name} — " <>
+        "clearing observed capability so it is re-derived"
+    )
+
+    store
+    |> Ecto.Changeset.change(%{
+      price_source: nil,
+      isbn_location: nil,
+      lookup_mode: nil,
+      capability_probed_at: nil
+    })
+    |> Repo.update()
+    |> case do
+      {:ok, _} -> :ok
+      {:error, _} -> :ok
+    end
+  end
+
+  def canary_failed(_store, _isbn), do: :not_canary
+
   # ── Stores ────────────────────────────────────────────────────────────────
 
   @doc """
