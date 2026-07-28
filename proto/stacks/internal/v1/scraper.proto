@@ -77,6 +77,17 @@ enum ScrapeOutcome {
   // The page was fetched but we could not extract a price from it. This is our
   // bug, and the only one of these that should count against the circuit breaker.
   SCRAPE_OUTCOME_EXTRACTOR_FAILED = 4;
+  // This store needs a local ISBN→path index and none exists yet.
+  //
+  // Distinct from EXTRACTOR_FAILED, which it used to be folded into, because it is
+  // *actionable*: the caller should build the index rather than treat this as a
+  // defect. It is also emphatically not NOT_STOCKED — we do not know whether the
+  // shop carries the book, only that we cannot currently ask.
+  //
+  // Having its own value is what lets the index be built on demand rather than only
+  // on a schedule, which matters because the index lives in this service's process
+  // and dies with it.
+  SCRAPE_OUTCOME_INDEX_REQUIRED = 5;
 }
 
 // Response from POST /scrape.

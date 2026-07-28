@@ -139,6 +139,30 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
       assert :ok = run_scrape()
     end
 
+    test "needing an index enqueues a build instead of failing", %{store: store} do
+      # The index lives in the scraper service's process and dies with it, so a restart
+      # would leave the four index-needing shops unpriceable until the nightly rebuild.
+      # Reacting to the outcome makes cron a belt-and-braces refresh, not the only path.
+      respond(store, "SCRAPE_OUTCOME_INDEX_REQUIRED", %{
+        "detail" => "za/wordsworth needs a local ISBN index before 9780743273565"
+      })
+
+      assert :ok = run_scrape()
+
+      assert_enqueued(
+        worker: Stacks.Workers.BuildScraperIndexJob,
+        args: %{store: store.scraper_module}
+      )
+    end
+
+    test "repeated lookups against an unindexed store enqueue one build", %{store: store} do
+      respond(store, "SCRAPE_OUTCOME_INDEX_REQUIRED")
+
+      Enum.each(1..4, fn _ -> run_scrape() end)
+
+      assert length(all_enqueued(worker: Stacks.Workers.BuildScraperIndexJob)) == 1
+    end
+
     test "an extractor failure is a failure", %{store: store} do
       respond(store, "SCRAPE_OUTCOME_EXTRACTOR_FAILED", %{
         "detail" => "price selector matched nothing: .product-price"
