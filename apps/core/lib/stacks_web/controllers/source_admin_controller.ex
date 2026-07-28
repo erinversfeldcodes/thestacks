@@ -43,6 +43,71 @@ defmodule StacksWeb.SourceAdminController do
     end
   end
 
+  @doc """
+  GET /api/admin/removal-requests — businesses waiting on a human decision.
+
+  A removal request whose contact address did not match the listing's domain parks with
+  `exclusion_requested_at` set. This is where those become visible; before it, they were
+  not in any payload at all.
+  """
+  def removal_requests(conn, _params) do
+    requests =
+      Discovery.pending_removal_requests()
+      |> Enum.map(&serialize_removal_request/1)
+
+    json(conn, %{requests: requests, total: length(requests)})
+  end
+
+  @doc """
+  PUT /api/admin/removal-requests/:id/honour — remove the listing.
+
+  ⚠️ **Not `approve`.** `PUT /sources/:id/approve` already exists and *publishes* a
+  listing; this takes one down. Two endpoints named "approve" with opposite effects on the
+  same row is a mistake waiting to happen, so these name what happens to the listing.
+  """
+  def honour_removal(conn, %{"id" => id}) do
+    case Discovery.honour_removal_request(id) do
+      {:ok, _source} -> json(conn, %{ok: true, outcome: "removed"})
+      {:error, reason} -> removal_error(conn, reason)
+    end
+  end
+
+  @doc "PUT /api/admin/removal-requests/:id/decline — the listing stays."
+  def decline_removal(conn, %{"id" => id}) do
+    case Discovery.decline_removal_request(id) do
+      {:ok, _source} -> json(conn, %{ok: true, outcome: "kept"})
+      {:error, reason} -> removal_error(conn, reason)
+    end
+  end
+
+  defp removal_error(conn, :not_found) do
+    conn |> put_status(404) |> json(%{error: "No such removal request."})
+  end
+
+  defp removal_error(conn, :not_pending) do
+    # 409, not 404: the request exists, it has simply already been decided. A double-click
+    # or a second reviewer must not read as "never existed".
+    conn |> put_status(409) |> json(%{error: "That request has already been decided."})
+  end
+
+  defp removal_error(conn, _reason) do
+    conn |> put_status(422) |> json(%{error: "Could not record that decision."})
+  end
+
+  defp serialize_removal_request(%DiscoveredSource{} = s) do
+    %{
+      id: s.id,
+      name: s.name,
+      url: s.url,
+      type: s.type,
+      # The address the request came from — the whole reason a human is looking. Without it
+      # the reviewer has nothing to judge, and the queue is a list of names.
+      exclusion_email: s.exclusion_email,
+      requested_at: s.exclusion_requested_at,
+      status: s.status
+    }
+  end
+
   @doc "GET /api/admin/source-health — per-source health for the scraper-health page."
   def source_health(conn, _params) do
     json(conn, %{data: Monitoring.list_source_health()})

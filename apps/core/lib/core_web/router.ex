@@ -312,6 +312,11 @@ defmodule CoreWeb.Router do
     get "/sources", SourceAdminController, :index
     put "/sources/:id/approve", SourceAdminController, :approve
     put "/sources/:id/reject", SourceAdminController, :reject
+    # Removal-request review (US-2.5.3). Verbs name what happens to the LISTING, because
+    # `/sources/:id/approve` above already means "publish it" — the opposite effect.
+    get "/removal-requests", SourceAdminController, :removal_requests
+    put "/removal-requests/:id/honour", SourceAdminController, :honour_removal
+    put "/removal-requests/:id/decline", SourceAdminController, :decline_removal
     get "/source-health", SourceAdminController, :source_health
 
     # Owner age-gate moderation (#118): list all books (incl. age-gated) and
