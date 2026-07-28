@@ -974,7 +974,14 @@
       timestamps: :standard,
       migration_exists: true,
       dbt_grant: true,
-      indexes: [],
+      indexes: [
+        # Bookshops are the other side of the 500 m pairing, and the geocoding pass
+        # scans them by bounding box to find each space's nearest shop.
+        %{
+          name: "idx_bookstores_lat_lng",
+          columns: [:latitude, :longitude]
+        }
+      ],
       field_overrides: %{
         has_physical: %{default: false},
         country_code: %{default: "ZA"}
@@ -1031,7 +1038,15 @@
       timestamps: :standard,
       migration_exists: true,
       dbt_grant: true,
-      indexes: [],
+      indexes: [
+        # The map's primary query is a viewport, i.e. a bounding box, so both
+        # coordinates are range predicates. Latitude leads because it is the more
+        # selective of the two at the zoom levels the page uses.
+        %{
+          name: "idx_third_spaces_lat_lng",
+          columns: [:latitude, :longitude]
+        }
+      ],
       field_overrides: %{
         country_code: %{default: "ZA"},
         verified: %{default: false},
