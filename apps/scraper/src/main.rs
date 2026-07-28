@@ -11,7 +11,9 @@ use axum::{
 use serde_json::{Value, json};
 use stacks_scraper::{
     error::ScraperError,
-    proto::generated::scraper::{ConfigReloadResponse, ScrapeRequest, ScrapeResponse},
+    proto::generated::scraper::{
+        ConfigReloadResponse, ScrapeRequest, ScrapeResponse, StoreCapability,
+    },
     scraper::Engine,
     stores::StoreRegistry,
 };
@@ -90,6 +92,11 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
         }
     };
 
+    // Reported on every response so the caller can persist it, which keeps the
+    // observation's timestamp current without a separate probe schedule. A
+    // replatform therefore surfaces on the next scrape rather than the next sweep.
+    let observed = wire_capability(state.engine.capability_for(&payload.store, &config).await);
+
     // Two things are going on here, and both are deliberate.
     //
     // `scrape_auto` rather than `scrape`: it routes to the store's *observed*
@@ -119,6 +126,7 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
             selector_match_rate: result.selector_match_rate,
             outcome: outcome::PRICED.to_string(),
             detail: None,
+            capability: observed.clone(),
         })
         .into_response(),
 
@@ -136,6 +144,7 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
             Json(ScrapeResponse {
                 outcome: outcome::EXTRACTOR_FAILED.to_string(),
                 detail: Some("page fetched but no price could be extracted".to_string()),
+                capability: observed.clone(),
                 ..empty_response(&result.isbn, &result.store, &result.currency)
             })
             .into_response()
@@ -157,6 +166,7 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
                 Json(ScrapeResponse {
                     outcome: concluded.to_string(),
                     detail: Some(e.to_string()),
+                    capability: observed.clone(),
                     ..empty_response(&payload.isbn, &payload.store, config.currency())
                 })
                 .into_response()
@@ -256,7 +266,17 @@ fn empty_response(isbn: &str, store: &str, currency: &str) -> ScrapeResponse {
         selector_match_rate: None,
         outcome: String::new(),
         detail: None,
+        capability: None,
     }
+}
+
+/// Convert an observed capability to its wire form.
+fn wire_capability(cap: stacks_scraper::platform::Capability) -> Option<StoreCapability> {
+    Some(StoreCapability {
+        price_source: cap.price_source.as_wire().to_string(),
+        isbn_location: cap.isbn_location.as_wire().to_string(),
+        lookup_mode: cap.lookup_mode.as_wire().to_string(),
+    })
 }
 
 async fn config_reload(State(state): State<AppState>) -> Response {

@@ -250,4 +250,107 @@ defmodule Stacks.Enrichment.PricesTest do
       assert length(stores) >= 2
     end
   end
+
+  describe "record_capability/2" do
+    test "records what was observed, with a timestamp" do
+      store = insert(:bookstore, price_source: nil, isbn_location: nil, lookup_mode: nil)
+
+      assert :ok =
+               Prices.record_capability(store, %{
+                 "price_source" => "shopify_products_json",
+                 "isbn_location" => "handle",
+                 "lookup_mode" => "direct"
+               })
+
+      reloaded = Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id)
+      assert reloaded.price_source == "shopify_products_json"
+      assert reloaded.isbn_location == "handle"
+      assert reloaded.lookup_mode == "direct"
+      assert reloaded.capability_probed_at
+    end
+
+    test "notices a replatform rather than trusting the stored platform" do
+      # The reason capability is derived and not configured. A shop that moves from
+      # WooCommerce to Shopify must be re-observed, or every lookup silently returns
+      # nothing and looks exactly like "we don't stock it".
+      # A *fresh* probed_at is essential to this test. Without it the stale-refresh
+      # branch writes the new capability regardless of whether the change was
+      # noticed, and the test passes while change detection is broken — confirmed by
+      # mutation probe.
+      store =
+        insert(:bookstore,
+          price_source: "woo_store_api",
+          isbn_location: "sku",
+          lookup_mode: "native_search",
+          capability_probed_at: DateTime.utc_now()
+        )
+
+      assert :ok =
+               Prices.record_capability(store, %{
+                 "price_source" => "shopify_products_json",
+                 "isbn_location" => "handle",
+                 "lookup_mode" => "direct"
+               })
+
+      reloaded = Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id)
+      assert reloaded.price_source == "shopify_products_json"
+      assert reloaded.lookup_mode == "direct"
+    end
+
+    test "a response without a capability is not an error" do
+      # An older scraper, or one that could not determine anything, still returns a
+      # usable price. Losing the observation must not lose the scrape.
+      store = insert(:bookstore, price_source: "woo_store_api")
+
+      assert :ok = Prices.record_capability(store, nil)
+
+      assert Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).price_source ==
+               "woo_store_api"
+    end
+
+    test "an unchanged observation inside the day does not churn the row" do
+      store =
+        insert(:bookstore,
+          price_source: "shopify_products_json",
+          isbn_location: "handle",
+          lookup_mode: "direct",
+          capability_probed_at: DateTime.utc_now()
+        )
+
+      before = Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).updated_at
+
+      assert :ok =
+               Prices.record_capability(store, %{
+                 "price_source" => "shopify_products_json",
+                 "isbn_location" => "handle",
+                 "lookup_mode" => "direct"
+               })
+
+      assert Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).updated_at == before
+    end
+
+    test "an unchanged but stale observation refreshes its timestamp" do
+      # So that a stale probed_at means "not observed lately" rather than
+      # "unchanged since forever".
+      old = DateTime.add(DateTime.utc_now(), -10, :day)
+
+      store =
+        insert(:bookstore,
+          price_source: "shopify_products_json",
+          isbn_location: "handle",
+          lookup_mode: "direct",
+          capability_probed_at: old
+        )
+
+      assert :ok =
+               Prices.record_capability(store, %{
+                 "price_source" => "shopify_products_json",
+                 "isbn_location" => "handle",
+                 "lookup_mode" => "direct"
+               })
+
+      refreshed = Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).capability_probed_at
+      assert DateTime.compare(refreshed, old) == :gt
+    end
+  end
 end

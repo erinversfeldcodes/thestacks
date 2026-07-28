@@ -286,13 +286,41 @@ sources:
           - name: website_url
             description: Bookstore website URL.
           - name: search_template
-            description: URL template for ISBN search (contains {isbn} placeholder).
+            description: >
+              Deprecated and normally null. It recorded an ISBN-substitution
+              contract that does not exist: Shopify's storefront search matches an
+              ISBN in no field, so most stores can never be queried that way.
           - name: has_physical
             description: Whether the store has a physical location.
           - name: country_code
             description: ISO 3166-1 alpha-2 country code.
           - name: scraper_module
             description: Rust scraper module name for this store.
+          - name: price_source
+            description: >
+              Observed product API: shopify_products_json, woo_store_api, or none.
+              Derived by the scraper, never hand-authored — shops replatform, and a
+              declared platform turns that into a silent outage.
+          - name: isbn_location
+            description: >
+              Where the ISBN was observed on this store's products: handle, sku,
+              barcode, body, or none.
+          - name: lookup_mode
+            description: >
+              How one ISBN becomes one product: direct (handle is the ISBN, so a 404
+              means not stocked), native_search, or local_index.
+          - name: capability_probed_at
+            description: >
+              When the three fields above were last observed. Null means never;
+              stale means not observed lately.
+          - name: canary_isbn
+            description: >
+              An ISBN this store is known to carry. If it stops resolving, the store
+              changed underneath us and its capability must be re-derived.
+          - name: robots_blocked_path
+            description: >
+              Set when robots.txt forbids the path we would need. Configuration is
+              retained so the store resumes by itself if the rule is lifted.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at

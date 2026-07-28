@@ -830,6 +830,18 @@ models:
         description: Country code.
       - name: scraper_module
         description: Scraper module.
+      - name: price_source
+        description: Price source.
+      - name: isbn_location
+        description: Isbn location.
+      - name: lookup_mode
+        description: Lookup mode.
+      - name: capability_probed_at
+        description: Capability probed at.
+      - name: canary_isbn
+        description: Canary isbn.
+      - name: robots_blocked_path
+        description: Robots blocked path.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
