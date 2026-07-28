@@ -14,6 +14,7 @@ select
     approved_at,
     config_generated,
     excluded_at,
+    exclusion_requested_at,
     created_at,
     updated_at
 from {{ source('op', 'discovered_sources') }}

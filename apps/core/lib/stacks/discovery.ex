@@ -266,25 +266,125 @@ defmodule Stacks.Discovery do
   `exclusion_email`. The URL must match an existing discovered source.
 
   Returns `{:error, :not_found}` if no source matches the URL.
-  Returns `{:error, :invalid_email}` if the email format is invalid.
+  Returns `{:ok, :excluded, source}` when the requester's email domain matches the
+  listing's, so the removal was applied; `{:ok, :pending_review, source}` when it did not,
+  so the request was recorded for owner review and **the listing is still live**.
+
+  Returns `{:error, :not_found}` if no source matches the URL, or
+  `{:error, :invalid_email}` if the email format is invalid.
   """
   @spec opt_out(String.t(), map()) ::
-          {:ok, DiscoveredSource.t()} | {:error, :not_found | :invalid_email | Ecto.Changeset.t()}
+          {:ok, :excluded | :pending_review, DiscoveredSource.t()}
+          | {:error, :not_found | :invalid_email | Ecto.Changeset.t()}
   def opt_out(url, %{email: email} = _params) when is_binary(url) and is_binary(email) do
     if valid_email?(email) do
       case get_source_by_url(url) do
-        nil ->
-          {:error, :not_found}
-
-        source ->
-          update_source_status(source, %{
-            status: "excluded",
-            excluded_at: DateTime.utc_now(),
-            exclusion_email: email
-          })
+        nil -> {:error, :not_found}
+        source -> record_removal_request(source, email)
       end
     else
       {:error, :invalid_email}
+    end
+  end
+
+  # Applies the removal when the requester demonstrably belongs to the business;
+  # otherwise records it for owner review.
+  #
+  # This used to exclude on submission unconditionally, which meant **anyone who knew a
+  # listing's URL could delist any business.** The form deliberately has no account
+  # behind it (US-2.5.3: "does not require account creation"), so submission alone
+  # cannot be evidence of ownership.
+  #
+  # The test is whether the contact email's domain matches the listing's own domain.
+  # That is not proof of ownership, but it is the same standard most services use for
+  # business verification, it needs no human in the loop, and it is correct for the
+  # common case — a shop at `booklounge.co.za` writing from `…@booklounge.co.za`.
+  # Anything else (a Gmail address, an agency, a personal account) is plausible but
+  # unverifiable here, so it waits for a human rather than being trusted or refused.
+  defp record_removal_request(source, email) do
+    if email_domain_matches_source?(email, source.url) do
+      update_source_status(source, %{
+        status: "excluded",
+        excluded_at: DateTime.utc_now(),
+        exclusion_requested_at: DateTime.utc_now(),
+        exclusion_email: email
+      })
+      |> case do
+        {:ok, updated} -> {:ok, :excluded, updated}
+        other -> other
+      end
+    else
+      # Status is deliberately untouched: the listing stays live until a human agrees.
+      # `exclusion_requested_at` set while status is not `excluded` *is* the pending
+      # state, so the request is visible without inventing an enum value.
+      update_source_status(source, %{
+        exclusion_requested_at: DateTime.utc_now(),
+        exclusion_email: email
+      })
+      |> case do
+        {:ok, updated} -> {:ok, :pending_review, updated}
+        other -> other
+      end
+    end
+  end
+
+  @doc """
+  Whether `email`'s domain matches the domain of `url`.
+
+  Compares registrable domains rather than exact hosts, so `hello@booklounge.co.za`
+  matches `https://www.booklounge.co.za/about` — a `www.` prefix or a deep path must not
+  defeat a legitimate request. Multi-part public suffixes (`.co.za`, `.com.au`) are why
+  this compares the last **three** labels when the second-to-last is a known
+  second-level suffix, rather than naively taking the last two.
+  """
+  @spec email_domain_matches_source?(String.t(), String.t() | nil) :: boolean()
+  def email_domain_matches_source?(email, url) do
+    with [_local, email_host] <- String.split(email, "@", parts: 2),
+         host when is_binary(host) <- url_host(url) do
+      registrable(email_host) == registrable(host) and registrable(host) != ""
+    else
+      _ -> false
+    end
+  end
+
+  defp url_host(nil), do: nil
+
+  defp url_host(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) and host != "" ->
+        host
+
+      # A bare domain with no scheme parses with a nil host and the whole string as path.
+      %URI{path: path} when is_binary(path) and path != "" ->
+        path |> String.split("/") |> List.first()
+
+      _ ->
+        nil
+    end
+  end
+
+  # Second-level suffixes we actually encounter. Not a full public-suffix list — that is
+  # a dependency and a data-update burden — but enough for the ZA-first target list, and
+  # a mismatch only ever routes a request to human review rather than refusing it.
+  @second_level_suffixes ~w(co ac org net gov edu com)
+
+  defp registrable(host) do
+    labels =
+      host
+      |> String.downcase()
+      |> String.trim_trailing(".")
+      |> String.split(".")
+      |> Enum.reject(&(&1 == ""))
+
+    case Enum.reverse(labels) do
+      [tld, second, third | _] when second in @second_level_suffixes ->
+        Enum.join([third, second, tld], ".")
+
+      [tld, second | _] ->
+        Enum.join([second, tld], ".")
+
+      _ ->
+        ""
     end
   end
 

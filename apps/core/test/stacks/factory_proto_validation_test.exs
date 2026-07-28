@@ -60,9 +60,12 @@ defmodule Stacks.FactoryProtoValidationTest do
     source_health_check:
       {Stacks.Monitoring.SourceHealthCheck,
        ~w(last_success_at last_failure_at last_failure_reason)a},
+    # The exclusion fields are set only when a removal is requested or applied, and
+    # `exclusion_requested_at` distinguishes "asked for" from "done" — a factory that
+    # populated it would make every fixture look like a pending takedown.
     discovered_source:
       {Stacks.Enrichment.DiscoveredSource,
-       ~w(confidence approved_at excluded_at exclusion_email config_generated)a},
+       ~w(confidence approved_at excluded_at exclusion_email exclusion_requested_at config_generated)a},
     review_snapshot: {Stacks.Enrichment.ReviewSnapshot, ~w()a},
     # The capability fields are unset until the scraper *observes* the store. A
     # factory that fabricated them would assert a platform we never measured, which
