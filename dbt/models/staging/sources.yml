@@ -336,6 +336,12 @@ sources:
               for a human operator — banks the research so the same shop is not
               re-investigated from scratch. Null means "not yet configured" rather than
               "ruled out".
+          - name: latitude
+            description: >
+              Decimal degrees, WGS 84. Null until geocoded. Needed because the 500 m
+              third-space pairing rule requires coordinates on BOTH sides.
+          - name: longitude
+            description: Decimal degrees, WGS 84. Null until geocoded.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -484,6 +490,20 @@ sources:
             description: Whether the space has been verified by the platform.
           - name: last_active_at
             description: Timestamp of last known activity.
+          - name: latitude
+            description: >
+              Decimal degrees, WGS 84. Null until geocoded. Replaced a `city` string
+              looked up in a hardcoded six-entry map, which silently dropped any space
+              outside those six cities.
+          - name: longitude
+            description: >
+              Decimal degrees, WGS 84. Null until geocoded. Range -180..180, so a
+              viewport crossing the antimeridian arrives with east < west.
+          - name: nearest_bookshop_km
+            description: >
+              Kilometres to the nearest bookshop, computed once at geocode time so the
+              500 m rule is a scalar comparison rather than a per-pan recomputation.
+              Null means "not computed", which is not the same as "no bookshop near".
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at

@@ -96,6 +96,10 @@ defmodule Stacks.Events.PayloadContract do
     "partner.inventory_synced" => %{version: 1, keys: ~w(synced unresolved_count)},
     # ── enrichment / discovery (system/operational) ───────────────────────────
     "source.approved" => %{version: 1, keys: ~w(status)},
+    # `geocoded` is carried so an operator can see, from the event stream alone, how many
+    # approvals produced a mappable space versus an unpositioned one — the difference
+    # between a working geocoder and a silently degraded one.
+    "third_space.created" => %{version: 1, keys: ~w(source_id geocoded)},
     "source.rejected" => %{version: 1, keys: ~w(status)},
     "enrichment.sources_discovered" => %{version: 1, keys: ~w(count query source_ids)},
     "enrichment.author_sources_discovered" => %{version: 1, keys: ~w(rss_feed_url website_url)},
