@@ -465,8 +465,15 @@ defmodule Stacks.Discovery do
         exclusion_email: email
       })
       |> case do
-        {:ok, updated} -> {:ok, :excluded, updated}
-        other -> other
+        {:ok, updated} ->
+          # ⚠️ The source is how we *found* the business; the `third_space` is what a
+          # reader actually sees. Excluding only the source would leave the listing on the
+          # map — the exact outcome the request asked us to prevent.
+          delist_third_space(updated.url)
+          {:ok, :excluded, updated}
+
+        other ->
+          other
       end
     else
       # Status is deliberately untouched: the listing stays live until a human agrees.
@@ -481,6 +488,65 @@ defmodule Stacks.Discovery do
         other -> other
       end
     end
+  end
+
+  # Soft-deletes the third space for a delisted business.
+  #
+  # ⚠️ **Never a hard delete, and this is the load-bearing reason:** the discovery
+  # pipeline re-finds sources continuously, so a deleted row would be rediscovered,
+  # re-approved by an owner with no record of the objection, and re-listed — turning one
+  # removal request into a recurring one. The surviving row with `opted_out: true` is what
+  # makes the removal *stick*: `Discovery.create_third_space/1` refuses to create a second
+  # listing for a URL it already holds, and `Enrichment.list_third_spaces/1` excludes
+  # opted-out spaces from every query.
+  #
+  # Matched by `website_url` because that is what the space carries from its source, and
+  # it is the same value the requester submitted.
+  #
+  # Returns `:ok` regardless — a business asked to be delisted, and a bookkeeping failure
+  # here must not turn that into an error the requester sees. It is logged loudly instead,
+  # because a space that stayed listed after a verified request is a real problem.
+  defp delist_third_space(url) do
+    now = DateTime.utc_now()
+
+    # Ids first, then update by id. `update_all`'s `:returning` is driver-dependent and
+    # came back nil here, and a removal request is rare enough that two queries cost
+    # nothing — whereas relying on a capability that silently returns nil cost a debugging
+    # cycle.
+    ids =
+      Repo.all(
+        from s in ThirdSpace,
+          where: s.website_url == ^url and s.opted_out == false,
+          select: s.id
+      )
+
+    {count, _} =
+      Repo.update_all(
+        from(s in ThirdSpace, where: s.id in ^ids),
+        set: [opted_out: true, opted_out_at: now, updated_at: now]
+      )
+
+    if count > 0 do
+      Logger.info("Discovery: delisted #{count} third space(s) for #{url}")
+
+      # One event per space, keyed by the space's id.
+      #
+      # ⚠️ Deliberately carries **no URL and no payload**. The first draft emitted a single
+      # event with `aggregate_id: url` and `payload: %{url: url}`, and the PII lint refused
+      # it — correctly. `event_log` is immutable and only GDPR-erasable for PII, so a
+      # free-text value in it is permanent; and a third space IS the aggregate here, so the
+      # id is both more accurate and carries nothing that needs justifying.
+      Enum.each(ids, fn id ->
+        Events.emit_safe(%{
+          event_type: "third_space.delisted",
+          aggregate_type: "third_space",
+          aggregate_id: id,
+          payload: %{}
+        })
+      end)
+    end
+
+    :ok
   end
 
   @doc """
