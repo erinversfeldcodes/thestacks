@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod platform;
 pub mod price;
 pub mod proto;
 pub mod rate_limiter;
