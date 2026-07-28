@@ -62,6 +62,14 @@ config :core, Oban,
        # budget is spent the remaining authors are picked up on the
        # next night. 08:00 UTC picks a low-traffic window.
        {"0 8 * * *", Stacks.Workers.DiscoverAuthorSourcesJob, args: %{batch: true}},
+       # Rebuilds each store's ISBN→product-path index in the scraper service. That
+       # index lives in the service's process and dies with it — deliberately, so
+       # nothing durable holds a copy of anyone's catalogue — so without this job every
+       # store needing an index answers IndexRequired forever after a deploy.
+       #
+       # 04:30 UTC, half an hour after the price batch, so a rebuild is not competing
+       # with price lookups for the same per-domain rate limit.
+       {"30 4 * * *", Stacks.Workers.BuildScraperIndexJob},
        # Sweeps expired rows from cache.isbn_resolver_cache and
        # cache.title_search_cache. Runs at 03:30 UTC in the low-traffic
        # window between ImageRetentionJob (02:00) and RSSLivenessJob (03:00).
