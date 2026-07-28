@@ -16,14 +16,31 @@ defmodule Stacks.Enrichment.ScraperClient do
     - Value: `<unix_ts>.<HMAC-SHA256(secret, "<ts>.POST./scrape")>` (hex-encoded)
     - Secret: `SCRAPER_HMAC_SECRET` env var
 
-  ## Circuit Breaker
+  ## Circuit Breakers — two, covering different failure domains
 
-  Protected by `:scraper_fuse` — managed by `Stacks.CircuitBreakers`.
-  When blown, `scrape/2` returns `{:error, :circuit_open}`.
+  Both are consulted before a request and either being open yields
+  `{:error, :circuit_open}`:
+
+  - **`:scraper_fuse`** — the *sidecar* is unreachable or rejecting us. Shared by
+    every store, which is right: if the service is down, no store can be scraped.
+    Melted on a transport failure or an HTTP 401.
+  - **`:scraper_store_fuse_<store>`** — *this shop* is failing: an upstream HTTP
+    error, a rate limit, a missing config, or an extractor that cannot parse its
+    pages. Melted on any other non-200, and on a
+    `SCRAPE_OUTCOME_EXTRACTOR_FAILED` response.
+
+  The split matters because the shared fuse opens for 15 minutes after 3 failures.
+  Previously every failure melted it, so one bad shop stopped price scraping for
+  all of them — repeatedly, since most causes recur on every attempt.
+
+  Note what does **not** melt anything: `NOT_STOCKED` and `ROBOTS_BLOCKED` are
+  determinations, not failures, and arrive as HTTP 200 (see
+  `ScrapeOutcome` in the proto).
   """
 
   @behaviour Stacks.Enrichment.ScraperClientBehaviour
 
+  alias Stacks.CircuitBreakers
   alias Stacks.Proto.Scraper.ScrapeRequest
 
   require Logger
@@ -39,11 +56,45 @@ defmodule Stacks.Enrichment.ScraperClient do
   end
 
   defp do_scrape(isbn, store_name) do
-    case :fuse.ask(@fuse_name, :sync) do
-      :ok -> make_scraper_request(isbn, store_name)
+    store_fuse = CircuitBreakers.store_fuse(store_name)
+
+    # Both domains must be healthy. Asking the service fuse first means a downed
+    # sidecar short-circuits without allocating or consulting store state.
+    with :ok <- ask(@fuse_name),
+         :ok <- ask(store_fuse) do
+      make_scraper_request(isbn, store_name, store_fuse)
+    end
+  end
+
+  defp ask(fuse_name) do
+    case :fuse.ask(fuse_name, :sync) do
+      :ok -> :ok
+      # `:not_found` can only happen if a fuse was never installed — treat it as
+      # closed rather than blocking scrapes on a bookkeeping gap.
+      {:error, :not_found} -> :ok
       :blown -> {:error, :circuit_open}
     end
   end
+
+  # An HTTP 200 carrying EXTRACTOR_FAILED means the service worked and this store's
+  # extraction did not — a per-store fault that should back off from this store
+  # alone. NOT_STOCKED and ROBOTS_BLOCKED are determinations and melt nothing.
+  defp melt_if_extractor_failed(
+         {:ok, %{"outcome" => "SCRAPE_OUTCOME_EXTRACTOR_FAILED"}},
+         store_fuse,
+         isbn,
+         store_name
+       ) do
+    CircuitBreakers.melt(store_fuse)
+
+    Logger.warning(
+      "ScraperClient: extraction failed for isbn=#{isbn} store=#{store_name}; melting #{store_fuse}"
+    )
+
+    :ok
+  end
+
+  defp melt_if_extractor_failed(_decoded, _store_fuse, _isbn, _store_name), do: :ok
 
   defp build_scraper_request(isbn, store_name) do
     base_url = Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
@@ -60,7 +111,7 @@ defmodule Stacks.Enrichment.ScraperClient do
     )
   end
 
-  defp make_scraper_request(isbn, store_name) do
+  defp make_scraper_request(isbn, store_name, store_fuse) do
     req = build_scraper_request(isbn, store_name)
     # Telemetry :start is emitted here (after fuse gate) so every :start has a
     # matching :stop/:exception — necessary for handlers that track open spans.
@@ -82,7 +133,9 @@ defmodule Stacks.Enrichment.ScraperClient do
           %{isbn: isbn, store: store_name, status: 200}
         )
 
-        Jason.decode(resp_body)
+        decoded = Jason.decode(resp_body)
+        melt_if_extractor_failed(decoded, store_fuse, isbn, store_name)
+        decoded
 
       {:ok, %Finch.Response{status: status, body: resp_body}} ->
         duration = System.monotonic_time() - start_time
@@ -93,7 +146,13 @@ defmodule Stacks.Enrichment.ScraperClient do
           %{isbn: isbn, store: store_name, status: status}
         )
 
-        Stacks.CircuitBreakers.melt(@fuse_name)
+        # A 401 means our HMAC is wrong, which is true of every store — that is a
+        # service problem. Everything else non-200 is store-specific after the
+        # outcome split: an upstream HTTP error, a rate limit, a missing or invalid
+        # config for this store. Melting the shared fuse for those is what let one
+        # shop stop all twelve.
+        CircuitBreakers.melt(if status == 401, do: @fuse_name, else: store_fuse)
+
         Logger.warning("ScraperClient: HTTP #{status} for isbn=#{isbn} store=#{store_name}")
         {:error, %{status: status, body: resp_body}}
 
@@ -106,7 +165,8 @@ defmodule Stacks.Enrichment.ScraperClient do
           %{isbn: isbn, store: store_name, kind: :error, reason: reason}
         )
 
-        Stacks.CircuitBreakers.melt(@fuse_name)
+        # We never reached the sidecar, so this says nothing about any one store.
+        CircuitBreakers.melt(@fuse_name)
 
         Logger.warning(
           "ScraperClient: request failed for isbn=#{isbn} store=#{store_name}: #{inspect(reason)}"

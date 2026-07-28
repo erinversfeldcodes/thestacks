@@ -72,6 +72,47 @@ defmodule Stacks.CircuitBreakersTest do
     _, _ -> :ok
   end
 
+  describe "Stacks.CircuitBreakers.store_fuse/1 — per-store isolation" do
+    test "one failing store does not open the circuit for another" do
+      # The whole reason per-store fuses exist. :scraper_fuse is shared and opens
+      # for 15 minutes after 3 failures, so melting it for a store-specific fault
+      # stopped price scraping at all twelve seeded shops — and kept doing so,
+      # because most causes (a hostile site, a broken selector, a rate limit) recur
+      # on every attempt.
+      bad = CircuitBreakers.store_fuse("za/hostile_shop")
+      good = CircuitBreakers.store_fuse("za/fine_shop")
+
+      refute bad == good, "each store must get its own circuit"
+
+      # Enough melts to open the bad store's circuit outright.
+      Enum.each(1..5, fn _ -> CircuitBreakers.melt(bad) end)
+
+      assert :fuse.ask(bad, :sync) == :blown
+      assert :fuse.ask(good, :sync) == :ok, "a healthy store must stay scrapeable"
+
+      assert :fuse.ask(:scraper_fuse, :sync) == :ok,
+             "a store-specific fault must not open the service-wide circuit"
+    end
+
+    test "the same store name always resolves to the same fuse" do
+      assert CircuitBreakers.store_fuse("za/exclusive_books") ==
+               CircuitBreakers.store_fuse("za/exclusive_books")
+    end
+
+    test "store identifiers are normalised into readable fuse names" do
+      # Store ids are paths like "za/exclusive_books"; the fuse name should stay
+      # legible in logs and telemetry rather than being hashed.
+      assert CircuitBreakers.store_fuse("za/exclusive_books") ==
+               :scraper_store_fuse_za_exclusive_books
+    end
+
+    test "falls back to the shared fuse when no store is named" do
+      # A bookstore row with neither scraper_module nor name should not crash the
+      # client; it degrades to the shared circuit.
+      assert CircuitBreakers.store_fuse(nil) == :scraper_fuse
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # 1. Stacks.CircuitBreakers.install_all/0 installs all 5 fuses
   # ---------------------------------------------------------------------------
