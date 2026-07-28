@@ -1102,6 +1102,13 @@ Repo.insert_all(
 #
 # Owner-specified target list, 2026-07-27. No PII, no user FK.
 #
+# ⚠️ `scraper_module` must be the Rust registry's key, which is derived from the
+# TOML's path under `apps/scraper/scrapers/` minus the extension — so
+# "za/exclusive_books", NOT "exclusive_books". Nothing validates the two, and the
+# mismatch is silent: the service answers 404 "store not found" forever and the
+# store simply never produces a price. Measured 2026-07-28 against a live service —
+# every seeded row was unmatchable.
+#
 # ── Measured capability, 2026-07-28 ────────────────────────────────────────
 # Sampled 50 products per Shopify store, 30 per WooCommerce store. Recorded here
 # so nobody re-probes needlessly; the service still derives it at runtime.
@@ -1134,24 +1141,24 @@ Repo.insert_all(
 # of catalogue size x wall clock. Until that lands, do not enable the cron
 # against the full list. Several of these are one-person shops.
 bookstore_targets = [
-  {9001, "Loot", "https://www.loot.co.za", "loot", false},
-  {9002, "Wordsworth Books", "https://www.wordsworth.co.za", "wordsworth", true},
-  {9003, "The Book Lounge", "https://booklounge.co.za", "book_lounge", true},
+  {9001, "Loot", "https://www.loot.co.za", "za/loot", false},
+  {9002, "Wordsworth Books", "https://www.wordsworth.co.za", "za/wordsworth", true},
+  {9003, "The Book Lounge", "https://booklounge.co.za", "za/book_lounge", true},
   # Bare domain, not www: www.exclusivebooks.co.za answers 301 while the bare
   # host answers 200, so every request through www would cost two round trips.
-  {9004, "Exclusive Books", "https://exclusivebooks.co.za", "exclusive_books", true},
-  {9005, "Clarke's Bookshop", "https://clarkesbooks.co.za", "clarkes_books", true},
-  {9006, "Kalk Bay Books", "https://kalkbaybooks.co.za", "kalk_bay_books", true},
-  {9007, "Love Books", "http://www.lovebooks.co.za", "love_books", true},
-  {9008, "Bridge Books", "https://bridgebooks.co.za", "bridge_books", true},
+  {9004, "Exclusive Books", "https://exclusivebooks.co.za", "za/exclusive_books", true},
+  {9005, "Clarke's Bookshop", "https://clarkesbooks.co.za", "za/clarkes_books", true},
+  {9006, "Kalk Bay Books", "https://kalkbaybooks.co.za", "za/kalk_bay_books", true},
+  {9007, "Love Books", "http://www.lovebooks.co.za", "za/love_books", true},
+  {9008, "Bridge Books", "https://bridgebooks.co.za", "za/bridge_books", true},
   # 9009 was Skoobs Theatre of Books. Removed 2026-07-28: skoobs.co.za and
   # www.skoobs.co.za both return NXDOMAIN, so the domain no longer exists and the
   # shop appears to have closed. Kept as a comment rather than silently dropped so
   # the gap in the id sequence is explained, and so it is not re-added from the
   # owner's original list without re-checking DNS.
-  {9010, "Ike's Books", "http://ikesbooks.com", "ikes_books", true},
-  {9011, "Fortunate Finds", "https://fortunatefinds.co.za", "fortunate_finds", true},
-  {9012, "Stellenbosch Books", "https://stellenboschbooks.co.za", "stellenbosch_books", true}
+  {9010, "Ike's Books", "http://ikesbooks.com", "za/ikes_books", true},
+  {9011, "Fortunate Finds", "https://fortunatefinds.co.za", "za/fortunate_finds", true},
+  {9012, "Stellenbosch Books", "https://stellenboschbooks.co.za", "za/stellenbosch_books", true}
 ]
 
 Repo.insert_all(
