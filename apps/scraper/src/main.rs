@@ -95,7 +95,13 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
     // Reported on every response so the caller can persist it, which keeps the
     // observation's timestamp current without a separate probe schedule. A
     // replatform therefore surfaces on the next scrape rather than the next sweep.
-    let observed = wire_capability(state.engine.capability_for(&payload.store, &config).await);
+    // A failed observation is reported as no observation, not as a fabricated one.
+    let observed = state
+        .engine
+        .capability_for(&payload.store, &config)
+        .await
+        .ok()
+        .map(wire_capability_of);
 
     // Two things are going on here, and both are deliberate.
     //
@@ -271,12 +277,52 @@ fn empty_response(isbn: &str, store: &str, currency: &str) -> ScrapeResponse {
 }
 
 /// Convert an observed capability to its wire form.
-fn wire_capability(cap: stacks_scraper::platform::Capability) -> Option<StoreCapability> {
-    Some(StoreCapability {
+fn wire_capability_of(cap: stacks_scraper::platform::Capability) -> StoreCapability {
+    StoreCapability {
         price_source: cap.price_source.as_wire().to_string(),
         isbn_location: cap.isbn_location.as_wire().to_string(),
         lookup_mode: cap.lookup_mode.as_wire().to_string(),
-    })
+    }
+}
+
+/// POST /index/build — build a store's ISBN→product-path index.
+///
+/// Separate from `/scrape` because it is a bulk operation: up to `MAX_INDEX_PAGES`
+/// requests against a shop limited to a few per minute, so it waits on the rate limit
+/// and can take minutes. It must never happen inside a price request.
+///
+/// Needed by the four Shopify targets whose products carry an ISBN somewhere other
+/// than the handle (Wordsworth, Stellenbosch, Bridge, Clarke's), which therefore
+/// cannot be addressed by ISBN directly.
+async fn index_build(
+    State(state): State<AppState>,
+    Json(payload): Json<ScrapeRequest>,
+) -> Response {
+    let config = match state.registry.get(&payload.store) {
+        Ok(c) => c,
+        Err(e) => {
+            return (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))).into_response();
+        }
+    };
+
+    match state.engine.build_index(&payload.store, &config).await {
+        Ok(entries) => {
+            tracing::info!(
+                "built index for store={} entries={}",
+                payload.store,
+                entries
+            );
+            Json(json!({"store": payload.store, "entries": entries})).into_response()
+        }
+        Err(e) => {
+            tracing::error!("index build failed for store={}: {}", payload.store, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn config_reload(State(state): State<AppState>) -> Response {
@@ -332,6 +378,7 @@ async fn main() -> anyhow::Result<()> {
     let authed_routes = Router::new()
         .route("/scrape", post(scrape))
         .route("/config/reload", post(config_reload))
+        .route("/index/build", post(index_build))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             hmac_auth_middleware,
@@ -483,6 +530,7 @@ requests_per_minute = 60
         let authed_routes = Router::new()
             .route("/scrape", post(scrape))
             .route("/config/reload", post(config_reload))
+            .route("/index/build", post(index_build))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 hmac_auth_middleware,
