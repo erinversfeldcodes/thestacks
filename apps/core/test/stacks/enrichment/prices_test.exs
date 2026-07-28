@@ -353,4 +353,72 @@ defmodule Stacks.Enrichment.PricesTest do
       assert DateTime.compare(refreshed, old) == :gt
     end
   end
+
+  describe "canary" do
+    test "a priced ISBN becomes the canary" do
+      store = insert(:bookstore, canary_isbn: nil)
+      assert :ok = Prices.note_canary(store, "9780749397050")
+
+      assert Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).canary_isbn ==
+               "9780749397050"
+    end
+
+    test "the canary going missing clears the capability so it is re-derived" do
+      # The failure detection alone cannot see: the platform stays Shopify, the probe
+      # still answers, but the shop re-slugs its catalogue or moves the ISBN out of
+      # `handle` for new products. Detection reports the same capability while every
+      # lookup quietly returns "not stocked".
+      store =
+        insert(:bookstore,
+          canary_isbn: "9780749397050",
+          price_source: "shopify_products_json",
+          isbn_location: "handle",
+          lookup_mode: "direct",
+          capability_probed_at: DateTime.utc_now()
+        )
+
+      assert :ok = Prices.canary_failed(store, "9780749397050")
+
+      reloaded = Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id)
+      assert reloaded.price_source == nil
+      assert reloaded.isbn_location == nil
+      assert reloaded.lookup_mode == nil
+      assert reloaded.capability_probed_at == nil
+    end
+
+    test "an ordinary edition going out of stock changes nothing" do
+      # Most (edition, store) pairs legitimately have no price. Treating each of those
+      # as evidence the store broke would clear the capability constantly.
+      store =
+        insert(:bookstore,
+          canary_isbn: "9780749397050",
+          price_source: "shopify_products_json",
+          isbn_location: "handle",
+          lookup_mode: "direct"
+        )
+
+      assert :not_canary = Prices.canary_failed(store, "9788497592581")
+
+      assert Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).price_source ==
+               "shopify_products_json"
+    end
+
+    test "a store with no canary yet is unaffected" do
+      store = insert(:bookstore, canary_isbn: nil, price_source: "woo_store_api")
+
+      assert :not_canary = Prices.canary_failed(store, "9780749397050")
+
+      assert Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).price_source ==
+               "woo_store_api"
+    end
+
+    test "re-noting the same canary does not write" do
+      store = insert(:bookstore, canary_isbn: "9780749397050")
+      before = Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).updated_at
+
+      assert :ok = Prices.note_canary(store, "9780749397050")
+
+      assert Core.Repo.get!(Stacks.Enrichment.Bookstore, store.id).updated_at == before
+    end
+  end
 end
