@@ -504,6 +504,15 @@ sources:
               Kilometres to the nearest bookshop, computed once at geocode time so the
               500 m rule is a scalar comparison rather than a per-pan recomputation.
               Null means "not computed", which is not the same as "no bookshop near".
+          - name: curated
+            description: >
+              Owner-marked as worth recommending — what "well-regarded" means here (no
+              stars, no third-party ratings). Also the second tier of the 500 m rule:
+              beyond 500 m a space qualifies only if curated.
+          - name: curated_note
+            description: >
+              The owner's own words for the cork board poster ("a good window seat and no
+              music"). Free text, deliberately not a score.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at

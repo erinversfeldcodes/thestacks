@@ -431,6 +431,25 @@ message ThirdSpace {
   // rather than silently vanishing from the queue.
   double nearest_bookshop_km = 18 [json_name = "nearest_bookshop_km"];
 
+  // ── Curation (US-3.1.1 §4) ───────────────────────────────────────────────
+  //
+  // Owner-marked as worth recommending. This is what "well-regarded" means here: no
+  // stars, no scores, no third-party ratings API — the cork board shows "a handful",
+  // and curation suits that framing.
+  //
+  // It is also the **second tier of the 500 m rule**. The owner's ruling (2026-07-28):
+  // *"500m is a rule of thumb: further away should only be included if the ratings are
+  // high."* So proximity and quality trade off — a space inside 500 m qualifies on
+  // distance alone, and one further out qualifies only if curated. Observed live: Truth
+  // Coffee sits 678 m from Clarke's, which a hard cutoff wrongly excluded.
+  bool curated = 19 [json_name = "curated"];
+
+  // What the poster says, in the owner's words — "a good window seat and no music".
+  //
+  // Free text, not a rating. "4.6 stars" is not a sentence a cork board should contain,
+  // and editorial copy is honest about its provenance in a way a borrowed score is not.
+  string curated_note = 20 [json_name = "curated_note"];
+
   // When this record was created.
   google.protobuf.Timestamp created_at = 12 [json_name = "created_at"];
 

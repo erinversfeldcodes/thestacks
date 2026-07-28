@@ -1576,12 +1576,44 @@ producer):
 | `list_third_spaces(near_bookshop_km: 5.0)` | **1 row** |
 | `list_third_spaces(near_bookshop_km: 0.5)` | **0 rows** — correctly excluded at 678 m |
 
-⚠️ **A product finding from the live data, not a bug: 500 m may be too tight.** Truth Coffee is 678 m
-from Clarke's Bookshop — a genuinely walkable pairing and exactly the kind of place US-3.1.1 §1 describes
-("somewhere to buy a book and somewhere to sit with it"), and the rule excludes it. The filter is working
-and discriminating correctly; the *threshold* is the question. Worth revisiting against real geography
-before the map ships, because at 500 m the page may be empty in cities where it should not be. Left as
-specified rather than quietly widened — changing a story's stated rule is the owner's call.
+### ✅ The 500 m rule became two tiers (owner ruling, 2026-07-28)
+
+The live data produced a product finding — Truth Coffee at **678 m** from Clarke's, walkable, excluded by
+a hard cutoff — which I recorded rather than acting on, because changing a story's stated rule is the
+owner's call. The ruling came back: *"500m is a rule of thumb: further away should only be included if
+the ratings are high."*
+
+Implemented as a genuine trade-off, not a wider circle:
+
+| Tier | Qualifies |
+|---|---|
+| **1** — within `near_bookshop_km` | on distance alone |
+| **2** — beyond it, within `Enrichment.curated_within_km/0` | **only if `curated`** |
+
+`curated` / `curated_note` on `op.third_spaces` are the mechanism — the same fields US-3.1.1 §4 already
+obliged as the source of "well-regarded", now carrying the distance trade-off as well. That is a good sign
+about the original decision: one field served two purposes without being stretched.
+
+⚠️ **Two ways this could have been done wrong, both tested and probed:**
+- **Tier 2 without the curation requirement** is just a bigger radius, and "the ratings are high" would
+  mean nothing. Probe: removing `curated == true` reddens the uncurated case.
+- **Tier 2 without an outer bound** would let a curated café 40 km from any bookshop onto a map answering
+  "where can I read *near here*". Asserted finite, and the 40 km case is tested.
+
+### ⚠️ Chains need per-branch rows — worse than "one arbitrary branch"
+
+Owner: *"there are a lot of Wordsworth and Exclusive Books branches, these are chains."* Correct, and my
+original framing understated the consequence. One row per chain does not merely give an *approximate*
+location — it makes the pairing rule **miss real pairings**. Wordsworth's row geocoded to `23.37°E`
+(Garden Route), so a third space beside a Cape Town Wordsworth is not paired with it at all.
+
+It fails safe (proximity is understated, never faked), which is why it is 🟧 rather than ⛔. But it is a
+**data-model gap**: `op.bookstores` needs one row per branch, or a branches table. Not a geocoding fix,
+and not attempted here.
+
+**Related, same root cause:** 3 of 10 physical shops did not geocode (Fortunate Finds, Ike's Books, **The
+Book Lounge**) because `op.bookstores` has **no city or address**, so the query is only `"<name>, ZA"`.
+Both problems point at the same missing structure — a bookshop record that knows *where a branch is*.
 
 **Two data gaps recorded rather than papered over:**
 - **3 of 10 physical shops did not geocode** (Fortunate Finds, Ike's Books, **The Book Lounge** — a

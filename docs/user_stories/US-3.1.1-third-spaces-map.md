@@ -98,6 +98,31 @@ Two constraints on the filter, both of which are the difference between a filter
 - **The 500 m-of-a-bookshop rule is not filterable.** It is the premise of the page, not a
   preference. A reader who turns it off is using a general-purpose map, which this is not.
 
+### ✅ DECIDED (2026-07-28) — 500 m is a rule of thumb, not a cutoff
+
+Owner ruling: *"500m is a rule of thumb: further away should only be included if the ratings are
+high."* So proximity and quality **trade off**, in two tiers:
+
+| Tier | Qualifies |
+|---|---|
+| **1** — within 500 m of a bookshop | on distance alone |
+| **2** — beyond 500 m, within an outer bound | only if **curated** |
+
+**The live case that forced this.** Truth Coffee Roasting is **678 m** from Clarke's Bookshop —
+walkable, and exactly the pairing §1 describes ("somewhere to buy a book and somewhere to sit with
+it"). A hard 500 m cutoff excluded it. The filter was behaving correctly; the *rule* was too blunt.
+
+Two constraints that keep the second tier honest:
+- **Tier 2 still has an outer bound** (`Enrichment.curated_within_km/0`). "Curated" cannot mean "any
+  distance" — a wonderful café 40 km from the nearest bookshop is not an answer to "where can I read
+  near here".
+- **Tier 2 requires curation, not merely a wider radius.** Otherwise it is just a bigger circle and
+  "the ratings are high" means nothing. Both directions are tested, and a probe confirms dropping the
+  curated requirement reddens the uncurated case.
+
+This is what `curated` / `curated_note` on `third_space` are *for* — §4 obliged them as the source of
+"well-regarded", and they now also carry the distance trade-off.
+
 ---
 
 ## 4. Data this needs, and what is missing
@@ -108,7 +133,7 @@ inputs do not exist yet.**
 | Input | State | Gap |
 |---|---|---|
 | Third-space locations | ❌ `op.third_spaces` has **0 rows**, and nothing writes it | A producer, and coordinates — the table has `city` but **no lat/lng** |
-| Bookshop locations | ❌ `op.bookstores` has `website_url`, `country_code`, **no lat/lng** | Geocoding, without which the 500 m rule cannot be computed at all |
+| Bookshop locations | ✅ geocoded 2026-07-28 (7 of 10 physical shops) | ⚠️ **Chains need per-branch rows.** Wordsworth and Exclusive Books have many branches; one row each means one coordinate, so the pairing rule **misses real pairings** — a space beside a Cape Town Wordsworth is not paired with it because that row resolved to the Garden Route. This *understates* proximity rather than faking it, but it is a data-model gap, not a geocoding one |
 | "Well-regarded" | ❌ No rating exists for any space | ⚠️ **DECIDE** — see below |
 | Events near a view | ❌ `third_space_events` and `bookstore_events` both **0 rows** | Needs the `schema.org/Event` → `.ics` → LLM cascade from the scraper research, and venues with coordinates first |
 

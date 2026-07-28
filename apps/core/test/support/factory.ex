@@ -355,7 +355,11 @@ defmodule Stacks.Factory do
       latitude: -33.9249,
       longitude: 18.4241,
       website_url: "https://example.com",
-      verified: false
+      verified: false,
+      # Defaults to NOT curated. Curation is the second tier of the 500 m rule, so a
+      # factory that curated by default would let every fixture qualify on quality it
+      # was never given — and the tier-2 tests would pass without asserting the trade-off.
+      curated: false
     }
   end
 

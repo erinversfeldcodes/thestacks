@@ -198,6 +198,42 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
       refute "Miles From Books" in names
     end
 
+    test "a curated space just beyond the radius is included — 500 m is a rule of thumb" do
+      # ⚠️ Owner ruling, 2026-07-28: "500m is a rule of thumb: further away should only be
+      # included if the ratings are high." The live case that prompted it — Truth Coffee at
+      # 678 m from Clarke's Bookshop, walkable, and excluded by a hard cutoff.
+      insert(:third_space, name: "Truth Coffee", nearest_bookshop_km: 0.678, curated: true)
+
+      names = Enrichment.list_third_spaces(near_bookshop_km: 0.5) |> Enum.map(& &1.name)
+
+      assert "Truth Coffee" in names,
+             "a curated space 678 m out was excluded — the rule is still a hard cutoff"
+    end
+
+    test "an uncurated space just beyond the radius stays out" do
+      # The other half of the trade-off. Without this the tier-2 rule would just be a
+      # wider radius for everyone, and "the ratings are high" would mean nothing.
+      insert(:third_space, name: "Ordinary Cafe", nearest_bookshop_km: 0.678, curated: false)
+
+      names = Enrichment.list_third_spaces(near_bookshop_km: 0.5) |> Enum.map(& &1.name)
+
+      refute "Ordinary Cafe" in names
+    end
+
+    test "curated does not mean any distance" do
+      # A wonderful cafe 40 km from the nearest bookshop is not an answer to "where can I
+      # read near here". The outer bound is what stops tier 2 becoming unbounded.
+      assert Enrichment.curated_within_km() < 10.0,
+             "the curated outer bound is too wide to mean 'near a bookshop'"
+
+      insert(:third_space, name: "Distant Gem", nearest_bookshop_km: 40.0, curated: true)
+
+      names = Enrichment.list_third_spaces(near_bookshop_km: 0.5) |> Enum.map(& &1.name)
+
+      refute "Distant Gem" in names,
+             "a curated space 40 km from any bookshop reached the map"
+    end
+
     test "a space with no computed proximity is not assumed to be near a bookshop" do
       # Missing data must not put a space on the map. `nil` means "not computed", which
       # is not the same as "close".

@@ -1056,6 +1056,10 @@ models:
         description: Longitude.
       - name: nearest_bookshop_km
         description: Nearest bookshop km.
+      - name: curated
+        description: Curated.
+      - name: curated_note
+        description: Curated note.
       - name: created_at
         description: Timestamp when the record was created.
         tests:
