@@ -166,12 +166,21 @@ defmodule Stacks.Feeds do
   # One query for the whole feed rather than one per entry: a shelf can hold hundreds
   # of books and a feed is regenerated on every placement event.
   #
-  # Returns a plain list, not a MapSet. Under OTP 28 dialyzer reports
-  # `call_without_opaque` when a MapSet built from `Repo.all`'s `any()` result crosses a
-  # function boundary — the same issue that made `book_ids_with_user_writing` return a
-  # list (b76fa3f3). The moved set is small (books that changed shelf, not the whole
-  # shelf), so a list membership check costs nothing here.
-  defp moved_book_ids(_bookshelf, []), do: []
+  # Returns a **map** used as a set, not a MapSet and not a list.
+  #
+  # Not a MapSet: under OTP 28 dialyzer reports `call_without_opaque` when a MapSet
+  # built from `Repo.all`'s `any()` result crosses a function boundary — the same issue
+  # behind `book_ids_with_user_writing` (b76fa3f3). MapSet is opaque, so dialyzer cannot
+  # see through it to the term it was built from.
+  #
+  # Not a list either, which was the first fix and the wrong one: a list turns the entry
+  # loop into O(entries × moved), and this runs on **every placement event**, so a shelf
+  # of several hundred mostly-moved books would do six figures of binary comparisons per
+  # regeneration. A plain map is O(log n) per lookup, is not opaque, and needs no
+  # dialyzer accommodation — the right structure rather than one chosen to satisfy a
+  # tool.
+  @spec moved_book_ids(map(), list()) :: %{optional(binary()) => true}
+  defp moved_book_ids(_bookshelf, []), do: %{}
 
   defp moved_book_ids(bookshelf, placements) do
     book_ids = Enum.map(placements, & &1.book_id)
@@ -184,6 +193,7 @@ defmodule Stacks.Feeds do
         select: h.book_id,
         distinct: true
     )
+    |> Map.new(&{&1, true})
   end
 
   # The cache writer is injectable (defaulting to `put_cache/3`) so tests can
@@ -236,7 +246,7 @@ defmodule Stacks.Feeds do
         do: DateTime.to_iso8601(placement.placed_at),
         else: DateTime.to_iso8601(DateTime.utc_now())
 
-    verb = if placement.book_id in moved_ids, do: "moved", else: "added"
+    verb = if Map.has_key?(moved_ids, placement.book_id), do: "moved", else: "added"
 
     summary =
       "#{escape_xml(title)} by #{escape_xml(author_name)} #{verb} to " <>

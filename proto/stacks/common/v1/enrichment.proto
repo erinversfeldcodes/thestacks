@@ -129,6 +129,18 @@ message DiscoveredSource {
 
   // When this record was last updated.
   google.protobuf.Timestamp updated_at = 14 [json_name = "updated_at"];
+
+  // When a removal was *requested*, as distinct from applied.
+  //
+  // `opt_out` used to apply the exclusion the moment a form was submitted, which meant
+  // anyone who knew a listing's URL could delist any business — the form has no account
+  // behind it by design. A request whose contact email does not demonstrably belong to
+  // the business now waits for owner review instead, and this records that it is waiting.
+  //
+  // Pending is derivable rather than a new enum value: this timestamp set while `status`
+  // is not yet `excluded` *is* the pending state, which avoids an enum alteration and
+  // keeps the two facts (requested / applied) independently visible.
+  google.protobuf.Timestamp exclusion_requested_at = 15 [json_name = "exclusion_requested_at"];
 }
 
 // ReviewSnapshot represents a scraped review summary for a book from an external source.
