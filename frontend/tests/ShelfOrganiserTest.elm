@@ -20,7 +20,9 @@ import Components.ShelfOrganiser as Organiser
 import Expect
 import Html
 import Html.Attributes
+import Json.Encode as Encode
 import Test exposing (Test, describe, test)
+import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import Types.Placement exposing (Placement)
@@ -205,6 +207,56 @@ suite =
                         |> Query.fromHtml
                         |> Query.find [ Selector.attribute (attr "data-testid" "shelf-add") ]
                         |> Query.has [ Selector.disabled True ]
+            ]
+        , describe "the drag events do not cancel the drag they are part of"
+            [ test "dragover must NOT emit DragEnd — that killed every drop" <|
+                \_ ->
+                    -- ⛔ The bug this replaced, found by driving a preview on 2026-07-28.
+                    --
+                    -- `dragover` has to call preventDefault or the browser refuses the drop,
+                    -- and the message it carried was chosen as an irrelevant placeholder:
+                    -- `DragEnd`. But `DragEnd` clears `dragging`, and `dragover` fires
+                    -- *continuously* while the pointer is over a row — so by the time `drop`
+                    -- arrived, `dragging` was always `Nothing`, `DropOn`'s Nothing branch
+                    -- returned silently, and no drop ever reordered anything. Drag-and-drop
+                    -- could not have worked in any browser.
+                    --
+                    -- Live proof of the mechanism: dragstart → drop reorders;
+                    -- dragstart → dragover → drop does nothing.
+                    --
+                    -- 28 tests passed throughout, because they all tested the pure move
+                    -- functions — which were never wrong — and never the event wiring.
+                    render three
+                        |> Query.findAll [ Selector.attribute (attr "data-testid" "shelf-row") ]
+                        |> Query.first
+                        |> Event.simulate (Event.custom "dragover" (Encode.object []))
+                        |> Event.toResult
+                        |> Expect.equal (Ok Organiser.DragOver)
+            , test "dragstart still starts the drag" <|
+                \_ ->
+                    render three
+                        |> Query.findAll [ Selector.attribute (attr "data-testid" "shelf-row") ]
+                        |> Query.index 1
+                        |> Event.simulate (Event.custom "dragstart" (Encode.object []))
+                        |> Event.toResult
+                        |> Expect.equal (Ok (Organiser.DragStart "b"))
+            , test "drop targets the row it landed on" <|
+                \_ ->
+                    render three
+                        |> Query.findAll [ Selector.attribute (attr "data-testid" "shelf-row") ]
+                        |> Query.first
+                        |> Event.simulate (Event.custom "drop" (Encode.object []))
+                        |> Event.toResult
+                        |> Expect.equal (Ok (Organiser.DropOn "a"))
+            , test "dragend is still reachable, for a drag abandoned off-target" <|
+                \_ ->
+                    -- Cancelling is a real case — it just must not be what `dragover` does.
+                    render three
+                        |> Query.findAll [ Selector.attribute (attr "data-testid" "shelf-row") ]
+                        |> Query.first
+                        |> Event.simulate (Event.custom "dragend" (Encode.object []))
+                        |> Event.toResult
+                        |> Expect.equal (Ok Organiser.DragEnd)
             ]
         , describe "the row says how full a shelf is"
             [ test "names an empty shelf as empty, so Remove reads as safe" <|

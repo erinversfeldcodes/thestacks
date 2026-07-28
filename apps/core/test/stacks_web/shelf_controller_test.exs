@@ -73,6 +73,38 @@ defmodule StacksWeb.ShelfControllerTest do
       conn = get(conn, "/api/bookshelves/library/shelves")
       assert json_response(conn, 401)
     end
+
+    test "does not claim to carry placements, even for a shelf holding books", %{
+      conn: conn,
+      user: user,
+      bookshelf: bookshelf,
+      shelf_a: shelf_a
+    } do
+      # ⚠️ This endpoint used to return `placements: []` for every shelf regardless of what
+      # was on it. Structurally valid, factually false — and the SPA repainted the owner's
+      # bookcase from it after every shelf mutation, so their books vanished, a full shelf
+      # read as "empty", and Remove lit up on a shelf the server refuses to delete.
+      #
+      # Asserting the key is *absent* rather than correct is the point: this endpoint does
+      # not own placement data, and an empty list is the failure mode. A missing key breaks
+      # a decoder loudly; an empty one is indistinguishable from an empty shelf.
+      book = insert(:book)
+      insert(:placement, bookshelf: bookshelf, book: book, shelf: shelf_a)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> get("/api/bookshelves/library/shelves")
+
+      %{"shelves" => shelves} = json_response(conn, 200)
+      loaded = Enum.find(shelves, &(&1["id"] == shelf_a.id))
+
+      assert loaded, "the shelf holding the book was not returned at all"
+
+      refute Map.has_key?(loaded, "placements"),
+             "the shelf payload carries a `placements` key again — if it is empty it is a " <>
+               "lie, and the SPA will paint an empty bookcase over a full one"
+    end
   end
 
   # ---------------------------------------------------------------------------
