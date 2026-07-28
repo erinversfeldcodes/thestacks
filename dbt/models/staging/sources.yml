@@ -414,6 +414,11 @@ sources:
             description: Timestamp when the source was excluded.
           - name: exclusion_email
             description: Email address that requested exclusion (GDPR).
+          - name: exclusion_requested_at
+            description: >
+              When a removal was requested, as distinct from applied. Set while status
+              is not yet 'excluded' means the request awaits owner review, because the
+              contact address did not belong to the listed website's domain.
 
       - name: bookstore_events
         description: Events hosted by partner bookstores (author signings, readings).

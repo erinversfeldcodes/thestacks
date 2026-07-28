@@ -20,8 +20,22 @@ defmodule StacksWeb.OptOutController do
   @spec create(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def create(conn, %{"url" => url, "email" => email} = _params) do
     case Discovery.opt_out(url, %{email: email}) do
-      {:ok, _source} ->
-        json(conn, %{message: "Source has been opted out successfully."})
+      {:ok, :excluded, _source} ->
+        json(conn, %{
+          status: "removed",
+          message: "Your listing has been removed and will not be re-added."
+        })
+
+      # Deliberately different copy: the listing is still live. Telling someone their
+      # listing is gone when it is not would be worse than telling them it is pending.
+      {:ok, :pending_review, _source} ->
+        json(conn, %{
+          status: "pending_review",
+          message:
+            "Your request has been received and will be reviewed. Because the contact " <>
+              "address does not belong to the listed website's domain, we verify these " <>
+              "by hand before removing a listing."
+        })
 
       {:error, :not_found} ->
         conn

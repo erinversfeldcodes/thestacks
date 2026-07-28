@@ -880,6 +880,8 @@ models:
         description: Config generated.
       - name: excluded_at
         description: Excluded at.
+      - name: exclusion_requested_at
+        description: Exclusion requested at.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

@@ -50,7 +50,15 @@ defmodule Stacks.Enrichment do
   @spec discovered_source_status_changeset(DiscoveredSource.t(), map()) :: Ecto.Changeset.t()
   def discovered_source_status_changeset(%DiscoveredSource{} = source, attrs) do
     source
-    |> cast(attrs, [:status, :approved_at, :excluded_at, :exclusion_email])
+    # `exclusion_requested_at` is castable so a removal request can be recorded without
+    # applying it — the pending state for an unverified request.
+    |> cast(attrs, [
+      :status,
+      :approved_at,
+      :excluded_at,
+      :exclusion_email,
+      :exclusion_requested_at
+    ])
     |> validate_required([:status])
   end
 
