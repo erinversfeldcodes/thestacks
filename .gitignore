@@ -68,6 +68,12 @@ node_modules/
 .claude/worktrees/
 plans/*-state.json
 plans/*-state-complete.json
+# ...EXCEPT a campaign's state file, which is a shared artifact rather than local run state.
+# Per-issue orchestrator state above is ephemeral. A campaign's state file is the handoff a
+# fresh pass resumes from and the input to `just wave-status` — so if it were ignored, a
+# worktree or a fresh clone would silently have no state and the harness would fall back to
+# asking a human, which is the exact failure it was built to remove. Checked in on purpose.
+!plans/*campaign*-state.json
 
 # IDE
 .idea/
