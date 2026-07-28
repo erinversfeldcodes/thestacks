@@ -14,7 +14,9 @@ dev:
     just db-migrate
 
     echo "==> Generating Ecto schemas from proto..."
-    cd apps/core && mix proto.sync && cd ../..
+    # Subshell so the cd cannot leak into the steps below — `cd ..` from apps/core
+    # lands in apps/, not the repo root, which is how the first version of this broke.
+    (cd apps/core && mix proto.sync)/..
 
     echo "==> Generating Elm proto decoders..."
     bash scripts/gen-elm-proto.sh
@@ -193,6 +195,58 @@ db-rollback-check:
 db-reset:
     mix ecto.reset
     mix run apps/core/priv/repo/seeds.exs
+
+# Regenerate every target after a .proto change, then name the steps codegen CANNOT do.
+#
+# Added 2026-07-28 after adding five proto fields cost three separate gate failures in one
+# day: `mix proto.sync` writes the Ecto schema, the dbt model and the migration, but four
+# follow-ons are hand-written and each fails in a different place — one of them silently.
+#
+# Run this instead of remembering the order.
+proto-sync-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "==> 1/4  Ecto schemas, dbt models, migrations (mix proto.sync)"
+    # Subshell so the cd cannot leak into the steps below — `cd ..` from apps/core
+    # lands in apps/, not the repo root, which is how the first version of this broke.
+    (cd apps/core && mix proto.sync)
+
+    echo "==> 2/4  Elixir proto structs"
+    bash scripts/gen-elixir-proto.sh
+
+    echo "==> 3/4  Rust serde structs"
+    bash scripts/gen-rust-proto.sh
+
+    echo "==> 4/4  Elm decoders"
+    bash scripts/gen-elm-proto.sh
+
+    # A generated migration is UNTRACKED, and `mix test` deletes untracked
+    # `_add_*_to_*` migrations. Staging immediately is the only reliable protection.
+    for f in $(git status --porcelain apps/core/priv/repo/migrations/ | awk '/^\?\?/ {print $2}'); do
+        git add "$f"
+        echo "    staged generated migration: $f"
+    done
+
+    echo ""
+    echo "==> Codegen done. Four things it CANNOT do for you:"
+    echo ""
+    echo "  1. CAST THE FIELD  — changesets here are hand-written on purpose, so a new"
+    echo "     column is NOT writable until you add it to the cast list. Dropping a field"
+    echo "     is SILENT: no error, the column just stays nil."
+    echo "       guarded by: apps/core/test/stacks/changeset_field_coverage_test.exs"
+    echo ""
+    echo "  2. DECIDE ON THE FACTORY — set the field, or skip-list it with a reason."
+    echo "       guarded by: apps/core/test/stacks/factory_proto_validation_test.exs"
+    echo ""
+    echo "  3. DESCRIBE IT FOR dbt — add the column to dbt/models/staging/sources.yml."
+    echo "       guarded by: just lint-dbt  (source-has-all-columns)"
+    echo ""
+    echo "  4. COMMENT IT FOR buf — every field needs its own comment, not a shared block."
+    echo "       guarded by: buf lint proto/"
+    echo ""
+    echo "  All four are gates, so nothing ships broken — but 1 is the one that fails"
+    echo "  silently at RUNTIME if its test is not run. Finish with: just run just verify"
 
 # Run Playwright E2E tests (requires just dev to be running on :4000/:4001)
 test-e2e:
