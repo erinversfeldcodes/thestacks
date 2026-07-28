@@ -1515,7 +1515,7 @@ to a later wave rather than being renamed Wave 0.
 | **1** lat/lng + `nearest_bookshop_km` on both tables, indexed | ✅ **Wave 0** (`2f4288cb`) | A proto contract change: cheapest early, additive forever. Also made a **live** endpoint's advertised contract honourable |
 | **2** Geocoding at approval, provider-swappable | ✅ **Wave 0** | Prerequisite of 3, and the thing that turns an approval into a position |
 | **3** `approve_source/1` creates the `third_space` — the only producer | ✅ **Wave 0** | The rung-8 gate: producing rows *before* 1–2 would turn "empty" into "silently wrong" on a live endpoint |
-| **4** Tiles ADR (provider, proxy-vs-direct, terms clause) | ⏭ **later wave** | A licensing and privacy decision needing a terms reading, not code. Must precede any tile code but blocks nothing in Wave 0 |
+| **4** Tiles ADR (provider, proxy-vs-direct, terms clause) | ✅ **Wave 0** — ADR 022 | Terms were fetched and read on 2026-07-28 rather than deferred. ⚠️ Two of three objections to Google **dissolved**; what rules it out is a verified chain ending in the `unsafe-eval` prohibition. Provider shortlist still open, on purpose |
 | **5** The narrow Elm port | ⏭ **later wave** | The project's **first** port; sets a precedent every later argument will cite. Wants its own review, not a footnote in a data-layer wave |
 | **6** Route the page + cork board | ⏭ **later wave** | ⛔ Gated on 1–3 having produced rows in a real environment. Routing an empty map onto the main nav promises what it cannot deliver |
 
