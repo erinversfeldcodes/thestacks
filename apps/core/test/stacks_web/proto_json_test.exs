@@ -1036,9 +1036,16 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result |> Map.keys() |> Enum.sort() ==
                [:bookshelves, :city, :country_code, :display_name, :handle, :website_url]
 
-      # Each bookshelf summary carries ONLY :name — no visibility, id, or counts.
+      # Each bookshelf summary carries ONLY :name and :has_feed — no visibility, id, or
+      # counts.
+      #
+      # `has_feed` was added for G4 (the Atom subscribe link) and is deliberately a
+      # boolean rather than the shelf's `visibility`: the client's question is "may I
+      # offer a subscribe link?", and answering *that* keeps the visibility ladder out of
+      # a public payload. A stranger has no business learning that a shelf is
+      # group-visible rather than simply absent.
       for shelf <- result.bookshelves do
-        assert shelf |> Map.keys() |> Enum.sort() == [:name]
+        assert shelf |> Map.keys() |> Enum.sort() == [:has_feed, :name]
       end
 
       assert Enum.map(result.bookshelves, & &1.name) == ["library", "wishlist"]

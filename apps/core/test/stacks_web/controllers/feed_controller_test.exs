@@ -12,6 +12,47 @@ defmodule StacksWeb.FeedControllerTest do
   alias Core.Repo
   alias Stacks.Feeds.FeedCacheEntry
 
+  describe "GET /api/feeds/u/:handle/:bookshelf_name — the canonical, handle form" do
+    test "serves the same feed as the id form", %{conn: conn} do
+      # ⚠️ The form that made G4 buildable at all. Profiles are addressed by handle
+      # everywhere (`/u/:handle`), so a page listing someone's bookshelves has their
+      # handle and not their UUID — the client could not construct the id-form URL, which
+      # is why no client call existed. The chain was broken at the contract.
+      user = insert(:user, display_name: "Erin", handle: "erin")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      by_handle = get(conn, "/api/feeds/u/erin/library")
+
+      assert by_handle.status == 200
+      assert by_handle.resp_body =~ "The Secret History"
+
+      assert get_resp_header(by_handle, "content-type") |> List.first() =~ "application/atom+xml"
+    end
+
+    test "404s for a handle nobody has", %{conn: conn} do
+      conn = get(conn, "/api/feeds/u/nobody-here/library")
+      assert conn.status == 404
+    end
+
+    test "still 403s a non-platform bookshelf, same as the id form", %{conn: conn} do
+      # The handle form must not become a way around the visibility rule.
+      user = insert(:user, handle: "private-erin")
+      _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
+
+      conn = get(conn, "/api/feeds/u/private-erin/library")
+      assert conn.status == 403
+    end
+
+    test "\"u\" is not swallowed as a user id", %{conn: conn} do
+      # Both routes are declared, and the handle one must win for `/feeds/u/...`.
+      # If ordering regressed, this would try to resolve "u" as a UUID.
+      conn = get(conn, "/api/feeds/u/erin/library")
+      refute conn.status == 500
+    end
+  end
+
   describe "GET /api/feeds/:user_id/:bookshelf_name" do
     test "returns 200 with Atom XML for a platform-visible bookshelf", %{conn: conn} do
       user = insert(:user, display_name: "Erin")

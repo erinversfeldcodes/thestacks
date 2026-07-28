@@ -2696,7 +2696,14 @@ type alias PublicProfile =
 
 
 type alias ProfileShelfSummary =
-    { name : String }
+    { name : String
+
+    -- True only when the bookshelf is platform-visible, which is the sole case that
+    -- has an Atom feed. Sent by the server rather than derived here, so the rule lives
+    -- next to `Feeds.resolve_platform_bookshelf/2` instead of being duplicated — and so
+    -- a public payload never has to disclose the visibility tier itself.
+    , hasFeed : Bool
+    }
 
 
 publicProfileDecoder : Decoder PublicProfile
@@ -2712,7 +2719,12 @@ publicProfileDecoder =
 
 profileShelfSummaryDecoder : Decoder ProfileShelfSummary
 profileShelfSummaryDecoder =
-    Decode.map ProfileShelfSummary (Decode.field "name" Decode.string)
+    Decode.map2 ProfileShelfSummary
+        (Decode.field "name" Decode.string)
+        -- Defaults to False when absent so an older server cannot make the client offer
+        -- a subscribe link that would 403. Absent means "unknown", and unknown must not
+        -- mean "yes" for something a reader will paste into their feed reader.
+        (Decode.oneOf [ Decode.field "has_feed" Decode.bool, Decode.succeed False ])
 
 
 {-| Decodes a string field that may be absent or JSON null, defaulting to "".
