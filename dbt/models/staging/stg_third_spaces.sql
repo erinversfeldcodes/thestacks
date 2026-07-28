@@ -19,6 +19,8 @@ select
     latitude,
     longitude,
     nearest_bookshop_km,
+    curated,
+    curated_note,
     created_at,
     updated_at
 from {{ source('op', 'third_spaces') }}
