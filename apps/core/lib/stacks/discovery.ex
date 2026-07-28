@@ -273,6 +273,100 @@ defmodule Stacks.Discovery do
   defp after_transition(error, _target_status, _event_type), do: error
 
   # ---------------------------------------------------------------------------
+  # Removal-request review queue (US-2.5.3)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Removal requests waiting for a human decision.
+
+  A request whose contact address did not match the listing's domain sets
+  `exclusion_requested_at` and leaves `status` alone — that pair *is* the pending state, so
+  no enum value had to be invented for it. This is the query that makes it visible.
+
+  ⚠️ **Without this the parked requests were invisible.** The admin payload did not carry
+  `exclusion_requested_at` at all, so a business whose request could not be auto-verified
+  waited on a human who had no way to know they were waiting. A queue nobody can see is
+  indistinguishable from a request that was silently refused.
+
+  Oldest first: these are people waiting, and the fair order is the order they asked in.
+  """
+  @spec pending_removal_requests() :: [DiscoveredSource.t()]
+  def pending_removal_requests do
+    Repo.all(
+      from s in DiscoveredSource,
+        where: not is_nil(s.exclusion_requested_at) and s.status != "excluded",
+        order_by: [asc: s.exclusion_requested_at]
+    )
+  end
+
+  @doc """
+  Honour a removal request: exclude the source and delist the third space.
+
+  ⚠️ **Named `honour_removal_request` and not `approve` on purpose.**
+  `approve_source/1` already exists and means *approve the listing* — the opposite effect.
+  Two functions called "approve" doing opposite things to the same row is precisely the
+  mistake that gets made at 2am, so these say what happens to the *listing* instead:
+  honour (it goes) or decline (it stays).
+
+  Reuses the same effect as a domain-verified request, so a listing removed by hand and one
+  removed automatically end in the same state — there is one notion of "removed".
+  """
+  @spec honour_removal_request(String.t()) ::
+          {:ok, DiscoveredSource.t()} | {:error, :not_found | :not_pending | term()}
+  def honour_removal_request(source_id) when is_binary(source_id) do
+    with {:ok, source} <- fetch_pending_removal(source_id) do
+      update_source_status(source, %{
+        status: "excluded",
+        excluded_at: DateTime.utc_now()
+      })
+      |> case do
+        {:ok, updated} ->
+          delist_third_space(updated.url)
+          {:ok, updated}
+
+        other ->
+          other
+      end
+    end
+  end
+
+  @doc """
+  Decline a removal request: the listing stays.
+
+  Clears `exclusion_requested_at` so the request leaves the queue, and deliberately keeps
+  `exclusion_email` — a declined request is a record worth having if the same business asks
+  again, and losing it would make a repeat look like a first contact.
+  """
+  @spec decline_removal_request(String.t()) ::
+          {:ok, DiscoveredSource.t()} | {:error, :not_found | :not_pending | term()}
+  def decline_removal_request(source_id) when is_binary(source_id) do
+    with {:ok, source} <- fetch_pending_removal(source_id) do
+      update_source_status(source, %{
+        status: source.status,
+        exclusion_requested_at: nil
+      })
+    end
+  end
+
+  # Refuses anything that is not actually pending, so a double-click cannot re-run a
+  # decision and an already-excluded source cannot be "declined" back into visibility.
+  defp fetch_pending_removal(source_id) do
+    case get_source(source_id) do
+      nil ->
+        {:error, :not_found}
+
+      %DiscoveredSource{exclusion_requested_at: nil} ->
+        {:error, :not_pending}
+
+      %DiscoveredSource{status: "excluded"} ->
+        {:error, :not_pending}
+
+      source ->
+        {:ok, source}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Third-space production (US-3.1.1)
   # ---------------------------------------------------------------------------
 
