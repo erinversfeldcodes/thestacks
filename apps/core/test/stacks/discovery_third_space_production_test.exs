@@ -192,6 +192,72 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     end
   end
 
+  describe "a verified removal request delists the space a reader sees" do
+    test "the space is opted out, not just the source" do
+      # ⚠️ The gap this closes: excluding only the `discovered_source` left the listing on
+      # the map. The source is how we *found* the business; the third space is what a
+      # reader actually sees.
+      MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
+      source = pending_source()
+      assert {:ok, _} = Discovery.approve_source(source.id)
+      assert [%{opted_out: false}] = spaces()
+
+      # A contact address on the listing's own domain — the verified path.
+      assert {:ok, :excluded, _} =
+               Discovery.opt_out("https://readingroom.test", %{email: "owner@readingroom.test"})
+
+      assert [space] = spaces()
+      assert space.opted_out, "the third space is still listed after a verified removal"
+      assert space.opted_out_at
+    end
+
+    test "the row survives — a hard delete would be rediscovered and re-listed" do
+      # The load-bearing reason for a soft delete. Discovery re-finds sources
+      # continuously, so a deleted row comes back, gets re-approved by an owner with no
+      # record of the objection, and one removal request becomes a recurring one.
+      MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
+      source = pending_source()
+      assert {:ok, _} = Discovery.approve_source(source.id)
+
+      assert {:ok, :excluded, _} =
+               Discovery.opt_out("https://readingroom.test", %{email: "owner@readingroom.test"})
+
+      assert length(spaces()) == 1, "the space row was deleted rather than delisted"
+
+      # And re-approval cannot resurrect it.
+      Discovery.create_third_space(Discovery.get_source(source.id))
+
+      assert [%{opted_out: true}] = spaces(),
+             "re-approval brought a delisted business back onto the map"
+    end
+
+    test "an unverified request leaves the space live" do
+      # The listing stays up until a human agrees — telling someone their listing is gone
+      # when it is not would be worse than telling them it is pending.
+      MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
+      source = pending_source()
+      assert {:ok, _} = Discovery.approve_source(source.id)
+
+      assert {:ok, :pending_review, _} =
+               Discovery.opt_out("https://readingroom.test", %{email: "someone@gmail.test"})
+
+      assert [%{opted_out: false}] = spaces(),
+             "an unverified request delisted the business anyway"
+    end
+
+    test "a delisted space stops appearing in reader-facing queries" do
+      MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
+      source = pending_source()
+      assert {:ok, _} = Discovery.approve_source(source.id)
+
+      assert {:ok, :excluded, _} =
+               Discovery.opt_out("https://readingroom.test", %{email: "owner@readingroom.test"})
+
+      assert Stacks.Enrichment.list_third_spaces() == [],
+             "a delisted business is still being served to readers"
+    end
+  end
+
   describe "opted-out businesses stay delisted" do
     test "an approved source whose space opted out is not re-listed" do
       # The discovery pipeline re-finds sources continuously, so a hard delete would be

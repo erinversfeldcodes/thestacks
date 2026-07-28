@@ -100,6 +100,10 @@ defmodule Stacks.Events.PayloadContract do
     # approvals produced a mappable space versus an unpositioned one — the difference
     # between a working geocoder and a silently degraded one.
     "third_space.created" => %{version: 1, keys: ~w(source_id geocoded)},
+    # No payload at all: `aggregate_id` is the space's own id, which says everything the
+    # event needs to. An earlier draft carried the business URL and the PII lint refused
+    # it — `event_log` is immutable, so free text in it is permanent.
+    "third_space.delisted" => %{version: 1, keys: ~w()},
     "source.rejected" => %{version: 1, keys: ~w(status)},
     "enrichment.sources_discovered" => %{version: 1, keys: ~w(count query source_ids)},
     "enrichment.author_sources_discovered" => %{version: 1, keys: ~w(rss_feed_url website_url)},
