@@ -7,6 +7,7 @@ mod tests {
     #[test]
     fn scrape_request_round_trip() {
         let req = ScrapeRequest {
+            product_path: None,
             isbn: "9780679410232".to_string(),
             store: "za/loot".to_string(),
         };

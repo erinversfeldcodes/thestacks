@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 use stacks_scraper::{
     error::ScraperError,
     proto::generated::scraper::{
-        ConfigReloadResponse, ScrapeRequest, ScrapeResponse, StoreCapability,
+        CatalogueTitle, CatalogueTitlesRequest, CatalogueTitlesResponse, ConfigReloadResponse,
+        ScrapeRequest, ScrapeResponse, StoreCapability,
     },
     scraper::Engine,
     stores::StoreRegistry,
@@ -117,7 +118,12 @@ async fn scrape(State(state): State<AppState>, Json(payload): Json<ScrapeRequest
     // book, took price scraping down for every other shop too.
     match state
         .engine
-        .scrape_auto(&payload.isbn, &payload.store, &config)
+        .scrape_auto(
+            &payload.isbn,
+            &payload.store,
+            &config,
+            payload.product_path.as_deref(),
+        )
         .await
     {
         // Reached a page and read a price.
@@ -325,6 +331,55 @@ async fn index_build(
     }
 }
 
+/// POST /catalogue/titles — products this store lists that carry no ISBN.
+///
+/// The residual for the two shops where no product carries an ISBN, so title matching
+/// is the only path. Returns paths and titles only; the caller matches against its own
+/// catalogue and keeps just the pointer.
+///
+/// A bulk sweep like the index build: it waits on the rate limit and takes minutes, so
+/// it must not be called from a request path that anyone is waiting on.
+async fn catalogue_titles(
+    State(state): State<AppState>,
+    Json(payload): Json<CatalogueTitlesRequest>,
+) -> Response {
+    let config = match state.registry.get(&payload.store) {
+        Ok(c) => c,
+        Err(e) => {
+            return (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))).into_response();
+        }
+    };
+
+    match state.engine.catalogue_titles(&config).await {
+        Ok(pairs) => {
+            tracing::info!(
+                "listed {} untitled-by-isbn products for store={}",
+                pairs.len(),
+                payload.store
+            );
+
+            Json(CatalogueTitlesResponse {
+                titles: pairs
+                    .into_iter()
+                    .map(|(product_path, title)| CatalogueTitle {
+                        product_path,
+                        title,
+                    })
+                    .collect(),
+            })
+            .into_response()
+        }
+        Err(e) => {
+            tracing::error!("catalogue titles failed for store={}: {}", payload.store, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    }
+}
+
 async fn config_reload(State(state): State<AppState>) -> Response {
     match state.registry.load_from_dir(&state.scrapers_dir) {
         Ok(n) => Json(ConfigReloadResponse { loaded: n as i32 }).into_response(),
@@ -379,6 +434,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/scrape", post(scrape))
         .route("/config/reload", post(config_reload))
         .route("/index/build", post(index_build))
+        .route("/catalogue/titles", post(catalogue_titles))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             hmac_auth_middleware,
@@ -531,6 +587,7 @@ requests_per_minute = 60
             .route("/scrape", post(scrape))
             .route("/config/reload", post(config_reload))
             .route("/index/build", post(index_build))
+            .route("/catalogue/titles", post(catalogue_titles))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 hmac_auth_middleware,
