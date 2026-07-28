@@ -61,10 +61,12 @@ module Api exposing
     , createComment
     , createGroup
     , createListing
+    , createShelf
     , deactivateListing
     , declineInvitation
     , deleteAccount
     , deleteComment
+    , deleteShelf
     , dismissAssociation
     , encodeProfileBody
     , foldProgress
@@ -88,6 +90,7 @@ module Api exposing
     , getPrivacySettings
     , getProfile
     , getProfileShelf
+    , getShelves
     , getSourceHealth
     , getTransparencyMetrics
     , getUserPlacements
@@ -117,6 +120,7 @@ module Api exposing
     , rejectIdentification
     , rejectSource
     , removeBook
+    , reorderShelves
     , requestExport
     , requestListingRemoval
     , resetPassword
@@ -2813,6 +2817,94 @@ getProfile maybeToken handle toMsg =
         , url = baseUrl ++ "/api/u/" ++ handle
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg publicProfileDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| The owner's physical shelves within one of their bookshelves.
+
+⚠️ **Terminology, because conflating these is easy and expensive:** a _bookshelf_ is a
+named virtual collection (library, antilibrary…); a _shelf_ is a physical horizontal row
+inside it (`op.shelves`). This is the shelf sub-resource.
+
+`GET /api/bookshelves/:bookshelfName/shelves`. Reuses `shelvesResponseDecoder` — the
+payload shape is the same one the public-profile path already decodes.
+
+-}
+getShelves : String -> String -> (Result Http.Error (List Shelf) -> msg) -> Cmd msg
+getShelves bookshelfName token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg shelvesResponseDecoder
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Add a shelf to the bottom of a bookshelf.
+
+`POST /api/bookshelves/:bookshelfName/shelves`. Takes no body: position is the server's
+to assign, and letting the client propose one invites two tabs choosing the same.
+
+-}
+createShelf : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+createShelf bookshelfName token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
+        , body = Http.jsonBody (Encode.object [])
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Remove a shelf.
+
+`DELETE /api/shelves/:id`.
+
+⚠️ **422 means the shelf still has books on it** and the server refused. That is a real
+outcome a reader must be told about, not a transport failure to swallow — deleting a shelf
+out from under its books would strand them.
+
+-}
+deleteShelf : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+deleteShelf shelfId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/shelves/" ++ shelfId
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Set the order of every shelf in a bookshelf.
+
+`PUT /api/bookshelves/:bookshelfName/shelves/reorder` with the full ordered id list.
+
+Sends the **whole** order rather than "move shelf X to position N": the server then has no
+ambiguity to resolve, and two reorders racing produce one of the two orders rather than an
+interleaving neither reader asked for.
+
+-}
+reorderShelves : String -> List String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+reorderShelves bookshelfName shelfIds token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves/reorder"
+        , body =
+            Http.jsonBody
+                (Encode.object [ ( "shelf_ids", Encode.list Encode.string shelfIds ) ])
+        , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
         }
