@@ -48,21 +48,70 @@ defmodule Stacks.Enrichment.ScraperClient do
   @fuse_name :scraper_fuse
 
   @impl true
-  def scrape(isbn, store_name) do
+  def scrape(isbn, store_name), do: scrape(isbn, store_name, nil)
+
+  @impl true
+  def scrape(isbn, store_name, product_path) do
     case configured_client() do
-      __MODULE__ -> do_scrape(isbn, store_name)
-      client -> client.scrape(isbn, store_name)
+      __MODULE__ -> do_scrape(isbn, store_name, product_path)
+      client -> client.scrape(isbn, store_name, product_path)
     end
   end
 
-  defp do_scrape(isbn, store_name) do
+  @impl true
+  def catalogue_titles(store_name) do
+    case configured_client() do
+      __MODULE__ -> do_catalogue_titles(store_name)
+      client -> client.catalogue_titles(store_name)
+    end
+  end
+
+  # Bulk sweep, so only the service fuse gates it — same reasoning as the index build.
+  defp do_catalogue_titles(store_name) do
+    with :ok <- ask(@fuse_name) do
+      path = "/catalogue/titles"
+
+      req =
+        Finch.build(
+          :post,
+          "#{base_url()}#{path}",
+          [{"content-type", "application/json"}, {"X-Internal-Token", auth_token("POST", path)}],
+          Jason.encode!(%{store: store_name})
+        )
+
+      req
+      |> Finch.request(Stacks.Finch, receive_timeout: 600_000)
+      |> handle_titles_response(store_name)
+    end
+  end
+
+  defp handle_titles_response({:ok, %Finch.Response{status: 200, body: body}}, _store) do
+    case Jason.decode(body) do
+      {:ok, %{"titles" => titles}} when is_list(titles) -> {:ok, titles}
+      _ -> {:error, :unexpected_response}
+    end
+  end
+
+  defp handle_titles_response({:ok, %Finch.Response{status: status, body: body}}, store) do
+    CircuitBreakers.melt(@fuse_name)
+    Logger.warning("ScraperClient: catalogue titles HTTP #{status} for #{store}: #{body}")
+    {:error, {:http, status}}
+  end
+
+  defp handle_titles_response({:error, reason}, store) do
+    CircuitBreakers.melt(@fuse_name)
+    Logger.warning("ScraperClient: catalogue titles failed for #{store}: #{inspect(reason)}")
+    {:error, reason}
+  end
+
+  defp do_scrape(isbn, store_name, product_path) do
     store_fuse = CircuitBreakers.store_fuse(store_name)
 
     # Both domains must be healthy. Asking the service fuse first means a downed
     # sidecar short-circuits without allocating or consulting store state.
     with :ok <- ask(@fuse_name),
          :ok <- ask(store_fuse) do
-      make_scraper_request(isbn, store_name, store_fuse)
+      make_scraper_request(isbn, store_name, store_fuse, product_path)
     end
   end
 
@@ -151,10 +200,13 @@ defmodule Stacks.Enrichment.ScraperClient do
     Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
   end
 
-  defp build_scraper_request(isbn, store_name) do
+  defp build_scraper_request(isbn, store_name, product_path) do
     path = "/scrape"
     url = "#{base_url()}#{path}"
-    body = Jason.encode!(%ScrapeRequest{isbn: isbn, store: store_name})
+
+    body =
+      Jason.encode!(%ScrapeRequest{isbn: isbn, store: store_name, product_path: product_path})
+
     token = auth_token("POST", path)
 
     Finch.build(
@@ -165,8 +217,8 @@ defmodule Stacks.Enrichment.ScraperClient do
     )
   end
 
-  defp make_scraper_request(isbn, store_name, store_fuse) do
-    req = build_scraper_request(isbn, store_name)
+  defp make_scraper_request(isbn, store_name, store_fuse, product_path) do
+    req = build_scraper_request(isbn, store_name, product_path)
     # Telemetry :start is emitted here (after fuse gate) so every :start has a
     # matching :stop/:exception — necessary for handlers that track open spans.
     start_time = System.monotonic_time()
