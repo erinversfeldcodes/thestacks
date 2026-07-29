@@ -529,6 +529,28 @@ requiresAuth route =
             True
 
 
+{-| The token for `/api/admin/*` — and the ONLY thing any admin call site may pass.
+
+⛔ This exists because the entry points disagreed. `/api/admin/*` sits behind an MFA-verified admin
+session (`typ: "admin_session"`, IP- and boot\_id-bound) and 401s anything else, so the four admin
+surfaces were built, routed, unit-tested and unreachable. Repointing `initPage` fixed the page load
+and left the `update` handlers on the ordinary token — the list loaded and every action 401'd.
+
+Five call sites, not two. A field read repeated at five sites is five chances to read the wrong one,
+and every page-level admin test is blind to it because the token arrives as an argument: a probe
+setting one site to `Nothing` reintroduced the defect verbatim with **all 1285 Elm tests green**
+(#309). So the read is named once, and `scripts/check-admin-token-routing.sh` fails the build if any
+admin call site passes anything else — measured to catch the probe that elm-test does not.
+
+Deliberately takes the whole `Model`: that is what makes it impossible to hand this function the
+ordinary session by mistake.
+
+-}
+adminTokenFor : Model -> Maybe String
+adminTokenFor model =
+    model.adminAuth
+
+
 initPage : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> ( Page, Cmd Msg )
 initPage config route maybeAuth adminToken maybePreviousRoute =
     if requiresAuth route && maybeAuth == Nothing then
@@ -1292,7 +1314,7 @@ update msg model =
                     Just (transitionClass model.route newRoute)
 
                 ( initialisedPage, cmd ) =
-                    initPage model.config newRoute model.auth model.adminAuth (Just model.route)
+                    initPage model.config newRoute model.auth (adminTokenFor model) (Just model.route)
 
                 -- Consume a pending session-expiry notice: when the redirect lands
                 -- on /login, build the Login page in its expired-notice state so the
@@ -2058,7 +2080,7 @@ update msg model =
                         -- Same half-wiring shape as the bug this whole change fixes — fixing one
                         -- entry point and not the other leaves a page that loads and cannot act.
                         adminToken =
-                            model.adminAuth
+                            adminTokenFor model
 
                         ( newSubModel, subCmd, outMsg ) =
                             AdminSourceApproval.update subMsg subModel adminToken
@@ -2107,7 +2129,7 @@ update msg model =
                         -- Same half-wiring shape as the bug this whole change fixes — fixing one
                         -- entry point and not the other leaves a page that loads and cannot act.
                         adminToken =
-                            model.adminAuth
+                            adminTokenFor model
 
                         ( newSubModel, subCmd, outMsg ) =
                             AdminBookModeration.update subMsg subModel adminToken
@@ -2146,10 +2168,13 @@ update msg model =
                                     { model | adminAuth = Just adminToken }
 
                                 ( page, pageCmd ) =
+                                    -- `adminTokenFor withToken`, not `Just adminToken`: the same value
+                                    -- by two different routes is exactly what the resolver exists to
+                                    -- remove. One way to obtain the admin token, everywhere.
                                     initPage model.config
                                         gatedRoute
                                         model.auth
-                                        (Just adminToken)
+                                        (adminTokenFor withToken)
                                         (Just model.route)
                             in
                             ( { withToken | page = page }, pageCmd )
@@ -2170,7 +2195,7 @@ update msg model =
                         -- Same half-wiring shape as the bug this whole change fixes — fixing one
                         -- entry point and not the other leaves a page that loads and cannot act.
                         adminToken =
-                            model.adminAuth
+                            adminTokenFor model
 
                         ( newSubModel, subCmd, outMsg ) =
                             AdminRemovalRequests.update subMsg subModel adminToken
