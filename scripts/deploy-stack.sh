@@ -410,6 +410,42 @@ if [[ -n "${NEON_STAGING_API_KEY:-}" ]]; then
     fi
     NEON_BRANCH_NAME="${PREVIEW_NEON_BRANCH}"
     echo "    Neon branch created: ${NEON_BRANCH_NAME}"
+
+    # ── Warm the new branch before anything depends on it (Issue #305) ────────
+    #
+    # ⛔ A freshly created Neon branch starts SUSPENDED, and the release command (migrations) is the
+    # very first thing to touch it — so it races the cold start. Observed 2026-07-29:
+    #
+    #   [error] Could not create schema migrations table
+    #   ** (DBConnection.ConnectionError) connection not available and request was dropped from
+    #      queue after 5974ms
+    #   Error: release command failed - aborting deployment.
+    #
+    # The script's own retry hit the same cold compute and gave up. A single trivial query
+    # immediately afterwards answered in under a second, and the next deploy passed first time.
+    #
+    # So: wake it here, where a slow start costs seconds of waiting instead of a failed deploy. Best
+    # effort — if psql is unavailable we say so and carry on rather than blocking the deploy on a
+    # tool that is not guaranteed to be present.
+    if [[ -n "$NEON_CONNECTION_URI" ]]; then
+        if command -v psql > /dev/null 2>&1; then
+            echo "    Waking the branch compute before migrations run..."
+            neon_awake=0
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                if psql "$NEON_CONNECTION_URI" -tAc 'select 1' > /dev/null 2>&1; then
+                    echo "    Branch is awake (attempt ${attempt})."
+                    neon_awake=1
+                    break
+                fi
+                sleep 3
+            done
+            if [[ "$neon_awake" -eq 0 ]]; then
+                echo "    WARNING: branch did not answer in ~30s; migrations may race its cold start."
+            fi
+        else
+            echo "    WARNING: psql not found, skipping branch warm-up (Issue #305)."
+        fi
+    fi
     if [[ -n "$NEON_CONNECTION_URI" ]]; then
         echo "    Connection URI obtained."
     else
@@ -1116,8 +1152,23 @@ _PROXY_PORT=14987
 fly proxy "${_PROXY_PORT}:4000" --app "${CORE_APP}" >/dev/null 2>&1 &
 _PROXY_PID=$!
 
-RETRIES=30
-until curl -sf --max-time 10 "http://localhost:${_PROXY_PORT}/api/health" >/dev/null 2>&1; do
+# ⚠️ Two changes here, both from Issue #305 and both about a COLD FIRST BOOT.
+#
+# 1. **Accept either signal.** This probed only the `fly proxy` tunnel. If the proxy has not
+#    established yet — likely when the machine is still starting — every curl fails and the loop burns
+#    all its retries no matter how healthy the app becomes. `cleanup-preview.sh` deliberately KEEPS
+#    the core app (it only stops machines), so the hostname survives and the public URL is a valid
+#    second probe. The proxy's original rationale (macOS caching a stale NXDOMAIN after
+#    `apps destroy` → `apps create`) does not apply on the teardown path we actually use.
+#
+# 2. **Longer window.** 30×5s = 150s was not enough for a first boot that includes an image pull.
+#    Observed 2026-07-29: the log's last line was "Configuring firecracker" as the window expired —
+#    the machine was still starting, and the deploy was failed for being slow rather than broken.
+#    ⚠️ Note the tension this resolves: making teardown the default (also #305) means every deploy now
+#    takes the cold path, so the window that was occasionally tight became reliably tight.
+RETRIES=60
+until curl -sf --max-time 10 "http://localhost:${_PROXY_PORT}/api/health" >/dev/null 2>&1 \
+   || curl -sf --max-time 10 "${CORE_URL}/api/health" >/dev/null 2>&1; do
     if [[ $RETRIES -le 0 ]]; then
         kill "${_PROXY_PID}" 2>/dev/null || true
         echo "--- Fly app logs (last 30 lines) ---"
@@ -1265,7 +1316,19 @@ if [[ -n "${machine_id}" ]]; then
         fi
     fi
 else
-    echo "WARN deploy: could not find running machine to run migrations/seeds"
+    # ⛔ Was a WARN, which is how a PARTIAL deploy passed for a working one (Issue #305). If no
+    # machine is running, migrations and seeds did NOT run — and on a preview the Neon branch is
+    # copy-on-write from `staging`, so the schema and staging's rows are already there. The app then
+    # serves perfectly against a database with none of this deploy's fixtures, and the missing data
+    # reads as an application bug. Observed 2026-07-29: `GET /api/admin/sources` → 200 with zero rows,
+    # which cost a false lead into the frontend.
+    #
+    # A deploy that could not run its own migrations is not a deploy. Fail.
+    echo "FAIL deploy: no running machine — migrations and seeds did NOT run." >&2
+    echo "       The stack is PARTIAL: on a preview it may still serve 200s, because the Neon branch" >&2
+    echo "       inherits staging's schema and data. Do not use it. Tear down and redeploy" >&2
+    echo "       (scripts/deploy-preview.sh tears down by default — Issue #305)." >&2
+    exit 1
 fi
 
 # ── Deploy log shipper (prod only) ────────────────────────────────────────────
