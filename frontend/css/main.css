@@ -5241,3 +5241,15 @@ h4 {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* Good news on the admin gate — distinct from `admin__error` so a success cannot read as a failure. */
+.admin-gate__notice {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: #2f5d3f;
+    background: rgba(74, 124, 89, 0.16);
+    border-left: 2px solid var(--accent);
+    padding: 0.6rem 0.85rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
+}

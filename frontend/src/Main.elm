@@ -2062,7 +2062,7 @@ update msg model =
                             )
 
                         AdminSourceApproval.SessionExpired ->
-                            handleSessionExpiry model
+                            handleAdminSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -2081,7 +2081,7 @@ update msg model =
                             )
 
                         AdminScraperConfig.SessionExpired ->
-                            handleSessionExpiry model
+                            handleAdminSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -2103,7 +2103,7 @@ update msg model =
                             )
 
                         AdminBookModeration.SessionExpired ->
-                            handleSessionExpiry model
+                            handleAdminSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -2158,7 +2158,7 @@ update msg model =
                             )
 
                         AdminRemovalRequests.SessionExpired ->
-                            handleSessionExpiry model
+                            handleAdminSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -3207,3 +3207,36 @@ viewFooter =
         [ p [ class "app-footer__text" ]
             [ text "The Stacks — open source book management" ]
         ]
+
+
+{-| An admin API call came back unauthorised.
+
+⛔ **All four admin pages used to call `handleSessionExpiry` here, which clears the ordinary session
+and drops the operator on the Login page.** So honouring a removal request — or any admin action
+whose token had lapsed — signed them out of the whole product. Driven on a preview 2026-07-29:
+confirming a removal ejected me to "The library closed your session for safekeeping".
+
+That directly contradicted the design this feature was built to (#303): the admin session is
+deliberately separate and short-lived — MFA expires after 30 minutes, and the session is bound to the
+client IP and the node's `boot_id`, so a network change or a deploy ends it. Those are _routine_, and
+none of them is a reason to end the ordinary session, which is untouched and still valid.
+
+So: drop only `adminAuth` and put the gate back on the current route. The operator re-verifies and
+carries on, rather than being told they were signed out of something they were not.
+
+⚠️ **Verified by driving, not by a unit test, and that is a deliberate choice.** Asserting on this
+needs a whole `Main.Model`, whose `Nav.Key` is opaque and unconstructable in a test — the only routes
+in are a `ProgramTest` harness at Main level (which does not exist here) or exporting a `testModel`
+seam from production code purely for the assertion. Neither is worth it for a four-line function
+whose failure is glaring the moment anyone uses the page. It was found live and it is confirmed live.
+The `e2e/` suite is the right home if this ever needs automating.
+
+-}
+handleAdminSessionExpiry : Model -> ( Model, Cmd Msg )
+handleAdminSessionExpiry model =
+    ( { model
+        | adminAuth = Nothing
+        , page = PageAdminGate model.route AdminSession.init
+      }
+    , Cmd.none
+    )

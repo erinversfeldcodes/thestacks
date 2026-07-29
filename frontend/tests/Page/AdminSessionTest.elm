@@ -195,6 +195,31 @@ suite =
                     -- operator already knows.
                     render Session.init
                         |> Query.has [ testId "admin-enrol-start" ]
+            , test "confirming enrolment returns to the sign-in form, not a dead end" <|
+                \_ ->
+                    -- ⛔ It used to render a terminal panel saying "Sign in above to open an admin
+                    -- session" while BEING the only thing on the page — the form it referred to had
+                    -- been replaced. The operator finished enrolling and had nowhere to go but a
+                    -- manual reload, actively misdirected by the copy. Found by driving it.
+                    let
+                        after =
+                            run (Session.EnrolmentConfirmed (Ok ())) Session.init
+                    in
+                    Expect.all
+                        [ \m -> Expect.notEqual Nothing m.notice
+                        , \m -> Expect.equal Nothing m.error
+                        ]
+                        after
+            , test "and the sign-in form is actually rendered there" <|
+                \_ ->
+                    render (run (Session.EnrolmentConfirmed (Ok ())) Session.init)
+                        |> Query.has [ testId "admin-email" ]
+            , test "the success notice is not rendered as an error" <|
+                \_ ->
+                    -- Separate fields, separate elements: a success shown in the error slot trains
+                    -- the operator to ignore the error slot.
+                    render (run (Session.EnrolmentConfirmed (Ok ())) Session.init)
+                        |> Query.has [ testId "admin-gate-notice" ]
             , test "the recovery codes are shown with the warning that they are shown once" <|
                 \_ ->
                     render
