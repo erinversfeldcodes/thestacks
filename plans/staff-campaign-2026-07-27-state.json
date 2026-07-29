@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-27",
   "plan": "plans/staff-campaign-2026-07-27.md",
   "created_at": "2026-07-27T00:00:00Z",
-  "updated_at": "2026-07-29T07:45:00Z",
+  "updated_at": "2026-07-29T08:45:00Z",
   "status": "in_progress",
   "current_wave": "0",
   "_why": [
@@ -71,9 +71,10 @@
         },
         "G3": {
           "title": "Source discovery — prove the chain end to end",
-          "status": "in_progress",
+          "status": "complete",
           "issue": null,
-          "note": "NOT blocked after all — I asserted 'needs a real Brave key' without checking. BRAVE_SEARCH_API_KEY is in .env (31 chars), deploy-stack.sh:847 already forwards it, and it is Deployed on the preview. Driving it found the REAL cause of the zero rows: BraveClient.increment_daily_counter/0 crashed on the first live call in any fresh node (ArgumentError, no persistent term) because a lying default made absent state look present. Fixed + 3 regression tests + mutation-probed."
+          "note": "CLOSED and PROVEN end to end 2026-07-29 through the PRIMARY path. Direct BraveClient.search/2 on the live node -> BRAVE_OK results=3 (real SA bookshops); full SourceDiscoveryJob run -> discovered_sources 5->15 with NO fallback warning. Was never a missing key (it was in .env and Deployed all along) — two real bugs: (1) the daily counter crashed on the first live call in any fresh node via a lying default; (2) the client advertised Accept-Encoding: gzip and never decompressed, so EVERY Brave 200 failed to parse and SearXNG silently covered for it. Brave had never once succeeded.",
+          "informal": true
         },
         "G4": {
           "title": "RSS feeds reachable from the profile",
@@ -119,6 +120,9 @@
     "2026-07-28: the seed's on_conflict clauses silently discarded BOTH visibility fixes (mine and the pre-existing public_bookshelf_names one) on every preview, because a preview branches staging so the rows already exist. Fixed: users replace profile_visibility, bookshelves replace visibility. A third instance of 'looks landed, is inert' this session.",
     "2026-07-28: shelf-organiser.spec.ts needs --workers=1 against a preview; 4 parallel session-mints 502 the 512MB VM. 4 passed / 2 failed in parallel, 6/6 serial.",
     "2026-07-29: G4 driven. 🟧 The public profile page is largely UNSTYLED (raw bulleted bookshelf list, no page chrome) — visible in the drive screenshot. `profile` is one of #301's larger orphan-class groups (15). Not fixed here; it is #301's scope.",
-    "2026-07-29: owner rulings — (1) a blocker that blocks a Wave 0 goal IS Wave 0 work, do not spin it out and stop; (2) assign work to waves/epics myself and document it; (3) platform-visibility feeds require auth, public-visibility feeds do not."
+    "2026-07-29: owner rulings — (1) a blocker that blocks a Wave 0 goal IS Wave 0 work, do not spin it out and stop; (2) assign work to waves/epics myself and document it; (3) platform-visibility feeds require auth, public-visibility feeds do not.",
+    "2026-07-29: teardown + clean redeploy was the right call — deploy7 failed for real (release command raced a SUSPENDED freshly-recreated Neon branch: 'connection not available ... after 5974ms'), deploy6 died mid-push, deploy8 hit the 10-min bash cap. A clean deploy10 passed all gates first time.",
+    "2026-07-29: ran DiscoverBookstoreEventsJob on the preview per owner instruction. Clean :ok, ZERO events written — filed as #304: egress and fetch work (Wordsworth returned 249,540 bytes) but extraction found nothing, the events path is a single hardcoded guess (Exclusive Books /events = 18 bytes), and `outcome` is nil on a successful fetch. Only 2 of 11 stores are reachable at all (P9's bad configs).",
+    "2026-07-29: filed #305 — preview deploy races a SUSPENDED freshly-created Neon branch; candidate root for the #171/#177 flakes."
   ]
 }
