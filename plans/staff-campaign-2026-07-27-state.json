@@ -2,9 +2,9 @@
   "campaign": "staff-campaign-2026-07-27",
   "plan": "plans/staff-campaign-2026-07-27.md",
   "created_at": "2026-07-27T00:00:00Z",
-  "updated_at": "2026-07-29T12:30:00Z",
+  "updated_at": "2026-07-29T13:00:00Z",
   "status": "in_progress",
-  "current_wave": "0",
+  "current_wave": "1",
   "_why": [
     "Retrofitted 2026-07-28 after the campaign twice claimed a wave complete when it was not.",
     "The prose plan cannot answer 'is this wave done?' — this file can, via scripts/wave-status.sh.",
@@ -18,7 +18,7 @@
   "waves": {
     "0": {
       "title": "Prerequisites — evidence gaps, reachability breaks, domain cutover",
-      "status": "in_progress",
+      "status": "complete",
       "items": {
         "C3": {
           "title": "Route the events job through the compliant egress",
@@ -92,10 +92,9 @@
         },
         "G6": {
           "title": "Business opt-out — form, soft-delete, review queue",
-          "status": "in_progress",
+          "status": "complete",
           "issue": 303,
-          "note": "CLOSED and DRIVEN END TO END 2026-07-29 on a clean preview. #303 built (admin-session API, sign-in gate with inline MFA enrolment, in-memory admin token, all four pages repointed). XHR trace proves the whole chain: admin/auth/login 200 -> verify_mfa 200 -> GET /api/admin/sources 200 -> PUT .../approve 200 (row Pending_review -> Approved) -> GET /api/admin/removal-requests 200 -> PUT .../honour 200 -> queue empty, operator NOT signed out. DB confirms: status=excluded, excluded_at set, exclusion_email retained, third_spaces.opted_out=true. All four admin pages load with real data (5/21/68 rows + queue). FOUR bugs found by driving, three mine: (1) invented status literal so Approve/Reject never rendered; (2) enrolment dead end; (3) admin 401 signed the operator out of the whole app; (4) init repointed but update not, so actions 401'd. 1285 elm tests passed through all four.",
-          "last_action": "Everything DRIVEN and proven (see #303 DoD, 5 of 6 boxes checked with evidence). ONE box open and it is real work, not paperwork: an E2E spec that reaches an admin page with a real MFA-verified session. Needs TOTP in TypeScript + the enrolment flow, because a preview redeploy destroys MFA enrolment every time."
+          "note": "CLOSED 2026-07-29. #303 built, driven end to end, and now REGRESSION-PROOFED: e2e/tests/admin-session.spec.ts 7/7 green against the deployed preview, asserting the gate, the page loading with rows, Approve/Reject rendering, an admin ACTION changing state, and an admin 401 NOT signing the operator out. XHR trace: login 200 -> verify_mfa 200 -> GET sources 200 -> PUT approve 200 -> PUT honour 200. DB: status=excluded, opted_out=true. Four bugs found by driving, three mine; 1285 elm tests passed through all four."
         },
         "0e": {
           "title": "Domain cutover (PHX_HOST, MetricsPusher, /.env probes, noindex)",
