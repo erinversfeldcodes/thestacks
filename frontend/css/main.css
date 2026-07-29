@@ -5215,3 +5215,29 @@ h4 {
     color: #7a3b12;
     background: rgba(155, 105, 48, 0.14);
 }
+
+/* A quieter second action on the admin gate — enrolment, next to the primary Continue. */
+.admin-gate__secondary {
+    width: 100%;
+    margin-top: 0.6rem;
+    padding: 0.55rem;
+    background: transparent;
+    border: 1px solid #c8b89a;
+    border-radius: 3px;
+    color: #5c4a32;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.admin-gate__secondary:hover:not(:disabled) {
+    background: rgba(139, 69, 19, 0.08);
+    border-color: #8b4513;
+    color: #3d2610;
+}
+
+.admin-gate__secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

@@ -37,7 +37,7 @@ consequence of a deliberately short-lived credential.
 import Api exposing (AdminAuthError(..), AdminMfaEnrolment)
 import Html exposing (Html, button, div, form, h1, h2, input, label, li, ol, p, span, text)
 import Html.Attributes exposing (attribute, autocomplete, class, disabled, for, id, type_, value)
-import Html.Events exposing (onInput, onSubmit)
+import Html.Events exposing (onClick, onInput, onSubmit)
 import Http
 import Url
 import Util.TestId exposing (testId)
@@ -292,6 +292,12 @@ authErrorMessage err =
         AlreadyVerified ->
             "That session is already verified. Reload the page."
 
+        AdminAuthTransport Http.Timeout ->
+            "The server took too long to answer. Try again."
+
+        AdminAuthTransport Http.NetworkError ->
+            "No connection to the server. Check your network, then try again."
+
         AdminAuthTransport _ ->
             "Could not reach the server. Please try again."
 
@@ -373,6 +379,17 @@ viewCredentials model =
                     "Continue"
                 )
             ]
+
+        -- Enrolment is reachable without failing a sign-in first. Signing in only to be told
+        -- "you have no second factor" is a detour when the operator already knows.
+        , button
+            [ type_ "button"
+            , class "admin-gate__secondary"
+            , onClick StartEnrolment
+            , disabled model.busy
+            , testId "admin-enrol-start"
+            ]
+            [ text "Set up a second factor" ]
         ]
 
 
