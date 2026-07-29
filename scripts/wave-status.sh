@@ -21,6 +21,11 @@
 #      a work unit nobody can audit, which is also the inverse of the project's
 #      "never cite a #NNN with no backing file" rule)
 #   2. an item marked done whose issue DoD still has unchecked boxes
+#   2b. an item marked done whose issue records NO `staff-review` verdict in its Progress Notes.
+#      Every issue and epic filed by a campaign must be staff-reviewed as it is implemented, and a
+#      rule nothing checks is a rule that decays. "Was this reviewed?" has to be answerable from
+#      disk, not from someone's memory of the run — so the verdict is written into the issue and
+#      read back out here.
 #   3. a WAVE marked done while any of its items is not done  (the "wave claimed
 #      finished when it wasn't" defect)
 #
@@ -177,6 +182,21 @@ def dod_boxes(path):
     no_ev = [i["text"][:90] for i in items if i["checked"] and not EVIDENCE.search(i["text"])]
     return unchecked, no_ev
 
+
+# A staff-review verdict recorded anywhere in the issue. The vocabulary is the skill's own:
+# LGTM / LGTM WITH NOTES / DESIGN CONCERNS. Matched case-insensitively and allowed to appear in any
+# section, because the natural home is Progress Notes but a DoD box citing it is just as good
+# evidence — the point is that it is on disk, not where exactly it sits.
+STAFF_REVIEW = re.compile(
+    r"staff[- ]review\b.{0,120}?(LGTM|DESIGN CONCERNS)|(LGTM|DESIGN CONCERNS).{0,120}?staff[- ]review\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def staff_reviewed(path):
+    """True when the issue records a staff-review verdict."""
+    return bool(STAFF_REVIEW.search(open(path, encoding="utf-8").read()))
+
 violations, actionable, informal = [], [], []
 waves = state.get("waves") or {}
 print(f"campaign: {state.get('campaign', os.path.basename(state_file))}")
@@ -244,6 +264,14 @@ for wname in sorted(waves, key=lambda w: (len(w), w)):
                             f"no evidence token, first: \"{no_ev[0]}\""
                         )
                         flags.append(f"NO-EVIDENCE({len(no_ev)})")
+                    if not staff_reviewed(p):
+                        violations.append(
+                            f"  {wname}/{iname} (#{issue_num}): marked done with NO staff-review "
+                            f"verdict recorded. Every issue is reviewed as it is implemented; run "
+                            f"the staff-review skill over its diff and record the verdict "
+                            f"(LGTM / LGTM WITH NOTES / DESIGN CONCERNS) in its Progress Notes."
+                        )
+                        flags.append("UNREVIEWED")
         elif istatus in ("blocked",):
             flags.append("BLOCKED: " + (item.get("blocked_on") or "unspecified"))
         else:
