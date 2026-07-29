@@ -187,6 +187,116 @@ defmodule Stacks.Enrichment.ScraperClient do
     end
   end
 
+  @impl true
+  def sitemap_urls(store_name) do
+    case configured_client() do
+      __MODULE__ -> do_sitemap_urls(store_name)
+      client -> client.sitemap_urls(store_name)
+    end
+  end
+
+  # Gated by both fuses like `fetch_page/2`: a per-store read on a normal cadence, so a store that is
+  # failing should stop being asked.
+  defp do_sitemap_urls(store_name) do
+    store_fuse = CircuitBreakers.store_fuse(store_name)
+
+    with :ok <- ask(@fuse_name),
+         :ok <- ask(store_fuse) do
+      endpoint = "/sitemap-urls"
+
+      Finch.build(
+        :post,
+        "#{base_url()}#{endpoint}",
+        [
+          {"content-type", "application/json"},
+          {"X-Internal-Token", auth_token("POST", endpoint)}
+        ],
+        Jason.encode!(%{store: store_name})
+      )
+      # Longer than `fetch_page`'s 30s: the walk fetches several documents and pauses between them
+      # on purpose. The courtesy delay is the reason this needs room, not slowness.
+      |> Finch.request(Stacks.Finch, receive_timeout: 120_000)
+      |> handle_sitemap_response(store_name, store_fuse)
+    end
+  end
+
+  defp handle_sitemap_response({:ok, %Finch.Response{status: 200, body: body}}, store, _fuse) do
+    case classify_sitemap_body(body, store) do
+      {:unexpected, other} ->
+        CircuitBreakers.melt(@fuse_name)
+
+        Logger.warning(
+          "ScraperClient: unexpected sitemap response for #{store}: #{inspect(other)}"
+        )
+
+        {:error, :unexpected_response}
+
+      result ->
+        result
+    end
+  end
+
+  defp handle_sitemap_response({:ok, %Finch.Response{status: status, body: body}}, store, fuse) do
+    CircuitBreakers.melt(fuse)
+    Logger.warning("ScraperClient: sitemap HTTP #{status} for #{store}: #{body}")
+    {:error, {:http, status}}
+  end
+
+  defp handle_sitemap_response({:error, reason}, store, _fuse) do
+    CircuitBreakers.melt(@fuse_name)
+    Logger.warning("ScraperClient: sitemap walk failed for #{store}: #{inspect(reason)}")
+    {:error, reason}
+  end
+
+  @doc """
+  Maps a `/sitemap-urls` response body onto a result, without side effects.
+
+  Public for the same reason as `classify_fetch_body/2`: tests swap this whole module out, so these
+  branches are otherwise unreachable. `{:unexpected, _}` is the only return that melts a fuse.
+  """
+  @spec classify_sitemap_body(String.t(), String.t()) ::
+          {:ok, map()} | {:error, term()} | {:unexpected, term()}
+  def classify_sitemap_body(body, store) do
+    case Jason.decode(body) do
+      {:ok, %{"outcome" => "SITEMAP_OUTCOME_HARVESTED"} = ok} ->
+        # Every list is read with a default: the sidecar omits empty repeated fields
+        # (`skip_serializing_if`), so an absent key means "none", not a malformed response.
+        harvest = %{
+          urls: Map.get(ok, "urls", []),
+          skipped: Map.get(ok, "skipped", []),
+          truncated: Map.get(ok, "truncated", false),
+          documents_fetched: Map.get(ok, "documents_fetched", 0),
+          bytes_read: Map.get(ok, "bytes_read", 0)
+        }
+
+        Logger.info(
+          "ScraperClient: #{store} sitemap — #{length(harvest.urls)} url(s) from " <>
+            "#{harvest.documents_fetched} document(s), #{harvest.bytes_read} bytes, " <>
+            "#{length(harvest.skipped)} skipped#{if harvest.truncated, do: " (TRUNCATED)", else: ""}"
+        )
+
+        {:ok, harvest}
+
+      # ⚠️ Its own error and NOT `{:ok, %{urls: []}}`. "The shop declares no sitemap" is a different
+      # fact from "the sitemap listed nothing", and a caller that cannot tell them apart will record
+      # a shop as having no events page without ever having looked.
+      {:ok, %{"outcome" => "SITEMAP_OUTCOME_NO_SITEMAP_DECLARED"}} ->
+        Logger.info("ScraperClient: #{store} declares no sitemap in robots.txt")
+        {:error, :no_sitemap_declared}
+
+      {:ok, %{"outcome" => "SITEMAP_OUTCOME_ROBOTS_BLOCKED"} = ok} ->
+        rule = ok |> Map.get("skipped", []) |> List.first() || "disallowed"
+        Logger.info("ScraperClient: robots.txt blocks #{store}'s sitemap (#{rule})")
+        {:error, {:robots_blocked, rule}}
+
+      {:ok, %{"outcome" => "SITEMAP_OUTCOME_RATE_LIMITED"} = ok} ->
+        {:error, {:rate_limited, Map.get(ok, "retry_after_seconds", 60)}}
+
+      other ->
+        {:unexpected, other}
+    end
+  end
+
   # No `store_fuse` here: on a 200 the store answered, so nothing about it is failing.
   # An unrecognised outcome below is a client/sidecar contract mismatch, which melts the
   # *service* fuse — melting the store's would blame the shop for our own bug.

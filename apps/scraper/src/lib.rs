@@ -9,4 +9,5 @@ pub mod proto;
 pub mod rate_limiter;
 pub mod robots;
 pub mod scraper;
+pub mod sitemap;
 pub mod stores;

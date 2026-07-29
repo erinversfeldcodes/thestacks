@@ -128,6 +128,71 @@ message FetchPageResponse {
   int64 retry_after_seconds = 6 [json_name = "retry_after_seconds"];
 }
 
+// Request for POST /sitemap-urls — enumerate a store's pages from its own sitemap.
+//
+// Keyed by `store` for the same reason `FetchPageRequest` is: the config supplies the base URL and
+// the rate limit, so a store with no scraper config cannot be walked at all.
+//
+// Takes no filter. The page-type sitemaps of a bookshop list tens of URLs, not thousands, so
+// returning them whole costs nothing and keeps the *decision* about which path is an events page
+// with the caller — which is where the vocabulary for that decision lives.
+message SitemapUrlsRequest {
+  // Store identifier, e.g. "za/exclusive_books". Must exist in the registry.
+  string store = 1 [json_name = "store"];
+}
+
+// How a sitemap walk ended.
+enum SitemapOutcome {
+  // Never sent; proto3 requires a zero value.
+  SITEMAP_OUTCOME_UNSPECIFIED = 0;
+
+  // The walk completed. `urls` may still be empty — a shop can genuinely list no pages — and
+  // `truncated` says whether it is complete.
+  SITEMAP_OUTCOME_HARVESTED = 1;
+
+  // robots.txt declared no `Sitemap:` at all, so there is nothing to walk. Distinct from HARVESTED
+  // with an empty `urls`: one means "the shop has no index", the other "the index listed nothing".
+  // Collapsing them would record a shop as having no events page on the strength of never asking.
+  SITEMAP_OUTCOME_NO_SITEMAP_DECLARED = 2;
+
+  // robots.txt disallows the sitemap path. Rare but real, and permanent until the rule changes.
+  SITEMAP_OUTCOME_ROBOTS_BLOCKED = 3;
+
+  // The shop is pacing us; see FETCH_OUTCOME_RATE_LIMITED. `retry_after_seconds` says when.
+  SITEMAP_OUTCOME_RATE_LIMITED = 4;
+}
+
+// Response from POST /sitemap-urls.
+message SitemapUrlsResponse {
+  // How the walk ended.
+  SitemapOutcome outcome = 1 [json_name = "outcome"];
+
+  // Page URLs the shop lists, de-duplicated, in document order.
+  repeated string urls = 2 [json_name = "urls"];
+
+  // How many sitemap documents were actually fetched, and how many bytes that cost the shop.
+  // Reported so the politeness of this operation is *measurable* rather than asserted: a change that
+  // quietly starts pulling a catalogue shows up here as a number, in a log line, on every run.
+  int32 documents_fetched = 3 [json_name = "documents_fetched"];
+  // Bytes transferred across those documents — what the walk actually cost the shop.
+  int64 bytes_read = 4 [json_name = "bytes_read"];
+
+  // Documents deliberately NOT fetched, each with its reason — a catalogue-sized child, a
+  // cross-host `Sitemap:` line, a non-2xx, a body that was not a sitemap.
+  //
+  // Carried on the response because "found nothing" and "declined to look" are different facts and
+  // a caller that cannot tell them apart will record the wrong one.
+  repeated string skipped = 5 [json_name = "skipped"];
+
+  // True when the crawl budget or a backoff ended the walk early, so `urls` is incomplete.
+  // A partial result presented as complete is how a shop gets permanently recorded as having no
+  // events page.
+  bool truncated = 6 [json_name = "truncated"];
+
+  // Set only when the outcome is RATE_LIMITED.
+  int64 retry_after_seconds = 7 [json_name = "retry_after_seconds"];
+}
+
 // What a scrape attempt concluded.
 //
 // The point of this enum is to separate two things that used to be

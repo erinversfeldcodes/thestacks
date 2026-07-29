@@ -51,6 +51,33 @@ defmodule Stacks.Enrichment.MockScraperClient do
     end
   end
 
+  @impl true
+  def sitemap_urls(store_name) do
+    Process.put({__MODULE__, :sitemap_calls}, sitemap_calls() ++ [store_name])
+
+    case Process.get({__MODULE__, :sitemaps}, [])
+         |> Enum.find(fn {s, _} -> s == store_name end) do
+      {_, response} ->
+        response
+
+      # Every key present with its real default, for the same reason `fetch_page/2` always includes
+      # `sitemaps: []`: a mock that omits a key lets a caller pass here and crash on the real shape.
+      nil ->
+        {:ok, %{urls: [], skipped: [], truncated: false, documents_fetched: 0, bytes_read: 0}}
+    end
+  end
+
+  @doc "Register a `sitemap_urls/1` response for a store."
+  def put_sitemap(store_name, response) do
+    Process.put(
+      {__MODULE__, :sitemaps},
+      [{store_name, response} | Process.get({__MODULE__, :sitemaps}, [])]
+    )
+  end
+
+  @doc "Every `sitemap_urls/1` call made in this process, in order."
+  def sitemap_calls, do: Process.get({__MODULE__, :sitemap_calls}, [])
+
   @doc "Register a `fetch_page/2` response for a specific store + path."
   def put_page(store_name, path, response) do
     pages = Process.get({__MODULE__, :pages}, [])
@@ -101,6 +128,8 @@ defmodule Stacks.Enrichment.MockScraperClient do
 
   @doc "Clear all registered responses for the current process."
   def clear do
+    Process.delete({__MODULE__, :sitemaps})
+    Process.delete({__MODULE__, :sitemap_calls})
     Process.delete(__MODULE__)
     Process.delete({__MODULE__, :pages})
     Process.delete({__MODULE__, :fetches})

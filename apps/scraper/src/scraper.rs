@@ -4,6 +4,7 @@ use crate::platform::{self, Capability, LookupMode, PriceSource};
 use crate::price::{extract_in_stock, extract_price, extract_text};
 use crate::rate_limiter::RateLimiter;
 use crate::robots::RobotsChecker;
+use crate::sitemap::{self, CrawlBudget, Spend};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -64,6 +65,62 @@ fn effective_rpm(policy: &crate::robots::RobotsPolicy, configured: u32) -> u32 {
     match policy.crawl_delay_secs {
         Some(secs) if secs > 0 => (60 / secs).max(1).min(configured),
         _ => configured,
+    }
+}
+
+/// What one sitemap walk found, and what it deliberately did not ask for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SitemapHarvest {
+    /// Page URLs the shop lists, de-duplicated.
+    pub urls: Vec<String>,
+    pub documents_fetched: u32,
+    pub bytes_read: u64,
+    /// Documents not fetched, each with the reason. Reported rather than dropped so that "we found
+    /// nothing" can be told apart from "we declined to look" — which is the difference between a
+    /// shop with no events page and a shop whose catalogue we refused to download.
+    pub skipped: Vec<String>,
+    /// The budget or a backoff ended the walk early, so `urls` may be incomplete. A partial result
+    /// silently presented as complete is how a shop gets recorded as having no events page.
+    pub truncated: bool,
+}
+
+/// One step of the walk.
+enum HarvestStep {
+    Read {
+        bytes: u64,
+        doc: sitemap::SitemapDoc,
+    },
+    Skipped(String),
+    /// End the whole walk — budget spent, or the shop asked us to back off.
+    Stop,
+}
+
+/// Pull the next document to fetch: everything known-worthwhile first, unlabelled leftovers after.
+fn next_target(queue: &mut Vec<String>, deferred: &mut Vec<String>) -> Option<String> {
+    if !queue.is_empty() {
+        return Some(queue.remove(0));
+    }
+    if !deferred.is_empty() {
+        return Some(deferred.remove(0));
+    }
+    None
+}
+
+/// The path part of `url`, but **only if `url` is on `domain`**.
+///
+/// `None` means refuse. robots.txt is attacker-controlled input as far as this service goes: a
+/// `Sitemap:` line naming another host would otherwise send our requests there while the robots
+/// check and rate limit still applied to the configured domain — the compliant egress turned into an
+/// open proxy, which is the exact hole `/fetch` guards against for its `path` parameter.
+fn path_within(url: &str, domain: &str) -> Option<String> {
+    let rest = url.strip_prefix(domain)?;
+
+    match rest {
+        "" => Some("/".to_string()),
+        r if r.starts_with('/') => Some(r.to_string()),
+        // `https://shop.test.evil.com/...` starts with `https://shop.test` as a *string* while being
+        // an entirely different host. The boundary check is the whole guard.
+        _ => None,
     }
 }
 
@@ -723,6 +780,216 @@ impl Engine {
         Ok((status, body, policy.sitemaps))
     }
 
+    /// Enumerate a shop's pages from its own sitemap, instead of guessing at paths.
+    ///
+    /// The polite alternative to path-guessing, and cheaper for both sides — see the `sitemap`
+    /// module docs for the measured comparison. Every request here goes through the same robots
+    /// check, rate limiter and pacing observation as any other, plus a `CrawlBudget` that bounds
+    /// what one discovery run can cost the shop in **requests and bytes**.
+    ///
+    /// The walk: robots.txt has already told us where the index is → fetch it → if it is an index,
+    /// fetch only the children that name themselves as *pages*, never products or collections →
+    /// return the page URLs. `skipped` reports the children we deliberately did not ask for, so the
+    /// politeness decision is observable rather than implicit.
+    pub async fn sitemap_urls(
+        &self,
+        config: &ScraperConfig,
+    ) -> Result<SitemapHarvest, ScraperError> {
+        let base = config.source.url.trim_end_matches('/').to_string();
+        let domain = extract_domain(&config.source.url).unwrap_or_else(|| base.clone());
+        let mut harvest = SitemapHarvest::default();
+        let mut budget = CrawlBudget::for_discovery();
+
+        // robots.txt is read for compliance anyway, and it is what declares the index. Permission is
+        // checked for the sitemap path itself, not for "/" — a shop may disallow one and not the
+        // other, and assuming otherwise is how a compliance check becomes decorative.
+        let policy = self
+            .robots
+            .policy(&base, "/robots.txt", config.rate_limit.retry_after_seconds)
+            .await?;
+
+        if policy.sitemaps.is_empty() {
+            return Ok(harvest);
+        }
+
+        // Every declared index, then every page-type child of each. `Unlabelled` children are
+        // deferred to the end of the queue: whatever budget remains goes to the children we *know*
+        // are worth reading before the ones we are merely unsure about.
+        let mut queue: Vec<String> = policy.sitemaps.clone();
+        let mut deferred: Vec<String> = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
+
+        while let Some(url) = next_target(&mut queue, &mut deferred) {
+            if seen.contains(&url) {
+                continue;
+            }
+            seen.push(url.clone());
+
+            // ⚠️ Cross-host sitemaps are refused, not followed. robots.txt is attacker-controlled
+            // input as far as this service is concerned — a `Sitemap:` line naming another host would
+            // otherwise steer our egress at it while the robots check and rate limit still applied to
+            // the *configured* domain. The same hole `/fetch` guards against for `path`.
+            let Some(path) = path_within(&url, &domain) else {
+                harvest.skipped.push(format!("{url} (not on {domain})"));
+                continue;
+            };
+
+            match self
+                .harvest_one(config, &domain, &path, &url, &mut budget)
+                .await
+            {
+                HarvestStep::Stop => {
+                    harvest.truncated = true;
+                    break;
+                }
+                HarvestStep::Skipped(why) => harvest.skipped.push(why),
+                HarvestStep::Read { bytes, doc } => {
+                    harvest.documents_fetched += 1;
+                    harvest.bytes_read += bytes;
+
+                    match doc.kind {
+                        sitemap::DocKind::Index => {
+                            for child in doc.locs {
+                                match sitemap::classify_child(&child) {
+                                    sitemap::ChildKind::Page => queue.push(child),
+                                    sitemap::ChildKind::Unlabelled => deferred.push(child),
+                                    sitemap::ChildKind::Excluded => harvest
+                                        .skipped
+                                        .push(format!("{child} (catalogue-sized, not pages)")),
+                                }
+                            }
+                        }
+                        sitemap::DocKind::UrlSet => {
+                            for page in doc.locs {
+                                if !harvest.urls.contains(&page) {
+                                    harvest.urls.push(page);
+                                }
+                            }
+                        }
+                        // Not a sitemap at all — a challenge page, an HTML 404, a redirect body.
+                        // Recorded rather than treated as "this shop has no pages", which is a false
+                        // negative that would never be revisited.
+                        sitemap::DocKind::Unknown => harvest
+                            .skipped
+                            .push(format!("{url} (response was not a sitemap)")),
+                    }
+                }
+            }
+        }
+
+        Ok(harvest)
+    }
+
+    /// One document of the walk: budget, robots, rate limit, fetch, parse.
+    async fn harvest_one(
+        &self,
+        config: &ScraperConfig,
+        domain: &str,
+        path: &str,
+        url: &str,
+        budget: &mut CrawlBudget,
+    ) -> HarvestStep {
+        // The budget is asked FIRST, and it is what yields the byte ceiling — so there is no way to
+        // reach the fetch below without having been given an allowance for it.
+        let byte_limit = match budget.spend() {
+            Spend::Allowed { byte_limit } => byte_limit,
+            Spend::Exhausted => return HarvestStep::Stop,
+        };
+
+        match self
+            .robots
+            .policy(domain, path, config.rate_limit.retry_after_seconds)
+            .await
+        {
+            Ok(policy) if !policy.allowed => {
+                return HarvestStep::Skipped(format!(
+                    "{url} ({})",
+                    policy.blocked_by.unwrap_or_else(|| "disallowed".into())
+                ));
+            }
+            Ok(policy) => {
+                let rpm = effective_rpm(&policy, config.rate_limit.requests_per_minute);
+                if let Err(e) = self.rate_limiter.check_and_record(domain, rpm) {
+                    // Includes a cooldown the shop asked for. Stopping the whole walk rather than
+                    // skipping this one document is the point: the next fetch would be refused too,
+                    // and a walk that keeps asking during a backoff is not a polite walk.
+                    tracing::info!("sitemap walk stopping at {}: {}", url, e);
+                    return HarvestStep::Stop;
+                }
+            }
+            Err(e) => {
+                tracing::info!("sitemap walk stopping at {}: {}", url, e);
+                return HarvestStep::Stop;
+            }
+        }
+
+        // Courtesy pause between documents of one burst — see `INTER_DOCUMENT_DELAY`.
+        tokio::time::sleep(sitemap::INTER_DOCUMENT_DELAY).await;
+
+        match self.fetch_capped(url, byte_limit).await {
+            Ok((status, body, bytes)) => {
+                budget.charge_bytes(bytes);
+
+                // Only a 2xx body is parsed. A 404 is data about the shop; a 429 is a challenge page
+                // that would parse cleanly and mean nothing.
+                if !(200..300).contains(&status) {
+                    return HarvestStep::Skipped(format!("{url} (HTTP {status})"));
+                }
+                HarvestStep::Read {
+                    bytes,
+                    doc: sitemap::parse(&body),
+                }
+            }
+            Err(e) => {
+                tracing::warn!("sitemap fetch failed for {}: {}", url, e);
+                HarvestStep::Skipped(format!("{url} ({e})"))
+            }
+        }
+    }
+
+    /// GET a URL, reading at most `byte_limit` bytes of the body.
+    ///
+    /// Streamed chunk by chunk rather than `response.text()`, because `text()` reads whatever the
+    /// server sends — and the documents this guards against are exactly the ones that are too big.
+    /// A cap enforced after the transfer is not a cap; the shop has already paid for it.
+    ///
+    /// Returns the bytes actually transferred, so the budget is charged for what happened rather
+    /// than for what was permitted. The body may be truncated mid-element; `sitemap::parse` is built
+    /// to return what it had rather than fail, and there is a test for that shape.
+    async fn fetch_capped(
+        &self,
+        url: &str,
+        byte_limit: u64,
+    ) -> Result<(u16, String, u64), ScraperError> {
+        let mut response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(ScraperError::Http)?;
+
+        let status = response.status().as_u16();
+        let mut body = Vec::new();
+
+        while let Some(chunk) = response.chunk().await.map_err(ScraperError::Http)? {
+            body.extend_from_slice(&chunk);
+            if body.len() as u64 >= byte_limit {
+                tracing::info!(
+                    "hung up on {} at {} bytes (budget {})",
+                    url,
+                    body.len(),
+                    byte_limit
+                );
+                break;
+            }
+        }
+
+        let bytes = body.len() as u64;
+        // Lossy rather than an error: a sitemap is XML and should be UTF-8, but a body truncated
+        // mid-codepoint by the cap above is normal, not a defect worth failing the walk over.
+        Ok((status, String::from_utf8_lossy(&body).into_owned(), bytes))
+    }
+
     /// Turn a pacing response into the determination it is, recording the cooldown on the way.
     ///
     /// Returns `Some(err)` when the shop is telling us to wait — 429, or a 503 (which for a shop
@@ -945,6 +1212,88 @@ mod tests {
             ),
             other => panic!("the 429 left no cooldown the next request could see: {other:?}"),
         }
+    }
+
+    // ------------------------------------------------------------------
+    // The sitemap walk's own two decisions
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn a_sitemap_on_another_host_is_refused_not_followed() {
+        // ⛔ robots.txt is attacker-controlled input as far as this service is concerned. A
+        // `Sitemap:` line naming another host would send our requests there while the robots check
+        // and rate limit still applied to the CONFIGURED domain — the compliant egress turned into an
+        // open proxy. `/fetch` already guards its `path` parameter against exactly this; the sitemap
+        // list is a second door into the same room.
+        let domain = "https://shop.test";
+
+        assert_eq!(
+            path_within("https://shop.test/sitemap.xml", domain),
+            Some("/sitemap.xml".to_string())
+        );
+        assert_eq!(
+            path_within("https://shop.test", domain),
+            Some("/".to_string())
+        );
+
+        for hostile in [
+            // The prefix-match trap: a string that begins with the domain and is a different host.
+            "https://shop.test.evil.com/sitemap.xml",
+            "https://shop.testevil.com/sitemap.xml",
+            "https://evil.com/sitemap.xml",
+            // Scheme downgrade is a different origin too.
+            "http://shop.test/sitemap.xml",
+        ] {
+            assert_eq!(
+                path_within(hostile, domain),
+                None,
+                "our egress would have been steered at: {hostile}"
+            );
+        }
+    }
+
+    #[test]
+    fn known_page_sitemaps_are_read_before_unlabelled_ones() {
+        // The budget is finite, so ordering IS allocation: spending the last request on a sitemap we
+        // merely could not classify, while a known pages sitemap waits, is how a walk comes back
+        // empty from a shop that told us exactly where its pages were.
+        let mut queue = vec!["pages-a".to_string(), "pages-b".to_string()];
+        let mut deferred = vec!["unlabelled".to_string()];
+
+        assert_eq!(
+            next_target(&mut queue, &mut deferred).as_deref(),
+            Some("pages-a")
+        );
+        assert_eq!(
+            next_target(&mut queue, &mut deferred).as_deref(),
+            Some("pages-b")
+        );
+        assert_eq!(
+            next_target(&mut queue, &mut deferred).as_deref(),
+            Some("unlabelled")
+        );
+        assert_eq!(next_target(&mut queue, &mut deferred), None);
+    }
+
+    #[test]
+    fn a_child_queued_mid_walk_still_precedes_the_deferred_ones() {
+        // The queue is refilled as an index is parsed, so this is the real shape rather than a
+        // static list: a pages child discovered on the second document must still outrank an
+        // unlabelled one discovered on the first.
+        let mut queue = vec!["index".to_string()];
+        let mut deferred = vec!["unlabelled-from-index".to_string()];
+
+        assert_eq!(
+            next_target(&mut queue, &mut deferred).as_deref(),
+            Some("index")
+        );
+        queue.push("pages-from-index".to_string());
+
+        assert_eq!(
+            next_target(&mut queue, &mut deferred).as_deref(),
+            Some("pages-from-index"),
+            "an unlabelled leftover was read before a pages child found later in the walk"
+        );
     }
 
     #[test]
