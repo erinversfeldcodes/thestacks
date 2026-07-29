@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-27",
   "plan": "plans/staff-campaign-2026-07-27.md",
   "created_at": "2026-07-27T00:00:00Z",
-  "updated_at": "2026-07-28T22:40:00Z",
+  "updated_at": "2026-07-29T00:25:00Z",
   "status": "in_progress",
   "current_wave": "0",
   "_why": [
@@ -78,15 +78,16 @@
         },
         "G4": {
           "title": "RSS feeds reachable from the profile",
-          "status": "in_progress",
+          "status": "complete",
           "issue": null,
-          "note": "endpoint + has_feed + anchor built and unit-tested; feed ladder bug fixed (public bookshelves were refused a feed). NOT DRIVEN: the subscribe anchor has never been seen rendered on a page"
+          "note": "CLOSED and DRIVEN 2026-07-29 on the preview. 3 subscribe anchors render on /u/test_user_0eee65 (antilibrary/library/reading_pile) with handle-addressed hrefs, rel=alternate, styled; GET /api/feeds/u/test_user_0eee65/library -> 200 real Atom (3 entries, ETag). Two bugs fixed en route: feeds gated on visibility=='platform' so a PUBLIC bookshelf was refused its feed (and has_feed duplicated the same wrong rule); and the seed's on_conflict silently discarded BOTH visibility fixes on every preview.",
+          "informal": true
         },
         "G5": {
           "title": "Shelf organisation reachable from the client",
           "status": "complete",
           "issue": null,
-          "note": "informal — driven live 2026-07-28: add/reorder/drag all work, 19 spines survive. Two bugs found and fixed live (hardcoded placements:[]; dragover cancelling the drag), both mutation-probed",
+          "note": "informal — CLOSED. Driven live 2026-07-28 (add/reorder/drag, 19 spines survive) AND e2e/tests/shelf-organiser.spec.ts 6/6 green against the preview, including a real HTML5 drag via Playwright dragTo. Two bugs found live and fixed: hardcoded placements:[] emptying the bookcase; dragover cancelling the drag. Both mutation-probed.",
           "informal": true
         },
         "G6": {
@@ -118,6 +119,9 @@
   "notes": [
     "2026-07-28: #301 (398 orphan CSS classes), #302 (prose negative assertions), #303 (SPA cannot reach any admin endpoint) filed.",
     "2026-07-28: #303 invalidates the earlier Wave 0 claim that seeding discovered_sources closed G3's evidence gap — the rows exist and the API serves them, but no UI can reach them.",
-    "A preview redeploy DELETES and recreates the Neon branch from staging, so anything seeded into a preview survives exactly one deploy."
+    "A preview redeploy DELETES and recreates the Neon branch from staging, so anything seeded into a preview survives exactly one deploy.",
+    "2026-07-28: the seed's on_conflict clauses silently discarded BOTH visibility fixes (mine and the pre-existing public_bookshelf_names one) on every preview, because a preview branches staging so the rows already exist. Fixed: users replace profile_visibility, bookshelves replace visibility. A third instance of 'looks landed, is inert' this session.",
+    "2026-07-28: shelf-organiser.spec.ts needs --workers=1 against a preview; 4 parallel session-mints 502 the 512MB VM. 4 passed / 2 failed in parallel, 6/6 serial.",
+    "2026-07-29: G4 driven. 🟧 The public profile page is largely UNSTYLED (raw bulleted bookshelf list, no page chrome) — visible in the drive screenshot. `profile` is one of #301's larger orphan-class groups (15). Not fixed here; it is #301's scope."
   ]
 }
