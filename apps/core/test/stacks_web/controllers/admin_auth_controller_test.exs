@@ -282,7 +282,7 @@ defmodule StacksWeb.AdminAuthControllerTest do
         |> put_req_header("authorization", "Bearer #{token}")
         |> post("/api/admin/auth/mfa/confirm", %{
           totp_code: totp_code,
-          secret: Base.encode64(secret),
+          secret: Base.encode32(secret, padding: false),
           recovery_codes: codes
         })
 
@@ -299,14 +299,14 @@ defmodule StacksWeb.AdminAuthControllerTest do
         |> put_req_header("authorization", "Bearer #{token}")
         |> post("/api/admin/auth/mfa/confirm", %{
           totp_code: "000000",
-          secret: Base.encode64(secret),
+          secret: Base.encode32(secret, padding: false),
           recovery_codes: codes
         })
 
       assert %{"error" => "invalid_code"} = json_response(conn, 422)
     end
 
-    test "returns 422 for malformed Base64 secret", %{conn: conn} do
+    test "returns 422 for a malformed secret", %{conn: conn} do
       user = insert(:owner_user)
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
@@ -320,6 +320,43 @@ defmodule StacksWeb.AdminAuthControllerTest do
         })
 
       assert %{"error" => "invalid_secret"} = json_response(conn, 422)
+    end
+
+    test "accepts the secret exactly as `mfa_setup` publishes it — the client's real path" do
+      # ⚠️ The test whose absence let an impossible contract survive. Every other test here calls
+      # `MFA.begin_enrollment/1` directly and gets RAW secret bytes, then encodes them however the
+      # endpoint happened to want. A real client cannot do that: `mfa_setup` returns only
+      # `provisioning_uri`, and the secret inside it is **base32**. So this walks the client's path —
+      # call setup, take the secret out of the URI, confirm with it, unmodified.
+      #
+      # It fails against the old `Base.decode64/1` implementation, which is the point.
+      user = insert(:owner_user)
+      {:ok, token, _} = Guardian.encode_and_sign(user)
+      auth = fn c -> put_req_header(c, "authorization", "Bearer #{token}") end
+
+      %{"provisioning_uri" => uri, "recovery_codes" => codes} =
+        build_conn() |> auth.() |> post("/api/admin/auth/mfa/setup") |> json_response(200)
+
+      secret_param =
+        uri
+        |> URI.parse()
+        |> Map.get(:query)
+        |> URI.decode_query()
+        |> Map.fetch!("secret")
+
+      {:ok, raw} = Base.decode32(secret_param, padding: false)
+
+      conn =
+        build_conn()
+        |> auth.()
+        |> post("/api/admin/auth/mfa/confirm", %{
+          totp_code: NimbleTOTP.verification_code(raw),
+          secret: secret_param,
+          recovery_codes: codes
+        })
+
+      assert %{"ok" => true} = json_response(conn, 200),
+             "the endpoint rejects the secret its own setup call published"
     end
   end
 end
