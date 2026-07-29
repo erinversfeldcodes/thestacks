@@ -6,6 +6,7 @@ use crate::rate_limiter::RateLimiter;
 use crate::robots::RobotsChecker;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Instant;
 
 /// User-agent string for HTTP requests.
 const USER_AGENT: &str = "TheStacksScraper/0.1 (+https://thestacks.app/scraper)";
@@ -118,10 +119,15 @@ impl Engine {
             .user_agent(USER_AGENT)
             .build()
             .map_err(ScraperError::Http)?;
+        // One limiter, shared with the robots checker. A 429 on `/robots.txt` must pace our *page*
+        // requests too — it is the same shop, and it is behind the same bot-protection front that
+        // issued it. Two independent limiters would let a domain that had just refused robots.txt
+        // keep taking page requests at full configured rate.
+        let rate_limiter = RateLimiter::new();
         Ok(Self {
-            robots: RobotsChecker::new(client.clone()),
+            robots: RobotsChecker::new(client.clone(), rate_limiter.clone()),
             client,
-            rate_limiter: RateLimiter::new(),
+            rate_limiter,
             fixtures: HashMap::new(),
             mock: false,
             capabilities: dashmap::DashMap::new(),
@@ -134,10 +140,11 @@ impl Engine {
     pub fn new_mock(fixtures: HashMap<String, String>) -> Self {
         // Mock engine never makes real HTTP requests; use a minimal client for RobotsChecker API compat.
         let client = reqwest::Client::new();
+        let rate_limiter = RateLimiter::new();
         Self {
-            robots: RobotsChecker::new(client.clone()),
+            robots: RobotsChecker::new(client.clone(), rate_limiter.clone()),
             client,
-            rate_limiter: RateLimiter::new(),
+            rate_limiter,
             fixtures,
             mock: true,
             capabilities: dashmap::DashMap::new(),
@@ -178,7 +185,13 @@ impl Engine {
                     "search URL '{search_url}' does not begin with source URL '{base}'"
                 ))
             })?;
-            self.robots.policy(&config.source.url, path).await?
+            self.robots
+                .policy(
+                    &config.source.url,
+                    path,
+                    config.rate_limit.retry_after_seconds,
+                )
+                .await?
         };
 
         if !policy.allowed {
@@ -201,7 +214,7 @@ impl Engine {
 
         self.rate_limiter.check_and_record(&domain, effective_rpm)?;
 
-        let html = self.fetch_html(store_id, &search_url).await?;
+        let html = self.fetch_html(store_id, &search_url, config).await?;
         self.parse_result(isbn, store_id, config, &html, &search_url)
     }
 
@@ -660,7 +673,13 @@ impl Engine {
         let policy = if self.mock {
             crate::robots::RobotsPolicy::unrestricted()
         } else {
-            self.robots.policy(&config.source.url, path).await?
+            self.robots
+                .policy(
+                    &config.source.url,
+                    path,
+                    config.rate_limit.retry_after_seconds,
+                )
+                .await?
         };
 
         if !policy.allowed {
@@ -683,13 +702,70 @@ impl Engine {
             .map_err(ScraperError::Http)?;
 
         let status = response.status().as_u16();
+
+        // Before the body, and that order matters: a 429 body is a styled challenge page (9 KB from
+        // both target shops) and reading it would both cost the transfer and hand a caller something
+        // that parses cleanly and means nothing.
+        if let Some(err) = self.note_pacing(
+            &domain,
+            status,
+            response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok()),
+            config.rate_limit.retry_after_seconds,
+        ) {
+            return Err(err);
+        }
+
         let body = response.text().await.map_err(ScraperError::Http)?;
 
         Ok((status, body, policy.sitemaps))
     }
 
+    /// Turn a pacing response into the determination it is, recording the cooldown on the way.
+    ///
+    /// Returns `Some(err)` when the shop is telling us to wait — 429, or a 503 (which for a shop
+    /// behind bot protection is usually the same message in a different envelope).
+    ///
+    /// Takes the status and header **by value rather than a `&Response`** so the decision is
+    /// unit-testable without a network or a mock HTTP server — the same reason `classify_status` was
+    /// split out of the robots fetch. Every egress path in this file routes through it, which is
+    /// what makes honouring the signal a property of the service rather than of whoever remembered.
+    fn note_pacing(
+        &self,
+        domain: &str,
+        status: u16,
+        retry_after: Option<&str>,
+        default_retry_after_secs: u64,
+    ) -> Option<ScraperError> {
+        if !matches!(status, 429 | 503) {
+            return None;
+        }
+
+        let wait = RateLimiter::retry_after(retry_after, default_retry_after_secs);
+        self.rate_limiter.back_off(domain, Instant::now() + wait);
+
+        tracing::info!(
+            "{} answered {}; backing off {}s",
+            domain,
+            status,
+            wait.as_secs()
+        );
+
+        Some(ScraperError::UpstreamBackoff {
+            domain: domain.to_string(),
+            seconds_remaining: wait.as_secs(),
+        })
+    }
+
     /// Fetch HTML — either from fixtures (mock mode) or real HTTP.
-    async fn fetch_html(&self, store_id: &str, url: &str) -> Result<String, ScraperError> {
+    async fn fetch_html(
+        &self,
+        store_id: &str,
+        url: &str,
+        config: &ScraperConfig,
+    ) -> Result<String, ScraperError> {
         if self.mock {
             return self.fixtures.get(store_id).cloned().ok_or_else(|| {
                 ScraperError::ConfigNotFound(format!("no fixture for '{store_id}'"))
@@ -703,7 +779,25 @@ impl Engine {
             .await
             .map_err(ScraperError::Http)?;
 
-        // Surface HTTP 4xx/5xx as errors so they don't silently produce empty results.
+        // Pacing is checked before `error_for_status`, because that call would fold a 429 into a
+        // generic `ScraperError::Http` — which `outcome_for_error` classifies as a *failure*, and a
+        // failure melts the fuse shared by every store. So a single shop pacing us used to take
+        // price scraping down everywhere, repeatedly, since a 429 recurs on every attempt.
+        let domain =
+            extract_domain(&config.source.url).unwrap_or_else(|| config.source.url.clone());
+        if let Some(err) = self.note_pacing(
+            &domain,
+            response.status().as_u16(),
+            response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok()),
+            config.rate_limit.retry_after_seconds,
+        ) {
+            return Err(err);
+        }
+
+        // Surface remaining HTTP 4xx/5xx as errors so they don't silently produce empty results.
         let response = response.error_for_status().map_err(ScraperError::Http)?;
         response.text().await.map_err(ScraperError::Http)
     }
@@ -815,6 +909,66 @@ fn extract_domain(url: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::config::ScraperConfig;
+
+    // ------------------------------------------------------------------
+    // Pacing — the shop's 429 reaching our limiter
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn a_429_records_a_cooldown_the_next_request_actually_observes() {
+        // The end-to-end wiring assertion, and the one worth having: it is not enough for
+        // `note_pacing` to *return* the determination. It has to write the cooldown into the very
+        // limiter the next egress consults, under the very same key. A mismatched domain key here
+        // would leave every test passing and the backoff a silent no-op — this project's dominant
+        // defect class.
+        let engine = Engine::new_mock(HashMap::new());
+        let config = exclusive_books_config();
+        let domain = extract_domain(&config.source.url).unwrap();
+
+        // Nothing is in force to begin with, so a refusal below cannot be a pre-existing condition.
+        assert!(
+            engine.rate_limiter.check_and_record(&domain, 10).is_ok(),
+            "the domain was already paced before the 429 — the test would pass vacuously"
+        );
+
+        let err = engine
+            .note_pacing(&domain, 429, Some("120"), 60)
+            .expect("a 429 was not recognised as the shop pacing us");
+        assert!(matches!(err, ScraperError::UpstreamBackoff { .. }));
+
+        match engine.rate_limiter.check_and_record(&domain, 10) {
+            Err(ScraperError::UpstreamBackoff {
+                seconds_remaining, ..
+            }) => assert!(
+                (110..=120).contains(&seconds_remaining),
+                "the cooldown was recorded but not for the 120s asked for: {seconds_remaining}s"
+            ),
+            other => panic!("the 429 left no cooldown the next request could see: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_ordinary_status_is_not_treated_as_pacing() {
+        // The other half, without which the test above is satisfied by a function that backs off on
+        // everything. A 200 and a 404 are both perfectly ordinary answers.
+        let engine = Engine::new_mock(HashMap::new());
+
+        for status in [200, 301, 404, 418, 500] {
+            assert!(
+                engine
+                    .note_pacing("https://example.com", status, Some("120"), 60)
+                    .is_none(),
+                "HTTP {status} was mistaken for a pacing signal"
+            );
+        }
+        assert!(
+            engine
+                .rate_limiter
+                .check_and_record("https://example.com", 10)
+                .is_ok(),
+            "an ordinary response left a cooldown behind"
+        );
+    }
 
     fn exclusive_books_config() -> ScraperConfig {
         ScraperConfig::from_toml_str(

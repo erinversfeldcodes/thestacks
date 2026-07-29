@@ -1,6 +1,8 @@
 use crate::error::ScraperError;
+use crate::rate_limiter::RateLimiter;
 use dashmap::DashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::OnceCell;
 
 // The User-Agent header for robots.txt fetches comes from the shared
@@ -94,13 +96,18 @@ pub struct RobotsChecker {
     /// Maps domain → once-initialised robots.txt document.
     cache: Arc<DashMap<String, Arc<OnceCell<RobotsDoc>>>>,
     client: reqwest::Client,
+    /// Shared with `Engine`, so a 429 seen while fetching robots.txt paces the *page* requests
+    /// too. Holding it here rather than reporting upward is the point: the component that observes
+    /// the signal is the one that records it, and there is no step in between for anyone to forget.
+    rate_limiter: RateLimiter,
 }
 
 impl RobotsChecker {
-    pub fn new(client: reqwest::Client) -> Self {
+    pub fn new(client: reqwest::Client, rate_limiter: RateLimiter) -> Self {
         Self {
             cache: Arc::new(DashMap::new()),
             client,
+            rate_limiter,
         }
     }
 
@@ -119,7 +126,16 @@ impl RobotsChecker {
     ///   is retried, rather than poisoning the domain for the process lifetime.
     ///   (`kalkbaybooks.co.za` returned 503 during target research, so this path
     ///   is real, not hypothetical.)
-    pub async fn policy(&self, base_url: &str, path: &str) -> Result<RobotsPolicy, ScraperError> {
+    ///
+    /// `default_retry_after_secs` is the store's configured `retry_after_seconds`, used when a
+    /// pacing response carries no usable `Retry-After`. Threaded in as a parameter rather than read
+    /// from a global so the value that a store's operator set is the value that applies to it.
+    pub async fn policy(
+        &self,
+        base_url: &str,
+        path: &str,
+        default_retry_after_secs: u64,
+    ) -> Result<RobotsPolicy, ScraperError> {
         let domain = extract_domain(base_url).ok_or_else(|| ScraperError::RobotsFetchFailed {
             domain: base_url.to_string(),
             reason: "cannot extract domain from URL".to_string(),
@@ -149,6 +165,32 @@ impl RobotsChecker {
                                     reason: format!("could not read robots.txt body: {e}"),
                                 }),
                             StatusVerdict::NoRestrictions => Ok(RobotsDoc::Absent),
+                            StatusVerdict::Paced => {
+                                // Record the cooldown HERE, where the signal was observed, rather
+                                // than leaving it to a caller to notice — the same reason the
+                                // cooldown is enforced inside `check_and_record`.
+                                //
+                                // Returned as an Err so `get_or_try_init` stores nothing: a shop
+                                // pacing us must not leave a cached verdict about its rules, which
+                                // we did not learn.
+                                let wait = RateLimiter::retry_after(
+                                    resp.headers()
+                                        .get("retry-after")
+                                        .and_then(|v| v.to_str().ok()),
+                                    default_retry_after_secs,
+                                );
+                                // `domain` is already `scheme://host`, which is exactly the key
+                                // `Engine` passes to `check_and_record` — so a cooldown recorded
+                                // here is the same one the egress path consults. Worth stating,
+                                // because a mismatched key would make all of this a silent no-op
+                                // that every test still passed.
+                                self.rate_limiter.back_off(&domain, Instant::now() + wait);
+
+                                Err(ScraperError::UpstreamBackoff {
+                                    domain: domain.clone(),
+                                    seconds_remaining: wait.as_secs(),
+                                })
+                            }
                             StatusVerdict::Unreachable => {
                                 Err(ScraperError::RobotsFetchFailed {
                                     domain: domain.clone(),
@@ -184,14 +226,36 @@ enum StatusVerdict {
     /// *complete disallow*, which is the opposite of the absent case and the easy
     /// thing to get backwards.
     Unreachable,
+    /// 429 / 503 — the shop is pacing us. Not a verdict about its *rules* at all: we
+    /// have learned nothing about what we may crawl, only that we must wait.
+    Paced,
 }
 
 /// Split out from the fetch so the 4xx-vs-5xx distinction is testable without a
 /// network or a mock HTTP server. This decision is the whole difference between
 /// "no robots.txt exists, crawl freely" and "the server is broken, crawl nothing".
+///
+/// ⚠️ **429 and 503 are a deliberate, documented deviation from the letter of RFC 9309.**
+/// The RFC classifies purely by range — §2.3.1.3 "Unavailable" is "status codes in the 400-499
+/// range", §2.3.1.4 "Unreachable" is "the 500-599 range" — and says nothing about 429 or 503
+/// specifically (checked against the published RFC text, not from memory). Followed literally,
+/// **429 lands in "Unavailable", which grants us permission to crawl anything.** So a shop
+/// answering "Too Many Requests" would have us drop all of its rules and carry on.
+///
+/// That is worse than a compliance nicety, because the 4xx result is *cached*: `RobotsDoc::Absent`
+/// goes into the domain's `OnceCell` and one transient 429 leaves us crawling that domain with no
+/// robots rules **for the rest of the process lifetime**. The module docs below already take pride
+/// in not caching the 5xx case for exactly this reason; the 429 door was standing open beside it.
+///
+/// Measured, not theoretical: a handful of probes from a single laptop during #307 design got
+/// `429` from both target shops on every path, `/robots.txt` included.
+///
+/// So `Paced` is returned instead, the caller records the cooldown, and nothing is cached.
 fn classify_status(status: u16) -> StatusVerdict {
     match status {
         200..=299 => StatusVerdict::Fetch,
+        // Ordered before the ranges below, and that order is the whole fix.
+        429 | 503 => StatusVerdict::Paced,
         400..=499 => StatusVerdict::NoRestrictions,
         _ => StatusVerdict::Unreachable,
     }
@@ -723,11 +787,44 @@ mod tests {
         assert_eq!(classify_status(401), StatusVerdict::NoRestrictions);
         assert_eq!(classify_status(403), StatusVerdict::NoRestrictions);
 
-        // kalkbaybooks.co.za actually returned 503 during target research.
-        assert_eq!(classify_status(503), StatusVerdict::Unreachable);
         assert_eq!(classify_status(500), StatusVerdict::Unreachable);
         assert_eq!(classify_status(502), StatusVerdict::Unreachable);
         // Redirect loops and anything else we can't interpret are also unreachable.
         assert_eq!(classify_status(302), StatusVerdict::Unreachable);
+    }
+
+    #[test]
+    fn a_429_on_robots_txt_is_not_permission_to_crawl_everything() {
+        // ⛔ THE BUG THIS PINS. Read strictly, RFC 9309 puts 429 in §2.3.1.3 "Unavailable" — "status
+        // codes in the 400-499 range" — which means *no robots.txt exists, crawl freely*. So a shop
+        // answering "Too Many Requests" would have had us discard all of its rules and carry on.
+        //
+        // Worse, the 4xx result is CACHED as `RobotsDoc::Absent` in the domain's `OnceCell`, so one
+        // transient 429 left us crawling that domain with no rules at all for the rest of the
+        // process lifetime. The module docs above already take care not to cache the 5xx case for
+        // exactly this reason; this door was open beside it.
+        //
+        // Measured, not hypothetical: a handful of probes from one laptop got 429 from both target
+        // shops on every path, `/robots.txt` included.
+        assert_eq!(classify_status(429), StatusVerdict::Paced);
+        assert_ne!(
+            classify_status(429),
+            StatusVerdict::NoRestrictions,
+            "429 was read as 'no robots.txt exists, crawl freely'"
+        );
+    }
+
+    #[test]
+    fn a_503_paces_rather_than_merely_failing() {
+        // Moved from `Unreachable` deliberately. Both verdicts refuse to crawl, so RFC 9309
+        // §2.3.1.4's "treat as a complete disallow" still holds — `Paced` also returns an Err and
+        // nothing is fetched or cached.
+        //
+        // What changes is the classification. `Unreachable` becomes `RobotsFetchFailed`, which
+        // `outcome_for_error` calls a *failure*, which melts the fuse shared by every store. A
+        // shop that is durably 503 — kalkbaybooks.co.za was, during target research — therefore took
+        // price scraping down for everyone, repeatedly, because the condition recurs every attempt.
+        // `Paced` is per-domain and self-healing instead.
+        assert_eq!(classify_status(503), StatusVerdict::Paced);
     }
 }

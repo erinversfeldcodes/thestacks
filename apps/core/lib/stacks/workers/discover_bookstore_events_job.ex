@@ -47,6 +47,10 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
         {:cancel, "store not found"}
 
       store ->
+        # Returns a *classified* success — `{:ok, :no_events_page}`, `{:ok, :blocked}`,
+        # `{:ok, :paced}`, `{:ok, {:events, n}}` — which is already this worker's contract and is
+        # what lets the batch summary tally the reasons apart. A robots block used to return a bare
+        # `:ok` here, which is why it was invisible in that summary.
         discover_for_store(store)
     end
   end
@@ -89,10 +93,16 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   # One line per run saying what actually happened, because "0 events" on its own is indistinguishable
   # from a broken pipeline — and was mistaken for one.
   defp summarise_batch(results, total) do
+    # ⚠️ `blocked` was carried in this accumulator, never incremented and never printed: a
+    # robots-blocked store returned a bare `:ok` and vanished into the no-op clause. So a batch in
+    # which every store was blocked logged "0 event(s) written" with nothing accounting for it —
+    # exactly the indistinguishable-from-broken reading this summary exists to prevent.
     tally =
-      Enum.reduce(results, %{events: 0, no_page: 0, blocked: 0, failed: 0}, fn
+      Enum.reduce(results, %{events: 0, no_page: 0, blocked: 0, paced: 0, failed: 0}, fn
         {:ok, :no_events_page}, acc -> %{acc | no_page: acc.no_page + 1}
         {:ok, {:events, n}}, acc -> %{acc | events: acc.events + n}
+        {:ok, :blocked}, acc -> %{acc | blocked: acc.blocked + 1}
+        {:ok, :paced}, acc -> %{acc | paced: acc.paced + 1}
         :ok, acc -> acc
         {:error, _}, acc -> %{acc | failed: acc.failed + 1}
         _, acc -> acc
@@ -101,6 +111,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
     Logger.info(
       "DiscoverBookstoreEventsJob: batch done — #{total} store(s): " <>
         "#{tally.events} event(s) written, #{tally.no_page} with no events page, " <>
+        "#{tally.blocked} blocked by robots.txt, #{tally.paced} asked us to back off, " <>
         "#{tally.failed} failed"
     )
 
@@ -145,11 +156,27 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
         Monitoring.record_failure(store_name, "event_source", "HTTP #{status}")
         {:error, {:unexpected_status, status}}
 
+      # The shop is pacing us. Like a robots.txt block this is a determination and not a failure,
+      # but unlike one it resolves by itself — so it is neither recorded against the store's health
+      # nor retried now. `{:ok, :paced}` rather than `{:error, …}` because the *job* did the right
+      # thing; a shop asking us to wait is a normal outcome of a polite crawler, not an incident.
+      #
+      # Deliberately no snooze/retry here: `retry_after` is logged for an operator, and the next
+      # scheduled run is well beyond any plausible cooldown. Holding a job open to sleep would tie
+      # up a worker to accomplish waiting, which the schedule already does for free.
+      {:error, {:rate_limited, retry_after}} ->
+        Logger.info(
+          "DiscoverBookstoreEventsJob: #{store_name} asked us to back off for #{retry_after}s; " <>
+            "skipping this run rather than retrying"
+        )
+
+        {:ok, :paced}
+
       # A determination, not a failure. Record it and stop for this store: retrying
       # cannot succeed, and reporting it as an error would melt a fuse on every run.
       {:error, {:robots_blocked, rule}} ->
         Prices.record_robots_block(store, @events_path, rule)
-        :ok
+        {:ok, :blocked}
 
       {:error, reason} ->
         Monitoring.record_failure(store_name, "event_source", inspect(reason))
