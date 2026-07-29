@@ -51,7 +51,6 @@ type Step
     = Credentials
     | AwaitingCode String
     | Enrolling AdminMfaEnrolment
-    | EnrolmentDone
 
 
 type alias Model =
@@ -60,6 +59,10 @@ type alias Model =
     , password : String
     , code : String
     , error : Maybe String
+
+    -- Good news, kept separate from `error` so a success and a failure cannot be rendered as each
+    -- other. Currently only set after enrolment.
+    , notice : Maybe String
     , busy : Bool
     }
 
@@ -91,6 +94,7 @@ init =
     , password = ""
     , code = ""
     , error = Nothing
+    , notice = Nothing
     , busy = False
     }
 
@@ -228,7 +232,19 @@ update msg model ownerToken =
                     ( model, Cmd.none, NoOut )
 
         EnrolmentConfirmed (Ok ()) ->
-            ( { model | step = EnrolmentDone, busy = False, code = "", error = Nothing }
+            -- ⚠️ Returns to the credentials step rather than a terminal "done" panel.
+            --
+            -- It used to render a panel whose copy read "Sign in above to open an admin session" —
+            -- while being the only thing on the page. There was no form above; it had replaced it.
+            -- The operator finished enrolling and had nowhere to go but a manual reload, and the
+            -- copy actively misdirected them. Found by driving the flow rather than reading it.
+            ( { model
+                | step = Credentials
+                , busy = False
+                , code = ""
+                , error = Nothing
+                , notice = Just "Your second factor is set up. Sign in to open an admin session."
+              }
             , Cmd.none
             , NoOut
             )
@@ -316,6 +332,12 @@ view model =
                     ++ "session is untouched, and this one ends after 30 minutes."
                 )
             ]
+        , case model.notice of
+            Just message ->
+                p [ class "admin-gate__notice", testId "admin-gate-notice" ] [ text message ]
+
+            Nothing ->
+                text ""
         , case model.error of
             Just message ->
                 p [ class "admin__error", testId "admin-gate-error" ] [ text message ]
@@ -331,9 +353,6 @@ view model =
 
             Enrolling enrolment ->
                 viewEnrolling model enrolment
-
-            EnrolmentDone ->
-                viewEnrolmentDone
         ]
 
 
@@ -475,12 +494,4 @@ viewEnrolling model enrolment =
                     "Confirm"
                 )
             ]
-        ]
-
-
-viewEnrolmentDone : Html Msg
-viewEnrolmentDone =
-    div [ class "admin-gate__done", testId "admin-enrolment-done" ]
-        [ p [ class "admin-gate__lede" ] [ text "Your second factor is set up." ]
-        , p [] [ text "Sign in above to open an admin session." ]
         ]
