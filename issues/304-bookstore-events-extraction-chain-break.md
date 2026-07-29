@@ -1,9 +1,17 @@
 # Issue #304: Bookstore events — fetch works, extraction yields nothing
 
 ## Summary
-`DiscoverBookstoreEventsJob` runs clean and creates **zero** events. Observed on a preview
-2026-07-29: the compliant egress and the fetch both work, a 250 KB page comes back, and the
-extractor finds nothing in it. The break is at extraction and at path-guessing, not at the network.
+`DiscoverBookstoreEventsJob` creates **zero** events — and that turns out to be **correct**, not a
+chain break.
+
+⚠️ **My original filing was wrong and is corrected below.** It claimed "a 250 KB page comes back and
+the extractor finds nothing in it". The 250 KB was a **styled Shopify 404 page**, and the job never
+parsed it: it already matches `{:ok, %{status: 404}}` and skips. There was no break at extraction,
+because extraction never ran.
+
+What the investigation did find: the reason was logged at `debug` (invisible, so a zero-row run looked
+like silent failure), the events path is a hardcoded guess that **404s on every scrapeable store**, and
+the extractor carried a latent bug that would have fabricated wrong records if it ever did run.
 
 ## User Stories
 US-3.1.x (third spaces / bookshop events). The events surface cannot show anything until this works.
@@ -23,26 +31,44 @@ Router wiring: implementation-only — a background job; no new user-facing rout
 
 ## Technical Requirements
 
-**Measured, not inferred** (`ScraperClient.fetch_page(store.scraper_module, "/events")` on the live
-preview):
+**Measured on the live site, 2026-07-29** (`curl -L https://www.wordsworth.co.za/events`):
 
-| Store | Fetch | Body | Events extracted |
-|---|---|---|---|
-| Wordsworth Books | `:ok` | **249,540 bytes** | 0 |
-| Exclusive Books | `:ok` | **18 bytes** | 0 |
+```
+http=404  bytes=249540
+```
 
-Three distinct defects behind one clean `:ok`:
+The 249,540 bytes are a **404 page**, which is why it looked like a real document. Shopify serves a
+fully-styled 404 with site chrome, so byte count is no evidence of content. In that body:
 
-1. ⛔ **Extraction finds nothing in a real page.** 250 KB of Wordsworth HTML produced zero events.
-   Either the site has no events or the extractor does not match its markup — determine which
-   before writing code, by dumping the fetched body and looking.
-2. 🟧 **The events path is a single hardcoded guess.** `@events_path "/events"` is fetched on
-   *every* store (`discover_bookstore_events_job.ex:78`). Exclusive Books returned 18 bytes, i.e.
-   no such page. Shopify stores vary; one guessed path cannot serve them all. Either add a
-   per-store events path to the scraper config, or discover it (sitemap / nav link).
-3. 🟧 **`outcome` is `nil` on a successful fetch.** C3/C4 added a `FetchOutcome` enum precisely so a
-   fetch's result is recorded; a successful fetch leaving it nil means the state that was supposed
-   to make robots-blocks and failures legible is not being written on the happy path.
+| Signal | Count |
+|---|---|
+| Headings the extractor's regex matches | **5** — all site chrome: "Subscribe", "Follow us", "Disclaimer", "Reset your password" |
+| Headings with nested markup (regex misses) | 7 |
+| ISO dates (`YYYY-MM-DD`) anywhere | **0** |
+
+So three findings, and the first two replace the original diagnosis:
+
+1. ✅ **No chain break.** `discover_for_store/1` already matches `{:ok, %{status: 404}}` and returns
+   without parsing. `ScraperClient.fetch_page/2` already surfaces `%{status:, body:}`. Both correct.
+   ⚠️ The original filing also claimed "`outcome` is nil on a successful fetch" — that was **my probe
+   reading a `:outcome` key that has never existed** on that map. Not a defect.
+2. 🟧 **A zero-row run could not explain itself.** The 404 reason was `Logger.debug`, invisible at the
+   default level, so the only visible signal was an unchanged row count — which reads as breakage, and
+   was mistaken for it. Now `Logger.info` per store plus a one-line batch summary
+   (`N event(s) written, N with no events page, N failed`).
+3. ⛔ **The extractor would have fabricated records.** `parse_events/2` paired the nth heading with the
+   nth ISO date found *anywhere* in the document (`Enum.at(dates, idx)`). Those lists are unrelated —
+   headings include site chrome, dates appear in footers, scripts and JSON-LD. On a page that did
+   match, it would have produced an event titled "Follow us" dated from an unrelated fragment.
+   **Inventing confident wrong data is worse than producing none**, and the weak regex was accidentally
+   the only thing preventing it. Now a date is used only when the page carries exactly **one distinct**
+   date (a listing repeating one date beside each entry is unambiguous; several different dates are not
+   assignable without the surrounding DOM node).
+
+**The remaining blocker is data, not code: no store has an events page at `/events`.** Solving that
+means either a per-store events path in the scraper config, or discovery (sitemap / nav link). Until
+then there is no real page to validate extraction against — which is why the DoD item that assumed one
+is re-scoped rather than ticked.
 
 ⚠️ **Only 2 of 11 stores are even reachable** — `scrapeable_stores/0` skips 9 for having no scraper
 config (the P9 finding: nine of eleven seeded stores named a nonexistent config). So even a perfect
@@ -75,14 +101,29 @@ Punch list:
 Verdict: ❌ — the happy path has no coverage that would notice it producing nothing.
 
 ## Definition of Done
-- [ ] Determined, from the captured body, whether Wordsworth genuinely has events — evidence: the
-      saved fixture + what was found in it
-- [ ] Extraction produces events from a real page — evidence: named test over the fixture
-- [ ] Per-store events path resolved (config or discovery) — evidence: test + a live batch run
-- [ ] `outcome` recorded on success — evidence: named test
-- [ ] A batch run writes a non-zero count, or logs a per-store reason for each zero — evidence:
-      live run output on a preview
-- [ ] `just verify` passes — evidence: command → captured output
+- [x] Determined from the real page whether Wordsworth has events — evidence: `curl -L` →
+      **`http=404`, 249,540 bytes of styled Shopify 404**; 5 matched headings are all site chrome
+      ("Subscribe", "Follow us", "Disclaimer"), **0** ISO dates. It has no events page
+- [x] The original "extraction is broken" diagnosis corrected — evidence: `discover_for_store/1`
+      already matches `{:ok, %{status: 404}}` and never parses; the claimed nil `outcome` was my probe
+      reading a key that does not exist on that map
+- [x] A zero-row batch explains itself per store — evidence: `Logger.info` per 404 plus
+      `summarise_batch/2` (`N event(s) written, N with no events page, N failed`); the 404 branch now
+      returns `{:ok, :no_events_page}` so the summary can count it
+- [x] The date-pairing bug is fixed and **mutation-probed** — evidence: `discover_bookstore_events_job_test.exs`
+      "several DIFFERENT dates on the page yield no date, rather than a guessed pairing" and "one
+      distinct date repeated beside every entry IS used"; restoring `Enum.at(dates, idx)` fails the
+      first, reverting gives 21/21
+- [x] `just verify` passes — evidence: command → captured output (see Progress Notes)
+- [ ] **Extraction validated against a real events page** — BLOCKED, and honestly so: no scrapeable
+      store has one. `/events` 404s on both, so there is nothing to parse. This needs the path problem
+      solved first (per-store config, or sitemap/nav discovery) and that is **#307**, because it is a
+      data-and-config question rather than a parsing one — and doing it properly means real DOM parsing
+      (Floki), not two independent regex scans.
+
+⚠️ **Only 2 of 11 stores are reachable at all** (`scrapeable_stores/0` skips 9 with no scraper config —
+the P9 finding). So even a perfect extractor covers 2 shops today. That caps what this issue could ever
+have demonstrated, and is stated rather than left to be discovered again.
 
 ## Progress Notes
 - 2026-07-29: Found by running the job on a preview at the owner's instruction ("run it, observe it,
