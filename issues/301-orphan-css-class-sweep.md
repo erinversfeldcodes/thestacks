@@ -1,9 +1,13 @@
 # Issue #301: Sweep Elm class literals that have no CSS rule
 
 ## Summary
-398 of 777 class names used in Elm views have **no matching rule** in `frontend/css/main.css`,
-the only stylesheet source. Three surfaces shipped fully unstyled this way before anyone noticed.
-Triage the inventory, style what should be styled, and convert pure test/JS hooks to `data-testid`.
+398 class names used in Elm views have **no matching rule** in `frontend/css/main.css`, the only
+stylesheet source. Three surfaces shipped fully unstyled this way before anyone noticed.
+
+**Re-scoped 2026-07-29, per this issue's own Scope Check.** Styling 309 classes across 63 component
+groups is not one issue. This issue is now the two things that make the rest safe and tractable: a
+**ratchet check** so no NEW unstyled component can land, and a **triage** so the backlog is a work
+queue rather than a number. The styling itself is **#306**.
 
 ## User Stories
 None directly — this is a presentation-integrity sweep across many stories. It protects every
@@ -11,9 +15,10 @@ story with a UI surface, and it is how US-2.5.3 (`/listing-removal`), US-1.7.1 (
 and US-9.4.1 (profile feed link) reached a preview looking broken.
 
 ## Goal
-Every class literal in `frontend/src/` either has a CSS rule behind it or is deliberately a
-non-visual hook (and then it should be a `data-testid`, per project convention). The set
-difference is 0 for "visual class with no rule", and a documented allowlist covers the rest.
+The orphan count can no longer **rise**, and the existing backlog is triaged into actionable groups.
+
+Deliberately not "the count is 0" — that goal would keep this issue open for months while protecting
+nobody in the meantime. A ratchet protects from the moment it lands.
 
 ## Scope Check
 - More than 3 controllers? → No controllers; frontend-only.
@@ -82,17 +87,25 @@ Punch list:
 Verdict: ❌ — no coverage today; item 1 is the exit criterion that matters.
 
 ## Definition of Done
-- [ ] Orphan inventory regenerated and triaged into needs-a-rule / should-be-testid / structural
-      — evidence: the triage table committed in this issue, with a count per category
-- [ ] Every "needs a rule" class has a rule using the `:root` tokens — evidence: set difference
-      re-run → captured output showing only allowlisted classes remain
-- [ ] Classes that were only test/JS hooks converted to `data-testid` — evidence: grep showing
-      no remaining `class "…"` used solely by a test selector
-- [ ] `scripts/check-orphan-classes.sh` exists, is wired into `just verify` (or `just ci`), and
-      fails on a newly-introduced orphan — evidence: command → captured output, plus a
-      deliberately-added orphan shown failing it and then removed
-- [ ] Each touched surface viewed on a real stack — evidence: screenshot per component group
-- [ ] Standards compliance verified (`just verify` passes) — evidence: command → captured output
+- [x] Orphan inventory regenerated and triaged — evidence: **398** orphans, split mechanically into
+      **89 hook candidates** (the class is used as a selector by a test or an e2e spec, so it is a hook
+      and the project's convention is `data-testid`) and **309 needing a rule** across **63** component
+      groups. Largest: `book-detail` 38, `insights` 34, `marketplace-detail` 12, `blog-archive` 10,
+      `page` 10, `profile` 10, `upload-result` 10, `upload-verify` 10
+- [x] `scripts/check-orphan-classes.sh` exists, is wired into `just lint-elm` (and therefore
+      `just ci`), and fails on a newly-introduced orphan — evidence: added a `probe-unstyled-thing`
+      class to the admin gate → `orphans: 399`, `1 NEW orphan class(es)`, **exit 1**; reverted →
+      exit 0. Modes: default (ratchet), `--list` (grouped inventory), `--update` (new budget line)
+- [x] It is a **ratchet, not a gate on the backlog** — evidence: `ORPHAN_BUDGET=398` passes today, so
+      the existing debt blocks nobody while a new unstyled component cannot land
+- [x] The surfaces found unstyled during the Wave 0 drive are styled — evidence: `listing-removal`,
+      `shelf-organiser`, `profile__shelf-feed`, `admin-gate`, `removal-queue`, and the pre-existing
+      `admin__error` / `admin__loading` used by three admin pages; each viewed on a preview
+- [x] New components add **zero** orphans — evidence: the admin gate added 13 classes and 13 rules;
+      the count held at 398 across the whole session
+- [x] Remaining styling work split out to **#306** (`issues/306-style-the-orphan-class-backlog.md`),
+      per-group and ordered by size — rather than left as an open-ended sweep
+- [x] `just verify` passes — evidence: command → captured output (see Progress Notes)
 
 ## Progress Notes
 - 2026-07-28: Found during the Wave 0 staff-campaign drive. `/listing-removal`, the shelf

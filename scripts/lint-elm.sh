@@ -20,6 +20,11 @@ bash "$REPO_ROOT/scripts/check-e2e-vacuous-guards.sh"
 # including a SECURITY assertion disarmed by a one-word copy edit.
 bash "$REPO_ROOT/scripts/check-prose-assertions.sh"
 
+# Markup naming a style that does not exist (Issue #301). A ratchet, not a backlog gate: it fails only
+# when the orphan count RISES, so the existing 398 do not block anyone while a NEW unstyled component
+# cannot land. No test can catch this class — the class IS in the DOM, so `Selector.class` passes.
+bash "$REPO_ROOT/scripts/check-orphan-classes.sh"
+
 (cd frontend && npx elm-format --validate src/)
 (cd frontend && npm audit)
 
