@@ -67,7 +67,12 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
 
     Logger.info("DiscoverBookstoreEventsJob: processing #{length(stores)} stores in batch")
 
-    Enum.each(stores, &discover_for_store/1)
+    # Collect outcomes rather than discarding them: a batch that writes zero events is the normal
+    # case right now (no store has an events page), and the run has to make that legible. Without
+    # the summary the only signal was an unchanged row count, which reads as breakage.
+    stores
+    |> Enum.map(&discover_for_store/1)
+    |> summarise_batch(length(stores))
 
     :ok
   end
@@ -81,6 +86,27 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   # path it can still be handed a store with no registry key. Refuse explicitly rather
   # than asking the service about `null` — that produces a 404 whose message blames the
   # store rather than the missing config.
+  # One line per run saying what actually happened, because "0 events" on its own is indistinguishable
+  # from a broken pipeline — and was mistaken for one.
+  defp summarise_batch(results, total) do
+    tally =
+      Enum.reduce(results, %{events: 0, no_page: 0, blocked: 0, failed: 0}, fn
+        {:ok, :no_events_page}, acc -> %{acc | no_page: acc.no_page + 1}
+        {:ok, {:events, n}}, acc -> %{acc | events: acc.events + n}
+        :ok, acc -> acc
+        {:error, _}, acc -> %{acc | failed: acc.failed + 1}
+        _, acc -> acc
+      end)
+
+    Logger.info(
+      "DiscoverBookstoreEventsJob: batch done — #{total} store(s): " <>
+        "#{tally.events} event(s) written, #{tally.no_page} with no events page, " <>
+        "#{tally.failed} failed"
+    )
+
+    :ok
+  end
+
   defp discover_for_store(%{scraper_module: nil} = store) do
     Logger.info(
       "DiscoverBookstoreEventsJob: #{store.name || store.id} has no scraper config; " <>
@@ -105,8 +131,15 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
       # 404 is data: plenty of shops have no /events page. Recording it as a failure
       # would melt the store's fuse for a condition that is simply true of that shop.
       {:ok, %{status: 404}} ->
-        Logger.debug("DiscoverBookstoreEventsJob: no events page at #{store_name}")
-        :ok
+        # ⚠️ Was `Logger.debug`, i.e. invisible at the default level — so a batch run that wrote
+        # nothing gave no reason at all, and read as a silent failure. It took a direct fetch to
+        # establish that `/events` simply 404s on both scrapeable stores; that should have been in
+        # the log. A zero-row outcome must explain itself or it will be mistaken for a defect.
+        Logger.info(
+          "DiscoverBookstoreEventsJob: #{store_name} has no events page at #{@events_path} (404)"
+        )
+
+        {:ok, :no_events_page}
 
       {:ok, %{status: status}} ->
         Monitoring.record_failure(store_name, "event_source", "HTTP #{status}")
@@ -150,10 +183,33 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
 
     authors = load_known_authors()
 
+    # ⚠️ **The date is deliberately NOT taken from the same index as the title.**
+    #
+    # It used to be `Enum.at(dates, idx)` — pairing the nth heading with the nth ISO date found
+    # anywhere in the document. Those two lists have no relationship whatsoever: headings include site
+    # chrome ("Subscribe", "Follow us", "Disclaimer" — measured on a real Shopify page), and dates
+    # appear in footers, scripts and JSON-LD. So the nth of each being the same event is coincidence.
+    #
+    # That is worse than extracting nothing: it manufactures confident, wrong data — an event titled
+    # "Follow us" dated from an unrelated part of the page. A pipeline that invents records is harder
+    # to notice and harder to undo than one that produces none.
+    #
+    # Until a real events page exists to parse (no store currently has one — `/events` 404s on both
+    # scrapeable stores), the honest behaviour is a nil date: `upsert_event` then decides whether a
+    # dateless event is acceptable, rather than this function guessing. Pairing a title to its date
+    # needs the surrounding DOM node, which means real parsing (Floki), not two independent scans.
+    # Unambiguous means ONE DISTINCT date, not one occurrence. A listing page that repeats the same
+    # date beside every entry is common and perfectly clear; several *different* dates is what cannot
+    # be assigned without knowing which DOM node each belongs to.
+    only_date =
+      case Enum.uniq(dates) do
+        [single] -> single
+        _ -> nil
+      end
+
     titles
-    |> Enum.with_index()
-    |> Enum.map(fn {title, idx} ->
-      raw_date = Enum.at(dates, idx)
+    |> Enum.map(fn title ->
+      raw_date = only_date
       author_id = match_author(title, authors)
 
       %{

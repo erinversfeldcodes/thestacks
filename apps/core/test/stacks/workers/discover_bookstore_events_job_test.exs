@@ -118,7 +118,11 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
       store = insert(:bookstore, scraper_module: "za/test_store")
       MockScraperClient.put_page("za/test_store", "/events", {:ok, %{status: 404, body: ""}})
 
-      assert :ok =
+      # `{:ok, :no_events_page}` rather than a bare `:ok`: the batch summary counts these so a run that
+      # writes zero events explains WHY per store. It took a direct fetch to establish that `/events`
+      # 404s on both scrapeable stores — that belonged in the log, not in an investigation. Oban treats
+      # `:ok` and `{:ok, term}` alike, so this is a reporting change, not a behavioural one.
+      assert {:ok, :no_events_page} =
                DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
 
       assert is_nil(Repo.get!(Bookstore, store.id).robots_blocked_path),
@@ -268,6 +272,52 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
 
       events = DiscoverBookstoreEventsJob.parse_events(html, store)
       assert hd(events).url == "https://mybookshop.co.za"
+    end
+  end
+
+  describe "parse_events does not invent a date it cannot justify" do
+    test "several DIFFERENT dates on the page yield no date, rather than a guessed pairing" do
+      # ⛔ It used to be `Enum.at(dates, idx)` — the nth heading paired with the nth ISO date found
+      # anywhere in the document. Those lists have no relationship: headings include site chrome and
+      # dates appear in footers, scripts and JSON-LD.
+      #
+      # Measured on a real Shopify page (Wordsworth, 2026-07-29): the headings a regex like this
+      # matches are "Subscribe", "Follow us", "Disclaimer", "Reset your password". Pairing those with
+      # arbitrary dates would have produced confident, wrong records — worse than none, because a
+      # pipeline that invents data is harder to notice and harder to undo than one that produces none.
+      store = insert(:bookstore)
+
+      html = """
+      <h2>Author Evening</h2>
+      <p>2026-03-01</p>
+      <h2>Poetry Night</h2>
+      <p>2026-09-30</p>
+      """
+
+      events = DiscoverBookstoreEventsJob.parse_events(html, store)
+
+      assert length(events) == 2
+
+      assert Enum.all?(events, &is_nil(&1.event_date)),
+             "a date was assigned by position, which pairs a title with an unrelated date"
+    end
+
+    test "one distinct date repeated beside every entry IS used" do
+      # Unambiguous means one DISTINCT date, not one occurrence. A listing that repeats the same date
+      # next to each entry is common and perfectly clear; refusing it would throw away good data.
+      store = insert(:bookstore)
+
+      html = """
+      <h2>Morning Session</h2>
+      <p>2026-03-01</p>
+      <h2>Evening Session</h2>
+      <p>2026-03-01</p>
+      """
+
+      events = DiscoverBookstoreEventsJob.parse_events(html, store)
+
+      assert length(events) == 2
+      assert Enum.all?(events, &(&1.event_date != nil))
     end
   end
 
