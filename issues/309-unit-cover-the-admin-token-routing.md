@@ -68,13 +68,31 @@ Punch list:
    failure in the DoD — a test added for this that stays green is worse than none.
 
 ## Definition of Done
-- [ ] A test failing on the reintroduced defect — evidence: `adminToken = Nothing` at
-      `Main.elm:2060` → named test fails; reverted → 1285+ green
-- [ ] `initPage` and `update` cannot disagree about which token to use — evidence: a shared
-      resolver, or a test covering both entry points
-- [ ] `e2e/tests/admin-session.spec.ts` untouched and still passing
-- [ ] `just run just verify` passes
-- [ ] `gdpr-review`: n/a — no personal data; token routing only. Stated, not skipped.
+- [x] A check failing on the reintroduced defect — evidence: `adminToken = Nothing` at the first
+      update site → `scripts/check-admin-token-routing.sh` **exit 1**, naming the file, line and
+      reason; reverted → exit 0. ⚠️ In the same probe **elm-test reported 1285 passed, 0 failed**,
+      which is the finding restated as a measurement rather than a claim
+- [x] `initPage` and `update` cannot disagree about which token to use — evidence: `adminTokenFor/1`
+      is the single read of `model.adminAuth`, used by all **five** call sites. The guard found the
+      fifth (a multi-line `initPage` in the gate-success handler) that a manual sweep had missed, and
+      that site was passing `Just adminToken` — the same value by a second route, which is what the
+      resolver exists to remove
+- [x] Wired into the gate — evidence: `scripts/lint-elm.sh` calls it, so it runs in `just verify`
+      and `just ci`, alongside the two sibling checks for defect classes no test can see
+- [x] The guard does not cry wolf — evidence: it first reported a false bypass on a correct
+      multi-line call; now reads a 6-line window. A check that flags correct code is a check someone
+      switches off
+- [x] `e2e/tests/admin-session.spec.ts` untouched and still passing — evidence: `git diff` shows no
+      change to it; it remains the only path through the real MFA pipeline. This adds a floor beneath
+      it, it does not replace it
+- [x] `just run just verify` passes — see Progress Notes
+- [x] `gdpr-review`: **n/a** — no personal data; token routing only. Stated, not skipped.
+
+**A `ProgramTest` was considered and rejected, per the issue's own option list.** The existing
+simulated-effects tests (`SessionExpiryTest`, `ThirdSpacesProgramTest`) hand-write their own copy of
+the request under test, so they assert against a mirror of the real code rather than the real code —
+and #302 found exactly that shape passing vacuously. A source-level invariant cannot be fooled by a
+mirror. Recorded here because the issue asked for option 1 first and this is the reasoned deviation.
 
 ## Dependencies
 None. #303 is complete; this hardens it.
@@ -88,3 +106,6 @@ None. #303 is complete; this hardens it.
   not wrong to be complete — it was driven live and its E2E spec is real — but its guarantee
   currently depends on a stack being available, and a guarantee that evaporates when a stack is
   absent is one worth writing down.
+- 2026-07-29: Closed. The design conclusion worth keeping: the bug was never "the token is wrong",
+  it was "N entry points disagree", so the fix is one named read rather than a better test of each
+  site. The guard exists because that invariant is invisible to the type system and to every test.
