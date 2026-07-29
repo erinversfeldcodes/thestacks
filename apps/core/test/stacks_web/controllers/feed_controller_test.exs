@@ -10,7 +10,18 @@ defmodule StacksWeb.FeedControllerTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.Accounts.Guardian
   alias Stacks.Feeds.FeedCacheEntry
+
+  # ⚠️ A `platform` bookshelf's feed now requires a signed-in reader (owner ruling 2026-07-29:
+  # `platform` means "authenticated users only" on the Audience ladder, so serving it anonymously
+  # contradicted the ladder). These tests are about caching, ETags and serving mechanics, so they
+  # authenticate a viewer rather than downgrade their fixtures to `public` — keeping the platform
+  # path covered at the controller layer, which is where the exposure actually happened.
+  defp as_reader(conn) do
+    {:ok, token, _} = Guardian.encode_and_sign(insert(:user))
+    put_req_header(conn, "authorization", "Bearer #{token}")
+  end
 
   describe "GET /api/feeds/u/:handle/:bookshelf_name — the canonical, handle form" do
     test "serves the same feed as the id form", %{conn: conn} do
@@ -23,7 +34,7 @@ defmodule StacksWeb.FeedControllerTest do
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      by_handle = get(conn, "/api/feeds/u/erin/library")
+      by_handle = get(as_reader(conn), "/api/feeds/u/erin/library")
 
       assert by_handle.status == 200
       assert by_handle.resp_body =~ "The Secret History"
@@ -32,7 +43,7 @@ defmodule StacksWeb.FeedControllerTest do
     end
 
     test "404s for a handle nobody has", %{conn: conn} do
-      conn = get(conn, "/api/feeds/u/nobody-here/library")
+      conn = get(as_reader(conn), "/api/feeds/u/nobody-here/library")
       assert conn.status == 404
     end
 
@@ -41,14 +52,14 @@ defmodule StacksWeb.FeedControllerTest do
       user = insert(:user, handle: "private-erin")
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
-      conn = get(conn, "/api/feeds/u/private-erin/library")
+      conn = get(as_reader(conn), "/api/feeds/u/private-erin/library")
       assert conn.status == 403
     end
 
     test "\"u\" is not swallowed as a user id", %{conn: conn} do
       # Both routes are declared, and the handle one must win for `/feeds/u/...`.
       # If ordering regressed, this would try to resolve "u" as a UUID.
-      conn = get(conn, "/api/feeds/u/erin/library")
+      conn = get(as_reader(conn), "/api/feeds/u/erin/library")
       refute conn.status == 500
     end
   end
@@ -62,7 +73,7 @@ defmodule StacksWeb.FeedControllerTest do
       _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      conn = get(conn, "/api/feeds/#{user.id}/library")
+      conn = get(as_reader(conn), "/api/feeds/#{user.id}/library")
 
       assert conn.status == 200
       assert {"content-type", content_type} = List.keyfind(conn.resp_headers, "content-type", 0)
@@ -80,13 +91,14 @@ defmodule StacksWeb.FeedControllerTest do
       _placement = insert(:placement, bookshelf: bookshelf, book: book, placed_at: fixed_time)
 
       # First request to get the ETag
-      conn1 = get(conn, "/api/feeds/#{user.id}/library")
+      conn1 = get(as_reader(conn), "/api/feeds/#{user.id}/library")
       assert conn1.status == 200
       {"etag", etag} = List.keyfind(conn1.resp_headers, "etag", 0)
 
       # Second request with If-None-Match
       conn2 =
         build_conn()
+        |> as_reader()
         |> put_req_header("if-none-match", etag)
         |> get("/api/feeds/#{user.id}/library")
 
@@ -94,7 +106,7 @@ defmodule StacksWeb.FeedControllerTest do
     end
 
     test "returns 404 for nonexistent bookshelf", %{conn: conn} do
-      conn = get(conn, "/api/feeds/#{Ecto.UUID.generate()}/library")
+      conn = get(as_reader(conn), "/api/feeds/#{Ecto.UUID.generate()}/library")
 
       assert %{"error" => "Bookshelf not found"} = json_response(conn, 404)
     end
@@ -103,7 +115,7 @@ defmodule StacksWeb.FeedControllerTest do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
-      conn = get(conn, "/api/feeds/#{user.id}/library")
+      conn = get(as_reader(conn), "/api/feeds/#{user.id}/library")
 
       # The status is the contract; the sentence is copy. This asserted the exact phrase
       # "platform-visible", which broke the moment the message had to cover `public` too —
@@ -119,7 +131,7 @@ defmodule StacksWeb.FeedControllerTest do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
 
-      conn = get(conn, "/api/feeds/#{user.id}/library")
+      conn = get(as_reader(conn), "/api/feeds/#{user.id}/library")
 
       assert response(conn, 200)
       assert conn |> get_resp_header("content-type") |> hd() =~ "application/atom+xml"
@@ -146,7 +158,7 @@ defmodule StacksWeb.FeedControllerTest do
         etag: stored_etag
       })
 
-      conn = get(conn, "/api/feeds/#{user.id}/library")
+      conn = get(as_reader(conn), "/api/feeds/#{user.id}/library")
 
       assert conn.status == 200
       assert conn.resp_body == stored_xml
@@ -175,6 +187,7 @@ defmodule StacksWeb.FeedControllerTest do
 
       conn =
         conn
+        |> as_reader()
         |> put_req_header("if-none-match", ~s("#{stored_etag}"))
         |> get("/api/feeds/#{user.id}/library")
 
@@ -195,7 +208,7 @@ defmodule StacksWeb.FeedControllerTest do
                :count
              ) == 0
 
-      conn = get(conn, "/api/feeds/#{user.id}/library")
+      conn = get(as_reader(conn), "/api/feeds/#{user.id}/library")
 
       assert conn.status == 200
       assert String.contains?(conn.resp_body, "The Secret History")
@@ -233,7 +246,7 @@ defmodule StacksWeb.FeedControllerTest do
 
       on_exit(fn -> Application.delete_env(:core, :feed_cache_writer) end)
 
-      conn = get(conn, "/api/feeds/#{user.id}/library")
+      conn = get(as_reader(conn), "/api/feeds/#{user.id}/library")
 
       assert conn.status == 200
       assert String.contains?(conn.resp_body, "The Secret History")

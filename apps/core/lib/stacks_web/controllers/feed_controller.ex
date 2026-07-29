@@ -9,6 +9,7 @@ defmodule StacksWeb.FeedController do
   use CoreWeb, :controller
 
   alias Stacks.Accounts
+  alias Stacks.Accounts.Guardian
   alias Stacks.Feeds
 
   @doc """
@@ -48,7 +49,12 @@ defmodule StacksWeb.FeedController do
   end
 
   def show(conn, %{"user_id" => user_id, "bookshelf_name" => bookshelf_name}) do
-    case Feeds.fetch_feed(user_id, bookshelf_name) do
+    # `:optional_auth` populates this when a token is present, and leaves it nil otherwise. A
+    # `platform` bookshelf's feed needs a viewer; a `public` one does not (owner decision
+    # 2026-07-29). Passed explicitly rather than defaulted, so "anonymous" is never implicit.
+    viewer = Guardian.Plug.current_resource(conn)
+
+    case Feeds.fetch_feed(user_id, bookshelf_name, viewer) do
       {:ok, xml, etag} ->
         client_etag = get_req_header(conn, "if-none-match") |> List.first()
 
