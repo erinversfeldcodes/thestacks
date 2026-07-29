@@ -33,7 +33,24 @@ defmodule Stacks.Enrichment.MockScraperClient do
   the branch that must record the block and stop, and it is the one worth testing.
   """
   @impl true
-  def fetch_page(store_name, path) do
+  def fetch_page(store_name, path), do: fetch_page(store_name, path, [])
+
+  @impl true
+  def fetch_page(store_name, path, validators) do
+    # Recorded so a test can assert a fetch WAS conditional. Without this, "we send validators" is a
+    # claim about code rather than about behaviour.
+    Process.put(
+      {__MODULE__, :validators},
+      Process.get({__MODULE__, :validators}, []) ++ [{store_name, path, validators}]
+    )
+
+    do_fetch_page(store_name, path)
+  end
+
+  @doc "Every `fetch_page/3` call's validators, as `{store, path, validators}`, in order."
+  def sent_validators, do: Process.get({__MODULE__, :validators}, [])
+
+  defp do_fetch_page(store_name, path) do
     # Recorded so a test can assert a store was *never* fetched. Asserting absence via
     # a downstream side effect (no events persisted) would also pass if the fetch
     # happened and merely returned nothing parseable — which is the wrong-selector
@@ -128,6 +145,7 @@ defmodule Stacks.Enrichment.MockScraperClient do
 
   @doc "Clear all registered responses for the current process."
   def clear do
+    Process.delete({__MODULE__, :validators})
     Process.delete({__MODULE__, :sitemaps})
     Process.delete({__MODULE__, :sitemap_calls})
     Process.delete(__MODULE__)

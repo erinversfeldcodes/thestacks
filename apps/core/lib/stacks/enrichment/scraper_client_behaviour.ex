@@ -31,6 +31,20 @@ defmodule Stacks.Enrichment.ScraperClientBehaviour do
               | {:error, {:robots_blocked, String.t()} | term()}
 
   @doc """
+  As `fetch_page/2`, but sends cache validators so the shop can answer 304.
+
+  `validators` is `[etag: String.t(), last_modified: String.t()]` from the previous fetch of the same
+  path. A 304 returns `%{status: 304, not_modified: true}` — deliberately **not** a body of `""`,
+  which would say the page went blank rather than that it is unchanged.
+  """
+  @callback fetch_page(
+              store_name :: String.t(),
+              path :: String.t(),
+              validators :: keyword()
+            ) ::
+              {:ok, map()} | {:error, {:robots_blocked, String.t()} | term()}
+
+  @doc """
   The pages a store lists in its own sitemap.
 
   The polite alternative to guessing at paths. A guess costs the shop a full page render — a Shopify

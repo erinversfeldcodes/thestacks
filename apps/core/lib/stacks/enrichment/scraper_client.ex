@@ -146,10 +146,13 @@ defmodule Stacks.Enrichment.ScraperClient do
   defp melt_if_extractor_failed(_decoded, _store_fuse, _isbn, _store_name), do: :ok
 
   @impl true
-  def fetch_page(store_name, path) do
+  def fetch_page(store_name, path), do: fetch_page(store_name, path, [])
+
+  @impl true
+  def fetch_page(store_name, path, validators) do
     case configured_client() do
-      __MODULE__ -> do_fetch_page(store_name, path)
-      client -> client.fetch_page(store_name, path)
+      __MODULE__ -> do_fetch_page(store_name, path, validators)
+      client -> client.fetch_page(store_name, path, validators)
     end
   end
 
@@ -166,7 +169,7 @@ defmodule Stacks.Enrichment.ScraperClient do
   # records it and stops. Deliberately not melting either fuse, because a disallow
   # recurs on every attempt by definition and melting on it would take every other
   # store down with it.
-  defp do_fetch_page(store_name, path) do
+  defp do_fetch_page(store_name, path, validators) do
     store_fuse = CircuitBreakers.store_fuse(store_name)
 
     with :ok <- ask(@fuse_name),
@@ -180,7 +183,13 @@ defmodule Stacks.Enrichment.ScraperClient do
           {"content-type", "application/json"},
           {"X-Internal-Token", auth_token("POST", endpoint)}
         ],
-        Jason.encode!(%{store: store_name, path: path})
+        Jason.encode!(%{
+          store: store_name,
+          path: path,
+          # Sent verbatim — an ETag is opaque, and reformatting one makes it stop matching silently.
+          if_none_match: Keyword.get(validators, :etag) || "",
+          if_modified_since: Keyword.get(validators, :last_modified) || ""
+        })
       )
       |> Finch.request(Stacks.Finch, receive_timeout: 30_000)
       |> handle_fetch_response(store_name, store_fuse)
@@ -372,6 +381,19 @@ defmodule Stacks.Enrichment.ScraperClient do
 
         {:error, {:rate_limited, retry_after}}
 
+      # ⚠️ Its own result, NOT `{:ok, %{body: ""}}`. A 304 says "what you have is current"; an empty
+      # body says "the page is now blank", which for an events listing means every event was removed.
+      # The caller must keep what it already had, and a caller that cannot tell these apart will
+      # cheerfully delete the lot.
+      {:ok, %{"outcome" => "FETCH_OUTCOME_NOT_MODIFIED"} = ok} ->
+        {:ok,
+         %{
+           status: 304,
+           not_modified: true,
+           etag: Map.get(ok, "etag", ""),
+           last_modified: Map.get(ok, "last_modified", "")
+         }}
+
       {:ok, %{"outcome" => "FETCH_OUTCOME_FETCHED", "status" => status, "body" => page} = ok} ->
         # `sitemaps` rides along on every fetch because robots.txt was already read for compliance —
         # the shop has therefore already told us where its content index is, and asking separately
@@ -384,7 +406,12 @@ defmodule Stacks.Enrichment.ScraperClient do
          %{
            status: status,
            body: page,
-           sitemaps: Map.get(ok, "sitemaps", [])
+           sitemaps: Map.get(ok, "sitemaps", []),
+           # Stored by the caller and sent back next time, which is the only thing that makes the
+           # conditional request worth having — without the round trip closing, every fetch stays full
+           # price for the shop.
+           etag: Map.get(ok, "etag", ""),
+           last_modified: Map.get(ok, "last_modified", "")
          }}
 
       # An unrecognised outcome is a contract mismatch between this client and the

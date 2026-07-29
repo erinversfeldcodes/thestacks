@@ -79,6 +79,46 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
   end
 
+  describe "classify_fetch_body/2 — a 304 is unchanged, not empty" do
+    test "a not-modified outcome never presents as a fetched empty page" do
+      # ⛔ **Found by a mutation probe that my own job-level test failed to catch.** That test stubbed
+      # the mock client with `not_modified: true` directly, so it never exercised this classification
+      # at all — rewriting a 304 into `%{status: 200, body: ""}` here left it green.
+      #
+      # This is the layer where the conflation is possible, so it is the layer that has to assert.
+      # `body: ""` would tell the events job the page went blank, i.e. every event was cancelled.
+      assert {:ok, result} =
+               classify(%{
+                 "outcome" => "FETCH_OUTCOME_NOT_MODIFIED",
+                 "status" => 0,
+                 "body" => "",
+                 "etag" => "W/\"abc\""
+               })
+
+      assert result.not_modified == true
+      assert result.status == 304
+
+      refute Map.has_key?(result, :body),
+             "a 304 carried a body key — a caller matching on `%{body: body}` would treat an " <>
+               "unchanged page as an empty one and delete every event it holds"
+    end
+
+    test "the validators come back so the next request can be conditional too" do
+      # An origin may rotate an ETag alongside a 304. Keeping the stale one silently makes every later
+      # request unconditional again — nothing fails, the saving just stops.
+      assert {:ok, %{etag: "W/\"v2\"", last_modified: "Wed, 21 Oct 2026 07:28:00 GMT"}} =
+               classify(%{
+                 "outcome" => "FETCH_OUTCOME_NOT_MODIFIED",
+                 "etag" => "W/\"v2\"",
+                 "last_modified" => "Wed, 21 Oct 2026 07:28:00 GMT"
+               })
+    end
+
+    test "a not-modified outcome is not a fuse-melting mismatch" do
+      refute match?({:unexpected, _}, classify(%{"outcome" => "FETCH_OUTCOME_NOT_MODIFIED"}))
+    end
+  end
+
   describe "classify_fetch_body/2 — a successful fetch" do
     test "carries the sitemaps the shop declared" do
       assert {:ok, %{status: 200, body: "<html/>", sitemaps: ["https://x.test/sitemap.xml"]}} =
@@ -99,6 +139,17 @@ defmodule Stacks.Enrichment.ScraperClientTest do
                  "outcome" => "FETCH_OUTCOME_FETCHED",
                  "status" => 200,
                  "body" => "<html/>"
+               })
+    end
+
+    test "carries the validators so the next fetch can be conditional" do
+      assert {:ok, %{etag: "\"v9\"", last_modified: "Thu, 22 Oct 2026 07:28:00 GMT"}} =
+               classify(%{
+                 "outcome" => "FETCH_OUTCOME_FETCHED",
+                 "status" => 200,
+                 "body" => "<html/>",
+                 "etag" => "\"v9\"",
+                 "last_modified" => "Thu, 22 Oct 2026 07:28:00 GMT"
                })
     end
 

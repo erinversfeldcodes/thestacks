@@ -68,6 +68,41 @@ fn effective_rpm(policy: &crate::robots::RobotsPolicy, configured: u32) -> u32 {
     }
 }
 
+/// Cache validators from a previous fetch of the same path, sent so the shop can answer "unchanged".
+///
+/// Empty strings mean "we have none", which is the normal state for a first fetch and for any page
+/// whose origin sends neither header.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Validators {
+    pub if_none_match: String,
+    pub if_modified_since: String,
+}
+
+/// One page fetch: what came back, plus the validators to send next time.
+///
+/// A struct rather than a widening tuple. `fetch_path` previously returned
+/// `(u16, String, Vec<String>)` and adding two more members would have made every call site a
+/// five-element positional puzzle in which two adjacent `String`s mean entirely different things —
+/// exactly the shape where an argument-order mistake compiles.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FetchedPage {
+    pub status: u16,
+    pub body: String,
+    pub sitemaps: Vec<String>,
+    pub etag: String,
+    pub last_modified: String,
+}
+
+/// A response header as an owned String, empty when absent or not valid UTF-8.
+fn header_string(response: &reqwest::Response, name: &str) -> String {
+    response
+        .headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string()
+}
+
 /// What one sitemap walk found, and what it deliberately did not ask for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SitemapHarvest {
@@ -378,9 +413,15 @@ impl Engine {
         // look. We do not second-guess it — the match was made with information this
         // service does not have.
         if let Some(path) = product_path {
-            let (status, body, _sitemaps) = self.fetch_path(config, &format!("{path}.js")).await?;
+            // No validators: this is a price lookup, and a stale price is worse than a redundant
+            // transfer. Conditional requests are for pages we re-read on a schedule and expect to be
+            // unchanged, which a product's price emphatically is not.
+            let page = self
+                .fetch_path(config, &format!("{path}.js"), Validators::default())
+                .await?;
+            let body = page.body;
 
-            return match status {
+            return match page.status {
                 200 => {
                     let price = platform::shopify_product_js(&body, config.currency())?;
                     Ok(price_result(isbn, store_id, config, price))
@@ -399,9 +440,14 @@ impl Engine {
             // The handle *is* the ISBN, so one request addresses the product and a
             // 404 is the store telling us it does not carry this edition.
             (PriceSource::ShopifyProductsJson, LookupMode::Direct) => {
-                let (status, body, _sitemaps) = self
-                    .fetch_path(config, &format!("/products/{isbn}.js"))
+                let page = self
+                    .fetch_path(
+                        config,
+                        &format!("/products/{isbn}.js"),
+                        Validators::default(),
+                    )
                     .await?;
+                let (status, body) = (page.status, page.body);
 
                 match status {
                     200 => platform::shopify_product_js(&body, config.currency())?,
@@ -422,12 +468,14 @@ impl Engine {
             // WooCommerce's Store API search matches `sku`, so no local index is
             // needed. An empty result set means not stocked.
             (PriceSource::WooStoreApi, LookupMode::NativeSearch) => {
-                let (status, body, _sitemaps) = self
+                let page = self
                     .fetch_path(
                         config,
                         &format!("/wp-json/wc/store/v1/products?search={isbn}"),
+                        Validators::default(),
                     )
                     .await?;
+                let (status, body) = (page.status, page.body);
 
                 if status != 200 {
                     return Err(ScraperError::PriceParse(format!(
@@ -455,8 +503,10 @@ impl Engine {
             {
                 match self.index_lookup(isbn, store_id).await? {
                     Some(path) => {
-                        let (status, body, _sitemaps) =
-                            self.fetch_path(config, &format!("{path}.js")).await?;
+                        let page = self
+                            .fetch_path(config, &format!("{path}.js"), Validators::default())
+                            .await?;
+                        let (status, body) = (page.status, page.body);
 
                         match status {
                             200 => platform::shopify_product_js(&body, config.currency())?,
@@ -523,8 +573,8 @@ impl Engine {
 
             // Bulk sweep: waits on the rate limit rather than failing, as the index
             // build does and for the same reason.
-            let (status, body, _sitemaps) = loop {
-                match self.fetch_path(config, &path).await {
+            let page_result = loop {
+                match self.fetch_path(config, &path, Validators::default()).await {
                     Ok(response) => break response,
                     Err(ScraperError::RateLimitExceeded { .. }) => {
                         tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMIT_BACKOFF_SECS))
@@ -533,6 +583,7 @@ impl Engine {
                     Err(e) => return Err(e),
                 }
             };
+            let (status, body) = (page_result.status, page_result.body);
 
             if status != 200 {
                 break;
@@ -608,8 +659,8 @@ impl Engine {
             // hit the limit by design — treating that as failure is what made an
             // inline build impossible. Measured against Wordsworth: capability
             // detection plus one page exhausted the budget.
-            let (status, body, _sitemaps) = loop {
-                match self.fetch_path(config, &path).await {
+            let page_result = loop {
+                match self.fetch_path(config, &path, Validators::default()).await {
                     Ok(response) => break response,
                     Err(ScraperError::RateLimitExceeded { .. }) => {
                         tokio::time::sleep(std::time::Duration::from_secs(RATE_LIMIT_BACKOFF_SECS))
@@ -618,6 +669,7 @@ impl Engine {
                     Err(e) => return Err(e),
                 }
             };
+            let (status, body) = (page_result.status, page_result.body);
 
             if status != 200 {
                 break;
@@ -671,8 +723,10 @@ impl Engine {
         // "not Shopify" — concluding absence from a failed question is how a
         // rate-limited probe came to be recorded as a shop having no product API.
         // Only a genuine non-200, or a 200 with nothing usable in it, is evidence.
-        let (shopify_status, shopify_body, _shopify_sitemaps) =
-            self.fetch_path(config, "/products.json?limit=50").await?;
+        let shopify = self
+            .fetch_path(config, "/products.json?limit=50", Validators::default())
+            .await?;
+        let (shopify_status, shopify_body) = (shopify.status, shopify.body);
 
         if shopify_status == 200 {
             if let Ok(listings) = platform::shopify_products_json(&shopify_body) {
@@ -682,9 +736,14 @@ impl Engine {
             }
         }
 
-        let (woo_status, woo_body, _woo_sitemaps) = self
-            .fetch_path(config, "/wp-json/wc/store/v1/products?per_page=30")
+        let woo = self
+            .fetch_path(
+                config,
+                "/wp-json/wc/store/v1/products?per_page=30",
+                Validators::default(),
+            )
             .await?;
+        let (woo_status, woo_body) = (woo.status, woo.body);
 
         if woo_status == 200 {
             return Ok(platform::classify_woo(&woo_body));
@@ -719,7 +778,8 @@ impl Engine {
         &self,
         config: &ScraperConfig,
         path: &str,
-    ) -> Result<(u16, String, Vec<String>), ScraperError> {
+        validators: Validators,
+    ) -> Result<FetchedPage, ScraperError> {
         let base = config.source.url.trim_end_matches('/');
         let url = format!("{base}{path}");
         let domain =
@@ -751,14 +811,27 @@ impl Engine {
 
         self.rate_limiter.check_and_record(&domain, effective_rpm)?;
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(ScraperError::Http)?;
+        let mut request = self.client.get(&url);
+
+        // Conditional headers, when the caller has validators from last time. This is the cheapest
+        // courtesy available: the shop answers 304 with no body instead of rendering and transmitting
+        // a page we already hold.
+        //
+        // Sent exactly as received. An ETag is an opaque byte string — weak (`W/"..."`), quoted, or
+        // whatever the origin chose — so any normalisation here would make it stop matching, and the
+        // failure is invisible: everything keeps working, just at full cost.
+        if !validators.if_none_match.is_empty() {
+            request = request.header("if-none-match", &validators.if_none_match);
+        }
+        if !validators.if_modified_since.is_empty() {
+            request = request.header("if-modified-since", &validators.if_modified_since);
+        }
+
+        let response = request.send().await.map_err(ScraperError::Http)?;
 
         let status = response.status().as_u16();
+        let etag = header_string(&response, "etag");
+        let last_modified = header_string(&response, "last-modified");
 
         // Before the body, and that order matters: a 429 body is a styled challenge page (9 KB from
         // both target shops) and reading it would both cost the transfer and hand a caller something
@@ -775,9 +848,36 @@ impl Engine {
             return Err(err);
         }
 
+        // 304 carries no body by definition, and asking for one would be reading a body the origin
+        // deliberately did not send. Returned with the validators echoed so a caller can refresh them
+        // if the origin rotated them alongside a 304.
+        if status == 304 {
+            return Ok(FetchedPage {
+                status,
+                body: String::new(),
+                sitemaps: policy.sitemaps,
+                etag: if etag.is_empty() {
+                    validators.if_none_match
+                } else {
+                    etag
+                },
+                last_modified: if last_modified.is_empty() {
+                    validators.if_modified_since
+                } else {
+                    last_modified
+                },
+            });
+        }
+
         let body = response.text().await.map_err(ScraperError::Http)?;
 
-        Ok((status, body, policy.sitemaps))
+        Ok(FetchedPage {
+            status,
+            body,
+            sitemaps: policy.sitemaps,
+            etag,
+            last_modified,
+        })
     }
 
     /// Enumerate a shop's pages from its own sitemap, instead of guessing at paths.
