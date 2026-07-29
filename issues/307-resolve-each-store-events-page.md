@@ -79,3 +79,25 @@ Punch list:
   disproved it: the fetch layer, the status handling and the 404 branch are all correct. The genuine
   blocker is that nobody knows where these shops publish their events, which is a data question and is
   why it is filed separately rather than fixed in passing.
+
+## Dependencies
+⛔ **Blocked on #308** (honour the shop's 429 / `Retry-After`). Discovered while designing part 2 of
+this issue: both target shops answered **HTTP 429 with a 9 KB bot-challenge page on every path,
+`/robots.txt` included**, after only a handful of requests from one laptop. Behind that sat two
+defects — `retry_after_seconds` configured and read by nothing, and a 429 on `/robots.txt` being read
+as *unrestricted permission* and then cached for the process lifetime.
+
+Harvesting a shop's sitemap "politely" through a client that ignores an explicit *stop* would be
+theatre, so #308 lands first.
+
+## Part 1 — landed
+`bf374c7f` — `Sitemap:` URLs are parsed at document level (RFC 9309 §2.2.4: not a group member, so
+they survive a no-matching-group *and* a disallow), de-duplicated, and carried on every `/fetch`
+response as proto field 5. Free information: robots.txt is already read for compliance on every
+request, so asking separately would cost the shop a request it should never have to serve.
+
+⚠️ **Parts 2–5 are specified from RFC 9309/9110 and the documented Shopify/Yoast sitemap layouts,
+with fixtures — not from measurement.** The measurement that was meant to ground the child-selection
+policy is what produced the 429 above, and continuing to probe would be precisely the discourtesy
+this issue exists to avoid. Confidence in the classification tokens is therefore "grounded in spec",
+not "measured"; re-measure once #308 is deployed and a cooldown has lapsed. Say so in the PR.
