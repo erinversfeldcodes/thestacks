@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-27",
   "plan": "plans/staff-campaign-2026-07-27.md",
   "created_at": "2026-07-27T00:00:00Z",
-  "updated_at": "2026-07-29T00:25:00Z",
+  "updated_at": "2026-07-29T00:30:00Z",
   "status": "in_progress",
   "current_wave": "0",
   "_why": [
@@ -64,10 +64,10 @@
         },
         "G1": {
           "title": "Third spaces — coordinates, geocoder, producer, ADR 022",
-          "status": "in_progress",
+          "status": "blocked",
           "issue": null,
           "note": "steps 1-4 done and proven live (third_spaces 0->1, nearest_bookshop_km 0.678). Steps 5-6 (Elm port + map page) NOT started — deferred to a later wave by owner decision, needs its own issue file",
-          "blocked_on": null
+          "blocked_on": "steps 5-6 (Elm port + map page) were deferred to a later wave by owner decision; they need a wave assignment and their own epic before any code"
         },
         "G3": {
           "title": "Source discovery — prove the chain end to end",
@@ -92,9 +92,10 @@
         },
         "G6": {
           "title": "Business opt-out — form, soft-delete, review queue",
-          "status": "in_progress",
+          "status": "blocked",
           "issue": null,
-          "note": "form + both outcomes driven live; API queue driven end to end (approve -> park -> honour -> 409). The admin UI is built but UNREACHABLE in the SPA — #303"
+          "note": "form + both outcomes driven live; API queue driven end to end (approve -> park -> honour -> 409). The admin UI is built but UNREACHABLE in the SPA — #303",
+          "blocked_on": "the review queue's server side is DRIVEN end to end, but the admin UI is unreachable because the SPA has no admin-session/MFA flow at all (#303) — that is its own epic and affects three pre-existing admin pages too, so it is not Wave 0 scope"
         },
         "0e": {
           "title": "Domain cutover (PHX_HOST, MetricsPusher, /.env probes, noindex)",
