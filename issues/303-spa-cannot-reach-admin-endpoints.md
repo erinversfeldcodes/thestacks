@@ -173,3 +173,13 @@ Verdict: ❌ — nothing currently exercises the client→admin-pipeline boundar
   `third_spaces.opted_out = true`, `discovered_sources.status = 'excluded'`.
   So: server verified live, client unreachable. See
   `plans/staff-campaign-2026-07-27.md` → "The SPA cannot reach any admin endpoint".
+
+- 2026-07-29: **staff-review: LGTM WITH NOTES.** Scope: `a7d9c0b6^..269fe737`. The design is right —
+  the gate is a real MFA-verified admin session rather than a client-side pretence, an admin 401
+  correctly does not end the ordinary session, and `admin-session.spec.ts` goes through the real
+  pipeline and asserts a **state change** rather than a render, which is what caught the half-wiring.
+  One 🟧, filed as **#309** rather than fixed inline: probe `adminToken = Nothing` at `Main.elm:2060`
+  reintroduces defect 4 verbatim and **all 1285 Elm tests stay green** — the token routing is guarded
+  only by an E2E spec that needs a live preview with MFA enrolment. `AdminSourceApprovalTest.elm` is
+  blind to it by construction, since the token is an argument. Not a reason to reopen #303: the work
+  was driven live and the spec is real. It is a reason to put a floor beneath it.

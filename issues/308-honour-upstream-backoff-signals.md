@@ -194,3 +194,12 @@ Depends on nothing. #307 part 1 (`Sitemap:` retention, landed) is independent.
   point — continuing to measure would be the exact discourtesy this issue is about. The remaining
   #307 design is therefore drawn from RFC 9309/9110 and the documented Shopify sitemap layout, with
   fixtures rather than live requests, and is marked as such.
+
+## Progress Notes (review)
+- 2026-07-29: **staff-review: LGTM.** Nothing above 🟦 in this issue's slice of the diff. The
+  determination-not-failure split is the `ROBOTS_BLOCKED` precedent applied correctly, the cooldown
+  sits inside `check_and_record` where no caller can route around it, and the 429-on-robots.txt fix
+  is a deliberate, documented deviation from the letter of RFC 9309 (verified against the published
+  text, which does not special-case 429). Four mutation probes, each failing only its intended test.
+  What it cannot prove: a real 429 end to end — provoking one is the discourtesy the issue exists to
+  prevent.
