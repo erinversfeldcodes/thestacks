@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-27",
   "plan": "plans/staff-campaign-2026-07-27.md",
   "created_at": "2026-07-27T00:00:00Z",
-  "updated_at": "2026-07-29T09:05:00Z",
+  "updated_at": "2026-07-29T10:15:00Z",
   "status": "in_progress",
   "current_wave": "0",
   "_why": [
@@ -95,7 +95,7 @@
           "status": "in_progress",
           "issue": 303,
           "note": "Server side DRIVEN end to end (approve -> park -> honour -> 409; DB opted_out=true). Remaining work is the SPA admin-session/MFA flow = #303, and per owner ruling 2026-07-29 that IS Wave 0 work because it blocks a Wave 0 completion goal — not a spin-out. It also unblocks three pre-existing admin pages that have never been reachable.",
-          "last_action": "#303 PHASE 1 of 3 DONE: the admin-session API layer is in Api.elm — adminLogin, adminVerifyMfa, adminMfaSetup, adminMfaConfirm, AdminSession/AdminMfaEnrolment, and an AdminAuthError type that keeps each failure's remedy distinct (InvalidCredentials/NotAnOwner/MfaNotEnrolled/InvalidCode/InvalidSession/AlreadyVerified). Compiles; 1252 elm tests green. PHASE 2 NEXT: Page/Admin/Session.elm — the sign-in gate (email+password -> session_id -> TOTP -> token) plus the one-off enrolment path (setup -> show provisioning URI + recovery codes -> confirm; remember the base32->base64 secret conversion). PHASE 3: Main.elm gains adminAuth : Maybe AdminAuth (IN MEMORY, no port - see #303 Design), /admin/* routes render the gate when it is Nothing, and the FOUR admin pages take the admin token instead of maybeToken. Then drive all four on a preview."
+          "last_action": "#303 BUILT and DRIVEN on the preview 2026-07-29. All FOUR admin pages now load with real data via SPA navigation: Source Approval 5 rows, Scraper Health 21, Book Moderation 68, Removal requests (empty-state, no error = the admin API call succeeded). Full flow driven through the gate's own form: enrolment (10 recovery codes + 'shown once' warning) -> confirm -> credentials -> TOTP -> real page. ⛔ SECOND BUG found by driving: SourceApproval compared status == 'pending' but the server writes 'pending_review', so Approve/Reject NEVER rendered — the page had an Actions column that was permanently empty. Also 'rejected' should be 'dismissed' (reject_source transitions to dismissed). Three invented status literals, invisible while the page was unreachable. Fixed + 11 tests. REMAINING: (a) after enrolment the gate says 'Sign in above' but viewEnrolmentDone REPLACES the form, so there is nothing above — dead end, needs to return to the credentials step; (b) confirm a queue ROW renders (needs a parked request); (c) confirm a full page reload drops the in-memory token and re-shows the gate."
         },
         "0e": {
           "title": "Domain cutover (PHX_HOST, MetricsPusher, /.env probes, noindex)",
@@ -123,6 +123,7 @@
     "2026-07-29: owner rulings — (1) a blocker that blocks a Wave 0 goal IS Wave 0 work, do not spin it out and stop; (2) assign work to waves/epics myself and document it; (3) platform-visibility feeds require auth, public-visibility feeds do not.",
     "2026-07-29: teardown + clean redeploy was the right call — deploy7 failed for real (release command raced a SUSPENDED freshly-recreated Neon branch: 'connection not available ... after 5974ms'), deploy6 died mid-push, deploy8 hit the 10-min bash cap. A clean deploy10 passed all gates first time.",
     "2026-07-29: ran DiscoverBookstoreEventsJob on the preview per owner instruction. Clean :ok, ZERO events written — filed as #304: egress and fetch work (Wordsworth returned 249,540 bytes) but extraction found nothing, the events path is a single hardcoded guess (Exclusive Books /events = 18 bytes), and `outcome` is nil on a successful fetch. Only 2 of 11 stores are reachable at all (P9's bad configs).",
-    "2026-07-29: filed #305 — preview deploy races a SUSPENDED freshly-created Neon branch; candidate root for the #171/#177 flakes."
+    "2026-07-29: filed #305 — preview deploy races a SUSPENDED freshly-created Neon branch; candidate root for the #171/#177 flakes.",
+    "2026-07-29: driving #303 found a SECOND defect stacked behind the auth one — SourceApproval's action buttons never rendered because it compared against an invented status string. Fixing only the auth would have shipped a page that loads and cannot be used. Two independent bugs, the outer one hiding the inner."
   ]
 }
