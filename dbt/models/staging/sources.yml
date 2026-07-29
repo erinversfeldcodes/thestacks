@@ -342,6 +342,33 @@ sources:
               third-space pairing rule requires coordinates on BOTH sides.
           - name: longitude
             description: Decimal degrees, WGS 84. Null until geocoded.
+          - name: events_path
+            description: >
+              Where this shop's events live, resolved from its own sitemap. The job used
+              to fetch a hardcoded /events on every store, and it 404s on every
+              scrapeable one — which is why the events pipeline had never written a row.
+              Null means not resolved; see events_unresolved_reason for why.
+          - name: events_path_checked_at
+            description: >
+              When resolution was last attempted. This is what separates "we looked and
+              found nothing" from "we have not looked yet" — an empty events_path alone
+              cannot tell those apart, and treating the second as the first writes a shop
+              off permanently. Also makes a negative verdict re-checkable.
+          - name: events_unresolved_reason
+            description: >
+              Why the last attempt resolved nothing. Free text for a human operator. The
+              distinctions are operational: "no sitemap declared" is a shop we could not
+              ask, while "no candidate matched" is a shop that genuinely lists no events
+              page.
+          - name: events_page_etag
+            description: >
+              ETag from the last fetch of events_path, sent back as If-None-Match so the
+              shop can answer 304 with no body. Stored verbatim — an ETag is opaque, and
+              normalising it makes it silently stop matching.
+          - name: events_page_last_modified
+            description: >
+              Last-Modified from the last fetch of events_path, sent back as
+              If-Modified-Since. Stored verbatim, as above.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at

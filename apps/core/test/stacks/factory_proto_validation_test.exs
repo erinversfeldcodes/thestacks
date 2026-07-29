@@ -78,11 +78,19 @@ defmodule Stacks.FactoryProtoValidationTest do
     # who has investigated the shop. A factory that pre-populated any of them would
     # make every test start with a store that looks blocked, ruled out, or already
     # probed — so the tests that care set them explicitly instead.
+    #
+    # The `events_*` five are the same kind of thing, written only by
+    # `Stacks.Enrichment.EventsPath`. Pre-populating `events_path` would be actively
+    # misleading: `resolve/1` short-circuits on a store that already has one, so every
+    # test would silently skip the sitemap walk it was meant to exercise. And an
+    # `events_path_checked_at` from a factory would assert we had looked at a shop we
+    # never asked about, which is the exact false-positive that field exists to prevent.
     bookstore:
       {Stacks.Enrichment.Bookstore,
        ~w(search_template price_source isbn_location lookup_mode capability_probed_at
           canary_isbn robots_blocked_path robots_blocked_rule robots_blocked_at
-          unscrapable_reason)a},
+          unscrapable_reason events_path events_path_checked_at events_unresolved_reason
+          events_page_etag events_page_last_modified)a},
     price_snapshot: {Stacks.Enrichment.PriceSnapshot, ~w()a},
     bookstore_event: {Stacks.Enrichment.BookstoreEvent, ~w()a},
     # `nearest_bookshop_km` is computed at geocode time, never fixture data: a factory

@@ -852,6 +852,16 @@ models:
         description: Latitude.
       - name: longitude
         description: Longitude.
+      - name: events_path
+        description: Events path.
+      - name: events_path_checked_at
+        description: Events path checked at.
+      - name: events_unresolved_reason
+        description: Events unresolved reason.
+      - name: events_page_etag
+        description: Events page etag.
+      - name: events_page_last_modified
+        description: Events page last modified.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

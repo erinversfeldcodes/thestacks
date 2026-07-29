@@ -21,6 +21,11 @@ select
     unscrapable_reason,
     latitude,
     longitude,
+    events_path,
+    events_path_checked_at,
+    events_unresolved_reason,
+    events_page_etag,
+    events_page_last_modified,
     created_at,
     updated_at
 from {{ source('op', 'bookstores') }}
