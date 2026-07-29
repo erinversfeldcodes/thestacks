@@ -31,6 +31,12 @@ bash "$REPO_ROOT/scripts/check-orphan-classes.sh"
 # token as an argument and so cannot notice that `Main` chose the wrong one.
 bash "$REPO_ROOT/scripts/check-admin-token-routing.sh"
 
+# The stylesheet itself (Issue #306). Nothing in this gate looked at main.css before — not its syntax,
+# not its specificity. Three defects shipped through a green `just verify` in one change on
+# 2026-07-29, including CSS a browser cannot parse. Checks well-formedness, bans `[class*=]`
+# selectors, and refuses a modifier whose state a base `:hover` rule silently overrides.
+bash "$REPO_ROOT/scripts/check-css.sh"
+
 (cd frontend && npx elm-format --validate src/)
 (cd frontend && npm audit)
 
