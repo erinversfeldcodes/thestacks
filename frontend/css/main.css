@@ -5922,20 +5922,16 @@ h4 {
  *
  * Classes that already have their own `:hover` are excluded below for the same reason.
  */
-.about__link--costs,
-.about__link--metrics,
-.blog-archive__link,
-.book-detail__author-rss-link,
-.writing-assistant__settings-link {
-    border-bottom-color: var(--accent);
-    color: var(--accent-hover);
-}
-
 .about__link--costs:hover,
 .about__link--metrics:hover,
 .blog-archive__link:hover,
 .book-detail__author-rss-link:hover,
 .writing-assistant__settings-link:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent-hover);
+}
+
+/* The gate invites a click, so hovering it should look like an opening. */
 .insights__risk-gate:hover,
 .insights__risk-reveal:hover {
     background: rgba(255, 255, 255, 0.06);
@@ -5952,4 +5948,63 @@ h4 {
     text-decoration: underline;
     color: var(--accent-hover);
     opacity: 1;
+}
+
+/* ============================================================================
+ * Specificity repairs: a modifier must not lose its own state to a hover
+ * ============================================================================
+ *
+ * `.b--m` is (0,1,0) and `.b:hover` is (0,2,0), so the base's hover rule outranks the modifier and
+ * the modifier's state vanishes the moment a cursor touches it. An *active* tab reverted to inactive
+ * colours on hover; a *disabled* button brightened under the cursor as though it were live; an ISBN
+ * input showing an error lost its red border as soon as it was focused — i.e. exactly when the reader
+ * went to fix the error.
+ *
+ * Found by generalising a defect introduced on 2026-07-29 (`.btn--link` losing its underline to
+ * `.btn:hover`). One instance became eight, which is the argument for `scripts/check-css.sh`
+ * enforcing this rather than a person remembering it. Each rule below restates the modifier's OWN
+ * declared value — nothing here invents a colour.
+ * ============================================================================ */
+
+/* A disabled control must not respond to a cursor at all: brightening on hover is a promise it will
+ * do something, and it will not. */
+.btn--disabled:hover {
+    opacity: 0.5;
+}
+
+/* Selected format: it is already filled with the accent, and the base hover repaints the border and
+ * text as though nothing were selected. */
+.format-picker__btn--selected:hover {
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* ⛔ The most consequential of the seven. `.isbn-input:focus` repaints the border, so an ISBN that
+ * failed validation lost its error colour the instant the reader clicked into the field to correct
+ * it — the feedback disappeared exactly when it was needed. */
+.isbn-input--error:focus {
+    border-color: #e05050;
+}
+
+/* The active tab on the parchment login card. */
+.login-card__tab--active:hover {
+    color: #5c3a1e;
+}
+
+/* Active filter and active admin tab: both are "you are here" states, and both were erased by hover.
+ * A navigation that forgets where you are while you point at it is worse than one with no hover. */
+.catalogue__filter-btn--active:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text, #e8dcc8);
+}
+
+.admin__tab--active:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text);
+}
+
+/* A row mid-drag keeps its accent outline; the base hover shadow would replace the one affordance
+ * telling the reader which row they are holding. */
+.shelf-organiser__row--dragging:hover {
+    box-shadow: inset 0 0 0 1px var(--accent);
 }

@@ -191,4 +191,29 @@ Punch list:
 
   Also checked and clean: the sweep introduced **0** new duplicate rule heads (15 exist in the file
   and all 15 pre-date it — ledger, not this change).
+- 2026-07-29 (follow-up): **The two review findings were one defect class, and it had seven more
+  instances plus a hole in the gate itself.** Treating them as two bugs would have missed both.
+
+  Generalising `.btn--link` losing its underline to `.btn:hover`: `.b--m` is specificity (0,1,0) and
+  `.b:hover` is (0,2,0), so **a base's pseudo-class rule outranks its own modifier**. Seven
+  pre-existing instances, all fixed:
+  - ⛔ `.isbn-input--error` lost its red border to `.isbn-input:focus` — the validation feedback
+    vanished exactly when the reader clicked into the field to correct it.
+  - `.btn--disabled` brightened on hover, promising a response it would not give.
+  - Four "you are here" states (`admin__tab--active`, `catalogue__filter-btn--active`,
+    `login-card__tab--active`, `format-picker__btn--selected`) reverted to inactive colours on hover.
+  - `.shelf-organiser__row--dragging` lost the outline telling you which row you were holding.
+
+  ⛔ **And a third defect of mine, worse than the two reviewed: the CSS I committed was
+  syntactically broken** — a selector list ending in `{` followed by more selectors, plus five links
+  pinned permanently into their hover state. **`just verify` returned exit 0 on it.** That is the real
+  finding: this gate had never looked at `main.css` in any way. `mix format`/`elm-format` do not touch
+  CSS, there is no CSS linter, and no test can see it, because a test asserts a class is in the DOM and
+  never that the class does anything.
+
+  `scripts/check-css.sh` now closes it, wired into `lint-elm.sh`: well-formedness, `[class*=]`
+  selectors banned, modifier/pseudo collisions ratcheted at **0**, and same-class-same-property
+  duplicates outside `@media`. All four rules probed. Two bugs in the check itself were found by
+  probing it — 24 false positives on multi-line `radial-gradient` declarations, and it flagged the
+  *repair* for `btn--link` as a defect — both fixed before wiring it in.
 
