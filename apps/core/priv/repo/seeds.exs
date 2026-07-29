@@ -154,7 +154,18 @@ Repo.insert_all(
     }
   ] ++ e2e_users,
   prefix: "op",
-  on_conflict: {:replace, [:email_confirmed, :password_hash, :updated_at]},
+  # ⚠️ `profile_visibility` MUST be in this list, and leaving it out silently voided a fix.
+  #
+  # Every preview branches from staging by Neon copy-on-write, so these deterministic-UUID rows
+  # already exist and the conflict path always fires. With only
+  # `[:email_confirmed, :password_hash, :updated_at]` replaced, any change to a *fixture* field
+  # — visibility above all — was discarded on every environment that mattered, while the seed
+  # reported success and the diff looked landed. Verified on a preview 2026-07-28: after a
+  # successful reseed, `test_user` was still `profile_visibility: "owner"`.
+  #
+  # So this list is the set of fields the seed is AUTHORITATIVE for on re-run. A dev fixture that
+  # cannot correct its own rows is not a fixture, it is a one-time insert.
+  on_conflict: {:replace, [:email_confirmed, :password_hash, :profile_visibility, :updated_at]},
   conflict_target: :id
 )
 
@@ -686,7 +697,19 @@ bookshelf_rows =
     end)
   end)
 
-Repo.insert_all("bookshelves", bookshelf_rows, prefix: "op", on_conflict: :nothing)
+# ⚠️ `:nothing` made the `public_bookshelf_names` decision above a no-op wherever it mattered.
+#
+# A preview branches staging, so these rows already exist and `:nothing` left their old
+# `visibility` in place — every preview kept `owner` on all five bookshelves. The comment above
+# says this fix made the RSS affordance drivable; it never did, on any preview, because this line
+# discarded it. Confirmed 2026-07-28: 0 shared bookshelves after a successful reseed.
+#
+# Replacing `visibility` makes the seed authoritative for the one field it is deciding.
+Repo.insert_all("bookshelves", bookshelf_rows,
+  prefix: "op",
+  on_conflict: {:replace, [:visibility, :updated_at]},
+  conflict_target: :id
+)
 
 # ── E2E user bookshelves ──────────────────────────────────────────────────
 # Each E2E user gets 5 bookshelves. UUID range: 400+ (5 per user, starting at user index * 10).
