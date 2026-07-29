@@ -188,6 +188,7 @@ impl Engine {
             return Err(ScraperError::RobotsDisallowed {
                 url: search_url.clone(),
                 rule: policy.blocked_by.clone().unwrap_or_default(),
+                sitemaps: policy.sitemaps.clone(),
             });
         }
 
@@ -307,7 +308,7 @@ impl Engine {
         // look. We do not second-guess it — the match was made with information this
         // service does not have.
         if let Some(path) = product_path {
-            let (status, body) = self.fetch_path(config, &format!("{path}.js")).await?;
+            let (status, body, _sitemaps) = self.fetch_path(config, &format!("{path}.js")).await?;
 
             return match status {
                 200 => {
@@ -328,7 +329,7 @@ impl Engine {
             // The handle *is* the ISBN, so one request addresses the product and a
             // 404 is the store telling us it does not carry this edition.
             (PriceSource::ShopifyProductsJson, LookupMode::Direct) => {
-                let (status, body) = self
+                let (status, body, _sitemaps) = self
                     .fetch_path(config, &format!("/products/{isbn}.js"))
                     .await?;
 
@@ -351,7 +352,7 @@ impl Engine {
             // WooCommerce's Store API search matches `sku`, so no local index is
             // needed. An empty result set means not stocked.
             (PriceSource::WooStoreApi, LookupMode::NativeSearch) => {
-                let (status, body) = self
+                let (status, body, _sitemaps) = self
                     .fetch_path(
                         config,
                         &format!("/wp-json/wc/store/v1/products?search={isbn}"),
@@ -384,7 +385,8 @@ impl Engine {
             {
                 match self.index_lookup(isbn, store_id).await? {
                     Some(path) => {
-                        let (status, body) = self.fetch_path(config, &format!("{path}.js")).await?;
+                        let (status, body, _sitemaps) =
+                            self.fetch_path(config, &format!("{path}.js")).await?;
 
                         match status {
                             200 => platform::shopify_product_js(&body, config.currency())?,
@@ -451,7 +453,7 @@ impl Engine {
 
             // Bulk sweep: waits on the rate limit rather than failing, as the index
             // build does and for the same reason.
-            let (status, body) = loop {
+            let (status, body, _sitemaps) = loop {
                 match self.fetch_path(config, &path).await {
                     Ok(response) => break response,
                     Err(ScraperError::RateLimitExceeded { .. }) => {
@@ -536,7 +538,7 @@ impl Engine {
             // hit the limit by design — treating that as failure is what made an
             // inline build impossible. Measured against Wordsworth: capability
             // detection plus one page exhausted the budget.
-            let (status, body) = loop {
+            let (status, body, _sitemaps) = loop {
                 match self.fetch_path(config, &path).await {
                     Ok(response) => break response,
                     Err(ScraperError::RateLimitExceeded { .. }) => {
@@ -599,7 +601,7 @@ impl Engine {
         // "not Shopify" — concluding absence from a failed question is how a
         // rate-limited probe came to be recorded as a shop having no product API.
         // Only a genuine non-200, or a 200 with nothing usable in it, is evidence.
-        let (shopify_status, shopify_body) =
+        let (shopify_status, shopify_body, _shopify_sitemaps) =
             self.fetch_path(config, "/products.json?limit=50").await?;
 
         if shopify_status == 200 {
@@ -610,7 +612,7 @@ impl Engine {
             }
         }
 
-        let (woo_status, woo_body) = self
+        let (woo_status, woo_body, _woo_sitemaps) = self
             .fetch_path(config, "/wp-json/wc/store/v1/products?per_page=30")
             .await?;
 
@@ -636,11 +638,18 @@ impl Engine {
     /// adapters **404 is meaningful data** (`/products/<isbn>.js` returning 404 is
     /// how a Shopify store says "we do not carry this ISBN"), not an error to
     /// propagate.
+    /// Fetch one path through the compliant egress.
+    ///
+    /// Returns the status, the body, and the **`Sitemap:` URLs the shop declared** — the last of
+    /// which is free: robots.txt is already fetched here for compliance, so the declaration is
+    /// in hand. Returning it is what lets a caller find a real page instead of guessing at one,
+    /// and a guess is not cheap for the shop (a Shopify 404 is a *styled* page — measured at
+    /// 249,540 bytes — while a sitemap index is ~10 KB).
     pub async fn fetch_path(
         &self,
         config: &ScraperConfig,
         path: &str,
-    ) -> Result<(u16, String), ScraperError> {
+    ) -> Result<(u16, String, Vec<String>), ScraperError> {
         let base = config.source.url.trim_end_matches('/');
         let url = format!("{base}{path}");
         let domain =
@@ -658,6 +667,7 @@ impl Engine {
             return Err(ScraperError::RobotsDisallowed {
                 url,
                 rule: policy.blocked_by.clone().unwrap_or_default(),
+                sitemaps: policy.sitemaps.clone(),
             });
         }
 
@@ -675,7 +685,7 @@ impl Engine {
         let status = response.status().as_u16();
         let body = response.text().await.map_err(ScraperError::Http)?;
 
-        Ok((status, body))
+        Ok((status, body, policy.sitemaps))
     }
 
     /// Fetch HTML — either from fixtures (mock mode) or real HTTP.

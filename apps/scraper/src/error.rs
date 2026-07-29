@@ -25,8 +25,17 @@ pub enum ScraperError {
     // recording the block has no way to distinguish a narrow disallow (`/search`) from
     // a total one (`/`) — i.e. whether the store is permanently unscrapable or merely
     // needs a different path. See `RobotsPolicy::blocked_by`.
+    //
+    // `sitemaps` carries the `Sitemap:` URLs the same document declared. A disallow is the case
+    // where they matter MOST: we are not permitted to guess at paths, so the store's own index is
+    // the only respectful way left to find a page it *is* willing to serve. Dropping them here
+    // would make the endpoint's blocked branch quietly lossier than the policy that produced it.
     #[error("robots.txt disallows scraping {url} ({rule})")]
-    RobotsDisallowed { url: String, rule: String },
+    RobotsDisallowed {
+        url: String,
+        rule: String,
+        sitemaps: Vec<String>,
+    },
 
     #[error("robots.txt fetch failed for {domain}: {reason}")]
     RobotsFetchFailed { domain: String, reason: String },

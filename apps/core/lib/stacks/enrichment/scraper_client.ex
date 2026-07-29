@@ -196,8 +196,20 @@ defmodule Stacks.Enrichment.ScraperClient do
         Logger.info("ScraperClient: robots.txt blocks #{store} (#{rule})")
         {:error, {:robots_blocked, rule}}
 
-      {:ok, %{"outcome" => "FETCH_OUTCOME_FETCHED", "status" => status, "body" => page}} ->
-        {:ok, %{status: status, body: page}}
+      {:ok, %{"outcome" => "FETCH_OUTCOME_FETCHED", "status" => status, "body" => page} = ok} ->
+        # `sitemaps` rides along on every fetch because robots.txt was already read for compliance —
+        # the shop has therefore already told us where its content index is, and asking separately
+        # would cost it a request it should never have to serve.
+        #
+        # This is what lets a caller resolve a real path instead of guessing. A guess is expensive
+        # for the shop: a Shopify 404 is a *styled* page, measured at 249,540 bytes on 2026-07-29,
+        # while a sitemap index is ~10 KB and states exactly which pages exist.
+        {:ok,
+         %{
+           status: status,
+           body: page,
+           sitemaps: Map.get(ok, "sitemaps", [])
+         }}
 
       # An unrecognised outcome is a contract mismatch between this client and the
       # sidecar, which is a service problem rather than a store problem.
