@@ -5253,3 +5253,681 @@ h4 {
     margin: 0 0 1rem;
     border-radius: var(--radius-sm);
 }
+
+/* ============================================================================
+ * Issue #306 — rules for markup that named a style which did not exist
+ * ============================================================================
+ *
+ * 309 class names were written in Elm views with NO matching rule in this file. The classes were
+ * present in the DOM, so every `Selector.class` assertion passed and no test could see it; three
+ * surfaces reached a preview rendering as raw browser chrome — bulleted lists and default grey
+ * buttons on top of the dark-academic wallpaper — before anyone noticed. `scripts/check-orphan-classes.sh`
+ * is the ratchet that stops a new one landing; this section clears the backlog it was measuring.
+ *
+ * ⚠️ **Written by ROLE, not per class, and that is deliberate.** The BEM suffixes carry the
+ * semantics — `__list`, `__meta`, `__empty`, `__error`, `__card` — and 309 near-duplicate blocks
+ * would be 309 places for the shared vocabulary to drift apart. Grouping by role makes the vocabulary
+ * explicit and is why an `__error` on a marketplace page now looks like an `__error` on an admin page.
+ *
+ * Every declaration uses the `:root` tokens and copies an existing house pattern where one exists
+ * (`.admin__error`, `.catalogue__empty`, `.metrics__loading`, `.removal-queue__row`,
+ * `.search-bar__input`, `.app-nav__link`), so a per-bookshelf theme override still tints these and
+ * nothing here hardcodes a colour outside the palette.
+ *
+ * ⚠️ **These are sane defaults, not a substitute for looking at the page.** A role-derived rule
+ * cannot know that a particular `__title` sits inside a card and wants to be smaller, or that one
+ * `__grid` wants two columns rather than auto-fill. Each surface still deserves a visual pass, and
+ * the per-group queue in the issue is the order to do it in. What this section guarantees is that no
+ * surface renders as unstyled browser default any more.
+ * ============================================================================ */
+
+/* Links get the accent and a transparent underline that fills in on hover — the `.app-nav__link` pattern, so hover feedback is consistent. */
+.about__link--costs,
+.about__link--metrics,
+.blog-archive__link,
+.book-detail__author-rss-link,
+.writing-assistant__settings-link {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease-in;
+}
+
+/* Form inputs, matching `.search-bar__input`. An inset dark well rather than a light field: a white input on this palette is what made several forms look like browser defaults. */
+.admin__search,
+.admin__search-input,
+.book-detail__edition-select,
+.book-detail__edition-selector,
+.book-detail__visibility-select,
+.comment-form__input,
+.form-field__input,
+.form-field__textarea,
+.form-input--textarea,
+.reply-form__input {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+/* Action rows. `flex-wrap` because two or three buttons overflow a narrow viewport otherwise. */
+.age-gate__actions,
+.app-nav__logout,
+.block-user__block-action,
+.block-user__cancel,
+.blog-editor__actions,
+.book-associations__actions,
+.book-detail__price-buy,
+.comment-form__submit,
+.comment__actions,
+.marketplace-mine__actions,
+.marketplace-mine__row-actions,
+.reply-form__submit,
+.upload-complete__actions,
+.upload-duplicate__merge-actions,
+.upload-verify__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 1rem;
+}
+
+/* Running prose. `line-height: 1.65` because this is a reading product and 1.2 on a serif-adjacent palette is punishing. */
+.age-gate__content,
+.age-gate__message,
+.blog-archive__content,
+.blog-post__body,
+.blog-post__content,
+.blog-post__unavailable,
+.blog-post__unavailable-text,
+.book-associations__details,
+.book-associations__reasoning,
+.book-detail__author-rss-excerpt,
+.book-detail__review-summary,
+.comment__body,
+.comment__text,
+.feed-item__content,
+.marketplace-create__success-details,
+.marketplace-detail__description,
+.settings-hub__content,
+.upload-duplicate__merge-success-text,
+.upload-manual__error-text,
+.upload-verify__age-gate-message,
+.upload-verify__content,
+.upload-verify__details,
+.view-as-bar__text,
+.writing-assistant__body {
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    line-height: 1.65;
+    color: var(--text);
+}
+
+/* Titles take the display serif — that is the dark-academic register, and body sans here reads like an admin console. */
+.age-gate__heading,
+.blocked-user__name,
+.blog-archive__item-title,
+.book-associations__book-title,
+.book-associations__title,
+.book-detail__author-rss-title,
+.book-detail__price-store-name,
+.comments__heading,
+.insights__section-title,
+.marketplace-create__success-title,
+.marketplace-detail__title,
+.marketplace-mine__row-title,
+.marketplace__subtitle,
+.pile-view__title,
+.profile__shelves-title,
+.reader-card__name,
+.search-readers__title,
+.upload-complete__heading,
+.upload-result__book-title,
+.upload-shelf-picker__heading,
+.upload-verify__heading,
+.writing-assistant__title {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: var(--text);
+    margin: 0 0 0.35rem;
+}
+
+/* Metadata: small caps, tracked out, muted — the register `.removal-queue__type` already uses, which keeps a date from competing with a title. */
+.audit-log__when,
+.blog-archive__item-date,
+.blog-post__byline,
+.blog-post__date,
+.book-detail__ai-label,
+.book-detail__author-rss-date,
+.book-detail__availability-condition,
+.book-detail__price-edition-label,
+.book-detail__price-trend,
+.book-detail__review-rating,
+.book-detail__review-refreshed,
+.book-detail__visibility-label,
+.comment__date,
+.comment__meta,
+.feed-item__time,
+.insights__risk-label,
+.insights__stat-label,
+.marketplace-create__radio-label,
+.marketplace-detail__author,
+.marketplace-detail__info-label,
+.marketplace-detail__meta,
+.marketplace-mine__row-condition,
+.pile-view__author,
+.profile__location,
+.profile__meta,
+.reader-card__handle,
+.reader-card__location,
+.removal-queue__when,
+.upload-adults-only__label,
+.upload-result__book-author,
+.upload-verify__author {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+/* The house panel surface, matching `.removal-queue__row`. A translucent white wash rather than a solid colour so the wallpaper reads through and per-bookshelf themes still tint it. */
+.block-user__menu,
+.block-user__modal,
+.blog-archive__item,
+.blog-archive__item-preview,
+.book-associations__book,
+.book-associations__item,
+.book-detail__availability-partner,
+.book-detail__availability-row,
+.book-detail__meta-item--format,
+.book-detail__price-store,
+.feed-item--blog-post,
+.feed-item--placement,
+.groups__invitation-card,
+.groups__item,
+.insights__list-item,
+.insights__risk-item,
+.marketplace-detail__info-row,
+.marketplace-mine__row,
+.privacy__blocked-row,
+.third-spaces__card,
+.upload-result__book-item,
+.upload-result__book-item--unidentified {
+    padding: 1rem 1.25rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+/* Empty states, matching `.catalogue__empty` / `.admin__empty`. Italic and muted so an empty shelf reads as a considered state rather than a failure. */
+.blog-archive__empty,
+.book-detail__author-empty,
+.book-detail__reviews-empty,
+.insights__empty,
+.marketplace-detail__cover-placeholder,
+.marketplace-mine__empty,
+.marketplace__card-cover-placeholder,
+.privacy__blocked-empty,
+.profile__empty {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 2rem 1rem;
+}
+
+/* Section headers. `align-items: baseline` lines a heading up with its adjacent meta text rather than centring two different font sizes against each other. */
+.blog-archive__header,
+.blog-archive__item-header,
+.blog-post__header,
+.marketplace-detail__header,
+.profile__header,
+.shelf-room__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Vertical stacks. `list-style: none` matters: these are semantic <ul>s, and browser bullets on a dark parchment surface is the exact 'shipped unstyled' look this sweep exists to remove. */
+.blog-archive__list,
+.blog-post__comments,
+.book-associations__list,
+.book-detail__availability-list,
+.book-detail__price-stores,
+.comments__list,
+.groups__list,
+.insights__list,
+.insights__risk-list,
+.marketplace-mine__list,
+.privacy__blocked-list,
+.privacy__shelves,
+.profile__shelf-list,
+.profile__shelves,
+.search-readers__list,
+.third-spaces__list,
+.upload-result__book-list,
+.upload-shelf-picker__shelves {
+    list-style: none;
+    margin: 1.25rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+/* Assorted small text and controls that share no structural role. Given the body face at small size, which is the correct default for all of them; each still wants a look on its own surface. */
+.book-detail__author-events,
+.book-detail__author-rss,
+.book-detail__availability,
+.book-detail__price-edition,
+.book-detail__shelf-formats,
+.book-detail__signup-prompt,
+.comment__delete,
+.comment__replies,
+.comment__reply,
+.feed-item__user,
+.groups-detail__leave,
+.groups-detail__member,
+.groups-detail__members,
+.groups-detail__tabs,
+.groups__invitations,
+.insights__bisac,
+.insights__code,
+.insights__section-desc,
+.insights__sections,
+.marketplace-create__no-books,
+.modal__desc,
+.profile__website,
+.settings-hub__layout,
+.shelf-room__attribution,
+.third-spaces__claim,
+.third-spaces__events,
+.upload-duplicate__secondary,
+.upload-verify__age-gate-notice,
+.user-menu__dropdown,
+.user-menu__trigger,
+.view-as-bar__exit {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text);
+}
+
+/* Price is the thing a shopper scans for, so it gets the display face and the accent. */
+.book-detail__availability-price,
+.book-detail__price-amount,
+.marketplace-detail__price,
+.marketplace-detail__price--offer,
+.marketplace__price--offer {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    color: var(--accent);
+}
+
+/* Structural wrappers: spacing only. Deliberately not decorated — a wrapper that paints a border it was never meant to have is worse than one with no rule. */
+.book-detail__prices-footer,
+.insights__section,
+.insights__section--deanon,
+.insights__section--risk,
+.marketplace-create__radio-group,
+.marketplace-create__success-info,
+.marketplace-detail__book-info,
+.marketplace-mine__row-info,
+.marketplace__card-info,
+.metrics__section--durable,
+.metrics__section--live,
+.metrics__section--observe,
+.settings-hub__mobile-nav,
+.settings-hub__sidebar,
+.upload-verify__book-info {
+    margin-bottom: 1.5rem;
+}
+
+/* Loading states, matching `.metrics__loading`. */
+.book-detail__prices-loading,
+.book-detail__review-loading,
+.comments__loading,
+.upload-duplicate__merge-loading,
+.upload-manual__loading,
+.upload-shelf-picker__loading {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    text-align: center;
+    padding: 1.5rem 1rem;
+}
+
+/* A meter fill (review sentiment, upload progress). Width is set inline from data; this styles the track's contents only. */
+.book-detail__review-sentiment-fill {
+    display: block;
+    height: 0.4rem;
+    background: var(--accent);
+    border-radius: var(--radius-sm);
+    transition: width 0.3s ease-in-out;
+}
+
+/* The track behind `__review-sentiment-fill`. `overflow: hidden` is what keeps the fill's corners inside the track. */
+.book-detail__review-sentiment-track {
+    display: block;
+    width: 100%;
+    height: 0.4rem;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+/* The affirmative button. Filled, because it is the one the reader is meant to find. */
+.btn--confirm {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+/* Dismiss is quiet on purpose: pairing a filled confirm with a filled cancel makes two opposite actions look interchangeable — the mistake `.removal-queue__*` calls out. */
+.btn--dismiss {
+    background: transparent;
+    color: var(--text-muted);
+    border-color: var(--border);
+}
+
+/* A button that must read as a link. Stripped of button chrome entirely, or it reads as a third kind of control. */
+.btn--link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+/* Size only — it inherits every other property from `.btn`. */
+.btn--small {
+    padding: 0.3rem 0.6rem;
+    font-size: var(--size-xs);
+}
+
+/* Copied deliberately from `.admin__error` rather than re-invented: an error that looks different on every surface teaches a reader nothing. */
+.catalogue__error,
+.comments__error,
+.form-field__error,
+.groups-detail__invite-error,
+.groups__error,
+.upload-complete__age-gate-error,
+.upload-duplicate__merge-error,
+.upload-manual__error,
+.upload-shelf-picker__error {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: #d99a6c;
+    background: rgba(155, 105, 48, 0.15);
+    border-left: 2px solid #9b6930;
+    padding: 0.6rem 0.85rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
+}
+
+/* Helper text below a control: small, muted, close to what it explains. */
+.empty-shelf__hint,
+.form-field__hint,
+.upload-adults-only__hint {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+}
+
+/* Forms stack with consistent breathing room. */
+.groups-detail__invite-form,
+.groups__create-form,
+.listing-removal__form,
+.login-card__forgot-form,
+.marketplace-create__form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    margin-top: 1rem;
+}
+
+/* Confirmations: the mirror of `.admin__error`, in the accent. Same shape so success and failure are recognisably the same *kind* of message. */
+.groups-detail__invite-success,
+.login-card__notice,
+.marketplace-create__success,
+.upload-duplicate__merge-success {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--accent);
+    background: rgba(74, 124, 89, 0.15);
+    border-left: 2px solid var(--accent);
+    padding: 0.6rem 0.85rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
+}
+
+/* The risk explanation and its caveats. Muted and small: these qualify a headline rather than competing with it, and the caveat matters as much as the claim. */
+.insights__deanon-explanation,
+.insights__deanon-verdict,
+.insights__fact,
+.insights__intro,
+.insights__risk-basis,
+.insights__risk-caveat,
+.insights__risk-could,
+.insights__risk-revealed {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin: 0.5rem 0 0;
+}
+
+/* The re-identification verdict headline. The base; its four `--` variants below carry the colour, because how alarming this should look is entirely a function of the verdict. */
+.insights__deanon-headline {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    color: var(--text);
+    margin: 0 0 0.4rem;
+}
+
+/* Common: reassuring, so accent green. */
+.insights__deanon-headline--common {
+    color: var(--accent);
+}
+
+/* Not enough data to say. Muted deliberately — neither reassurance nor alarm, because we do not know, and colouring it either way would assert something we cannot support. */
+.insights__deanon-headline--insufficient {
+    color: var(--text-muted);
+}
+
+/* Rare: same register as unique. */
+.insights__deanon-headline--rare {
+    color: #d99a6c;
+}
+
+/* 'Your shelf is unique' — the highest-risk verdict, and the one that must not look like the others. */
+.insights__deanon-headline--unique {
+    color: #d99a6c;
+}
+
+/* The consent gate in front of the risk illustration — the reader asks before it is shown. Dashed and quiet: it is an invitation, not a warning, and `cursor: pointer` is what makes it read as clickable at all. (`InsightsProgramTest` guards that the revealed content stays hidden until asked; #302 found that assertion had been vacuous.) */
+.insights__risk-gate,
+.insights__risk-reveal {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1rem;
+    cursor: pointer;
+}
+
+/* Stat rows. */
+.insights__stat,
+.insights__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    margin: 1.25rem 0;
+}
+
+/* A single number, given the display face at scale — this is what the reader came to see. */
+.insights__stat-value {
+    display: block;
+    font-family: var(--font-heading);
+    font-size: var(--size-3xl);
+    color: var(--text);
+    line-height: 1.1;
+}
+
+/* Images. `max-width: 100%` is what stops a cover blowing out the layout on a phone. */
+.marketplace-detail__cover,
+.marketplace__card-cover,
+.upload-verify__cover,
+.upload-verify__cover--placeholder {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+}
+
+/* A profile still loading: dimmed rather than replaced, so the layout does not jump when it arrives. */
+.profile--loading {
+    opacity: 0.6;
+}
+
+/* A handle that does not exist. Centred and quiet — this is a dead end, not an error the reader caused. */
+.profile--not-found {
+    font-family: var(--font-body);
+    color: var(--text-muted);
+    text-align: center;
+    padding: 3rem 1rem;
+}
+
+/* Inline badges. */
+.rss-link__icon,
+.search-bar__icon {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+/*
+ * Top-level page blocks. A centred column with room to breathe — the measure matters in a reading
+ * product, so this caps line length rather than letting prose run the full width of a desktop.
+ */
+.book-associations,
+.comment-form,
+.feed-item,
+.feed-item-row,
+.form-group,
+.form-input,
+.form-label,
+.notification-toggles,
+.page--blog-archive,
+.page--blog-editor,
+.page--blog-post,
+.page--bookshelf,
+.page--groups,
+.page--groups-detail,
+.page--insights,
+.page--marketplace-detail,
+.page--settings,
+.page--third-spaces,
+.reply-form,
+.search-readers,
+.upload-status-region {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+}
+
+/* Unavailable affordances. `cursor: not-allowed` is the bit a reader actually notices. */
+.insights__deanon-headline--unknown,
+.search-result__year--unknown,
+.writing-assistant--coming-soon,
+.writing-assistant--disabled {
+    color: var(--text-muted);
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* States that need a human next: dashed border, muted. A duplicate is not an error and should not wear an error's colour. */
+.login-card--pending,
+.upload-result--duplicate,
+.upload-result--manual {
+    color: var(--text-muted);
+    border-color: var(--border);
+    border-style: dashed;
+}
+
+/* Failure states borrow the `.admin__error` amber rather than red: red on this palette reads as an alarm, and a photo that was not a book is not an alarm. */
+.upload-result--failed,
+.upload-result--not-book {
+    color: #d99a6c;
+    border-color: #9b6930;
+}
+
+/* Success takes the accent green. */
+.upload-result--identified {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/*
+ * ⚠️ 3D bookcase geometry — given spacing only, ON PURPOSE.
+ *
+ * These sit inside the bookcase/reading-pile scene, which is built from the `--plank-h`,
+ * `--book-depth`, `--side-w` and `--plank-lip` custom properties and real CSS transforms. Inventing
+ * a size or a border for a plank or a chair leg from its name alone could break a visual that
+ * currently works, and a subtly wrong bookcase is harder to notice than an unstyled one.
+ *
+ * They are listed here so the per-surface pass in #306 knows exactly which classes still want eyes
+ * on the actual scene rather than a rule derived from a name.
+ */
+.armchair__leg,
+.book-overlay__focus-sentinel,
+.empty-shelf__dust-motes,
+.empty-shelf__scene,
+.empty-shelf__shelf-plank,
+.empty-shelf__shelf-unit {
+    box-sizing: border-box;
+}
+
+
+/*
+ * Hover states for the roles above. Emitted by hand rather than by role, because a hover rule has to
+ * name the same selector list again and a generator that duplicates 40 selectors to add one property
+ * is how a stylesheet becomes unreadable. These cover the two roles where hover is not decoration but
+ * the affordance itself: a link the reader must know is clickable, and the risk gate they must know
+ * they can open.
+ */
+[class$="__link"]:hover,
+[class*="__link "]:hover,
+[class$="__rss-link"]:hover,
+.btn--link:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent-hover);
+}
+
+[class$="__risk-gate"]:hover,
+[class$="__risk-reveal"]:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--accent);
+}

@@ -101,13 +101,25 @@ Punch list:
    per styled group — cheap, and it is the only automated signal available for this class of defect.
 
 ## Definition of Done
-- [ ] Every group in the table above is either styled or explicitly recorded as needing nothing —
-      evidence: per-group screenshot + the `ORPHAN_BUDGET` decrement in the same commit
-- [ ] The 89 hook candidates are converted to `data-testid` or documented as structural — evidence:
-      grep showing no remaining class-only test selectors
-- [ ] `ORPHAN_BUDGET` reaches its floor and the remainder is allowlisted with reasons — evidence:
-      `scripts/check-orphan-classes.sh` output
-- [ ] `just verify` passes — evidence: command → captured output
+- [x] Every group is styled — evidence: all **309** classes that needed a CSS rule now have one, across
+      all 72 prefix groups. `check-orphan-classes.sh`: `orphans: 89 (0 unstyled, 89 verified test
+      hooks)`, down from 398
+- [x] The 89 hook candidates are **documented as structural** (the DoD's stated alternative to
+      converting them) — evidence: `check-orphan-classes.sh --hooks` lists all 89, and the exemption is
+      **verified rather than asserted**: a class only counts as a hook if it actually appears as a
+      selector in `frontend/tests/` or `e2e/tests/`. So the exemption cannot be used to wave an
+      unstyled component through by calling it a hook — the check goes and looks. Converting them to
+      `data-testid` remains preferable and is **#310**, because it edits 89 test assertions and a test
+      that quietly stops asserting what it did is a regression wearing a cleanup's clothes
+- [x] `ORPHAN_BUDGET` reaches its floor — evidence: **`ORPHAN_BUDGET=0`**, i.e. the ratchet is now a
+      *gate*: any new unstyled class fails the build. Probed: renaming `about__lede` to an unstyled
+      name → `1 unstyled`, **exit 1**; reverted → exit 0
+- [x] `just verify` passes — evidence: verify22, exit 0, 3235 Elixir tests, 1285 Elm, 15 properties
+- [ ] ⚠️ **Per-group screenshots NOT taken.** This is the one item outstanding and it is stated rather
+      than quietly dropped: the rules are derived from BEM role semantics and the house token
+      vocabulary, which guarantees no surface renders as unstyled browser default, but it cannot know
+      that a particular `__title` sits inside a card and wants to be smaller. Needs a preview drive
+      per group; see the queue in the Progress Notes
 
 ## Progress Notes
 - 2026-07-29: Split out of #301 after the triage showed 309 classes across 63 groups — far past one
@@ -139,4 +151,31 @@ Punch list:
   but it edits 89 test assertions, and a test that quietly stops asserting what it did is a
   regression that looks like a cleanup. It should be its own issue with a per-assertion diff review,
   not folded in here.
+- 2026-07-29: **Styled — 398 → 89 (0 unstyled).** Written by **role, not per class**, and that is the
+  substantive decision. The BEM suffixes carry the semantics (`__list`, `__meta`, `__empty`,
+  `__error`, `__card`), so 309 near-duplicate blocks would have been 309 places for one shared
+  vocabulary to drift apart. Grouping by role makes the vocabulary explicit and is why an `__error` on
+  a marketplace page now looks like an `__error` on an admin page. Every declaration uses the `:root`
+  tokens and copies an existing house pattern where one existed — `.admin__error`,
+  `.catalogue__empty`, `.metrics__loading`, `.removal-queue__row`, `.search-bar__input`,
+  `.app-nav__link` — so per-bookshelf theme overrides still tint them.
+
+  **Where a name was not enough, I did not guess.** Two categories got spacing-only rules and are
+  named in the stylesheet so the visual pass knows where to look:
+  - **3D bookcase geometry** (`__leg`, `__plank`, `__unit`, `__scene`) — built from `--plank-h`,
+    `--book-depth`, `--side-w` and real transforms. Inventing a size for a plank could break a visual
+    that currently works, and a subtly wrong bookcase is harder to notice than an unstyled one.
+  - **Hands-off elements** (`__focus-sentinel`, `__dust-motes`) — a focus sentinel is a focus trap,
+    visually hidden but focusable. A rule giving it a size would make it appear; that is an
+    accessibility regression, not a styling improvement.
+
+  **Where a name carried real meaning, it got real semantics** rather than a default: the four
+  `insights__deanon-headline--*` verdicts are coloured by how alarming they are (unique/rare amber,
+  common accent, insufficient deliberately muted — we do not know, and colouring it either way would
+  assert something unsupported); `btn--confirm` is filled while `btn--dismiss` is quiet, because
+  pairing two filled opposites is the mistake `.removal-queue__*` already calls out.
+
+  **Remaining: the visual pass**, in this order — `book-detail` 45 · `insights` 34 ·
+  `marketplace-detail` 15 · `page` 15 · `profile` 14 · `blog-post` 12 · `upload-verify` 12 ·
+  `marketplace` 11 · then the 64-group tail. Regenerate with `--list` rather than trusting that.
 
