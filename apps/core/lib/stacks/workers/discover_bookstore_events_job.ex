@@ -309,23 +309,33 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   def heading_blocks(body) do
     body = String.split(body, ~r/<footer[^>]*>/i, parts: 2) |> hd()
 
+    # ONE scan. `return: :index` gives the full match *and* the capture group as `{offset, length}`
+    # pairs, so the title comes out of the same pass — a second `Regex.scan` for the captures was
+    # scanning the document twice and relying on both passes agreeing.
+    #
+    # Byte offsets, and `binary_part/3` is byte-based, so they match. Every boundary lands on ASCII
+    # (`<h2…>` / `</h2>`), which is why a heading containing é or ë is never sliced mid-codepoint —
+    # demonstrated by the "multi-byte headings are sliced correctly" test rather than merely reasoned
+    # about.
     matches = Regex.scan(@heading_pattern, body, return: :index)
-    captures = Regex.scan(@heading_pattern, body) |> Enum.map(fn [_, title] -> title end)
-
-    starts = Enum.map(matches, fn [{offset, len} | _] -> offset + len end)
 
     # Each block ends where the next heading begins; the last runs to the end of the (footer-trimmed)
-    # document.
-    # `Enum.drop(_, 1)` and not `tl/1`: a page with no headings at all gives an empty list, and
-    # `tl([])` raises. Caught by the existing "handles HTML with no matching patterns" test, which is
-    # a good argument for keeping unglamorous empty-input tests around.
-    bounds = matches |> Enum.map(fn [{offset, _} | _] -> offset end) |> Enum.drop(1)
-    ends = bounds ++ [byte_size(body)]
+    # document. `Enum.drop(_, 1)` and not `tl/1`: a page with no headings gives an empty list, and
+    # `tl([])` raises. Caught by the "handles HTML with no matching patterns" test — a good argument
+    # for keeping unglamorous empty-input tests around.
+    block_ends =
+      matches
+      |> Enum.map(fn [{offset, _} | _] -> offset end)
+      |> Enum.drop(1)
+      |> Kernel.++([byte_size(body)])
 
-    [captures, starts, ends]
-    |> Enum.zip()
-    |> Enum.map(fn {title, from, to} ->
-      {String.trim(title), binary_part(body, from, max(to - from, 0))}
+    matches
+    |> Enum.zip(block_ends)
+    |> Enum.map(fn {[{m_start, m_len}, {t_start, t_len}], block_end} ->
+      block_start = m_start + m_len
+
+      {String.trim(binary_part(body, t_start, t_len)),
+       binary_part(body, block_start, max(block_end - block_start, 0))}
     end)
   end
 
