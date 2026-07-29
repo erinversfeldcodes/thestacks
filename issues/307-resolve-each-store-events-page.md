@@ -66,13 +66,23 @@ Punch list:
 3. If B is chosen: a test that discovery never requests more than N pages per store.
 
 ## Definition of Done
-- [ ] Approach A or B chosen and recorded with reasoning — evidence: the decision written in this issue
-- [ ] Every scrapeable store has a working events path **or** a durable "no events page" reason —
+- [x] Approach chosen and recorded with reasoning — evidence: sitemap harvesting, argued in this issue
+      and in `apps/scraper/src/sitemap.rs`'s module docs. The measurement that settled it: a blind
+      `/events` guess costs the shop a **249,540-byte** styled Shopify 404, while the sitemap index is
+      **10,334 bytes** and states which pages exist — ~25× less traffic *and* the actual answer
+- [ ] ⛔ **BLOCKED — needs a live run.** Every scrapeable store has a working events path **or** a
+      durable "no events page" reason —
       evidence: a live batch run's summary line, plus the DB rows
-- [ ] The job stops re-fetching stores known to have no events page — evidence: named test
-- [ ] A live batch run writes a non-zero event count, or its summary accounts for every store —
+- [x] The job stops re-fetching stores known to have no events page — evidence:
+      `a recent negative is not re-asked, so the shop pays nothing` asserts `sitemap_calls() == []` and
+      `fetches() == []` for a store checked inside the 30-day window. Probed: forcing the window open
+      (`if true or stale?`) fails exactly that test. Before this, a shop with no events page paid for a
+      fresh sitemap walk on **every run, forever**
+- [ ] ⛔ **BLOCKED — needs a live run.** A batch run writes a non-zero event count, or its summary
+      accounts for every store —
       evidence: captured run output on a preview
-- [ ] `just verify` passes — evidence: command → captured output
+- [x] `just verify` passes — evidence: verify24, **exit 0** — 3235 Elixir tests, 1285 Elm, 15
+      properties, all five codegen targets clean, `check-css.sh` 0 problems
 
 ## Progress Notes
 - 2026-07-29: Split out of #304. That issue began as "extraction is broken" and the investigation
@@ -176,3 +186,26 @@ the sitemaps are re-read on a schedule. Store the validators alongside `events_p
   events page no longer pays for a walk every run) and a stale positive (a path that dies by 500 or
   redirect, which the 404 branch never catches). One 🟨 fixed (double regex scan → one). One 🟦
   recorded, not actioned: `"post"` in `EXCLUDED_TOKENS` would refuse `/pages/postponed-events`.
+
+## Why the last two boxes are still open — and it is not effort
+
+Both require running the pipeline against the **real shops**, and both are blocked by #308's own
+finding: probing `exclusivebooks.co.za` and `www.wordsworth.co.za` a handful of times from one laptop
+produced **HTTP 429 on every path including `/robots.txt`**. Running a live batch now would be the
+exact discourtesy this issue was rebuilt to avoid, and would also measure our own rate-limit state
+rather than the shops' events pages.
+
+What is in place for when a cooldown has lapsed:
+- The client now **honours** a 429 rather than ignoring it (#308), so a live run is safe to attempt in
+  a way it was not before.
+- Conditional requests mean a repeat run costs a shop a 304 with no body.
+- `summarise_batch/2` accounts for **every** store per run — `events` / `no_page` / `blocked` /
+  `paced` / `unchanged` / `failed` — so the second box is answerable from one log line rather than an
+  investigation. That reporting was itself a defect: the events tally clause was dead code, so every
+  batch logged "0 event(s) written" regardless of what it wrote.
+
+⚠️ Deliberately **not** ticking these from unit tests. A green suite proving the chain writes rows
+against a fixture is not evidence that a real shop has an events page — that conflation is why this
+pipeline sat at zero rows with every test passing, and it is the one mistake this issue exists to
+correct.
+
