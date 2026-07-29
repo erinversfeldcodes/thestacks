@@ -594,6 +594,30 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
       assert [%{title: "Author Evening", event_date: nil}] = events
     end
 
+    test "multi-byte headings are sliced correctly" do
+      # `heading_blocks/1` takes BYTE offsets from `Regex.scan(return: :index)` and cuts with
+      # `binary_part/3`, so it is fair to ask whether a heading containing é or ë can be sliced
+      # mid-codepoint. It cannot — every boundary is derived from a match of `<h2…>` / `</h2>`, which
+      # are ASCII — but "I reasoned about it" is weaker than "I ran it", and Afrikaans and isiZulu
+      # titles are routine for a South African bookshop rather than an exotic edge case.
+      store = insert(:bookstore)
+
+      html = """
+      <h2>Skrywersaand met André Brink</h2>
+      <p>2026-09-01</p>
+      <h2>Poësie in die Kaap</h2>
+      <p>2026-09-15</p>
+      """
+
+      by_title =
+        html
+        |> DiscoverBookstoreEventsJob.parse_events(store)
+        |> Map.new(&{&1.title, &1.event_date})
+
+      assert by_title["Skrywersaand met André Brink"] == ~U[2026-09-01 00:00:00Z]
+      assert by_title["Poësie in die Kaap"] == ~U[2026-09-15 00:00:00Z]
+    end
+
     test "site chrome headings are not events" do
       # Measured on a real Shopify storefront: every one of these renders as an `<h2>`, so without the
       # filter a page reliably produces several "events" named after its own navigation.
