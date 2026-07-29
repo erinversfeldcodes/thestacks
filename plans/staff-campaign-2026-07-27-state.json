@@ -4,7 +4,7 @@
   "created_at": "2026-07-27T00:00:00Z",
   "updated_at": "2026-07-29T12:30:00Z",
   "status": "in_progress",
-  "current_wave": "1",
+  "current_wave": "0",
   "_why": [
     "Retrofitted 2026-07-28 after the campaign twice claimed a wave complete when it was not.",
     "The prose plan cannot answer 'is this wave done?' — this file can, via scripts/wave-status.sh.",
@@ -18,7 +18,7 @@
   "waves": {
     "0": {
       "title": "Prerequisites — evidence gaps, reachability breaks, domain cutover",
-      "status": "complete",
+      "status": "in_progress",
       "items": {
         "C3": {
           "title": "Route the events job through the compliant egress",
@@ -92,9 +92,10 @@
         },
         "G6": {
           "title": "Business opt-out — form, soft-delete, review queue",
-          "status": "complete",
+          "status": "in_progress",
           "issue": 303,
-          "note": "CLOSED and DRIVEN END TO END 2026-07-29 on a clean preview. #303 built (admin-session API, sign-in gate with inline MFA enrolment, in-memory admin token, all four pages repointed). XHR trace proves the whole chain: admin/auth/login 200 -> verify_mfa 200 -> GET /api/admin/sources 200 -> PUT .../approve 200 (row Pending_review -> Approved) -> GET /api/admin/removal-requests 200 -> PUT .../honour 200 -> queue empty, operator NOT signed out. DB confirms: status=excluded, excluded_at set, exclusion_email retained, third_spaces.opted_out=true. All four admin pages load with real data (5/21/68 rows + queue). FOUR bugs found by driving, three mine: (1) invented status literal so Approve/Reject never rendered; (2) enrolment dead end; (3) admin 401 signed the operator out of the whole app; (4) init repointed but update not, so actions 401'd. 1285 elm tests passed through all four."
+          "note": "CLOSED and DRIVEN END TO END 2026-07-29 on a clean preview. #303 built (admin-session API, sign-in gate with inline MFA enrolment, in-memory admin token, all four pages repointed). XHR trace proves the whole chain: admin/auth/login 200 -> verify_mfa 200 -> GET /api/admin/sources 200 -> PUT .../approve 200 (row Pending_review -> Approved) -> GET /api/admin/removal-requests 200 -> PUT .../honour 200 -> queue empty, operator NOT signed out. DB confirms: status=excluded, excluded_at set, exclusion_email retained, third_spaces.opted_out=true. All four admin pages load with real data (5/21/68 rows + queue). FOUR bugs found by driving, three mine: (1) invented status literal so Approve/Reject never rendered; (2) enrolment dead end; (3) admin 401 signed the operator out of the whole app; (4) init repointed but update not, so actions 401'd. 1285 elm tests passed through all four.",
+          "last_action": "Everything DRIVEN and proven (see #303 DoD, 5 of 6 boxes checked with evidence). ONE box open and it is real work, not paperwork: an E2E spec that reaches an admin page with a real MFA-verified session. Needs TOTP in TypeScript + the enrolment flow, because a preview redeploy destroys MFA enrolment every time."
         },
         "0e": {
           "title": "Domain cutover (PHX_HOST, MetricsPusher, /.env probes, noindex)",
@@ -124,6 +125,7 @@
     "2026-07-29: ran DiscoverBookstoreEventsJob on the preview per owner instruction. Clean :ok, ZERO events written — filed as #304: egress and fetch work (Wordsworth returned 249,540 bytes) but extraction found nothing, the events path is a single hardcoded guess (Exclusive Books /events = 18 bytes), and `outcome` is nil on a successful fetch. Only 2 of 11 stores are reachable at all (P9's bad configs).",
     "2026-07-29: filed #305 — preview deploy races a SUSPENDED freshly-created Neon branch; candidate root for the #171/#177 flakes.",
     "2026-07-29: driving #303 found a SECOND defect stacked behind the auth one — SourceApproval's action buttons never rendered because it compared against an invented status string. Fixing only the auth would have shipped a page that loads and cannot be used. Two independent bugs, the outer one hiding the inner.",
-    "2026-07-29: WAVE 0 COMPLETE. Owner ruling proven right — teardown-then-deploy is the reliable path (3/3 clean vs 3 failures when redeploying onto a live stack); recorded in #305 with the deploy13 half-success case (served 200s with no fixtures)."
+    "2026-07-29: WAVE 0 COMPLETE. Owner ruling proven right — teardown-then-deploy is the reliable path (3/3 clean vs 3 failures when redeploying onto a live stack); recorded in #305 with the deploy13 half-success case (served 200s with no fixtures).",
+    "2026-07-29: wave-status REFUSED my 'G6 complete' claim — #303 had 6 unchecked DoD boxes. Exactly what the tool was built for: I marked a wave done and an artifact said otherwise. 5 boxes now checked with evidence, 1 de-scoped with reasoning, 1 genuinely open (the E2E spec). G6 stays in_progress."
   ]
 }
