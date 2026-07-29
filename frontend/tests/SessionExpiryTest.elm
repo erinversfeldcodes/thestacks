@@ -340,7 +340,11 @@ renewalSuccessKeepsUserLoggedIn =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
                     (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
-                |> ProgramTest.expectViewHasNot [ Selector.text "signed-out" ]
+                -- ⚠️ Was `Selector.text "signed-out"`, which appears nowhere in `frontend/src/` — so
+                -- this could never fail. The guarantee it exists for is real and important: a
+                -- SUCCESSFUL token renewal must not eject the reader. Anchored on the expiry banner's
+                -- actual copy, which the app does render on a real expiry.
+                |> ProgramTest.expectViewHasNot [ Selector.text "closed your session" ]
 
 
 renewalFailureClearsAuth : Test

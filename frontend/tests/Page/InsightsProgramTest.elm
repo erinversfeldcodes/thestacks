@@ -16,6 +16,7 @@ is exercised end-to-end.
 -}
 
 import Api
+import Html.Attributes as Attr
 import Http
 import Page.Insights as Insights
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
@@ -194,8 +195,16 @@ riskHiddenUntilRevealed =
             start
                 |> ProgramTest.simulateHttpOk "GET" "/api/me/inferences" defaultPayload
                 |> ProgramTest.ensureViewHas [ Selector.text "Show me what could be inferred" ]
+                -- ⚠️ Was `Selector.text "A data broker could infer an interest in philosophy from
+                -- your subject clusters."` — a sentence that appears NOWHERE in `frontend/src/`, so
+                -- the assertion could never fail. A **privacy** guarantee (risk illustrations stay
+                -- hidden until the reader asks) that guarded nothing at all.
+                --
+                -- The copy is server-supplied per-request (`riskInferences`), so no literal in the
+                -- client could ever have matched it. Anchored on the section testid the page actually
+                -- renders when revealed.
                 |> ProgramTest.expectViewHasNot
-                    [ Selector.text "A data broker could infer an interest in philosophy from your subject clusters." ]
+                    [ Selector.attribute (Attr.attribute "data-testid" "insights-risk-revealed") ]
 
 
 revealFetchesAndShowsRisk : Test

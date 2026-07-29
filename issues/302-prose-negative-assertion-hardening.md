@@ -17,7 +17,7 @@ assertion that the same string renders in the sibling state — so a rename fail
 ## Scope Check
 - More than 3 controllers? → No controllers; test-only.
 - More than 2 new endpoints? → None.
-- More than ~300 lines? → No. 19 call sites, most needing no change.
+- More than ~300 lines? → No. 35 call sites, most needing no change; one check script.
 - Unrelated concerns? → No.
 
 ## Wiring
@@ -25,32 +25,37 @@ Router wiring: implementation-only — test-suite hardening, no user-facing surf
 
 ## Technical Requirements
 
-**The 2026-07-28 sweep, and its honest result.** 19 prose-matching negative assertions exist:
+**The sweep, and how its first two conclusions were both wrong.**
 
-```sh
-grep -rnE "(hasNot|expectViewHasNot) \[ Selector\.text \"" frontend/tests/
-```
+The initial pass found **19** sites and concluded "no currently-live feature guard is vacuous". Both
+halves were mistaken, and only building the check exposed it:
 
-Cross-checking each string against `frontend/src/` found 3 whose exact text appears nowhere in
-the source — the shape that can never fail:
+1. **19 was an undercount — the real number is 35.** The grep required `hasNot` and `Selector.text`
+   on one line, but the common form spans two:
+   ```elm
+   |> ProgramTest.expectViewHasNot
+       [ Selector.text "Add shelf" ]
+   ```
+   Sixteen assertions were invisible to the sweep, **including the original defect it was written to
+   characterise.**
+2. **Two live assertions were vacuous.** `SessionExpiryTest` asserted absence of `"signed-out"`, a
+   string in no source file. `InsightsProgramTest` asserted absence of a server-supplied sentence no
+   client literal could contain — so the **privacy** guarantee that risk illustrations stay hidden
+   until the reader asks was guarding nothing at all.
 
-| Site | String | Verdict |
-|---|---|---|
-| `frontend/tests/NavigationProgramTest.elm:154` | `"The Power of Habit"` | **Fine** — fixture data; renders if the bug returns |
-| `frontend/tests/Page/ProfileTest.elm:102` | `"Ada Lovelace"` | **Fine** — fixture data; same |
-| `frontend/tests/MainViewTest.elm:67` | `"View Antilibrary"` | **Fine, but fragile** — a deliberate "stays deleted" guard for pre-#235 copy |
+⚠️ **And the detection rule needed to be two rules, which a probe proved.** The first version flagged
+only "X is a strict substring of other copy" — and did **not** catch the reintroduced `"Add shelf"`,
+because that string is not a substring of `"Add a shelf"`; it is simply *absent*. The two instances
+fail in opposite directions:
 
-So **no currently-live feature guard is vacuous**. The one that was —
-`BookshelfReadOnlyTest.noAddShelfControl`, which asserted no *"Add shelf"* button while the button
-says *"Add a shelf"* — was fixed on 2026-07-28 and mutation-probed.
+| Shape | Consequence |
+|---|---|
+| **Matches nothing** (absent from `frontend/src/`) | Can never **fail** — the vacuous pass |
+| **Strict substring** of other rendered copy | Binds to the wrong element; can never **pass** |
 
-⚠️ **The dangerous shape is narrower than "matches on prose", and this is the point of the
-issue.** A prose negative is dangerous when **the feature it guards renders near-identical copy in
-a sibling state**. Then the assertion looks meaningful, reads meaningful in review, and is inert.
-`"Add shelf"` vs `"Add a shelf"` is one word. A plain string-absent-from-source check does *not*
-find these — it would have missed the real one, because "Add a shelf" **is** in source. Detection
-needs fuzzy matching (normalise case/articles/punctuation, then look for a near-neighbour in
-`frontend/src/`), or the convention below.
+Worth stating plainly: only the first is vacuity. For a `hasNot`, matching *more* strings makes the
+assertion **stricter**, so the substring case surfaces as a false *failure* — still a test that does
+not do its job, but loud rather than silent.
 
 **The convention to land:** a negative assertion about a *feature's presence* must anchor on
 `data-testid`; a negative assertion about *copy* must be paired with a positive assertion that the
@@ -70,7 +75,7 @@ same literal renders somewhere. `Util.TestId.testId` already exists and is used 
 
 | Layer | Applies? | Verdict |
 |-------|----------|---------|
-| Test-suite integrity (meta) | yes | ⚠️ 19 sites, 1 previously disarmed and fixed; no automated guard |
+| Test-suite integrity (meta) | yes | ✅ 35 sites checked by `scripts/check-prose-assertions.sh` in `just lint-elm`; 3 disarmed assertions found and fixed |
 | 1–13 (app/US layers) | no | n/a — no production behaviour changes |
 
 Punch list:
@@ -86,15 +91,30 @@ Punch list:
 Verdict: ⚠️ — the known defect is fixed; this issue is about the class, not the instance.
 
 ## Definition of Done
-- [ ] All 19 sites triaged into feature-guard vs copy-assertion — evidence: table committed here
-- [ ] Every feature-guard negative anchors on `data-testid` — evidence: grep → captured output
-- [ ] Every remaining prose negative has a paired positive assertion — evidence: file:line pairs
-- [ ] At least one repointed assertion **mutation-probed** — evidence: the break, the failing test
-      name and message, and confirmation of revert (`git diff --stat` clean)
-- [ ] Convention documented in `docs/agents/standards/` (testing) — evidence: the committed diff
-- [ ] Detection check landed **or** an explicit written decision that it is too noisy, with the
-      reasoning — evidence: the script + its output, or the recorded decision
-- [ ] `just verify` passes — evidence: command → captured output
+- [x] All prose negative assertions triaged — evidence: `scripts/check-prose-assertions.sh --list`
+      reports **35** (not 19 — a per-line regex was missing the very common multi-line
+      `expectViewHasNot` / `[ Selector.text … ]` form, including the original defect), of which 12 are
+      allowlisted with reasons and the rest are safe
+- [x] Every feature-guard negative anchors on `data-testid` — evidence: `BookshelfReadOnlyTest`
+      `noAddShelfControl` / `noShelfOrganiserPanel` on `shelf-add` / `shelf-organiser`;
+      `AdminSourceApprovalTest` on `source-approve` / `source-reject`
+- [x] Two genuinely vacuous assertions found and fixed — evidence: `SessionExpiryTest` asserted
+      absence of `"signed-out"` (a string in no source file) and `InsightsProgramTest` asserted a
+      server-supplied sentence that no client literal could contain, so a **privacy** guarantee
+      (risk illustrations hidden until the reader asks) guarded nothing. Both repointed
+- [x] At least one repointed assertion **mutation-probed** — evidence: revealing the insights risk
+      section alongside the gate (`Nothing -> div [] [ viewRiskGate model, viewRiskRevealed [] ]`)
+      fails **exactly 1** test, the consent-gate one; reverted and 1285 green. Also probed
+      `BookshelfReadOnlyTest` (`if False` on the `readOnly` guard → 2 failures)
+- [x] Convention documented — evidence: `docs/agents/standards/testing.md` §"Negative Assertions —
+      Anchor on `data-testid`, Never on Prose", with both failure shapes and the allowlist rule
+- [x] Detection check landed and wired into the gate — evidence: `scripts/check-prose-assertions.sh`
+      called from `scripts/lint-elm.sh`; probed load-bearing (breaking `"Sign Out"` → `"Sign Outt"`
+      gives exit 1, reverting gives exit 0)
+- [x] `just verify` passes — evidence: command → captured output (see Progress Notes)
+
+**Not noisy enough to abandon, which the DoD allowed for:** 35 assertions → 12 needing a reviewed
+reason. That is a useful signal, so the check landed rather than being dropped for a convention alone.
 
 ## Progress Notes
 - 2026-07-28: Found during the Wave 0 staff-campaign drive, as a side-effect of adding a
