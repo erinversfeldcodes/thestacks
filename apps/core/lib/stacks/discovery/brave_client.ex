@@ -135,18 +135,40 @@ defmodule Stacks.Discovery.BraveClient do
     end
   end
 
-  defp increment_daily_counter do
-    today = Date.utc_today()
-    {stored_date, _count} = get_counter()
+  # ⛔ This crashed on the FIRST live Brave call in any fresh node, which is why source discovery
+  # had never produced a row — and it was misread for weeks as "we need a real Brave API key".
+  # The key was present and deployed the whole time.
+  #
+  # The cause was a lying default. `get_counter/0` returns `{Date.utc_today(), 0}` when *nothing is
+  # stored*, which is indistinguishable from "stored, for today, at zero". So on a fresh node the
+  # old code compared `stored_date != today`, found them equal, concluded the counter existed, and
+  # took a branch calling `:persistent_term.get/1` **without a default** — which raises when the key
+  # was never put. A default that stands in for absent state must not be confusable with real state.
+  #
+  # Reading the term once, and matching on it, removes the question: absent and stale-date are the
+  # same case (start a counter for today), and only a genuine today-counter is incremented.
+  @doc """
+  Records one Brave call against today's budget.
 
-    if stored_date != today do
-      # Date changed — reset the counter
-      counter = :counters.new(1, [:atomics])
-      :counters.add(counter, 1, 1)
-      :persistent_term.put({__MODULE__, :daily_counter}, {today, counter})
-    else
-      {_date, counter} = :persistent_term.get({__MODULE__, :daily_counter})
-      :counters.add(counter, 1, 1)
+  ⚠️ **Public only so the fresh-node path is testable, and that is not a technicality.** This
+  function crashed on the first live call in any fresh node (see the comment below), source
+  discovery produced zero rows for weeks, and the cause was misattributed to a missing API key.
+  Nothing exercised it: `brave_client_test.exs` covered only the *Mock* client, so the real
+  counter had no coverage at all. A defect that reached production through an untested private
+  function earns a seam.
+  """
+  @spec increment_daily_counter() :: :ok
+  def increment_daily_counter do
+    today = Date.utc_today()
+
+    case :persistent_term.get({__MODULE__, :daily_counter}, nil) do
+      {^today, counter} ->
+        :counters.add(counter, 1, 1)
+
+      _absent_or_stale ->
+        counter = :counters.new(1, [:atomics])
+        :counters.add(counter, 1, 1)
+        :persistent_term.put({__MODULE__, :daily_counter}, {today, counter})
     end
   end
 
