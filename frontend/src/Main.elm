@@ -2049,11 +2049,19 @@ update msg model =
             case model.page of
                 PageAdminSourceApproval subModel ->
                     let
-                        maybeToken =
-                            Maybe.map .token model.auth
+                        -- ⛔ The ADMIN token, not the ordinary one. `init` was repointed and
+                        -- `update` was not, so the first load worked (admin token) and every
+                        -- subsequent action 401'd (ordinary token). Driven on a preview
+                        -- 2026-07-29: GET /api/admin/sources -> 200, then
+                        -- PUT /api/admin/sources/:id/approve -> 401 unauthorized.
+                        --
+                        -- Same half-wiring shape as the bug this whole change fixes — fixing one
+                        -- entry point and not the other leaves a page that loads and cannot act.
+                        adminToken =
+                            model.adminAuth
 
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminSourceApproval.update subMsg subModel maybeToken
+                            AdminSourceApproval.update subMsg subModel adminToken
                     in
                     case outMsg of
                         AdminSourceApproval.NoOut ->
@@ -2090,11 +2098,19 @@ update msg model =
             case model.page of
                 PageAdminBookModeration subModel ->
                     let
-                        maybeToken =
-                            Maybe.map .token model.auth
+                        -- ⛔ The ADMIN token, not the ordinary one. `init` was repointed and
+                        -- `update` was not, so the first load worked (admin token) and every
+                        -- subsequent action 401'd (ordinary token). Driven on a preview
+                        -- 2026-07-29: GET /api/admin/sources -> 200, then
+                        -- PUT /api/admin/sources/:id/approve -> 401 unauthorized.
+                        --
+                        -- Same half-wiring shape as the bug this whole change fixes — fixing one
+                        -- entry point and not the other leaves a page that loads and cannot act.
+                        adminToken =
+                            model.adminAuth
 
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminBookModeration.update subMsg subModel maybeToken
+                            AdminBookModeration.update subMsg subModel adminToken
                     in
                     case outMsg of
                         AdminBookModeration.NoOut ->
@@ -2145,11 +2161,19 @@ update msg model =
             case model.page of
                 PageAdminRemovalRequests subModel ->
                     let
-                        maybeToken =
-                            Maybe.map .token model.auth
+                        -- ⛔ The ADMIN token, not the ordinary one. `init` was repointed and
+                        -- `update` was not, so the first load worked (admin token) and every
+                        -- subsequent action 401'd (ordinary token). Driven on a preview
+                        -- 2026-07-29: GET /api/admin/sources -> 200, then
+                        -- PUT /api/admin/sources/:id/approve -> 401 unauthorized.
+                        --
+                        -- Same half-wiring shape as the bug this whole change fixes — fixing one
+                        -- entry point and not the other leaves a page that loads and cannot act.
+                        adminToken =
+                            model.adminAuth
 
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminRemovalRequests.update subMsg subModel maybeToken
+                            AdminRemovalRequests.update subMsg subModel adminToken
                     in
                     case outMsg of
                         AdminRemovalRequests.NoOut ->
