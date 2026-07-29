@@ -71,9 +71,9 @@ defmodule Stacks.Discovery.BraveClient do
         )
 
       case Finch.request(req, Stacks.Finch, receive_timeout: 15_000) do
-        {:ok, %Finch.Response{status: 200, body: body}} ->
+        {:ok, %Finch.Response{status: 200, body: body, headers: headers}} ->
           increment_daily_counter()
-          parse_results(body)
+          parse_results(maybe_gunzip(body, headers))
 
         {:ok, %Finch.Response{status: 429}} ->
           Logger.warning("BraveClient: rate limited by Brave API")
@@ -98,6 +98,29 @@ defmodule Stacks.Discovery.BraveClient do
           {:error, reason}
       end
     end
+  end
+
+  # ⛔ We advertise `Accept-Encoding: gzip` and then have to actually decompress — Finch does not
+  # do it for us. Without this, every Brave **200** reached `Jason.decode/1` holding gzip bytes and
+  # returned `{:json_decode_error, ...}`, so `SourceDiscoveryJob` logged "Brave search failed" and
+  # fell through to the SearXNG fallback. **Brave had therefore never once succeeded.**
+  #
+  # ⚠️ What made this invisible for so long is the fallback working. The primary path was dead and
+  # the feature still produced rows, so nothing looked broken from the outside — the only signal was
+  # a warning line among gzip bytes rendered as a byte list, which reads like noise. A fallback that
+  # silently absorbs a broken primary is worse than no fallback: it converts an outage into a
+  # permanent, unnoticed regression. Discovery ran entirely on the backup search engine.
+  #
+  # Keyed on the response header rather than sniffing magic bytes: the server tells us what it did,
+  # and a `content-encoding` we do not handle should fail loudly rather than be guessed at.
+  defp maybe_gunzip(body, headers) do
+    gzipped? =
+      Enum.any?(headers, fn {name, value} ->
+        String.downcase(name) == "content-encoding" and
+          String.contains?(String.downcase(value), "gzip")
+      end)
+
+    if gzipped?, do: :zlib.gunzip(body), else: body
   end
 
   defp parse_results(body) do
