@@ -1,6 +1,8 @@
 module Api exposing
     ( AdminBook
     , AdminBooksResponse
+    , AdminMfaEnrolment
+    , AdminSession
     , AdminSource
     , AdminSourcesResponse
     , AuditLogEntry
@@ -51,7 +53,11 @@ module Api exposing
     , adminBookDecoder
     , adminBooksResponseDecoder
     , adminListBooks
+    , adminLogin
+    , adminMfaConfirm
+    , adminMfaSetup
     , adminSetBookAgeGate
+    , adminVerifyMfa
     , approveSource
     , auditLogResponseDecoder
     , blockUser
@@ -3032,6 +3038,208 @@ fromProtoSourceAdminListResponse proto =
 adminSourcesResponseDecoder : Decoder AdminSourcesResponse
 adminSourcesResponseDecoder =
     Decode.map fromProtoSourceAdminListResponse ProtoSourceResp.decodeSourceAdminListResponse
+
+
+{-| The admin-session flow (#303).
+
+⚠️ **This is the layer whose absence made four admin pages dead.** `/api/admin/*` sits behind
+`pipeline :admin` → `AdminAuthPipeline` (requires a token whose `typ` is `"admin_session"`,
+IP- and boot\_id-bound) → `RequireMFA` (verified within 30 minutes). The pages were passing the
+ordinary Guardian token, which that pipeline rejects with **401** — so source approval, scraper
+health, book moderation and the removal queue had never loaded for anyone.
+
+The flow is two steps because MFA is a second factor, not a second password:
+
+1.  `adminLogin` — owner email + password → a `session_id` for an **unverified** admin session.
+    Refuses non-owners (403 `insufficient_role`) and owners with no MFA enrolled
+    (403 `mfa_not_enrolled`).
+2.  `adminVerifyMfa` — that `session_id` + a TOTP code → the **admin token**.
+
+`adminMfaSetup` / `adminMfaConfirm` are the one-off enrolment path, and they take the **ordinary**
+owner token rather than an admin one — necessarily, since you cannot hold an admin session before
+enrolling the factor it requires.
+
+-}
+type alias AdminSession =
+    { sessionId : String }
+
+
+{-| Why a distinct error type rather than passing `Http.Error` up: every failure here has a
+different remedy, and an operator staring at "something went wrong" cannot tell which. A wrong
+password, a non-owner account, an unenrolled factor and a stale code are four different next
+actions.
+-}
+type AdminAuthError
+    = InvalidCredentials
+    | NotAnOwner
+    | MfaNotEnrolled
+    | InvalidCode
+    | InvalidSession
+    | AlreadyVerified
+    | AdminAuthTransport Http.Error
+
+
+{-| POST /api/admin/auth/login — step 1. Returns an UNVERIFIED session id, not a usable token.
+-}
+adminLogin :
+    { email : String, password : String }
+    -> (Result AdminAuthError AdminSession -> msg)
+    -> Cmd msg
+adminLogin body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/admin/auth/login"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "email", Encode.string body.email )
+                    , ( "password", Encode.string body.password )
+                    ]
+                )
+        , expect =
+            expectAdminJson toMsg
+                (Decode.map AdminSession (Decode.field "session_id" Decode.string))
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/admin/auth/verify\_mfa — step 2. Returns the admin token.
+-}
+adminVerifyMfa :
+    { sessionId : String, code : String }
+    -> (Result AdminAuthError String -> msg)
+    -> Cmd msg
+adminVerifyMfa body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/admin/auth/verify_mfa"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "session_id", Encode.string body.sessionId )
+                    , ( "totp_code", Encode.string body.code )
+                    ]
+                )
+        , expect = expectAdminJson toMsg (Decode.field "token" Decode.string)
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| What enrolment hands back: the `otpauth://` URI for an authenticator app, and one-time
+recovery codes the operator must record before continuing.
+-}
+type alias AdminMfaEnrolment =
+    { provisioningUri : String
+    , recoveryCodes : List String
+    }
+
+
+{-| POST /api/admin/auth/mfa/setup — takes the ORDINARY owner token (no admin session exists yet).
+-}
+adminMfaSetup : String -> (Result Http.Error AdminMfaEnrolment -> msg) -> Cmd msg
+adminMfaSetup ownerToken toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ ownerToken) ]
+        , url = baseUrl ++ "/api/admin/auth/mfa/setup"
+        , body = Http.jsonBody (Encode.object [])
+        , expect =
+            Http.expectJson toMsg
+                (Decode.map2 AdminMfaEnrolment
+                    (Decode.field "provisioning_uri" Decode.string)
+                    (Decode.field "recovery_codes" (Decode.list Decode.string))
+                )
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/admin/auth/mfa/confirm — completes enrolment.
+
+⚠️ **`secret` must be base64 of the RAW secret bytes, not the base32 string from the provisioning
+URI.** The URI carries base32 (the TOTP standard); the endpoint runs `Base.decode64/1`. Sending the
+base32 through returns `422 invalid_code`, which reads as clock skew or a mistyped code and sends
+you hunting in the wrong place — it cost real time on 2026-07-29. The caller converts.
+
+-}
+adminMfaConfirm :
+    String
+    -> { code : String, secretBase64 : String, recoveryCodes : List String }
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+adminMfaConfirm ownerToken body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ ownerToken) ]
+        , url = baseUrl ++ "/api/admin/auth/mfa/confirm"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "totp_code", Encode.string body.code )
+                    , ( "secret", Encode.string body.secretBase64 )
+                    , ( "recovery_codes", Encode.list Encode.string body.recoveryCodes )
+                    ]
+                )
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Maps the endpoint's `{"error": "..."}` bodies onto `AdminAuthError`, so each failure keeps the
+remedy the operator needs. An unrecognised shape stays transport-level rather than being guessed at.
+-}
+expectAdminJson : (Result AdminAuthError a -> msg) -> Decode.Decoder a -> Http.Expect msg
+expectAdminJson toMsg decoder =
+    Http.expectStringResponse toMsg
+        (\response ->
+            case response of
+                Http.GoodStatus_ _ body ->
+                    Decode.decodeString decoder body
+                        |> Result.mapError (Http.BadBody << Decode.errorToString)
+                        |> Result.mapError AdminAuthTransport
+
+                Http.BadStatus_ _ body ->
+                    Err (adminErrorFromBody body)
+
+                Http.BadUrl_ url ->
+                    Err (AdminAuthTransport (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (AdminAuthTransport Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (AdminAuthTransport Http.NetworkError)
+        )
+
+
+adminErrorFromBody : String -> AdminAuthError
+adminErrorFromBody body =
+    case Decode.decodeString (Decode.field "error" Decode.string) body of
+        Ok "invalid_credentials" ->
+            InvalidCredentials
+
+        Ok "insufficient_role" ->
+            NotAnOwner
+
+        Ok "mfa_not_enrolled" ->
+            MfaNotEnrolled
+
+        Ok "invalid_code" ->
+            InvalidCode
+
+        Ok "invalid_session" ->
+            InvalidSession
+
+        Ok "already_verified" ->
+            AlreadyVerified
+
+        _ ->
+            AdminAuthTransport (Http.BadBody body)
 
 
 {-| A business waiting on a human decision about its listing (US-2.5.3, campaign G6).

@@ -62,13 +62,39 @@ Sending the base32 string through returns `422 invalid_code`, which reads as a c
 wrong-code problem and sends you looking in the wrong place. Either document this at the
 endpoint or accept base32 — the current pairing is a trap for whoever writes the client.
 
-**Design questions for the implementer (not decided here):**
-- Where does the admin token live? It must **not** replace `stacks-auth`, or an expiring admin
-  session would log the operator out of the app. A separate key, or an in-memory-only field.
-- MFA expires after 30 minutes while the regular session does not. The UI needs a re-verify path
-  that does not lose page state.
-- The admin session is **IP-bound**. A mobile network switching IP mid-session will 401; decide
-  whether that surfaces as "sign in again" or something clearer.
+## Design (decided 2026-07-29, during Wave 0 execution)
+
+**The admin token is held in memory only — in `Main.Model` — and is never persisted.** No new port,
+no localStorage, no sessionStorage.
+
+Three reasons, in order of weight:
+
+1. **It needs no port at all**, which honours the project's "no ports unless absolutely necessary"
+   rule. Persisting it would mean a `saveAdminAuth`/`clearAdminAuth` pair, JS wiring in
+   `apps/core/assets/js/app.js`, sibling-tab sync (the `stacks-auth` path already carries that
+   complexity for #180), and a clearing path on logout. In-memory removes all of it.
+2. **The credential is the highest-value one in the system** and localStorage is readable by any
+   XSS. An admin token that dies with the page is a much smaller target.
+3. **It is already short-lived and fragile by design**: MFA expires after 30 minutes, and the
+   session is bound to both the client IP and the node's `boot_id`. Persisting a token that a
+   machine restart or a network change invalidates buys little.
+
+The cost is that a page reload requires re-authenticating. For an operator surface entered
+deliberately and occasionally, that is acceptable — and it is the honest consequence of the token
+being short-lived anyway.
+
+**Shape:**
+- `Main.Model` gains `adminAuth : Maybe AdminAuth` (token + expiry).
+- An `/admin/*` route with `adminAuth == Nothing` renders an **admin sign-in gate** rather than the
+  page — so the four admin pages never see a token they cannot use, and never render an error state
+  that means "you are not signed in".
+- The four pages take the **admin** token, not `maybeToken`. That is the actual bug: they were
+  handed the ordinary Guardian token, which the `:admin` pipeline rejects with 401.
+- **MFA expiry (30 min) surfaces as a re-verify prompt over the current page**, not a logout: the
+  ordinary session is untouched, so losing admin rights must not eject the operator from the app.
+- An **IP change** invalidates the session server-side and returns 401. It surfaces as the same
+  re-verify prompt with a plain explanation, since "your network changed" is the real cause and a
+  generic "signed out" would send the operator looking for a different problem.
 
 ## Reviewer Context
 - ⚠️ `PUT /api/admin/sources/:id/approve` **publishes** a listing;
