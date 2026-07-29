@@ -147,10 +147,13 @@ Verdict: ❌ — nothing currently exercises the client→admin-pipeline boundar
       `Base.decode64/1`)
 - [x] `just verify` passes — evidence: `VERIFY8_EXIT=0`, 3180 Elixir tests / 1285 Elm tests / dbt
       checkpoint clean / elm-review clean
-- [ ] **An E2E spec reaches an admin page with a real MFA-verified session** — NOT DONE. This is the
-      punch-list item that would make the whole class regression-proof, and it is the one thing here a
-      human should not have to re-drive by hand. Needs TOTP in TypeScript (Node `crypto` can do
-      HMAC-SHA1) plus the enrolment flow, since a preview redeploy destroys MFA enrolment every time.
+- [x] **An E2E spec reaches an admin page with a real MFA-verified session** — evidence:
+      `e2e/tests/admin-session.spec.ts`, **7/7 green** against the deployed preview 2026-07-29
+      (`--workers=1`). It implements RFC 6238 TOTP in Node and drives the gate's own form, so it
+      exercises the real `:admin` pipeline rather than a mock. Its five assertions map one-to-one onto
+      the four stacked bugs: gate-not-page without an admin session; the page loading WITH rows;
+      Approve/Reject rendering on a pending source; an admin **action** changing state (not merely a
+      page load); and an admin 401 returning to the gate with `stacks-auth` intact.
 - [ ] ~~MFA re-verify loses no page state~~ — **DE-SCOPED, with reasoning.** `handleAdminSessionExpiry`
       puts the gate on the current route and re-resolves that route after re-auth, so the operator
       returns to the same *page* — but its internal state (filter tab, pagination) resets, because the
