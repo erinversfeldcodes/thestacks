@@ -20,7 +20,13 @@ import { provisionBookOnShelf } from "./helpers";
  *
  * Every test mints its own fresh user and provisions its own placement
  * (`provisionBookOnShelf`), following the shelf-actions/#294 pattern — self-restoring and
- * safe to run in parallel.
+ * independent.
+ *
+ * ⚠️ **Against a preview, run this with `--workers=1`.** The preview core VM is 512 MB, and four
+ * parallel workers each minting a session 502'd the helper (`session-mint helper returned HTTP
+ * 502`) on 2026-07-28 — 4 passed, 2 failed, and the two failures were capacity, not defects. The
+ * same six pass serially. A 502 from `/api/test/session` here means the machine buckled, not that
+ * the organiser is broken; re-run with one worker before believing anything else.
  */
 
 /** The organiser only renders for the owner, in spine view, once shelves have loaded. */
