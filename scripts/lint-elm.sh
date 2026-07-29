@@ -25,6 +25,12 @@ bash "$REPO_ROOT/scripts/check-prose-assertions.sh"
 # cannot land. No test can catch this class — the class IS in the DOM, so `Selector.class` passes.
 bash "$REPO_ROOT/scripts/check-orphan-classes.sh"
 
+# Admin call sites bypassing the admin-token resolver (Issue #309). Same reason as the two checks
+# above: no Elm test can catch it. Measured, not assumed — reintroducing the #303 half-wiring defect
+# at one update site left all 1285 Elm tests green, because every page-level admin test receives the
+# token as an argument and so cannot notice that `Main` chose the wrong one.
+bash "$REPO_ROOT/scripts/check-admin-token-routing.sh"
+
 (cd frontend && npx elm-format --validate src/)
 (cd frontend && npm audit)
 
