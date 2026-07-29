@@ -101,3 +101,43 @@ with fixtures — not from measurement.** The measurement that was meant to grou
 policy is what produced the 429 above, and continuing to probe would be precisely the discourtesy
 this issue exists to avoid. Confidence in the classification tokens is therefore "grounded in spec",
 not "measured"; re-measure once #308 is deployed and a cooldown has lapsed. Say so in the PR.
+
+## Part 2 — landed
+`739c1c26` — `POST /sitemap-urls`. `apps/scraper/src/sitemap.rs` holds the pure core: `<loc>`
+extraction (CDATA, entities, attributes, truncated bodies), `DocKind` with a distinct `Unknown` so a
+bot-challenge page is never mistaken for "this shop lists no pages", `classify_child` (exclusions
+beat page tokens, so an ambiguous `product-pages-sitemap.xml` is refused), and `CrawlBudget` — a
+**consumable** value, because `spend()` is what yields the byte ceiling, so no request can be issued
+in this path without an allowance. `fetch_capped` streams and hangs up rather than reading past it;
+a cap applied after the transfer is not a cap.
+
+Guards worth noting: cross-host `Sitemap:` lines are **refused, not followed** (`path_within`) —
+robots.txt is attacker-controlled input, and this was a second door into the open-proxy hole
+`/fetch` already guards for `path`. Known-`Page` children are read before `Unlabelled` ones, because
+a finite budget makes ordering allocation.
+
+Probes: page-before-exclusion ordering → 1 failure; `Unknown` falling back to `UrlSet` → 1 failure;
+`charge_bytes` becoming a no-op → 3 failures.
+
+## Parts 3–5 — remaining, in this order
+
+**Part 3 — `Stacks.Enrichment.EventsPath.resolve/1`.** Consume `ScraperClient.sitemap_urls/1`, filter
+the returned URLs on `events|whats-on|calendar|diary|programme|happenings`, verify the best candidate
+with **one** fetch, and persist the result on the store: `events_path` on success,
+`unscrapable_reason` otherwise, so a shop is never asked the same question twice. Needs a migration
+(two nullable columns on `op.bookstores`) → therefore needs `mix proto.sync` **and** the
+`gdpr-review` lens.
+
+⚠️ Do not treat `{:error, :no_sitemap_declared}` as "no events page" — it is "we could not look", and
+conflating them is the exact false negative parts 1–2 were shaped to avoid. Same for
+`truncated: true`.
+
+**Part 4 — wire the job off `@events_path "/events"`.** `DiscoverBookstoreEventsJob` currently fetches
+one hardcoded path that 404s on every scrapeable store. It should read the store's resolved
+`events_path`, and call `EventsPath.resolve/1` when it has none. **A zero-row sweep afterwards is
+mandatory** — the whole point is that this pipeline has never written a row, and "it compiles" has
+never been evidence of that changing.
+
+**Part 5 — conditional requests (`ETag` / `If-Modified-Since`).** Absent entirely, and the single
+biggest remaining politeness win: a 304 costs the shop almost nothing, and both the events page and
+the sitemaps are re-read on a schedule. Store the validators alongside `events_path`.
