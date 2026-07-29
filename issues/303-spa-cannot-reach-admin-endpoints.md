@@ -55,12 +55,18 @@ unexpired, and **IP- and boot_id-matched**) → `RequireMFA` (verified within 30
 
 So this is a **client** issue. Do not add endpoints.
 
-⚠️ **Encoding trap in step 3, which cost real time:** the provisioning URI carries the TOTP
-secret as **base32** (the standard), but `mfa_confirm` runs `Base.decode64/1` on the `secret`
-param — so the client must base32-decode the URI secret and **base64-encode the raw bytes**.
-Sending the base32 string through returns `422 invalid_code`, which reads as a clock-skew or
-wrong-code problem and sends you looking in the wrong place. Either document this at the
-endpoint or accept base32 — the current pairing is a trap for whoever writes the client.
+✅ **The encoding trap in step 3 is FIXED (2026-07-29), not documented around.** `mfa_confirm`
+demanded base64 of the raw secret bytes, while `mfa_setup` publishes the secret only as **base32**
+inside the provisioning URI — so no client could satisfy it without decoding and re-encoding, and
+getting it wrong returned `422 invalid_code`, which reads as clock skew. The endpoint now accepts
+base32, i.e. exactly what its own setup call hands out.
+
+⚠️ **Why the tests missed an impossible contract, which is the transferable part:** every
+`mfa_confirm` test called `MFA.begin_enrollment/1` **directly** to get raw secret bytes, then encoded
+them however the endpoint wanted — **bypassing the contract a client is forced to use**. A test that
+walks the client's path (setup → read `secret=` from the URI → confirm unmodified) now exists and is
+mutation-probed: it fails against `Base.decode64/1`. When a test constructs its input by a route no
+caller can take, it is testing the implementation, not the interface.
 
 ## Design (decided 2026-07-29, during Wave 0 execution)
 

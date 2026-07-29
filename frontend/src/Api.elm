@@ -3160,15 +3160,19 @@ adminMfaSetup ownerToken toMsg =
 
 {-| POST /api/admin/auth/mfa/confirm — completes enrolment.
 
-⚠️ **`secret` must be base64 of the RAW secret bytes, not the base32 string from the provisioning
-URI.** The URI carries base32 (the TOTP standard); the endpoint runs `Base.decode64/1`. Sending the
-base32 through returns `422 invalid_code`, which reads as clock skew or a mistyped code and sends
-you hunting in the wrong place — it cost real time on 2026-07-29. The caller converts.
+Pass `secret` **exactly as it appears in the provisioning URI** — the `secret=` parameter, base32,
+unmodified.
+
+⚠️ It used to demand base64 of the raw bytes, which no client could produce: `adminMfaSetup` returns
+only the URI, and the secret inside it is base32. Getting it wrong returned `422 invalid_code`,
+reading as clock skew rather than an encoding mismatch. The endpoint was changed to accept what its
+own setup call publishes (2026-07-29) rather than have every client base32-decode and re-encode.
+**Do not "fix" this by implementing base32 in Elm** — the contract is correct now.
 
 -}
 adminMfaConfirm :
     String
-    -> { code : String, secretBase64 : String, recoveryCodes : List String }
+    -> { code : String, secret : String, recoveryCodes : List String }
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 adminMfaConfirm ownerToken body toMsg =
@@ -3180,7 +3184,7 @@ adminMfaConfirm ownerToken body toMsg =
             Http.jsonBody
                 (Encode.object
                     [ ( "totp_code", Encode.string body.code )
-                    , ( "secret", Encode.string body.secretBase64 )
+                    , ( "secret", Encode.string body.secret )
                     , ( "recovery_codes", Encode.list Encode.string body.recoveryCodes )
                     ]
                 )
