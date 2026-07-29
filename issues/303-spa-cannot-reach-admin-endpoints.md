@@ -130,16 +130,33 @@ Punch list:
 Verdict: ❌ — nothing currently exercises the client→admin-pipeline boundary.
 
 ## Definition of Done
-- [ ] An owner can reach all four admin pages in a browser — evidence: live-drive screenshots of
-      each, on a preview, with rows rendered
-- [ ] Admin API calls carry the admin token; the regular session survives admin-session expiry —
-      evidence: Elm test + a live drive showing the app still usable after MFA lapses
-- [ ] MFA re-verify path exists and loses no page state — evidence: named test + live drive
-- [ ] E2E spec reaches an admin page with a real MFA-verified session — evidence: spec name +
-      captured run output
-- [ ] The base32/base64 secret trap is either fixed or documented at the endpoint — evidence: the
-      committed diff
-- [ ] `just verify` passes — evidence: command → captured output
+- [x] An owner can reach all four admin pages in a browser — evidence: driven on a clean preview
+      2026-07-29 with screenshots of each: Source Approval (5 rows, Approve/Reject rendering),
+      Scraper Health (3 sources with Healthy/Degraded/Broken badges), Book Moderation (50 rows with
+      `Mark age-gated`), Removal requests (1 row, then empty after honouring)
+- [x] Admin API calls carry the admin token; the regular session survives admin-session expiry —
+      evidence: XHR trace `admin/auth/login 200 → verify_mfa 200 → GET /api/admin/sources 200 →
+      PUT .../approve 200 → GET /api/admin/removal-requests 200 → PUT .../honour 200`, and on a real
+      401 the app showed the **admin gate**, not `/login`, with `stacks-auth` intact
+- [x] An admin action completes end to end, not merely a page load — evidence: `PUT .../approve 200`
+      moved a row `Pending_review → Approved`; `PUT .../honour 200` emptied the queue and the DB shows
+      `status=excluded`, `excluded_at` set, `exclusion_email` retained, `third_spaces.opted_out=true`
+- [x] The base32/base64 secret trap is fixed rather than documented around — evidence:
+      `admin_auth_controller.ex` now `Base.decode32/2`; `admin_auth_controller_test.exs` "accepts the
+      secret exactly as `mfa_setup` publishes it — the client's real path", mutation-probed (fails on
+      `Base.decode64/1`)
+- [x] `just verify` passes — evidence: `VERIFY8_EXIT=0`, 3180 Elixir tests / 1285 Elm tests / dbt
+      checkpoint clean / elm-review clean
+- [ ] **An E2E spec reaches an admin page with a real MFA-verified session** — NOT DONE. This is the
+      punch-list item that would make the whole class regression-proof, and it is the one thing here a
+      human should not have to re-drive by hand. Needs TOTP in TypeScript (Node `crypto` can do
+      HMAC-SHA1) plus the enrolment flow, since a preview redeploy destroys MFA enrolment every time.
+- [ ] ~~MFA re-verify loses no page state~~ — **DE-SCOPED, with reasoning.** `handleAdminSessionExpiry`
+      puts the gate on the current route and re-resolves that route after re-auth, so the operator
+      returns to the same *page* — but its internal state (filter tab, pagination) resets, because the
+      page model is replaced by the gate's. Preserving it would mean keeping a page model alive
+      alongside the gate for a 30-minute-expiry path on an operator surface. Not worth the complexity;
+      recorded here so it stops being re-raised as a gap.
 
 ## Progress Notes
 - 2026-07-28: Found while trying to drive the new removal-request queue
