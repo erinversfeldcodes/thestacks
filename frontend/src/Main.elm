@@ -46,6 +46,7 @@ import Page.About as AboutPage
 import Page.Admin.BookModeration as AdminBookModeration
 import Page.Admin.RemovalRequests as AdminRemovalRequests
 import Page.Admin.ScraperConfig as AdminScraperConfig
+import Page.Admin.Session as AdminSession
 import Page.Admin.SourceApproval as AdminSourceApproval
 import Page.Blog.Archive as BlogArchive
 import Page.Blog.Editor as BlogEditor
@@ -207,6 +208,7 @@ type Page
     | PageAdminScraperConfig AdminScraperConfig.Model
     | PageAdminBookModeration AdminBookModeration.Model
     | PageAdminRemovalRequests AdminRemovalRequests.Model
+    | PageAdminGate Route AdminSession.Model
     | PageGroups Groups.Model
     | PageGroupsDetail GroupsDetail.Model
     | PageProfile ProfilePage.Model
@@ -262,6 +264,12 @@ type alias Model =
     , url : Url
     , route : Route
     , auth : Maybe Auth
+
+    -- The MFA-verified admin-session token (#303). Held IN MEMORY and deliberately never
+    -- persisted: it needs no port, it is the highest-value credential here, and MFA expires after
+    -- 30 minutes anyway. Losing it on reload is the honest cost of that. Separate from `auth`
+    -- because an expiring admin session must NOT eject the operator from the ordinary app.
+    , adminAuth : Maybe String
     , page : Page
     , previousRoute : Maybe Route
     , transition : Maybe String
@@ -349,12 +357,13 @@ init flags url key =
             Route.fromUrl url
 
         ( page, cmd ) =
-            initPage config route maybeAuth Nothing
+            initPage config route maybeAuth Nothing Nothing
     in
     ( { key = key
       , url = url
       , route = route
       , auth = maybeAuth
+      , adminAuth = Nothing
       , page = page
       , previousRoute = Nothing
       , transition = Nothing
@@ -520,13 +529,43 @@ requiresAuth route =
             True
 
 
-initPage : AppConfig -> Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
-initPage config route maybeAuth maybePreviousRoute =
+initPage : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> ( Page, Cmd Msg )
+initPage config route maybeAuth adminToken maybePreviousRoute =
     if requiresAuth route && maybeAuth == Nothing then
         ( PageLogin Login.init, Cmd.none )
 
+    else if isAdminRoute route && adminToken == Nothing then
+        -- ⛔ The gate that makes #303's four surfaces reachable. `/api/admin/*` needs an
+        -- MFA-verified admin-session token, NOT the ordinary Guardian one; the pages were handed
+        -- the latter and every request 401'd, so all four had never loaded for anyone. Rather than
+        -- let a page render and fail, the route resolves to the sign-in gate until a real admin
+        -- token exists — so a page never holds a token it cannot use.
+        ( PageAdminGate route AdminSession.init, Cmd.none )
+
     else
-        initPageAuthenticated config route maybeAuth maybePreviousRoute
+        initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute
+
+
+{-| The routes behind the `:admin` pipeline. Exhaustive on purpose — a `_ -> False` catch-all would
+silently leave a newly added admin route ungated, which is the bug this whole change is fixing.
+-}
+isAdminRoute : Route -> Bool
+isAdminRoute route =
+    case route of
+        Route.AdminSourceApproval ->
+            True
+
+        Route.AdminScraperConfig ->
+            True
+
+        Route.AdminBookModeration ->
+            True
+
+        Route.AdminRemovalRequests ->
+            True
+
+        _ ->
+            False
 
 
 initBookshelf : Bookshelf.Config -> Maybe Auth -> ( Page, Cmd Msg )
@@ -544,8 +583,8 @@ initBookshelf config maybeAuth =
     ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
 
 
-initPageAuthenticated : AppConfig -> Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
-initPageAuthenticated config route maybeAuth maybePreviousRoute =
+initPageAuthenticated : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> ( Page, Cmd Msg )
+initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute =
     let
         maybeToken =
             Maybe.map .token maybeAuth
@@ -770,7 +809,7 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             if isOwner maybeAuth then
                 let
                     ( subModel, subCmd ) =
-                        AdminSourceApproval.init maybeToken
+                        AdminSourceApproval.init adminToken
                 in
                 ( PageAdminSourceApproval subModel, Cmd.map AdminSourceApprovalMsg subCmd )
 
@@ -781,7 +820,7 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             if isOwner maybeAuth then
                 let
                     ( subModel, subCmd ) =
-                        AdminScraperConfig.init maybeToken
+                        AdminScraperConfig.init adminToken
                 in
                 ( PageAdminScraperConfig subModel, Cmd.map AdminScraperConfigMsg subCmd )
 
@@ -796,7 +835,7 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             if isOwner maybeAuth && config.ageGatingEnabled then
                 let
                     ( subModel, subCmd ) =
-                        AdminBookModeration.init maybeToken
+                        AdminBookModeration.init adminToken
                 in
                 ( PageAdminBookModeration subModel, Cmd.map AdminBookModerationMsg subCmd )
 
@@ -809,7 +848,7 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             if isOwner maybeAuth then
                 let
                     ( subModel, subCmd ) =
-                        AdminRemovalRequests.init maybeToken
+                        AdminRemovalRequests.init adminToken
                 in
                 ( PageAdminRemovalRequests subModel, Cmd.map AdminRemovalRequestsMsg subCmd )
 
@@ -936,6 +975,7 @@ forceSessionExpiry : Bool -> Model -> ( Model, Cmd Msg )
 forceSessionExpiry draftSaved model =
     ( { model
         | auth = Nothing
+        , adminAuth = Nothing
         , sessionExpiredNotice = True
         , draftSavedNotice = model.draftSavedNotice || draftSaved
         , userMenu = UserMenu.init
@@ -963,6 +1003,7 @@ handleAccountDeleted : Model -> ( Model, Cmd Msg )
 handleAccountDeleted model =
     ( { model
         | auth = Nothing
+        , adminAuth = Nothing
         , accountDeletedNotice = True
         , userMenu = UserMenu.init
         , bookDetailOverlay = Nothing
@@ -1200,6 +1241,7 @@ type Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminBookModerationMsg AdminBookModeration.Msg
     | AdminRemovalRequestsMsg AdminRemovalRequests.Msg
+    | AdminSessionMsg AdminSession.Msg
     | GroupsMsg Groups.Msg
     | GroupsDetailMsg GroupsDetail.Msg
     | PublicProfileMsg ProfilePage.Msg
@@ -1250,7 +1292,7 @@ update msg model =
                     Just (transitionClass model.route newRoute)
 
                 ( initialisedPage, cmd ) =
-                    initPage model.config newRoute model.auth (Just model.route)
+                    initPage model.config newRoute model.auth model.adminAuth (Just model.route)
 
                 -- Consume a pending session-expiry notice: when the redirect lands
                 -- on /login, build the Login page in its expired-notice state so the
@@ -2066,6 +2108,39 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        AdminSessionMsg subMsg ->
+            case model.page of
+                PageAdminGate gatedRoute subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminSession.update subMsg subModel (Maybe.map .token model.auth)
+                    in
+                    case outMsg of
+                        AdminSession.NoOut ->
+                            ( { model | page = PageAdminGate gatedRoute newSubModel }
+                            , Cmd.map AdminSessionMsg subCmd
+                            )
+
+                        AdminSession.Authenticated adminToken ->
+                            -- Hold the token in memory and re-resolve the route the operator was
+                            -- actually going to, so signing in lands them on that page rather than
+                            -- on a "now navigate again" screen.
+                            let
+                                withToken =
+                                    { model | adminAuth = Just adminToken }
+
+                                ( page, pageCmd ) =
+                                    initPage model.config
+                                        gatedRoute
+                                        model.auth
+                                        (Just adminToken)
+                                        (Just model.route)
+                            in
+                            ( { withToken | page = page }, pageCmd )
+
+                _ ->
+                    ( model, Cmd.none )
+
         AdminRemovalRequestsMsg subMsg ->
             case model.page of
                 PageAdminRemovalRequests subModel ->
@@ -2234,7 +2309,7 @@ update msg model =
                                 Nothing ->
                                     Cmd.none
                     in
-                    ( { model | userMenu = newUserMenu, auth = Nothing, page = PageLogin Login.init }
+                    ( { model | userMenu = newUserMenu, auth = Nothing, adminAuth = Nothing, page = PageLogin Login.init }
                     , Cmd.batch
                         [ logoutCmd
                         , clearAuth ()
@@ -3001,6 +3076,9 @@ viewPage model =
 
         PageAdminRemovalRequests subModel ->
             Html.map AdminRemovalRequestsMsg (AdminRemovalRequests.view subModel)
+
+        PageAdminGate _ subModel ->
+            Html.map AdminSessionMsg (AdminSession.view subModel)
 
         PageGroups subModel ->
             Html.map GroupsMsg (Groups.view subModel)

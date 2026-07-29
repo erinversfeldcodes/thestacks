@@ -5048,3 +5048,170 @@ h4 {
     font-size: var(--size-sm);
     color: var(--text);
 }
+
+/* ===== Admin sign-in gate (#303) ===== */
+
+/*
+ * The surface that made four admin pages reachable. Styled at the same time as it was written,
+ * deliberately: #301 exists because three surfaces shipped with correct BEM names and zero rules,
+ * and nothing in the test suite can catch that — the classes are present, so every selector
+ * assertion passes.
+ *
+ * Parchment card, same family as `login-card` and `listing-removal`: it is the same kind of
+ * surface, a short form for someone who arrived with one thing to do.
+ */
+
+.admin-gate {
+    max-width: 30rem;
+    margin: 3rem auto;
+    padding: 2rem 2.25rem;
+    background: linear-gradient(160deg, #f2ead7, #e4d8bd);
+    border: 1px solid #c8b89a;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    color: #2c1f0e;
+}
+
+.admin-gate .page__title,
+.admin-gate .admin__title {
+    color: #3d2610;
+}
+
+.admin-gate .admin__subtitle {
+    color: #5c4a32;
+    font-size: var(--size-sm);
+    line-height: 1.5;
+    margin-bottom: 1.5rem;
+}
+
+.admin-gate__step {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    color: #3d2610;
+    margin: 0 0 0.5rem;
+}
+
+.admin-gate__field {
+    margin-bottom: 1.25rem;
+}
+
+.admin-gate__field label {
+    display: block;
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    color: #6b5a45;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+}
+
+.admin-gate__input {
+    width: 100%;
+    padding: 0.7rem 0.75rem;
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid #c8b89a;
+    border-radius: 3px;
+    color: #2c1f0e;
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.admin-gate__input:focus {
+    outline: none;
+    border-color: #8b4513;
+    box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.15);
+}
+
+/* A six-digit code is easier to check at a glance when it is monospaced and spaced out. */
+.admin-gate__input--code {
+    font-family: var(--font-mono);
+    font-size: var(--size-xl);
+    letter-spacing: 0.35em;
+    text-align: center;
+}
+
+.admin-gate__hint {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: #5c4a32;
+    line-height: 1.45;
+    margin: 0 0 1rem;
+}
+
+/* The recovery codes are shown once and never again, so this warning is not decoration. */
+.admin-gate__hint--warning {
+    color: #7a3b12;
+    background: rgba(155, 105, 48, 0.14);
+    border-left: 2px solid #9b6930;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+}
+
+.admin-gate__secret {
+    font-family: var(--font-mono);
+    font-size: var(--size-base);
+    word-break: break-all;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px dashed #c8b89a;
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.admin-gate__recovery {
+    margin: 0 0 1.25rem 1.25rem;
+    padding: 0;
+    color: #2c1f0e;
+}
+
+.admin-gate__recovery-code {
+    font-family: var(--font-mono);
+    font-size: var(--size-sm);
+    letter-spacing: 0.05em;
+}
+
+.admin-gate__submit {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #5c3a1e;
+    border-radius: 3px;
+    background: linear-gradient(135deg, #5c3a1e, #3d2610);
+    color: #f5eed6;
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.admin-gate__submit:hover:not(:disabled) {
+    background: linear-gradient(135deg, #6b4525, #4a2e15);
+    box-shadow: 0 2px 12px rgba(92, 58, 30, 0.3);
+}
+
+.admin-gate__submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.admin-gate__done {
+    padding: 1rem 1.25rem;
+    background: rgba(74, 124, 89, 0.14);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+}
+
+.admin-gate__lede {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    color: #3d2610;
+    margin: 0 0 0.5rem;
+}
+
+/* The gate's error text sits on parchment, so the dark-panel `admin__error` colour would vanish. */
+.admin-gate .admin__error {
+    color: #7a3b12;
+    background: rgba(155, 105, 48, 0.14);
+}
