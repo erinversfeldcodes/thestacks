@@ -41,7 +41,7 @@ defmodule Stacks.FeedsTest do
       _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library", user)
 
       assert is_binary(xml)
       assert is_binary(etag)
@@ -62,14 +62,14 @@ defmodule Stacks.FeedsTest do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
-      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library")
+      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library", user)
     end
 
     test "returns {:error, :not_public} for group-visibility bookshelf" do
       user = insert(:user)
       _bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
 
-      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library")
+      assert {:error, :not_public} = Feeds.fetch_feed(user.id, "library", user)
     end
 
     test "serves a feed for a public-visibility bookshelf" do
@@ -92,18 +92,58 @@ defmodule Stacks.FeedsTest do
       _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library"),
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library", user),
              "a bookshelf the reader marked public is refused the feed a platform one gets"
 
       assert is_binary(etag)
       assert String.contains?(xml, "The Secret History")
     end
 
+    test "a PLATFORM bookshelf's feed is not served to an anonymous reader" do
+      # ⚠️ Owner ruling 2026-07-29: `platform` means "any authenticated platform user — NOT visible
+      # to logged-out" on the Audience ladder, so serving it anonymously contradicted the ladder the
+      # rest of the system enforces. The feed route sat in a wholly unauthenticated pipeline and
+      # handed a reader's shelf — titles, authors — to any anonymous client.
+      #
+      # `:not_found` rather than a forbidden-style error is deliberate and matches
+      # `GET /api/u/:handle` for a platform profile (#225): the ladder says the resource is
+      # *invisible*, and "exists but not for you" would leak that the shelf exists.
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      _placement = insert(:placement, bookshelf: bookshelf, book: insert(:book))
+
+      assert {:error, :not_found} = Feeds.fetch_feed(user.id, "library", nil)
+    end
+
+    test "a PUBLIC bookshelf's feed IS served to an anonymous reader" do
+      # The other half of the same ruling, and the reason this is not simply "feeds need auth":
+      # `public` means "anyone with the link, signed in or not". A feed reader has no session, so
+      # requiring auth for `public` would make the feature pointless.
+      user = insert(:user, display_name: "Ada")
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
+      book = insert(:book, title: "The Secret History")
+      _placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", nil),
+             "a public bookshelf must be readable by an unauthenticated feed reader"
+
+      assert String.contains?(xml, "The Secret History")
+    end
+
+    test "a signed-in reader may read a PLATFORM bookshelf's feed" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
+      _placement = insert(:placement, bookshelf: bookshelf, book: insert(:book))
+      viewer = insert(:user)
+
+      assert {:ok, _xml, _etag} = Feeds.fetch_feed(user.id, "library", viewer)
+    end
+
     test "returns valid XML with empty bookshelf" do
       user = insert(:user, display_name: "Test User")
       _bookshelf = insert(:bookshelf, user: user, name: "wishlist", visibility: "platform")
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "wishlist")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "wishlist", user)
       assert String.contains?(xml, "<feed xmlns=")
       assert String.contains?(xml, "Test User")
       refute String.contains?(xml, "<entry>")
@@ -115,7 +155,7 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "Tom & Jerry <Adventures>")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", user)
       assert String.contains?(xml, "&amp;")
       assert String.contains?(xml, "&lt;")
     end
@@ -138,7 +178,7 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", user)
 
       refute String.contains?(xml, "owner-secret@example.com")
       refute String.contains?(xml, "@")
@@ -157,7 +197,7 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", user)
 
       assert String.contains?(xml, "shadow_reader")
       refute String.contains?(xml, "owner-secret@example.com")
@@ -176,7 +216,7 @@ defmodule Stacks.FeedsTest do
       book = insert(:book, title: "The Secret History")
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
-      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, _etag} = Feeds.fetch_feed(user.id, "library", user)
 
       assert String.contains?(xml, "Erin")
       refute String.contains?(xml, "owner-secret@example.com")
@@ -191,7 +231,7 @@ defmodule Stacks.FeedsTest do
 
       inject_failing_writer()
 
-      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library")
+      assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library", user)
       assert String.contains?(xml, "The Secret History")
       assert is_binary(etag)
 

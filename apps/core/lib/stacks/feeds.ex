@@ -44,10 +44,11 @@ defmodule Stacks.Feeds do
 
   Returns `{:ok, xml, etag}` or `{:error, :not_found | :not_public}`.
   """
-  @spec fetch_feed(binary(), String.t()) ::
+  @spec fetch_feed(binary(), String.t(), map() | nil) ::
           {:ok, String.t(), String.t()} | {:error, :not_found | :not_public}
-  def fetch_feed(user_id, bookshelf_name) do
-    with {:ok, bookshelf} <- resolve_shared_bookshelf(user_id, bookshelf_name) do
+  def fetch_feed(user_id, bookshelf_name, viewer \\ nil) do
+    with {:ok, bookshelf} <- resolve_shared_bookshelf(user_id, bookshelf_name),
+         :ok <- authorize_viewer(bookshelf, viewer) do
       case get_cached(bookshelf.id) do
         {:ok, xml, etag} -> {:ok, xml, etag}
         :miss -> render_and_serve(bookshelf)
@@ -138,6 +139,22 @@ defmodule Stacks.Feeds do
   @spec feed_eligible?(String.t()) :: boolean()
   def feed_eligible?(visibility), do: Visibility.at_least?(visibility, "platform")
 
+  @doc """
+  Must the requester be signed in to read this bookshelf's feed?
+
+  `platform` means "any authenticated platform user — **not** visible to logged-out" on the Audience
+  ladder, so a `platform` bookshelf's feed requires a viewer. `public` means "anyone with the link,
+  signed in or not", so it does not.
+
+  ⚠️ Before this existed, the feed route sat in a wholly unauthenticated pipeline and served a
+  `platform` bookshelf's contents — titles, authors, a reader's shelf — to any anonymous client.
+  That contradicted the ladder the rest of the system enforces: `GET /api/u/:handle` already 404s a
+  `platform` profile for a logged-out visitor (#225). Owner decision 2026-07-29: `platform` requires
+  auth, `public` does not.
+  """
+  @spec feed_requires_auth?(String.t()) :: boolean()
+  def feed_requires_auth?(visibility), do: not Visibility.at_least?(visibility, "public")
+
   # ── Private helpers ────────────────────────────────────────────────────────
 
   # Feed eligibility is "shared at least as widely as `platform`", not "is exactly `platform`".
@@ -149,6 +166,18 @@ defmodule Stacks.Feeds do
   # `group`, so the literally-public case was never exercised.
   #
   # `Visibility.at_least?/2` treats an unknown value as most-private, so a typo fails closed.
+  # A `platform` feed needs a signed-in reader; `public` does not. Returns `:not_found` rather than
+  # a 403-ish error on purpose: the ladder says a `platform` resource is *invisible* to a logged-out
+  # visitor, and `GET /api/u/:handle` already 404s that case (#225). Telling an anonymous client
+  # "this exists but you may not have it" would leak the shelf's existence.
+  defp authorize_viewer(%{visibility: visibility}, viewer) do
+    if feed_requires_auth?(visibility) and is_nil(viewer) do
+      {:error, :not_found}
+    else
+      :ok
+    end
+  end
+
   defp resolve_shared_bookshelf(user_id, bookshelf_name) do
     case Shelving.get_bookshelf(user_id, bookshelf_name) do
       nil ->

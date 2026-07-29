@@ -114,9 +114,12 @@ defmodule CoreWeb.Router do
     get "/listings/mine", ListingController, :mine
   end
 
-  # Public feeds — no auth required (Atom XML)
+  # Feeds (Atom XML). `:optional_auth` because eligibility is not uniform: a `public` bookshelf
+  # is served to anyone, a `platform` one only to a signed-in reader — `platform` means "any
+  # authenticated platform user, NOT visible to logged-out" on the Audience ladder, so serving it
+  # anonymously would have contradicted the ladder's own definition. Owner decision 2026-07-29.
   scope "/api", StacksWeb do
-    pipe_through [:api, :rate_limit_public]
+    pipe_through [:api, :optional_auth, :rate_limit_public]
     # Handle-addressed and canonical: a page showing someone's bookshelves knows their
     # handle, not their UUID, which is why no client could build a feed URL before.
     # Declared first so "u" is not swallowed as a :user_id.
