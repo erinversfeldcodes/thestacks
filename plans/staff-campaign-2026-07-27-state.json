@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-27",
   "plan": "plans/staff-campaign-2026-07-27.md",
   "created_at": "2026-07-27T00:00:00Z",
-  "updated_at": "2026-07-29T08:45:00Z",
+  "updated_at": "2026-07-29T09:05:00Z",
   "status": "in_progress",
   "current_wave": "0",
   "_why": [
@@ -92,10 +92,10 @@
         },
         "G6": {
           "title": "Business opt-out — form, soft-delete, review queue",
-          "status": "blocked",
-          "issue": null,
-          "note": "form + both outcomes driven live; API queue driven end to end (approve -> park -> honour -> 409). The admin UI is built but UNREACHABLE in the SPA — #303",
-          "blocked_on": "the review queue's server side is DRIVEN end to end, but the admin UI is unreachable because the SPA has no admin-session/MFA flow at all (#303) — that is its own epic and affects three pre-existing admin pages too, so it is not Wave 0 scope"
+          "status": "in_progress",
+          "issue": 303,
+          "note": "Server side DRIVEN end to end (approve -> park -> honour -> 409; DB opted_out=true). Remaining work is the SPA admin-session/MFA flow = #303, and per owner ruling 2026-07-29 that IS Wave 0 work because it blocks a Wave 0 completion goal — not a spin-out. It also unblocks three pre-existing admin pages that have never been reachable.",
+          "last_action": "#303 PHASE 1 of 3 DONE: the admin-session API layer is in Api.elm — adminLogin, adminVerifyMfa, adminMfaSetup, adminMfaConfirm, AdminSession/AdminMfaEnrolment, and an AdminAuthError type that keeps each failure's remedy distinct (InvalidCredentials/NotAnOwner/MfaNotEnrolled/InvalidCode/InvalidSession/AlreadyVerified). Compiles; 1252 elm tests green. PHASE 2 NEXT: Page/Admin/Session.elm — the sign-in gate (email+password -> session_id -> TOTP -> token) plus the one-off enrolment path (setup -> show provisioning URI + recovery codes -> confirm; remember the base32->base64 secret conversion). PHASE 3: Main.elm gains adminAuth : Maybe AdminAuth (IN MEMORY, no port - see #303 Design), /admin/* routes render the gate when it is Nothing, and the FOUR admin pages take the admin token instead of maybeToken. Then drive all four on a preview."
         },
         "0e": {
           "title": "Domain cutover (PHX_HOST, MetricsPusher, /.env probes, noindex)",
