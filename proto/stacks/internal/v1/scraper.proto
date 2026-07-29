@@ -83,6 +83,13 @@ enum FetchOutcome {
   // robots.txt disallows this path. The caller must record it and stop; retrying
   // cannot succeed, and treating it as an error melts the shared fuse every time.
   FETCH_OUTCOME_ROBOTS_BLOCKED = 2;
+
+  // The shop answered 429, or we are still inside a cooldown it previously asked for.
+  //
+  // A determination, not a failure — same reasoning as ROBOTS_BLOCKED, and for the same fuse.
+  // The distinction from ROBOTS_BLOCKED is that this one *does* resolve on its own:
+  // `retry_after_seconds` says when.
+  FETCH_OUTCOME_RATE_LIMITED = 3;
 }
 
 // Response from POST /fetch.
@@ -108,6 +115,17 @@ message FetchPageResponse {
   // page render (measured: 249,540 bytes for a Shopify 404, which is a *styled error
   // page*), whereas a sitemap index is ~10 KB and states exactly which pages exist.
   repeated string sitemaps = 5 [json_name = "sitemaps"];
+
+  // How long to wait before asking again, set only when the outcome is RATE_LIMITED.
+  //
+  // Carried on the response so the caller can *schedule* rather than poll: an Oban job that knows
+  // the cooldown can snooze itself for exactly that long. Without it the caller's only options are
+  // to guess an interval or to retry blindly, and retrying blindly against a shop that just said
+  // "too many requests" is how a rate limit becomes a ban.
+  //
+  // Sourced from the shop's `Retry-After` header where it sends one, else from the store's
+  // configured `retry_after_seconds`.
+  int64 retry_after_seconds = 6 [json_name = "retry_after_seconds"];
 }
 
 // What a scrape attempt concluded.
@@ -151,6 +169,14 @@ enum ScrapeOutcome {
   // on a schedule, which matters because the index lives in this service's process
   // and dies with it.
   SCRAPE_OUTCOME_INDEX_REQUIRED = 5;
+
+  // The shop is pacing us — it answered 429, or we are inside a cooldown it asked for.
+  //
+  // Its own value rather than folded into EXTRACTOR_FAILED or a 5xx, because it is neither our
+  // defect nor a service failure: it is the shop exercising a right we should have been honouring
+  // all along. Crucially it must not count against the shared fuse, since it recurs on every
+  // attempt until the cooldown lapses — the identical trap ROBOTS_BLOCKED was split out to avoid.
+  SCRAPE_OUTCOME_RATE_LIMITED = 6;
 }
 
 // Response from POST /scrape.

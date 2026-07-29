@@ -56,7 +56,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
         {:error, {:robots_blocked, "Disallow: /"}}
       )
 
-      assert :ok =
+      assert {:ok, :blocked} =
                DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
 
       reloaded = Repo.get!(Bookstore, store.id)
@@ -79,8 +79,30 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
         {:error, {:robots_blocked, "Disallow: /events"}}
       )
 
-      assert :ok =
+      # `{:ok, _}` rather than a bare `:ok`: the classification is what the batch summary tallies,
+      # and the point of the assertion is that it is an :ok at all, not an :error.
+      assert {:ok, :blocked} =
                DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
+    end
+
+    test "being paced does not fail the job, and is not recorded against the store" do
+      # A 429 is a determination like a disallow, but a *temporary* one, so the two must not be
+      # conflated. Recording it as a robots block would leave the store marked blocked with a rule
+      # nobody wrote; recording it as a failure would melt the fuse shared by every other shop, on
+      # every run, for as long as the shop kept pacing us.
+      store = insert(:bookstore, scraper_module: "za/test_store")
+
+      MockScraperClient.put_page("za/test_store", "/events", {:error, {:rate_limited, 120}})
+
+      assert {:ok, :paced} =
+               DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
+
+      reloaded = Repo.get!(Bookstore, store.id)
+
+      refute reloaded.robots_blocked_path,
+             "a temporary backoff was written to the store as a permanent robots block"
+
+      refute reloaded.robots_blocked_at
     end
 
     test "a later successful fetch clears the block, so a lifted disallow resumes" do

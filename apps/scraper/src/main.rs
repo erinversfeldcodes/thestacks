@@ -209,6 +209,7 @@ mod outcome {
     pub const ROBOTS_BLOCKED: &str = "SCRAPE_OUTCOME_ROBOTS_BLOCKED";
     pub const EXTRACTOR_FAILED: &str = "SCRAPE_OUTCOME_EXTRACTOR_FAILED";
     pub const INDEX_REQUIRED: &str = "SCRAPE_OUTCOME_INDEX_REQUIRED";
+    pub const RATE_LIMITED: &str = "SCRAPE_OUTCOME_RATE_LIMITED";
 }
 
 /// Wire values for `FetchOutcome` — a page fetch's outcomes, which are not a scrape's.
@@ -216,6 +217,7 @@ mod outcome {
 mod fetch_outcome {
     pub const FETCHED: &str = "FETCH_OUTCOME_FETCHED";
     pub const ROBOTS_BLOCKED: &str = "FETCH_OUTCOME_ROBOTS_BLOCKED";
+    pub const RATE_LIMITED: &str = "FETCH_OUTCOME_RATE_LIMITED";
 }
 
 /// Decide whether an engine error is a *determination* or a *failure*.
@@ -252,6 +254,11 @@ fn outcome_for_error(e: &ScraperError) -> Option<&'static str> {
         // per-store one — it says nothing about the health of the service, so it
         // belongs in per-source health tracking rather than the shared breaker.
         ScraperError::PriceNotFound { .. } => Some(outcome::EXTRACTOR_FAILED),
+
+        // The shop is pacing us, and it is entitled to. Neither our defect nor a service failure,
+        // so not a 5xx — and emphatically not a fuse-melting one, since it recurs on every attempt
+        // until the cooldown lapses. Unlike ROBOTS_BLOCKED it resolves by itself with time.
+        ScraperError::UpstreamBackoff { .. } => Some(outcome::RATE_LIMITED),
 
         // Everything else is a genuine failure of the service or the network:
         // rate-limit exhaustion, an upstream HTTP error, an unreachable robots.txt,
@@ -453,8 +460,37 @@ fn fetch_response(
             // already told us where its index is. Returning it means a caller never has to guess
             // at a path, and a guess costs the shop a full page render.
             sitemaps,
+            retry_after_seconds: 0,
         })
         .into_response(),
+
+        // The shop is pacing us. Reported as a 200 determination carrying the cooldown, so the
+        // caller can snooze for exactly as long as asked instead of guessing — and so it does not
+        // melt the fuse shared by every other shop. See `ScraperError::UpstreamBackoff`.
+        Err(ScraperError::UpstreamBackoff {
+            domain,
+            seconds_remaining,
+        }) => {
+            tracing::info!(
+                "backing off {} for store={}; {}s remaining",
+                domain,
+                store,
+                seconds_remaining
+            );
+
+            Json(FetchPageResponse {
+                status: 0,
+                // Deliberately empty. A 429 body is a styled challenge page — 9 KB of it from both
+                // target shops — and handing that to an extractor is how "found no events" gets
+                // reported for a page we were never shown.
+                body: String::new(),
+                outcome: fetch_outcome::RATE_LIMITED.to_string(),
+                robots_rule: String::new(),
+                sitemaps: Vec::new(),
+                retry_after_seconds: seconds_remaining as i64,
+            })
+            .into_response()
+        }
 
         Err(ScraperError::RobotsDisallowed {
             url,
@@ -476,6 +512,7 @@ fn fetch_response(
                 outcome: fetch_outcome::ROBOTS_BLOCKED.to_string(),
                 robots_rule: rule,
                 sitemaps,
+                retry_after_seconds: 0,
             })
             .into_response()
         }

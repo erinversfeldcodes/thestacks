@@ -191,32 +191,14 @@ defmodule Stacks.Enrichment.ScraperClient do
   # An unrecognised outcome below is a client/sidecar contract mismatch, which melts the
   # *service* fuse — melting the store's would blame the shop for our own bug.
   defp handle_fetch_response({:ok, %Finch.Response{status: 200, body: body}}, store, _store_fuse) do
-    case Jason.decode(body) do
-      {:ok, %{"outcome" => "FETCH_OUTCOME_ROBOTS_BLOCKED", "robots_rule" => rule}} ->
-        Logger.info("ScraperClient: robots.txt blocks #{store} (#{rule})")
-        {:error, {:robots_blocked, rule}}
-
-      {:ok, %{"outcome" => "FETCH_OUTCOME_FETCHED", "status" => status, "body" => page} = ok} ->
-        # `sitemaps` rides along on every fetch because robots.txt was already read for compliance —
-        # the shop has therefore already told us where its content index is, and asking separately
-        # would cost it a request it should never have to serve.
-        #
-        # This is what lets a caller resolve a real path instead of guessing. A guess is expensive
-        # for the shop: a Shopify 404 is a *styled* page, measured at 249,540 bytes on 2026-07-29,
-        # while a sitemap index is ~10 KB and states exactly which pages exist.
-        {:ok,
-         %{
-           status: status,
-           body: page,
-           sitemaps: Map.get(ok, "sitemaps", [])
-         }}
-
-      # An unrecognised outcome is a contract mismatch between this client and the
-      # sidecar, which is a service problem rather than a store problem.
-      other ->
+    case classify_fetch_body(body, store) do
+      {:unexpected, other} ->
         CircuitBreakers.melt(@fuse_name)
         Logger.warning("ScraperClient: unexpected fetch response for #{store}: #{inspect(other)}")
         {:error, :unexpected_response}
+
+      result ->
+        result
     end
   end
 
@@ -240,6 +222,66 @@ defmodule Stacks.Enrichment.ScraperClient do
     CircuitBreakers.melt(@fuse_name)
     Logger.warning("ScraperClient: fetch failed for #{store}: #{inspect(reason)}")
     {:error, reason}
+  end
+
+  @doc """
+  Maps a `/fetch` response body onto a result, without side effects.
+
+  Public and separate from `handle_fetch_response/3` **so the outcome branches can be tested at
+  all.** Tests swap the whole module out for `MockScraperClient`, and there is no Finch stub in this
+  project, so every branch below was unreachable from a test — including the one deciding whether a
+  shop's answer melts the fuse shared by every other shop.
+
+  Returns `{:unexpected, decoded}` rather than melting anything itself: which fuse an unrecognised
+  outcome should melt is the caller's business, and keeping the classification pure is what makes it
+  assertable. **`{:unexpected, _}` is the only return that melts a fuse** — so a test that a given
+  outcome is *not* `{:unexpected, _}` is a test that it does not melt one.
+  """
+  @spec classify_fetch_body(String.t(), String.t()) ::
+          {:ok, map()} | {:error, term()} | {:unexpected, term()}
+  def classify_fetch_body(body, store) do
+    case Jason.decode(body) do
+      {:ok, %{"outcome" => "FETCH_OUTCOME_ROBOTS_BLOCKED", "robots_rule" => rule}} ->
+        Logger.info("ScraperClient: robots.txt blocks #{store} (#{rule})")
+        {:error, {:robots_blocked, rule}}
+
+      # The shop is pacing us. A determination, so **neither fuse melts** — same reasoning as
+      # `:robots_blocked` above, and the reasoning matters more here because it recurs: while the
+      # cooldown holds, every attempt gets this answer, so counting it against the shared fuse would
+      # take price scraping down for every other shop, over and over.
+      #
+      # ⚠️ Note what the clause below this one does to an unrecognised outcome: it melts the
+      # *service* fuse. So adding `FETCH_OUTCOME_RATE_LIMITED` to the sidecar without adding this
+      # clause would have made a 429 strictly worse than before it was reported at all.
+      {:ok, %{"outcome" => "FETCH_OUTCOME_RATE_LIMITED"} = ok} ->
+        retry_after = Map.get(ok, "retry_after_seconds", 60)
+
+        Logger.info(
+          "ScraperClient: #{store} asked us to back off for #{retry_after}s; not retrying until then"
+        )
+
+        {:error, {:rate_limited, retry_after}}
+
+      {:ok, %{"outcome" => "FETCH_OUTCOME_FETCHED", "status" => status, "body" => page} = ok} ->
+        # `sitemaps` rides along on every fetch because robots.txt was already read for compliance —
+        # the shop has therefore already told us where its content index is, and asking separately
+        # would cost it a request it should never have to serve.
+        #
+        # This is what lets a caller resolve a real path instead of guessing. A guess is expensive
+        # for the shop: a Shopify 404 is a *styled* page, measured at 249,540 bytes on 2026-07-29,
+        # while a sitemap index is ~10 KB and states exactly which pages exist.
+        {:ok,
+         %{
+           status: status,
+           body: page,
+           sitemaps: Map.get(ok, "sitemaps", [])
+         }}
+
+      # An unrecognised outcome is a contract mismatch between this client and the
+      # sidecar, which is a service problem rather than a store problem.
+      other ->
+        {:unexpected, other}
+    end
   end
 
   @impl true
