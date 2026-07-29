@@ -5910,24 +5910,46 @@ h4 {
     box-sizing: border-box;
 }
 
-
 /*
- * Hover states for the roles above. Emitted by hand rather than by role, because a hover rule has to
- * name the same selector list again and a generator that duplicates 40 selectors to add one property
- * is how a stylesheet becomes unreadable. These cover the two roles where hover is not decoration but
- * the affordance itself: a link the reader must know is clickable, and the risk gate they must know
- * they can open.
+ * Hover states for the two roles where hover is the affordance rather than decoration: a link the
+ * reader must know is clickable, and the risk gate they must know they can open.
+ *
+ * ⚠️ **Written as an explicit selector list, NOT `[class$="__link"]:hover`.** The attribute-selector
+ * version was the first attempt and it was a live regression: it has the same specificity as
+ * `.app-nav__link:hover` and sits later in the file, so it silently took over the **primary
+ * navigation's** hover colour — changing it from `--text` to `--accent-hover`. An attribute selector
+ * cannot be scoped to "the classes this sweep added", which is exactly the scope wanted here.
+ *
+ * Classes that already have their own `:hover` are excluded below for the same reason.
  */
-[class$="__link"]:hover,
-[class*="__link "]:hover,
-[class$="__rss-link"]:hover,
-.btn--link:hover {
+.about__link--costs,
+.about__link--metrics,
+.blog-archive__link,
+.book-detail__author-rss-link,
+.writing-assistant__settings-link {
     border-bottom-color: var(--accent);
     color: var(--accent-hover);
 }
 
-[class$="__risk-gate"]:hover,
-[class$="__risk-reveal"]:hover {
+.about__link--costs:hover,
+.about__link--metrics:hover,
+.blog-archive__link:hover,
+.book-detail__author-rss-link:hover,
+.writing-assistant__settings-link:hover {
+.insights__risk-gate:hover,
+.insights__risk-reveal:hover {
     background: rgba(255, 255, 255, 0.06);
     border-color: var(--accent);
+}
+
+
+/*
+ * `.btn:hover` sets `text-decoration: none`, and it outranks `.btn--link` (class + pseudo-class beats
+ * class), so a button styled as a link *lost* its underline on hover — reading as less interactive
+ * exactly when the reader points at it. Restored here, with the accent shift the other links get.
+ */
+.btn--link:hover {
+    text-decoration: underline;
+    color: var(--accent-hover);
+    opacity: 1;
 }

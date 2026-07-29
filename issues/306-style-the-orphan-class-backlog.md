@@ -178,4 +178,17 @@ Punch list:
   **Remaining: the visual pass**, in this order — `book-detail` 45 · `insights` 34 ·
   `marketplace-detail` 15 · `page` 15 · `profile` 14 · `blog-post` 12 · `upload-verify` 12 ·
   `marketplace` 11 · then the 64-group tail. Regenerate with `--list` rather than trusting that.
+- 2026-07-29: **staff-review: LGTM WITH NOTES**, and the review caught two regressions in this very
+  change — both from the same mistake, using a broad selector where a scoped one was meant:
+  1. ⛔ `[class$="__link"]:hover` has the **same specificity** as `.app-nav__link:hover` and sat later
+     in the file, so it silently took over the **primary navigation's** hover colour (`--text` →
+     `--accent-hover`). An attribute selector cannot be scoped to "the classes this sweep added",
+     which is exactly the scope wanted. Replaced with an explicit 5-selector list, and any class with
+     its own `:hover` is excluded by construction.
+  2. 🟧 `.btn:hover { text-decoration: none }` outranks `.btn--link` (class + pseudo-class beats
+     class), so a button styled as a link *lost* its underline on hover — reading as less interactive
+     precisely when pointed at. Fixed with an explicit `.btn--link:hover`.
+
+  Also checked and clean: the sweep introduced **0** new duplicate rule heads (15 exist in the file
+  and all 15 pre-date it — ledger, not this change).
 
