@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-27",
   "plan": "plans/staff-campaign-2026-07-27.md",
   "created_at": "2026-07-27T00:00:00Z",
-  "updated_at": "2026-07-29T10:15:00Z",
+  "updated_at": "2026-07-29T11:30:00Z",
   "status": "in_progress",
   "current_wave": "0",
   "_why": [
@@ -95,7 +95,7 @@
           "status": "in_progress",
           "issue": 303,
           "note": "Server side DRIVEN end to end (approve -> park -> honour -> 409; DB opted_out=true). Remaining work is the SPA admin-session/MFA flow = #303, and per owner ruling 2026-07-29 that IS Wave 0 work because it blocks a Wave 0 completion goal — not a spin-out. It also unblocks three pre-existing admin pages that have never been reachable.",
-          "last_action": "#303 BUILT and DRIVEN on the preview 2026-07-29. All FOUR admin pages now load with real data via SPA navigation: Source Approval 5 rows, Scraper Health 21, Book Moderation 68, Removal requests (empty-state, no error = the admin API call succeeded). Full flow driven through the gate's own form: enrolment (10 recovery codes + 'shown once' warning) -> confirm -> credentials -> TOTP -> real page. ⛔ SECOND BUG found by driving: SourceApproval compared status == 'pending' but the server writes 'pending_review', so Approve/Reject NEVER rendered — the page had an Actions column that was permanently empty. Also 'rejected' should be 'dismissed' (reject_source transitions to dismissed). Three invented status literals, invisible while the page was unreachable. Fixed + 11 tests. REMAINING: (a) after enrolment the gate says 'Sign in above' but viewEnrolmentDone REPLACES the form, so there is nothing above — dead end, needs to return to the credentials step; (b) confirm a queue ROW renders (needs a parked request); (c) confirm a full page reload drops the in-memory token and re-shows the gate."
+          "last_action": "#303 driven repeatedly; FOUR bugs found by driving, three of them mine. (1) SourceApproval compared status=='pending' vs server 'pending_review' so Approve/Reject never rendered — fixed, 11 tests, CONFIRMED LIVE (5 Approve + 5 Reject buttons). (2) Enrolment dead end: 'Sign in above' while having replaced the form — state deleted, returns to credentials with a notice. (3) An admin 401 called handleSessionExpiry and signed the operator OUT OF THE APP — now handleAdminSessionExpiry drops only adminAuth and re-shows the gate; CONFIRMED LIVE (gate, not Login). (4) HALF-WIRING, mine: init was repointed to the admin token but update was NOT, so the list loaded (200) and every action 401'd. Proven by XHR instrumentation: GET /api/admin/sources 200 then PUT .../approve 401 unauthorized. All three token-taking handlers repointed. NEXT: deploy and confirm an approve/honour ACTION succeeds end to end."
         },
         "0e": {
           "title": "Domain cutover (PHX_HOST, MetricsPusher, /.env probes, noindex)",
