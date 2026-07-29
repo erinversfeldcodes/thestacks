@@ -108,7 +108,15 @@ defmodule Stacks.Enrichment.EventsPathTest do
     test "a known path short-circuits without touching the network" do
       # The cost this module exists to remove. Re-verifying on every run would put us back to one
       # request per store per run, which is what made the hardcoded path expensive in the first place.
-      s = insert(:bookstore, scraper_module: "za/test_store", events_path: "/pages/events")
+      # `events_path_checked_at` must be set too: a path with no record of ever having been checked is
+      # one we cannot vouch for, so `resolve/1` correctly re-verifies it. Only a *fresh* verdict
+      # short-circuits, which is the whole point of the window.
+      s =
+        insert(:bookstore,
+          scraper_module: "za/test_store",
+          events_path: "/pages/events",
+          events_path_checked_at: DateTime.utc_now()
+        )
 
       assert {:ok, "/pages/events"} = EventsPath.resolve(s)
 
@@ -116,6 +124,111 @@ defmodule Stacks.Enrichment.EventsPathTest do
              "a store with a known events path was walked again"
 
       assert MockScraperClient.fetches() == []
+    end
+  end
+
+  describe "resolve/1 — the recheck window, i.e. what events_path_checked_at is FOR" do
+    test "a recent negative is not re-asked, so the shop pays nothing" do
+      # ⛔ The finding this closes. `events_path_checked_at` was written on every outcome and read by
+      # nothing, so a bookshop with no events page paid for a fresh sitemap walk on **every run,
+      # forever** — the exact opposite of the courtesy the whole path was built for.
+      s =
+        insert(:bookstore,
+          scraper_module: "za/test_store",
+          events_path: nil,
+          events_path_checked_at: DateTime.utc_now(),
+          events_unresolved_reason: "no candidate matched among 12 listed page(s)"
+        )
+
+      assert {:error, :recently_checked} = EventsPath.resolve(s)
+
+      assert MockScraperClient.sitemap_calls() == [],
+             "a shop we asked minutes ago was walked again"
+
+      assert MockScraperClient.fetches() == []
+    end
+
+    test "a negative older than the window IS re-asked, so a new events page is found" do
+      # The other half. A verdict trusted forever is a shop written off permanently, which is what the
+      # timestamp exists to prevent.
+      stale = DateTime.add(DateTime.utc_now(), -(EventsPath.recheck_after_days() + 1), :day)
+
+      s =
+        insert(:bookstore,
+          scraper_module: "za/test_store",
+          events_path: nil,
+          events_path_checked_at: stale
+        )
+
+      MockScraperClient.put_sitemap("za/test_store", harvest(["https://shop.test/pages/events"]))
+
+      MockScraperClient.put_page(
+        "za/test_store",
+        "/pages/events",
+        {:ok, %{status: 200, body: ""}}
+      )
+
+      assert {:ok, "/pages/events"} = EventsPath.resolve(s)
+      assert MockScraperClient.sitemap_calls() == ["za/test_store"]
+    end
+
+    test "a never-checked store is always asked" do
+      # `nil` must read as stale, never as a fresh negative: it means we have not looked.
+      s = insert(:bookstore, scraper_module: "za/test_store", events_path_checked_at: nil)
+      MockScraperClient.put_sitemap("za/test_store", harvest([]))
+
+      assert {:error, :no_candidate} = EventsPath.resolve(s)
+      assert MockScraperClient.sitemap_calls() == ["za/test_store"]
+    end
+
+    test "a stale resolved path is re-verified, catching one that died without a 404" do
+      # `forget/1` only fires on a 404, so a path that starts answering 500 — or redirecting to the
+      # homepage — would otherwise be believed indefinitely.
+      stale = DateTime.add(DateTime.utc_now(), -(EventsPath.recheck_after_days() + 1), :day)
+
+      s =
+        insert(:bookstore,
+          scraper_module: "za/test_store",
+          events_path: "/pages/events",
+          events_path_checked_at: stale
+        )
+
+      MockScraperClient.put_page(
+        "za/test_store",
+        "/pages/events",
+        {:ok, %{status: 500, body: ""}}
+      )
+
+      assert {:error, :unverified} = EventsPath.resolve(s)
+
+      reloaded = reload(s)
+      refute reloaded.events_path, "a path that answered 500 on re-verification was kept"
+      assert reloaded.events_unresolved_reason =~ "HTTP 500"
+    end
+
+    test "a stale resolved path that still serves is kept and its check refreshed" do
+      stale = DateTime.add(DateTime.utc_now(), -(EventsPath.recheck_after_days() + 1), :day)
+
+      s =
+        insert(:bookstore,
+          scraper_module: "za/test_store",
+          events_path: "/pages/events",
+          events_path_checked_at: stale
+        )
+
+      MockScraperClient.put_page(
+        "za/test_store",
+        "/pages/events",
+        {:ok, %{status: 200, body: ""}}
+      )
+
+      assert {:ok, "/pages/events"} = EventsPath.resolve(s)
+
+      reloaded = reload(s)
+      assert reloaded.events_path == "/pages/events"
+
+      assert DateTime.compare(reloaded.events_path_checked_at, stale) == :gt,
+             "the check was not refreshed, so this store re-verifies on every single run"
     end
   end
 

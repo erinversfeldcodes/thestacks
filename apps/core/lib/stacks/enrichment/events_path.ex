@@ -77,6 +77,21 @@ defmodule Stacks.Enrichment.EventsPath do
   def candidate_tokens, do: @candidate_tokens
 
   @doc """
+  How long a verdict — positive or negative — is trusted before it is checked again.
+
+  This is what `events_path_checked_at` is *for*. Without a window the timestamp is written and never
+  read, which is where this module started: it documented at length that a stale check should be
+  revisited, and then nothing revisited anything.
+
+  Thirty days is chosen from what the verdicts are about. A bookshop that adds an events page should
+  be found within a month; a resolved path that quietly dies — a 500, or a redirect to the homepage,
+  neither of which the job's 404 branch catches — should not persist for longer than that. One request
+  per store per month is not a cost worth optimising away.
+  """
+  @recheck_after_days 30
+  def recheck_after_days, do: @recheck_after_days
+
+  @doc """
   Resolve and persist this store's events path.
 
   Returns `{:ok, path}` when a candidate was found and verified, or `{:error, reason}`. Every outcome
@@ -85,17 +100,46 @@ defmodule Stacks.Enrichment.EventsPath do
   """
   @spec resolve(Bookstore.t()) :: {:ok, String.t()} | {:error, term()}
   def resolve(%Bookstore{events_path: path} = store) when is_binary(path) and path != "" do
-    # Already known. Deliberately no re-verification: a path that has worked is not re-tested on
-    # every run, because that would put us back to a request per store per run, which is the cost
-    # this module exists to remove. A path that stops working surfaces as a 404 in the job, which
-    # clears it — the check belongs where the failure appears, not here.
-    _ = store
-    {:ok, path}
+    if stale?(store) do
+      # Re-verify rather than trust indefinitely. `forget/1` only fires on a 404, so a path that
+      # starts answering 500 or redirecting to the homepage would otherwise be believed forever.
+      Logger.info("EventsPath: re-verifying #{store.name || store.id}'s #{path} (stale)")
+      verify(store, store.name || store.id, path)
+    else
+      # Fresh and known: no network at all. Re-testing a working path on every run is the per-store
+      # per-run cost this module exists to remove.
+      {:ok, path}
+    end
   end
 
   def resolve(%Bookstore{} = store) do
     store_name = store.name || store.id
 
+    # ⚠️ A *negative* verdict is trusted for the same window as a positive one, and this is the half
+    # that matters for the shop. Without it, a bookshop with no events page pays for a fresh sitemap
+    # walk on every single run, forever — which is the opposite of the courtesy this whole path was
+    # built for. `events_path_checked_at` is what makes "we already asked" answerable.
+    if stale?(store) do
+      walk(store, store_name)
+    else
+      Logger.info(
+        "EventsPath: #{store_name} was checked within #{@recheck_after_days} days and had no " <>
+          "events page; not asking again yet"
+      )
+
+      {:error, :recently_checked}
+    end
+  end
+
+  # Never checked, or checked longer ago than the window. `nil` is stale by definition: it means we
+  # have not looked, which must never read as a fresh negative.
+  defp stale?(%Bookstore{events_path_checked_at: nil}), do: true
+
+  defp stale?(%Bookstore{events_path_checked_at: at}) do
+    DateTime.diff(DateTime.utc_now(), at, :day) >= @recheck_after_days
+  end
+
+  defp walk(store, store_name) do
     case client().sitemap_urls(store.scraper_module) do
       {:ok, %{urls: urls, truncated: truncated}} ->
         resolve_from(store, store_name, urls, truncated)
@@ -175,8 +219,11 @@ defmodule Stacks.Enrichment.EventsPath do
 
   # One fetch, and only one. The candidate came from the shop's own list of pages, so it should
   # exist; verifying is about confirming it is reachable and not a redirect stub, not about searching.
-  defp verify(store, store_name, candidate_url) do
-    path = path_of(candidate_url)
+  defp verify(store, store_name, candidate) do
+    # Accepts either an absolute URL from a sitemap or an already-relative path from a re-verify —
+    # `path_of/1` is idempotent on a path, so one function serves both callers rather than the caller
+    # having to know which shape it holds.
+    path = if String.starts_with?(candidate, "/"), do: candidate, else: path_of(candidate)
 
     case client().fetch_page(store.scraper_module, path) do
       {:ok, %{status: 200}} ->

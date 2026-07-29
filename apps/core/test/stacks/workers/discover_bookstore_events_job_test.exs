@@ -276,6 +276,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
         insert(:bookstore,
           scraper_module: "za/test_store",
           events_path: "/pages/events",
+          events_path_checked_at: DateTime.utc_now(),
           events_page_etag: "\"v1\""
         )
 
@@ -307,6 +308,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
         insert(:bookstore,
           scraper_module: "za/test_store",
           events_path: "/pages/events",
+          events_path_checked_at: DateTime.utc_now(),
           events_page_etag: "\"v1\"",
           events_page_last_modified: "Wed, 21 Oct 2026 07:28:00 GMT"
         )
@@ -329,7 +331,12 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     test "a fresh fetch banks the validators it came back with" do
       # Without this the round trip never closes: we would send nothing next time and the shop would
       # render the page again, every run, forever.
-      store = insert(:bookstore, scraper_module: "za/test_store", events_path: "/pages/events")
+      store =
+        insert(:bookstore,
+          scraper_module: "za/test_store",
+          events_path: "/pages/events",
+          events_path_checked_at: DateTime.utc_now()
+        )
 
       MockScraperClient.put_page(
         "za/test_store",
@@ -353,7 +360,11 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     test "a previously working path that starts 404ing is forgotten, so it re-resolves" do
       # Without this the store keeps a dead path forever and the shop keeps serving 404s for it.
       store =
-        insert(:bookstore, scraper_module: "za/test_store", events_path: "/pages/old-events")
+        insert(:bookstore,
+          scraper_module: "za/test_store",
+          events_path: "/pages/old-events",
+          events_path_checked_at: DateTime.utc_now()
+        )
 
       MockScraperClient.put_page(
         "za/test_store",
