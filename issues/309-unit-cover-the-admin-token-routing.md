@@ -86,6 +86,12 @@ Punch list:
       change to it; it remains the only path through the real MFA pipeline. This adds a floor beneath
       it, it does not replace it
 - [x] `just run just verify` passes — see Progress Notes
+- [x] The **resolver's body** is guarded too, not only its call sites — evidence: found by probing
+      the guard itself. Replacing the body with `Maybe.map .token model.auth` (i.e. #303's *original*
+      defect: handing the admin endpoints the ordinary session) left the guard passing **and** all
+      1285 Elm tests passing. Naming the read in one place had reduced five vulnerable sites to one
+      and left that one unprotected. The check now asserts the body is `model.adminAuth`; re-probed →
+      exit 1
 - [x] `gdpr-review`: **n/a** — no personal data; token routing only. Stated, not skipped.
 
 **A `ProgramTest` was considered and rejected, per the issue's own option list.** The existing

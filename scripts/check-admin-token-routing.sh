@@ -54,6 +54,24 @@ resolver_line = definition[0]
 
 findings, sites = [], []
 
+# ⚠️ The resolver's BODY is checked, not only its call sites.
+#
+# Found by probing this very check: replacing the body with `Maybe.map .token model.auth` — i.e.
+# handing the admin endpoints the ORDINARY session token, which is defect 1 of #303 verbatim — left
+# this guard passing and all 1285 Elm tests passing. Naming the read in one place reduced five
+# vulnerable sites to one; it did not protect the one.
+body = lines[resolver_line + 1].strip() if resolver_line + 1 < len(lines) else ""
+if body != "model.adminAuth":
+    findings.append(
+        (
+            resolver_line + 2,
+            f"{RESOLVER} returns `{body}`, not `model.adminAuth`. The admin endpoints require an "
+            "MFA-verified admin session and 401 anything else — returning the ordinary session here "
+            "is #303's original defect with a better name on it.",
+        )
+    )
+sites.append((resolver_line + 2, "resolver body", body, body == "model.adminAuth"))
+
 for i, line in enumerate(lines):
     stripped = line.strip()
 
