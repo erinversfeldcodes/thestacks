@@ -1561,6 +1561,26 @@ verification. Worth a standing check in the DoD template: *does an endpoint exis
 
 ### Wave 6 — ROOT E: first impressions
 **Depends on Wave 5** for W-12 and the title fixes.
+
+**G1 steps 5–6 (third-spaces Elm port + map page) are assigned here.** Decided 2026-07-29 rather
+than escalated, since the plan already contains everything needed to place them:
+
+- **Not Wave 0.** Its charter is *prerequisites — evidence gaps and reachability breaks*. Steps 1–4
+  belonged there because they fixed a broken chain (no bookshop had coordinates, so the 500 m rule
+  could never fire). A brand-new map surface is net-new feature work, not a reachability repair.
+- **Wave 6 is the only wave whose theme is user-facing surface quality**, which is what a map page
+  is. Waves 1–5 are deletions, contracts, and roots A–C; Waves 7–8 are docs and a11y.
+- **Being late is a feature, not a delay.** Two things must precede it and both land earlier: the
+  **tile-serving path** (ADR 022 chose proxied non-Google tiles — that proxy does not exist yet) and
+  a CSS baseline, since **#301** shows new surfaces here ship unstyled by default. Scheduling the
+  map before either would produce a page that cannot render and would not be styled if it could.
+
+The tile proxy is a **child issue inside the same epic**, ordered before the map page in the epic's
+DAG — so the orchestrator sequences it, rather than it becoming a surprise mid-page.
+
+| Issue | Root | Size |
+|---|---|---|
+| **G1 step 5–6:** tile proxy (ADR 022) → Elm port + third-spaces map page, with the two-tier 500 m/curated rule surfaced | G1 | M then M |
 | Issue | Root | Size |
 |---|---|---|
 | Diagnose and fix the ~30s sign-in (W-1): is `LoginTransitionCompleted` animation-driven or awaiting post-login fetches? Add an in-flight state either way | E | M |

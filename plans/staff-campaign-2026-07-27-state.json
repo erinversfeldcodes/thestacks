@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-27",
   "plan": "plans/staff-campaign-2026-07-27.md",
   "created_at": "2026-07-27T00:00:00Z",
-  "updated_at": "2026-07-29T00:30:00Z",
+  "updated_at": "2026-07-29T07:45:00Z",
   "status": "in_progress",
   "current_wave": "0",
   "_why": [
@@ -64,17 +64,16 @@
         },
         "G1": {
           "title": "Third spaces — coordinates, geocoder, producer, ADR 022",
-          "status": "blocked",
+          "status": "complete",
           "issue": null,
-          "note": "steps 1-4 done and proven live (third_spaces 0->1, nearest_bookshop_km 0.678). Steps 5-6 (Elm port + map page) NOT started — deferred to a later wave by owner decision, needs its own issue file",
-          "blocked_on": "steps 5-6 (Elm port + map page) were deferred to a later wave by owner decision; they need a wave assignment and their own epic before any code"
+          "note": "Wave 0 scope (steps 1-4) COMPLETE and proven live: coordinates + indexes, Nominatim behind a swappable seam, approval-driven producer, ADR 022, two-tier 500m rule; third_spaces 0->1 with nearest_bookshop_km 0.678, and re-confirmed 2026-07-29 when approving a source geocoded it. Steps 5-6 (tile proxy -> Elm port -> map page) ASSIGNED TO WAVE 6 (decided 2026-07-29, reasoning in the plan): they are net-new user-facing surface work, not a reachability repair, and they depend on a tile proxy that does not exist yet plus a CSS baseline (#301).",
+          "informal": true
         },
         "G3": {
           "title": "Source discovery — prove the chain end to end",
-          "status": "blocked",
+          "status": "in_progress",
           "issue": null,
-          "blocked_on": "needs a real Brave API key in a deployed environment; rows now exist but the UI that shows them is unreachable (#303)",
-          "note": "evidence gap, not a code gap"
+          "note": "NOT blocked after all — I asserted 'needs a real Brave key' without checking. BRAVE_SEARCH_API_KEY is in .env (31 chars), deploy-stack.sh:847 already forwards it, and it is Deployed on the preview. Driving it found the REAL cause of the zero rows: BraveClient.increment_daily_counter/0 crashed on the first live call in any fresh node (ArgumentError, no persistent term) because a lying default made absent state look present. Fixed + 3 regression tests + mutation-probed."
         },
         "G4": {
           "title": "RSS feeds reachable from the profile",
@@ -112,17 +111,14 @@
       "items": {}
     }
   },
-  "human_decisions_pending": [
-    "G1 steps 5-6 (Elm port + map page): confirm the wave they belong to, then file an issue",
-    "DiscoverBookstoreEventsJob scheduling: starting it crawls real bookshops, several one-person operations — owner's call",
-    "Whether a platform-visibility bookshelf should be served by an UNAUTHENTICATED feed URL at all (the ladder says platform = signed-in only; the feed route is public). Pre-existing; not changed unilaterally"
-  ],
+  "human_decisions_pending": [],
   "notes": [
     "2026-07-28: #301 (398 orphan CSS classes), #302 (prose negative assertions), #303 (SPA cannot reach any admin endpoint) filed.",
     "2026-07-28: #303 invalidates the earlier Wave 0 claim that seeding discovered_sources closed G3's evidence gap — the rows exist and the API serves them, but no UI can reach them.",
     "A preview redeploy DELETES and recreates the Neon branch from staging, so anything seeded into a preview survives exactly one deploy.",
     "2026-07-28: the seed's on_conflict clauses silently discarded BOTH visibility fixes (mine and the pre-existing public_bookshelf_names one) on every preview, because a preview branches staging so the rows already exist. Fixed: users replace profile_visibility, bookshelves replace visibility. A third instance of 'looks landed, is inert' this session.",
     "2026-07-28: shelf-organiser.spec.ts needs --workers=1 against a preview; 4 parallel session-mints 502 the 512MB VM. 4 passed / 2 failed in parallel, 6/6 serial.",
-    "2026-07-29: G4 driven. 🟧 The public profile page is largely UNSTYLED (raw bulleted bookshelf list, no page chrome) — visible in the drive screenshot. `profile` is one of #301's larger orphan-class groups (15). Not fixed here; it is #301's scope."
+    "2026-07-29: G4 driven. 🟧 The public profile page is largely UNSTYLED (raw bulleted bookshelf list, no page chrome) — visible in the drive screenshot. `profile` is one of #301's larger orphan-class groups (15). Not fixed here; it is #301's scope.",
+    "2026-07-29: owner rulings — (1) a blocker that blocks a Wave 0 goal IS Wave 0 work, do not spin it out and stop; (2) assign work to waves/epics myself and document it; (3) platform-visibility feeds require auth, public-visibility feeds do not."
   ]
 }
