@@ -113,3 +113,30 @@ Punch list:
 - 2026-07-29: Split out of #301 after the triage showed 309 classes across 63 groups — far past one
   reviewable diff, and #301's own Scope Check called for the split. #301 kept the durable half (the
   ratchet, which makes the debt safe to carry) and this issue holds the work.
+
+## Progress Notes
+- 2026-07-29: **Re-triaged, not advanced.** Inventory reconfirmed independently of the issue text:
+  **398 orphans, 89 of which are used as a test or E2E selector** (so they are hooks and want
+  `data-testid`, not a rule) and **309 needing a CSS rule** across 72 prefix groups. Matches the
+  original triage exactly, which is worth knowing — the numbers have not drifted.
+
+  **Deliberately not partly closed, and the reason is structural rather than effort.** This issue's
+  own Scope Check mandates one PR per component group, and its DoD requires each styled surface to be
+  **viewed on a preview**. Writing 309 rules without driving them would produce exactly the defect
+  class the issue exists to fix: markup and styles that look complete and render wrong. Three
+  surfaces already shipped that way. A batch of unverified CSS would be a fourth, larger instance.
+
+  The ratchet (`ORPHAN_BUDGET=398`) protects the codebase meanwhile: no NEW unstyled component can
+  land, which was #301's exit criterion and is holding.
+
+  **Ordered work queue** (largest first, one PR each, drive before styling): `book-detail` 45 ·
+  `insights` 34 · `marketplace-detail` 12 · `blog-archive` 10 · `page` 10 · `profile` 10 ·
+  `upload-result` 10 · `upload-verify` 10 · then the 64-group tail. Regenerate with
+  `scripts/check-orphan-classes.sh --list` rather than trusting this list — it will drift.
+
+  Separately worth its own decision: the **89 hooks**. Converting them to `data-testid` is mechanical
+  and needs no visual drive, so it is the one slice of this issue that could land without a preview —
+  but it edits 89 test assertions, and a test that quietly stops asserting what it did is a
+  regression that looks like a cleanup. It should be its own issue with a per-assertion diff review,
+  not folded in here.
+
