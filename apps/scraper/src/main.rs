@@ -16,7 +16,7 @@ use stacks_scraper::{
         FetchPageRequest, FetchPageResponse, ScrapeRequest, ScrapeResponse, SitemapUrlsRequest,
         SitemapUrlsResponse, StoreCapability,
     },
-    scraper::Engine,
+    scraper::{Engine, FetchedPage, Validators},
     stores::StoreRegistry,
 };
 use std::{path::PathBuf, sync::Arc};
@@ -219,6 +219,7 @@ mod fetch_outcome {
     pub const FETCHED: &str = "FETCH_OUTCOME_FETCHED";
     pub const ROBOTS_BLOCKED: &str = "FETCH_OUTCOME_ROBOTS_BLOCKED";
     pub const RATE_LIMITED: &str = "FETCH_OUTCOME_RATE_LIMITED";
+    pub const NOT_MODIFIED: &str = "FETCH_OUTCOME_NOT_MODIFIED";
 }
 
 /// Decide whether an engine error is a *determination* or a *failure*.
@@ -435,8 +436,16 @@ async fn fetch_page(
             .into_response();
     }
 
+    let validators = Validators {
+        if_none_match: payload.if_none_match,
+        if_modified_since: payload.if_modified_since,
+    };
+
     fetch_response(
-        state.engine.fetch_path(&config, &payload.path).await,
+        state
+            .engine
+            .fetch_path(&config, &payload.path, validators)
+            .await,
         &payload.store,
     )
 }
@@ -549,21 +558,27 @@ fn sitemap_response(
 /// handler's own tests go through the real engine against the configured base URL, which means the
 /// robots-blocked branch cannot be exercised there at all — and that branch is the one carrying the
 /// easiest-to-lose piece of information in this file (see the `sitemaps` note below).
-fn fetch_response(
-    outcome: Result<(u16, String, Vec<String>), ScraperError>,
-    store: &str,
-) -> Response {
+fn fetch_response(outcome: Result<FetchedPage, ScraperError>, store: &str) -> Response {
     match outcome {
-        Ok((status, body, sitemaps)) => Json(FetchPageResponse {
-            status: status as i32,
-            body,
-            outcome: fetch_outcome::FETCHED.to_string(),
+        Ok(page) => Json(FetchPageResponse {
+            status: page.status as i32,
+            body: page.body,
+            // 304 is its own outcome, not a FETCHED with an empty body. Those mean opposite things:
+            // an empty body would read as "the page is now blank", which for an events page says
+            // every event was removed. Here it says nothing changed, so keep what you have.
+            outcome: if page.status == 304 {
+                fetch_outcome::NOT_MODIFIED.to_string()
+            } else {
+                fetch_outcome::FETCHED.to_string()
+            },
             robots_rule: String::new(),
             // Free information: robots.txt was already fetched for compliance, so the shop has
             // already told us where its index is. Returning it means a caller never has to guess
             // at a path, and a guess costs the shop a full page render.
-            sitemaps,
+            sitemaps: page.sitemaps,
             retry_after_seconds: 0,
+            etag: page.etag,
+            last_modified: page.last_modified,
         })
         .into_response(),
 
@@ -591,6 +606,8 @@ fn fetch_response(
                 robots_rule: String::new(),
                 sitemaps: Vec::new(),
                 retry_after_seconds: seconds_remaining as i64,
+                etag: String::new(),
+                last_modified: String::new(),
             })
             .into_response()
         }
@@ -616,6 +633,8 @@ fn fetch_response(
                 robots_rule: rule,
                 sitemaps,
                 retry_after_seconds: 0,
+                etag: String::new(),
+                last_modified: String::new(),
             })
             .into_response()
         }
@@ -1192,6 +1211,55 @@ requests_per_minute = 60
     }
 
     #[tokio::test]
+    async fn a_304_is_not_modified_and_never_an_empty_page() {
+        // ⚠️ The distinction the outcome exists for. A 304 has no body, and reporting it as FETCHED
+        // with `body: ""` would tell the caller the page is now blank — which for an events page
+        // means every event was cancelled. It means the opposite: keep what you already have.
+        let resp = fetch_response(
+            Ok(FetchedPage {
+                status: 304,
+                body: String::new(),
+                etag: "W/\"abc123\"".to_string(),
+                ..Default::default()
+            }),
+            "za/test_store",
+        );
+        let json = body_of(resp).await;
+
+        assert_eq!(json["outcome"], fetch_outcome::NOT_MODIFIED);
+        assert_ne!(
+            json["outcome"],
+            fetch_outcome::FETCHED,
+            "an unchanged page was reported as a successfully fetched empty one"
+        );
+        assert_eq!(
+            json["etag"], "W/\"abc123\"",
+            "the validator was dropped, so the next fetch cannot be conditional and the saving is lost"
+        );
+    }
+
+    #[tokio::test]
+    async fn validators_ride_back_on_a_normal_fetch_so_the_next_one_can_be_conditional() {
+        // Without these on the response there is nothing to store, and every subsequent fetch costs
+        // the shop a full render. The feature is only worth anything if the round trip closes.
+        let resp = fetch_response(
+            Ok(FetchedPage {
+                status: 200,
+                body: "<html/>".to_string(),
+                etag: "\"v2\"".to_string(),
+                last_modified: "Wed, 21 Oct 2026 07:28:00 GMT".to_string(),
+                ..Default::default()
+            }),
+            "za/test_store",
+        );
+        let json = body_of(resp).await;
+
+        assert_eq!(json["outcome"], fetch_outcome::FETCHED);
+        assert_eq!(json["etag"], "\"v2\"");
+        assert_eq!(json["last_modified"], "Wed, 21 Oct 2026 07:28:00 GMT");
+    }
+
+    #[tokio::test]
     async fn a_robots_block_still_reports_the_sitemaps_it_declared() {
         // Reaching this branch through the router would take a live request to a store whose
         // robots.txt refuses us, so the response mapping is driven directly.
@@ -1227,7 +1295,14 @@ requests_per_minute = 60
         // says "robots.txt declared nothing"; `"sitemaps": []` would read as a positive claim that
         // the shop has no index, which we are in no position to make — plenty of sites serve
         // /sitemap.xml without ever mentioning it in robots.txt.
-        let resp = fetch_response(Ok((200, "<html/>".to_string(), vec![])), "za/test_store");
+        let resp = fetch_response(
+            Ok(FetchedPage {
+                status: 200,
+                body: "<html/>".to_string(),
+                ..Default::default()
+            }),
+            "za/test_store",
+        );
 
         let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         let json: Value = serde_json::from_slice(&body).unwrap();

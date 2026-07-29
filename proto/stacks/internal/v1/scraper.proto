@@ -63,6 +63,19 @@ message FetchPageRequest {
   string store = 1 [json_name = "store"];
   // Path relative to the store root, e.g. "/events". Must begin with "/".
   string path = 2 [json_name = "path"];
+
+  // Validators from the last time we fetched this path, so the shop can answer "nothing changed".
+  //
+  // This is the cheapest politeness available to us and it was missing entirely. An events page is
+  // re-read on a schedule and changes rarely; without these the shop renders and transmits the whole
+  // page every time to tell us something it could have said in a 304 with no body at all.
+  //
+  // Sent as received, never synthesised. An `ETag` is opaque — it may be weak (`W/"..."`), quoted, or
+  // any byte string the origin chose — so normalising or reformatting it is how a validator silently
+  // stops matching and the saving quietly disappears.
+  string if_none_match = 3 [json_name = "if_none_match"];
+  // An HTTP-date exactly as the origin's `Last-Modified` gave it.
+  string if_modified_since = 4 [json_name = "if_modified_since"];
 }
 
 // How a page fetch ended.
@@ -90,6 +103,14 @@ enum FetchOutcome {
   // The distinction from ROBOTS_BLOCKED is that this one *does* resolve on its own:
   // `retry_after_seconds` says when.
   FETCH_OUTCOME_RATE_LIMITED = 3;
+
+  // The shop answered 304: what we already have is current.
+  //
+  // Its own outcome rather than a FETCHED with an empty body, because those mean opposite things — an
+  // empty body would read as "the page is now blank", which for an events page means "all events were
+  // removed". `body` is empty here because there is nothing new to send, and a caller must keep what
+  // it already had.
+  FETCH_OUTCOME_NOT_MODIFIED = 4;
 }
 
 // Response from POST /fetch.
@@ -126,6 +147,14 @@ message FetchPageResponse {
   // Sourced from the shop's `Retry-After` header where it sends one, else from the store's
   // configured `retry_after_seconds`.
   int64 retry_after_seconds = 6 [json_name = "retry_after_seconds"];
+
+  // Validators for this response, to be stored and sent back on the next fetch of this path.
+  //
+  // Empty when the origin sent none — plenty of pages carry neither, and in that case conditional
+  // requests are simply unavailable for that path rather than broken.
+  string etag = 7 [json_name = "etag"];
+  // The origin's `Last-Modified`, verbatim.
+  string last_modified = 8 [json_name = "last_modified"];
 }
 
 // Request for POST /sitemap-urls — enumerate a store's pages from its own sitemap.
