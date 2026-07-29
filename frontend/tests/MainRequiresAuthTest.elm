@@ -241,6 +241,36 @@ isPageLogin page =
             False
 
 
+isPageAdminGate : Main.Page -> Bool
+isPageAdminGate page =
+    case page of
+        Main.PageAdminGate _ _ ->
+            True
+
+        _ ->
+            False
+
+
+{-| An owner, since every admin route is owner-only. Built from `ownerAuth` so these tests exercise
+the ADMIN gate rather than tripping the ordinary auth redirect first.
+-}
+ownerAuth : Main.Auth
+ownerAuth =
+    { user =
+        { id = "owner-1"
+        , email = "owner@thestacks.app"
+        , displayName = "Owner"
+        , handle = "owner"
+        , role = "owner"
+        , countryCode = Nothing
+        , city = Nothing
+        , consentAnalytics = False
+        , consentWritingAssistant = False
+        }
+    , token = "ordinary-guardian-token"
+    }
+
+
 suite : Test
 suite =
     describe "Main auth gating"
@@ -254,22 +284,60 @@ suite =
                     )
                         |> Expect.equal ( 18, 24 )
             ]
+        , describe "admin routes are gated on an ADMIN token, not the ordinary one (#303)"
+            [ test "an owner with no admin token gets the sign-in gate, not the page" <|
+                \() ->
+                    -- ⛔ The bug this closes. All four admin pages were handed the ordinary Guardian
+                    -- token and rendered; every request then 401'd against the `:admin` pipeline,
+                    -- which needs a `typ: "admin_session"` token. Four surfaces were built, routed,
+                    -- tested and unreachable — and nothing failed, because each page's own tests
+                    -- passed a token straight into a mocked API.
+                    Main.initPage config AdminRemovalRequests (Just ownerAuth) Nothing Nothing
+                        |> Tuple.first
+                        |> isPageAdminGate
+                        |> Expect.equal True
+            , test "with an admin token the real page loads" <|
+                \() ->
+                    Main.initPage config AdminRemovalRequests (Just ownerAuth) (Just "admin-tok") Nothing
+                        |> Tuple.first
+                        |> isPageAdminGate
+                        |> Expect.equal False
+            , test "every admin route is gated, not just the new one" <|
+                \() ->
+                    -- `isAdminRoute` is exhaustive over Route on purpose; this asserts the four are
+                    -- actually wired to it, so adding a fifth admin page cannot silently skip the
+                    -- gate.
+                    [ AdminSourceApproval, AdminScraperConfig, AdminBookModeration, AdminRemovalRequests ]
+                        |> List.map
+                            (\r ->
+                                Main.initPage config r (Just ownerAuth) Nothing Nothing
+                                    |> Tuple.first
+                                    |> isPageAdminGate
+                            )
+                        |> Expect.equal [ True, True, True, True ]
+            , test "a non-admin route is unaffected by the admin token being absent" <|
+                \() ->
+                    Main.initPage config Library (Just ownerAuth) Nothing Nothing
+                        |> Tuple.first
+                        |> isPageAdminGate
+                        |> Expect.equal False
+            ]
         , describe "initPage redirect guard"
             [ test "a protected route with no auth renders the Login page (login-at-URL)" <|
                 \() ->
-                    Main.initPage config Upload Nothing Nothing
+                    Main.initPage config Upload Nothing Nothing Nothing
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal True
             , test "a second protected route with no auth also renders Login" <|
                 \() ->
-                    Main.initPage config SettingsProfile Nothing Nothing
+                    Main.initPage config SettingsProfile Nothing Nothing Nothing
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal True
             , test "a public route with no auth does NOT force the Login page" <|
                 \() ->
-                    Main.initPage config Home Nothing Nothing
+                    Main.initPage config Home Nothing Nothing Nothing
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal False

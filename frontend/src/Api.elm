@@ -1,5 +1,6 @@
 module Api exposing
-    ( AdminBook
+    ( AdminAuthError(..)
+    , AdminBook
     , AdminBooksResponse
     , AdminMfaEnrolment
     , AdminSession
