@@ -285,6 +285,38 @@ End-to-end and vision tests share image fixtures at the repo-top `images/` direc
 
 ---
 
+## Negative Assertions — Anchor on `data-testid`, Never on Prose
+
+An assertion that something is **absent** is the easiest kind to write and the easiest kind to get
+silently wrong. `Selector.text` matches on a **substring**, which gives two failure modes:
+
+| Shape | What happens | Example that shipped |
+|---|---|---|
+| The text appears **nowhere** in `frontend/src/` | The assertion can **never fail** — it matches nothing, forever | `hasNot [ Selector.text "Add shelf" ]` while the button says **"Add a shelf"**. A read-only-view SECURITY guarantee, disarmed by a one-word copy edit, passing for months |
+| The text is a **strict substring** of other rendered copy | The selector binds to the **wrong element**, so the assertion tests something else | `hasNot [ Selector.text "Approve" ]` also matched the **"Approved"** filter tab |
+
+Both were found the hard way, and neither was catchable by reading the test — they read perfectly.
+
+**The rule:**
+
+- **Guarding an affordance** (a button, a link, a panel is absent) → anchor on `data-testid` via
+  `Util.TestId.testId`. Copy changes; testids do not, and that is the whole point.
+- **Asserting specific copy** (an error message must not appear) → prose is legitimate, but pair it
+  with a **positive** assertion elsewhere that the same literal *does* render in the sibling state. A
+  literal asserted only negatively is a literal nobody notices going stale.
+- **Deliberately asserting text stays deleted** → fine, and it *will* match nothing by design. Record
+  it in the allowlist so the intent is explicit rather than inferred.
+
+**Enforced by** `scripts/check-prose-assertions.sh`, which runs inside `just lint-elm` (and therefore
+`just ci`). It flags both shapes above and carries a reason-bearing allowlist keyed on **file + text**
+— not `file:line`, which rots the moment anyone adds a comment.
+
+⚠️ **The check has no view scope, and says so.** It compares against every literal in
+`frontend/src/`, but a collision only bites when both strings can render in the *view under test* —
+`MainNavTest` renders `Main.viewNav` alone, so a clash with a different page's copy is inert. It
+deliberately over-reports; the allowlist is where the judgement lives. Treat a finding as a prompt to
+look, not a proof of a bug.
+
 ## Mandatory Testing Protocol
 
 **Every code change MUST be accompanied by tests.**

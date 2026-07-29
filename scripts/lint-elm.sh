@@ -13,6 +13,13 @@ fi
 # the CI lint-elm job both enforce it.
 bash "$REPO_ROOT/scripts/check-e2e-vacuous-guards.sh"
 
+# Negative Elm assertions that cannot do their job (Issue #302). Sibling of the E2E guard check
+# above: that one catches `if (count > 0)` wrappers in Playwright specs, this one catches
+# `hasNot [ Selector.text "..." ]` that either matches nothing (can never fail) or is a strict
+# substring of other rendered copy (can bind to the wrong element). Two real instances motivated it,
+# including a SECURITY assertion disarmed by a one-word copy edit.
+bash "$REPO_ROOT/scripts/check-prose-assertions.sh"
+
 (cd frontend && npx elm-format --validate src/)
 (cd frontend && npm audit)
 
