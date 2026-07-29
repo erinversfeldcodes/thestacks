@@ -13,7 +13,8 @@ use stacks_scraper::{
     error::ScraperError,
     proto::generated::scraper::{
         CatalogueTitle, CatalogueTitlesRequest, CatalogueTitlesResponse, ConfigReloadResponse,
-        FetchPageRequest, FetchPageResponse, ScrapeRequest, ScrapeResponse, StoreCapability,
+        FetchPageRequest, FetchPageResponse, ScrapeRequest, ScrapeResponse, SitemapUrlsRequest,
+        SitemapUrlsResponse, StoreCapability,
     },
     scraper::Engine,
     stores::StoreRegistry,
@@ -440,6 +441,108 @@ async fn fetch_page(
     )
 }
 
+/// Wire values for `SitemapOutcome`.
+mod sitemap_outcome {
+    pub const HARVESTED: &str = "SITEMAP_OUTCOME_HARVESTED";
+    pub const NO_SITEMAP_DECLARED: &str = "SITEMAP_OUTCOME_NO_SITEMAP_DECLARED";
+    pub const ROBOTS_BLOCKED: &str = "SITEMAP_OUTCOME_ROBOTS_BLOCKED";
+    pub const RATE_LIMITED: &str = "SITEMAP_OUTCOME_RATE_LIMITED";
+}
+
+async fn sitemap_urls(
+    State(state): State<AppState>,
+    Json(payload): Json<SitemapUrlsRequest>,
+) -> Response {
+    let config = match state.registry.get(&payload.store) {
+        Ok(c) => c,
+        Err(e) => {
+            return (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))).into_response();
+        }
+    };
+
+    let result = state.engine.sitemap_urls(&config).await;
+    sitemap_response(result, &payload.store)
+}
+
+/// Maps a sitemap walk onto the wire response.
+///
+/// Extracted for the same reason as `fetch_response`: the handler's own tests go through the real
+/// engine, so no branch here is otherwise reachable without a network.
+fn sitemap_response(
+    result: Result<stacks_scraper::scraper::SitemapHarvest, ScraperError>,
+    store: &str,
+) -> Response {
+    match result {
+        Ok(harvest) => {
+            // Logged rather than left to the caller, because this is the number that says whether the
+            // operation is behaving politely. "N documents, M bytes" on every run means a change that
+            // starts pulling a catalogue is visible immediately instead of being inferred later from
+            // someone's bandwidth bill.
+            tracing::info!(
+                "sitemap walk for store={}: {} url(s) from {} document(s), {} bytes, {} skipped{}",
+                store,
+                harvest.urls.len(),
+                harvest.documents_fetched,
+                harvest.bytes_read,
+                harvest.skipped.len(),
+                if harvest.truncated {
+                    " (TRUNCATED — budget spent)"
+                } else {
+                    ""
+                }
+            );
+
+            // No sitemap declared at all is its own outcome, not an empty harvest. "The shop has no
+            // index" and "the index listed nothing" lead to different decisions, and reporting the
+            // first as the second records a shop as having no events page without ever having asked.
+            let outcome = if harvest.documents_fetched == 0 && harvest.skipped.is_empty() {
+                sitemap_outcome::NO_SITEMAP_DECLARED
+            } else {
+                sitemap_outcome::HARVESTED
+            };
+
+            Json(SitemapUrlsResponse {
+                outcome: outcome.to_string(),
+                urls: harvest.urls,
+                documents_fetched: harvest.documents_fetched as i32,
+                bytes_read: harvest.bytes_read as i64,
+                skipped: harvest.skipped,
+                truncated: harvest.truncated,
+                retry_after_seconds: 0,
+            })
+            .into_response()
+        }
+
+        Err(ScraperError::UpstreamBackoff {
+            seconds_remaining, ..
+        }) => Json(SitemapUrlsResponse {
+            outcome: sitemap_outcome::RATE_LIMITED.to_string(),
+            retry_after_seconds: seconds_remaining as i64,
+            ..Default::default()
+        })
+        .into_response(),
+
+        Err(ScraperError::RobotsDisallowed { rule, .. }) => Json(SitemapUrlsResponse {
+            outcome: sitemap_outcome::ROBOTS_BLOCKED.to_string(),
+            // The rule rides in `skipped` rather than getting its own field: this response already
+            // has a place for "what we did not fetch and why", and a second one would let the two
+            // disagree.
+            skipped: vec![rule],
+            ..Default::default()
+        })
+        .into_response(),
+
+        Err(e) => {
+            tracing::error!("sitemap walk failed for store={}: {}", store, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// Maps a fetch outcome onto the wire response.
 ///
 /// Extracted from `fetch_page` so the branches are reachable **without a network round-trip**. The
@@ -584,6 +687,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/index/build", post(index_build))
         .route("/catalogue/titles", post(catalogue_titles))
         .route("/fetch", post(fetch_page))
+        .route("/sitemap-urls", post(sitemap_urls))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             hmac_auth_middleware,
@@ -619,6 +723,7 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
+    use stacks_scraper::scraper::SitemapHarvest;
     use stacks_scraper::{auth::generate_token, config::ScraperConfig};
     use tower::util::ServiceExt;
 
@@ -743,6 +848,7 @@ requests_per_minute = 60
             .route("/index/build", post(index_build))
             .route("/catalogue/titles", post(catalogue_titles))
             .route("/fetch", post(fetch_page))
+            .route("/sitemap-urls", post(sitemap_urls))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 hmac_auth_middleware,
@@ -923,6 +1029,165 @@ requests_per_minute = 60
             resp.status(),
             StatusCode::BAD_REQUEST,
             "a well-formed relative path must not be rejected as malformed"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // /sitemap-urls — polite page discovery
+    // ------------------------------------------------------------------
+
+    async fn body_of(resp: Response) -> Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn no_declared_sitemap_is_its_own_outcome_not_an_empty_harvest() {
+        // ⚠️ The distinction this test exists for. "The shop declares no sitemap" and "the shop's
+        // sitemap lists no pages" both come back with zero URLs, and collapsing them would let a
+        // caller record a shop as having no events page on the strength of never having looked.
+        let resp = sitemap_response(Ok(SitemapHarvest::default()), "za/test_store");
+        let json = body_of(resp).await;
+
+        assert_eq!(json["outcome"], sitemap_outcome::NO_SITEMAP_DECLARED);
+    }
+
+    #[tokio::test]
+    async fn a_walk_that_read_a_document_is_harvested_even_with_no_urls() {
+        // The other side of the distinction above: we DID look, and the index genuinely listed
+        // nothing we could use. That is a real answer about the shop and must not read as "no index".
+        let resp = sitemap_response(
+            Ok(SitemapHarvest {
+                documents_fetched: 1,
+                bytes_read: 10_334,
+                skipped: vec![
+                    "https://shop.test/sitemap_products_1.xml (catalogue-sized, not pages)".into(),
+                ],
+                ..Default::default()
+            }),
+            "za/test_store",
+        );
+        let json = body_of(resp).await;
+
+        assert_eq!(json["outcome"], sitemap_outcome::HARVESTED);
+        // The key is ABSENT rather than `[]` — the generated struct skips empty repeated fields, the
+        // same behaviour `sitemaps` relies on. `outcome` is what carries the meaning here.
+        assert!(json.get("urls").is_none(), "expected no urls key: {json}");
+        assert_eq!(
+            json["skipped"].as_array().map(Vec::len),
+            Some(1),
+            "the refusal to download a catalogue was not reported, so 'found nothing' is \
+             indistinguishable from 'declined to look'"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_truncated_walk_says_so_rather_than_looking_complete() {
+        // A partial result presented as complete is the failure mode: the caller concludes the shop
+        // has no events page and never asks again.
+        let resp = sitemap_response(
+            Ok(SitemapHarvest {
+                urls: vec!["https://shop.test/pages/about".into()],
+                documents_fetched: 4,
+                bytes_read: 8 * 1024 * 1024,
+                truncated: true,
+                ..Default::default()
+            }),
+            "za/test_store",
+        );
+        let json = body_of(resp).await;
+
+        assert_eq!(json["outcome"], sitemap_outcome::HARVESTED);
+        assert_eq!(json["truncated"], true);
+    }
+
+    #[tokio::test]
+    async fn the_cost_of_the_walk_is_reported_so_politeness_is_measurable() {
+        // Not decoration. These two numbers are how a regression that starts pulling a product
+        // catalogue becomes visible on the next run instead of on someone's bandwidth bill.
+        let resp = sitemap_response(
+            Ok(SitemapHarvest {
+                urls: vec!["https://shop.test/pages/events".into()],
+                documents_fetched: 2,
+                bytes_read: 12_500,
+                ..Default::default()
+            }),
+            "za/test_store",
+        );
+        let json = body_of(resp).await;
+
+        assert_eq!(json["documents_fetched"], 2);
+        assert_eq!(json["bytes_read"], 12_500);
+    }
+
+    #[tokio::test]
+    async fn a_paced_walk_is_a_determination_carrying_the_cooldown() {
+        let resp = sitemap_response(
+            Err(ScraperError::UpstreamBackoff {
+                domain: "https://shop.test".into(),
+                seconds_remaining: 90,
+            }),
+            "za/test_store",
+        );
+        let json = body_of(resp).await;
+
+        assert_eq!(json["outcome"], sitemap_outcome::RATE_LIMITED);
+        assert_eq!(json["retry_after_seconds"], 90);
+    }
+
+    #[tokio::test]
+    async fn a_robots_block_on_the_sitemap_reports_the_rule() {
+        let resp = sitemap_response(
+            Err(ScraperError::RobotsDisallowed {
+                url: "https://shop.test/sitemap.xml".into(),
+                rule: "Disallow: /sitemap.xml".into(),
+                sitemaps: vec![],
+            }),
+            "za/test_store",
+        );
+        let json = body_of(resp).await;
+
+        assert_eq!(json["outcome"], sitemap_outcome::ROBOTS_BLOCKED);
+        assert_eq!(json["skipped"][0], "Disallow: /sitemap.xml");
+    }
+
+    #[tokio::test]
+    async fn sitemap_urls_requires_auth() {
+        // Same gate as every other route. A discovery endpoint that anyone can call is a way to make
+        // this service issue requests at a shop on someone else's behalf.
+        let app = make_app(make_test_state());
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sitemap-urls")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"store":"za/test_store"}"#))
+            .unwrap();
+
+        assert_eq!(
+            app.oneshot(req).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn sitemap_urls_refuses_an_unknown_store() {
+        // No scraper config means no declared crawl policy, so there is no rate limit or base URL to
+        // walk under — the same refusal `/fetch` makes, for the same reason.
+        let app = make_app(make_test_state());
+        let token = generate_token("POST", "/sitemap-urls", TEST_SECRET).unwrap();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/sitemap-urls")
+            .header("content-type", "application/json")
+            .header("x-internal-token", token)
+            .body(Body::from(r#"{"store":"za/nonexistent"}"#))
+            .unwrap();
+
+        assert_eq!(
+            app.oneshot(req).await.unwrap().status(),
+            StatusCode::NOT_FOUND
         );
     }
 

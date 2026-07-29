@@ -113,6 +113,97 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
   end
 
+  describe "classify_sitemap_body/2" do
+    defp classify_sitemap(payload) do
+      capture_log(fn ->
+        send(
+          self(),
+          {:result, ScraperClient.classify_sitemap_body(Jason.encode!(payload), "za/test")}
+        )
+      end)
+
+      receive do
+        {:result, result} -> result
+      end
+    end
+
+    test "a harvest carries the urls, the cost, and what was deliberately skipped" do
+      assert {:ok, harvest} =
+               classify_sitemap(%{
+                 "outcome" => "SITEMAP_OUTCOME_HARVESTED",
+                 "urls" => ["https://shop.test/pages/events"],
+                 "documents_fetched" => 2,
+                 "bytes_read" => 12_500,
+                 "skipped" => ["https://shop.test/sitemap_products_1.xml (catalogue-sized)"]
+               })
+
+      assert harvest.urls == ["https://shop.test/pages/events"]
+      assert harvest.documents_fetched == 2
+      assert harvest.bytes_read == 12_500
+      assert length(harvest.skipped) == 1
+      refute harvest.truncated
+    end
+
+    test "no declared sitemap is its own error, not an empty harvest" do
+      # ⚠️ The distinction this whole endpoint is shaped around. Returning `{:ok, %{urls: []}}` here
+      # would have a caller record the shop as having no events page on the strength of never
+      # having looked at one.
+      assert {:error, :no_sitemap_declared} =
+               classify_sitemap(%{"outcome" => "SITEMAP_OUTCOME_NO_SITEMAP_DECLARED"})
+    end
+
+    test "an empty harvest is still a harvest, and is not confused with the above" do
+      assert {:ok, %{urls: []}} =
+               classify_sitemap(%{
+                 "outcome" => "SITEMAP_OUTCOME_HARVESTED",
+                 "documents_fetched" => 1
+               })
+    end
+
+    test "absent repeated fields default rather than crashing" do
+      # The sidecar omits empty repeated fields (`skip_serializing_if`), so absence is the normal
+      # shape for a shop with nothing skipped — not a malformed response.
+      assert {:ok, %{urls: [], skipped: [], truncated: false, bytes_read: 0}} =
+               classify_sitemap(%{"outcome" => "SITEMAP_OUTCOME_HARVESTED"})
+    end
+
+    test "a truncated walk is reported as such" do
+      assert {:ok, %{truncated: true}} =
+               classify_sitemap(%{
+                 "outcome" => "SITEMAP_OUTCOME_HARVESTED",
+                 "urls" => ["https://shop.test/pages/a"],
+                 "truncated" => true
+               })
+    end
+
+    test "being paced and being blocked are determinations, not fuse-melting mismatches" do
+      assert {:error, {:rate_limited, 90}} =
+               classify_sitemap(%{
+                 "outcome" => "SITEMAP_OUTCOME_RATE_LIMITED",
+                 "retry_after_seconds" => 90
+               })
+
+      assert {:error, {:robots_blocked, "Disallow: /sitemap.xml"}} =
+               classify_sitemap(%{
+                 "outcome" => "SITEMAP_OUTCOME_ROBOTS_BLOCKED",
+                 "skipped" => ["Disallow: /sitemap.xml"]
+               })
+
+      for outcome <- [
+            "SITEMAP_OUTCOME_RATE_LIMITED",
+            "SITEMAP_OUTCOME_ROBOTS_BLOCKED",
+            "SITEMAP_OUTCOME_NO_SITEMAP_DECLARED"
+          ] do
+        refute match?({:unexpected, _}, classify_sitemap(%{"outcome" => outcome})),
+               "#{outcome} melts the fuse shared by every store"
+      end
+    end
+
+    test "an unset outcome is not read as a harvest" do
+      assert {:unexpected, _} = classify_sitemap(%{"outcome" => "SITEMAP_OUTCOME_UNSPECIFIED"})
+    end
+  end
+
   describe "classify_fetch_body/2 — contract mismatches" do
     test "an outcome this client does not know is flagged for the caller to melt" do
       assert {:unexpected, _} = classify(%{"outcome" => "FETCH_OUTCOME_SOMETHING_NEW"})

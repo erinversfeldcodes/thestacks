@@ -31,6 +31,37 @@ defmodule Stacks.Enrichment.ScraperClientBehaviour do
               | {:error, {:robots_blocked, String.t()} | term()}
 
   @doc """
+  The pages a store lists in its own sitemap.
+
+  The polite alternative to guessing at paths. A guess costs the shop a full page render — a Shopify
+  404 measured 249,540 bytes — whereas the sitemap index is ~10 KB and states which pages exist.
+
+  Bounded by a crawl budget in the sidecar (requests **and** bytes), and it never fetches a
+  catalogue-sized child sitemap. `skipped` reports what was deliberately not fetched, so
+  "found nothing" can be told from "declined to look".
+
+  ⚠️ `{:ok, %{urls: []}}` and `{:error, :no_sitemap_declared}` are different facts. The first means
+  the shop's index listed nothing usable; the second means it has no index at all. Recording either
+  as the other marks a shop as having no events page without that ever having been established.
+
+  `truncated: true` means the budget ended the walk early, so `urls` is incomplete.
+  """
+  @callback sitemap_urls(store_name :: String.t()) ::
+              {:ok,
+               %{
+                 urls: [String.t()],
+                 skipped: [String.t()],
+                 truncated: boolean(),
+                 documents_fetched: integer(),
+                 bytes_read: integer()
+               }}
+              | {:error,
+                 :no_sitemap_declared
+                 | {:robots_blocked, String.t()}
+                 | {:rate_limited, integer()}
+                 | term()}
+
+  @doc """
   Titles of products this store lists that carry no extractable ISBN.
 
   The residual for shops where no product carries an ISBN, so title matching is the
