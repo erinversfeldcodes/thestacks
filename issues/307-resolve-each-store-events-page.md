@@ -141,3 +141,38 @@ never been evidence of that changing.
 **Part 5 — conditional requests (`ETag` / `If-Modified-Since`).** Absent entirely, and the single
 biggest remaining politeness win: a 304 costs the shop almost nothing, and both the events page and
 the sitemaps are re-read on a schedule. Store the validators alongside `events_path`.
+
+## Parts 3–5 — landed
+`78037736` (parts 3–4), `b4fa7020` (part 5), `f1518d57` + `9b9a334b` (review fixes).
+
+- **Part 3** `Stacks.Enrichment.EventsPath.resolve/1` — one function, one argument, and the caller
+  needs to know nothing about robots.txt, sitemap indexes, child classification or crawl budgets.
+  Persists `events_path` / `events_unresolved_reason` / `events_path_checked_at`.
+- **Part 4** the job reads the resolved path. There is now **no default events path at all**;
+  reintroducing one would restore the quiet failure, since a guess that 404s looks exactly like a
+  shop with no events.
+- **Part 5** conditional requests. `If-None-Match` / `If-Modified-Since` sent verbatim, a 304 is its
+  own outcome carrying no body, and the validators are banked so the round trip closes.
+
+**Three real defects surfaced by writing the tests, not by review:**
+1. `persist_events/2` returned a bare `:ok`, so `summarise_batch/2`'s events clause was **dead** —
+   every batch logged "0 event(s) written" regardless of what it wrote.
+2. `parse_events/2` refused a date whenever a page held more than one distinct date, so a **normal
+   listing produced nothing**. Replaced with block-scoped pairing: a date is used only if it sits
+   between its own heading and the next, so it can never be borrowed from another event or from page
+   chrome. Footer trimmed; chrome headings filtered.
+3. A byte cap that cut a document short did **not** set `truncated` — the index was truncated
+   mid-`<loc>`, parsed to zero children, and the walk ended normally reporting a complete result.
+
+## Progress Notes
+- 2026-07-29: **staff-review: LGTM WITH NOTES** over `bf374c7f^..HEAD`. Two 🟧 raised and both
+  **fixed in this issue** rather than deferred: (a) `Engine::sitemap_urls` had never been executed —
+  every piece unit-tested, the assembling loop never run, which is #307's own defect one layer up.
+  Fixed with a mock-mode seam (`Engine::new_mock_http`) plus five end-to-end walk tests; writing them
+  found defect 3 above, and found that `sitemap_urls`/`harvest_one` called `RobotsChecker`
+  **unguarded**, so `new_mock` would have made live network calls. (b) `events_path_checked_at` was
+  written and never read — the field documented at length as making a negative re-checkable, with
+  nothing re-checking. Fixed with a 30-day window that gates **both** a negative (a shop with no
+  events page no longer pays for a walk every run) and a stale positive (a path that dies by 500 or
+  redirect, which the 404 branch never catches). One 🟨 fixed (double regex scan → one). One 🟦
+  recorded, not actioned: `"post"` in `EXCLUDED_TOKENS` would refuse `/pages/postponed-events`.
