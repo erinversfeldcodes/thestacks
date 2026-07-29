@@ -140,19 +140,41 @@ def epic_rollup(num):
     return " | ".join(bits)
 
 def dod_boxes(path):
-    """Returns (unchecked, checked_without_evidence) from the Definition of Done section."""
-    unchecked, no_ev, in_dod = [], [], False
-    for line in open(path, encoding="utf-8"):
-        if line.startswith("## "):
-            in_dod = line.strip().lower().startswith("## definition of done")
+    """Returns (unchecked, checked_without_evidence) from the Definition of Done section.
+
+    A DoD item is the `- [x]` line PLUS its indented continuation lines — evidence tokens routinely
+    land on the next line, because an evidence citation is usually longer than the criterion. Reading
+    only the first line reported a false "no evidence token" on a box whose proof was one line below.
+    """
+    items, in_dod, current = [], False, None
+    for raw in open(path, encoding="utf-8"):
+        if raw.startswith("## "):
+            in_dod = raw.strip().lower().startswith("## definition of done")
+            if current:
+                items.append(current)
+                current = None
             continue
         if not in_dod:
             continue
-        s = line.strip()
-        if s.startswith("- [ ]"):
-            unchecked.append(s[5:].strip()[:90])
-        elif s.startswith("- [x]") and not EVIDENCE.search(s):
-            no_ev.append(s[5:].strip()[:90])
+        stripped = raw.strip()
+        if stripped.startswith(("- [ ]", "- [x]", "- [X]")):
+            if current:
+                items.append(current)
+            current = {"checked": stripped[3].lower() == "x", "text": stripped[5:].strip()}
+        elif current is not None and raw.startswith((" ", "\t")) and stripped:
+            # Continuation of the item above.
+            current["text"] += " " + stripped
+        elif not stripped:
+            continue
+        else:
+            if current:
+                items.append(current)
+            current = None
+    if current:
+        items.append(current)
+
+    unchecked = [i["text"][:90] for i in items if not i["checked"]]
+    no_ev = [i["text"][:90] for i in items if i["checked"] and not EVIDENCE.search(i["text"])]
     return unchecked, no_ev
 
 violations, actionable, informal = [], [], []
