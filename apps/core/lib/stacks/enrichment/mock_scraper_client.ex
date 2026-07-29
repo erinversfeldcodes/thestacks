@@ -44,7 +44,10 @@ defmodule Stacks.Enrichment.MockScraperClient do
 
     case Enum.find(pages, fn {s, p, _} -> s == store_name and p == path end) do
       {_, _, response} -> response
-      nil -> {:ok, %{status: 200, body: ""}}
+      # `sitemaps: []` rather than omitting the key: the real client always includes it (robots.txt
+      # is read on every fetch), so a mock that leaves it out lets a caller pass here while
+      # crashing on the real shape.
+      nil -> {:ok, %{status: 200, body: "", sitemaps: []}}
     end
   end
 

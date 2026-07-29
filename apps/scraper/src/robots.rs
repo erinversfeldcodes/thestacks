@@ -33,6 +33,17 @@ pub struct RobotsPolicy {
     /// and therefore no way to know whether the store is permanently unscrapable or
     /// merely needs a different path.
     pub blocked_by: Option<String>,
+    /// `Sitemap:` URLs declared in the document, in order.
+    ///
+    /// Retained for the same reason `crawl_delay_secs` is: it is not a group member
+    /// (RFC 9309 §2.2.4), but it is *the shop telling us where its content index is*,
+    /// and we are already paying for this fetch on every request.
+    ///
+    /// This is what makes polite discovery possible. Guessing a path costs the shop a
+    /// full page render — measured at **249,540 bytes** for a Shopify 404 — whereas a
+    /// sitemap index is ~10 KB and says exactly which pages exist. Harvesting a value
+    /// we already have in hand is strictly cheaper for them than asking again.
+    pub sitemaps: Vec<String>,
 }
 
 impl RobotsPolicy {
@@ -43,6 +54,7 @@ impl RobotsPolicy {
             allowed: true,
             crawl_delay_secs: None,
             blocked_by: None,
+            sitemaps: Vec::new(),
         }
     }
 }
@@ -212,6 +224,7 @@ fn evaluate(doc: &RobotsDoc, path: &str) -> RobotsPolicy {
 /// configured rate. (Exclusive Books declares `Crawl-delay: 10`.)
 fn parse_and_apply(txt: &str, request_path: &str) -> RobotsPolicy {
     let groups = parse_groups(txt);
+    let sitemaps = parse_sitemaps(txt);
 
     // §2.2.1: prefer a group that names us; fall back to the wildcard group.
     let group = groups
@@ -220,7 +233,12 @@ fn parse_and_apply(txt: &str, request_path: &str) -> RobotsPolicy {
         .or_else(|| groups.iter().find(|g| g.wildcard));
 
     let Some(group) = group else {
-        return RobotsPolicy::unrestricted();
+        // No group applies to us, but a `Sitemap:` still does: it is document-level, not
+        // group-scoped, so it survives "nothing restricts us".
+        return RobotsPolicy {
+            sitemaps,
+            ..RobotsPolicy::unrestricted()
+        };
     };
 
     // §2.2.2: longest matching pattern wins; Allow wins ties. The winning pattern is
@@ -252,7 +270,42 @@ fn parse_and_apply(txt: &str, request_path: &str) -> RobotsPolicy {
             Some((_, false, pattern)) => Some(format!("Disallow: {pattern}")),
             _ => None,
         },
+        sitemaps,
     }
+}
+
+/// Collect `Sitemap:` URLs from the whole document.
+///
+/// ⚠️ **Document-level, deliberately not read from the winning group.** RFC 9309 §2.2.4 makes
+/// `Sitemap` a non-group field, so it may appear before any `User-agent` line, between groups, or
+/// after all of them — and it applies regardless of which group matched us. Reading it while walking
+/// groups would silently drop declarations that sit outside one, which is where shops commonly put
+/// them (both bookshops measured on 2026-07-29 declare it at the end of the file).
+///
+/// Duplicates are dropped: Exclusive Books declares the same sitemap twice, and fetching it twice
+/// would cost the shop double for nothing.
+fn parse_sitemaps(txt: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+
+    for line in txt.lines() {
+        // Strip comments before splitting: a `#` may follow the value.
+        let line = line.split('#').next().unwrap_or("");
+        let Some((field, value)) = line.split_once(':') else {
+            continue;
+        };
+        if !field.trim().eq_ignore_ascii_case("sitemap") {
+            continue;
+        }
+        // `split_once` cuts at the FIRST colon, which is the field separator — the URL's own
+        // `https:` colon comes later and is left intact.
+        let url = value.trim().to_string();
+        if url.is_empty() || out.contains(&url) {
+            continue;
+        }
+        out.push(url);
+    }
+
+    out
 }
 
 /// Split a robots.txt document into `User-agent` groups.
@@ -568,6 +621,74 @@ mod tests {
             apply("User-agent: *\nCrawl-delay: 0\n", "/x").crawl_delay_secs,
             None
         );
+    }
+
+    #[test]
+    fn test_sitemap_urls_are_retained() {
+        // The whole point: we already pay for robots.txt on every request, and the shop is telling
+        // us where its content index is. Harvesting that is free; guessing a path costs it a full
+        // page render (measured: 249,540 bytes for a Shopify 404).
+        let robots = "User-agent: *\nDisallow: /admin\nSitemap: https://shop.test/sitemap.xml\n";
+        let policy = apply(robots, "/events");
+        assert_eq!(policy.sitemaps, vec!["https://shop.test/sitemap.xml"]);
+    }
+
+    #[test]
+    fn test_sitemap_is_read_from_outside_any_group() {
+        // ⚠️ RFC 9309 §2.2.4: `Sitemap` is NOT a group member, so it may sit before any
+        // `User-agent` line. Reading it while walking groups would drop exactly this shape — and
+        // both bookshops measured on 2026-07-29 declare it outside a group.
+        let robots = "Sitemap: https://shop.test/sitemap.xml\nUser-agent: *\nDisallow: /admin\n";
+        let policy = apply(robots, "/events");
+        assert_eq!(policy.sitemaps, vec!["https://shop.test/sitemap.xml"]);
+    }
+
+    #[test]
+    fn test_sitemap_survives_when_no_group_applies_to_us() {
+        // "Nothing restricts us" must not also mean "we learned nothing". The sitemap is
+        // document-level and still applies.
+        let robots = "Sitemap: https://shop.test/sitemap.xml\n";
+        let policy = apply(robots, "/events");
+        assert!(policy.allowed);
+        assert_eq!(policy.sitemaps, vec!["https://shop.test/sitemap.xml"]);
+    }
+
+    #[test]
+    fn test_duplicate_sitemaps_are_dropped() {
+        // Exclusive Books declares the same sitemap twice. Fetching it twice would cost the shop
+        // double for no information.
+        let robots = "Sitemap: https://shop.test/sitemap.xml\nUser-agent: *\nSitemap: https://shop.test/sitemap.xml\n";
+        let policy = apply(robots, "/events");
+        assert_eq!(policy.sitemaps.len(), 1);
+    }
+
+    #[test]
+    fn test_multiple_distinct_sitemaps_are_all_kept_in_order() {
+        let robots = "Sitemap: https://shop.test/a.xml\nSitemap: https://shop.test/b.xml\n";
+        let policy = apply(robots, "/events");
+        assert_eq!(
+            policy.sitemaps,
+            vec!["https://shop.test/a.xml", "https://shop.test/b.xml"]
+        );
+    }
+
+    #[test]
+    fn test_sitemap_comment_is_stripped_and_url_scheme_survives() {
+        // Two things at once: a trailing comment must not become part of the URL, and the `https:`
+        // colon must survive the field/value split (which cuts at the FIRST colon).
+        let robots = "Sitemap: https://shop.test/sitemap.xml  # the index\n";
+        let policy = apply(robots, "/events");
+        assert_eq!(policy.sitemaps, vec!["https://shop.test/sitemap.xml"]);
+    }
+
+    #[test]
+    fn test_a_disallowed_path_still_reports_the_sitemap() {
+        // A block is a determination about one path, not about the document. We still know where
+        // the index is, which is how discovery can find an ALLOWED page instead.
+        let robots = "User-agent: *\nDisallow: /events\nSitemap: https://shop.test/sitemap.xml\n";
+        let policy = apply(robots, "/events");
+        assert!(!policy.allowed);
+        assert_eq!(policy.sitemaps, vec!["https://shop.test/sitemap.xml"]);
     }
 
     #[test]

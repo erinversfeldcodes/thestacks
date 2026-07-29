@@ -98,6 +98,16 @@ message FetchPageResponse {
   // Recorded on the store so a block is observable state rather than a silent skip,
   // and so an operator can tell a narrow disallow from a total one.
   string robots_rule = 4 [json_name = "robots_rule"];
+  // `Sitemap:` URLs the shop declares in its robots.txt, in order, de-duplicated.
+  //
+  // Carried on EVERY fetch response because robots.txt is already fetched for every
+  // request — so this information is free, and asking for it separately would cost the
+  // shop a request it should never have to serve.
+  //
+  // It is what makes polite discovery possible. Guessing a path costs the shop a full
+  // page render (measured: 249,540 bytes for a Shopify 404, which is a *styled error
+  // page*), whereas a sitemap index is ~10 KB and states exactly which pages exist.
+  repeated string sitemaps = 5 [json_name = "sitemaps"];
 }
 
 // What a scrape attempt concluded.

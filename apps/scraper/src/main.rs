@@ -427,34 +427,61 @@ async fn fetch_page(
             .into_response();
     }
 
-    match state.engine.fetch_path(&config, &payload.path).await {
-        Ok((status, body)) => Json(FetchPageResponse {
+    fetch_response(
+        state.engine.fetch_path(&config, &payload.path).await,
+        &payload.store,
+    )
+}
+
+/// Maps a fetch outcome onto the wire response.
+///
+/// Extracted from `fetch_page` so the branches are reachable **without a network round-trip**. The
+/// handler's own tests go through the real engine against the configured base URL, which means the
+/// robots-blocked branch cannot be exercised there at all — and that branch is the one carrying the
+/// easiest-to-lose piece of information in this file (see the `sitemaps` note below).
+fn fetch_response(
+    outcome: Result<(u16, String, Vec<String>), ScraperError>,
+    store: &str,
+) -> Response {
+    match outcome {
+        Ok((status, body, sitemaps)) => Json(FetchPageResponse {
             status: status as i32,
             body,
             outcome: fetch_outcome::FETCHED.to_string(),
             robots_rule: String::new(),
+            // Free information: robots.txt was already fetched for compliance, so the shop has
+            // already told us where its index is. Returning it means a caller never has to guess
+            // at a path, and a guess costs the shop a full page render.
+            sitemaps,
         })
         .into_response(),
 
-        Err(ScraperError::RobotsDisallowed { url, rule }) => {
+        Err(ScraperError::RobotsDisallowed {
+            url,
+            rule,
+            sitemaps,
+        }) => {
             tracing::info!(
                 "robots.txt disallows {} for store={} ({})",
                 url,
-                payload.store,
+                store,
                 rule
             );
 
+            // The sitemaps survive the refusal deliberately — see `ScraperError::RobotsDisallowed`.
+            // A blocked path plus "here is the index" is actionable; a blocked path alone is not.
             Json(FetchPageResponse {
                 status: 0,
                 body: String::new(),
                 outcome: fetch_outcome::ROBOTS_BLOCKED.to_string(),
                 robots_rule: rule,
+                sitemaps,
             })
             .into_response()
         }
 
         Err(e) => {
-            tracing::error!("fetch failed for store={}: {}", payload.store, e);
+            tracing::error!("fetch failed for store={}: {}", store, e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": e.to_string()})),
@@ -571,6 +598,9 @@ mod tests {
         let e = ScraperError::RobotsDisallowed {
             url: "https://exclusivebooks.co.za/search?q=9780156001311".to_string(),
             rule: "Disallow: /search".to_string(),
+            // Measured from the live document: it declares this outside any group, so we hold it
+            // even while refusing the path — that is how discovery finds a page it MAY fetch.
+            sitemaps: vec!["https://exclusivebooks.co.za/sitemap.xml".to_string()],
         };
         assert_eq!(outcome_for_error(&e), Some(outcome::ROBOTS_BLOCKED));
     }
@@ -856,6 +886,54 @@ requests_per_minute = 60
             resp.status(),
             StatusCode::BAD_REQUEST,
             "a well-formed relative path must not be rejected as malformed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_robots_block_still_reports_the_sitemaps_it_declared() {
+        // Reaching this branch through the router would take a live request to a store whose
+        // robots.txt refuses us, so the response mapping is driven directly.
+        //
+        // What it guards: we fetched robots.txt in order to learn we were refused, so we ALREADY
+        // know where the shop's index is. Dropping that on the way out is what would force the
+        // next attempt to *guess* a path — and a guess costs the shop a full page render to answer
+        // 404. Holding it is both the cheaper and the more respectful behaviour.
+        let resp = fetch_response(
+            Err(ScraperError::RobotsDisallowed {
+                url: "https://exclusivebooks.co.za/search?q=9780156001311".to_string(),
+                rule: "Disallow: /search".to_string(),
+                sitemaps: vec!["https://exclusivebooks.co.za/sitemap.xml".to_string()],
+            }),
+            "za/exclusive_books",
+        );
+
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(json["outcome"], fetch_outcome::ROBOTS_BLOCKED);
+        assert_eq!(json["robots_rule"], "Disallow: /search");
+        assert_eq!(
+            json["sitemaps"],
+            json!(["https://exclusivebooks.co.za/sitemap.xml"]),
+            "the refusal discarded the index that same robots.txt had just declared"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_declared_sitemap_omits_the_key_rather_than_asserting_none_exist() {
+        // `skip_serializing_if = "Vec::is_empty"` is load-bearing, not incidental. An absent key
+        // says "robots.txt declared nothing"; `"sitemaps": []` would read as a positive claim that
+        // the shop has no index, which we are in no position to make — plenty of sites serve
+        // /sitemap.xml without ever mentioning it in robots.txt.
+        let resp = fetch_response(Ok((200, "<html/>".to_string(), vec![])), "za/test_store");
+
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(json["outcome"], fetch_outcome::FETCHED);
+        assert!(
+            json.get("sitemaps").is_none(),
+            "an empty list was serialised as a claim that no sitemap exists: {json}"
         );
     }
 
