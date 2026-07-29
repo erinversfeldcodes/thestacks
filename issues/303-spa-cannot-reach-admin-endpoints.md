@@ -154,7 +154,7 @@ Verdict: ❌ — nothing currently exercises the client→admin-pipeline boundar
       the four stacked bugs: gate-not-page without an admin session; the page loading WITH rows;
       Approve/Reject rendering on a pending source; an admin **action** changing state (not merely a
       page load); and an admin 401 returning to the gate with `stacks-auth` intact.
-- [ ] ~~MFA re-verify loses no page state~~ — **DE-SCOPED, with reasoning.** `handleAdminSessionExpiry`
+**De-scoped (not a DoD item):** *MFA re-verify loses no page state.* `handleAdminSessionExpiry`
       puts the gate on the current route and re-resolves that route after re-auth, so the operator
       returns to the same *page* — but its internal state (filter tab, pagination) resets, because the
       page model is replaced by the gate's. Preserving it would mean keeping a page model alive
