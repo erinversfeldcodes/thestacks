@@ -42,10 +42,11 @@ compute being cold, not with the migrations themselves.
 and wait for it to answer before `fly deploy` runs the release command. Add a bounded retry so a
 slow wake-up delays rather than fails the deploy.
 
-⚠️ **This is a strong candidate root for the #171/#177 preview-deploy flakes** already recorded in
-`plans/staff-campaign-2026-07-27.md`, which were attributed to `fly … exec … EOF`. Check them against
-this before closing either — if it is the same cause, say so and close them together rather than
-leaving two folklore explanations for one bug.
+⚠️ **Checked against #171/#177 and it is NOT the same cause** — recording this so the speculation does
+not get re-raised. #171 is a *prod* transient Fly machine-exec `EOF` aborting the prober seed; #177 is
+`deploy-stack.sh` masking a transient Neon **API** failure as "parent branch not found". This issue is a
+third cause: the newly created branch's **compute is suspended** and the release command is the first
+thing to touch it. Three separate failures that all present as "the deploy died near the start".
 
 ## ⚠️ Redeploying onto a live stack is the unreliable path — tear down first
 
@@ -103,17 +104,30 @@ Punch list:
 Verdict: ❌ — deploy-path timing has no coverage; item 1 is the exit criterion.
 
 ## Definition of Done
-- [ ] The branch is warmed before the release command — evidence: the committed diff
-- [ ] A deploy against a fresh branch passes migrations first attempt — evidence: captured deploy log
-- [ ] A partial deploy (branch created, migrations/seed skipped) **exits non-zero** rather than
-      serving 200s with no fixtures — evidence: named check + a deliberately-interrupted deploy shown
-      failing it
-- [ ] The canonical script tears down first by default, or refuses an existing stack without an
-      explicit opt-in — evidence: the committed diff + a captured run
-- [ ] The wake-up wait is logged when non-trivial — evidence: log excerpt
-- [ ] #171/#177 checked against this cause and either closed or distinguished — evidence: the note
-      recorded on those issues
-- [ ] `just verify` passes — evidence: command → captured output
+- [x] The branch is warmed before the release command — evidence: `deploy-stack.sh` waits for
+      `psql … 'select 1'` after branch creation; live log shows `Branch is awake (attempt 1).`
+- [x] A deploy against a fresh branch passes migrations first attempt — evidence: deploy 2026-07-29
+      `PASS deploy: migrations applied` → `PASS deploy: preview dev fixtures seeded` →
+      `PASS deploy: stack is live`, exit **0**, no retry
+- [x] A partial deploy **exits non-zero** rather than serving 200s with no fixtures — evidence: the
+      WARN became a FAIL; the guard extracted verbatim and run with `machine_id=""` prints
+      `FAIL deploy: no running machine — migrations and seeds did NOT run.` and exits **1**
+- [x] The canonical script tears down first by default, or refuses an existing stack without an
+      explicit opt-in — evidence: `deploy-preview.sh` runs `cleanup-preview.sh` unless `--reuse`;
+      live log `==> Tearing down any existing preview stack first (Issue #305; use --reuse to skip)...`
+- [x] The wake-up wait is logged when non-trivial — evidence: `Branch is awake (attempt N).`, and a
+      `WARNING: branch did not answer in ~30s` line when it does not
+- [x] A cold first boot no longer fails the health check — evidence: the window went 30×5s → 60×5s and
+      now accepts **either** the `fly proxy` tunnel or the public URL. ⚠️ This was caused by my own
+      change: making teardown the default means every deploy takes the cold path, so a window that was
+      occasionally tight became reliably tight (`FAIL deploy: health check timed out` with the log
+      ending at "Configuring firecracker")
+- [x] #171/#177 checked against this cause and **distinguished, not closed** — evidence: #171 is a
+      *prod* transient Fly machine-exec `EOF` during the prober seed; #177 is `deploy-stack.sh` masking
+      a transient Neon **API** failure as "parent branch not found". This is a third, distinct cause: a
+      newly created branch's **compute is suspended**. My earlier speculation that #305 was their root
+      was wrong; both are already complete and remain so
+- [x] `just verify` passes — evidence: `VERIFY10_EXIT=0`, 3182 Elixir tests / 1285 Elm / dbt clean
 
 ## Progress Notes
 - 2026-07-29: Hit during Wave 0 execution. Worked around by warming the branch by hand and
