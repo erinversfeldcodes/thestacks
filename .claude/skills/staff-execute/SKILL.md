@@ -78,21 +78,40 @@ there, delete it and do the work.
    instrument applies to the *standard you hold the work to*: the Evidence Standard (read it AND run
    it), the mutation-probe protocol, the Bug-Catching Ladder, the Wiring Trace and its zero-row
    sweep, the Drive, the severity registers, the tone contract.
-2. **Turn each approved wave into ONE epic issue.** `mcp__project-tools__create_issue`, from
-   `issues/TEMPLATE.md`. The wave's items become the epic's **phases documented inside the epic**
-   — ⚠️ *not* separate ticket files invented up front, and never a cited `#NNN` with no backing
-   file. The orchestrator spins out real child issues during its own flow, which is where that
-   breakdown belongs and has always worked.
-3. **Write the persona's bar into the epic's DoD.** This is Mode E's substantive contribution and
-   the reason this isn't just "call the orchestrator". Each DoD box names its evidence, and for this
-   campaign's recurring defect classes specifically:
+2. **The issues already exist — read them, do not re-derive them.** Mode D's **Stage 7** files an
+   epic issue per wave and a real child issue file per item, sequenced, before execution begins. Your
+   job here is to *consume* that set: `mcp__project-tools__get_issue` each one, confirm each cited
+   number has a backing `issues/NNN-*.md`, and confirm each `## Dependencies` section names its
+   predecessors with reasons.
+
+   ⚠️ **If a wave's issues are missing, that is a Stage 7 failure — file them, then continue.** Do not
+   improvise a breakdown in your head and do not cite a `#NNN` you have not written; a number with no
+   file on disk is the specific defect that broke the 2026-07-27 handoff. `just wave-status <slug>`
+   refuses a wave whose item has no backing file, so this is checkable, not a matter of care.
+3. **Verify the persona's bar is in every DoD, and add it where it is not.** Stage 7 should have
+   written it; your job is that no issue reaches the orchestrator without it. Each DoD box names its
+   evidence, and for this campaign's recurring defect classes specifically:
    - a **live drive** for any user-facing surface — unit tests do not establish reachability;
    - a **mutation probe** on every load-bearing assertion, with the failure output quoted;
    - a **wiring trace + zero-row sweep** for anything with a pipeline behind it;
    - for a data-touching diff, the `gdpr-review` lens.
-4. **Hand the epic to the orchestrator in epic mode.** Do not re-derive its DAG, its worktree
-   isolation, its per-child review cycle, or its gates. `just ci` — not `just verify` — is the
-   integration gate (the #119 lesson).
+4. **Hand the epic and its filed children to the orchestrator in epic mode.** Do not re-derive its
+   DAG, its worktree isolation, its per-child review cycle, or its gates. `just ci` — not `just
+   verify` — is the integration gate (the #119 lesson).
+
+4a. ⛔ **Every issue and epic gets a `staff-review` as it is implemented — mandatory invocation.**
+   Not once per PR and not at the end: as the orchestrator completes each child issue, invoke the
+   **`staff-review` skill** over that issue's diff, and record the verdict in that issue's Progress
+   Notes. "Was this reviewed?" must be answerable from disk.
+
+   The verdict stays **advisory**. DESIGN CONCERNS goes to the human — fix now, file and ship, or
+   override — and never mechanically blocks. That combination is deliberate: a gate would put a taste
+   judgement in the critical path of every child, while optional invocation is how the review gets
+   skipped precisely on the diffs that most need it.
+
+   This is *in addition to* the `staff-review` already inside `finalize-pr`, which sees the cumulative
+   branch. A per-issue review catches a design problem while the diff is still small enough to change
+   cheaply; the branch-level one catches what only shows up when the pieces sit together.
 5. **Keep the campaign state file current** as the layer above epic state: set the wave's item
    `issue` to the epic number, mirror status, update `updated_at`. The hierarchy is
    campaign state → `plans/<root>-<slug>-epic-state.json` → per-child `plans/NNN-*-state.json`;
@@ -106,10 +125,13 @@ there, delete it and do the work.
 
 - **Do not reimplement the orchestrator.** If you find yourself writing a child-dependency DAG, a
   worktree scheme, or a review-revision loop, stop — epic mode has all three and they are proven.
-- **One epic per wave; items are phases inside it.** Ad-hoc labels are what made completion
-  uncheckable. Equally, do not manufacture a ticket file per item up front — the orchestrator
-  creates children as it goes, and a phantom `#NNN` is its own defect.
+- **One epic per wave, with its items filed as real child issues by Stage 7.** Ad-hoc labels are
+  what made completion uncheckable. The rule is not "don't file issues early" — it is **never cite a
+  number with no file behind it**. Filing them up front satisfies that; inventing `G4` or `#312` in
+  prose does not.
 - **`just wave-status` is the definition of done**, not your judgement and not a green suite.
 - **A stale state file is a defect** on par with a failing test — it is what a fresh pass reads.
 - **Never push; never deploy to production.** Preview deploys are yours.
 - **Report faithfully.** An item built but undriven is `in_progress`, and you name what is missing.
+- **An unreviewed issue is not done.** If an issue's Progress Notes carry no `staff-review` verdict,
+  it has not been reviewed, whatever anyone remembers about the run.

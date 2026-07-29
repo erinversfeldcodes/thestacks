@@ -27,7 +27,8 @@ supply one, derive a candidate from `notes/` and confirm it before proceeding.
 ## ⛔ Autonomy contract — read this before Stage 0
 
 **A campaign runs Stages 0 through 5 to completion without stopping for the human.** There is exactly
-**one** stop: Stage 6, presenting the Remediation Plan before any issue is created. Everything before
+**one** stop: Stage 6, presenting the Remediation Plan before any issue is created. **Stage 7 — filing
+the issues and epics and handing them over — runs on approval without a further stop.** Everything before
 that is yours to drive.
 
 This is not a licence to rush — it is the opposite. It means *never trade completeness for a
@@ -84,7 +85,7 @@ could summarise. Do not narrate. Screenshots are expensive: capture them for vis
    Staff Engineer, Mode D. Every cross-cutting section applies: Economy, the Bug-Catching Ladder,
    Goal Grounding, the Evidence Standard, The Drive, Test Critique, Simplification, the severity
    registers, the tone contract, and the boundaries.
-2. **Run Mode D's stages 0–6 as written**: frame from `notes/` → **surface inventory + the absence
+2. **Run Mode D's stages 0–7 as written**: frame from `notes/` → **surface inventory + the absence
    pass + the Comprehensive Walkthrough on a preview stack** → reconnaissance → deep passes →
    synthesis by root cause and leverage → sequencing → mandatory stop.
 2a. ⛔ **Stage 1c — the absence pass — is mandatory, and is what the 2026-07-27 run skipped.** Stage
@@ -101,7 +102,7 @@ could summarise. Do not narrate. Screenshots are expensive: capture them for vis
    don't. Screenshots throughout; server logs watched throughout.
 4. **Respect the stage order and say why it exists.** The walkthrough *aims* the code survey — brief
    each reader with what you actually observed in its subsystem, not with a generic survey request.
-   Synthesis before sequencing; the human stop before any issue exists.
+   Synthesis before sequencing; the human stop before any issue exists; then Stage 7 files them all.
 
 ## Stage exit criteria — how you know a stage is done without asking
 
@@ -118,6 +119,7 @@ its criterion is objectively met; then you move on **in the same turn**.
 | **4 Synthesis** | Every finding is assigned to a root cause; each root has its symptoms listed as acceptance criteria and a stated leverage; the ladder-wins group exists. **A flat list of findings means this stage is not done.** |
 | **5 Sequencing** | Every accepted root sits in a numbered wave, each wave naming the sequencing rule that placed it, with sizes and dependencies. |
 | **6 Present** | ⛔ **The one stop.** Plan written to `plans/staff-campaign-<date>.md` **and** `plans/staff-campaign-<date>-state.json` (per-wave, per-item, each naming its backing issue). `just wave-status <slug>` runs clean. No issue created yet. |
+| **7 File & hand off** | Runs **immediately on approval, with no second check-in.** Every wave has an epic issue file and every item a child issue file in `issues/`, each with a full template shape, a DoD whose boxes name their evidence, and a `## Dependencies` section citing predecessors **by number and reason**. `just wave-status <slug>` still clean, every cited number backed by a file on disk. Handed to the orchestrator with the plan. |
 
 **Cross-cutting instruments are not optional and are part of Stage 3's criterion.** A campaign that
 reaches synthesis without having produced any mutation probes, any Reference Corpus citation, any
@@ -157,16 +159,55 @@ coverage table, reconnaissance numbers, root findings clustered with their sympt
 the ladder-wins group, dependency-ordered waves of issues, what's deliberately excluded, and what
 the whole thing costs and buys.
 
-Then, **on human approval only**: **one epic issue per wave** via `create-issue`, in dependency
-order, each wave's items recorded as **phases inside its epic** (not as invented ticket files — the
-orchestrator spins out the real children during its own flow, and a cited `#NNN` with no backing
-file is its own defect). Execution is **Mode E (`staff-execute`)**, which forms the epics, writes
-the persona's bar into their DoD, and drives the orchestrator's Epic Parallel Execution — the flow
-that already works and is ticket-driven.
+## Stage 7 — file the whole plan as issues and epics, then hand it over
 
-⚠️ **Emitting waves of ad-hoc labels instead of epics is what broke the 2026-07-27 handoff.** `G1`,
-`G4`, `C3`, `P7` are a work-unit type no tooling here reads: no issue file, no DoD, no state. The
-campaign could not hand off to the machinery that works, so the plan was carried by hand and
+⛔ **A plan is not a deliverable on its own.** Stage 6 is the one stop; Stage 7 runs immediately on
+approval, without a second check-in, and it is what makes the plan executable.
+
+**Every wave becomes an epic issue, and every item in it becomes a real child issue file.** All of
+them are written to `issues/` before execution begins, via the **`create-issue` skill** so each one
+gets the template's full shape — Scope Check, Wiring, Feature-Completeness Pre-Check, Test Audit,
+Reviewer Context, and a DoD whose every box names its evidence.
+
+⚠️ **File real files, never bare numbers.** The rule this replaces was "don't manufacture ticket
+files up front", and its actual point was narrower: *never cite a `#NNN` that has no backing file.*
+Up-front filing satisfies that rule rather than breaking it — what breaks it is a plan that
+references `G1` or `#312` with nothing on disk. Every number this stage emits must be a file you
+wrote, and `just wave-status <slug>` will refuse the wave otherwise (it fails on an item marked done
+with no backing `issues/NNN-*.md`).
+
+**Sequence them explicitly.** Each issue's `## Dependencies` section names the issues that must land
+first, by number and by reason. The sequencing rules are the ones from Stage 5: deletions before
+refactors, contracts before consumers, guarantees before the refactors that need them, ladder climbs
+before retiring the tests they replace. A dependency with no stated reason is not a dependency, it is
+a guess about ordering.
+
+**Write the persona's bar into every DoD.** This is the campaign's substantive contribution and the
+reason this is not just "call `create-issue` in a loop". For the recurring defect classes:
+a **live drive** for any user-facing surface; a **mutation probe** on every load-bearing assertion,
+with the failure output quoted; a **wiring trace plus zero-row sweep** for anything with a pipeline
+behind it; the **`gdpr-review`** lens for a data-touching diff.
+
+**Then hand the set to the orchestrator** — the plan file, the epic numbers in dependency order, and
+each epic's children. Execution is **Mode E (`staff-execute`)**, which drives the orchestrator's Epic
+Parallel Execution unchanged; it adapts, it does not reimplement.
+
+### ⛔ Every issue and epic gets a `staff-review` as it is implemented
+
+Not at the end, and not once per PR: **as each issue is implemented, that issue's diff is reviewed by
+the Staff Engineer via the `staff-review` skill.** Invocation is **mandatory**; the verdict remains
+**advisory** — DESIGN CONCERNS goes to the human to decide (fix now / file and ship / override), and
+never mechanically blocks.
+
+Mandatory-invocation-with-advisory-verdict is the deliberate combination. Making it a gate would put
+a taste judgement in the critical path of every child issue; leaving invocation optional is how it
+gets skipped exactly on the diffs that most need a second pair of eyes. Record the verdict per issue
+in that issue's Progress Notes, so "was this reviewed?" is answerable from disk rather than from
+someone's memory of the run.
+
+⚠️ **Emitting waves of ad-hoc labels instead of filed issues is what broke the 2026-07-27 handoff.**
+`G1`, `G4`, `C3`, `P7` are a work-unit type no tooling here reads: no issue file, no DoD, no state.
+The campaign could not hand off to the machinery that works, so the plan was carried by hand and
 execution happened outside any harness.
 
 ## Guardrails
@@ -185,5 +226,11 @@ execution happened outside any harness.
   before retiring the tests they replace.
 - **Coverage honesty.** State what you surveyed, drove, probed, and skipped. Implied completeness
   is the failure mode that makes a plan dangerous rather than merely incomplete.
-- **Plan, don't implement.** No production edits (mutation probes only, always reverted). Hand
-  execution to the orchestrator.
+- **Plan, don't implement — but do finish the handoff.** No production edits (mutation probes only,
+  always reverted). Stage 7 writes *issue files*, which is paperwork, not implementation, and it is
+  not optional: a plan handed over as prose is a plan someone carries by hand.
+- **Every number you emit is a file on disk.** No `G1`, no `#312` you did not write. `just
+  wave-status <slug>` enforces this and will refuse a wave whose item has no backing issue file.
+- **Mandatory `staff-review` per issue, advisory verdict.** Each issue's implementation diff gets a
+  `staff-review`, recorded in that issue's Progress Notes. It never mechanically blocks; DESIGN
+  CONCERNS goes to the human to decide.
