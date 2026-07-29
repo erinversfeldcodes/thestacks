@@ -282,6 +282,55 @@ message Bookstore {
   double latitude = 19 [json_name = "latitude"];
   // Decimal degrees, WGS 84. Null until geocoded.
   double longitude = 20 [json_name = "longitude"];
+
+  // ── Events page ─────────────────────────────────────────────────────────
+  //
+  // Where this shop's events actually live, resolved from its own sitemap.
+  //
+  // `DiscoverBookstoreEventsJob` used to fetch one hardcoded `/events` on every store, and it 404s
+  // on **every** scrapeable store — so the events pipeline had never written a row. Guessing further
+  // is not cheap for the shop either: a Shopify 404 is a *styled* page, measured at 249,540 bytes.
+  //
+  // Stored so the question is asked once. `Stacks.Enrichment.EventsPath` is the only writer.
+  //
+  // ⚠️ Deliberately NOT folded into `unscrapable_reason` above. That field means "this store cannot
+  // be *priced*", and a shop can be perfectly priceable while having no events page — the two are
+  // independent facts about a store and one field cannot answer both.
+
+  // Path relative to the store root, e.g. "/pages/events". Empty until resolved.
+  string events_path = 21 [json_name = "events_path"];
+
+  // When resolution was last attempted.
+  //
+  // This is the field that makes "we looked and found nothing" distinguishable from "we have not
+  // looked yet" — an empty `events_path` alone cannot tell those apart, and treating the second as
+  // the first is how a shop gets permanently written off. It also makes the verdict *re-checkable*:
+  // a shop that adds an events page next month should be found, so a stale check is a reason to look
+  // again. Exactly the role `robots_blocked_at` plays for a disallow.
+  google.protobuf.Timestamp events_path_checked_at = 22 [json_name = "events_path_checked_at"];
+
+  // Why the last attempt resolved nothing — "no sitemap declared in robots.txt", "no candidate
+  // matched", "candidate answered 404", "shop paced us".
+  //
+  // Free text for the same reason `unscrapable_reason` is: it is a note for a human operator, and an
+  // enum would need extending every time a shop turns out to be unresolvable in a new way. The
+  // distinctions matter operationally — "no sitemap" is a shop we could not ask, while "no candidate
+  // matched" is a shop we asked and that genuinely lists no events page.
+  string events_unresolved_reason = 23 [json_name = "events_unresolved_reason"];
+
+  // Cache validators from the last fetch of `events_path`, sent back as `If-None-Match` /
+  // `If-Modified-Since` so the shop can answer 304 instead of rendering the page again.
+  //
+  // An events page is re-read on a schedule and changes rarely, which makes this the cheapest
+  // courtesy available: a 304 carries no body at all. Stored per store because a validator is only
+  // meaningful for the exact URL that issued it.
+  //
+  // ⚠️ Stored and sent **verbatim**. An ETag is an opaque byte string — weak (`W/"..."`), quoted,
+  // whatever the origin chose — so normalising it makes it silently stop matching, and the failure is
+  // invisible: everything keeps working, just at full cost to the shop.
+  string events_page_etag = 24 [json_name = "events_page_etag"];
+  // The origin's `Last-Modified` for `events_path`, verbatim.
+  string events_page_last_modified = 25 [json_name = "events_page_last_modified"];
 }
 
 // PriceSnapshot represents a scraped price for a book at a store.
