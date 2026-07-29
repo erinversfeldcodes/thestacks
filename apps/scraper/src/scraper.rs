@@ -78,6 +78,21 @@ pub struct Validators {
     pub if_modified_since: String,
 }
 
+/// One capped document read: what came back, and whether we hung up before the end of it.
+///
+/// `hung_up` exists because a byte cap that silently truncates is indistinguishable from a short
+/// document. The walk sets `truncated` from it — without that, cutting an index off mid-`<loc>` yields
+/// a parse with no children and a walk that ends *normally*, reporting a complete result for a
+/// document it only partly read. Found by the test that drove budget exhaustion, which is exactly the
+/// branch that had never been exercised.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CappedBody {
+    status: u16,
+    body: String,
+    bytes: u64,
+    hung_up: bool,
+}
+
 /// One page fetch: what came back, plus the validators to send next time.
 ///
 /// A struct rather than a widening tuple. `fetch_path` previously returned
@@ -124,6 +139,8 @@ enum HarvestStep {
     Read {
         bytes: u64,
         doc: sitemap::SitemapDoc,
+        /// The byte cap cut this document short, so its `locs` are incomplete.
+        hung_up: bool,
     },
     Skipped(String),
     /// End the whole walk — budget spent, or the shop asked us to back off.
@@ -187,6 +204,13 @@ pub struct Engine {
     robots: RobotsChecker,
     /// Pre-loaded fixture HTML keyed by store ID (used when MOCK_HTTP=true).
     fixtures: HashMap<String, String>,
+    /// Pre-loaded `(status, body)` keyed by **URL**, for mock-mode `fetch_capped`. Keyed by URL
+    /// rather than store because a sitemap walk fetches several distinct documents per store.
+    http_fixtures: HashMap<String, (u16, String)>,
+    /// What mock-mode robots.txt declares under `Sitemap:`. Stated explicitly by a test rather than
+    /// defaulted, because "which sitemaps did the shop declare" is the input the walk turns on — a
+    /// convenient default would let a test pass without saying what it was testing.
+    mock_sitemaps: Vec<String>,
     /// True when running in mock mode (no real HTTP calls).
     mock: bool,
     /// Observed platform capability per store, so detection costs two requests
@@ -221,10 +245,24 @@ impl Engine {
             client,
             rate_limiter,
             fixtures: HashMap::new(),
+            http_fixtures: HashMap::new(),
+            mock_sitemaps: Vec::new(),
             mock: false,
             capabilities: dashmap::DashMap::new(),
             indexes: dashmap::DashMap::new(),
         })
+    }
+
+    /// Create an engine serving `(status, body)` per URL — for exercising the sitemap walk.
+    #[cfg(test)]
+    pub fn new_mock_http(
+        http_fixtures: HashMap<String, (u16, String)>,
+        declared_sitemaps: Vec<String>,
+    ) -> Self {
+        let mut engine = Self::new_mock(HashMap::new());
+        engine.http_fixtures = http_fixtures;
+        engine.mock_sitemaps = declared_sitemaps;
+        engine
     }
 
     /// Create an engine that serves HTML from a pre-loaded fixture map.
@@ -238,6 +276,8 @@ impl Engine {
             client,
             rate_limiter,
             fixtures,
+            http_fixtures: HashMap::new(),
+            mock_sitemaps: Vec::new(),
             mock: true,
             capabilities: dashmap::DashMap::new(),
             indexes: dashmap::DashMap::new(),
@@ -895,18 +935,28 @@ impl Engine {
         &self,
         config: &ScraperConfig,
     ) -> Result<SitemapHarvest, ScraperError> {
+        self.sitemap_urls_with_budget(config, CrawlBudget::for_discovery())
+            .await
+    }
+
+    /// As `sitemap_urls`, with the budget supplied.
+    ///
+    /// A parameter so budget *exhaustion* can be driven by a tiny cap rather than a multi-megabyte
+    /// fixture. Production always calls `sitemap_urls`, which supplies `for_discovery()` — the budget
+    /// is not a per-caller knob and callers do not get to raise it.
+    pub async fn sitemap_urls_with_budget(
+        &self,
+        config: &ScraperConfig,
+        mut budget: CrawlBudget,
+    ) -> Result<SitemapHarvest, ScraperError> {
         let base = config.source.url.trim_end_matches('/').to_string();
         let domain = extract_domain(&config.source.url).unwrap_or_else(|| base.clone());
         let mut harvest = SitemapHarvest::default();
-        let mut budget = CrawlBudget::for_discovery();
 
         // robots.txt is read for compliance anyway, and it is what declares the index. Permission is
         // checked for the sitemap path itself, not for "/" — a shop may disallow one and not the
         // other, and assuming otherwise is how a compliance check becomes decorative.
-        let policy = self
-            .robots
-            .policy(&base, "/robots.txt", config.rate_limit.retry_after_seconds)
-            .await?;
+        let policy = self.policy_for(&base, "/robots.txt", config).await?;
 
         if policy.sitemaps.is_empty() {
             return Ok(harvest);
@@ -943,9 +993,19 @@ impl Engine {
                     break;
                 }
                 HarvestStep::Skipped(why) => harvest.skipped.push(why),
-                HarvestStep::Read { bytes, doc } => {
+                HarvestStep::Read {
+                    bytes,
+                    doc,
+                    hung_up,
+                } => {
                     harvest.documents_fetched += 1;
                     harvest.bytes_read += bytes;
+
+                    // A document we only partly read cannot yield a complete answer, whether or not
+                    // the walk later runs out of requests.
+                    if hung_up {
+                        harvest.truncated = true;
+                    }
 
                     match doc.kind {
                         sitemap::DocKind::Index => {
@@ -996,11 +1056,7 @@ impl Engine {
             Spend::Exhausted => return HarvestStep::Stop,
         };
 
-        match self
-            .robots
-            .policy(domain, path, config.rate_limit.retry_after_seconds)
-            .await
-        {
+        match self.policy_for(domain, path, config).await {
             Ok(policy) if !policy.allowed => {
                 return HarvestStep::Skipped(format!(
                     "{url} ({})",
@@ -1027,17 +1083,18 @@ impl Engine {
         tokio::time::sleep(sitemap::INTER_DOCUMENT_DELAY).await;
 
         match self.fetch_capped(url, byte_limit).await {
-            Ok((status, body, bytes)) => {
-                budget.charge_bytes(bytes);
+            Ok(read) => {
+                budget.charge_bytes(read.bytes);
 
                 // Only a 2xx body is parsed. A 404 is data about the shop; a 429 is a challenge page
                 // that would parse cleanly and mean nothing.
-                if !(200..300).contains(&status) {
-                    return HarvestStep::Skipped(format!("{url} (HTTP {status})"));
+                if !(200..300).contains(&read.status) {
+                    return HarvestStep::Skipped(format!("{url} (HTTP {})", read.status));
                 }
                 HarvestStep::Read {
-                    bytes,
-                    doc: sitemap::parse(&body),
+                    bytes: read.bytes,
+                    doc: sitemap::parse(&read.body),
+                    hung_up: read.hung_up,
                 }
             }
             Err(e) => {
@@ -1056,11 +1113,29 @@ impl Engine {
     /// Returns the bytes actually transferred, so the budget is charged for what happened rather
     /// than for what was permitted. The body may be truncated mid-element; `sitemap::parse` is built
     /// to return what it had rather than fail, and there is a test for that shape.
-    async fn fetch_capped(
-        &self,
-        url: &str,
-        byte_limit: u64,
-    ) -> Result<(u16, String, u64), ScraperError> {
+    async fn fetch_capped(&self, url: &str, byte_limit: u64) -> Result<CappedBody, ScraperError> {
+        // Mock mode serves documents from `http_fixtures`, keyed by URL. This is the seam that makes
+        // the *assembly* of the walk testable — queue refill, budget threading, `Stop` propagation —
+        // rather than only its pieces. The cap applies to fixtures too, so budget exhaustion is
+        // drivable without a huge fixture.
+        if self.mock {
+            let (status, body) = self
+                .http_fixtures
+                .get(url)
+                .cloned()
+                .unwrap_or((404, String::new()));
+
+            let capped: Vec<u8> = body.bytes().take(byte_limit as usize).collect();
+            let hung_up = capped.len() < body.len();
+
+            return Ok(CappedBody {
+                status,
+                bytes: capped.len() as u64,
+                body: String::from_utf8_lossy(&capped).into_owned(),
+                hung_up,
+            });
+        }
+
         let mut response = self
             .client
             .get(url)
@@ -1070,10 +1145,12 @@ impl Engine {
 
         let status = response.status().as_u16();
         let mut body = Vec::new();
+        let mut hung_up = false;
 
         while let Some(chunk) = response.chunk().await.map_err(ScraperError::Http)? {
             body.extend_from_slice(&chunk);
             if body.len() as u64 >= byte_limit {
+                hung_up = true;
                 tracing::info!(
                     "hung up on {} at {} bytes (budget {})",
                     url,
@@ -1084,10 +1161,41 @@ impl Engine {
             }
         }
 
-        let bytes = body.len() as u64;
         // Lossy rather than an error: a sitemap is XML and should be UTF-8, but a body truncated
         // mid-codepoint by the cap above is normal, not a defect worth failing the walk over.
-        Ok((status, String::from_utf8_lossy(&body).into_owned(), bytes))
+        Ok(CappedBody {
+            status,
+            bytes: body.len() as u64,
+            body: String::from_utf8_lossy(&body).into_owned(),
+            hung_up,
+        })
+    }
+
+    /// robots.txt policy for a path, honouring mock mode.
+    ///
+    /// ⚠️ Extracted because two call sites had the `if self.mock` guard and **two did not**:
+    /// `sitemap_urls` and `harvest_one` went straight to `RobotsChecker`, so `Engine::new_mock` —
+    /// whose entire contract is "never touches the network" — would have issued live requests for
+    /// robots.txt. That is a broken guarantee, and it is also why the sitemap walk had no test at
+    /// all: it could not be run without a network.
+    ///
+    /// A guard each new egress path must remember is a guard that will be forgotten. One way to ask.
+    async fn policy_for(
+        &self,
+        base_url: &str,
+        path: &str,
+        config: &ScraperConfig,
+    ) -> Result<crate::robots::RobotsPolicy, ScraperError> {
+        if self.mock {
+            return Ok(crate::robots::RobotsPolicy {
+                sitemaps: self.mock_sitemaps.clone(),
+                ..crate::robots::RobotsPolicy::unrestricted()
+            });
+        }
+
+        self.robots
+            .policy(base_url, path, config.rate_limit.retry_after_seconds)
+            .await
     }
 
     /// Turn a pacing response into the determination it is, recording the cooldown on the way.
@@ -1317,6 +1425,197 @@ mod tests {
     // ------------------------------------------------------------------
     // The sitemap walk's own two decisions
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // The sitemap walk, END TO END — the assembly, not its pieces
+    // ------------------------------------------------------------------
+    //
+    // ⛔ Every piece of `sitemap_urls` was unit-tested and the loop joining them had **never run
+    // once**: queue refill from a parsed index, budget threading, robots/rate-limit ordering, and
+    // `Stop` becoming `truncated`. That is exactly the defect #307 exists to fix — stages that each
+    // pass while the chain does nothing — reproduced one layer above it.
+    //
+    // These run through `Engine::new_mock_http`, which serves `(status, body)` per URL, so the whole
+    // walk executes with no network.
+
+    fn walk_engine(pairs: Vec<(&str, u16, &str)>, declared: &[&str]) -> Engine {
+        Engine::new_mock_http(
+            pairs
+                .into_iter()
+                .map(|(url, status, body)| (url.to_string(), (status, body.to_string())))
+                .collect(),
+            declared.iter().map(|s| s.to_string()).collect(),
+        )
+    }
+
+    fn walk_config() -> ScraperConfig {
+        ScraperConfig::from_toml_str(
+            r#"
+[source]
+name = "Walk Test"
+country = "ZA"
+url = "https://shop.test"
+
+[search]
+method = "GET"
+path = "/search"
+query_param = "q"
+query_template = "{isbn}"
+
+[selectors]
+price = ".price"
+currency = "ZAR"
+
+[rate_limit]
+requests_per_minute = 60
+"#,
+        )
+        .unwrap()
+    }
+
+    const INDEX: &str = r#"<sitemapindex>
+        <sitemap><loc>https://shop.test/sitemap_pages_1.xml</loc></sitemap>
+        <sitemap><loc>https://shop.test/sitemap_products_1.xml</loc></sitemap>
+      </sitemapindex>"#;
+
+    const PAGES: &str = r#"<urlset>
+        <url><loc>https://shop.test/pages/events</loc></url>
+        <url><loc>https://shop.test/pages/about</loc></url>
+      </urlset>"#;
+
+    #[tokio::test]
+    async fn the_walk_follows_an_index_to_its_page_child_and_refuses_the_catalogue() {
+        // The whole feature in one assertion: index → page child → URLs, catalogue never requested.
+        // A broken queue refill leaves the page child unread; a bypassed classification fetches the
+        // catalogue.
+        let engine = walk_engine(
+            vec![
+                ("https://shop.test/sitemap.xml", 200, INDEX),
+                ("https://shop.test/sitemap_pages_1.xml", 200, PAGES),
+                ("https://shop.test/sitemap_products_1.xml", 200, "<urlset/>"),
+            ],
+            &["https://shop.test/sitemap.xml"],
+        );
+
+        let mut harvest = engine.sitemap_urls(&walk_config()).await.unwrap();
+        harvest.urls.sort();
+
+        assert_eq!(
+            harvest.urls,
+            vec![
+                "https://shop.test/pages/about",
+                "https://shop.test/pages/events"
+            ],
+            "the index was fetched but its page child was never followed"
+        );
+        assert_eq!(harvest.documents_fetched, 2);
+        assert!(
+            harvest
+                .skipped
+                .iter()
+                .any(|s| s.contains("sitemap_products_1.xml")),
+            "the catalogue child was not reported as skipped: {:?}",
+            harvest.skipped
+        );
+        assert!(!harvest.truncated);
+        assert!(harvest.bytes_read > 0, "no bytes charged for two documents");
+    }
+
+    #[tokio::test]
+    async fn an_exhausted_budget_reports_truncated_rather_than_looking_complete() {
+        // ⛔ `truncated` was set in the code and asserted nowhere, and writing this test found a real
+        // defect: a byte cap that cut a document short did NOT set it. The index was truncated
+        // mid-`<loc>`, parsed to zero children, and the walk ended *normally* — reporting a complete
+        // result for a document it had only partly read.
+        let engine = walk_engine(
+            vec![
+                ("https://shop.test/sitemap.xml", 200, INDEX),
+                ("https://shop.test/sitemap_pages_1.xml", 200, PAGES),
+            ],
+            &["https://shop.test/sitemap.xml"],
+        );
+
+        let harvest = engine
+            .sitemap_urls_with_budget(&walk_config(), CrawlBudget::new(1, 64))
+            .await
+            .unwrap();
+
+        assert!(
+            harvest.truncated,
+            "the walk read a partial document but reported a complete result"
+        );
+        assert_eq!(harvest.documents_fetched, 1);
+    }
+
+    #[tokio::test]
+    async fn a_cross_host_sitemap_line_is_skipped_by_the_walk_itself() {
+        // `path_within` is unit-tested; this proves the WALK consults it. A guard that exists and is
+        // never called is the same as no guard.
+        let engine = walk_engine(
+            vec![(
+                "https://evil.test/sitemap.xml",
+                200,
+                "<urlset><url><loc>https://evil.test/x</loc></url></urlset>",
+            )],
+            &["https://evil.test/sitemap.xml"],
+        );
+
+        let harvest = engine.sitemap_urls(&walk_config()).await.unwrap();
+
+        assert!(
+            harvest.urls.is_empty(),
+            "a sitemap on another host was followed: {:?}",
+            harvest.urls
+        );
+        assert!(
+            harvest.skipped.iter().any(|s| s.contains("not on")),
+            "the refusal was not reported: {:?}",
+            harvest.skipped
+        );
+    }
+
+    #[tokio::test]
+    async fn a_response_that_is_not_a_sitemap_is_reported_not_treated_as_empty() {
+        // The 429 bot-challenge case, end to end. Reporting it as "the shop lists no pages" is the
+        // false negative that never re-checks.
+        let engine = walk_engine(
+            vec![(
+                "https://shop.test/sitemap.xml",
+                200,
+                "<!DOCTYPE html><html><title>Verifying your connection...</title></html>",
+            )],
+            &["https://shop.test/sitemap.xml"],
+        );
+
+        let harvest = engine.sitemap_urls(&walk_config()).await.unwrap();
+
+        assert!(harvest.urls.is_empty());
+        assert!(
+            harvest.skipped.iter().any(|s| s.contains("not a sitemap")),
+            "a challenge page was counted as a sitemap listing nothing: {:?}",
+            harvest.skipped
+        );
+    }
+
+    #[tokio::test]
+    async fn a_non_2xx_child_is_skipped_rather_than_parsed() {
+        let engine = walk_engine(
+            vec![
+                ("https://shop.test/sitemap.xml", 200, INDEX),
+                ("https://shop.test/sitemap_pages_1.xml", 503, "server error"),
+            ],
+            &["https://shop.test/sitemap.xml"],
+        );
+
+        let harvest = engine.sitemap_urls(&walk_config()).await.unwrap();
+
+        assert!(harvest.urls.is_empty());
+        assert!(
+            harvest.skipped.iter().any(|s| s.contains("HTTP 503")),
+            "a 503 body was parsed as a sitemap: {:?}",
+            harvest.skipped
+        );
+    }
 
     #[test]
     fn a_sitemap_on_another_host_is_refused_not_followed() {
