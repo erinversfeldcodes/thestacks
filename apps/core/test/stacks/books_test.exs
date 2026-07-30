@@ -720,35 +720,61 @@ defmodule Stacks.BooksTest do
       existing_book = insert(:book, title: "Nineteen Eighty-Four")
       insert(:book_edition, book: existing_book, isbn: "9780141036144")
 
-      assert {:ok, :existing, returned_book, placement} =
+      assert {:ok, :existing, returned_book, placement, placements} =
                Books.confirm(user.id, %{isbn: "9780141036144"})
 
       assert returned_book.id == existing_book.id
       assert placement.book_id == existing_book.id
+      assert Enum.map(placements, & &1.id) == [placement.id]
     end
 
-    test "returns {:ok, :existing, book, placement} when ISBN exists but user has no placement" do
+    test "returns {:ok, :existing, book, placement, placements} when ISBN exists but user has no placement" do
       user = insert(:user)
       existing_book = insert(:book, title: "Already In Catalogue")
       insert(:book_edition, book: existing_book, isbn: "9780141036144")
 
-      assert {:ok, :existing, book, placement} = Books.confirm(user.id, %{isbn: "9780141036144"})
+      assert {:ok, :existing, book, placement, [only]} =
+               Books.confirm(user.id, %{isbn: "9780141036144"})
+
       assert book.id == existing_book.id
       assert placement.book_id == existing_book.id
+      assert only.id == placement.id
     end
 
-    test "returns {:ok, :already_placed, book, placement} when user already owns the book" do
+    test "returns :already_placed only when the book is on the bookshelf that was ASKED for" do
       user = insert(:user)
       existing_book = insert(:book, title: "Already Placed Book")
       insert(:book_edition, book: existing_book, isbn: "9780141036144")
       bookshelf = insert(:bookshelf, user: user, name: "library")
       existing_placement = insert(:placement, book: existing_book, bookshelf: bookshelf)
 
-      assert {:ok, :already_placed, book, placement} =
-               Books.confirm(user.id, %{isbn: "9780141036144"})
+      assert {:ok, :already_placed, book, placement, [only]} =
+               Books.confirm(user.id, %{isbn: "9780141036144", shelf_name: "library"})
 
       assert book.id == existing_book.id
       assert placement.id == existing_placement.id
+      assert only.id == existing_placement.id
+    end
+
+    # #333 — inform, never block. Owning the book on ANOTHER bookshelf used to
+    # short-circuit to :already_placed, so the requested placement was never
+    # made: a silent refusal reported as success. Multi-shelf is legal now, so
+    # the placement happens and the caller is handed every shelf to inform with.
+    test "a book owned on another bookshelf is still placed on the requested one" do
+      user = insert(:user)
+      existing_book = insert(:book, title: "Wanted On Two Shelves")
+      insert(:book_edition, book: existing_book, isbn: "9780141036144")
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      existing_placement = insert(:placement, book: existing_book, bookshelf: bookshelf)
+
+      assert {:ok, :existing, book, placement, placements} =
+               Books.confirm(user.id, %{isbn: "9780141036144", shelf_name: "wishlist"})
+
+      assert book.id == existing_book.id
+      assert placement.bookshelf.name == "wishlist"
+      assert placement.id != existing_placement.id
+
+      assert placements |> Enum.map(& &1.bookshelf.name) |> Enum.sort() == ["library", "wishlist"]
     end
 
     test "returns {:error, {:merge_required, existing_work_id}} when same work detected via fuzzy match" do

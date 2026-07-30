@@ -282,7 +282,7 @@ suite =
                             { base | pendingBookIds = [ "book-1" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.result |> Expect.equal (Identified [ dummyBook ])
@@ -298,7 +298,7 @@ suite =
                             { init_ | pendingBookIds = [ "book-1", "book-2" ], collectedBooks = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing })) modelPending Nothing
+                            Upload.update (GotIdentifiedBook "book-1" (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) modelPending Nothing
                     in
                     Expect.all
                         [ \m -> m.pendingBookIds |> Expect.equal [ "book-2" ]
@@ -327,7 +327,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing })) Upload.init Nothing
+                            Upload.update (GotDuplicateBook (Ok { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })) Upload.init Nothing
                     in
                     model.result |> Expect.equal (DuplicateDetected dummyBook)
             , -- US-1.1.6 | Suite 10: Elm
@@ -640,7 +640,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing }
+                            { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
 
                         ( model, _, _ ) =
                             Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
@@ -651,6 +651,65 @@ suite =
                         , \m -> m.isbnLookupState |> Expect.equal (Success ())
                         ]
                         model
+            , -- US-1.1.6 / #333 | Suite 10: Elm — the manual-ISBN duplicate
+              -- notice. The photo path has had `is_duplicate` for a long time;
+              -- typing the ISBN by hand told the reader nothing, so a second
+              -- placement happened silently.
+              test "IsbnLookupResult Ok records the bookshelves the book is already on" <|
+                \_ ->
+                    let
+                        response =
+                            { book = dummyBook
+                            , placement = Just { dummyPlacement | bookshelfName = Just "library" }
+                            , bookshelfVisibility = Nothing
+                            , placements =
+                                [ { dummyPlacement | id = "p1", bookshelfName = Just "library" }
+                                , { dummyPlacement | id = "p2", bookshelfName = Just "wishlist" }
+                                ]
+                            }
+
+                        ( model, _, _ ) =
+                            Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
+                    in
+                    model.existingShelves |> Expect.equal [ "library", "wishlist" ]
+            , -- #333 — inform, NEVER block: an already-owned book still walks
+              -- the same path to the verification step. If this ever diverges,
+              -- the notice has become a gate.
+              test "IsbnLookupResult Ok on an already-owned book still reaches Verifying" <|
+                \_ ->
+                    let
+                        response =
+                            { book = dummyBook
+                            , placement = Just { dummyPlacement | bookshelfName = Just "library" }
+                            , bookshelfVisibility = Nothing
+                            , placements =
+                                [ { dummyPlacement | bookshelfName = Just "library" } ]
+                            }
+
+                        ( model, _, _ ) =
+                            Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.step |> Expect.equal (Verifying dummyBook)
+                        , \m -> m.result |> Expect.equal (Identified [ dummyBook ])
+                        , \m -> m.isbnLookupState |> Expect.equal (Success ())
+                        ]
+                        model
+            , -- #333 — a book the reader does not own leaves the notice empty.
+              test "IsbnLookupResult Ok with no placements records no existing shelves" <|
+                \_ ->
+                    let
+                        response =
+                            { book = dummyBook
+                            , placement = Nothing
+                            , bookshelfVisibility = Nothing
+                            , placements = []
+                            }
+
+                        ( model, _, _ ) =
+                            Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
+                    in
+                    model.existingShelves |> Expect.equal []
             , -- US-1.1.5 | Suite 10: Elm
               test "IsbnLookupResult Err sets isbnLookupState to Failure" <|
                 \_ ->
@@ -666,7 +725,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing
@@ -677,7 +736,7 @@ suite =
                 \_ ->
                     let
                         response =
-                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing }
+                            { book = dummyBookWithEdition, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
 
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Ok response)) Upload.init Nothing

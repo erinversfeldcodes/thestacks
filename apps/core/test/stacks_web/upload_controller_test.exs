@@ -267,7 +267,41 @@ defmodule StacksWeb.UploadControllerTest do
       )
 
       # Placement should be soft-deleted (removed_at set).
-      assert Stacks.Shelving.get_placement_for_book(user.id, book.id) == nil
+      assert Stacks.Shelving.get_placements_for_book(user.id, book.id) == []
+    end
+
+    # #333 — the reject path withdraws ONE placement, the most recent, because
+    # that is the one the identification created. A book the reader had already
+    # shelved deliberately elsewhere must survive us undoing our own mistake:
+    # an extra shelf entry they can remove beats a deliberate one we deleted.
+    test "a rejection withdraws only the newest placement, not the reader's own", %{
+      conn: conn,
+      user: user
+    } do
+      book = insert(:book, title: "Kept On Purpose")
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      kept =
+        insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
+
+      from_identification =
+        insert(:placement,
+          book: book,
+          bookshelf: insert(:bookshelf, user: user, name: "wishlist")
+        )
+
+      image = insert(:uploaded_image, status: "resolved", user_id: user.id)
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert json_response(conn, 202)
+
+      remaining = Stacks.Shelving.get_placements_for_book(user.id, book.id)
+      assert Enum.map(remaining, & &1.id) == [kept.id]
+      refute from_identification.id in Enum.map(remaining, & &1.id)
     end
 
     test "falls back to title-only descriptor when the book has no author", %{

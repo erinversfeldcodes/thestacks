@@ -29,8 +29,13 @@ defmodule StacksWeb.SearchControllerTest do
 
     insert(
       :placement,
+      # `removed_at` added by #333. The take-list silently DROPPED any option
+      # not named here, so `place(user, book, "wishlist", removed_at: ...)`
+      # inserted a live placement and the test asserting its absence would
+      # have failed for the right reason by accident — or passed for the
+      # wrong one. Keep this list in step with what callers pass.
       [book: book, bookshelf: bookshelf, shelf: shelf] ++
-        Keyword.take(attrs, [:listing_status, :visibility])
+        Keyword.take(attrs, [:listing_status, :visibility, :removed_at])
     )
   end
 
@@ -251,6 +256,40 @@ defmodule StacksWeb.SearchControllerTest do
       # Platform provenance is source/handle/price — never the viewer's shelf.
       assert platform_hit["source"] == "listed"
       assert platform_hit["bookshelf_name"] == ""
+      # The plural field (#333) is bound by the same rule as the singular one.
+      assert platform_hit["bookshelf_names"] == []
+    end
+
+    # #333 — the annotation must name EVERY bookshelf a book sits on. It named
+    # one and dropped the rest, which read as the whole truth: a book on both
+    # the Wish List and the Reading Pile was reported as being on one of them.
+    test "a collection hit names every bookshelf it sits on", %{conn: conn, user: user} do
+      book = insert_book_with_edition(title: "Doubly Shelved", isbn: "9780000000194")
+      place(user, book, "wishlist")
+      place(user, book, "reading_pile")
+
+      response = conn |> get("/api/search", q: "Doubly Shelved") |> json_response(200)
+
+      hits = Enum.filter(response["collection"], &(&1["book"]["id"] == book.id))
+      # Still ONE result row — de-duplication was never the bug.
+      assert length(hits) == 1
+
+      [hit] = hits
+      assert Enum.sort(hit["bookshelf_names"]) == ["reading_pile", "wishlist"]
+      # The singular field stays on the wire, always the first of the list.
+      assert hit["bookshelf_name"] == List.first(hit["bookshelf_names"])
+    end
+
+    test "a removed placement is not named among a collection hit's bookshelves",
+         %{conn: conn, user: user} do
+      book = insert_book_with_edition(title: "Partly Unshelved", isbn: "9780000000200")
+      place(user, book, "library")
+      place(user, book, "wishlist", removed_at: DateTime.utc_now())
+
+      response = conn |> get("/api/search", q: "Partly Unshelved") |> json_response(200)
+
+      hit = Enum.find(response["collection"], &(&1["book"]["id"] == book.id))
+      assert hit["bookshelf_names"] == ["library"]
     end
 
     test "another user's private library placement leaks no label or provenance",

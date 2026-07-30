@@ -147,6 +147,10 @@ defmodule StacksWeb.ProtoJSON do
       owner_handle: Map.get(label, :owner_handle, ""),
       price: Map.get(label, :price, ""),
       bookshelf_name: Map.get(label, :bookshelf_name, ""),
+      # Every bookshelf the hit sits on (#333). A book may legally sit on
+      # several at once, and the singular `bookshelf_name` can only name one —
+      # it is kept for wire compatibility and always equals the first entry.
+      bookshelf_names: Map.get(label, :bookshelf_names, []),
       snippet: Map.get(label, :snippet, "")
     }
   end

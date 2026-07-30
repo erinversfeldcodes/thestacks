@@ -1472,6 +1472,75 @@ h4 {
     border-top: 1px solid var(--parchment-border);
 }
 
+/* -- Multi-shelf notice (#333) --
+   A book on two or more of Library / Antilibrary / Reading Pile / Wish List is
+   a legal state, so this reads as a marginal note in the reader's own book, not
+   as an error: warm parchment, a soft left rule, no red anywhere. */
+
+.book-detail__multi-shelf {
+    margin: 1.5rem 0;
+    padding: 1rem 1.25rem;
+    background-color: var(--parchment-cream);
+    border-left: 3px solid var(--parchment-border);
+    border-radius: 0 4px 4px 0;
+}
+
+.book-detail__multi-shelf .book-detail__section-title {
+    font-size: var(--size-lg);
+    margin-bottom: 0.25rem;
+}
+
+.book-detail__multi-shelf-note {
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--parchment-muted, var(--text-muted, #a09070));
+    margin-bottom: 0.75rem;
+}
+
+.book-detail__multi-shelf-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.book-detail__multi-shelf-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--parchment-border);
+}
+
+.book-detail__multi-shelf-item:last-child {
+    border-bottom: none;
+}
+
+.book-detail__multi-shelf-name {
+    font-family: var(--font-heading);
+    font-size: var(--size-base);
+    color: var(--parchment-text);
+}
+
+.book-detail__multi-shelf-remove {
+    flex-shrink: 0;
+}
+
+/* -- Manual-ISBN "already yours" notice (#333) --
+   Informational, never blocking: an aside above the confirm buttons, in the
+   same muted register as the other upload hints, with nothing disabled. */
+
+.upload-verify__already-yours {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--parchment-muted, var(--text-muted, #a09070));
+    margin: 0 0 0.75rem;
+}
+
 /* -- Rating -- */
 
 .book-detail__rating {

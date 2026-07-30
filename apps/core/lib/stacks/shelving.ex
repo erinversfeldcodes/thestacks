@@ -210,7 +210,13 @@ defmodule Stacks.Shelving do
     limit = Keyword.get(opts, :limit, 20)
     scope = Keyword.get(opts, :scope, :title)
 
-    pairs =
+    # A book may sit on several bookshelves at once (owner ruling, 2026-07-30),
+    # so the join returns one row per placement. Collapsing with `uniq_by` — as
+    # this did before #333 — kept the first bookshelf and silently DROPPED the
+    # rest, so a book on both the Wish List and the Reading Pile was annotated
+    # "On your Wish List shelf" and the reader was never told about the other.
+    # Group instead: one entry per book, carrying every shelf it sits on.
+    rows =
       Book
       |> join(:inner, [b], p in Placement, on: p.book_id == b.id and is_nil(p.removed_at))
       |> join(:inner, [b, p], bs in Bookshelf,
@@ -220,13 +226,25 @@ defmodule Stacks.Shelving do
       |> collection_scope_order(scope, query)
       |> select([b, p, bs], {b, bs.name})
       |> Repo.all()
-      |> Enum.uniq_by(fn {book, _name} -> book.id end)
-      |> Enum.take(limit)
 
-    books = pairs |> Enum.map(&elem(&1, 0)) |> Repo.preload([:author, :editions])
+    # Group by book id rather than `chunk_by`: two distinct books can share a
+    # title, and the SQL tie-breaker is the bookshelf name, so equal-titled
+    # books' rows may interleave. Rank order is taken from first appearance so
+    # the relevance ordering computed in SQL survives the grouping.
+    by_book = Enum.group_by(rows, fn {book, _name} -> book.id end)
 
-    Enum.zip_with(books, pairs, fn book, {_book, name} ->
-      %{book: book, bookshelf_name: name}
+    ordered_ids =
+      rows |> Enum.map(fn {book, _name} -> book.id end) |> Enum.uniq() |> Enum.take(limit)
+
+    grouped = Enum.map(ordered_ids, &Map.fetch!(by_book, &1))
+
+    books =
+      grouped |> Enum.map(fn [{book, _} | _] -> book end) |> Repo.preload([:author, :editions])
+
+    Enum.zip_with(books, grouped, fn book, book_rows ->
+      names = book_rows |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> Enum.sort()
+
+      %{book: book, bookshelf_name: List.first(names), bookshelf_names: names}
     end)
   end
 
@@ -627,16 +645,36 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Returns the user's active (non-removed) placement for a specific book,
-  with the bookshelf preloaded. Returns `nil` if no such placement exists.
+  Returns **all** of the user's active (non-removed) placements for a specific
+  book, each with its bookshelf preloaded. Returns `[]` when the book is not in
+  the user's collection.
+
+  A book may legally sit on several bookshelves at once (owner ruling,
+  2026-07-30) — Library *and* Wish List, say. What stays forbidden is two copies
+  of the same book on the **same** bookshelf, and that is enforced at rung 4 by
+  `bookshelf_placements_book_active_idx`
+  (`UNIQUE (book_id, bookshelf_id) WHERE removed_at IS NULL`), not here.
+
+  This replaces the singular `get_placement_for_book/2`, which ended in
+  `Repo.one()` and so *raised* `Ecto.MultipleResultsError` on the very state the
+  ruling legalised — a live 500 on `GET /api/books/:id` for the owner of a
+  double-placed book (#333). There is deliberately no singular variant left: a
+  function that can only carry one answer is exactly the shape that produced the
+  bug, and every caller has now stated which placement it wants and why.
+
+  Ordering is deterministic — oldest first (`created_at`, `id` breaking ties, so
+  two placements written inside the same microsecond still come back in a stable
+  order) — so "the first placement" means "the one the reader made first"
+  everywhere, and callers wanting the newest can `List.last/1`.
   """
-  @spec get_placement_for_book(binary(), binary()) :: Placement.t() | nil
-  def get_placement_for_book(user_id, book_id) do
+  @spec get_placements_for_book(binary(), binary()) :: [Placement.t()]
+  def get_placements_for_book(user_id, book_id) do
     Placement
     |> join(:inner, [p], bs in Bookshelf, on: p.bookshelf_id == bs.id and bs.user_id == ^user_id)
     |> where([p], p.book_id == ^book_id and is_nil(p.removed_at))
+    |> order_by([p], asc: p.created_at, asc: p.id)
     |> preload(:bookshelf)
-    |> Repo.one()
+    |> Repo.all()
   end
 
   @doc """
