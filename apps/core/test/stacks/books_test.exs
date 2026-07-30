@@ -5,6 +5,7 @@ defmodule Stacks.BooksTest do
   import Stacks.Factory
 
   alias Core.Repo
+  alias Stacks.AI.MockClient
   alias Stacks.Books
   alias Stacks.Books.Book
   alias Stacks.Books.BookEdition
@@ -567,17 +568,13 @@ defmodule Stacks.BooksTest do
     test "returns {:error, reason} when vision service call fails" do
       user = insert(:user)
 
-      # Temporarily override with a client that always fails
-      defmodule Stacks.AI.AlwaysFailClient do
-        @behaviour Stacks.AI.ClientBehaviour
-        @impl true
-        def call_vision(_endpoint, _payload), do: {:error, :simulated_failure}
-      end
-
-      Application.put_env(:core, :vision_client, Stacks.AI.AlwaysFailClient)
+      # Steer the seam to fail on the endpoint identify/2 calls. Asserting the
+      # exact reason proves the steered response — not the mock's default — is
+      # what came back through Books.identify/2.
+      MockClient.put_response("extract_isbn", {:error, :simulated_failure})
 
       result = Books.identify(user.id, {:b64, Base.encode64("bytes")})
-      assert {:error, _reason} = result
+      assert {:error, :simulated_failure} = result
     end
   end
 

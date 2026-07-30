@@ -11,7 +11,12 @@ defmodule Stacks.Books.MockHttpClient do
       MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => [...]}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [...]}})
 
-  The first registered pattern whose substring matches the requested URL wins.
+  The **most recently** registered pattern whose substring matches the requested
+  URL wins — registrations are prepended, so a later `put_response/2` overrides
+  an earlier one for the same (or an overlapping) pattern. That is the useful
+  semantic for a test overriding a response installed by its `setup` block, and
+  it is what the code has always done; the moduledoc previously claimed
+  first-registration-wins, which was never true (Issue #327).
   Unmatched URLs return `{:ok, %{}}`.
   """
 
