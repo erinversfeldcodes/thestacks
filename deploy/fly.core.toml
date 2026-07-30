@@ -52,16 +52,16 @@ kill_timeout = "5s"
   method = "GET"
   path = "/api/health"
 
-# Fly's managed Prometheus scrapes this endpoint directly over the private
-# 6PN network (never via fly-proxy), storing the series independently of the
-# app machines so they survive redeploys (Issue #232). Because the scrape
-# arrives over 6PN with no fly-proxy `fly-client-ip` header,
-# StacksWeb.Plugs.MetricsAuth allows it WITHOUT the METRICS_SCRAPE_TOKEN
-# bearer — while the same path over the public edge still requires the token.
-# Deploy-time scrape/render smoke check: docs/runbooks/metrics-stack.md.
-[metrics]
-  port = 4000
-  path = "/internal/metrics"
+# NOTE(#323): the `[metrics]` block (Fly managed-Prometheus scrape of
+# /internal/metrics, Issue #232) was REMOVED. It triggered Fly's platform
+# scraper every 15s, but the scrape never ingested a single stacks_* series
+# (#248) and 401'd continuously against StacksWeb.Plugs.MetricsAuth — the
+# platform scraper cannot send the METRICS_SCRAPE_TOKEN bearer and its
+# requests do not satisfy the 6PN bypass. ADR-021 replaced scraping with an
+# in-BEAM PUSH (Core.PromEx.MetricsPusher → VictoriaMetrics via
+# STACKS_METRICS_PUSH_URL), so nothing consumes the Fly scrape. Do not
+# re-add a `[metrics]` block without also solving its auth.
+# See docs/runbooks/metrics-stack.md.
 
 [[vm]]
   size = "shared-cpu-1x"
