@@ -218,6 +218,25 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
     {:determined, :robots_blocked}
   end
 
+  # The shop is pacing us — 429, or a cooldown it asked for. A determination,
+  # not a failure: it is neither our defect nor a service failure, and it
+  # recurs on every attempt until the cooldown lapses, so counting it against
+  # the shared fuse (or letting Oban retry it) is the identical trap
+  # ROBOTS_BLOCKED was split out to avoid. The store stays configured; the
+  # next scheduled pass simply asks again later.
+  defp interpret(%{"outcome" => "SCRAPE_OUTCOME_RATE_LIMITED"} = response, ctx) do
+    %{isbn: isbn, store_name: store_name} = ctx
+
+    Monitoring.record_success(store_name, "scraper_config")
+
+    Logger.info(
+      "TriggerPriceScrapeJob: #{store_name} rate-limited us for isbn=#{isbn}: " <>
+        "#{response["detail"]}"
+    )
+
+    {:determined, :rate_limited}
+  end
+
   # The store needs an ISBN index and none exists. Build one, then this ISBN resolves
   # on the next attempt.
   #
