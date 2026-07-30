@@ -61,7 +61,10 @@ module Api exposing
     , adminVerifyMfa
     , approveSource
     , auditLogResponseDecoder
+    , authResponseDecoder
     , blockUser
+    , bookDetailResponseDecoder
+    , catalogueResponseDecoder
     , commitUpload
     , completeOnboardingStep
     , confirmAssociation
@@ -114,11 +117,13 @@ module Api exposing
     , logout
     , lookupByIsbn
     , mergeFormat
+    , mergeFormatResponseDecoder
     , moveBook
     , moveResponseToResult
     , personalInferencesDecoder
     , placeBook
     , placeResponseToResult
+    , placementsMineDecoder
     , progressErrorMessage
     , progressResponseToResult
     , publicProfileDecoder
@@ -127,6 +132,7 @@ module Api exposing
     , putFileToR2
     , refresh
     , register
+    , registrationResponseDecoder
     , rejectIdentification
     , rejectSource
     , removeBook
@@ -154,6 +160,25 @@ module Api exposing
     , updateProgress
     , updateShelfVisibility
     )
+
+{-| Every HTTP call the SPA makes, and every decoder that reads a server
+response.
+
+A note on the size of the `exposing` list: several decoders here are exported
+only so `tests/TestHelpers.elm` and the program tests can wire the REAL decoder
+into their simulated effects. That is deliberate and is accepted repo practice.
+The alternative — a hand-written "mirror" of the decoder living in the test
+harness — is what let the upload SSE wire format drift for months: the mirrors
+and the fixtures agreed with each other while disagreeing with the server, and
+breaking every production wire field left the whole Elm suite green (Issue
+#328). A test that decodes with its own copy of the decoder is testing the
+copy.
+
+`elm-review`'s `NoUnused.Exports` reviews `src/` and `tests/` together, so each
+of these exports stays justified only while a test consumes it — land an
+exposure together with its consumer, never on its own.
+
+-}
 
 import File exposing (File)
 import Http
@@ -232,7 +257,12 @@ registrationResponseDecoder =
 
 
 {-| The identification status of an uploaded image.
-Fails loudly on unknown values rather than silently falling through.
+
+The wire carries a status string from the DB (`"pending"`, `"resolved"`,
+`"rejected"`) plus the SSE loop's synthetic `"timeout"`. Anything else is a
+status the server grew after this client shipped, and is read as still-in-flight
+(`Pending`) rather than as a terminal outcome we would guess wrong.
+
 -}
 type PollStatus
     = Pending
@@ -240,9 +270,12 @@ type PollStatus
     | Rejected
 
 
-{-| Response from GET /api/upload/:image\_id/status.
-bookId is present only when status is Resolved and a book was identified.
-isDuplicate is true when the identified book is already on one of the user's shelves.
+{-| The SSE frame from `GET /api/upload/:image_id/stream`.
+
+`bookId` is present only when the status is Resolved and a single book was
+identified; `isDuplicate` is True when the identified book is already on one of
+the user's bookshelves.
+
 -}
 type alias PollResponse =
     { imageId : String
@@ -250,14 +283,29 @@ type alias PollResponse =
     , bookId : Maybe String
     , bookIds : List String
     , rejectionReason : Maybe String
-    , isDuplicate : Maybe Bool
+    , isDuplicate : Bool
     }
 
 
-{-| Decoder for SSE stream events from /api/upload/:id/stream.
+{-| Decoder for SSE frames from `GET /api/upload/:image_id/stream`.
 
-SSE events use camelCase JSON keys (standard JSON API convention), while the
-proto-generated decoder uses snake\_case. This decoder handles both.
+There is exactly ONE wire shape, and the server owns it:
+`StacksWeb.ProtoJSON.poll_response/1`
+(`apps/core/lib/stacks_web/proto_json.ex:525-534`), mirrored by
+`proto/stacks/common/v1/upload.proto`'s `PollResponse`. It is snake\_case, and
+it always emits all six keys — `book_ids` defaults to `[]` and `is_duplicate`
+to `false` server-side, so neither is ever absent, and `book_id` /
+`rejection_reason` arrive as JSON `null` rather than going missing.
+
+Every field is therefore REQUIRED here. This decoder used to accept a
+camelCase alternative for five of the six and fall back to `Decode.succeed`
+defaults for all of them, which meant no test could ever notice a wire rename:
+the fixtures spoke camelCase, production spoke snake\_case, and both "passed".
+Do not reintroduce a `oneOf`/`succeed` fallback for a field the server always
+sends — that is precisely the hole (Issue #328).
+
+Heartbeat frames (`{"type":"heartbeat"}`) deliberately fail this decoder;
+`Page.Upload.StreamEvent` treats a decode error as "ignore, stay put".
 
 -}
 streamEventDecoder : Decoder PollResponse
@@ -278,43 +326,18 @@ streamEventDecoder =
 
                     _ ->
                         Pending
-            , bookId = emptyToNothing (Maybe.withDefault "" bookId)
+            , bookId = Maybe.andThen emptyToNothing bookId
             , bookIds = bookIds
-            , rejectionReason = emptyToNothing (Maybe.withDefault "" rejectionReason)
-            , isDuplicate =
-                if isDuplicate == Just True then
-                    Just True
-
-                else
-                    Nothing
+            , rejectionReason = Maybe.andThen emptyToNothing rejectionReason
+            , isDuplicate = isDuplicate
             }
         )
-        (Decode.oneOf [ Decode.field "imageId" Decode.string, Decode.field "image_id" Decode.string, Decode.succeed "" ])
-        (Decode.oneOf [ Decode.field "status" Decode.string, Decode.succeed "" ])
-        (Decode.oneOf
-            [ Decode.field "bookId" (Decode.nullable Decode.string)
-            , Decode.field "book_id" (Decode.nullable Decode.string)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "bookIds" (Decode.list Decode.string)
-            , Decode.field "book_ids" (Decode.list Decode.string)
-            , Decode.succeed []
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "rejectionReason" (Decode.nullable Decode.string)
-            , Decode.field "rejection_reason" (Decode.nullable Decode.string)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "isDuplicate" (Decode.nullable Decode.bool)
-            , Decode.field "is_duplicate" (Decode.nullable Decode.bool)
-            , Decode.succeed Nothing
-            ]
-        )
+        (Decode.field "image_id" Decode.string)
+        (Decode.field "status" Decode.string)
+        (Decode.field "book_id" (Decode.nullable Decode.string))
+        (Decode.field "book_ids" (Decode.list Decode.string))
+        (Decode.field "rejection_reason" (Decode.nullable Decode.string))
+        (Decode.field "is_duplicate" Decode.bool)
 
 
 {-| A registration failure.
@@ -1704,14 +1727,21 @@ getUserPlacements token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
-        , expect =
-            Http.expectJson toMsg
-                (Decode.map .placements ProtoBookshelfResp.decodePlacementsMineResponse
-                    |> Decode.map (List.map fromProtoPlacementSummary)
-                )
+        , expect = Http.expectJson toMsg placementsMineDecoder
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+{-| The `GET /api/placements/mine` body: `{"placements": [...]}`, built by
+`StacksWeb.BookshelfPlacementController.mine/2` straight off
+`Shelving.get_user_placements_summary/1` (no ProtoJSON serializer in between).
+Named and exported so the Catalogue program test decodes the real thing.
+-}
+placementsMineDecoder : Decoder (List PlacementSummary)
+placementsMineDecoder =
+    Decode.map .placements ProtoBookshelfResp.decodePlacementsMineResponse
+        |> Decode.map (List.map fromProtoPlacementSummary)
 
 
 {-| GET /api/books/isbn/:isbn — look up a book by ISBN.

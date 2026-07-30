@@ -7,9 +7,8 @@ simulated user interactions and HTTP responses.
 
 -}
 
-import Json.Decode as Decode
 import Json.Encode as Encode
-import Page.ThirdSpaces as ThirdSpaces exposing (ThirdSpace)
+import Page.ThirdSpaces as ThirdSpaces
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
 import SimulatedEffect.Http
@@ -65,40 +64,17 @@ thirdSpacesInitEffects maybeToken =
                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                 , url = "/api/third-spaces"
                 , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson ThirdSpaces.SpacesLoaded thirdSpacesResponseDecoder
+
+                -- The real decoder, not a copy of it. A hand-mirrored trio used
+                -- to live here; a mirror agrees with its fixtures while both
+                -- drift away from the server (Issue #328).
+                , expect = SimulatedEffect.Http.expectJson ThirdSpaces.SpacesLoaded ThirdSpaces.thirdSpacesResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
                 }
 
         Nothing ->
             SimulatedEffect.Cmd.none
-
-
-thirdSpacesResponseDecoder : Decode.Decoder (List ThirdSpace)
-thirdSpacesResponseDecoder =
-    Decode.field "third_spaces" (Decode.list thirdSpaceDecoder)
-
-
-thirdSpaceDecoder : Decode.Decoder ThirdSpace
-thirdSpaceDecoder =
-    Decode.map8 ThirdSpace
-        (Decode.field "id" Decode.string)
-        (Decode.field "name" Decode.string)
-        (Decode.field "type" Decode.string)
-        (Decode.field "city" Decode.string)
-        (Decode.field "country_code" Decode.string)
-        (Decode.field "website_url" Decode.string)
-        (Decode.field "verified" Decode.bool)
-        (Decode.field "upcoming_events" (Decode.list thirdSpaceEventDecoder))
-
-
-thirdSpaceEventDecoder : Decode.Decoder ThirdSpaces.ThirdSpaceEvent
-thirdSpaceEventDecoder =
-    Decode.map4 ThirdSpaces.ThirdSpaceEvent
-        (Decode.field "id" Decode.string)
-        (Decode.field "title" Decode.string)
-        (Decode.field "event_date" Decode.string)
-        (Decode.maybe (Decode.field "ends_at" Decode.string))
 
 
 startThirdSpaces : ProgramTest.ProgramTest ThirdSpaces.Model ThirdSpaces.Msg (SimulatedEffect ThirdSpaces.Msg)

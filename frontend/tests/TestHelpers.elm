@@ -39,7 +39,7 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (AuthResponse, BookDetailResponse, PollStatus(..), RegisterError(..), streamEventDecoder)
+import Api exposing (PollStatus(..), RegisterError(..), streamEventDecoder)
 import Components.ISBNInput
 import Dict
 import Http
@@ -57,8 +57,8 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import SimulatedEffect.Process
 import SimulatedEffect.Task
-import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
-import Types.Placement exposing (Placement, placementDecoder, readingStatusToString)
+import Types.Book exposing (Book, Edition, VisibilityTier(..))
+import Types.Placement exposing (Placement, readingStatusToString)
 import Types.RemoteData
 import Types.Shelf exposing (bookshelfResponseDecoder, shelvesResponseDecoder)
 import Types.Visibility
@@ -583,7 +583,31 @@ simulateBookDetailResponse bookId book =
         json
 
 
-{-| Create an HTTP response containing a book detail JSON payload with a placement.
+{-| An HTTP response for `GET /api/books/:id` carrying a placement.
+
+The placement object is exactly what `StacksWeb.ProtoJSON.book_placement/1`
+emits (`apps/core/lib/stacks_web/proto_json.ex:311-322`): a `Map.take` of
+`[:id, :book_id, :personal_rating, :notes]` off the placement, merged with
+`bookshelf_name`, `formats`, `visibility` and `bookshelf_visibility`. That
+allow-list is the whole contract — nothing else can reach the client on this
+endpoint. (`bookshelf_visibility` is the #194 ceiling and has its own fixture,
+`simulateBookDetailResponseWithVisibility`, which sets both visibility keys
+explicitly; here they stay at the "bookshelf association not loaded" value the
+serializer emits, `null`.)
+
+In particular the reading-progress quartet — `reading_status`, `current_page`,
+`started_at`, `finished_at` — is NOT emitted here. This fixture used to send it
+anyway, which made `Components.PlacementCard` look like it renders a live
+progress badge on page load when in production the card always opens at its
+"To Read" default with no page count (Issue #328; the contract question is
+Issue #314). Those four keys only ever arrive from
+`PUT /api/placements/:id/progress` via `ProtoJSON.reading_progress/1`
+(`proto_json.ex:688-696`) — fold them in from a progress response, never from
+here.
+
+`position` and `placed_at` are likewise outside the allow-list: they belong to
+the bookshelf payload's `PlacementDetail`, not to `book_placement/1`.
+
 -}
 simulateBookDetailResponseWithPlacement : String -> Book -> Placement -> Http.Response String
 simulateBookDetailResponseWithPlacement bookId book placement =
@@ -591,10 +615,14 @@ simulateBookDetailResponseWithPlacement bookId book placement =
         placementJson =
             Encode.object
                 ([ ( "id", Encode.string placement.id )
+                 , ( "book_id", Encode.string bookId )
                  , ( "formats", Encode.list Encode.string [] )
+                 , ( "visibility"
+                   , placement.visibility
+                        |> Maybe.map Encode.string
+                        |> Maybe.withDefault Encode.null
+                   )
                  ]
-                    ++ encodeMaybe "position" Encode.int placement.position
-                    ++ encodeMaybe "placed_at" Encode.string placement.placedAt
                     ++ (case placement.bookshelfName of
                             Just name ->
                                 [ ( "bookshelf_name", Encode.string name ) ]
@@ -616,16 +644,6 @@ simulateBookDetailResponseWithPlacement bookId book placement =
                             Nothing ->
                                 []
                        )
-                    ++ (case placement.readingStatus of
-                            Just status ->
-                                [ ( "reading_status", Encode.string (readingStatusToString status) ) ]
-
-                            Nothing ->
-                                []
-                       )
-                    ++ encodeMaybe "current_page" Encode.int placement.currentPage
-                    ++ encodeMaybe "started_at" Encode.string placement.startedAt
-                    ++ encodeMaybe "finished_at" Encode.string placement.finishedAt
                 )
 
         json =
@@ -734,7 +752,7 @@ uploadEffects msg model maybeToken =
                             SimulatedEffect.Cmd.none
 
                         ( bookIds, Just token ) ->
-                            if response.isDuplicate == Just True then
+                            if response.isDuplicate then
                                 case bookIds of
                                     [ singleId ] ->
                                         SimulatedEffect.Http.request
@@ -742,7 +760,7 @@ uploadEffects msg model maybeToken =
                                             , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                                             , url = "/api/books/" ++ singleId
                                             , body = SimulatedEffect.Http.emptyBody
-                                            , expect = SimulatedEffect.Http.expectJson Upload.GotDuplicateBook decodeBookDetailResponse
+                                            , expect = SimulatedEffect.Http.expectJson Upload.GotDuplicateBook Api.bookDetailResponseDecoder
                                             , timeout = Nothing
                                             , tracker = Nothing
                                             }
@@ -759,7 +777,7 @@ uploadEffects msg model maybeToken =
                                                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                                                 , url = "/api/books/" ++ bid
                                                 , body = SimulatedEffect.Http.emptyBody
-                                                , expect = SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) decodeBookDetailResponse
+                                                , expect = SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) Api.bookDetailResponseDecoder
                                                 , timeout = Nothing
                                                 , tracker = Nothing
                                                 }
@@ -782,7 +800,7 @@ uploadEffects msg model maybeToken =
                             , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                             , url = "/api/books/isbn/" ++ model.manualIsbn
                             , body = SimulatedEffect.Http.emptyBody
-                            , expect = SimulatedEffect.Http.expectJson Upload.IsbnLookupResult decodeBookDetailResponse
+                            , expect = SimulatedEffect.Http.expectJson Upload.IsbnLookupResult Api.bookDetailResponseDecoder
                             , timeout = Nothing
                             , tracker = Nothing
                             }
@@ -801,7 +819,7 @@ uploadEffects msg model maybeToken =
                         , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                         , url = "/api/books/" ++ bookId ++ "/merge-format"
                         , body = SimulatedEffect.Http.emptyBody
-                        , expect = SimulatedEffect.Http.expectJson Upload.MergeFormatCompleted decodeMergeFormatResponse
+                        , expect = SimulatedEffect.Http.expectJson Upload.MergeFormatCompleted Api.mergeFormatResponseDecoder
                         , timeout = Nothing
                         , tracker = Nothing
                         }
@@ -1005,7 +1023,7 @@ searchEffects msg model maybeToken =
                             , body = SimulatedEffect.Http.emptyBody
                             , expect =
                                 SimulatedEffect.Http.expectJson Search.ReadersCompleted
-                                    (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
+                                    (Decode.field "users" (Decode.list Api.publicProfileSummaryDecoder))
                             , timeout = Nothing
                             , tracker = Nothing
                             }
@@ -1069,18 +1087,6 @@ authHeaderList maybeToken =
 
         Nothing ->
             []
-
-
-{-| Local copy of the people-search result decoder (Api.publicProfileSummaryDecoder
-is not exposed). Matches `public_profile_summary/1`'s redacted shape.
--}
-publicProfileSummaryDecoder : Decode.Decoder Api.PublicProfileSummary
-publicProfileSummaryDecoder =
-    Decode.map4 Api.PublicProfileSummary
-        (Decode.field "handle" Decode.string)
-        (Decode.field "display_name" Decode.string)
-        (Decode.oneOf [ Decode.field "city" Decode.string, Decode.succeed "" ])
-        (Decode.oneOf [ Decode.field "country_code" Decode.string, Decode.succeed "" ])
 
 
 {-| Translate BookDetail page Cmds into SimulatedEffects.
@@ -1217,60 +1223,6 @@ bookDetailEffects msg model maybeToken =
             SimulatedEffect.Cmd.none
 
 
-{-| Decode a BookDetailResponse. Mirrors Api.bookDetailResponseDecoder which is not exposed.
--}
-decodeBookDetailResponse : Decode.Decoder BookDetailResponse
-decodeBookDetailResponse =
-    Decode.map3 BookDetailResponse
-        (Decode.field "book" bookDecoder)
-        -- Mirror production `Api.bookDetailResponseDecoder`: the proto-generated
-        -- placementDecoder decodes JSON null to a default struct (every field
-        -- `oneOf [ field, succeed default ]`), so `Decode.maybe` alone yields a
-        -- phantom `Just {id = ""}` for an unplaced book — hiding the
-        -- "Add to Collection" (place) path the real decoder reaches via
-        -- `Decode.nullable`. Match production so null → Nothing.
-        (Decode.oneOf
-            [ Decode.field "placement" (Decode.nullable placementDecoder)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
-            , Decode.succeed Nothing
-            ]
-        )
-
-
-{-| Decode a MergeFormatResponse. Mirrors Api.mergeFormatResponseDecoder which is not exposed.
--}
-decodeMergeFormatResponse : Decode.Decoder Api.MergeFormatResponse
-decodeMergeFormatResponse =
-    Decode.map (\ed -> { edition = ed })
-        (Decode.field "edition"
-            (Decode.map8
-                (\id isbn isPrimary formatLabel coverImageUrl pageCount publisher publicationYear ->
-                    { id = id
-                    , isbn = isbn
-                    , isPrimary = isPrimary
-                    , formatLabel = formatLabel
-                    , coverImageUrl = coverImageUrl
-                    , pageCount = pageCount
-                    , publisher = publisher
-                    , publicationYear = publicationYear
-                    }
-                )
-                (Decode.field "id" Decode.string)
-                (Decode.field "isbn" Decode.string)
-                (Decode.field "is_primary" Decode.bool)
-                (Decode.maybe (Decode.field "format_label" Decode.string))
-                (Decode.maybe (Decode.field "cover_image_url" Decode.string))
-                (Decode.maybe (Decode.field "page_count" Decode.int))
-                (Decode.maybe (Decode.field "publisher" Decode.string))
-                (Decode.maybe (Decode.field "publication_year" Decode.int))
-            )
-        )
-
-
 {-| Translate BookDetail init Cmds into SimulatedEffects.
 -}
 bookDetailInitEffects : String -> Maybe String -> SimulatedEffect BookDetail.Msg
@@ -1283,7 +1235,7 @@ bookDetailInitEffects bookId maybeToken =
                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                     , url = "/api/books/" ++ bookId
                     , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded decodeBookDetailResponse
+                    , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded Api.bookDetailResponseDecoder
                     , timeout = Nothing
                     , tracker = Nothing
                     }
@@ -1292,7 +1244,7 @@ bookDetailInitEffects bookId maybeToken =
                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                     , url = "/api/books/" ++ bookId ++ "/availability"
                     , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson BookDetail.AvailabilityLoaded decodeAvailabilityResponse
+                    , expect = SimulatedEffect.Http.expectJson BookDetail.AvailabilityLoaded BookDetail.availabilityDecoder
                     , timeout = Nothing
                     , tracker = Nothing
                     }
@@ -1301,12 +1253,6 @@ bookDetailInitEffects bookId maybeToken =
                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                     , url = "/api/books/" ++ bookId ++ "/prices"
                     , body = SimulatedEffect.Http.emptyBody
-
-                    -- The real decoder, not a copy. `decodeAvailabilityResponse`
-                    -- above is a hand-mirrored duplicate of BookDetail's, which is
-                    -- a second source of truth that can drift silently; reusing the
-                    -- exported one means a decoder change cannot pass here while
-                    -- failing in production.
                     , expect = SimulatedEffect.Http.expectJson BookDetail.PricesLoaded BookDetail.pricesDecoder
                     , timeout = Nothing
                     , tracker = Nothing
@@ -1315,22 +1261,6 @@ bookDetailInitEffects bookId maybeToken =
 
         Nothing ->
             SimulatedEffect.Cmd.none
-
-
-{-| Decode an availability response. Mirrors BookDetail.availabilityDecoder.
--}
-decodeAvailabilityResponse : Decode.Decoder (List BookDetail.AvailabilityItem)
-decodeAvailabilityResponse =
-    Decode.field "availability"
-        (Decode.list
-            (Decode.map5 BookDetail.AvailabilityItem
-                (Decode.field "partner_name" Decode.string)
-                (Decode.field "price_cents" Decode.int)
-                (Decode.field "condition" Decode.string)
-                (Decode.field "quantity" Decode.int)
-                (Decode.field "isbn" Decode.string)
-            )
-        )
 
 
 
@@ -1566,45 +1496,6 @@ searchProgram maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-{-| Decode an AuthResponse. Mirrors Api.authResponseDecoder which is not exposed.
--}
-decodeAuthResponse : Decode.Decoder AuthResponse
-decodeAuthResponse =
-    Decode.map8 AuthResponse
-        (Decode.field "token" Decode.string)
-        (Decode.at [ "user", "id" ] Decode.string)
-        (Decode.at [ "user", "email" ] Decode.string)
-        (Decode.at [ "user", "display_name" ] Decode.string)
-        (Decode.oneOf
-            [ Decode.at [ "user", "handle" ] Decode.string
-            , Decode.succeed ""
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "role" ] Decode.string
-            , Decode.succeed "user"
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "consent_analytics" ] Decode.bool
-            , Decode.succeed False
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "consent_writing_assistant" ] Decode.bool
-            , Decode.succeed False
-            ]
-        )
-
-
-{-| Decode a registration response. Mirrors Api.registrationResponseDecoder,
-which only checks for the `"message"` key and does NOT attempt to read a token.
--}
-decodeRegistrationResponse : Decode.Decoder ()
-decodeRegistrationResponse =
-    Decode.map (\_ -> ()) (Decode.field "message" Decode.string)
-
-
 {-| Mirror `Api.expectRegister`: decode the 422 `{"errors": ...}` body so program
 tests exercise the same field-error surfacing as production rather than losing
 the body the way `expectJson` would.
@@ -1634,7 +1525,7 @@ registerResponseResult response =
                 Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
 
         Http.GoodStatus_ _ bodyText ->
-            case Decode.decodeString decodeRegistrationResponse bodyText of
+            case Decode.decodeString Api.registrationResponseDecoder bodyText of
                 Ok value ->
                     Ok value
 
@@ -1661,7 +1552,7 @@ loginEffects msg model =
                                     , ( "password", Encode.string model.password )
                                     ]
                                 )
-                        , expect = SimulatedEffect.Http.expectJson Login.GotAuthResponse decodeAuthResponse
+                        , expect = SimulatedEffect.Http.expectJson Login.GotAuthResponse Api.authResponseDecoder
                         , timeout = Nothing
                         , tracker = Nothing
                         }

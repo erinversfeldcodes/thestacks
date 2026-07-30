@@ -36,7 +36,20 @@ startUploadAgeGatingOff =
     ProgramTest.start () (uploadProgram False (Just "test-token"))
 
 
-{-| Build an SSE stream event JSON string for a given status.
+{-| Build an SSE frame exactly as the server emits it.
+
+The one and only wire shape is `StacksWeb.ProtoJSON.poll_response/1`
+(`apps/core/lib/stacks_web/proto_json.ex:525-534`), declared by
+`proto/stacks/common/v1/upload.proto`'s `PollResponse`: snake\_case, and always
+all six keys — `book_ids` defaults to `[]` and `is_duplicate` to `false`
+server-side, and `book_id` / `rejection_reason` arrive as JSON `null` rather
+than going missing (`UploadController.sse_receive_loop/4` passes all six on
+every branch).
+
+These fixtures spoke camelCase until Issue #328, so they exercised a decoder
+branch the server never reaches — breaking every production wire field left the
+whole Elm suite green.
+
 -}
 simulateStreamEvent : PollStatus -> Maybe String -> Bool -> String
 simulateStreamEvent status maybeBookId isDuplicate =
@@ -52,41 +65,39 @@ simulateStreamEvent status maybeBookId isDuplicate =
                 Rejected ->
                     "rejected"
 
-        bookIdField =
+        ( bookId, bookIds ) =
             case maybeBookId of
                 Just bid ->
-                    [ ( "bookId", Encode.string bid )
-                    , ( "bookIds", Encode.list Encode.string [ bid ] )
-                    ]
+                    ( Encode.string bid, [ bid ] )
 
                 Nothing ->
-                    [ ( "bookId", Encode.null )
-                    , ( "bookIds", Encode.list Encode.string [] )
-                    ]
+                    ( Encode.null, [] )
     in
     Encode.encode 0
         (Encode.object
-            ([ ( "imageId", Encode.string "img-test-001" )
-             , ( "status", Encode.string statusStr )
-             , ( "isDuplicate", Encode.bool isDuplicate )
-             , ( "rejectionReason", Encode.null )
-             ]
-                ++ bookIdField
-            )
+            [ ( "image_id", Encode.string "img-test-001" )
+            , ( "status", Encode.string statusStr )
+            , ( "book_id", bookId )
+            , ( "book_ids", Encode.list Encode.string bookIds )
+            , ( "rejection_reason", Encode.null )
+            , ( "is_duplicate", Encode.bool isDuplicate )
+            ]
         )
 
 
-{-| Build an SSE stream event JSON string that resolves with multiple book IDs.
+{-| The same server frame (`proto_json.ex:525-534`) for a multi-book resolve:
+`book_ids` carries the candidates and `book_id` stays null.
 -}
 simulateMultiBookStreamEvent : List String -> String
 simulateMultiBookStreamEvent bookIds =
     Encode.encode 0
         (Encode.object
-            [ ( "imageId", Encode.string "img-test-001" )
+            [ ( "image_id", Encode.string "img-test-001" )
             , ( "status", Encode.string "resolved" )
-            , ( "isDuplicate", Encode.bool False )
-            , ( "bookIds", Encode.list Encode.string bookIds )
-            , ( "bookId", Encode.null )
+            , ( "book_id", Encode.null )
+            , ( "book_ids", Encode.list Encode.string bookIds )
+            , ( "rejection_reason", Encode.null )
+            , ( "is_duplicate", Encode.bool False )
             ]
         )
 

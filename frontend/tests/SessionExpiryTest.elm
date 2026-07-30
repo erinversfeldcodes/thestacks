@@ -35,7 +35,6 @@ import Api
 import Expect
 import Html
 import Http
-import Json.Decode as Decode
 import Main
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
@@ -228,41 +227,13 @@ type RenewMsg
     | RefreshResult (Result Http.Error Api.AuthResponse)
 
 
-{-| Decoder mirroring `Api.authResponseDecoder` — refresh's 200 body is
-byte-identical to login's (contract confirmed), so the same shape decodes it.
--}
-authResponseDecoder : Decode.Decoder Api.AuthResponse
-authResponseDecoder =
-    Decode.map8 Api.AuthResponse
-        (Decode.field "token" Decode.string)
-        (Decode.at [ "user", "id" ] Decode.string)
-        (Decode.at [ "user", "email" ] Decode.string)
-        (Decode.at [ "user", "display_name" ] Decode.string)
-        (Decode.oneOf
-            [ Decode.at [ "user", "handle" ] Decode.string
-            , Decode.succeed ""
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "role" ] Decode.string
-            , Decode.succeed "user"
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "consent_analytics" ] Decode.bool
-            , Decode.succeed False
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "consent_writing_assistant" ] Decode.bool
-            , Decode.succeed False
-            ]
-        )
-
-
 {-| Effect translation for the harness: `TriggerRenewal` issues the real
-`POST /api/auth/refresh` (Bearer token) that `Api.refresh` builds; results feed
-back as `RefreshResult`.
+`POST /api/auth/refresh` (Bearer token) that `Api.refresh` builds, decoded with
+the REAL `Api.authResponseDecoder` — refresh's 200 body is byte-identical to
+login's (contract confirmed), so the same decoder reads it. A hand-mirrored
+copy used to live here; it is exactly the second-source-of-truth that let the
+upload wire format drift unnoticed (Issue #328). Results feed back as
+`RefreshResult`.
 -}
 renewEffects : RenewMsg -> Maybe Main.Auth -> SimulatedEffect RenewMsg
 renewEffects msg model =
@@ -273,7 +244,7 @@ renewEffects msg model =
                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ auth.token) ]
                 , url = "/api/auth/refresh"
                 , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson RefreshResult authResponseDecoder
+                , expect = SimulatedEffect.Http.expectJson RefreshResult Api.authResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
                 }
