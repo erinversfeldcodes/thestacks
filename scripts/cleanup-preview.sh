@@ -102,7 +102,10 @@ if command -v fly &>/dev/null && [[ -n "${FLY_API_TOKEN:-}" ]]; then
     # post-teardown Postgrex "endpoint could not be found" noise in the
     # logs. Same `fly machines list --json` idiom as deploy-stack.sh.
     echo "    Stopping ${CORE_APP} machines (drain DB pool before Neon branch deletion)..."
-    fly machines list --app "${CORE_APP}" --json 2>/dev/null \
+    # `|| echo "[]"` — on a first deploy for a branch the core app doesn't exist
+    # yet; under pipefail the dead `fly machines list` would kill the whole
+    # teardown (#311 finalization, 2026-07-30). An empty list drains nothing.
+    { fly machines list --app "${CORE_APP}" --json 2>/dev/null || echo "[]"; } \
         | python3 -c "
 import json,sys
 for m in json.load(sys.stdin):
