@@ -715,18 +715,6 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute =
             in
             ( PageCatalogue model, Cmd.map CatalogueMsg cmd )
 
-        Settings ->
-            let
-                profileModel =
-                    case maybeAuth of
-                        Just auth ->
-                            Profile.init auth.user
-
-                        Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
-            in
-            ( PageSettingsProfile profileModel, Cmd.none )
-
         SettingsProfile ->
             let
                 profileModel =
@@ -1268,7 +1256,6 @@ type Msg
     | GroupsDetailMsg GroupsDetail.Msg
     | PublicProfileMsg ProfilePage.Msg
     | UserMenuMsg UserMenu.Msg
-    | LogoutCompleted
     | SettingsMobileNavChanged String
     | SwipeReceived String
     | SwipeIgnored
@@ -2353,7 +2340,7 @@ update msg model =
                         logoutCmd =
                             case model.auth of
                                 Just auth ->
-                                    Api.logout auth.token (always LogoutCompleted)
+                                    Api.logout auth.token (always FocusResult)
 
                                 Nothing ->
                                     Cmd.none
@@ -2371,9 +2358,6 @@ update msg model =
                         , Nav.pushUrl model.key (Route.toPath Login)
                         ]
                     )
-
-        LogoutCompleted ->
-            ( model, Cmd.none )
 
         SettingsMobileNavChanged path ->
             ( model, Nav.pushUrl model.key path )
@@ -2488,7 +2472,8 @@ update msg model =
             ( { model | config = { config | ageGatingEnabled = enabled } }, Cmd.none )
 
         FocusResult ->
-            -- Focus attempt completed (success or failure); nothing to do.
+            -- Shared fire-and-forget no-op: absorbs focus-attempt results and
+            -- the logout request's result (best-effort server-side revocation).
             ( model, Cmd.none )
 
         GotPlacementCheck result ->
@@ -2801,9 +2786,6 @@ pageTitle route =
 
         Search ->
             "Search — The Stacks"
-
-        Settings ->
-            "Settings — The Stacks"
 
         SettingsProfile ->
             "Profile — The Stacks"

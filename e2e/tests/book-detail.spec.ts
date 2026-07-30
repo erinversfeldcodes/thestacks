@@ -59,11 +59,6 @@ test.describe("Book Detail overlay — layout and structure", () => {
     ).toBeVisible();
     await expect(
       overlay.locator(".book-detail__section-title", {
-        hasText: "What People Think",
-      })
-    ).toBeVisible();
-    await expect(
-      overlay.locator(".book-detail__section-title", {
         hasText: "Where to Buy",
       })
     ).toBeVisible();

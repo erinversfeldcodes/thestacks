@@ -26,7 +26,6 @@ type Route
     | BookDetail String
     | Upload
     | Search
-    | Settings
     | SettingsProfile
     | SettingsPassword
     | SettingsNotifications
@@ -80,7 +79,7 @@ parser =
         , Parser.map SettingsConsent (s "settings" </> s "consent")
         , Parser.map SettingsAuditLog (s "settings" </> s "audit-log")
         , Parser.map Insights (s "me" </> s "insights")
-        , Parser.map Settings (s "settings")
+        , Parser.map SettingsProfile (s "settings")
         , Parser.map CostTransparency (s "costs")
         , Parser.map Metrics (s "metrics")
         , Parser.map About (s "about")
@@ -148,9 +147,6 @@ toPath route =
 
         Search ->
             "/search"
-
-        Settings ->
-            "/settings/profile"
 
         SettingsProfile ->
             "/settings/profile"
@@ -255,9 +251,6 @@ toPath route =
 isSettingsRoute : Route -> Bool
 isSettingsRoute route =
     case route of
-        Settings ->
-            True
-
         SettingsProfile ->
             True
 

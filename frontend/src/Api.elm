@@ -686,8 +686,10 @@ decodeUploadInit =
 
 
 {-| `POST /api/upload/init` — allocates an image\_id server-side and
-returns a presigned R2 PUT URL the client can upload to directly. The
-Phoenix handler only touches the DB + SigV4 signing, not the bytes.
+returns a Phoenix-served `upload_url` (`PUT /api/upload/:id/data`) the
+client PUTs the bytes to. Phoenix proxies them to the configured storage
+backend (R2 in production, Local in dev/preview); same-origin, so no R2
+CORS allowlisting is needed.
 -}
 initUpload :
     String

@@ -55,9 +55,6 @@ expectedAuth route =
         Search ->
             False
 
-        Settings ->
-            True
-
         SettingsProfile ->
             True
 
@@ -174,7 +171,6 @@ allRoutes =
     , ( "BookDetail", BookDetail "abc" )
     , ( "Upload", Upload )
     , ( "Search", Search )
-    , ( "Settings", Settings )
     , ( "SettingsProfile", SettingsProfile )
     , ( "SettingsPassword", SettingsPassword )
     , ( "SettingsNotifications", SettingsNotifications )
@@ -277,12 +273,12 @@ suite =
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "18 public routes and 24 protected routes are enumerated" <|
+            [ test "18 public routes and 23 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 18, 24 )
+                        |> Expect.equal ( 18, 23 )
             ]
         , describe "admin routes are gated on an ADMIN token, not the ordinary one (#303)"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|

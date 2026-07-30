@@ -5,7 +5,7 @@ module UserMenuTest exposing (suite)
 Covers Toggle (open/close), Close, SignOutClicked → SignOut OutMsg,
 SettingsClicked → NavigateToSettings, and the rendered dropdown contents.
 The Main.elm SignOut wiring (auth cleared, clearAuth port, navigate to /login)
-and the non-blocking LogoutCompleted no-op are exercised at the Main level,
+and the non-blocking logout result no-op (FocusResult) are exercised at the Main level,
 which cannot be unit-tested here because it owns a Browser.Navigation.Key.
 
 -}

@@ -1477,7 +1477,7 @@ h4 {
 .book-detail__rating {
     margin-top: 0.5rem;
     font-size: var(--size-sm);
-    color: var(--parchment-ink, #3a2e1e);
+    color: #3a2e1e;
 }
 
 .book-detail__rating--empty {
@@ -1521,13 +1521,13 @@ h4 {
 .book-detail__author-link {
     display: inline-block;
     margin-top: 0.5rem;
-    color: var(--link-color, #6b4e2e);
+    color: #6b4e2e;
     text-decoration: underline;
     font-size: var(--size-sm);
 }
 
 .book-detail__author-link:hover {
-    color: var(--link-hover, #4a351f);
+    color: #4a351f;
 }
 
 /* -- Writing section -- */
@@ -2951,8 +2951,8 @@ h4 {
 
 .catalogue__card-add:hover,
 .catalogue__card-add:focus {
-    border-color: var(--link-color, #6b4e2e);
-    color: var(--link-color, #6b4e2e);
+    border-color: #6b4e2e;
+    color: #6b4e2e;
     outline: 2px solid transparent;
 }
 
@@ -2970,7 +2970,7 @@ h4 {
     border: 1px solid var(--parchment-border, #c4b69c);
     border-radius: 0.25rem;
     background: transparent;
-    color: var(--parchment-ink, #3a2e1e);
+    color: #3a2e1e;
     font-size: 0.8rem;
     cursor: pointer;
     text-align: left;
