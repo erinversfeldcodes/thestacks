@@ -63,6 +63,12 @@ sources:
             description: Google Books volume ID.
           - name: is_primary
             description: Whether this is the primary/default edition of the work.
+          - name: verification_source
+            description: >
+              Where this edition's ISBN verification came from — open_library,
+              google_books, or barcode_unverified (scanned but never confirmed
+              against an external catalogue). Makes "never externally verified"
+              auditable rather than inferable.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -125,6 +131,11 @@ sources:
             description: Primary key (UUID).
           - name: book_id
             description: FK to books.
+          - name: book_edition_id
+            description: >
+              FK to book_editions — the specific edition the reader shelved.
+              Nullable (ON DELETE SET NULL) so removing an edition can never
+              take a reader's placement with it.
           - name: bookshelf_id
             description: FK to bookshelves.
           - name: position

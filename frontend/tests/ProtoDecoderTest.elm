@@ -647,6 +647,11 @@ bookSuite =
                         , openLibraryId = ""
                         , googleBooksId = ""
                         , bookId = ""
+
+                        -- Deliberately NOT "" (#335): "" is this field's proto
+                        -- default, so a round-trip using it would pass even if
+                        -- the decoder dropped the field entirely.
+                        , verificationSource = "open_library"
                         , createdAt = ""
                         , updatedAt = ""
                         }
