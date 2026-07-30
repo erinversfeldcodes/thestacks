@@ -63,6 +63,26 @@ suite =
                     |> Tuple.first
                     |> .prefs
                     |> Expect.equal Loading
+        , test "tokenless init yields NotAsked, not a Loading state nothing will resolve (#324 0h)" <|
+            \_ ->
+                -- With no auth token there is no request to await; Loading with
+                -- Cmd.none would render "Loading your preferences…" forever.
+                Notifications.init Nothing
+                    |> Tuple.first
+                    |> .prefs
+                    |> Expect.equal NotAsked
+        , test "tokenless init produces no effect (#324 0h)" <|
+            \_ ->
+                Notifications.init Nothing
+                    |> Tuple.second
+                    |> Expect.equal Cmd.none
+        , test "tokenless init does not render the loading copy (#324 0h)" <|
+            \_ ->
+                Notifications.init Nothing
+                    |> Tuple.first
+                    |> Notifications.view
+                    |> Query.fromHtml
+                    |> Query.hasNot [ Selector.text "Loading your preferences…" ]
         , test "a successful load renders toggles at the saved values, not defaults" <|
             \_ ->
                 -- Defaults would show every toggle Off; loading all-on proves the

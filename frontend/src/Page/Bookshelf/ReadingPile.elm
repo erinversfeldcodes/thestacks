@@ -320,8 +320,17 @@ view model =
                             , div [ class "armchair__leg armchair__leg--br" ] []
                             ]
                         ]
-                    , viewProgressPanel model
                     ]
+
+            -- Sibling of the scene, not a child: inside the scene's
+            -- bottom-aligned flex row the panel floated mid-wall beside the
+            -- armchair (#324 0g). Its CSS (margin: 1.5rem auto 0) expects
+            -- below-scene flow.
+            , if model.showAgeGate then
+                text ""
+
+              else
+                viewProgressPanel model
             ]
         ]
 
