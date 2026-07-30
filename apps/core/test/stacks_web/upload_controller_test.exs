@@ -103,8 +103,9 @@ defmodule StacksWeb.UploadControllerTest do
       user: user,
       init: init
     } do
-      # Mock backend: seed bytes at the storage_path so head_image returns {:ok, _}.
-      StorageMock.seed("uploads/#{init.image_id}", "fake image bytes")
+      # Mock backend: seed bytes at the storage_path so head_image returns
+      # {:ok, size} above the sub-1KB rejection gate.
+      StorageMock.seed("uploads/#{init.image_id}", String.duplicate("fake image bytes ", 128))
 
       conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
 
@@ -142,8 +143,24 @@ defmodule StacksWeb.UploadControllerTest do
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
+    test "returns 422 image_too_small and rejects the row for an empty object", %{
+      conn: conn,
+      init: init
+    } do
+      # The PUT landed but wrote zero bytes — cannot be a real book photo, and
+      # committing it would spend a GPU call. Must take the standard rejection
+      # path, not an Oban-visible error.
+      StorageMock.seed("uploads/#{init.image_id}", "")
+
+      conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
+
+      assert %{"error" => "image_too_small"} = json_response(conn, 422)
+      assert Core.Repo.get!(UploadedImage, init.image_id).status == "rejected"
+      refute_enqueued(worker: IdentifyBookJob, args: %{"image_id" => init.image_id})
+    end
+
     test "returns 409 already_committed on repeat commit", %{conn: conn, init: init} do
-      StorageMock.seed("uploads/#{init.image_id}", "fake")
+      StorageMock.seed("uploads/#{init.image_id}", String.duplicate("fake image bytes ", 128))
       # First commit: succeeds, flips to pending.
       post(conn, "/api/upload/#{init.image_id}/commit", %{})
       # Second commit: row is no longer awaiting_upload.

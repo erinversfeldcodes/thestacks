@@ -208,49 +208,8 @@ defmodule Stacks.Workers.IdentifyBookJob do
       Logger.error("IdentifyBookJob: failed to resolve image #{image_id}: #{inspect(error)}")
   end
 
-  defp mark_rejected(image_id, reason) do
-    # Scope to rows still in `pending` so an Oban retry that re-enters this
-    # path after a successful rejection cannot re-emit
-    # [:stacks, :upload, :terminal]. Only real pending -> rejected transitions
-    # fire the counter.
-    query = from(i in UploadedImage, where: i.id == ^image_id and i.status == "pending")
-
-    {count, _} =
-      Repo.update_all(
-        query,
-        set: [
-          status: "rejected",
-          rejection_reason: reason,
-          updated_at: DateTime.utc_now()
-        ]
-      )
-
-    if count > 0 do
-      Logger.info("IdentifyBookJob: rejected image #{image_id} (#{reason})")
-
-      :telemetry.execute(
-        [:stacks, :upload, :terminal],
-        %{count: 1},
-        %{outcome: :rejected}
-      )
-
-      Phoenix.PubSub.broadcast(
-        Core.PubSub,
-        "upload:#{image_id}",
-        {:upload_complete, %{status: "rejected", rejection_reason: reason}}
-      )
-
-      Events.emit_safe(%{
-        event_type: "image.rejected",
-        aggregate_type: "image",
-        aggregate_id: image_id,
-        payload: %{reason: reason}
-      })
-    else
-      Logger.warning("IdentifyBookJob: image #{image_id} not found for reject")
-    end
-  rescue
-    error ->
-      Logger.error("IdentifyBookJob: failed to reject image #{image_id}: #{inspect(error)}")
-  end
+  # Rejection machinery lives in `Stacks.Books.reject_image/2` (terminal row
+  # state + telemetry + SSE PubSub + image.rejected event) so the commit-time
+  # undersized-object gate and this pipeline share one observable path.
+  defp mark_rejected(image_id, reason), do: Stacks.Books.reject_image(image_id, reason)
 end
