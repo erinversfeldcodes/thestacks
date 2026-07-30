@@ -107,7 +107,34 @@ iex> Core.Repo.all(
 ...> )
 ```
 
-### Step 5: Check domain authentication (SPF/DKIM)
+### Step 5: Verify the sender address (EMAIL_FROM)
+
+The in-code default sender is Resend's `onboarding@resend.dev` stopgap
+(`apps/core/config/config.exs`), which **cannot deliver to real users** —
+Resend's onboarding mode only accepts the Resend-account owner's own address.
+If real users report missing emails and Resend returns `403` on sends, the
+prod app is almost certainly still on the default sender.
+
+```bash
+fly secrets list -a thestacks-core | grep EMAIL_FROM
+```
+
+If absent, set it (owner action — requires the domain to be verified at
+resend.com/domains first):
+
+```bash
+fly secrets set EMAIL_FROM=noreply@thestacks.app -a thestacks-core
+```
+
+The app restarts on secret set. **Verify:** enqueue a real send to a non-owner
+address (see Step 4's iex snippet, using a recipient that is NOT the Resend
+account owner) and confirm the Oban job reaches `completed` and the email
+arrives — with the default sender that exact send 403s. `config/runtime.exs`
+reads `EMAIL_FROM` in the prod server block; `scripts/deploy-stack.sh` also
+stages it from the deploy environment when present and warns on prod deploys
+when it is missing.
+
+### Step 6: Check domain authentication (SPF/DKIM)
 
 A common cause of delivery failures is domain authentication misconfiguration. If SPF/DKIM/DMARC records are missing or incorrect, major providers (Gmail, Outlook) may silently reject or junk emails.
 

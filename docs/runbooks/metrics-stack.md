@@ -1,31 +1,36 @@
-# Runbook: Metrics Stack — Fly managed Prometheus + Grafana
+# Runbook: Metrics Stack — VictoriaMetrics push + self-hosted Grafana
 
 **Severity:** P3 (observability — no user-facing impact)
 **Owner:** Platform operator
-**Last reviewed:** 2026-07-15
+**Last reviewed:** 2026-07-30
 
 ---
 
 ## Overview
 
-The app exposes Prometheus text at `/internal/metrics` (PromEx, `Core.PromEx`).
-Fly's **managed Prometheus** (bundled, $0, persists across deploys) scrapes it and
-stores the series independently of the app machines. The dashboards-as-code in
-`Core.PromEx.dashboards/0` (JSON under `apps/core/priv/grafana/`) render against
-Fly's Grafana (fly-metrics.net).
+The app exposes Prometheus text at `/internal/metrics` (PromEx, `Core.PromEx`),
+but the pipeline is **push-based** (ADR-021): `Core.PromEx.MetricsPusher` POSTs
+the same exposition to self-hosted VictoriaMetrics
+(`deploy/fly.victoriametrics.toml`) via `STACKS_METRICS_PUSH_URL` every 15s
+while the node is alive. Self-hosted Grafana (`deploy/fly.grafana.toml`) reads
+VictoriaMetrics over 6PN; dashboards-as-code live in
+`apps/core/priv/grafana/*.json`.
 
-### How the scrape is wired (Issue #232)
+### Retired: the Fly managed-Prometheus scrape (Issues #232 / #248 / #323)
 
-- `deploy/fly.core.toml` has a `[metrics]` block (`port = 4000`,
-  `path = "/internal/metrics"`). Fly's Prometheus scrapes each machine
-  **directly over the private 6PN network** — it never traverses fly-proxy.
-- `/internal/metrics` is normally gated by `StacksWeb.Plugs.MetricsAuth`
-  (bearer `METRICS_SCRAPE_TOKEN`). The scrape can't present a bearer, so the plug
-  has a **scoped bypass**: a request is allowed without a token **iff** it has a
-  `fdaa::/16` remote_ip **and** carries **no** `fly-client-ip` header (which
-  fly-proxy stamps on every public-edge request). Public callers always have
-  `fly-client-ip`, so the public path still requires the bearer. See the plug's
-  `@moduledoc`.
+- `deploy/fly.core.toml` used to carry a `[metrics]` block (`port = 4000`,
+  `path = "/internal/metrics"`) that made Fly's platform Prometheus poll each
+  machine every 15s. That scrape **never ingested a single `stacks_*` series**
+  (#248) and 401'd continuously against `StacksWeb.Plugs.MetricsAuth` — Fly's
+  scraper cannot attach the `METRICS_SCRAPE_TOKEN` bearer (the `[metrics]`
+  block has no header mechanism) and its requests did not satisfy the plug's
+  6PN bypass. The block was removed in #323; if `fly logs` shows 15s-interval
+  401s on `/internal/metrics` again, someone has re-added it.
+- `/internal/metrics` remains gated by `StacksWeb.Plugs.MetricsAuth`
+  (bearer `METRICS_SCRAPE_TOKEN`); its only legitimate external caller is the
+  SLO gate (`scripts/check-slo-gate.sh`). The plug's narrow 6PN bypass (fdaa::
+  remote_ip + no `fly-client-ip` header) is retained but no longer has a
+  known caller. See the plug's `@moduledoc`.
 
 ### Grafana upload
 
@@ -38,27 +43,27 @@ Fly's Grafana (fly-metrics.net).
 
 ## Deploy-time smoke check (live validation)
 
-Config/plumbing is covered by unit tests locally; the **live** scrape/render is
+Config/plumbing is covered by unit tests locally; the **live** push/render is
 DEPLOY-TIME only — do not fake it. After a preview/prod deploy:
 
-1. **Fly is scraping.** Confirm the `[metrics]` target is up:
+1. **The push is landing.** Query VictoriaMetrics for a known family, e.g.
    ```
-   fly metrics list -a thestacks-core     # or the Fly dashboard → Metrics
+   curl -s "http://<vm-host>:8428/api/v1/query?query=stacks_moderation_classification_count_total"
    ```
-   Then query Fly's Prometheus (fly-metrics.net) for a known family, e.g.
-   `stacks_moderation_classification_count_total` — a non-empty series means the
-   scrape is landing.
+   (over `fly proxy` / 6PN; prod VM is `thestacks-victoriametrics.internal`).
+   A non-empty series means `Core.PromEx.MetricsPusher` is pushing. If empty,
+   check the core app's logs for pusher errors and that
+   `STACKS_METRICS_PUSH_URL` is set (unset ⇒ pusher is a no-op).
 
-2. **Dashboards resolve their panels.** Open the moderation/age-gate dashboard in
-   Grafana (fly-metrics.net) and confirm panels render data (not "No data").
+2. **Dashboards resolve their panels.** Open the self-hosted Grafana app and
+   confirm panels render data (not "No data"). `dashboard-emission-gate.sh` and
+   `e2e/tests/dashboards.spec.ts` cover this on preview.
 
 3. **Public path is still locked.** From outside 6PN, `GET https://<host>/internal/metrics`
    with no bearer MUST return `401`; with the bearer it returns the metrics text.
 
-If step 1 fails: check the `[metrics]` block port/path matches the app listener
-(4000 / `/internal/metrics`) and that the machine is healthy. If step 3 returns
-200 without a bearer, STOP — the bypass is mis-scoped and metrics are public;
-revert and re-check `MetricsAuth`.
+If step 3 returns 200 without a bearer, STOP — the bypass is mis-scoped and
+metrics are public; revert and re-check `MetricsAuth`.
 
 ---
 
