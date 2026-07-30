@@ -169,6 +169,11 @@ config :guardian, Guardian.DB,
   schema_name: "guardian_tokens",
   token_types: ["access"]
 
+# External-service client bindings (ADR-012). INVARIANT (Issue #327): this file
+# names REAL clients only, in every environment. Every mock lives under
+# apps/core/test/support/mocks/ — on the :test elixirc path only (mix.exs) —
+# and is bound exclusively in test.exs, so no mock compiles into the dev or
+# prod release artifact.
 config :core, :vision_client, Stacks.AI.Client
 config :core, :isbn_http_client, Stacks.Books.HttpClient
 config :core, :vision_service_url, "http://localhost:8000"

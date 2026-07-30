@@ -100,14 +100,19 @@ defmodule Stacks.UploadPipelineTest do
     end)
   end
 
-  defp with_client(client_module, fun) do
-    original = Application.get_env(:core, :vision_client)
+  # Steer the configured vision seam (Stacks.AI.MockClient) for the duration of
+  # `fun`. `response` is what /analyze should answer with — the endpoint the
+  # Moderation pipeline calls. Registrations live in the process dictionary and
+  # reach the pipeline's Tasks via `$callers`, so nothing global is mutated.
+  defp with_vision(response, fun), do: with_vision("analyze", response, fun)
+
+  defp with_vision(endpoint, response, fun) do
+    MockClient.put_response(endpoint, response)
 
     try do
-      Application.put_env(:core, :vision_client, client_module)
       fun.()
     after
-      Application.put_env(:core, :vision_client, original)
+      MockClient.clear()
     end
   end
 
@@ -465,9 +470,9 @@ defmodule Stacks.UploadPipelineTest do
       # SSE payload IS the partial-success response.
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      # MultiBookPartialClient returns 2 ISBNs but only 9780743273565 is
+      # multi_book_partial/0 returns 2 ISBNs but only 9780743273565 is
       # pre-inserted in setup; 9780000000099 will not resolve.
-      with_client(__MODULE__.MultiBookPartialClient, fn ->
+      with_vision(multi_book_partial(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -592,7 +597,7 @@ defmodule Stacks.UploadPipelineTest do
       image = insert(:uploaded_image, status: "pending")
       user = insert(:user)
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -618,7 +623,7 @@ defmodule Stacks.UploadPipelineTest do
       image = insert(:uploaded_image, status: "pending")
       user = insert(:user)
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -651,7 +656,7 @@ defmodule Stacks.UploadPipelineTest do
 
       user = insert(:user)
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -685,7 +690,7 @@ defmodule Stacks.UploadPipelineTest do
 
       user = insert(:user)
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -840,7 +845,7 @@ defmodule Stacks.UploadPipelineTest do
       book2 = insert(:book, title: "Book Two")
       insert(:book_edition, book: book2, isbn: "9780306406157")
 
-      with_client(__MODULE__.MultiBookClient, fn ->
+      with_vision(multi_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -883,7 +888,7 @@ defmodule Stacks.UploadPipelineTest do
       books_before = Repo.aggregate(Book, :count)
       editions_before = Repo.aggregate(BookEdition, :count)
 
-      with_client(__MODULE__.MultiBookPartialClient, fn ->
+      with_vision(multi_book_partial(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -921,7 +926,7 @@ defmodule Stacks.UploadPipelineTest do
       book2 = insert(:book, title: "Book Two Isolated")
       insert(:book_edition, book: book2, isbn: "9780306406157")
 
-      with_client(__MODULE__.MultiBookClient, fn ->
+      with_vision(multi_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1008,7 +1013,7 @@ defmodule Stacks.UploadPipelineTest do
          }}
       )
 
-      with_client(__MODULE__.RomanceBookClient, fn ->
+      with_vision(romance_book(), fn ->
         image = insert(:uploaded_image, status: "pending")
 
         perform_job(IdentifyBookJob, %{
@@ -1188,7 +1193,7 @@ defmodule Stacks.UploadPipelineTest do
       user = insert(:user)
       before_count = event_count("image.rejected")
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1209,7 +1214,7 @@ defmodule Stacks.UploadPipelineTest do
       user = insert(:user)
       before_count = event_count("image.rejected")
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1230,7 +1235,7 @@ defmodule Stacks.UploadPipelineTest do
       user = insert(:user)
       before_count = event_count("book.created")
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1247,7 +1252,7 @@ defmodule Stacks.UploadPipelineTest do
       user = insert(:user)
       before_count = event_count("placement.created")
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
@@ -1399,7 +1404,7 @@ defmodule Stacks.UploadPipelineTest do
     test "returns {:cancel, reason} for non-book images", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         assert {:cancel, "image does not contain a book"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1415,7 +1420,7 @@ defmodule Stacks.UploadPipelineTest do
     test "returns {:cancel, reason} when no ISBN resolves", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         assert {:cancel, "isbn_not_found"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1433,7 +1438,7 @@ defmodule Stacks.UploadPipelineTest do
     } do
       image = insert(:uploaded_image, status: "pending")
 
-      with_client(__MODULE__.ErrorClient, fn ->
+      with_vision(:any, service_error(), fn ->
         # {:error, reason} tells Oban the job failed transiently and should be
         # retried (up to max_attempts). This is distinct from {:cancel, reason}
         # which permanently cancels the job.
@@ -1495,7 +1500,7 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 5 — IdentifyBookJob with MultiBookClient" do
+  describe "Suite 5 — IdentifyBookJob with a multi-book vision response" do
     @tag stories: ["US-1.1.7"], suite: :jobs
     test "resolves multiple books and stores all book_ids in uploaded_images", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
@@ -1504,7 +1509,7 @@ defmodule Stacks.UploadPipelineTest do
       book2 = insert(:book, title: "Book Two")
       insert(:book_edition, book: book2, isbn: "9780306406157")
 
-      with_client(__MODULE__.MultiBookClient, fn ->
+      with_vision(multi_book(), fn ->
         assert :ok =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1527,14 +1532,14 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 5 — IdentifyBookJob with AmbiguousClient" do
+  describe "Suite 5 — IdentifyBookJob with an ambiguous vision response" do
     @tag stories: ["US-1.1.3"], suite: :jobs
     test "ambiguous classification is treated as not_a_book (rejected)", %{user: user} do
       # The Moderation pipeline only accepts classification == "book".
       # "ambiguous" falls through to {:error, :not_a_book}.
       image = insert(:uploaded_image, status: "pending")
 
-      with_client(__MODULE__.AmbiguousClient, fn ->
+      with_vision(ambiguous(), fn ->
         assert {:cancel, "image does not contain a book"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -1566,7 +1571,7 @@ defmodule Stacks.UploadPipelineTest do
 
       # Test the split via a direct moderation pipeline call with a mock client
       # that returns the compound title.
-      with_client(__MODULE__.CompoundTitleClient, fn ->
+      with_vision(compound_title(), fn ->
         image = insert(:uploaded_image, status: "pending")
         user = insert(:user)
 
@@ -1598,23 +1603,25 @@ defmodule Stacks.UploadPipelineTest do
     end
 
     @tag stories: ["US-1.1.3"], suite: :external
-    test "NotABookClient returns not_book classification" do
-      result = __MODULE__.NotABookClient.call_vision("analyze", %{})
+    test "steered not-a-book response replaces the default classification" do
+      MockClient.put_response("analyze", not_a_book())
+      result = MockClient.call_vision("analyze", %{})
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK"}} = result
     end
 
     @tag stories: ["US-1.1.3"], suite: :external
-    test "AmbiguousClient returns ambiguous classification" do
-      result = __MODULE__.AmbiguousClient.call_vision("analyze", %{})
+    test "steered ambiguous response replaces the default classification" do
+      MockClient.put_response("analyze", ambiguous())
+      result = MockClient.call_vision("analyze", %{})
 
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => 0.5}} =
                result
     end
 
     @tag stories: ["US-1.1.1"], suite: :external
-    test "ErrorClient returns service_unavailable" do
-      result = __MODULE__.ErrorClient.call_vision("analyze", %{})
-      assert {:error, :service_unavailable} = result
+    test "steered service_unavailable error replaces the default success" do
+      MockClient.put_response("analyze", service_error())
+      assert {:error, :service_unavailable} = MockClient.call_vision("analyze", %{})
     end
   end
 
@@ -1627,17 +1634,115 @@ defmodule Stacks.UploadPipelineTest do
     end
 
     @tag stories: ["US-1.1.2"], suite: :external
-    test "NoIsbnClient returns empty books array" do
-      {:ok, resp} = __MODULE__.NoIsbnClient.call_vision("analyze", %{})
+    test "steered no-ISBN response replaces the default non-empty books array" do
+      MockClient.put_response("analyze", no_isbn())
+      {:ok, resp} = MockClient.call_vision("analyze", %{})
       assert resp["books"] == []
     end
   end
 
   describe "Suite 6 — circuit breaker" do
     @tag stories: ["US-1.1.1"], suite: :external
-    test "CircuitOpenClient returns :circuit_open error" do
-      result = __MODULE__.CircuitOpenClient.call_vision("analyze", %{})
-      assert {:error, :circuit_open} = result
+    test "steered :circuit_open error is returned for every endpoint" do
+      MockClient.put_response(:any, circuit_open())
+      assert {:error, :circuit_open} = MockClient.call_vision("analyze", %{})
+      assert {:error, :circuit_open} = MockClient.call_vision("is_book", %{})
+    end
+  end
+
+  describe "Suite 6 — MockClient steering seam (Issue #327)" do
+    @tag stories: ["US-1.1.1"], suite: :external
+    test "put_response/2 steers is_book, and clear/0 restores the default" do
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
+               MockClient.call_vision("is_book", %{})
+
+      MockClient.put_response(
+        "is_book",
+        {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK", "confidence" => 0.11}}
+      )
+
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK", "confidence" => 0.11}} =
+               MockClient.call_vision("is_book", %{})
+
+      MockClient.clear()
+
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
+               MockClient.call_vision("is_book", %{})
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :external
+    test "steering is per-endpoint — an unsteered endpoint keeps its default" do
+      MockClient.put_response("extract_isbn", {:error, :steered_failure})
+
+      assert {:error, :steered_failure} = MockClient.call_vision("extract_isbn", %{})
+
+      assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
+               MockClient.call_vision("is_book", %{})
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :external
+    test "the most recent registration for an endpoint wins" do
+      MockClient.put_response("extract_isbn", {:error, :first})
+      MockClient.put_response("extract_isbn", {:error, :second})
+      assert {:error, :second} = MockClient.call_vision("extract_isbn", %{})
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :external
+    test "an exact-endpoint registration wins over an :any registration" do
+      MockClient.put_response(:any, {:error, :catch_all})
+      MockClient.put_response("extract_isbn", {:error, :specific})
+
+      assert {:error, :specific} = MockClient.call_vision("extract_isbn", %{})
+      assert {:error, :catch_all} = MockClient.call_vision("is_book", %{})
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :external
+    test "a response can be a function of the payload" do
+      MockClient.put_response("extract_isbn", fn payload ->
+        {:ok, %{"echoed" => Map.get(payload, :image_b64)}}
+      end)
+
+      assert {:ok, %{"echoed" => "abc"}} =
+               MockClient.call_vision("extract_isbn", %{image_b64: "abc"})
+    end
+
+    @tag stories: ["US-1.1.1"], suite: :external
+    test "a steered response reaches work the caller farms out to a Task ($callers)" do
+      MockClient.put_response("extract_isbn", {:error, :steered_in_parent})
+
+      result =
+        Task.async(fn -> MockClient.call_vision("extract_isbn", %{}) end)
+        |> Task.await()
+
+      assert {:error, :steered_in_parent} = result
+    end
+
+    @tag stories: ["US-1.1.3"], suite: :external
+    test "a steered response is consumed by the IdentifyBookJob pipeline, not just echoed" do
+      image = insert(:uploaded_image, status: "pending")
+      user = insert(:user)
+
+      with_vision(not_a_book(), fn ->
+        perform_job(IdentifyBookJob, %{
+          "user_id" => user.id,
+          "image_id" => image.id,
+          "image_b64" => @image_b64
+        })
+      end)
+
+      {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
+
+      updated =
+        from(i in "uploaded_images",
+          where: i.id == ^image_id_bin,
+          select: %{status: i.status, rejection_reason: i.rejection_reason}
+        )
+        |> Repo.one(prefix: "op")
+
+      # The mock's DEFAULT analyze response classifies as BOOK; only the steered
+      # NOT_BOOK response produces this rejection.
+      assert updated.status == "rejected"
+      assert updated.rejection_reason == "not_a_book"
     end
   end
 
@@ -2265,7 +2370,7 @@ defmodule Stacks.UploadPipelineTest do
       image_id = stored.id
 
       # Step 2: Run identification with not-a-book mock
-      with_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image_id,
@@ -2296,7 +2401,7 @@ defmodule Stacks.UploadPipelineTest do
       assert {:ok, stored} = Books.store_upload(user.id, upload)
       image_id = stored.id
 
-      with_client(__MODULE__.NoIsbnClient, fn ->
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image_id,
@@ -2313,196 +2418,78 @@ defmodule Stacks.UploadPipelineTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Inline mock modules. Each returns the consolidated /analyze shape
-  # (classification + books in one response), matching what the production
-  # Moderation pipeline now calls post-consolidation.
+  # Vision scenarios. Each is a response the real seam (Stacks.AI.MockClient) is
+  # steered with via `with_vision/2` — no bespoke replacement client modules.
+  # All use the consolidated /analyze shape (classification + books in one
+  # response), matching what the production Moderation pipeline calls
+  # post-consolidation.
   # ---------------------------------------------------------------------------
 
-  defmodule NotABookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
-           "confidence" => 0.95,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  defp analyze_response(classification, books, confidence \\ 0.9) do
+    {:ok,
+     %{
+       "classification" => classification,
+       "confidence" => confidence,
+       "books" => books,
+       "model_used" => "mock"
+     }}
   end
 
-  defmodule NoIsbnClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  defp book_candidate(title, author, potential_isbns, confidence) do
+    %{
+      "title" => title,
+      "author" => author,
+      "potential_isbns" => potential_isbns,
+      "raw_text" => nil,
+      "confidence" => confidence
+    }
   end
 
-  defmodule ErrorClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload), do: {:error, :service_unavailable}
-    def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
+  defp not_a_book, do: analyze_response("CLASSIFICATION_RESULT_NOT_BOOK", [], 0.95)
+
+  defp no_isbn, do: analyze_response("CLASSIFICATION_RESULT_BOOK", [])
+
+  # AMBIGUOUS classifications are treated as not-a-book by Moderation (only
+  # BOOK short-circuits into extract), so `books` stays empty — extract is
+  # never reached for AMBIGUOUS.
+  defp ambiguous, do: analyze_response("CLASSIFICATION_RESULT_AMBIGUOUS", [], 0.5)
+
+  defp service_error, do: {:error, :service_unavailable}
+
+  defp circuit_open, do: {:error, :circuit_open}
+
+  defp compound_title do
+    analyze_response("CLASSIFICATION_RESULT_BOOK", [
+      book_candidate(
+        "Things I Don't Want to Know OR The Cost of Living",
+        "Deborah Levy",
+        [],
+        0.85
+      )
+    ])
   end
 
-  defmodule AmbiguousClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    # AMBIGUOUS classifications are treated as not-a-book by Moderation
-    # (only BOOK short-circuits into extract). Books field should be
-    # empty since extract is never reached for AMBIGUOUS.
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_AMBIGUOUS",
-           "confidence" => 0.5,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  defp romance_book do
+    analyze_response("CLASSIFICATION_RESULT_BOOK", [
+      book_candidate("Romance Novel", "Author X", ["9780451524935"], 0.9)
+    ])
   end
 
-  defmodule CircuitOpenClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision(_endpoint, _payload), do: {:error, :circuit_open}
+  defp multi_book do
+    analyze_response("CLASSIFICATION_RESULT_BOOK", [
+      book_candidate("Book One", "Author A", ["9780743273565"], 0.9),
+      book_candidate("Book Two", "Author B", ["9780306406157"], 0.8)
+    ])
   end
 
-  defmodule CompoundTitleClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "Things I Don't Want to Know OR The Cost of Living",
-               "author" => "Deborah Levy",
-               "potential_isbns" => [],
-               "raw_text" => nil,
-               "confidence" => 0.85
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule RomanceBookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "Romance Novel",
-               "author" => "Author X",
-               "potential_isbns" => ["9780451524935"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule MultiBookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "Book One",
-               "author" => "Author A",
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             },
-             %{
-               "title" => "Book Two",
-               "author" => "Author B",
-               "potential_isbns" => ["9780306406157"],
-               "raw_text" => nil,
-               "confidence" => 0.8
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule MultiBookPartialClient do
-    @moduledoc """
-    Returns 2 candidates: one with a pre-inserted ISBN (resolves), one with
-    a fabricated ISBN (will not resolve via Books.find_existing or
-    ISBNResolver.resolve in the test environment). Used to exercise the
-    partial-failure branch of `Moderation.do_resolve_and_store_all/2`.
-    """
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "Book One (resolves)",
-               "author" => "Author A",
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             },
-             %{
-               "title" => "Book Two (fails)",
-               "author" => "Author B",
-               "potential_isbns" => ["9780000000099"],
-               "raw_text" => nil,
-               "confidence" => 0.8
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  # Two candidates: one with a pre-inserted ISBN (resolves), one with a
+  # fabricated ISBN (will not resolve via Books.find_existing or
+  # ISBNResolver.resolve in the test environment). Exercises the
+  # partial-failure branch of `Moderation.do_resolve_and_store_all/2`.
+  defp multi_book_partial do
+    analyze_response("CLASSIFICATION_RESULT_BOOK", [
+      book_candidate("Book One (resolves)", "Author A", ["9780743273565"], 0.9),
+      book_candidate("Book Two (fails)", "Author B", ["9780000000099"], 0.8)
+    ])
   end
 end

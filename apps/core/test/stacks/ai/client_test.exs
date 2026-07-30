@@ -1,11 +1,3 @@
-defmodule Stacks.AI.BadShapeClient do
-  @moduledoc false
-  @behaviour Stacks.AI.ClientBehaviour
-  @impl true
-  def call_vision("associate", _payload), do: {:ok, %{"unexpected_key" => "value"}}
-  def call_vision(_endpoint, _payload), do: {:ok, %{}}
-end
-
 defmodule Stacks.AI.ClientTest do
   # async: false — tests mutate the global :vision_client application env key
   # and the global BudgetTracker GenServer.
@@ -13,6 +5,7 @@ defmodule Stacks.AI.ClientTest do
 
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.Client
+  alias Stacks.AI.MockClient
 
   # Token format: "<integer_timestamp>.<64_hex_chars>"
   @token_format ~r/\A\d+\.[0-9a-f]{64}\z/
@@ -107,8 +100,12 @@ defmodule Stacks.AI.ClientTest do
   describe "associate_isbn/4 — unexpected response shape" do
     setup do
       original = Application.get_env(:core, :vision_client)
-      Application.put_env(:core, :vision_client, Stacks.AI.BadShapeClient)
+      Application.put_env(:core, :vision_client, MockClient)
       on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
+
+      # Steer the seam rather than swapping in a bespoke module: /associate
+      # answers without the "job_id" key the caller contract requires.
+      MockClient.put_response("associate", {:ok, %{"unexpected_key" => "value"}})
       :ok
     end
 
