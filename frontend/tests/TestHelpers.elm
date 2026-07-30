@@ -41,6 +41,7 @@ simulators, and test data builders.
 
 import Api exposing (PollStatus(..), RegisterError(..), streamEventDecoder)
 import Components.ISBNInput
+import Components.ShelfOrganiser as ShelfOrganiser
 import Dict
 import Http
 import Json.Decode as Decode
@@ -60,7 +61,7 @@ import SimulatedEffect.Task
 import Types.Book exposing (Book, Edition, VisibilityTier(..))
 import Types.Placement exposing (Placement, readingStatusToString)
 import Types.RemoteData
-import Types.Shelf exposing (bookshelfResponseDecoder, shelvesResponseDecoder)
+import Types.Shelf exposing (Shelf, bookshelfResponseDecoder, shelvesResponseDecoder)
 import Types.Visibility
 
 
@@ -921,12 +922,140 @@ uploadEffects msg model maybeToken =
 
 
 {-| Translate Bookshelf page Cmds into SimulatedEffects.
+
+⚠️ **This used to be `case msg of _ -> SimulatedEffect.Cmd.none`** — a total
+black hole. Every bookshelf harness (owner _and_ read-only) shared it, so no
+`Bookshelf.Msg` could produce any request in any bookshelf program test. That
+silently disarmed `BookshelfReadOnlyTest`'s `no_mutating_request` assertion,
+which is labelled a SECURITY guarantee: it counted POSTs in a harness where the
+count was structurally pinned at zero, and would have kept passing had the
+read-only view started firing mutations on every render.
+
+It now mirrors `Page.Bookshelf.update`'s real effects, computed — as production
+does — from the **pre-update** model. `BookshelfProgramTest`'s
+`token_fires_one_request` is the pattern: an assertion that something does _not_
+happen is only worth the positive control that proves the harness can see it
+happening at all.
+
 -}
-libraryEffects : Bookshelf.Msg -> SimulatedEffect Bookshelf.Msg
-libraryEffects msg =
-    case msg of
+libraryEffects : Bookshelf.Msg -> Bookshelf.Model -> SimulatedEffect Bookshelf.Msg
+libraryEffects msg model =
+    case ( msg, model.token ) of
+        ( Bookshelf.OrganiserMsg ShelfOrganiser.AddShelf, Just token ) ->
+            shelfCreateEffect model.config.apiName token
+
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.RemoveShelf id), Just token ) ->
+            shelfDeleteEffect id token
+
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveUp id), Just token ) ->
+            reorderEffect model token (ShelfOrganiser.moveUp id)
+
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveDown id), Just token ) ->
+            reorderEffect model token (ShelfOrganiser.moveDown id)
+
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.DropOn targetId), Just token ) ->
+            case model.organiser.dragging of
+                Just draggedId ->
+                    reorderEffect model token (moveShelfToId draggedId targetId)
+
+                Nothing ->
+                    SimulatedEffect.Cmd.none
+
+        ( Bookshelf.ShelfMutated _, Just token ) ->
+            -- Both the Ok and Err branches refetch: the page never trusts its
+            -- local order after a mutation.
+            bookshelfInitEffects model.config (Just token)
+
         _ ->
             SimulatedEffect.Cmd.none
+
+
+{-| Mirror of `Api.createShelf` — `POST /api/bookshelves/:name/shelves`.
+-}
+shelfCreateEffect : String -> String -> SimulatedEffect Bookshelf.Msg
+shelfCreateEffect bookshelfName token =
+    SimulatedEffect.Http.request
+        { method = "POST"
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
+        , body = SimulatedEffect.Http.jsonBody (Encode.object [])
+        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Mirror of `Api.deleteShelf` — `DELETE /api/shelves/:id`.
+-}
+shelfDeleteEffect : String -> String -> SimulatedEffect Bookshelf.Msg
+shelfDeleteEffect shelfId token =
+    SimulatedEffect.Http.request
+        { method = "DELETE"
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "/api/shelves/" ++ shelfId
+        , body = SimulatedEffect.Http.emptyBody
+        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Mirror of `Api.reorderShelves` — `PUT /api/bookshelves/:name/shelves/reorder`
+with the whole ordered id list. Applies the same pure reorder `Page.Bookshelf`
+applies, so the harness sends the order production would send rather than a
+plausible-looking one.
+-}
+reorderEffect :
+    Bookshelf.Model
+    -> String
+    -> (List Shelf -> List Shelf)
+    -> SimulatedEffect Bookshelf.Msg
+reorderEffect model token reorder =
+    case model.shelves of
+        Types.RemoteData.Success shelves ->
+            SimulatedEffect.Http.request
+                { method = "PUT"
+                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/bookshelves/" ++ model.config.apiName ++ "/shelves/reorder"
+                , body =
+                    SimulatedEffect.Http.jsonBody
+                        (Encode.object
+                            [ ( "shelf_ids"
+                              , Encode.list Encode.string
+                                    (ShelfOrganiser.orderedIds (reorder shelves))
+                              )
+                            ]
+                        )
+                , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        _ ->
+            -- Shelves not loaded: production's `handleOrganiser` falls through
+            -- to its no-token/no-shelves clause and issues nothing.
+            SimulatedEffect.Cmd.none
+
+
+{-| Mirror of `Page.Bookshelf.moveToId` (private there): resolve a drop onto
+`targetId` to the same index move the up/down buttons perform.
+-}
+moveShelfToId : String -> String -> List Shelf -> List Shelf
+moveShelfToId draggedId targetId shelves =
+    let
+        indexOf id =
+            shelves
+                |> List.indexedMap (\i shelf -> ( i, shelf.id ))
+                |> List.filter (\( _, shelfId ) -> shelfId == id)
+                |> List.head
+                |> Maybe.map Tuple.first
+    in
+    case ( indexOf draggedId, indexOf targetId ) of
+        ( Just from, Just to ) ->
+            ShelfOrganiser.moveTo from to shelves
+
+        _ ->
+            shelves
 
 
 {-| Translate the owner-mode `Page.Bookshelf.init` Cmd into a SimulatedEffect.
@@ -1323,7 +1452,7 @@ bookshelfProgram config maybeToken =
                     ( newModel, _, _ ) =
                         Bookshelf.update msg model
                 in
-                ( newModel, libraryEffects msg )
+                ( newModel, libraryEffects msg model )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1472,7 +1601,7 @@ profileShelfProgram maybeToken handle bookshelfName =
                     ( newModel, _, _ ) =
                         Bookshelf.update msg model
                 in
-                ( newModel, libraryEffects msg )
+                ( newModel, libraryEffects msg model )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity

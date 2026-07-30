@@ -1159,6 +1159,12 @@ jobs:
         # an insufficient-seed skip (assertSeedOrSkip) is a seed regression, not a
         # reason to skip — turn it into a hard failure (#280 enforcement switch,
         # wiring left to #269).
+        # E2E_EXPECT_RATE_LIMITING=1: the preview runs with rate_limiting_enabled,
+        # so rate-limit.spec must ASSERT the 429 rather than skip when it doesn't
+        # appear (#330 — the old `test.skip(!sawRateLimit, …)` skipped precisely
+        # when the :auth bucket was broken, and this is its only E2E proof).
+        # BASE_URL alone already implies this; set explicitly so the intent
+        # survives a future BASE_URL refactor.
         # GRAFANA_URL: makes dashboards.spec render live panels in-suite instead of
         # skipping on !GRAFANA_URL (#269 workstream 2).
         run: |
@@ -1175,6 +1181,7 @@ jobs:
           KEEPALIVE_PID=$!
           trap 'kill "${KEEPALIVE_PID}" 2>/dev/null || true' EXIT
           CI=1 E2E_SERVICES=none E2E_EXPECT_LIVE_METRICS=1 E2E_EXPECT_FULL_SEEDS=1 \
+            E2E_EXPECT_RATE_LIMITING=1 \
             GRAFANA_URL="${GRAFANA_URL}" BASE_URL="${CORE_URL}" scripts/test-e2e.sh
       - name: Dashboard emission gate (preview VictoriaMetrics)
         # Emission-fidelity layer (ADR-021 / #253/#256). After the E2E drive, the core

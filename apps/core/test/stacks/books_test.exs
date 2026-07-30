@@ -562,12 +562,73 @@ defmodule Stacks.BooksTest do
       :ok
     end
 
-    test "returns {:ok, candidates} list when vision service responds successfully" do
+    test "returns one candidate per potential ISBN the vision service reported" do
+      # ⚠️ This asserted only `is_list(candidates)` against the mock's canned
+      # default — true for `[]`, so it passed whether or not `identify/2`
+      # carried a single book through, and it could not distinguish "the vision
+      # seam works" from "the vision seam returns nothing" (Issue #330).
+      #
+      # #327 made the seam steerable per endpoint, so the test can now name the
+      # payload and assert what came back out of it. `:isbn` is taken verbatim
+      # from `potential_isbns`, and with no resolver response registered
+      # `MockHttpClient` answers `{:ok, %{}}` → `ISBNResolver.resolve/1` finds
+      # nothing → title/author fall back to the vision result's own fields. So
+      # every asserted value below is one this test put in.
       user = insert(:user)
-      image_b64 = Base.encode64("fake_image_bytes")
 
-      assert {:ok, candidates} = Books.identify(user.id, {:b64, image_b64})
-      assert is_list(candidates)
+      MockClient.put_response(
+        "extract_isbn",
+        {:ok,
+         %{
+           "books" => [
+             %{
+               "title" => "Nineteen Eighty-Four",
+               "author" => "George Orwell",
+               "potential_isbns" => ["9780141036144"],
+               "confidence" => 0.91
+             },
+             %{
+               "title" => "Brave New World",
+               "author" => "Aldous Huxley",
+               "potential_isbns" => ["9780060850524", "9780060929879"],
+               "confidence" => 0.77
+             }
+           ],
+           "model_used" => "mock"
+         }}
+      )
+
+      assert {:ok, candidates} = Books.identify(user.id, {:b64, Base.encode64("bytes")})
+
+      # Two spines, three ISBNs between them: `identify/2` flat_maps over the
+      # books, so a candidate per ISBN — not per book.
+      assert Enum.map(candidates, & &1.isbn) == [
+               "9780141036144",
+               "9780060850524",
+               "9780060929879"
+             ]
+
+      assert Enum.map(candidates, & &1.title) == [
+               "Nineteen Eighty-Four",
+               "Brave New World",
+               "Brave New World"
+             ]
+
+      assert Enum.map(candidates, & &1.author) == [
+               "George Orwell",
+               "Aldous Huxley",
+               "Aldous Huxley"
+             ]
+    end
+
+    test "returns {:ok, []} when the vision service reports no books" do
+      # The empty case the old `is_list/1` assertion silently also accepted —
+      # now pinned as its own outcome, so the two cannot be confused again.
+      user = insert(:user)
+
+      MockClient.put_response("extract_isbn", {:ok, %{"books" => [], "model_used" => "mock"}})
+
+      assert {:ok, []} = Books.identify(user.id, {:b64, Base.encode64("bytes")})
     end
 
     test "returns {:error, reason} when vision service call fails" do
@@ -616,9 +677,17 @@ defmodule Stacks.BooksTest do
       user = insert(:user)
 
       assert {:ok, :created, book} = Books.confirm(user.id, %{isbn: "9780141036144"})
-      assert book.title != nil
-      assert is_list(book.editions)
-      assert book.editions != []
+
+      # ⚠️ This asserted `book.title != nil` and `book.editions != []` — true of
+      # any book at all, so it could not tell the resolver's metadata from a
+      # placeholder, nor the requested edition from some other one (Issue #330).
+      # The `setup` above registers the exact Open Library payload, so the
+      # resolved values are known and can be named.
+      assert book.title == "Nineteen Eighty-Four"
+
+      assert [edition] = book.editions
+      assert edition.isbn == "9780141036144"
+      assert edition.is_primary == true
     end
 
     test "creates placement on specified shelf when shelf_name provided" do
@@ -627,7 +696,23 @@ defmodule Stacks.BooksTest do
       assert {:ok, :created, book} =
                Books.confirm(user.id, %{isbn: "9780141036144", shelf_name: "library"})
 
-      assert book.title != nil
+      # ⚠️ This asserted only `book.title != nil` — in a test whose whole subject
+      # is *which bookshelf the placement lands on*, it never looked at the
+      # placement (Issue #330). It would have passed with the book placed on the
+      # default wishlist, i.e. with the `shelf_name` argument ignored entirely.
+      assert book.title == "Nineteen Eighty-Four"
+
+      placement =
+        Repo.one!(
+          from(p in Stacks.Shelving.Placement,
+            join: b in assoc(p, :bookshelf),
+            where: b.user_id == ^user.id,
+            select: %{bookshelf_name: b.name}
+          )
+        )
+
+      assert placement.bookshelf_name == "library",
+             "shelf_name: \"library\" was ignored — the placement landed elsewhere"
     end
 
     test "returns existing book when ISBN already exists (no duplicate created)" do

@@ -2,36 +2,22 @@ defmodule Stacks.Discovery.BraveClientTest do
   use Core.DataCase, async: true
 
   alias Stacks.Discovery.BraveClient
-  alias Stacks.Discovery.MockBraveClient
 
-  describe "MockBraveClient.search/2" do
-    test "returns empty list when no response is registered" do
-      assert {:ok, []} = MockBraveClient.search("test query")
-    end
-
-    test "returns registered response" do
-      results = [
-        %{title: "Author Blog", url: "https://author.com", description: "An author's blog"}
-      ]
-
-      MockBraveClient.put_response({:ok, results})
-      assert {:ok, ^results} = MockBraveClient.search("test query")
-    end
-
-    test "returns error when error response is registered" do
-      MockBraveClient.put_response({:error, :rate_limited})
-      assert {:error, :rate_limited} = MockBraveClient.search("test query")
-    end
-
-    test "clear removes registered response" do
-      MockBraveClient.put_response(
-        {:ok, [%{title: "Test", url: "https://test.com", description: ""}]}
-      )
-
-      MockBraveClient.clear()
-      assert {:ok, []} = MockBraveClient.search("test query")
-    end
-  end
+  # ⚠️ **A `describe "MockBraveClient.search/2"` block of four tests was removed
+  # here (Issue #330).** Each one called `MockBraveClient.put_response(x)` and
+  # then asserted `MockBraveClient.search/2` returned `x`. The subject was the
+  # test double, not `Stacks.Discovery.BraveClient` — no change to the real
+  # client could have reddened them. They asserted that an Agent stores things.
+  #
+  # Coverage note: nothing was lost. The mock's put/clear machinery is exercised
+  # for real by `source_discovery_job_test.exs` and
+  # `discover_author_sources_job_test.exs`, which use `put_response` to steer the
+  # production `SourceDiscoveryJob` / `DiscoverAuthorSourcesJob` through the
+  # behaviour seam — there the mock is a means and the assertion is about
+  # production code. The removed tests were never a real guarantee.
+  #
+  # The describe below is the genuine article and stays: it pins the
+  # `persistent_term` bug that took SourceDiscoveryJob down in production.
 
   describe "BraveClient.increment_daily_counter/0 — the daily budget counter" do
     setup do
