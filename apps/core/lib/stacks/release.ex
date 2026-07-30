@@ -42,6 +42,31 @@ defmodule Stacks.Release do
   end
 
   @doc """
+  The deploy entry point: apply registered data corrections, then migrate.
+
+  This is what `release_command` in `deploy/fly.core.toml` runs, and the order
+  is the whole point. A migration that adds a constraint to an existing table
+  is a claim about *existing data*, so anything that repairs that data has to
+  land first — #339's `book_editions_isbn_ean13_checksum` VALIDATE aborted two
+  preview deployments because the repair was wired as a post-deploy
+  `fly machine exec` in `scripts/deploy-stack.sh`, which never runs: Fly's
+  `release_command` executes during `fly deploy` itself and fails the whole
+  deployment before any post-deploy step is reached.
+
+  Corrections are guarded by `to_regclass` (see `Stacks.DataCorrection.EditionIsbn`),
+  so a first-ever deploy against an empty database is a no-op rather than an
+  `undefined_table` crash.
+  """
+  @spec deploy() :: :ok
+  def deploy do
+    correct_data(apply: true)
+
+    migrate()
+
+    :ok
+  end
+
+  @doc """
   Runs the registered data corrections (`Stacks.DataCorrection.Registry`)
   against the connected database.
 

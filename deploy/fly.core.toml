@@ -7,7 +7,9 @@ kill_timeout = "5s"
   dockerfile = "Dockerfile.core"
 
 [deploy]
-  release_command = "/app/bin/core eval 'Stacks.Release.migrate()'"
+  # correct-then-migrate, not migrate alone (#339): a constraint added to an
+  # existing table is a claim about existing data, so repairs must land first.
+  release_command = "/app/bin/core eval 'Stacks.Release.deploy()'"
 
 [env]
   # The production domain (certs linked to this app). Phoenix builds absolute
