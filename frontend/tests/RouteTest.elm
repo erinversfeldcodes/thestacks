@@ -1,7 +1,7 @@
 module RouteTest exposing (suite)
 
 import Expect
-import Navigation.Route as Route exposing (Route(..))
+import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..))
 import Test exposing (Test, describe, test)
 import Url
 
@@ -23,10 +23,209 @@ fromPath path =
             NotFound
 
 
+{-| Every `Route` constructor with a sample argument. `routeLabel` below is an
+exhaustive case (no wildcard), so adding a constructor to the `Route` union is
+a compile error here until it is added to this list and covered by the
+round-trip property.
+-}
+allRoutes : List Route
+allRoutes =
+    [ Home
+    , Login
+    , Library
+    , AntiLibrary
+    , WishList
+    , ReadingPile
+    , LookingForHome
+    , BookDetail "abc123"
+    , Upload
+    , Search
+    , SettingsProfile
+    , SettingsPassword
+    , SettingsNotifications
+    , SettingsConsent
+    , SettingsAuditLog
+    , Insights
+    , CostTransparency
+    , Metrics
+    , About
+    , ListingRemoval
+    , Catalogue
+    , MarketplaceBrowse
+    , MarketplaceCreate
+    , MarketplaceMyListings
+    , MarketplaceDetail "listing-1"
+    , SettingsPrivacy
+    , BlogArchive
+    , BlogNew
+    , BlogEdit "post-1"
+    , BlogPost "post-1"
+    , AdminSourceApproval
+    , AdminScraperConfig
+    , AdminBookModeration
+    , AdminRemovalRequests
+    , Groups
+    , GroupDetail "group-1"
+    , Profile "handle"
+    , ProfileShelf "handle" "library"
+    , ConfirmEmail EmailConfirmed
+    , ConfirmEmail EmailConfirmFailed
+    , ForgotPassword
+    , ResetPassword "tok-abc123"
+    , NotFound
+    ]
+
+
+{-| Exhaustive on purpose — a new `Route` constructor fails to compile here,
+forcing it into `allRoutes` (and thus into the round-trip property).
+-}
+routeLabel : Route -> String
+routeLabel route =
+    case route of
+        Home ->
+            "Home"
+
+        Login ->
+            "Login"
+
+        Library ->
+            "Library"
+
+        AntiLibrary ->
+            "AntiLibrary"
+
+        WishList ->
+            "WishList"
+
+        ReadingPile ->
+            "ReadingPile"
+
+        LookingForHome ->
+            "LookingForHome"
+
+        BookDetail _ ->
+            "BookDetail"
+
+        Upload ->
+            "Upload"
+
+        Search ->
+            "Search"
+
+        SettingsProfile ->
+            "SettingsProfile"
+
+        SettingsPassword ->
+            "SettingsPassword"
+
+        SettingsNotifications ->
+            "SettingsNotifications"
+
+        SettingsConsent ->
+            "SettingsConsent"
+
+        SettingsAuditLog ->
+            "SettingsAuditLog"
+
+        Insights ->
+            "Insights"
+
+        CostTransparency ->
+            "CostTransparency"
+
+        Metrics ->
+            "Metrics"
+
+        About ->
+            "About"
+
+        ListingRemoval ->
+            "ListingRemoval"
+
+        Catalogue ->
+            "Catalogue"
+
+        MarketplaceBrowse ->
+            "MarketplaceBrowse"
+
+        MarketplaceCreate ->
+            "MarketplaceCreate"
+
+        MarketplaceMyListings ->
+            "MarketplaceMyListings"
+
+        MarketplaceDetail _ ->
+            "MarketplaceDetail"
+
+        SettingsPrivacy ->
+            "SettingsPrivacy"
+
+        BlogArchive ->
+            "BlogArchive"
+
+        BlogNew ->
+            "BlogNew"
+
+        BlogEdit _ ->
+            "BlogEdit"
+
+        BlogPost _ ->
+            "BlogPost"
+
+        AdminSourceApproval ->
+            "AdminSourceApproval"
+
+        AdminScraperConfig ->
+            "AdminScraperConfig"
+
+        AdminBookModeration ->
+            "AdminBookModeration"
+
+        AdminRemovalRequests ->
+            "AdminRemovalRequests"
+
+        Groups ->
+            "Groups"
+
+        GroupDetail _ ->
+            "GroupDetail"
+
+        Profile _ ->
+            "Profile"
+
+        ProfileShelf _ _ ->
+            "ProfileShelf"
+
+        ConfirmEmail EmailConfirmed ->
+            "ConfirmEmail EmailConfirmed"
+
+        ConfirmEmail EmailConfirmFailed ->
+            "ConfirmEmail EmailConfirmFailed"
+
+        ForgotPassword ->
+            "ForgotPassword"
+
+        ResetPassword _ ->
+            "ResetPassword"
+
+        NotFound ->
+            "NotFound"
+
+
+roundTripTest : Route -> Test
+roundTripTest route =
+    test (routeLabel route ++ " survives fromUrl (toPath r)") <|
+        \_ ->
+            fromPath (Route.toPath route)
+                |> Expect.equal route
+
+
 suite : Test
 suite =
     describe "Route"
-        [ describe "fromUrl / toPath round-trips"
+        [ describe "fromUrl (toPath r) == r for every Route constructor"
+            (List.map roundTripTest allRoutes)
+        , describe "fromUrl / toPath round-trips"
             [ test "Home" <|
                 \_ ->
                     fromPath "/"

@@ -21,7 +21,6 @@ import Components.FormatPicker exposing (formatPicker)
 import Components.PlacementCard as Card
 import Components.PriceInfo as PriceInfo
 import Components.RemoveBookModal as RemoveBookModal exposing (removeBookModal)
-import Components.ReviewSummary as ReviewSummary
 import Components.ShelfMover exposing (shelfMover)
 import Html exposing (Html, a, button, div, h1, h2, h3, img, label, li, option, p, section, select, span, text, ul)
 import Html.Attributes exposing (alt, attribute, class, disabled, for, href, id, selected, src, style, tabindex, value)
@@ -944,7 +943,6 @@ viewBook model book =
     div [ class "book-detail" ]
         ([ viewHero model book
          , viewAboutSection book
-         , viewReviewsSection
          , viewPricesSection model
          , viewAvailabilitySection model
          , viewAuthorSection book
@@ -1278,14 +1276,6 @@ viewAboutSection book =
                         [ text "No synopsis available yet." ]
             ]
         ]
-
-
-{-| Review summary section — delegates to the ReviewSummary component.
-Currently passes NotAsked since the API does not yet provide per-book reviews.
--}
-viewReviewsSection : Html Msg
-viewReviewsSection =
-    ReviewSummary.view NotAsked
 
 
 {-| Price info section — delegates to the PriceInfo component.

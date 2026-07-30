@@ -465,7 +465,7 @@ loadingState =
 
 successRendersAllSections : Test
 successRendersAllSections =
-    test "success_renders_all_sections: successful response renders hero, about, reviews, prices, author, writing, shelf actions" <|
+    test "success_renders_all_sections: successful response renders hero, about, prices, author, writing, shelf actions" <|
         \() ->
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
@@ -475,8 +475,6 @@ successRendersAllSections =
                     [ Selector.class "book-detail__hero" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "book-detail__about" ]
-                |> ProgramTest.ensureViewHas
-                    [ Selector.class "book-detail__reviews" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "book-detail__prices" ]
                 |> ProgramTest.ensureViewHas
@@ -579,18 +577,12 @@ removeModalOpenConfirmFlow =
 
 sectionContentDetails : Test
 sectionContentDetails =
-    test "section_content: reviews show source names, prices show empty message, author name visible" <|
+    test "section_content: prices show empty message, author name visible" <|
         \() ->
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
                     (simulateBookDetailResponse "book-test-001" testBook)
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "GoodReads" ]
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "Storygraph" ]
-                |> ProgramTest.ensureViewHas
-                    [ Selector.text "Reddit" ]
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001/prices"
                     (simulateEmptyBookPricesResponse "book-test-001")
@@ -655,7 +647,7 @@ ariaRegionsPresent =
                     ]
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute (Html.Attributes.attribute "role" "region")
-                    , Selector.id "section-reviews"
+                    , Selector.id "section-writing"
                     ]
 
 
