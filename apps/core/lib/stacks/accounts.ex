@@ -1117,20 +1117,12 @@ defmodule Stacks.Accounts do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Open a token family at login.
+  Open a family at login, or advance a family's live token on refresh rotation.
 
-  Returns `{:ok, family}` or `{:error, changeset}`. The caller (login) treats a
-  failure as fatal: a token whose family row did not persist would violate the
-  invariant that every live access token is tracked by exactly one family.
-  """
-  def open_token_family(attrs) do
-    %AuthTokenFamily{}
-    |> AuthTokenFamily.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Advance a family's live token on refresh rotation.
+  At login the caller passes a freshly generated `family_id`, so the upsert is
+  a plain insert; the caller treats a failure as fatal — a token whose family
+  row did not persist would violate the invariant that every live access token
+  is tracked by exactly one family.
 
   Idempotent upsert keyed on `family_id`: an existing family has its
   `current_jti`, `previous_jti`, `rotated_at` (and `updated_at`) replaced —

@@ -122,48 +122,9 @@ defmodule Stacks.UploadPipelineTest do
   # Suite 2: API Endpoint Tests
   # ============================================================================
 
-  describe "Suite 2 — POST /api/upload" do
+  describe "Suite 2 — upload rate limiting" do
     @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 202 with image_id when authenticated with valid image", %{
-      conn: conn,
-      token: token
-    } do
-      tmp_path = create_temp_image()
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "book_cover.jpg",
-        content_type: "image/jpeg"
-      }
-
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{"image" => upload})
-
-      assert %{"status" => "accepted", "image_id" => image_id} = json_response(conn, 202)
-      assert is_binary(image_id)
-      assert {:ok, _} = Ecto.UUID.dump(image_id)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 422 when no image is provided", %{conn: conn, token: token} do
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{})
-
-      assert %{"error" => "no image provided"} = json_response(conn, 422)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 401 when unauthenticated", %{conn: conn} do
-      conn = post(conn, "/api/upload", %{})
-      assert conn.status == 401
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 429 when rate limit is exceeded", %{conn: conn, token: token} do
+    test "returns 429 when rate limit is exceeded", %{token: token} do
       # Rate limiting is disabled in test config; enable it for this test.
       Application.put_env(:core, :rate_limiting_enabled, true)
 
@@ -176,7 +137,7 @@ defmodule Stacks.UploadPipelineTest do
           Enum.map(1..121, fn _ ->
             build_conn()
             |> auth_conn(token)
-            |> post("/api/upload", %{})
+            |> post("/api/upload/init", %{})
             |> Map.get(:status)
           end)
 
@@ -184,38 +145,6 @@ defmodule Stacks.UploadPipelineTest do
       after
         Application.put_env(:core, :rate_limiting_enabled, false)
       end
-    end
-  end
-
-  describe "Suite 2 — POST /api/upload/identify" do
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns identified candidates with valid image_b64", %{conn: conn, token: token} do
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload/identify", %{"image_b64" => @image_b64})
-
-      assert %{"status" => "identified", "candidates" => candidates} = json_response(conn, 200)
-      assert is_list(candidates)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 422 when neither image_b64 nor image_url is provided", %{
-      conn: conn,
-      token: token
-    } do
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload/identify", %{})
-
-      assert %{"error" => _} = json_response(conn, 422)
-    end
-
-    @tag stories: ["US-1.1.1"], suite: :api
-    test "returns 401 when unauthenticated", %{conn: conn} do
-      conn = post(conn, "/api/upload/identify", %{"image_b64" => @image_b64})
-      assert conn.status == 401
     end
   end
 
@@ -562,21 +491,10 @@ defmodule Stacks.UploadPipelineTest do
     end
 
     @tag stories: ["US-1.1.7"], suite: :api
-    test "multi-book endpoint returns 401 when unauthenticated", %{conn: conn} do
-      # Defence-in-depth: don't rely on inheritance from the `/api/upload`
-      # 401 test. Multi-book identification flows through the same
-      # `/api/upload` route, but exercise it explicitly with a multipart
-      # body to guarantee the auth pipe halts before the multi-book code
-      # path runs.
-      tmp_path = create_temp_image()
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "two_books.jpg",
-        content_type: "image/jpeg"
-      }
-
-      conn = post(conn, "/api/upload", %{"image" => upload})
+    test "multi-book upload flow returns 401 when unauthenticated", %{conn: conn} do
+      # Defence-in-depth: exercise the upload entry point explicitly to
+      # guarantee the auth pipe halts before any multi-book code path runs.
+      conn = post(conn, "/api/upload/init", %{})
       assert conn.status == 401
     end
   end
@@ -2258,12 +2176,12 @@ defmodule Stacks.UploadPipelineTest do
   describe "Integration — full upload-to-shelf flow via API" do
     @tag stories: ["US-1.1.1"], suite: :api
     test "complete flow: upload -> poll -> book detail -> placement", %{
-      conn: conn,
       token: token,
       user: user,
       book: _book
     } do
-      # Step 1: Upload image
+      # Step 1: Store the upload (the legacy multipart POST /api/upload route
+      # was removed; Books.store_upload/2 is the same entry point it wrapped)
       tmp_path = create_temp_image()
 
       upload = %Plug.Upload{
@@ -2272,13 +2190,8 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      upload_conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{"image" => upload})
-
-      assert %{"status" => "accepted", "image_id" => image_id} =
-               json_response(upload_conn, 202)
+      assert {:ok, stored} = Books.store_upload(user.id, upload)
+      image_id = stored.id
 
       # Step 2: Assert DB state — image is pending
       # SSE stream validation covered in Suite 2 SSE tests above
@@ -2337,11 +2250,9 @@ defmodule Stacks.UploadPipelineTest do
   describe "Integration — rejection flow via API" do
     @tag stories: ["US-1.1.1", "US-1.1.3"], suite: :api
     test "upload -> poll -> rejection (not_a_book)", %{
-      conn: conn,
-      token: token,
       user: user
     } do
-      # Step 1: Upload image
+      # Step 1: Store the upload directly (legacy POST /api/upload removed)
       tmp_path = create_temp_image()
 
       upload = %Plug.Upload{
@@ -2350,12 +2261,8 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      upload_conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{"image" => upload})
-
-      assert %{"image_id" => image_id} = json_response(upload_conn, 202)
+      assert {:ok, stored} = Books.store_upload(user.id, upload)
+      image_id = stored.id
 
       # Step 2: Run identification with not-a-book mock
       with_client(__MODULE__.NotABookClient, fn ->
@@ -2376,8 +2283,6 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag stories: ["US-1.1.1", "US-1.1.2"], suite: :api
     test "upload -> poll -> rejection (isbn_not_found)", %{
-      conn: conn,
-      token: token,
       user: user
     } do
       tmp_path = create_temp_image()
@@ -2388,12 +2293,8 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      upload_conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload", %{"image" => upload})
-
-      assert %{"image_id" => image_id} = json_response(upload_conn, 202)
+      assert {:ok, stored} = Books.store_upload(user.id, upload)
+      image_id = stored.id
 
       with_client(__MODULE__.NoIsbnClient, fn ->
         perform_job(IdentifyBookJob, %{

@@ -98,8 +98,8 @@ defmodule StacksWeb.Plugs.RouteGroupTest do
       assert read_group(conn) == :upload
     end
 
-    test "tags /api/upload/identify as :upload" do
-      conn = run_plug("/api/upload/identify")
+    test "tags /api/upload/init as :upload" do
+      conn = run_plug("/api/upload/init")
       assert read_group(conn) == :upload
     end
 

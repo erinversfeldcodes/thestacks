@@ -178,7 +178,7 @@ defmodule StacksWeb.TestHelperController do
 
   The token is minted via the exact same path `AuthController.login` uses
   (`Guardian.encode_and_sign/2` with a fresh `family_id` claim +
-  `Accounts.open_token_family/1`, failing closed if the family row does not
+  `Accounts.rotate_token_family/1`, failing closed if the family row does not
   persist), so it is indistinguishable from a real login session token.
 
   Security posture: this endpoint MINTS AUTHENTICATION. Besides the
@@ -376,7 +376,7 @@ defmodule StacksWeb.TestHelperController do
       session_started_at: DateTime.from_unix!(claims["sst"])
     }
 
-    case Accounts.open_token_family(family_attrs) do
+    case Accounts.rotate_token_family(family_attrs) do
       {:ok, _family} ->
         conn
         |> put_status(:created)
@@ -388,7 +388,7 @@ defmodule StacksWeb.TestHelperController do
         })
 
       {:error, reason} ->
-        Logger.error("open_token_family failed on E2E session mint: #{inspect(reason)}")
+        Logger.error("rotate_token_family failed on E2E session mint: #{inspect(reason)}")
         revoke_minted_token(token)
 
         conn

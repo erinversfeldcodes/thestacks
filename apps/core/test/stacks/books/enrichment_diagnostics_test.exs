@@ -658,12 +658,13 @@ defmodule Stacks.Books.EnrichmentDiagnosticsTest do
       {"future publication_year", %{"publish_date" => "99999"}}
     ]
 
-    # Cases that EXPOSE pre-existing bugs in the resolver/worker. We
-    # keep the fixtures here as documentation + as a regression hook —
-    # mark `@tag :pending_apply_metadata_hardening` so they're excluded
-    # from default `mix test` but visible via `mix test --include
-    # pending_apply_metadata_hardening`. The Pre-Implementation Flags
-    # in the completion report enumerate the underlying bugs.
+    # Cases that ONCE exposed bugs in the resolver/worker, since fixed
+    # (nil-guarded `ol_authors` in ISBNResolver; EnrichBookJob switched
+    # Repo.update! → Repo.update). They now PASS and run in the default
+    # `mix test` — no ExUnit exclusion is configured for this tag. The
+    # `@tag :pending_apply_metadata_hardening` label is kept only as a
+    # selection handle (`mix test --only pending_apply_metadata_hardening`)
+    # and as documentation of the bug history in the comments below.
     @edge_cases_pending [
       # ISBNResolver.parse_open_library/2 calls Enum.map_join on
       # `book_data["authors"]` without nil-guarding — raises

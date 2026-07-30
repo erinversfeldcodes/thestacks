@@ -168,8 +168,6 @@ defmodule CoreWeb.Router do
 
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated, :rate_limit_upload]
-    post "/upload", UploadController, :create
-    post "/upload/identify", UploadController, :identify
     # Presigned-URL upload flow — init issues the signed PUT, commit
     # verifies the client's direct-to-R2 upload + enqueues the job.
     post "/upload/init", UploadController, :init

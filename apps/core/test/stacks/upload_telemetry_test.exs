@@ -76,15 +76,6 @@ defmodule Stacks.UploadTelemetryTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  defp create_temp_image do
-    path =
-      Path.join(System.tmp_dir!(), "test_telemetry_#{System.unique_integer([:positive])}.jpg")
-
-    File.write!(path, "fake jpeg image bytes for testing")
-    on_exit(fn -> File.rm(path) end)
-    path
-  end
-
   defp attach_telemetry(event_name) do
     test_pid = self()
     handler_id = "test-#{Enum.join(event_name, "-")}-#{System.unique_integer([:positive])}"
@@ -522,23 +513,15 @@ defmodule Stacks.UploadTelemetryTest do
 
   describe "Suite 11 — Phoenix endpoint telemetry for upload requests" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "[:phoenix, :endpoint, :stop] fires for POST /api/upload", %{
+    test "[:phoenix, :endpoint, :stop] fires for POST /api/upload/init", %{
       conn: conn,
       token: token
     } do
       attach_telemetry([:phoenix, :endpoint, :stop])
 
-      tmp_path = create_temp_image()
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "telemetry_test.jpg",
-        content_type: "image/jpeg"
-      }
-
       conn
       |> auth_conn(token)
-      |> post("/api/upload", %{"image" => upload})
+      |> post("/api/upload/init", %{"content_type" => "image/jpeg"})
 
       assert_receive {:telemetry, [:phoenix, :endpoint, :stop], measurements, _metadata}, 2_000
       assert is_integer(measurements.duration)
@@ -569,17 +552,9 @@ defmodule Stacks.UploadTelemetryTest do
     } do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
-      tmp_path = create_temp_image()
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "router_test.jpg",
-        content_type: "image/jpeg"
-      }
-
       conn
       |> auth_conn(token)
-      |> post("/api/upload", %{"image" => upload})
+      |> post("/api/upload/init", %{"content_type" => "image/jpeg"})
 
       assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
                      2_000
@@ -593,17 +568,20 @@ defmodule Stacks.UploadTelemetryTest do
   # 5. HTTP request telemetry for ALL upload-related endpoints (Section A)
   # ============================================================================
 
-  describe "Suite 11 — router_dispatch telemetry for POST /api/upload" do
+  describe "Suite 11 — router_dispatch telemetry for POST /api/upload/init" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "422 when no image provided", %{conn: conn, token: token} do
+    test "telemetry fires on an error response (404 commit for unknown image)", %{
+      conn: conn,
+      token: token
+    } do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
       conn =
         conn
         |> auth_conn(token)
-        |> post("/api/upload", %{})
+        |> post("/api/upload/#{Ecto.UUID.generate()}/commit", %{})
 
-      assert json_response(conn, 422)["error"] == "no image provided"
+      assert json_response(conn, 404)["error"] == "not_found"
 
       assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
                      2_000
@@ -616,7 +594,7 @@ defmodule Stacks.UploadTelemetryTest do
     test "401 when unauthenticated", %{conn: conn} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
-      conn = post(conn, "/api/upload", %{})
+      conn = post(conn, "/api/upload/init", %{})
 
       assert conn.status == 401
 
@@ -1109,36 +1087,12 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   # ============================================================================
-  # 11. Upload flow telemetry for POST /api/upload/identify (US-1.1.1, US-1.1.5)
-  # ============================================================================
-
-  describe "Suite 11 — router_dispatch telemetry for POST /api/upload/identify" do
-    @tag stories: ["US-1.1.1", "US-1.1.5"], suite: :telemetry
-    test "422 when no image input provided", %{conn: conn, token: token} do
-      attach_telemetry([:phoenix, :router_dispatch, :stop])
-
-      conn =
-        conn
-        |> auth_conn(token)
-        |> post("/api/upload/identify", %{})
-
-      assert json_response(conn, 422)["error"]
-
-      assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
-                     2_000
-
-      assert is_integer(measurements.duration)
-      assert metadata.plug == StacksWeb.UploadController
-    end
-  end
-
-  # ============================================================================
   # 12. End-to-end telemetry: full upload flow emits multiple telemetry events
   # ============================================================================
 
   describe "Suite 11 — end-to-end telemetry across upload flow (US-1.1.1)" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
-    test "POST /api/upload emits both endpoint and router_dispatch telemetry", %{
+    test "POST /api/upload/init emits both endpoint and router_dispatch telemetry", %{
       conn: conn,
       token: token
     } do
@@ -1170,17 +1124,9 @@ defmodule Stacks.UploadTelemetryTest do
         :telemetry.detach(router_id)
       end)
 
-      tmp_path = create_temp_image()
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "e2e_test.jpg",
-        content_type: "image/jpeg"
-      }
-
       conn
       |> auth_conn(token)
-      |> post("/api/upload", %{"image" => upload})
+      |> post("/api/upload/init", %{"content_type" => "image/jpeg"})
 
       # Both endpoint-level and router-level telemetry should fire
       assert_receive {:endpoint_stop, measurements}, 2_000
