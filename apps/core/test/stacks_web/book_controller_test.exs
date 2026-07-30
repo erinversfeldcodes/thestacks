@@ -317,7 +317,9 @@ defmodule StacksWeb.BookControllerTest do
       assert placement["bookshelf_name"] == "library"
     end
 
-    test "returns 200 with book data when ISBN resolves via metadata (mocked)", %{conn: conn} do
+    test "returns 201 with the resolved book when a new ISBN resolves via metadata (mocked)", %{
+      conn: conn
+    } do
       user = insert(:user)
       original = Application.get_env(:core, :isbn_http_client)
 
@@ -347,8 +349,23 @@ defmodule StacksWeb.BookControllerTest do
           |> auth_conn(user)
           |> post("/api/books/confirm", %{"isbn" => "9780451524935"})
 
-        # Accept 201 (new book created) or 409 (merge required — unlikely with new ISBN)
-        assert conn.status in [201, 409]
+        # ⚠️ This was `assert conn.status in [201, 409]` with the comment
+        # "accept 201 (new book created) or 409 (merge required — unlikely with
+        # a new ISBN)" (Issue #330). 201 and 409 are the two OPPOSITE outcomes
+        # of this endpoint — "created it" and "refused, you must merge" — so the
+        # disjunction passed whichever happened and asserted only "not a crash".
+        # It would have gone green if metadata resolution silently started
+        # colliding every new ISBN with an existing work.
+        #
+        # The test means 201: this user's collection is empty, the only seeded
+        # row is the user, and 9780451524935 exists nowhere — so there is no
+        # work for `find_similar_work` to match and a merge can never be
+        # required. The old comment said as much ("unlikely with new ISBN") and
+        # then hedged anyway.
+        assert conn.status == 201
+
+        assert %{"book" => book} = json_response(conn, 201)
+        assert book["title"] == "Confirm Test Book"
       after
         Application.put_env(:core, :isbn_http_client, original)
       end

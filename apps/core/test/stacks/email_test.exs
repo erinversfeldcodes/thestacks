@@ -183,5 +183,40 @@ defmodule Stacks.EmailTest do
       assert final_user.password_reset_token == nil
       assert final_user.password_reset_sent_at == nil
     end
+
+    # Single-use was proven LIVE on 2026-07-30 (replaying a spent reset link
+    # returned 400) but had no test — the closest, "clears reset token after
+    # successful password update" above, asserts the COLUMN is nil, which is the
+    # mechanism, not the guarantee. A refactor that kept the column clear but
+    # matched the user by id alone would leave that test green and hand every
+    # spent reset link a second life.
+    #
+    # The distinction matters because the token stays *cryptographically valid*
+    # for 24h: `Phoenix.Token.verify/4` will happily re-sign off on it. The only
+    # thing standing between a leaked-then-used link and an account takeover is
+    # the `password_reset_token: token` clause in the `Repo.get_by/2`.
+    test "a spent reset token cannot be replayed (single-use)" do
+      user = insert(:user)
+      Email.send_password_reset(user.email)
+      token = Core.Repo.reload!(user).password_reset_token
+
+      assert {:ok, _} = Email.reset_password(token, "newpassword123"),
+             "precondition: the first use must succeed, or the replay proves nothing"
+
+      # Replay the SAME token. It is still inside its 24h signing window, so the
+      # rejection cannot come from expiry — it must come from single-use.
+      assert {:error, :invalid} = Email.reset_password(token, "attackerpassword456")
+
+      # …and the attacker's password must not have taken effect. Without this
+      # the test would pass on an implementation that returned an error AFTER
+      # writing the new password.
+      final_user = Core.Repo.reload!(user)
+
+      assert Argon2.verify_pass("newpassword123", final_user.password_hash),
+             "the replayed reset overwrote the password the legitimate user set"
+
+      refute Argon2.verify_pass("attackerpassword456", final_user.password_hash),
+             "a replayed reset token set a new password — the link is not single-use"
+    end
   end
 end

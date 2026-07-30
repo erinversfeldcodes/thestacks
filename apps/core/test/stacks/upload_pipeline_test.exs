@@ -267,9 +267,13 @@ defmodule Stacks.UploadPipelineTest do
       assert String.contains?(body, "resolved")
     end
 
-    @tag :sla
+    # ⚠️ **This was `@tag :sla`, and `:sla` was in `test_helper.exs`'s permanent
+    # exclude list with no comment explaining why (Issue #330).** It was the
+    # suite's ONLY latency assertion and it had never run. Verdict: RUN IT, with
+    # an honest threshold — see the assertion below. `:sla` is now removed from
+    # the exclude list; this was its only user.
     @tag stories: ["US-1.1.1"], suite: :api
-    test "GET /api/upload/:image_id/stream responds within 100ms", %{
+    test "GET /api/upload/:image_id/stream returns immediately for an already-resolved image", %{
       conn: conn,
       token: token,
       user: user,
@@ -289,8 +293,21 @@ defmodule Stacks.UploadPipelineTest do
           get(conn, "/api/upload/#{image.id}/stream?token=#{token}")
         end)
 
-      assert elapsed_us < 100_000,
-             "SSE stream endpoint took #{elapsed_us}μs, expected < 100,000μs (100ms)"
+      # Threshold rationale (Issue #330). The regression this guards is
+      # CATEGORICAL, not marginal: a resolved image must short-circuit, not
+      # enter the SSE wait. That wait is budgeted in tens of seconds (the E2E
+      # upload spec allows 240s), so anything in that failure mode overshoots by
+      # orders of magnitude, and a ceiling of 1s catches it with ~240x margin.
+      #
+      # The old bound was 100ms against a measured ~31-35ms — roughly 3x
+      # headroom, tight enough that a loaded CI runner would flake it. That is
+      # the likely reason it got tagged out of the suite entirely, and an
+      # excluded test is worth exactly nothing. 1s is the threshold that is both
+      # defensible and actually runnable.
+      assert elapsed_us < 1_000_000,
+             "SSE stream endpoint took #{elapsed_us}μs for an ALREADY-RESOLVED image, " <>
+               "expected < 1,000,000μs (1s). This endpoint must short-circuit on a " <>
+               "resolved image rather than entering the PubSub/SSE wait."
     end
   end
 

@@ -8,10 +8,22 @@ rendered read-only:
   - the fetch targets the profile endpoint (`/api/u/:handle/bookshelves/:name`),
     NOT the viewer's own `/api/bookshelves/:name`;
   - the received placements render as spines;
-  - NO mutating affordance is exposed (no "Add shelf" button) and NO mutating
-    request can be issued — a defence-in-depth SECURITY guarantee;
+  - NO mutating affordance is exposed (no "Add shelf" button), so no mutating
+    request can be issued through the UI — a SECURITY guarantee;
   - a failed load (hidden shelf / ghost / bad name → 404) shows a neutral
     "not available" state, not the owner's "could not load your library" error.
+
+⚠️ **Scope of the SECURITY guarantee, measured (Issue #330).** It holds at the
+VIEW layer only. `Page.Bookshelf.handleOrganiser` matches on
+`( ShelfOrganiser.AddShelf, Just token, _ )` with **no `config.readOnly` check**,
+so a synthetic `OrganiserMsg` dispatched into a read-only model still issues
+`POST /api/bookshelves/:apiName/shelves` — confirmed by probe. This is not a
+cross-reader leak (the request carries the _viewer's_ token, so the server
+scopes it to the viewer's own bookshelf, not the owner's), but the page is not
+defence-in-depth the way this module's docs previously claimed: strip the view
+and the update function will happily mutate. Making `handleOrganiser` refuse
+under `readOnly` is a production change and therefore out of scope here; filed
+as a follow-up.
 
 -}
 
@@ -24,7 +36,7 @@ import Page.Bookshelf as Bookshelf
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import TestHelpers exposing (profileShelfProgram, testBook)
+import TestHelpers exposing (libraryProgram, profileShelfProgram, simulateBookshelfResponse, testBook, testPlacement)
 
 
 {-| Read-only browse of `alice`'s `library` shelf as an authenticated viewer.
@@ -126,6 +138,7 @@ suite =
         , rendersReceivedPlacements
         , noAddShelfControl
         , noShelfOrganiserPanel
+        , ownerMutationIsObservable
         , noMutatingRequestOnLoad
         , lookOnlySpineClick
         , rendersOwnerAttribution
@@ -230,14 +243,59 @@ noShelfOrganiserPanel =
                     ]
 
 
+{-| ⚠️ **POSITIVE CONTROL for `noMutatingRequestOnLoad` below.**
+
+The negative assertion is only worth what this test proves: that the harness can
+observe a shelf mutation at all. Until Issue #330 the shared effect translator
+(`TestHelpers.libraryEffects`) was `case msg of _ -> Cmd.none`, so _no_
+`Bookshelf.Msg` could produce a request in _any_ bookshelf harness — the
+SECURITY assertion below counted POSTs in a world where the count was pinned at
+zero by construction, and would have kept passing had the read-only view started
+firing mutations on every render.
+
+Same page module, same translator, owner config: clicking the organiser's real
+"Add a shelf" button must issue exactly one POST. If this goes red the negative
+assertion below has stopped meaning anything.
+
+-}
+ownerMutationIsObservable : Test
+ownerMutationIsObservable =
+    test "owner_mutation_is_observable: the SAME harness in owner mode DOES issue a shelf POST — so the assertion below can fail" <|
+        \() ->
+            ProgramTest.start () (libraryProgram (Just "owner-token"))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/bookshelves/library"
+                    (simulateBookshelfResponse [ testPlacement ])
+                -- Pre-condition: the affordance the read-only view must not
+                -- expose really is on screen here.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "shelf-add") ]
+                |> ProgramTest.clickButton "Add a shelf"
+                |> ProgramTest.expectHttpRequests "POST"
+                    "/api/bookshelves/library/shelves"
+                    (\requests -> Expect.equal (List.length requests) 1)
+
+
+{-| The read-only browse must issue no mutation across the whole load cycle.
+
+Paired with `ownerMutationIsObservable` above, which proves this harness reports
+a shelf POST when one is made.
+
+-}
 noMutatingRequestOnLoad : Test
 noMutatingRequestOnLoad =
-    test "no_mutating_request: browsing another reader's shelf issues no POST/PUT/DELETE" <|
+    test "no_mutating_request_SECURITY: browsing another reader's shelf issues no POST/PUT/DELETE" <|
         \() ->
             browse
                 |> ProgramTest.simulateHttpResponse "GET" profileEndpoint oneShelf
-                |> ProgramTest.expectHttpRequests "POST"
+                |> ProgramTest.ensureHttpRequests "POST"
                     "/api/bookshelves/library/shelves"
+                    (\requests -> Expect.equal (List.length requests) 0)
+                |> ProgramTest.ensureHttpRequests "PUT"
+                    "/api/bookshelves/library/shelves/reorder"
+                    (\requests -> Expect.equal (List.length requests) 0)
+                |> ProgramTest.expectHttpRequests "DELETE"
+                    "/api/shelves/shelf-1"
                     (\requests -> Expect.equal (List.length requests) 0)
 
 

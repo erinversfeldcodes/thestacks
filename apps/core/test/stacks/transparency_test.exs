@@ -30,12 +30,15 @@ defmodule Stacks.TransparencyTest do
   end
 
   describe "allowlist enforcement" do
-    test "a allowlisted signal returns a number via the client" do
+    test "a allowlisted signal returns the client's value unchanged" do
+      # ⚠️ This asserted `is_number(value)` after configuring 0.42 (Issue #330) —
+      # so it passed for *any* number, including a hardcoded 0, and could not
+      # tell "the client's answer came back" from "some number came back". The
+      # value is configured right here; assert it.
       MockPrometheusClient.put_response({:ok, 0.42})
 
       key = hd(Transparency.allowlist_keys())
-      assert {:ok, value} = Transparency.run_signal(key)
-      assert is_number(value)
+      assert {:ok, 0.42} = Transparency.run_signal(key)
     end
 
     test "an un-allowlisted key cannot be run (no arbitrary/injected PromQL path)" do
@@ -108,7 +111,13 @@ defmodule Stacks.TransparencyTest do
       assert Map.has_key?(metrics, :live)
       assert Map.has_key?(metrics, :durable)
       assert %DateTime{} = metrics.generated_at
-      assert is_integer(metrics.cache_ttl)
+
+      # ⚠️ `is_integer(metrics.cache_ttl)` (Issue #330) passed for 0 — a TTL of
+      # zero disables the cache and makes every page load re-hit Prometheus,
+      # which is the failure this field exists to prevent. `cache_ttl` is what
+      # the page tells the reader about staleness, so it must be the real TTL
+      # (`@cache_ttl_seconds = 45`) and, in particular, positive.
+      assert metrics.cache_ttl == 45
     end
 
     test "every live entry carries what/how/why teaching metadata" do
@@ -124,7 +133,14 @@ defmodule Stacks.TransparencyTest do
         assert is_binary(entry.how)
         assert is_binary(entry.why)
         assert is_binary(entry.unit)
-        assert is_number(entry.value)
+
+        # ⚠️ `is_number(entry.value)` (Issue #330) never checked that the
+        # configured response reached the entry — a live section rendering a
+        # constant, or one signal's value copied across every row, would have
+        # satisfied it. 3.5 is configured above for every signal, so every live
+        # entry must carry exactly it.
+        assert entry.value == 3.5,
+               "live entry #{inspect(entry.key)} did not carry the client's configured value"
       end)
     end
 
