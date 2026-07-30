@@ -307,6 +307,9 @@ defmodule Stacks.ShelvingTest do
       assert active_pile_count(user.id) == 50
     end
 
+    # 51 sequential inserts sit near the 60s default under coverage
+    # instrumentation (timed out in `just ci` 2026-07-30, passes uninstrumented).
+    @tag timeout: 180_000
     test "place_book/3 rejects the 51st reading_pile placement" do
       user = insert(:user)
       fill_reading_pile(user, 50)
