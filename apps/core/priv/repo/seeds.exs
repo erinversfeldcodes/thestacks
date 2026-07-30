@@ -636,23 +636,30 @@ work_groups =
             _ -> if is_primary, do: nil, else: "Edition #{i + 1}"
           end
 
-        edition = %{
-          id: Seeds.uuid(3000 + idx),
-          book_id: Seeds.uuid(primary_idx),
-          isbn: isbn,
-          format_label: format_label,
-          page_count: pages,
-          publication_year: year,
-          is_primary: is_primary,
-          # Every seeded ISBN is a real, externally-catalogued book, and
-          # `op.book_editions.verification_source` is NOT NULL (#335 D1) — so
-          # the seed must state its provenance like any other writer. This is
-          # exactly the class of out-of-band writer the constraint exists for:
-          # it does not go through `Books.book_edition_changeset/2`.
-          verification_source: "open_library",
-          created_at: jan_01,
-          updated_at: jan_01
-        }
+        # `vet_edition_row!/1` puts this row through the SAME changeset every
+        # production write path uses, and raises here rather than letting
+        # `insert_all/3` carry an impossible edition into the database. Three
+        # seeded ISBNs with wrong check digits reached staging exactly this way
+        # (#339) — `insert_all/3` was chosen for deterministic ids and fixed
+        # timestamps, and silently bought a bypass of every validation with it.
+        # It also normalises: an ISBN-10 literal comes back as its ISBN-13 form,
+        # so the seed cannot mint the unnormalised rows #339 also had to repair.
+        edition =
+          Stacks.Books.vet_edition_row!(%{
+            id: Seeds.uuid(3000 + idx),
+            book_id: Seeds.uuid(primary_idx),
+            isbn: isbn,
+            format_label: format_label,
+            page_count: pages,
+            publication_year: year,
+            is_primary: is_primary,
+            # Every seeded ISBN is a real, externally-catalogued book, and
+            # `op.book_editions.verification_source` is NOT NULL (#335 D1) — so
+            # the seed must state its provenance like any other writer.
+            verification_source: "open_library",
+            created_at: jan_01,
+            updated_at: jan_01
+          })
 
         {{edition, {idx, primary_idx}}, nil}
       end)

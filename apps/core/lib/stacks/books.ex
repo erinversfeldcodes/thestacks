@@ -1350,6 +1350,73 @@ defmodule Stacks.Books do
 
   defp present?(value), do: is_binary(value) and value != ""
 
+  @doc """
+  Puts one raw `op.book_editions` row through the production changeset on its
+  way to `Repo.insert_all/3`, and returns it with the changeset's normalised
+  `isbn`. Raises `ArgumentError` if the row is one production could not write.
+
+  `insert_all/3` is the right tool for a fixture — deterministic ids, fixed
+  timestamps, one round trip — but it goes around
+  `book_edition_changeset/2` entirely, which is how `seeds.exs` shipped three
+  editions whose ISBN check digit was wrong and how those rows reached staging
+  (Issue #339). Nothing caught it: unit tests build editions through the
+  changeset, and the seed's own rows were never asked to satisfy it.
+
+  So the seed keeps `insert_all/3` and gains the validation it was missing. A
+  seed row that fails here fails loudly at seed time in every environment —
+  dev, CI, preview, staging — instead of becoming a row that only a CHECK
+  constraint years later discovers. That is the same bargain #329 struck for the
+  test factory: a fixture may only build states a real write path can produce.
+
+  `book_id` may be a dumped 16-byte UUID (what `Seeds.uuid/1` returns) or a
+  string; either is accepted. Keys outside the changeset's cast list —
+  `:id`, `:created_at`, `:updated_at` — are passed through untouched.
+  """
+  @spec vet_edition_row!(map()) :: map()
+  def vet_edition_row!(row) when is_map(row) do
+    changeset = book_edition_changeset(%BookEdition{}, castable_edition_row(row))
+
+    if changeset.valid? do
+      %{row | isbn: get_field(changeset, :isbn)}
+    else
+      raise ArgumentError, """
+      seed edition row is not one a production write path could produce:
+        isbn:    #{inspect(row[:isbn])}
+        errors:  #{inspect(changeset_error_messages(changeset))}
+      Fix the row in priv/repo/seeds.exs — do not relax this check.
+      """
+    end
+  end
+
+  @edition_row_cast_keys [:isbn, :book_id, :verification_source] ++
+                           [
+                             :format_label,
+                             :cover_image_url,
+                             :page_count,
+                             :publisher,
+                             :publication_year,
+                             :open_library_id,
+                             :google_books_id,
+                             :is_primary
+                           ]
+
+  defp castable_edition_row(row) do
+    row
+    |> Map.take(@edition_row_cast_keys)
+    |> Map.replace_lazy(:book_id, &load_uuid/1)
+  end
+
+  defp load_uuid(<<_::128>> = raw), do: Ecto.UUID.load!(raw)
+  defp load_uuid(other), do: other
+
+  defp changeset_error_messages(changeset) do
+    traverse_errors(changeset, fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {key, value}, acc ->
+        String.replace(acc, "%{#{key}}", to_string(value))
+      end)
+    end)
+  end
+
   @doc false
   def book_edition_changeset(edition, attrs) do
     edition

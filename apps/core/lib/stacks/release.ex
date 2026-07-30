@@ -42,6 +42,56 @@ defmodule Stacks.Release do
   end
 
   @doc """
+  Runs the registered data corrections (`Stacks.DataCorrection.Registry`)
+  against the connected database.
+
+  **Dry-run by default** — it prints what each correction would change and
+  writes nothing. Pass `apply: true` to write:
+
+      /app/bin/core eval 'Stacks.Release.correct_data()'
+      /app/bin/core eval 'Stacks.Release.correct_data(apply: true)'
+
+  This is the release-side twin of `mix stacks.data.correct`, which a deployed
+  image has no `mix` to run. `scripts/deploy-stack.sh` invokes it with
+  `apply: true` immediately before migrating, because a correction is only
+  useful ahead of the constraint that would otherwise reject the row (Issue
+  #339: `book_editions_isbn_ean13_checksum`'s VALIDATE aborted a deploy).
+
+  Raises on failure so `set -e` in the deploy script aborts while the old image
+  is still serving traffic. Every applied change is audited in the same
+  transaction as the change itself.
+
+  Starts `Core.Repo` only — not every repo in `:ecto_repos` the way `migrate/0`
+  does. Corrections are written against the application database; running them
+  once per repo would repeat the work and then fail on the Oban repo's turn,
+  where `Core.Repo` is no longer started.
+  """
+  @spec correct_data(keyword()) :: :ok
+  def correct_data(opts \\ []) do
+    load_app()
+
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(Repo, fn _repo ->
+        run_corrections(Keyword.get(opts, :apply, false))
+      end)
+
+    :ok
+  end
+
+  defp run_corrections(apply?) do
+    case Stacks.DataCorrection.run_all(Stacks.DataCorrection.Registry.all(),
+           apply: apply?,
+           invoked_by: "Stacks.Release.correct_data"
+         ) do
+      {:ok, outcomes} ->
+        Enum.each(outcomes, &IO.puts(&1.report))
+
+      {:error, {correction, reason}} ->
+        raise "data correction #{inspect(correction)} failed: #{inspect(reason)} — nothing was committed"
+    end
+  end
+
+  @doc """
   Prints the migration versions applied on the connected DB, one per line,
   prefixed with `APPLIED_VERSION `.
 

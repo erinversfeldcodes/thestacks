@@ -1083,11 +1083,22 @@ if [[ "${PROD_MODE}" == 1 ]]; then
         echo "WARN: psql not found — skipping Neon warmup (migrate may hit a cold-start connection timeout)"
     fi
 
+    # ── Data corrections BEFORE migrate ────────────────────────────────────────
+    # A constraint added to an existing table is a claim about existing data, so
+    # a repair has to land before the migration that validates it. Issue #339:
+    # `book_editions_isbn_ean13_checksum`'s VALIDATE aborted a deploy on two
+    # editions whose ISBN was written unnormalised years earlier. The
+    # corrections are named, narrowly scoped, idempotent and audited — see
+    # `Stacks.DataCorrection` — so running them on every deploy costs a SELECT
+    # once the data is clean, and repairs a restored backup or a re-branched
+    # database automatically. `--apply` is the deploy explicitly opting out of
+    # the dry-run default; the full blast radius is printed either way.
     if ! (cd "$REPO_ROOT/apps/core" && \
             MIX_ENV=prod mix deps.get --only prod && \
             MIX_ENV=prod mix compile && \
+            MIX_ENV=prod mix stacks.data.correct --apply && \
             MIX_ENV=prod mix ecto.migrate); then
-        echo "FAIL deploy: prod migration failed — old image still serving traffic"
+        echo "FAIL deploy: prod data correction or migration failed — old image still serving traffic"
         exit 1
     fi
     echo "PASS deploy: prod migrations applied"
@@ -1240,6 +1251,23 @@ echo "==> Running migrations on ${CORE_APP}..."
 machine_id="$(fly_machine_started_id "${CORE_APP}")"
 
 if [[ -n "${machine_id}" ]]; then
+    # ── Data corrections BEFORE migrate ────────────────────────────────────
+    # The runner-side twin of this runs on the prod path only; a preview
+    # deploy reaches its migrations here, and a preview inherits real staging
+    # data via Neon copy-on-write — which is what made Issue #339's three
+    # stale seed editions abort the deploy at
+    # `book_editions_isbn_ean13_checksum`'s VALIDATE. Corrections are named,
+    # narrowly scoped, idempotent and audited (`Stacks.DataCorrection`), so
+    # this is a SELECT once the data is clean. `eval` is safe here where the
+    # seed needs `rpc`: this starts one repo and touches a handful of rows,
+    # not the ~160-book in-memory fixture that OOMs the 512 MB preview VM.
+    deploy_with_retry "in-container data corrections" \
+        fly machine exec "${machine_id}" \
+        "/bin/sh -c \"/app/bin/core eval 'Stacks.Release.correct_data(apply: true)'\"" \
+        --app "${CORE_APP}" --timeout 60 \
+        || { echo "FAIL deploy: data corrections failed"; exit 1; }
+    echo "PASS deploy: data corrections applied"
+
     # deploy_with_retry: machine execs right after a rolling deploy are the
     # flakiest calls here — observed transient "failed_precondition: exec
     # request failed: EOF" (run 28928687981) aborting an otherwise-healthy
