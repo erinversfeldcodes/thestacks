@@ -30,16 +30,14 @@ defmodule StacksWeb.BookControllerTest do
   end
 
   defp insert_book_with_edition(attrs \\ []) do
-    book = insert(:book, Keyword.take(attrs, [:title, :visibility_tier, :author]))
+    book =
+      insert(
+        :book,
+        Keyword.take(attrs, [:title, :visibility_tier, :author]) ++
+          [editions: [build(:primary_book_edition, Keyword.take(attrs, [:isbn]))]]
+      )
 
-    edition_attrs =
-      attrs
-      |> Keyword.take([:isbn])
-      |> Keyword.put(:book, book)
-      |> Keyword.put_new(:is_primary, true)
-
-    edition = insert(:book_edition, edition_attrs)
-    {book, edition}
+    {book, hd(book.editions)}
   end
 
   describe "GET /api/books/:id" do

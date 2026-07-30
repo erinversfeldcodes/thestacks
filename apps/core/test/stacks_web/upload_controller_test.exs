@@ -361,8 +361,13 @@ defmodule StacksWeb.UploadControllerTest do
       # to its primary edition ISBN and threads the list through the
       # Oban args so Moderation / ISBNResolver can suppress matches.
       author = insert(:author, name: "Orson Scott Card")
-      book = insert(:book, title: "Crystal City", author: author)
-      insert(:book_edition, book: book, isbn: "9781429964500", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "Crystal City",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9781429964500")]
+        )
 
       image = insert(:uploaded_image, status: "resolved", user_id: user.id)
 
@@ -391,8 +396,13 @@ defmodule StacksWeb.UploadControllerTest do
       # the user clicked the same suggestion twice), the controller
       # dedupes the resolved ISBN list.
       author = insert(:author, name: "A")
-      book = insert(:book, title: "B", author: author)
-      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "B",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9780743273565")]
+        )
 
       image = insert(:uploaded_image, status: "resolved", user_id: user.id)
 
@@ -418,8 +428,14 @@ defmodule StacksWeb.UploadControllerTest do
       TitleSearchCache.invalidate_all()
 
       author = insert(:author, name: "Orson Scott Card")
-      book = insert(:book, title: "Crystal City", author: author)
-      insert(:book_edition, book: book, isbn: "9781429964500", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "Crystal City",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9781429964500")]
+        )
+
       insert(:book_edition, book: book, isbn: "9780765341297", is_primary: false)
 
       image = insert(:uploaded_image, status: "resolved", user_id: user.id)

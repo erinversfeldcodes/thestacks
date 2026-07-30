@@ -56,8 +56,11 @@ defmodule Stacks.Workers.DiscoverEditionsJobTest do
         else: Application.delete_env(:core, :isbn_http_client)
     end)
 
-    book = insert(:book, title: "The Name of the Rose")
-    insert(:book_edition, book: book, isbn: @primary, is_primary: true)
+    book =
+      insert(:book,
+        title: "The Name of the Rose",
+        editions: [build(:primary_book_edition, isbn: @primary)]
+      )
 
     %{book: book}
   end

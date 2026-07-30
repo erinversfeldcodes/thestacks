@@ -6,6 +6,7 @@ defmodule Stacks.Factory do
 
   use ExMachina.Ecto, repo: Core.Repo
 
+  alias Stacks.Accounts
   alias Stacks.Accounts.User
   alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
@@ -36,8 +37,43 @@ defmodule Stacks.Factory do
     UserBookContentAccess
   }
 
+  @doc """
+  A user whose email is confirmed — the state `RequireConfirmedEmail` demands,
+  so this is what nearly every test wants.
+
+  "Confirmed" is not a *starting* state: it is the result of
+  `Accounts.mark_confirmed/1` running over a registered, unconfirmed account
+  (accounts.ex:438-446). So rather than asserting the end state by hand, this
+  builds the registered state and pushes it through the very changeset
+  `mark_confirmed/1` uses. The two cannot drift: if confirmation ever clears
+  another field or sets a confirmed_at, the factory picks it up for free.
+  """
   def user_factory do
+    :unconfirmed_user
+    |> build()
+    |> Accounts.email_confirmation_changeset(%{
+      email_confirmed: true,
+      email_confirmation_token: nil
+    })
+    |> Ecto.Changeset.apply_changes()
+  end
+
+  @doc """
+  A registered-but-unconfirmed account — the state EVERY real signup passes
+  through, and the one `ExpiredUnverifiedAccountsJob` exists to reap.
+
+  `Accounts.register/1` commits `email_confirmed: false` plus a `Phoenix.Token`
+  signed with the `"email_confirm"` salt over the user's OWN id
+  (accounts.ex:527-545). The id is therefore generated here rather than left to
+  the database, so the token genuinely verifies — a random string would fixture
+  a token no confirmation link could ever carry, and the confirmation flow
+  would be untestable from the factory.
+  """
+  def unconfirmed_user_factory do
+    id = Ecto.UUID.generate()
+
     %User{
+      id: id,
       email: sequence(:email, &"user#{&1}@example.com"),
       password_hash: Argon2.hash_pwd_salt("password123"),
       display_name: sequence(:display_name, &"User #{&1}"),
@@ -46,7 +82,8 @@ defmodule Stacks.Factory do
       profile_visibility: "owner",
       age_verified: false,
       consent_analytics: false,
-      email_confirmed: true
+      email_confirmed: false,
+      email_confirmation_token: Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", id)
     }
   end
 
@@ -64,8 +101,34 @@ defmodule Stacks.Factory do
     }
   end
 
+  # A work ALWAYS ships with its primary edition. Both production creation
+  # paths — `Books.create/1` (books.ex:180-200) and `Books.confirm_book/3`
+  # (books.ex:1099-1120) — insert the work and its `is_primary: true` edition
+  # inside ONE `Ecto.Multi`, because the ISBN hard gate means a work without a
+  # verified ISBN cannot exist. A bare `%Book{}` therefore fixtures a row the
+  # system cannot produce, and every assertion about `Books.primary_edition/1`
+  # made against one was asserting on a shape prod never emits.
+  #
+  # To exercise the gate itself (or the `primary_edition/1` nil branch), use
+  # `:editionless_book` — explicitly named so the invalid state is deliberate.
   def book_factory do
+    %{editionless_book_factory() | editions: [build(:primary_book_edition)]}
+  end
+
+  @doc """
+  A work with NO edition — the one state the ISBN hard gate forbids.
+
+  Only for tests *about* the gate (or `primary_edition/1` returning nil).
+  Everything else wants `:book`.
+  """
+  def editionless_book_factory do
     %Book{
+      # Generated here, not by the database, so a factory can point two columns
+      # at ONE work before anything is inserted — and so that accidentally
+      # putting the same unsaved work on two association paths raises on
+      # `books_pkey` instead of silently creating two works. See
+      # `price_snapshot_factory/0`.
+      id: Ecto.UUID.generate(),
       title: sequence(:title, &"Book Title #{&1}"),
       description: "A great book.",
       language: "en",
@@ -79,20 +142,84 @@ defmodule Stacks.Factory do
     %{book_factory() | author: build(:author)}
   end
 
+  # An ADDITIONAL edition of a work that already has its primary one — the only
+  # shape production can reach for a second edition. `Books.merge_edition/2`
+  # (books.ex:1101) and `insert_edition/4` (books.ex:1180) both force
+  # `is_primary: false`, so two primaries on one work is unreachable in prod.
+  # Hence `is_primary: false` here, and a default `book:` that brings its own
+  # primary. Pass `book:` an existing work to hang a second edition off it.
   def book_edition_factory do
     %BookEdition{
-      isbn: sequence(:isbn, &"978074327#{String.pad_leading(to_string(&1), 4, "0")}"),
+      isbn: next_isbn(),
+      format_label: "Hardcover",
+      page_count: 300,
+      publisher: "Test Publisher",
+      publication_year: 2020,
+      is_primary: false,
+      book: build(:book)
+    }
+  end
+
+  @doc """
+  The primary edition a work is created WITH — never on its own.
+
+  `book: nil` because it is inserted through the work's `has_many :editions`,
+  which fills `book_id` in. `op.book_editions` has a partial unique index
+  (`book_editions_one_primary_per_book`), so hanging one of these off a work
+  that already has its primary edition raises — which is the point.
+
+  Use it to pin the work's ISBN or format:
+
+      insert(:book, editions: [build(:primary_book_edition, isbn: "9780593098233")])
+  """
+  def primary_book_edition_factory do
+    %BookEdition{
+      isbn: next_isbn(),
       format_label: "Paperback",
       page_count: 300,
       publisher: "Test Publisher",
       publication_year: 2020,
       is_primary: true,
-      book: build(:book)
+      book: nil
     }
   end
 
+  # Production validates the EAN-13 check digit on EVERY edition write path
+  # (`Books.book_edition_changeset/2` → `validate_isbn_checksum/1`,
+  # books.ex:1293), so an ISBN whose 13th digit is just the next number in a
+  # sequence is a value no write path would ever have accepted. Build the
+  # 12-digit body from the sequence and compute the check digit.
+  #
+  # The `97817` block is deliberately one no fixture, seed or spec hard-codes,
+  # so a generated ISBN can never collide with a literal one.
+  defp next_isbn do
+    sequence(:isbn, fn n ->
+      with_check_digit("97817" <> String.pad_leading(to_string(n), 7, "0"))
+    end)
+  end
+
+  defp with_check_digit(body) do
+    sum =
+      body
+      |> String.graphemes()
+      |> Enum.map(&String.to_integer/1)
+      |> Enum.with_index()
+      |> Enum.reduce(0, fn {digit, index}, acc ->
+        weight = if rem(index, 2) == 0, do: 1, else: 3
+        acc + digit * weight
+      end)
+
+    body <> Integer.to_string(rem(10 - rem(sum, 10), 10))
+  end
+
+  # The id is generated here rather than by the database so that a shelf and a
+  # placement can be pointed at THE SAME bookshelf before anything is inserted.
+  # Ecto has no identity map: the same unsaved struct reached through two
+  # association paths is inserted twice, which is how the old placement factory
+  # ended up with two bookshelves. See `placement_factory/1`.
   def bookshelf_factory do
     %Bookshelf{
+      id: Ecto.UUID.generate(),
       name: "library",
       visibility: "owner",
       user: build(:user)
@@ -106,7 +233,34 @@ defmodule Stacks.Factory do
     }
   end
 
-  def placement_factory do
+  # The shelf is DERIVED from the bookshelf, never built beside it. Production
+  # never picks the two independently: `place_book/3` (shelving.ex:329-341),
+  # `reread_book/1` and `do_move_book/3` (shelving.ex:427) all resolve the
+  # bookshelf first and then get-or-create *its* default shelf. Building both
+  # from their own factories gave every bare `insert(:placement)` a
+  # `bookshelf_id` and a `shelf.bookshelf_id` pointing at two different
+  # bookshelves owned by two different users — the exact desync shelving.ex
+  # documents at :418-421 as making a book "stay visible on the source and
+  # never on the destination". Overriding `bookshelf:` re-homes the shelf with
+  # it; override `shelf:` too only when the desync is what you are testing.
+  #
+  # Same reasoning as `price_snapshot_factory/0` below: two columns that
+  # describe one relationship must be built from one value.
+  #
+  # This takes `attrs` (ExMachina's arity-1 factory form) because the derivation
+  # has to see an overridden `bookshelf:` — a plain arity-0 factory is evaluated
+  # BEFORE overrides are merged, so `insert(:placement, bookshelf: b)` would
+  # re-home the placement and leave the shelf behind on the default one.
+  #
+  # Only the SHELF holds the bookshelf struct; the placement carries the id and
+  # a `:loaded` view of it. Ecto has no identity map, so the same unsaved struct
+  # on two association paths is inserted twice — the bookshelf must be inserted
+  # by exactly one chain, and it has to be the shelf's, because `shelves` has
+  # the FK that must already exist.
+  def placement_factory(attrs) do
+    {bookshelf, attrs} = Map.pop_lazy(attrs, :bookshelf, fn -> build(:bookshelf) end)
+    {shelf, attrs} = Map.pop_lazy(attrs, :shelf, fn -> default_shelf_for(bookshelf) end)
+
     %Placement{
       position: 1,
       placed_at: DateTime.utc_now(),
@@ -117,9 +271,28 @@ defmodule Stacks.Factory do
       started_at: nil,
       finished_at: nil,
       book: build(:book),
-      bookshelf: build(:bookshelf),
-      shelf: build(:shelf)
+      bookshelf_id: bookshelf.id,
+      bookshelf: Ecto.put_meta(bookshelf, state: :loaded),
+      shelf: shelf
     }
+    |> merge_attributes(attrs)
+  end
+
+  # Mirrors `get_or_create_default_shelf/1` (shelving.ex:1105), which every
+  # production placement path goes through. A bookshelf has ONE shelf at
+  # position 0 — `op.shelves` has a unique index on (bookshelf_id, position) —
+  # so two placements on the same bookshelf must land on the same shelf, not on
+  # two rival position-0 shelves. A bookshelf that is already persisted is
+  # looked up; an unsaved one gets its shelf built and inserted alongside it.
+  defp default_shelf_for(%Bookshelf{__meta__: %{state: :loaded}} = bookshelf) do
+    case Core.Repo.get_by(Shelf, bookshelf_id: bookshelf.id, position: 0) do
+      nil -> build(:shelf, bookshelf: bookshelf)
+      shelf -> shelf
+    end
+  end
+
+  defp default_shelf_for(%Bookshelf{} = bookshelf) do
+    build(:shelf, bookshelf: bookshelf)
   end
 
   def uploaded_image_factory do
@@ -265,11 +438,21 @@ defmodule Stacks.Factory do
     }
   end
 
+  # The seller of a transaction IS the seller of its listing — one relationship
+  # spread over two columns, exactly like `price_snapshot_factory/0`. Building
+  # them apart gave every transaction a seller who did not own the thing being
+  # sold. `op.transactions` has no production write path yet (nothing outside
+  # the generated schema references `Marketplace.Transaction`), so there is no
+  # context function to mirror — which is the reason to get the shape right
+  # here, before one is written against these fixtures.
   def transaction_factory do
+    listing = build(:listing)
+
     %Transaction{
-      listing: build(:listing),
+      listing: listing,
       buyer: build(:user),
-      seller: build(:user),
+      seller_id: listing.seller.id,
+      seller: Ecto.put_meta(listing.seller, state: :loaded),
       amount_cents: 15_000,
       currency: "ZAR",
       payment_provider_ref: sequence(:payment_ref, &"stitch-#{&1}"),
@@ -391,11 +574,22 @@ defmodule Stacks.Factory do
     }
   end
 
-  def price_snapshot_factory do
-    # The edition is the grain, and `book` must be *that edition's* book — the
-    # two columns describe one relationship, so building them independently would
-    # manufacture rows the production write path cannot produce.
-    edition = build(:book_edition)
+  # The edition is the grain, and `book` must be *that edition's* book — the two
+  # columns describe one relationship, so building them independently would
+  # manufacture rows the production write path cannot produce.
+  #
+  # Naming the same struct on both association paths was not enough, and was in
+  # fact the very bug the old comment warned about: Ecto has no identity map, so
+  # it inserted that work TWICE and the two columns ended up pointing at two
+  # different works. Only the EDITION holds the struct; the snapshot carries its
+  # id plus a `:loaded` view, which Ecto reads and does not re-insert.
+  #
+  # Arity-1 (like `placement_factory/1`) so an overridden `book_edition:` still
+  # determines `book`, and so a caller passing both does not collide with a
+  # `book_id` this factory set from the default.
+  def price_snapshot_factory(attrs) do
+    {edition, attrs} = Map.pop_lazy(attrs, :book_edition, fn -> build(:book_edition) end)
+    {book, attrs} = Map.pop_lazy(attrs, :book, fn -> book_of(edition) end)
 
     %PriceSnapshot{
       price_cents: 29_900,
@@ -404,10 +598,15 @@ defmodule Stacks.Factory do
       url: "https://example.com/book",
       scraped_at: DateTime.utc_now(),
       book_edition: edition,
-      book: edition.book,
+      book_id: book.id,
+      book: Ecto.put_meta(book, state: :loaded),
       store: build(:bookstore)
     }
+    |> merge_attributes(attrs)
   end
+
+  defp book_of(%BookEdition{book: %Book{} = book}), do: book
+  defp book_of(%BookEdition{book_id: id}) when is_binary(id), do: Core.Repo.get!(Book, id)
 
   def review_snapshot_factory do
     %ReviewSnapshot{

@@ -122,11 +122,12 @@ defmodule Stacks.BooksTest do
     test "returns book with author and editions preloaded" do
       author = insert(:author)
       book = insert(:book, author: author)
+      # The work already carries its primary edition; this is the second format.
       insert(:book_edition, book: book)
       assert found = Books.get_book_detail(book.id)
       assert found.id == book.id
       assert found.author.id == author.id
-      assert length(found.editions) == 1
+      assert length(found.editions) == 2
     end
 
     test "returns nil for unknown id" do
@@ -136,15 +137,19 @@ defmodule Stacks.BooksTest do
 
   describe "primary_edition/1" do
     test "returns the primary edition" do
-      book = insert(:book)
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780000000002")])
+      primary = hd(book.editions)
       insert(:book_edition, book: book, is_primary: false, isbn: "9780000000001")
-      primary = insert(:book_edition, book: book, is_primary: true, isbn: "9780000000002")
       book = Books.get_book_detail(book.id)
       assert Books.primary_edition(book).id == primary.id
     end
 
+    # A work with editions but NO primary flag is drift, not something a write
+    # path produces — `create/1` always flags the first edition. It is still a
+    # branch `primary_edition/1` deliberately handles (books.ex:124-126), so it
+    # is built from `:editionless_book`, the factory's named escape hatch.
     test "falls back to first edition when no primary" do
-      book = insert(:book)
+      book = insert(:editionless_book)
       first = insert(:book_edition, book: book, is_primary: false)
       book = Books.get_book_detail(book.id)
       assert Books.primary_edition(book).id == first.id
@@ -153,7 +158,7 @@ defmodule Stacks.BooksTest do
 
   describe "primary_edition/1 — deterministic ordering (PE P3-2)" do
     test "query clause: no primary flag → picks the earliest-created edition, repeatably" do
-      book = insert(:book)
+      book = insert(:editionless_book)
 
       older =
         insert(:book_edition,
@@ -179,7 +184,7 @@ defmodule Stacks.BooksTest do
     end
 
     test "in-memory clause: no primary flag → picks the earliest-created edition regardless of list order" do
-      book = insert(:book)
+      book = insert(:editionless_book)
 
       older =
         insert(:book_edition,
@@ -203,7 +208,7 @@ defmodule Stacks.BooksTest do
     end
 
     test "explicit primary wins over an earlier-created non-primary (both clauses)" do
-      book = insert(:book)
+      book = insert(:editionless_book)
 
       early =
         insert(:book_edition,
@@ -741,8 +746,7 @@ defmodule Stacks.BooksTest do
     end
 
     test "creates a non-primary edition under an existing work" do
-      book = insert(:book)
-      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
 
       assert {:ok, edition} =
                Books.merge_edition(book.id, %{isbn: "9780451524935", format_label: "Hardcover"})
@@ -753,8 +757,7 @@ defmodule Stacks.BooksTest do
     end
 
     test "returns {:error, :duplicate_isbn} on duplicate ISBN" do
-      book = insert(:book)
-      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
 
       # Try to merge the same ISBN again
       assert {:error, :duplicate_isbn} =
@@ -769,8 +772,7 @@ defmodule Stacks.BooksTest do
     end
 
     test "emits books.edition_merged event on success" do
-      book = insert(:book)
-      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
       before_count = event_count("books.edition_merged")
 
       Books.merge_edition(book.id, %{isbn: "9780451524935", format_label: "Paperback"})
@@ -780,8 +782,7 @@ defmodule Stacks.BooksTest do
 
     @tag stories: ["US-1.1.8"], suite: :events
     test "books.edition_merged event aggregate_id matches the new edition's id" do
-      book = insert(:book)
-      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
 
       assert {:ok, %BookEdition{} = edition} =
                Books.merge_edition(book.id, %{isbn: "9780316769174", format_label: "Paperback"})

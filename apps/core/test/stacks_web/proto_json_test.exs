@@ -15,21 +15,24 @@ defmodule StacksWeb.ProtoJSONTest do
   describe "book/2" do
     test "produces identical output to BookController.format_book/2 with all fields" do
       author = insert(:author, bio: "Great writer.", website_url: "https://example.com")
-      book = insert(:book, author: author, subjects: ["fiction", "philosophy"])
 
-      edition =
-        insert(:book_edition,
-          book: book,
-          isbn: "9780140449136",
-          format_label: "Paperback",
-          cover_image_url: "https://covers.example.com/1.jpg",
-          page_count: 320,
-          publisher: "Penguin",
-          publication_year: 2003,
-          is_primary: true
+      book =
+        insert(:book,
+          author: author,
+          subjects: ["fiction", "philosophy"],
+          editions: [
+            build(:primary_book_edition,
+              isbn: "9780140449136",
+              format_label: "Paperback",
+              cover_image_url: "https://covers.example.com/1.jpg",
+              page_count: 320,
+              publisher: "Penguin",
+              publication_year: 2003
+            )
+          ]
         )
 
-      book = %{book | editions: [edition]}
+      edition = hd(book.editions)
 
       result = ProtoJSON.book(book, community_read_count: 42)
 
@@ -148,11 +151,6 @@ defmodule StacksWeb.ProtoJSONTest do
       author = insert(:author)
       book = insert(:book, author: author, subjects: ["history"])
 
-      edition =
-        insert(:book_edition, book: book, is_primary: true)
-
-      book = %{book | editions: [edition]}
-
       result = ProtoJSON.catalogue_book(book)
 
       assert result.subjects == ["history"]
@@ -182,9 +180,6 @@ defmodule StacksWeb.ProtoJSONTest do
       author = insert(:author)
       book = insert(:book, author: author, visibility_tier: "age_gated")
 
-      edition = insert(:book_edition, book: book, is_primary: true)
-      book = %{book | editions: [edition]}
-
       result = ProtoJSON.search_book(book)
 
       assert result.visibility_tier == "age_gated"
@@ -205,9 +200,6 @@ defmodule StacksWeb.ProtoJSONTest do
     test "includes description and visibility_tier, author with bio: nil" do
       author = insert(:author, bio: "Great writer.", website_url: "https://example.com")
       book = insert(:book, author: author, description: "A fine book.")
-
-      edition = insert(:book_edition, book: book, is_primary: true)
-      book = %{book | editions: [edition]}
 
       result = ProtoJSON.bookshelf_book(book)
 
@@ -249,8 +241,18 @@ defmodule StacksWeb.ProtoJSONTest do
 
       assert result.editions == []
       assert result.edition_count == 0
-      assert result.primary_edition == nil
+
+      # `primary_edition` is NOT nil here, and never was for a real book: with
+      # `editions` unloaded, `Books.primary_edition/1` falls through to its
+      # query clause (books.ex:137) and reads the work's primary edition from
+      # the database. The old `== nil` assertion only held because the fixture
+      # was an editionless work — a row the ISBN hard gate forbids (#329).
+      assert result.primary_edition.id == hd(book_editions(book)).id
     end
+  end
+
+  defp book_editions(book) do
+    Core.Repo.all(Ecto.Query.where(Stacks.Books.BookEdition, book_id: ^book.id))
   end
 
   # ---------------------------------------------------------------------------
@@ -387,8 +389,6 @@ defmodule StacksWeb.ProtoJSONTest do
       author = insert(:author)
       bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book, author: author)
-      edition = insert(:book_edition, book: book, is_primary: true)
-      book = %{book | editions: [edition]}
 
       placement =
         insert(:placement,
@@ -845,7 +845,6 @@ defmodule StacksWeb.ProtoJSONTest do
     test "serializes nested book and seller matching Jason.Encoder derive shapes" do
       author = insert(:author)
       book = insert(:book, author: author, subjects: ["fiction"])
-      _edition = insert(:book_edition, book: book, is_primary: true)
       seller = insert(:user, display_name: "Alice")
 
       listing = insert(:listing, book: book, seller: seller)

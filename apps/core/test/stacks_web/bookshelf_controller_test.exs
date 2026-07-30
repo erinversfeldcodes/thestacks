@@ -238,8 +238,7 @@ defmodule StacksWeb.BookshelfControllerTest do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
       shelf = insert(:shelf, bookshelf: bookshelf)
-      book = insert(:book)
-      _edition = insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
       _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
 
       conn =
@@ -258,7 +257,7 @@ defmodule StacksWeb.BookshelfControllerTest do
       bookshelf = insert(:bookshelf, user: user, name: "library")
       shelf = insert(:shelf, bookshelf: bookshelf)
       book = insert(:book)
-      edition = insert(:book_edition, book: book, is_primary: true)
+      edition = hd(book.editions)
       _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
 
       conn =
@@ -275,8 +274,7 @@ defmodule StacksWeb.BookshelfControllerTest do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
       shelf = insert(:shelf, bookshelf: bookshelf)
-      book = insert(:book)
-      _edition = insert(:book_edition, book: book, is_primary: true, page_count: 450)
+      book = insert(:book, editions: [build(:primary_book_edition, page_count: 450)])
       _placement = insert(:placement, bookshelf: bookshelf, shelf: shelf, book: book)
 
       conn =
@@ -404,8 +402,15 @@ defmodule StacksWeb.BookshelfControllerTest do
       bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
       shelf = insert(:shelf, bookshelf: bookshelf, position: 0)
       author = insert(:author, name: "Ursula K. Le Guin")
-      book = insert(:book, title: "The Dispossessed", author: author)
-      edition = insert(:book_edition, book: book, isbn: "9780060512750", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "The Dispossessed",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9780060512750")]
+        )
+
+      edition = hd(book.editions)
 
       placement =
         insert(:placement,

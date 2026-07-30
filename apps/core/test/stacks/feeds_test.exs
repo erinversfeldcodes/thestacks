@@ -37,8 +37,14 @@ defmodule Stacks.FeedsTest do
       user = insert(:user, display_name: "Erin")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       author = insert(:author, name: "Donna Tartt")
-      book = insert(:book, title: "The Secret History", author: author)
-      _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "The Secret History",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9780140167771")]
+        )
+
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
       assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library", user)
@@ -88,8 +94,14 @@ defmodule Stacks.FeedsTest do
       user = insert(:user, display_name: "Ada")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
       author = insert(:author, name: "Donna Tartt")
-      book = insert(:book, title: "The Secret History", author: author)
-      _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "The Secret History",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9780140167771")]
+        )
+
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
       assert {:ok, xml, etag} = Feeds.fetch_feed(user.id, "library", user),
@@ -363,13 +375,14 @@ defmodule Stacks.FeedsTest do
     test "carries the cover as an enclosure", %{user: user, library: library} do
       # US-6.1 asks each entry to carry a cover thumbnail. It is what makes a feed
       # browsable in a reader rather than a list of sentences.
-      book = insert(:book)
-
-      insert(:book_edition,
-        book: book,
-        cover_image_url: "https://covers.openlibrary.org/b/id/99-M.jpg",
-        is_primary: true
-      )
+      book =
+        insert(:book,
+          editions: [
+            build(:primary_book_edition,
+              cover_image_url: "https://covers.openlibrary.org/b/id/99-M.jpg"
+            )
+          ]
+        )
 
       place(library, book)
 
@@ -382,8 +395,7 @@ defmodule Stacks.FeedsTest do
     test "omits the enclosure rather than emitting an empty one", %{user: user, library: library} do
       # Most seeded editions have no cover: 200 of 201 measured. An empty href would be
       # invalid Atom and would render as a broken image in a reader.
-      book = insert(:book)
-      insert(:book_edition, book: book, cover_image_url: nil, is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, cover_image_url: nil)])
       place(library, book)
 
       {:ok, xml, _etag} = Feeds.regenerate(user.id, "library")

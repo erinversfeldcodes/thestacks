@@ -59,43 +59,28 @@ defmodule Stacks.UploadDbtTest do
     user = insert(:user)
     author = insert(:author)
 
+    # The work and its primary edition are one insert, exactly as
+    # `Books.create/1` commits them. The local checksum-computing
+    # `sequence_isbn/0` this used to need is gone: the factory's own ISBNs are
+    # now checksum-valid, and unlike the old `:rand.uniform(999)` they cannot
+    # collide.
+    edition_attrs = if isbn, do: [isbn: isbn], else: []
+
     book =
       insert(:book,
         author: author,
         title: Keyword.get(opts, :title, "Test Book"),
-        visibility_tier: visibility
+        visibility_tier: visibility,
+        editions: [build(:primary_book_edition, edition_attrs)]
       )
 
-    edition =
-      insert(:book_edition,
-        book: book,
-        isbn: isbn || sequence_isbn(),
-        is_primary: true
-      )
-
-    {user, book, edition, author}
+    {user, book, hd(book.editions), author}
   end
 
-  defp sequence_isbn do
-    # Generate a valid ISBN-13 with correct checksum.
-    # Use 12-digit prefix, compute check digit to make it valid.
-    prefix =
-      "978074327" <>
-        (:rand.uniform(999) |> Integer.to_string() |> String.pad_leading(3, "0"))
-
-    digits = String.graphemes(prefix) |> Enum.map(&String.to_integer/1)
-
-    sum =
-      digits
-      |> Enum.with_index()
-      |> Enum.reduce(0, fn {d, i}, acc ->
-        weight = if rem(i, 2) == 0, do: 1, else: 3
-        acc + d * weight
-      end)
-
-    check = rem(10 - rem(sum, 10), 10)
-    prefix <> Integer.to_string(check)
-  end
+  # Was a local ISBN-13 check-digit calculator over `:rand.uniform(999)` — both
+  # jobs now belong to the factory, which generates checksum-valid ISBNs from a
+  # sequence (so they cannot collide the way the random ones could).
+  defp sequence_isbn, do: build(:primary_book_edition).isbn
 
   # =========================================================================
   # A. Existing DbtRefreshHandler event-mapping tests (preserved from original)
