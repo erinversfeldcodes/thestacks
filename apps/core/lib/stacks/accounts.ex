@@ -58,12 +58,14 @@ defmodule Stacks.Accounts do
     |> cast(attrs, @registration_required_fields ++ @registration_optional_fields)
     |> validate_required(@registration_required_fields)
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email address")
+    |> downcase_email()
     |> validate_length(:password, min: 8, message: "must be at least 8 characters")
     |> validate_inclusion(:role, ["owner", "user"])
     |> validate_inclusion(:profile_visibility, Stacks.Visibility.profile_audience_levels())
     |> maybe_put_handle()
     |> validate_handle()
     |> unique_constraint(:email)
+    |> unique_constraint(:email, name: :users_lower_email_index)
     |> hash_password()
   end
 
@@ -117,7 +119,32 @@ defmodule Stacks.Accounts do
     |> cast(attrs, [:email])
     |> validate_required([:email])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email address")
+    |> downcase_email()
     |> unique_constraint(:email)
+    |> unique_constraint(:email, name: :users_lower_email_index)
+  end
+
+  # Downcase-on-write (#335 D4). `get_user_by_email/1` has always downcased its
+  # ARGUMENT before an exact match, so an address stored with any upper-case
+  # character produced an account nobody could log into — the sign-up succeeded
+  # and every subsequent login failed. Normalising the stored value is the half
+  # that was missing; `users_lower_email_index` (20260730200500) is the half that
+  # stops two accounts sharing one address in different cases. Runs AFTER
+  # `validate_format/3` so whitespace is still rejected outright rather than
+  # silently trimmed into acceptance — `normalise_email/1`'s trim is then a
+  # no-op here, kept only so the stored form and the comparison form in
+  # `email_change?/2` are produced by one function.
+  #
+  # Both unique_constraint/2 calls above are needed: the exact-match
+  # `users_email_index` is what a normalised duplicate actually violates, and
+  # naming `users_lower_email_index` as well means a row that somehow reaches the
+  # functional index (a direct put_change, a future write path) still comes back
+  # as a changeset error rather than a raised Postgrex error.
+  defp downcase_email(changeset) do
+    case get_change(changeset, :email) do
+      nil -> changeset
+      email -> put_change(changeset, :email, normalise_email(email))
+    end
   end
 
   @doc "Changeset for location update (country_code, city)."
@@ -871,9 +898,10 @@ defmodule Stacks.Accounts do
   # the current email on every profile save, so a same-email payload must NOT be
   # treated as a change (that would demand current_password on ordinary profile
   # edits). auth resolves identity case-insensitively (get_user_by_email/1
-  # downcases), so we compare downcased/trimmed on both sides — storage does not
-  # downcase on write (registration/email_changeset cast the raw value), an
-  # inconsistency flagged in the #126 report.
+  # downcases), so we compare downcased/trimmed on both sides. Storage now
+  # matches: `downcase_email/1` normalises on every write path (#335 D4), closing
+  # the inconsistency flagged in the #126 report. The comparison stays normalised
+  # anyway so a legacy mixed-case row still reads as "no change".
   defp email_change?(%User{email: current}, attrs) do
     case Map.get(attrs, "email") do
       nil -> false

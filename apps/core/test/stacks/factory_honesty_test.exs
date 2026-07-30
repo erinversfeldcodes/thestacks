@@ -50,7 +50,11 @@ defmodule Stacks.FactoryHonestyTest do
       changeset =
         Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => edition.isbn,
-          "book_id" => insert(:book).id
+          "book_id" => insert(:book).id,
+          # Provenance is required on every edition (#335 D1); the factory sets
+          # it, so pass the factory's value rather than a literal — the point of
+          # this probe is that what the factory builds is what production takes.
+          "verification_source" => edition.verification_source
         })
 
       assert changeset.valid?, inspect(changeset.errors)

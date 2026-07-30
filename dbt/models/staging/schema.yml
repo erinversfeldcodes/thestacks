@@ -103,6 +103,12 @@ models:
           - relationships:
               to: ref('stg_books')
               field: id
+      - name: verification_source
+        description: Verification source.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['open_library', 'google_books', 'barcode_unverified']
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -260,6 +266,12 @@ models:
         description: Finished at.
       - name: shelf_id
         description: Shelf id.
+      - name: book_edition_id
+        description: Book edition id.
+        tests:
+          - relationships:
+              to: ref('stg_book_editions')
+              field: id
       - name: created_at
         description: Timestamp when the record was created.
         tests:

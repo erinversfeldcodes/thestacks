@@ -337,7 +337,7 @@ defmodule StacksWeb.ProtoJSONTest do
       ed =
         insert(:book_edition,
           book: book,
-          isbn: "9781234567890",
+          isbn: "9781600000102",
           format_label: "Hardcover",
           cover_image_url: "https://covers.example.com/2.jpg",
           page_count: 450,
@@ -348,7 +348,7 @@ defmodule StacksWeb.ProtoJSONTest do
 
       assert ProtoJSON.edition(ed) == %{
                id: ed.id,
-               isbn: "9781234567890",
+               isbn: "9781600000102",
                format_label: "Hardcover",
                cover_image_url: "https://covers.example.com/2.jpg",
                page_count: 450,

@@ -13,6 +13,7 @@ defmodule Stacks.Workers.GuardianTokenSweepJobTest do
   use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query
+  import Stacks.Factory
 
   alias Core.Repo
   alias Stacks.Accounts.AuthTokenFamily
@@ -75,7 +76,10 @@ defmodule Stacks.Workers.GuardianTokenSweepJobTest do
     # (unrevoked, session within the cap) must NEVER be deleted.
     test "prunes long-revoked and past-cap families but keeps live ones" do
       now = DateTime.utc_now()
-      user_id = Ecto.UUID.generate()
+      # A REAL user: op.auth_token_families now carries an ON DELETE CASCADE FK
+      # to op.users (#335 D3), so a family naming a fabricated user is a row
+      # production cannot produce and the database no longer accepts.
+      user_id = insert(:user).id
 
       live = insert_family(user_id, session_started_at: now, revoked_at: nil)
 

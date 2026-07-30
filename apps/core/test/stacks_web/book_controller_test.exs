@@ -684,12 +684,12 @@ defmodule StacksWeb.BookControllerTest do
 
     test "returns 403 for age_gated book when user is not age_verified", %{conn: conn} do
       user = insert(:user, age_verified: false)
-      insert_book_with_edition(isbn: "9780000000001", visibility_tier: "age_gated")
+      insert_book_with_edition(isbn: "9781600000126", visibility_tier: "age_gated")
 
       conn =
         conn
         |> auth_conn(user)
-        |> get("/api/books/isbn/9780000000001")
+        |> get("/api/books/isbn/9781600000126")
 
       assert %{"error" => "age_verification_required"} = json_response(conn, 403)
     end

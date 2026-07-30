@@ -119,12 +119,10 @@ defmodule StacksWeb.BookPriceControllerTest do
       book = insert(:book)
 
       # The work's own primary edition is edition 1; these are the reprints.
-      Enum.each(2..12, fn i ->
-        insert(:book_edition,
-          book: book,
-          isbn: "97800000000#{String.pad_leading(to_string(i), 2, "0")}",
-          is_primary: false
-        )
+      # No `isbn:` — only distinctness matters here, and the factory's generated
+      # ISBNs satisfy `book_editions_isbn_ean13_checksum` (#335 D4).
+      Enum.each(2..12, fn _i ->
+        insert(:book_edition, book: book, is_primary: false)
       end)
 
       conn |> get("/api/books/#{book.id}/prices") |> json_response(200)
@@ -135,15 +133,11 @@ defmodule StacksWeb.BookPriceControllerTest do
 
     test "spends the first requests on the primary edition", %{conn: conn} do
       # It is the edition the page leads with, so it is the one worth pricing first.
-      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780000000099")])
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9781600000119")])
       primary = hd(book.editions)
 
-      Enum.each(1..10, fn i ->
-        insert(:book_edition,
-          book: book,
-          isbn: "97800000000#{String.pad_leading(to_string(i), 2, "0")}",
-          is_primary: false
-        )
+      Enum.each(1..10, fn _i ->
+        insert(:book_edition, book: book, is_primary: false)
       end)
 
       conn |> get("/api/books/#{book.id}/prices") |> json_response(200)

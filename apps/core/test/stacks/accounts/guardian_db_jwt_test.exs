@@ -88,7 +88,10 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
               jti: jti,
               aud: "access",
               typ: "access",
-              sub: Ecto.UUID.generate(),
+              # A REAL user: op.guardian_tokens now carries an owner FK to
+              # op.users (#335 D3), so a fabricated sub is a row production
+              # cannot produce and the database no longer accepts.
+              sub: insert(:user).id,
               exp: future_exp,
               # Even the initial insert value must not survive the trigger, but the
               # UPDATE below is the specific behaviour under test here.

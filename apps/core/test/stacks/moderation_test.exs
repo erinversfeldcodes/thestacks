@@ -552,8 +552,42 @@ defmodule Stacks.ModerationTest do
         assert String.starts_with?(book.title, "ISBN ")
 
         # EnrichBookJob should have been enqueued for this ISBN.
-        isbn = List.first(book.editions).isbn
-        assert_enqueued(worker: Stacks.Workers.EnrichBookJob, args: %{"isbn" => isbn})
+        edition = List.first(book.editions)
+        assert_enqueued(worker: Stacks.Workers.EnrichBookJob, args: %{"isbn" => edition.isbn})
+
+        # The provenance is recorded ON THE ROW (#335 D1). Nothing external
+        # confirmed this ISBN — only the barcode's own check digit did — and
+        # that must stay auditable after enrichment overwrites the placeholder
+        # title, which is the only place the fact used to live.
+        assert edition.verification_source == "barcode_unverified"
+      after
+        Application.put_env(:core, :vision_client, original)
+      end
+    end
+
+    test "the placeholder title stops being the only record of an unverified ISBN" do
+      original = Application.get_env(:core, :vision_client)
+
+      try do
+        Application.put_env(:core, :vision_client, __MODULE__.LocalOcrClient)
+
+        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
+        edition = List.first(book.editions)
+
+        # Simulate what EnrichBookJob does on success: replace the placeholder.
+        {:ok, _} =
+          book
+          |> Stacks.Books.book_changeset(%{"title" => "A Real Title"})
+          |> Core.Repo.update()
+
+        reloaded = Core.Repo.get!(Stacks.Books.BookEdition, edition.id)
+        reloaded_book = Core.Repo.get!(Stacks.Books.Book, book.id)
+
+        refute String.starts_with?(reloaded_book.title, "ISBN "),
+               "precondition: enrichment has overwritten the placeholder title"
+
+        assert reloaded.verification_source == "barcode_unverified",
+               "the never-externally-verified fact must outlive the placeholder it used to be inferred from"
       after
         Application.put_env(:core, :vision_client, original)
       end

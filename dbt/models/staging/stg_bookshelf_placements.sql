@@ -22,6 +22,7 @@ select
     started_at,
     finished_at,
     shelf_id,
+    book_edition_id,
     created_at,
     updated_at
 from {{ source('op', 'bookshelf_placements') }}

@@ -72,8 +72,11 @@ defmodule StacksWeb.SearchControllerTest do
     end
 
     test "respects a valid limit parameter", %{conn: conn} do
+      # No `isbn:` — the test only needs five distinct books, and the factory's
+      # generated ISBNs carry a correct EAN-13 check digit, which
+      # `book_editions_isbn_ean13_checksum` (#335 D4) now requires.
       for i <- 1..5 do
-        insert_book_with_edition(title: "Rustica#{i}", isbn: "978000000000#{i}")
+        insert_book_with_edition(title: "Rustica#{i}")
       end
 
       conn = get(conn, "/api/search", q: "Rustica", limit: "2")
@@ -190,12 +193,12 @@ defmodule StacksWeb.SearchControllerTest do
       {:ok, token, _} = Guardian.encode_and_sign(age_verified_user)
       verified_conn = put_req_header(conn, "authorization", "Bearer #{token}")
 
-      insert_book_with_edition(title: "Gatekeeper Chronicles", isbn: "9780000000111")
+      insert_book_with_edition(title: "Gatekeeper Chronicles", isbn: "9781600000089")
 
       insert(:book,
         title: "Gatekeeper Secrets",
         visibility_tier: "age_gated",
-        editions: [build(:primary_book_edition, isbn: "9780000000222")]
+        editions: [build(:primary_book_edition, isbn: "9781600000096")]
       )
 
       conn = get(verified_conn, "/api/search", q: "Gatekeeper")

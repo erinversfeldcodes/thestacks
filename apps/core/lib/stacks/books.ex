@@ -41,7 +41,7 @@ defmodule Stacks.Books do
 
   @author_cast_fields [:name, :bio, :website_url, :rss_feed_url, :open_library_id]
 
-  @edition_required_fields [:isbn, :book_id]
+  @edition_required_fields [:isbn, :book_id, :verification_source]
   @edition_optional_fields [
     :format_label,
     :cover_image_url,
@@ -52,6 +52,11 @@ defmodule Stacks.Books do
     :google_books_id,
     :is_primary
   ]
+
+  # The closed set of ISBN-verification provenances (#335 D1). Mirrored by the
+  # `book_editions_verification_source_check` CHECK constraint and the
+  # `accepted_values` dbt test on stg_book_editions.
+  @verification_sources ~w(open_library google_books barcode_unverified)
 
   @image_cast_fields [
     :storage_path,
@@ -196,7 +201,11 @@ defmodule Stacks.Books do
         "publication_year" => attrs["publication_year"],
         "open_library_id" => attrs["open_library_id"],
         "google_books_id" => attrs["google_books_id"],
-        "is_primary" => true
+        "is_primary" => true,
+        # Callers that KNOW the provenance say so (Moderation's barcode fast
+        # path); everyone else has it read off the identifiers the resolver
+        # returned.
+        "verification_source" => attrs["verification_source"] || verification_source_from(attrs)
       })
     end)
     |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
@@ -1134,7 +1143,8 @@ defmodule Stacks.Books do
           "publisher" => metadata[:publisher],
           "publication_year" => metadata[:publication_year],
           "open_library_id" => metadata[:open_library_id],
-          "is_primary" => true
+          "is_primary" => true,
+          "verification_source" => verification_source_from(metadata)
         })
       end)
       |> Multi.run(:placement, fn _repo, %{book: book} ->
@@ -1181,22 +1191,25 @@ defmodule Stacks.Books do
     isbn = attrs[:isbn] || attrs["isbn"]
     format_label = attrs[:format_label] || attrs["format_label"]
 
-    with {:ok, _meta} <- ISBNResolver.resolve(isbn),
+    with {:ok, meta} <- ISBNResolver.resolve(isbn),
          book when not is_nil(book) <- Repo.get(Book, work_id) do
-      insert_edition(book, isbn, format_label, work_id)
+      insert_edition(book, isbn, format_label, work_id, meta)
     else
       {:error, _} -> {:error, :isbn_not_found}
       nil -> {:error, :not_found}
     end
   end
 
-  defp insert_edition(book, isbn, format_label, work_id) do
+  defp insert_edition(book, isbn, format_label, work_id, meta) do
     %BookEdition{}
     |> book_edition_changeset(%{
       "isbn" => isbn,
       "book_id" => book.id,
       "format_label" => format_label,
-      "is_primary" => false
+      "is_primary" => false,
+      # merge_edition/2 only gets here after ISBNResolver.resolve/1 succeeded,
+      # so the provenance is whichever source answered.
+      "verification_source" => verification_source_from(meta)
     })
     |> Repo.insert()
     |> emit_or_classify_edition(isbn, work_id)
@@ -1303,15 +1316,61 @@ defmodule Stacks.Books do
     |> validate_required([:name])
   end
 
+  @doc """
+  The closed set of values `book_editions.verification_source` may hold.
+
+  Public so callers and tests name the same list the CHECK constraint does
+  rather than re-spelling the strings.
+  """
+  @spec verification_sources() :: [String.t()]
+  def verification_sources, do: @verification_sources
+
+  @doc """
+  Derives an edition's ISBN provenance from resolver metadata (#335 D1).
+
+  `Stacks.Books.ISBNResolver` races Open Library and Google Books and returns
+  whichever answered first, identified by which cross-reference id it carries —
+  `open_library_id` for Open Library, `google_books_id` for Google Books. When
+  neither is present nothing external confirmed the ISBN, so the answer is
+  `"barcode_unverified"`: the same conservative reading the backfill in
+  `20260730200000` uses, and the reason the moderation fast path (which resolves
+  no metadata at all) needs no special case here.
+
+  Accepts a map keyed by either atoms (resolver metadata) or strings (book
+  attrs), since both shapes reach the edition insert paths.
+  """
+  @spec verification_source_from(map()) :: String.t()
+  def verification_source_from(metadata) when is_map(metadata) do
+    cond do
+      present?(metadata[:open_library_id] || metadata["open_library_id"]) -> "open_library"
+      present?(metadata[:google_books_id] || metadata["google_books_id"]) -> "google_books"
+      true -> "barcode_unverified"
+    end
+  end
+
+  defp present?(value), do: is_binary(value) and value != ""
+
   @doc false
   def book_edition_changeset(edition, attrs) do
     edition
     |> cast(attrs, @edition_required_fields ++ @edition_optional_fields)
     |> validate_required(@edition_required_fields)
+    |> validate_inclusion(:verification_source, @verification_sources)
     |> validate_format(:isbn, ~r/^\d{10}(\d{3})?$/, message: "must be a valid ISBN-10 or ISBN-13")
     |> validate_isbn_checksum()
     |> normalize_edition_isbn()
     |> unique_constraint(:isbn)
+    # Rung-4 backstops. The validations above already reject both, so these only
+    # fire when a value slips past them (a `put_change`, a future write path) —
+    # turning what would be a raised Postgrex error into a changeset error.
+    |> check_constraint(:isbn,
+      name: :book_editions_isbn_ean13_checksum,
+      message: "must be a valid ISBN-13 with a correct check digit"
+    )
+    |> check_constraint(:verification_source,
+      name: :book_editions_verification_source_check,
+      message: "is invalid"
+    )
   end
 
   # Normalise any ISBN-10 input to ISBN-13 before storage so that

@@ -388,7 +388,18 @@
           belongs_to: Stacks.Books.Book,
           dbt_tests: [{:relationships, "stg_books"}]
         },
-        is_primary: %{default: false}
+        is_primary: %{default: false},
+        # ISBN verification provenance (#335 D1). NOT NULL is tightened by the
+        # hand-written companion migration `20260730120500` after its backfill —
+        # the proto-generated ADD COLUMN must stay nullable so it can run against
+        # a populated table. The accepted_values test mirrors the DB CHECK
+        # `book_editions_verification_source_check`.
+        verification_source: %{
+          null: false,
+          dbt_tests: [
+            {:accepted_values, ["open_library", "google_books", "barcode_unverified"]}
+          ]
+        }
       }
     },
     %{
@@ -500,6 +511,17 @@
           dbt_tests: [{:relationships, "stg_bookshelves"}]
         },
         shelf_id: %{belongs_to: Stacks.Shelving.Shelf},
+        # The edition (ISBN/format) this placement is of (#335 D2). Nullable by
+        # design — `book_id` stays the work-level key every read path uses, and
+        # `formats` is deliberately kept alongside it (retiring it is later
+        # work). `nilify_all`: an edition being deleted must never take the
+        # user's placement — and therefore their reading history — with it.
+        book_edition_id: %{
+          belongs_to: Stacks.Books.BookEdition,
+          references_table: :book_editions,
+          on_delete: :nilify_all,
+          dbt_tests: [{:relationships, "stg_book_editions"}]
+        },
         formats: %{ecto_type: {:array, :string}, default: []},
         visibility: %{default: "owner"},
         reading_status: %{
