@@ -36,14 +36,16 @@ type Msg
 
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
-    ( { prefs = Loading, saving = NotAsked }
-    , case maybeToken of
+    case maybeToken of
         Just token ->
-            Api.getNotifications token Loaded
+            ( { prefs = Loading, saving = NotAsked }
+            , Api.getNotifications token Loaded
+            )
 
         Nothing ->
-            Cmd.none
-    )
+            -- No token means no request is in flight: Loading here would
+            -- render "Loading your preferences…" forever (#324 0h).
+            ( { prefs = NotAsked, saving = NotAsked }, Cmd.none )
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
@@ -134,7 +136,10 @@ viewPreferences prefs =
             p [ class "error" ]
                 [ text "Could not load your notification preferences. Please refresh to try again." ]
 
-        _ ->
+        NotAsked ->
+            text ""
+
+        Loading ->
             p [ class "settings-section__desc" ]
                 [ text "Loading your preferences…" ]
 

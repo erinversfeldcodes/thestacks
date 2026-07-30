@@ -93,7 +93,12 @@ viewDropdown =
         , ul
             [ class "user-menu__dropdown app-nav__dropdown-menu"
             , testId "user-menu-dropdown"
-            , style "position" "relative"
+
+            -- position comes from .app-nav__dropdown-menu (absolute) — an inline
+            -- `relative` here pulled the open menu into the header's flex flow
+            -- (#324 0f). The z-index stays inline, paired with the backdrop's
+            -- inline 999 above: the class's z-index (200) would sit UNDER the
+            -- backdrop and let it swallow menu-item clicks.
             , style "z-index" "1000"
             ]
             [ li []
