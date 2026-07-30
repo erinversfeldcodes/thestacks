@@ -585,6 +585,38 @@ defmodule Stacks.UploadPipelineTest do
   # Suite 3: Database Assertion Tests
   # ============================================================================
 
+  describe "Suite 3 — commit gate on undersized stored objects" do
+    test "a 0-byte stored object is rejected at commit and enqueues no vision job",
+         %{user: user} do
+      {:ok, init} = Books.init_upload(user.id)
+
+      # The client's presigned PUT "landed" but wrote zero bytes. No sub-1KB
+      # blob is a real book photo, and each accepted image costs a GPU call.
+      StorageMock.seed("uploads/#{init.image_id}", "")
+
+      assert {:error, :image_too_small} = Books.commit_upload(user.id, init.image_id)
+
+      # Same rejection path an invalid commit takes: the row is terminal
+      # rejected, the SSE stream reads status/rejection_reason straight from
+      # the row, and the standard image.rejected event is emitted.
+      row = Repo.get!(UploadedImage, init.image_id)
+      assert row.status == "rejected"
+      assert row.rejection_reason == "image_too_small"
+      assert event_count("image.rejected") == 1
+
+      refute_enqueued(worker: IdentifyBookJob)
+    end
+
+    test "a sub-1KB stored object is rejected identically", %{user: user} do
+      {:ok, init} = Books.init_upload(user.id)
+      StorageMock.seed("uploads/#{init.image_id}", String.duplicate("x", 512))
+
+      assert {:error, :image_too_small} = Books.commit_upload(user.id, init.image_id)
+      assert Repo.get!(UploadedImage, init.image_id).status == "rejected"
+      refute_enqueued(worker: IdentifyBookJob)
+    end
+  end
+
   describe "Suite 3 — uploaded_images INSERT on upload" do
     @tag stories: ["US-1.1.1"], suite: :db
     test "creates an uploaded_image record with correct fields", %{user: user} do

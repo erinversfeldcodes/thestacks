@@ -130,6 +130,38 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
       assert :ok = run_scrape()
     end
 
+    test "a rate-limit is a determination, not a failure", %{store: store} do
+      # The shop is pacing us — 429, or a cooldown it asked for. It recurs on
+      # every attempt until the cooldown lapses, the identical trap
+      # ROBOTS_BLOCKED was split out to avoid, so it must not count against
+      # the shared fuse (scraper.proto SCRAPE_OUTCOME_RATE_LIMITED).
+      respond(store, "SCRAPE_OUTCOME_RATE_LIMITED", %{
+        "detail" => "shop answered 429 for https://example.com/search?q=9780743273565"
+      })
+
+      # With a single store, any {:error, _} interpretation would surface as
+      # {:error, "all scrape requests failed"} — :ok proves the outcome was
+      # interpreted as a determination.
+      assert :ok = run_scrape()
+    end
+
+    test "a rate-limit records source-health success and does not retry", %{store: store} do
+      respond(store, "SCRAPE_OUTCOME_RATE_LIMITED")
+
+      # Anything but a non-error return would put the job into Oban's retry
+      # loop — rate limiting recurs, so retrying it hammers the shop harder.
+      refute match?({:error, _}, run_scrape())
+
+      health =
+        Core.Repo.get_by!(Stacks.Monitoring.SourceHealthCheck,
+          source_name: store.scraper_module
+        )
+
+      assert health.status == "healthy"
+      assert health.total_successes == 1
+      assert health.total_failures in [0, nil]
+    end
+
     test "not stocked is a real answer, not a failure", %{store: store} do
       # Shops stock whichever editions they stock. With per-edition pricing most
       # (edition, store) pairs legitimately have no price, so if this counted as a

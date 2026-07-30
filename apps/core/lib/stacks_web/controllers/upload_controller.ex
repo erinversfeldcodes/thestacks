@@ -140,6 +140,12 @@ defmodule StacksWeb.UploadController do
       {:error, :already_committed} ->
         conn |> put_status(409) |> json(%{error: "already_committed"})
 
+      {:error, :image_too_small} ->
+        # The PUT landed but the object cannot be a real book photo. The row
+        # has already been marked rejected, so the SSE stream reports it like
+        # any other rejection — 422, not a retryable 5xx.
+        conn |> put_status(422) |> json(%{error: "image_too_small"})
+
       {:error, _reason} ->
         conn |> put_status(500) |> json(%{error: "commit_failed"})
     end
