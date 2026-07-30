@@ -270,7 +270,7 @@ defmodule Stacks.GDPR.DeletionTest do
       {:ok, token, claims} = Guardian.encode_and_sign(user, %{"family_id" => fid})
 
       {:ok, _family} =
-        Accounts.open_token_family(%{
+        Accounts.rotate_token_family(%{
           family_id: fid,
           user_id: user.id,
           current_jti: claims["jti"],

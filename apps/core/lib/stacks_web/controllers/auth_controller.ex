@@ -69,7 +69,7 @@ defmodule StacksWeb.AuthController do
           session_started_at: DateTime.from_unix!(claims["sst"])
         }
 
-        case Accounts.open_token_family(family_attrs) do
+        case Accounts.rotate_token_family(family_attrs) do
           {:ok, _family} ->
             # JWT issuance counter (Issue #206 / auth §12). Counted only once the
             # token is actually handed to the client (family persisted); the
@@ -84,7 +84,7 @@ defmodule StacksWeb.AuthController do
             # written) but its family did not persist. Handing it out would
             # break the "every live token has a family" invariant that Phase 2b
             # relies on, so revoke the just-minted token and refuse the login.
-            Logger.error("open_token_family failed on login: #{inspect(reason)}")
+            Logger.error("rotate_token_family failed on login: #{inspect(reason)}")
             revoke_refresh_token(token)
 
             conn

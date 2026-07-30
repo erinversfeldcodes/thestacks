@@ -50,7 +50,7 @@ defmodule Stacks.AuthSecurityTelemetryTest do
       fid = Ecto.UUID.generate()
 
       {:ok, _family} =
-        Accounts.open_token_family(%{
+        Accounts.rotate_token_family(%{
           family_id: fid,
           user_id: user.id,
           current_jti: "jti-current",

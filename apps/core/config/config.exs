@@ -186,10 +186,6 @@ config :core, :dbt_runner, Stacks.Workers.DbtRunner
 # secrets (see config/runtime.exs); absent ⇒ live section degrades to
 # `:unavailable`.
 config :core, :transparency_prometheus_client, Stacks.Transparency.Prometheus
-# review_fetcher defaults to mock in all environments — no real review API
-# integration exists yet. FetchReviewsJob uses this mock to return sample data.
-# Replace with a real implementation when a review source API is integrated.
-config :core, :review_fetcher, Stacks.Enrichment.MockReviewFetcher
 config :core, :rss_fetcher, Stacks.Enrichment.RssFetcher
 config :core, :storage, Stacks.Storage.Local
 

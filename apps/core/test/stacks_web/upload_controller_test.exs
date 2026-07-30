@@ -19,42 +19,6 @@ defmodule StacksWeb.UploadControllerTest do
     %{conn: authed_conn, user: user}
   end
 
-  describe "POST /api/upload" do
-    test "accepts image upload and enqueues IdentifyBookJob", %{conn: conn, user: user} do
-      tmp_path = Path.join(System.tmp_dir!(), "test_upload_#{System.unique_integer()}.jpg")
-      File.write!(tmp_path, "fake image content")
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "test_book.jpg",
-        content_type: "image/jpeg"
-      }
-
-      conn = post(conn, "/api/upload", %{"image" => upload})
-
-      assert %{"status" => "accepted", "image_id" => image_id} = json_response(conn, 202)
-      assert is_binary(image_id)
-
-      assert_enqueued(
-        worker: IdentifyBookJob,
-        args: %{"user_id" => user.id, "image_id" => image_id}
-      )
-
-      File.rm(tmp_path)
-    end
-
-    test "returns 422 when no image provided", %{conn: conn} do
-      conn = post(conn, "/api/upload", %{})
-      assert %{"error" => "no image provided"} = json_response(conn, 422)
-    end
-
-    test "returns 401 without auth token" do
-      conn = build_conn()
-      conn = post(conn, "/api/upload", %{"image" => "not_a_file"})
-      assert json_response(conn, 401)
-    end
-  end
-
   describe "POST /api/upload/init" do
     test "returns 201 with image_id + upload_url + expires_in", %{conn: conn} do
       conn = post(conn, "/api/upload/init", %{"content_type" => "image/jpeg"})
@@ -174,78 +138,17 @@ defmodule StacksWeb.UploadControllerTest do
     end
   end
 
-  describe "POST /api/upload/identify" do
-    test "returns 200 with identified candidates when image_b64 provided", %{conn: conn} do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
-
-        conn =
-          post(conn, "/api/upload/identify", %{"image_b64" => Base.encode64("fake image bytes")})
-
-        assert %{"status" => "identified", "candidates" => candidates} = json_response(conn, 200)
-        assert is_list(candidates)
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "returns 200 with identified candidates when image_url provided", %{conn: conn} do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
-
-        conn =
-          post(conn, "/api/upload/identify", %{
-            "image_url" => "https://example.com/cover.jpg"
-          })
-
-        assert %{"status" => "identified", "candidates" => candidates} = json_response(conn, 200)
-        assert is_list(candidates)
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "returns 422 when neither image_b64 nor image_url is provided", %{conn: conn} do
-      conn = post(conn, "/api/upload/identify", %{})
-      assert %{"error" => _} = json_response(conn, 422)
-    end
-
-    test "returns 401 without auth token" do
-      conn = build_conn()
-      conn = post(conn, "/api/upload/identify", %{"image_b64" => "abc"})
-      assert json_response(conn, 401)
-    end
-  end
-
   describe "GET /api/upload/:image_id/stream" do
-    test "returns status for a pending image via SSE", %{conn: conn, user: user} do
+    test "returns status for a pending image via SSE", %{user: user} do
       alias Stacks.Accounts.Guardian
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
-      tmp_path = Path.join(System.tmp_dir!(), "status_test_#{System.unique_integer()}.jpg")
-      File.write!(tmp_path, "fake image content")
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "test_book.jpg",
-        content_type: "image/jpeg"
-      }
-
-      %{"image_id" => image_id} =
-        conn
-        |> post("/api/upload", %{"image" => upload})
-        |> json_response(202)
-
-      conn2 = get(build_conn(), "/api/upload/#{image_id}/stream?token=#{token}")
+      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
       assert conn2.status == 200
       [content_type | _] = get_resp_header(conn2, "content-type")
       assert String.contains?(content_type, "text/event-stream")
-
-      File.rm(tmp_path)
     end
 
     test "returns 404 for unknown image_id", %{user: user} do

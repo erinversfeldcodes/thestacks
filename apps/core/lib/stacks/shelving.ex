@@ -627,45 +627,6 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Returns spine rendering data for a placement: formats (derived from
-  edition format labels), page_count (from the primary edition), and
-  wear level (derived from how many times the book has been moved).
-  """
-  @spec spine_data(binary()) :: map() | nil
-  def spine_data(placement_id) do
-    placement = Repo.get(Placement, placement_id) |> Repo.preload(book: :editions)
-
-    case placement do
-      nil ->
-        nil
-
-      p ->
-        move_count =
-          PlacementHistory
-          |> where([h], h.book_id == ^p.book_id)
-          |> Repo.aggregate(:count, :id)
-
-        wear_level = compute_wear_level(move_count)
-
-        editions = if p.book && is_list(p.book.editions), do: p.book.editions, else: []
-        primary = if p.book, do: Stacks.Books.primary_edition(p.book), else: nil
-
-        %{
-          placement_id: placement_id,
-          formats: editions |> Enum.map(& &1.format_label) |> Enum.reject(&is_nil/1),
-          page_count: primary && primary.page_count,
-          move_count: move_count,
-          wear_level: wear_level
-        }
-    end
-  end
-
-  defp compute_wear_level(0), do: :new
-  defp compute_wear_level(n) when n <= 2, do: :light
-  defp compute_wear_level(n) when n <= 5, do: :moderate
-  defp compute_wear_level(_), do: :heavy
-
-  @doc """
   Returns the user's active (non-removed) placement for a specific book,
   with the bookshelf preloaded. Returns `nil` if no such placement exists.
   """
