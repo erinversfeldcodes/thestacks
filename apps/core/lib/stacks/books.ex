@@ -73,6 +73,10 @@ defmodule Stacks.Books do
   #   rejected        → pipeline rejected (not-a-book, isbn-not-found, etc).
   @valid_image_statuses ~w(awaiting_upload pending resolved rejected)
 
+  # No sub-1KB blob is a real book photo, and each accepted image costs a GPU
+  # call — undersized objects are rejected at commit, before vision work exists.
+  @min_image_bytes 1_024
+
   @doc """
   Returns a book edition by ID, or nil if not found.
   """
@@ -463,6 +467,10 @@ defmodule Stacks.Books do
     * `{:error, :already_committed}` — row status is already `"pending"`
       or a terminal state. Idempotent — repeat commits are safe but
       don't re-enqueue.
+    * `{:error, :image_too_small}` — the object landed but is under
+      `#{@min_image_bytes}` bytes, which no real book photo is. The row is
+      marked rejected via the same machinery the identify pipeline uses,
+      so the SSE stream reports it as an ordinary rejection.
   """
   @spec commit_upload(binary(), binary()) ::
           {:ok, %{image_id: binary(), job_id: binary()}} | {:error, term()}
@@ -479,7 +487,78 @@ defmodule Stacks.Books do
       })
 
       {:ok, %{image_id: updated.id, job_id: job.id}}
+    else
+      {:error, :image_too_small} ->
+        # The same rejection path an invalid image takes downstream: terminal
+        # row state + SSE notification + image.rejected event — never a bare
+        # error the client would be told to retry.
+        reject_image(image_id, "image_too_small")
+        {:error, :image_too_small}
+
+      other ->
+        other
     end
+  end
+
+  @doc """
+  Marks an in-flight uploaded image (`awaiting_upload` or `pending`) as
+  rejected: sets the terminal row state, fires the upload-terminal
+  telemetry counter, notifies the SSE stream via PubSub, and emits the
+  `image.rejected` event.
+
+  This is THE rejection path — `IdentifyBookJob` delegates here for
+  pipeline rejections, and `commit_upload/2` uses it for undersized
+  objects — so every rejection is observable the same way. Scoped to
+  in-flight statuses so a retry that re-enters after a successful
+  rejection cannot re-emit `[:stacks, :upload, :terminal]`.
+  """
+  @spec reject_image(binary(), String.t()) :: :ok
+  def reject_image(image_id, reason) do
+    query =
+      from(i in UploadedImage,
+        where: i.id == ^image_id and i.status in ["awaiting_upload", "pending"]
+      )
+
+    {count, _} =
+      Repo.update_all(
+        query,
+        set: [
+          status: "rejected",
+          rejection_reason: reason,
+          updated_at: DateTime.utc_now()
+        ]
+      )
+
+    if count > 0 do
+      Logger.info("Books.reject_image: rejected image #{image_id} (#{reason})")
+
+      :telemetry.execute(
+        [:stacks, :upload, :terminal],
+        %{count: 1},
+        %{outcome: :rejected}
+      )
+
+      Phoenix.PubSub.broadcast(
+        Core.PubSub,
+        "upload:#{image_id}",
+        {:upload_complete, %{status: "rejected", rejection_reason: reason}}
+      )
+
+      Events.emit_safe(%{
+        event_type: "image.rejected",
+        aggregate_type: "image",
+        aggregate_id: image_id,
+        payload: %{reason: reason}
+      })
+    else
+      Logger.warning("Books.reject_image: image #{image_id} not in-flight, skipping reject")
+    end
+
+    :ok
+  rescue
+    error ->
+      Logger.error("Books.reject_image: failed to reject image #{image_id}: #{inspect(error)}")
+      :ok
   end
 
   # Translate the storage backend's :not_found into :not_yet_uploaded so
@@ -488,7 +567,8 @@ defmodule Stacks.Books do
   # clients can retry, the former is a hard 404.
   defp verify_object_exists(storage_path) do
     case Stacks.Storage.head_image(storage_path) do
-      {:ok, _size} -> :ok
+      {:ok, size} when size >= @min_image_bytes -> :ok
+      {:ok, _undersized} -> {:error, :image_too_small}
       {:error, :not_found} -> {:error, :not_yet_uploaded}
       {:error, reason} -> {:error, reason}
     end
