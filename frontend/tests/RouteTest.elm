@@ -226,7 +226,11 @@ suite =
         [ describe "fromUrl (toPath r) == r for every Route constructor"
             (List.map roundTripTest allRoutes)
         , describe "fromUrl / toPath round-trips"
-            [ test "Home" <|
+            [ test "bare /settings parses to SettingsProfile (#326 review: the round-trip law starts from constructors, so it cannot see this alias entry — pin it directly)" <|
+                \_ ->
+                    fromPath "/settings"
+                        |> Expect.equal SettingsProfile
+            , test "Home" <|
                 \_ ->
                     fromPath "/"
                         |> Expect.equal Home
