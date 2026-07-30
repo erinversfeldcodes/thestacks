@@ -127,7 +127,18 @@ defmodule Stacks.Enrichment.ScraperClient do
 
   # An HTTP 200 carrying EXTRACTOR_FAILED means the service worked and this store's
   # extraction did not — a per-store fault that should back off from this store
-  # alone. NOT_STOCKED and ROBOTS_BLOCKED are determinations and melt nothing.
+  # alone. Every other outcome is a conclusion the service reached successfully, so
+  # none of them melt anything; deciding what they *mean* is TriggerPriceScrapeJob's
+  # job, not this transport's.
+  #
+  # proto-enum-coverage: ScrapeOutcome ignore
+  #   SCRAPE_OUTCOME_PRICED, SCRAPE_OUTCOME_NOT_STOCKED, SCRAPE_OUTCOME_ROBOTS_BLOCKED,
+  #   SCRAPE_OUTCOME_INDEX_REQUIRED, SCRAPE_OUTCOME_RATE_LIMITED
+  #   — this clause answers one question, "does this outcome melt the per-store
+  #   fuse?", and for all five the answer is no. Melting on any of them is the exact
+  #   trap ROBOTS_BLOCKED and RATE_LIMITED were split out of EXTRACTOR_FAILED to
+  #   avoid: they recur on every attempt, so they would hold the fuse open forever.
+  #   A new ScrapeOutcome must be added here or to this list deliberately.
   defp melt_if_extractor_failed(
          {:ok, %{"outcome" => "SCRAPE_OUTCOME_EXTRACTOR_FAILED"}},
          store_fuse,

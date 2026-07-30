@@ -32,6 +32,15 @@ elif git rev-parse --verify origin/main &>/dev/null 2>&1; then
     fi
 fi
 
+# Consumer coverage — an enum value no Elixir consumer handles fails the build.
+#
+# Runs unconditionally, including in CI: it reads the proto descriptor and the
+# hand-written sources, never the gitignored generated output. This is the gate the
+# SCRAPE_OUTCOME_RATE_LIMITED miss needed and did not have — proto, Rust and two of
+# three Elixir consumers were updated, the third silently was not, and price
+# snapshots stopped for three campaigns with every other check green.
+python3 "$REPO_ROOT/scripts/check-enum-coverage.py"
+
 # Proto codegen drift checks — only run locally where generated files are present.
 # Generated files are gitignored so they don't exist in CI (skip silently there).
 if [[ "${CI:-}" != "true" ]]; then
