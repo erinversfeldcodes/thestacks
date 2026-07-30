@@ -276,7 +276,7 @@ update msg model maybeToken =
                                     -- Single book: check for duplicate, then fetch.
                                     let
                                         callback =
-                                            if response.isDuplicate == Just True then
+                                            if response.isDuplicate then
                                                 GotDuplicateBook
 
                                             else

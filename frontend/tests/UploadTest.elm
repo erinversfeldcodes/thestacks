@@ -3,12 +3,47 @@ module UploadTest exposing (suite)
 import Api exposing (PollResponse, PollStatus(..))
 import Expect
 import Http
+import Json.Encode as Encode
 import Navigation.Route
 import Page.Upload as Upload exposing (Msg(..), OutMsg(..), UploadResult(..), UploadStep(..))
 import Test exposing (Test, describe, test)
 import Types.Book exposing (Book, Edition, VisibilityTier(..))
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+
+
+{-| An SSE frame exactly as the server emits it.
+
+The one and only wire shape is `StacksWeb.ProtoJSON.poll_response/1`
+(`apps/core/lib/stacks_web/proto_json.ex:525-534`), declared by
+`proto/stacks/common/v1/upload.proto`'s `PollResponse`. It is snake\_case, and
+`UploadController.sse_receive_loop/4` passes all six keys on every branch —
+`book_ids` defaults to `[]` and `is_duplicate` to `false` server-side, and
+`book_id` / `rejection_reason` are serialized as JSON `null` rather than
+omitted. Building every fixture through here means a wire rename has exactly
+one place to be wrong, and it is the place that fails.
+
+Until Issue #328 these frames were written by hand in camelCase — a shape the
+server has never emitted — so breaking any production wire field left the suite
+green.
+
+-}
+serverFrame : String -> Maybe String -> List String -> Maybe String -> String
+serverFrame status bookId bookIds rejectionReason =
+    let
+        orNull =
+            Maybe.map Encode.string >> Maybe.withDefault Encode.null
+    in
+    Encode.encode 0
+        (Encode.object
+            [ ( "image_id", Encode.string "img-uuid" )
+            , ( "status", Encode.string status )
+            , ( "book_id", orNull bookId )
+            , ( "book_ids", Encode.list Encode.string bookIds )
+            , ( "rejection_reason", orNull rejectionReason )
+            , ( "is_duplicate", Encode.bool False )
+            ]
+        )
 
 
 dummyBook : Book
@@ -32,7 +67,7 @@ timeoutPoll =
     , bookId = Nothing
     , bookIds = []
     , rejectionReason = Nothing
-    , isDuplicate = Nothing
+    , isDuplicate = False
     }
 
 
@@ -118,7 +153,7 @@ suite =
                 \_ ->
                     let
                         rawJson =
-                            "{\"status\":\"resolved\",\"bookIds\":[\"some-uuid\"],\"bookId\":\"some-uuid\",\"rejectionReason\":null,\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+                            serverFrame "resolved" (Just "some-uuid") [ "some-uuid" ] Nothing
 
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
@@ -131,7 +166,7 @@ suite =
                 \_ ->
                     let
                         rawJson =
-                            "{\"status\":\"rejected\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"not_a_book\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+                            serverFrame "rejected" Nothing [] (Just "not_a_book")
 
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
@@ -159,7 +194,7 @@ suite =
                 \_ ->
                     let
                         rawJson =
-                            "{\"status\":\"resolved\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"not_a_book\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+                            serverFrame "resolved" Nothing [] (Just "not_a_book")
 
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
@@ -170,7 +205,7 @@ suite =
                 \_ ->
                     let
                         rawJson =
-                            "{\"status\":\"rejected\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"isbn_not_found\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+                            serverFrame "rejected" Nothing [] (Just "isbn_not_found")
 
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
@@ -194,7 +229,7 @@ suite =
                             }
 
                         rawJson =
-                            "{\"status\":\"rejected\",\"bookIds\":[],\"bookId\":null,\"rejectionReason\":\"isbn_not_found\",\"isDuplicate\":false,\"imageId\":\"img-uuid\"}"
+                            serverFrame "rejected" Nothing [] (Just "isbn_not_found")
 
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelInFlight (Just "tok")

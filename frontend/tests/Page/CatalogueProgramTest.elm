@@ -7,9 +7,8 @@ simulated user interactions and HTTP responses.
 
 -}
 
-import Api exposing (CatalogueResponse, PlacementSummary)
+import Api
 import Http
-import Json.Decode as Decode
 import Json.Encode as Encode
 import Page.Catalogue as Catalogue exposing (Msg(..))
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
@@ -19,7 +18,6 @@ import SimulatedEffect.Process
 import SimulatedEffect.Task
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import Types.Book exposing (bookDecoder)
 
 
 suite : Test
@@ -75,7 +73,7 @@ catalogueInitEffects maybeToken =
                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                     , url = "/api/catalogue?sort=title&page=1"
                     , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived catalogueResponseDecoder
+                    , expect = SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived Api.catalogueResponseDecoder
                     , timeout = Nothing
                     , tracker = Nothing
                     }
@@ -84,7 +82,11 @@ catalogueInitEffects maybeToken =
                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                     , url = "/api/placements/mine"
                     , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson Catalogue.UserPlacementsLoaded (Decode.field "placements" (Decode.list placementSummaryDecoder))
+
+                    -- The real decoders throughout, never a copy: a mirror and
+                    -- its fixtures stay consistent with each other while both
+                    -- drift away from the server (Issue #328).
+                    , expect = SimulatedEffect.Http.expectJson Catalogue.UserPlacementsLoaded Api.placementsMineDecoder
                     , timeout = Nothing
                     , tracker = Nothing
                     }
@@ -92,13 +94,6 @@ catalogueInitEffects maybeToken =
 
         Nothing ->
             SimulatedEffect.Cmd.none
-
-
-placementSummaryDecoder : Decode.Decoder PlacementSummary
-placementSummaryDecoder =
-    Decode.map2 PlacementSummary
-        (Decode.field "book_id" Decode.string)
-        (Decode.field "bookshelf_name" Decode.string)
 
 
 catalogueEffects : Catalogue.Msg -> Catalogue.Model -> Maybe String -> SimulatedEffect Catalogue.Msg
@@ -180,22 +175,13 @@ fetchSimulated model maybeToken =
                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                 , url = "/api/catalogue?sort=" ++ model.sort ++ "&page=" ++ String.fromInt model.page ++ searchParam ++ subjectParam
                 , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived catalogueResponseDecoder
+                , expect = SimulatedEffect.Http.expectJson Catalogue.CatalogueReceived Api.catalogueResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
                 }
 
         Nothing ->
             SimulatedEffect.Cmd.none
-
-
-catalogueResponseDecoder : Decode.Decoder CatalogueResponse
-catalogueResponseDecoder =
-    Decode.map4 CatalogueResponse
-        (Decode.field "books" (Decode.list bookDecoder))
-        (Decode.field "total" Decode.int)
-        (Decode.field "page" Decode.int)
-        (Decode.field "per_page" Decode.int)
 
 
 

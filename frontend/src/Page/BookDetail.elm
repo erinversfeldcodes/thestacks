@@ -3,6 +3,7 @@ module Page.BookDetail exposing
     , Model
     , Msg(..)
     , OutMsg(..)
+    , availabilityDecoder
     , cardFocusId
     , firstFocusableId
     , init

@@ -5,6 +5,7 @@ module Page.ThirdSpaces exposing
     , ThirdSpace
     , ThirdSpaceEvent
     , init
+    , thirdSpacesResponseDecoder
     , update
     , view
     )
