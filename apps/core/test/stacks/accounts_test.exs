@@ -1141,14 +1141,37 @@ defmodule Stacks.AccountsTest do
   end
 
   describe "find_users_by_email/1" do
-    test "returns every user matching case-insensitively (email is not unique)" do
-      a = insert(:user, email: "casing@stacks.test")
-      b = insert(:user, email: "CASING@stacks.test")
+    # This used to insert TWO users differing only in case and assert the lookup
+    # surfaced both. `users_lower_email_index` (#335 D4) makes that state
+    # unreachable — the second insert is now rejected by the database, which
+    # `Stacks.SchemaConstraintsTest` proves directly. What still matters, and is
+    # what this test was really protecting, is that erase-by-email resolves the
+    # right account no matter how the operator typed the address. The function
+    # keeps returning a LIST: at most one row can match now, but an erasure that
+    # silently picked "the first" of several would be the worst possible failure,
+    # so the caller stays obliged to look at how many it got.
+    test "matches case-insensitively however the query is cased" do
+      user = insert(:user, email: "casing@stacks.test")
 
-      ids = "Casing@Stacks.Test" |> Accounts.find_users_by_email() |> Enum.map(& &1.id)
+      for query <- ["casing@stacks.test", "CASING@stacks.test", "Casing@Stacks.Test"] do
+        assert Enum.map(Accounts.find_users_by_email(query), & &1.id) == [user.id],
+               "lookup missed the account for query #{query}"
+      end
+    end
 
-      assert a.id in ids
-      assert b.id in ids
+    test "matches a legacy row stored with mixed case" do
+      # Rows that predate the downcase-on-write in `registration_changeset/2`.
+      # `20260730200400` normalises them, but the lookup must not depend on that
+      # migration having run — it is the GDPR erase-by-email entry point.
+      user = insert(:user, email: "legacy@stacks.test")
+
+      {1, _} =
+        Core.Repo.update_all(
+          from(u in Stacks.Accounts.User, where: u.id == ^user.id),
+          set: [email: "LeGaCy@Stacks.Test"]
+        )
+
+      assert Enum.map(Accounts.find_users_by_email("legacy@stacks.test"), & &1.id) == [user.id]
     end
 
     test "returns [] when nothing matches" do

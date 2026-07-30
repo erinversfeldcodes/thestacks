@@ -544,9 +544,14 @@ defmodule Stacks.UploadDbtTest do
         Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => isbn,
           "book_id" => book.id,
-          "is_primary" => false
+          "is_primary" => false,
+          # Required since #335 D1. Without it the changeset is invalid before
+          # it reaches the database and the ISBN-uniqueness assertion below can
+          # never fire — the test would pass on the wrong error.
+          "verification_source" => "open_library"
         })
 
+      assert duplicate.valid?, inspect(duplicate.errors)
       assert {:error, changeset} = Repo.insert(duplicate)
       assert {"has already been taken", _} = changeset.errors[:isbn]
     end

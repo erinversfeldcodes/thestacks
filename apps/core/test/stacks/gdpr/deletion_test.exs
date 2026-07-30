@@ -307,6 +307,24 @@ defmodule Stacks.GDPR.DeletionTest do
       assert family_count(user.id) == 0
     end
 
+    test "the erasure reports how many sessions it killed, and fails if any survive" do
+      # `:revoke_sessions` stopped deleting rows in #335 D3 — the ON DELETE
+      # CASCADE FKs on both session tables do that now. What it still owes the
+      # operator runbook is the count, and what it owes the data subject is a
+      # refusal to report success over a session that outlived the erasure.
+      user = insert(:user)
+      _session = open_session(user)
+
+      assert {:ok, result} = Deletion.delete_user_data(user.id)
+
+      assert result.sessions_to_revoke == 2,
+             "one auth_token_families row + one guardian_tokens row"
+
+      assert result.revoke_sessions == 2, "the reported count must survive the cascade rewrite"
+      assert guardian_token_count(user.id) == 0
+      assert family_count(user.id) == 0
+    end
+
     test "the erased user's live token no longer verifies" do
       user = insert(:user)
       %{token: token} = open_session(user)

@@ -56,7 +56,8 @@ defmodule Stacks.Shelving do
     :current_page,
     :started_at,
     :finished_at,
-    :shelf_id
+    :shelf_id,
+    :book_edition_id
   ]
 
   # ── Changeset functions (moved from schema modules) ────────────────
@@ -356,7 +357,8 @@ defmodule Stacks.Shelving do
       placement_changeset(%Placement{}, %{
         book_id: book_id,
         bookshelf_id: bookshelf.id,
-        shelf_id: default_shelf.id
+        shelf_id: default_shelf.id,
+        book_edition_id: primary_edition_id(book_id)
       })
     )
     |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
@@ -527,7 +529,11 @@ defmodule Stacks.Shelving do
       placement_changeset(%Placement{}, %{
         book_id: placement.book_id,
         bookshelf_id: library_bookshelf.id,
-        shelf_id: default_shelf.id
+        shelf_id: default_shelf.id,
+        # A reread is the same copy going back on the shelf — carry the
+        # edition forward rather than re-resolving the work's primary, which
+        # would silently rewrite which edition the reader owns.
+        book_edition_id: placement.book_edition_id || primary_edition_id(placement.book_id)
       })
     )
     |> Multi.insert(:history, fn _ ->
@@ -1167,6 +1173,25 @@ defmodule Stacks.Shelving do
       %Book{visibility_tier: tier} -> tier
       _ -> nil
     end
+  end
+
+  # The edition a new placement points at (#335 D2). A placement is made from a
+  # work — the user picked a book, not an ISBN — so the honest default is the
+  # edition the work displays as its own, the same one `Books.primary_edition/1`
+  # resolves. Falls back to the oldest edition when nothing is flagged primary
+  # (legacy rows: `book_editions_one_primary_per_book` forbids two primaries but
+  # not zero), and to nil for a work with no edition at all, which the nullable
+  # column permits. Mirrors the backfill in `20260730200100`.
+  defp primary_edition_id(nil), do: nil
+
+  defp primary_edition_id(book_id) do
+    Repo.one(
+      from e in Books.BookEdition,
+        where: e.book_id == type(^book_id, Ecto.UUID),
+        order_by: [desc: e.is_primary, asc: e.created_at, asc: e.id],
+        limit: 1,
+        select: e.id
+    )
   end
 
   # Enforces the reading-pile cap (#276) inside the write transaction.

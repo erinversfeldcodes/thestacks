@@ -14,6 +14,7 @@ select
     open_library_id,
     google_books_id,
     book_id,
+    verification_source,
     created_at,
     updated_at
 from {{ source('op', 'book_editions') }}

@@ -356,7 +356,7 @@ books_data = [
   {1074, "9780156949606", "The Waves", 108, 297, 1931, ["Literary Fiction", "Classic"], "public"},
   {1075, "9780199536610", "To the Lighthouse (Oxford)", 108, 209, 1927,
    ["Literary Fiction", "Classic"], "public"},
-  {1076, "9780156030358", "A Room of One's Own", 108, 112, 1929, ["Non-Fiction", "Classic"],
+  {1076, "9780156030359", "A Room of One's Own", 108, 112, 1929, ["Non-Fiction", "Classic"],
    "public"},
   {1077, "9780156907279", "Jacob's Room", 108, 176, 1922, ["Literary Fiction", "Classic"],
    "public"},
@@ -394,7 +394,7 @@ books_data = [
    "age_gated"},
   {1094, "9781400033430", "Sula", 110, 174, 1973, ["Literary Fiction", "Classic"], "public"},
   {1095, "9780679745204", "Jazz", 110, 229, 1992, ["Literary Fiction", "Classic"], "public"},
-  {1096, "9780679775474", "Paradise", 110, 318, 1997, ["Literary Fiction", "Classic"], "public"},
+  {1096, "9780679775478", "Paradise", 110, 318, 1997, ["Literary Fiction", "Classic"], "public"},
   {1097, "9780307264169", "A Mercy", 110, 167, 2008, ["Historical Fiction", "Fiction"], "public"},
   {1098, "9780307594167", "Home", 110, 147, 2012, ["Literary Fiction", "Fiction"], "public"},
   {1099, "9780307740922", "God Help the Child", 110, 178, 2015, ["Literary Fiction", "Fiction"],
@@ -431,7 +431,7 @@ books_data = [
    "public"},
   {1116, "9780446606721", "Clay's Ark", 112, 201, 1984, ["Science Fiction", "Horror"],
    "age_gated"},
-  {1117, "9780446611972", "Dawn", 112, 248, 1987, ["Science Fiction", "Afrofuturism"], "public"},
+  {1117, "9780446611978", "Dawn", 112, 248, 1987, ["Science Fiction", "Afrofuturism"], "public"},
   {1118, "9780446603768", "Adulthood Rites", 112, 277, 1988, ["Science Fiction", "Afrofuturism"],
    "public"},
   {1119, "9780446603799", "Imago", 112, 264, 1989, ["Science Fiction", "Afrofuturism"], "public"},
@@ -644,6 +644,12 @@ work_groups =
           page_count: pages,
           publication_year: year,
           is_primary: is_primary,
+          # Every seeded ISBN is a real, externally-catalogued book, and
+          # `op.book_editions.verification_source` is NOT NULL (#335 D1) — so
+          # the seed must state its provenance like any other writer. This is
+          # exactly the class of out-of-band writer the constraint exists for:
+          # it does not go through `Books.book_edition_changeset/2`.
+          verification_source: "open_library",
           created_at: jan_01,
           updated_at: jan_01
         }
@@ -825,6 +831,12 @@ e2e_placement_rows =
         %{
           id: Seeds.uuid(place_base + i),
           book_id: Seeds.uuid(work_idx),
+          # The work's primary edition (#335 D2): the works loop above gives every
+          # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
+          # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
+          # sets this on every real placement, so a seed that left it null would
+          # fixture a shape production stopped producing.
+          book_edition_id: Seeds.uuid(3000 + work_idx),
           bookshelf_id: library_shelf,
           shelf_id: library_shelf_id,
           position: i + 1,
@@ -841,6 +853,12 @@ e2e_placement_rows =
         %{
           id: Seeds.uuid(place_base + 10 + i),
           book_id: Seeds.uuid(work_idx),
+          # The work's primary edition (#335 D2): the works loop above gives every
+          # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
+          # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
+          # sets this on every real placement, so a seed that left it null would
+          # fixture a shape production stopped producing.
+          book_edition_id: Seeds.uuid(3000 + work_idx),
           bookshelf_id: antilibrary_shelf,
           shelf_id: antilibrary_shelf_id,
           position: i + 1,
@@ -857,6 +875,12 @@ e2e_placement_rows =
         %{
           id: Seeds.uuid(place_base + 15 + i),
           book_id: Seeds.uuid(work_idx),
+          # The work's primary edition (#335 D2): the works loop above gives every
+          # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
+          # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
+          # sets this on every real placement, so a seed that left it null would
+          # fixture a shape production stopped producing.
+          book_edition_id: Seeds.uuid(3000 + work_idx),
           bookshelf_id: reading_pile_shelf,
           shelf_id: reading_pile_shelf_id,
           position: i + 1,
@@ -905,6 +929,12 @@ placement_groups = [
         base = %{
           id: Seeds.uuid(idx),
           book_id: Seeds.uuid(work_idx),
+          # The work's primary edition (#335 D2): the works loop above gives every
+          # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
+          # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
+          # sets this on every real placement, so a seed that left it null would
+          # fixture a shape production stopped producing.
+          book_edition_id: Seeds.uuid(3000 + work_idx),
           bookshelf_id: Seeds.uuid(shelf_idx),
           shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(shelf_idx)),
           position: position,
@@ -965,6 +995,11 @@ placement_groups = [
   end)
 
 # User 2 placements: 3 on library (shelf 307), 1 on antilibrary (shelf 306)
+user2_antilibrary_book_idx = elem(Enum.at(books_data, 3), 0)
+
+user2_antilibrary_work_idx =
+  Map.get(edition_to_work_map, user2_antilibrary_book_idx, user2_antilibrary_book_idx)
+
 user2_placements =
   Enum.with_index(Enum.slice(books_data, 0..2), fn {book_idx, _, _, _, _, _, _, _}, i ->
     work_idx = Map.get(edition_to_work_map, book_idx, book_idx)
@@ -972,6 +1007,12 @@ user2_placements =
     %{
       id: Seeds.uuid(next_place_idx + i),
       book_id: Seeds.uuid(work_idx),
+      # The work's primary edition (#335 D2): the works loop above gives every
+      # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
+      # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
+      # sets this on every real placement, so a seed that left it null would
+      # fixture a shape production stopped producing.
+      book_edition_id: Seeds.uuid(3000 + work_idx),
       bookshelf_id: Seeds.uuid(307),
       shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(307)),
       position: i + 1,
@@ -985,14 +1026,8 @@ user2_placements =
     [
       %{
         id: Seeds.uuid(next_place_idx + 3),
-        book_id:
-          Seeds.uuid(
-            Map.get(
-              edition_to_work_map,
-              elem(Enum.at(books_data, 3), 0),
-              elem(Enum.at(books_data, 3), 0)
-            )
-          ),
+        book_id: Seeds.uuid(user2_antilibrary_work_idx),
+        book_edition_id: Seeds.uuid(3000 + user2_antilibrary_work_idx),
         bookshelf_id: Seeds.uuid(306),
         shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(306)),
         position: 1,

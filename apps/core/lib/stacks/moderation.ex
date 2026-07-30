@@ -496,6 +496,24 @@ defmodule Stacks.Moderation do
     base_attrs = %{
       "isbn" => isbn,
       "title" => derive_title(isbn, metadata, used_fast_path),
+      # ISBN provenance (#335 D1). The fast path deliberately skipped the
+      # OL/GB round-trip, so nothing external has confirmed this ISBN — say
+      # so on the row rather than leaving it to be inferred from the
+      # `"ISBN <isbn>"` placeholder title, which `EnrichBookJob` overwrites
+      # the moment enrichment succeeds. Otherwise the identifiers the
+      # resolver returned name the source (Books.verification_source_from/1).
+      #
+      # The fast-path branch is written out even though `resolve_metadata/3`
+      # currently returns `%{}` alongside `used_fast_path == true`, which the
+      # derivation would map to the same answer. That coincidence is not the
+      # reason: `used_fast_path` means "we deliberately skipped the external
+      # lookup", and if the fast path ever carries partial metadata, deriving
+      # from it would silently claim a verification that never happened.
+      "verification_source" =>
+        if(used_fast_path,
+          do: "barcode_unverified",
+          else: Books.verification_source_from(metadata)
+        ),
       "subjects" => metadata[:subjects] || [],
       "bisac_codes" => metadata[:bisac_codes] || [],
       "description" => metadata[:description],

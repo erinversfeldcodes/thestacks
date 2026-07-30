@@ -207,4 +207,23 @@ message Edition {
 
   // When this edition record was last updated.
   google.protobuf.Timestamp updated_at = 15 [json_name = "updated_at"];
+
+  // Where this edition's ISBN verification came from. DB-only provenance field,
+  // never serialised on the wire. Exactly one of:
+  //
+  //   "open_library"       — the ISBN was resolved against Open Library.
+  //   "google_books"       — the ISBN was resolved against Google Books.
+  //   "barcode_unverified" — the ISBN came from a local barcode decode whose
+  //                          EAN-13 check digit passed, and NO external source
+  //                          has confirmed it yet (Moderation's fast path).
+  //
+  // "barcode_unverified" is what makes "never externally verified" auditable
+  // rather than inferred from a placeholder `title LIKE 'ISBN %'`, which
+  // vanishes the moment async enrichment succeeds.
+  //
+  // Persisted as a plain string (NOT a proto enum) because the DB values are
+  // the lowercase domain names above, not `VERIFICATION_SOURCE_*` wire names;
+  // the closed set is enforced by an op.book_editions CHECK constraint, the
+  // changeset's validate_inclusion, and a dbt accepted_values test.
+  string verification_source = 16 [json_name = "verification_source"];
 }

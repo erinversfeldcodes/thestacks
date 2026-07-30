@@ -392,20 +392,22 @@ defmodule Stacks.ReleaseTest do
   end
 
   describe "gdpr_lookup_user/1 (email/handle → user_id, read-only)" do
-    test "finds every user matching an email case-insensitively" do
-      u1 = insert(:user, email: "dup@stacks.test", handle: "dup_one")
-      # A second row with the SAME email but different case — the exact-match
-      # get_user_by_email would miss it; the lookup must surface both.
-      u2 = insert(:user, email: "DUP@stacks.test", handle: "dup_two")
+    # This used to seed two rows sharing an address in different cases and
+    # assert the operator lookup surfaced BOTH. `users_lower_email_index`
+    # (#335 D4) makes that pair unreachable — the database now rejects the
+    # second row, which `Stacks.SchemaConstraintsTest` proves directly. The
+    # property the break-glass runbook actually depends on survives: whatever
+    # casing the operator pastes resolves to the account they mean.
+    test "finds a user however the operator cased the email" do
+      user = insert(:user, email: "dup@stacks.test", handle: "dup_one")
 
       out =
         capture_io(fn ->
-          assert :ok = Release.gdpr_lookup_user(encode(%{query: "dup@stacks.test"}))
+          assert :ok = Release.gdpr_lookup_user(encode(%{query: "DUP@Stacks.Test"}))
         end)
 
-      assert out =~ "user_id=#{u1.id}"
-      assert out =~ "user_id=#{u2.id}"
-      assert out =~ "GDPR_LOOKUP_COUNT 2"
+      assert out =~ "user_id=#{user.id}"
+      assert out =~ "GDPR_LOOKUP_COUNT 1"
     end
 
     test "finds a user by unique handle" do

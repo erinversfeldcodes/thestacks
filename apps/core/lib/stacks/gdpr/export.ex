@@ -29,7 +29,7 @@ defmodule Stacks.GDPR.Export do
     placements =
       Placement
       |> where([p], p.bookshelf_id in ^bookshelf_ids)
-      |> preload(book: :editions)
+      |> preload([:book_edition, book: :editions])
       |> Repo.all()
 
     histories =
@@ -125,9 +125,7 @@ defmodule Stacks.GDPR.Export do
   defp placement_to_map(placement) do
     %{
       id: placement.id,
-      book_isbn:
-        placement.book &&
-          (Stacks.Books.primary_edition(placement.book) || %{isbn: nil}).isbn,
+      book_isbn: placement_isbn(placement),
       book_title: placement.book && placement.book.title,
       bookshelf_id: placement.bookshelf_id,
       position: placement.position,
@@ -138,6 +136,26 @@ defmodule Stacks.GDPR.Export do
       notes: placement.notes
     }
   end
+
+  # Which ISBN this placement is OF. Since #335 D2 a placement names its own
+  # edition, so the export reports the copy the person actually shelved rather
+  # than whichever edition the work currently displays as primary — a work can
+  # gain a new primary edition long after they shelved theirs, and an export
+  # that silently re-pointed at it would be reporting someone else's book.
+  # Falls back to the work's primary for placements made before the column
+  # existed and for a work with no edition at all.
+  defp placement_isbn(%{book_edition: %{isbn: isbn}}) when is_binary(isbn), do: isbn
+
+  defp placement_isbn(%{book: nil}), do: nil
+
+  defp placement_isbn(%{book: book}) do
+    case Stacks.Books.primary_edition(book) do
+      nil -> nil
+      edition -> edition.isbn
+    end
+  end
+
+  defp placement_isbn(_placement), do: nil
 
   defp history_to_map(history) do
     %{

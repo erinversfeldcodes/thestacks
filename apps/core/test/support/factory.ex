@@ -6,6 +6,8 @@ defmodule Stacks.Factory do
 
   use ExMachina.Ecto, repo: Core.Repo
 
+  import Ecto.Query, only: [from: 2]
+
   alias Stacks.Accounts
   alias Stacks.Accounts.User
   alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
@@ -150,12 +152,19 @@ defmodule Stacks.Factory do
   # primary. Pass `book:` an existing work to hang a second edition off it.
   def book_edition_factory do
     %BookEdition{
+      # Generated here, like the work's own id, so a placement can point at this
+      # edition before either row is inserted (see `placement_factory/1`).
+      id: Ecto.UUID.generate(),
       isbn: next_isbn(),
       format_label: "Hardcover",
       page_count: 300,
       publisher: "Test Publisher",
       publication_year: 2020,
       is_primary: false,
+      # `merge_edition/2` is the only production path to a second edition and it
+      # only runs after `ISBNResolver.resolve/1` returned, so a non-primary
+      # edition production can reach always has an external source.
+      verification_source: "open_library",
       book: build(:book)
     }
   end
@@ -174,12 +183,19 @@ defmodule Stacks.Factory do
   """
   def primary_book_edition_factory do
     %BookEdition{
+      id: Ecto.UUID.generate(),
       isbn: next_isbn(),
       format_label: "Paperback",
       page_count: 300,
       publisher: "Test Publisher",
       publication_year: 2020,
       is_primary: true,
+      # `op.book_editions.verification_source` is NOT NULL with a CHECK on the
+      # value (#335 D1), so a factory that omitted it would build a row no
+      # database accepts. `open_library` is the ordinary path: the moderation
+      # fast path's `barcode_unverified` is the exception, and a test about it
+      # should say so explicitly.
+      verification_source: "open_library",
       book: nil
     }
   end
@@ -260,6 +276,7 @@ defmodule Stacks.Factory do
   def placement_factory(attrs) do
     {bookshelf, attrs} = Map.pop_lazy(attrs, :bookshelf, fn -> build(:bookshelf) end)
     {shelf, attrs} = Map.pop_lazy(attrs, :shelf, fn -> default_shelf_for(bookshelf) end)
+    {book, attrs} = Map.pop_lazy(attrs, :book, fn -> build(:book) end)
 
     %Placement{
       position: 1,
@@ -270,13 +287,44 @@ defmodule Stacks.Factory do
       current_page: nil,
       started_at: nil,
       finished_at: nil,
-      book: build(:book),
+      book: book,
+      # `Shelving.place_book/3` points every new placement at the work's primary
+      # edition (#335 D2), so a factory placement that left this nil would build
+      # a shape production stopped emitting. Derived from the work the caller
+      # actually gave us — never guessed — and nil for an `:editionless_book`,
+      # which is the one case production also leaves nil.
+      book_edition_id: primary_edition_id_of(book),
       bookshelf_id: bookshelf.id,
       bookshelf: Ecto.put_meta(bookshelf, state: :loaded),
       shelf: shelf
     }
     |> merge_attributes(attrs)
   end
+
+  # The edition `Shelving.primary_edition_id/1` would resolve for this work.
+  # Reads the built `editions` list when it is loaded (the common case: the
+  # `:book` factory brings its primary edition with it) and falls back to the
+  # database for an already-persisted work whose association was not preloaded.
+  defp primary_edition_id_of(%Book{editions: editions}) when is_list(editions) do
+    editions
+    |> Enum.sort_by(&{not &1.is_primary, &1.id})
+    |> case do
+      [] -> nil
+      [edition | _] -> edition.id
+    end
+  end
+
+  defp primary_edition_id_of(%Book{id: book_id}) when is_binary(book_id) do
+    Core.Repo.one(
+      from e in BookEdition,
+        where: e.book_id == type(^book_id, Ecto.UUID),
+        order_by: [desc: e.is_primary, asc: e.created_at, asc: e.id],
+        limit: 1,
+        select: e.id
+    )
+  end
+
+  defp primary_edition_id_of(_book), do: nil
 
   # Mirrors `get_or_create_default_shelf/1` (shelving.ex:1105), which every
   # production placement path goes through. A bookshelf has ONE shelf at

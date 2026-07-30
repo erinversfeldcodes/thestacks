@@ -12,6 +12,13 @@ defmodule Stacks.GDPR.Deletion do
   legacy rows written before Issue #121 — but it runs unconditionally as a
   safety net. `op.event_log` has no append-only trigger (unlike
   `audit.audit_log`), so the scrub is a plain UPDATE needing no GUC.
+
+  Auth session state (`op.auth_token_families`, `op.guardian_tokens`) is erased
+  by the DATABASE, not by this module: both now carry an ON DELETE CASCADE
+  foreign key to `op.users` (Issue #335 D3, migration `20260730200200`), so
+  `repo.delete(user)` takes them — from any path that deletes a user, not just
+  this one. `:revoke_sessions` no longer deletes anything; it asserts the
+  cascade fired and fails the erasure if it did not.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -62,16 +69,35 @@ defmodule Stacks.GDPR.Deletion do
            feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
            comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
            event_log_rows_scrubbed: count(user_event_log_query(user_id)),
-           sessions_revoked:
-             count(from f in AuthTokenFamily, where: f.user_id == ^user_id) +
-               count(
-                 from t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)
-               )
+           sessions_revoked: session_row_count(Repo, user_id)
          }}
     end
   end
 
   defp count(query), do: Repo.aggregate(query, :count)
+
+  # Live auth-session rows keyed to a user, across both session tables. Shared
+  # by preview_user_data/1 and the two delete_user_data/2 steps that bracket the
+  # user delete, so the preview, the reported count and the post-erasure
+  # assertion can never drift from one another.
+  #
+  # `guardian_tokens` is queried on `sub` (the string the app writes) rather
+  # than the generated `user_id` column the FK hangs off: the two are equal by
+  # construction, and reading `sub` keeps this count honest even for a row whose
+  # `sub` is not a UUID — such a row names no user and must therefore never be
+  # counted as one of theirs.
+  defp session_row_count(repo, user_id) do
+    families = repo.aggregate(from(f in AuthTokenFamily, where: f.user_id == ^user_id), :count)
+
+    tokens =
+      repo.aggregate(
+        from(t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)),
+        :count,
+        :jti
+      )
+
+    families + tokens
+  end
 
   # The set of op.event_log rows the erasure scrubs — the user's own aggregate
   # plus events under other aggregates whose payload references the user. Shared
@@ -163,6 +189,12 @@ defmodule Stacks.GDPR.Deletion do
 
       {:ok, count}
     end)
+    |> Multi.run(:sessions_to_revoke, fn repo, _ ->
+      # Counted BEFORE the user row goes, because the FKs added in
+      # `20260730200200` take these rows with it. The number is what the
+      # operator break-glass summary reports (`Stacks.Release.do_erase/2`).
+      {:ok, session_row_count(repo, user_id)}
+    end)
     |> Multi.run(:delete_user, fn repo, _ ->
       case repo.get(User, user_id) do
         nil -> {:error, :user_not_found}
@@ -195,32 +227,27 @@ defmodule Stacks.GDPR.Deletion do
 
       {:ok, count}
     end)
-    |> Multi.run(:revoke_sessions, fn repo, _ ->
-      # Kill every live auth session belonging to the erased user. Neither
-      # op.auth_token_families (no FK on user_id) nor op.guardian_tokens
-      # (schemaless; `sub` is a plain string, not an FK) cascades from the
-      # user delete, so without this step a hard-deleted user's access token
-      # keeps passing verify_claims for up to its 8h TTL and their session
-      # rows linger indefinitely.
+    |> Multi.run(:revoke_sessions, fn repo, %{sessions_to_revoke: expected} ->
+      # Both session tables now carry an ON DELETE CASCADE foreign key to
+      # op.users — `auth_token_families.user_id` directly, `guardian_tokens`
+      # via the generated `user_id` column derived from `sub` (Issue #335 D3,
+      # migration `20260730200200`). `:delete_user` above therefore already
+      # removed every row this step used to `delete_all` by hand, from ANY
+      # path that deletes a user, not just this one.
       #
-      # We DELETE the rows rather than mark `revoked_at`: this is an ERASURE,
-      # so the goal is full removal of the user's identifiers. Marking revoked
-      # would leave rows still keyed to the deleted user's UUID forever, which
-      # contradicts the right-to-erasure intent; deletion also achieves the
-      # same security outcome (the family vanishes ⇒ verify_claims fails
-      # closed, and the guardian_tokens row is gone ⇒ the JWT is unverifiable).
-      #
-      # Both deletes run on the Multi's `repo`, so they commit/rollback
-      # atomically with the rest of the erasure.
-      {family_count, _} =
-        repo.delete_all(from f in AuthTokenFamily, where: f.user_id == ^user_id)
-
-      {token_count, _} =
-        repo.delete_all(
-          from t in "guardian_tokens", prefix: "op", where: t.sub == ^to_string(user_id)
-        )
-
-      {:ok, family_count + token_count}
+      # What remains is the assertion. A cascade that silently stops firing —
+      # a constraint dropped in a later migration, a table recreated without
+      # it — would leave a hard-deleted user's access token passing
+      # verify_claims for up to its 8h TTL, which is exactly the failure the
+      # hand-rolled delete existed to prevent. So we recount and fail the
+      # whole erasure transaction if anything survived, rather than reporting
+      # success over a leak. The `op.users` schema-guard test in
+      # `deletion_test.exs` keeps both FKs CASCADE at build time; this is the
+      # runtime half of the same guarantee.
+      case session_row_count(repo, user_id) do
+        0 -> {:ok, expected}
+        survivors -> {:error, {:sessions_survived_erasure, survivors}}
+      end
     end)
     |> Multi.run(:audit, fn _repo, _ ->
       Audit.log(nil, "user.data_deleted",

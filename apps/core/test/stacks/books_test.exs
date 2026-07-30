@@ -28,6 +28,56 @@ defmodule Stacks.BooksTest do
       assert %{isbn: [_]} = errors_on(changeset)
     end
 
+    # #335 D1. `ISBNResolver.resolve/1` races Open Library and Google Books and
+    # returns whichever answered, identified only by which cross-reference id
+    # the metadata carries — so that id IS the provenance signal, and these
+    # tests pin the mapping rather than the derivation's implementation.
+    test "records open_library when the resolver returned an Open Library id" do
+      attrs = %{
+        "isbn" => "9780743273565",
+        "title" => "From Open Library",
+        "open_library_id" => "OL123M"
+      }
+
+      assert {:ok, book} = Books.create(attrs)
+      assert hd(book.editions).verification_source == "open_library"
+    end
+
+    test "records google_books when only a Google Books id came back" do
+      attrs = %{
+        "isbn" => "9780451524935",
+        "title" => "From Google Books",
+        "google_books_id" => "gb-abc"
+      }
+
+      assert {:ok, book} = Books.create(attrs)
+      assert hd(book.editions).verification_source == "google_books"
+    end
+
+    test "records barcode_unverified when nothing external identified the ISBN" do
+      attrs = %{"isbn" => "9780140449136", "title" => "Nobody Confirmed This"}
+
+      assert {:ok, book} = Books.create(attrs)
+
+      assert hd(book.editions).verification_source == "barcode_unverified",
+             "absent an external identifier the honest answer is 'not externally verified' — " <>
+               "understating verification is recoverable, overstating it is not"
+    end
+
+    test "an explicit provenance from the caller wins over the derivation" do
+      # Moderation's barcode fast path knows something the attrs cannot show:
+      # it deliberately skipped the OL/GB round-trip.
+      attrs = %{
+        "isbn" => "9780061120084",
+        "title" => "ISBN 9780061120084",
+        "open_library_id" => "OL999M",
+        "verification_source" => "barcode_unverified"
+      }
+
+      assert {:ok, book} = Books.create(attrs)
+      assert hd(book.editions).verification_source == "barcode_unverified"
+    end
+
     test "returns error on duplicate isbn" do
       book = insert(:book)
       insert(:book_edition, book: book, isbn: "9780743273565")
@@ -139,7 +189,7 @@ defmodule Stacks.BooksTest do
     test "returns the primary edition" do
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780000000002")])
       primary = hd(book.editions)
-      insert(:book_edition, book: book, is_primary: false, isbn: "9780000000001")
+      insert(:book_edition, book: book, is_primary: false, isbn: "9781600000010")
       book = Books.get_book_detail(book.id)
       assert Books.primary_edition(book).id == primary.id
     end
@@ -164,7 +214,7 @@ defmodule Stacks.BooksTest do
         insert(:book_edition,
           book: book,
           is_primary: false,
-          isbn: "9780000000010",
+          isbn: "9781600000027",
           created_at: ~U[2024-01-01 00:00:00.000000Z]
         )
 
@@ -172,7 +222,7 @@ defmodule Stacks.BooksTest do
         insert(:book_edition,
           book: book,
           is_primary: false,
-          isbn: "9780000000011",
+          isbn: "9781600000034",
           created_at: ~U[2024-06-01 00:00:00.000000Z]
         )
 
@@ -190,7 +240,7 @@ defmodule Stacks.BooksTest do
         insert(:book_edition,
           book: book,
           is_primary: false,
-          isbn: "9780000000012",
+          isbn: "9781600000041",
           created_at: ~U[2024-01-01 00:00:00.000000Z]
         )
 
@@ -198,7 +248,7 @@ defmodule Stacks.BooksTest do
         insert(:book_edition,
           book: book,
           is_primary: false,
-          isbn: "9780000000013",
+          isbn: "9781600000058",
           created_at: ~U[2024-06-01 00:00:00.000000Z]
         )
 
@@ -214,7 +264,7 @@ defmodule Stacks.BooksTest do
         insert(:book_edition,
           book: book,
           is_primary: false,
-          isbn: "9780000000014",
+          isbn: "9781600000065",
           created_at: ~U[2020-01-01 00:00:00.000000Z]
         )
 
@@ -222,7 +272,7 @@ defmodule Stacks.BooksTest do
         insert(:book_edition,
           book: book,
           is_primary: true,
-          isbn: "9780000000015",
+          isbn: "9781600000072",
           created_at: ~U[2024-01-01 00:00:00.000000Z]
         )
 
