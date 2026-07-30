@@ -48,6 +48,17 @@ TARGETS: list[dict] = [
         "language": "elixir",
         "output": REPO_ROOT / "apps/core/lib/stacks/gen/proto/scraper.ex",
     },
+    # Every enum in every proto file, not just the two inter-service ones: an
+    # enum's Elixir consumers are what the coverage check needs a closed value
+    # list for, and those live all over apps/core. "generator" overrides the
+    # language dispatch; "language" stays "elixir" so scripts/gen-elixir-proto.sh
+    # and --language elixir still pick this target up.
+    {
+        "proto_file": "<all>",
+        "language": "elixir",
+        "generator": "elixir_enums",
+        "output": REPO_ROOT / "apps/core/lib/stacks/gen/proto/enums.ex",
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -378,7 +389,7 @@ def _render_py_semantic_validators(msg_name: str) -> list[str]:
         lines += [
             "",
             '    @model_validator(mode="after")',
-            f'    def {excl["method"]}(self) -> {msg_name}:',
+            f"    def {excl['method']}(self) -> {msg_name}:",
             f"        if {excl['check']}:",
             f'            raise ValueError("{excl["error"]}")',
             "        return self",
@@ -672,6 +683,195 @@ def generate_elixir_module(descriptor: dict, proto_file: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Elixir enum generation
+#
+# Proto enums used to reach Elixir as a bare `String.t()`, so every consumer
+# matched on string literals behind a mandatory catch-all and a missed clause was
+# invisible to the compiler, to `mix proto.sync --check`, and to the suite. That
+# is how SCRAPE_OUTCOME_RATE_LIMITED reached proto + Rust + two Elixir files,
+# missed a third, and left `price_snapshots` empty for three campaigns with every
+# gate green. These modules give each enum a closed Elixir representation, and
+# `scripts/check-enum-coverage.py` uses the same value list to fail the build when
+# a consumer stops handling one.
+# ---------------------------------------------------------------------------
+
+# mix format's default line width. Generated output must already be formatted,
+# because apps/core/.formatter.exs globs lib/**/*.ex — including this target.
+EX_LINE_LENGTH = 98
+
+
+def _pascal_to_screaming_snake(name: str) -> str:
+    """ISBNFormat -> ISBN_FORMAT, VisibilityTier -> VISIBILITY_TIER.
+
+    Mirrors the Elm generator's helper of the same name so both languages derive
+    the identical short form from a proto enum value.
+    """
+    result: list[str] = []
+    current: list[str] = []
+    for i, ch in enumerate(name):
+        if (
+            ch.isupper()
+            and current
+            and (
+                name[i - 1].islower()
+                or (i + 1 < len(name) and name[i + 1].islower() and name[i - 1].isupper())
+            )
+        ):
+            result.append("".join(current))
+            current = [ch]
+        else:
+            current.append(ch)
+    if current:
+        result.append("".join(current))
+    return "_".join(part.upper() for part in result)
+
+
+def enum_value_to_atom(enum_name: str, value_name: str) -> str:
+    """SCRAPE_OUTCOME_PRICED (of ScrapeOutcome) -> "priced".
+
+    Strips the SCREAMING_SNAKE form of the enum's own name, matching the wire
+    short form the Elm generator produces (`_enum_value_lowercase_form`), so the
+    two languages name the same enum value the same way.
+    """
+    prefix = _pascal_to_screaming_snake(enum_name)
+    if value_name.startswith(prefix + "_") and len(value_name) > len(prefix) + 1:
+        return value_name[len(prefix) + 1 :].lower()
+    return value_name.lower()
+
+
+def _ex_attr_list(name: str, items: list[str]) -> list[str]:
+    """Render `  @name [...]` the way mix format would: inline if it fits, else one per line."""
+    inline = f"  @{name} [{', '.join(items)}]"
+    if len(inline) <= EX_LINE_LENGTH:
+        return [inline]
+    lines = [f"  @{name} ["]
+    for i, item in enumerate(items):
+        comma = "," if i < len(items) - 1 else ""
+        lines.append(f"    {item}{comma}")
+    lines.append("  ]")
+    return lines
+
+
+def _ex_type_union(members: list[str]) -> list[str]:
+    """Render `  @type t() :: a | b` the way mix format would.
+
+    When the union does not fit on one line the formatter breaks after `::` and
+    indents the members by 10 spaces, leading each continuation with `| `.
+    """
+    inline = f"  @type t() :: {' | '.join(members)}"
+    if len(inline) <= EX_LINE_LENGTH:
+        return [inline]
+    lines = ["  @type t() ::"]
+    indent = " " * 10
+    lines.append(f"{indent}{members[0]}")
+    for member in members[1:]:
+        lines.append(f"{indent}| {member}")
+    return lines
+
+
+def _collect_all_enums(descriptor: dict) -> list[dict]:
+    """Every enum in every proto file, top-level and nested, with its source metadata."""
+
+    def walk(container: dict, proto_file: str, package: str) -> list[dict]:
+        found = []
+        for enum in container.get("enumType", []):
+            found.append({"enum": enum, "proto_file": proto_file, "package": package})
+        for msg in container.get("nestedType", []) + container.get("messageType", []):
+            found.extend(walk(msg, proto_file, package))
+        return found
+
+    enums: list[dict] = []
+    for f in descriptor.get("file", []):
+        name = f["name"]
+        # Well-known types are dependencies, not our schema.
+        if name.startswith("google/"):
+            continue
+        enums.extend(walk(f, name, f.get("package", "")))
+    return enums
+
+
+def generate_elixir_enums_module(descriptor: dict, _proto_file: str) -> str:
+    """One Elixir module per proto enum, for every enum in every proto file."""
+    entries = _collect_all_enums(descriptor)
+
+    by_name: dict[str, dict] = {}
+    for entry in entries:
+        enum_name = entry["enum"]["name"]
+        if enum_name in by_name:
+            # A collision would make `Stacks.Proto.Enums.X` ambiguous. Fail the
+            # codegen rather than silently generating one of the two.
+            print(
+                f"ERROR: duplicate proto enum name '{enum_name}' in "
+                f"{by_name[enum_name]['proto_file']} and {entry['proto_file']} — "
+                "Stacks.Proto.Enums.* requires globally unique enum names",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        by_name[enum_name] = entry
+
+    lines = [
+        "# Generated by scripts/gen_python_proto.py — DO NOT EDIT MANUALLY.",
+        "# Source: every enum declared under proto/",
+        "# Regenerate: scripts/gen-elixir-proto.sh",
+        "#",
+        "# One module per proto enum. `values/0` is the closed set of wire values;",
+        "# `scripts/check-enum-coverage.py` asserts that every Elixir consumer matching",
+        "# on these strings handles all of them, or declares the omission in-source.",
+        "",
+    ]
+
+    for i, enum_name in enumerate(sorted(by_name)):
+        entry = by_name[enum_name]
+        enum = entry["enum"]
+        fqn = f"{entry['package']}.{enum_name}" if entry["package"] else enum_name
+        module_name = f"Stacks.Proto.Enums.{enum_name}"
+
+        wire_values = [v["name"] for v in enum.get("value", [])]
+        atoms = [enum_value_to_atom(enum_name, name) for name in wire_values]
+
+        lines.append(f"defmodule {module_name} do")
+        lines.append('  @moduledoc """')
+        lines.append(f"  Closed enum contract for `{fqn}`.")
+        lines.append("")
+        lines.append(f"  Generated from {entry['proto_file']}. Do not edit.")
+        lines.append('  """')
+        lines.append("")
+        lines.extend(_ex_type_union([f":{a}" for a in atoms]))
+        lines.append("")
+        lines.extend(_ex_attr_list("values", [f'"{v}"' for v in wire_values]))
+        lines.append("")
+        lines.extend(_ex_attr_list("atoms", [f":{a}" for a in atoms]))
+        lines.append("")
+        lines.append('  @doc "Every wire value of this enum, in proto declaration order."')
+        lines.append("  @spec values() :: [String.t()]")
+        lines.append("  def values, do: @values")
+        lines.append("")
+        lines.append('  @doc "Every value of this enum as an atom, in proto declaration order."')
+        lines.append("  @spec atoms() :: [t()]")
+        lines.append("  def atoms, do: @atoms")
+        lines.append("")
+        lines.append('  @doc """')
+        lines.append("  Casts a wire value to its atom, or `:error` if it is not a value of")
+        lines.append("  this enum. An unknown string is a contract violation, not a default.")
+        lines.append('  """')
+        lines.append("  @spec cast(term()) :: {:ok, t()} | :error")
+        for wire, atom in zip(wire_values, atoms, strict=True):
+            lines.append(f'  def cast("{wire}"), do: {{:ok, :{atom}}}')
+        lines.append("  def cast(_other), do: :error")
+        lines.append("")
+        lines.append('  @doc "Renders an atom back to the wire value proto declares."')
+        lines.append("  @spec to_wire(t()) :: String.t()")
+        for wire, atom in zip(wire_values, atoms, strict=True):
+            lines.append(f'  def to_wire(:{atom}), do: "{wire}"')
+        lines.append("end")
+        if i < len(by_name) - 1:
+            lines.append("")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -679,6 +879,7 @@ GENERATORS = {
     "python": generate_python_module,
     "rust": generate_rust_module,
     "elixir": generate_elixir_module,
+    "elixir_enums": generate_elixir_enums_module,
 }
 
 
@@ -710,7 +911,7 @@ def main() -> None:
         proto_file: str = target["proto_file"]
         output: Path = target["output"]
         language: str = target["language"]
-        generate = GENERATORS[language]
+        generate = GENERATORS[target.get("generator", language)]
 
         generated = generate(descriptor, proto_file)
 

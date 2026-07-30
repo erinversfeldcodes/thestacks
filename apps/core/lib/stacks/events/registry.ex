@@ -1,18 +1,37 @@
 defmodule Stacks.Events.Registry do
   @moduledoc """
-  Central compile-time registry mapping event types to handler modules.
+  Central compile-time catalog of event types, and the handlers subscribed to them.
 
-  Each entry maps an event type string to a list of modules that implement
-  `Stacks.Events.Handler`. The registry is a plain module attribute — no
-  GenServer or runtime state is needed.
+  Two lists, deliberately kept apart:
+
+    * `@registry` — the dispatch table. Event type to the modules implementing
+      `Stacks.Events.Handler` that should run when it is emitted.
+    * `@unsubscribed` — event types the system emits that nothing listens to. They
+      are real events with real rows in `event_log`; they simply have no subscriber
+      today.
+
+  `all_event_types/0` returns both, because replay and diagnostics need the whole
+  vocabulary the system can emit — not just the observed part of it. `handlers_for/1`
+  reads only `@registry`.
+
+  Splitting them is a correction. This moduledoc used to claim `@registry` was "the
+  complete catalog … surfaced by `all_event_types/0` for replay/diagnostics" while
+  listing 22 of the 54 types actually emitted, so `all_event_types/0` silently
+  omitted three fifths of the vocabulary. The alternative — registering every event
+  with `[]` — makes the dispatch table lie in the other direction, reading as though
+  32 subscriptions exist. Kept apart, `@unsubscribed` is also useful in its own
+  right: it is the standing inventory of what this system announces and nobody acts
+  on, which is where the next handler is likely needed.
 
   ## Adding a new subscription
 
-  Add an entry to the `@registry` map below:
+  Add an entry to `@registry`:
 
       "book.created" => [MyApp.SomeHandler]
 
-  The handler module must implement `Stacks.Events.Handler`.
+  The handler module must implement `Stacks.Events.Handler`. If you are adding a new
+  event type with no handler, add it to `@unsubscribed` instead — the completeness
+  test in `registry_completeness_test.exs` fails until it is in one list or the other.
   """
 
   @registry %{
@@ -60,30 +79,15 @@ defmodule Stacks.Events.Registry do
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
     ],
-    # placement.reread (US-1.6.3): emitted by Shelving.reread_book/2. Registered
-    # with an EMPTY handler set — matching the reading-lifecycle events below and
-    # PRESERVING this event's pre-existing no-handler behaviour (it was never
-    # wired to PlacementHandler/DbtRefreshHandler). stg_bookshelf_placements is a
-    # dbt view (the fresh library placement a re-read creates is reflected live),
-    # and no mart consumes re-read counts today, so no handler is warranted.
-    # Registering with `[]` keeps it in the all_event_types/0 catalog for
-    # replay/diagnostics without inventing a phantom handler. Surfacing re-reads
-    # in the activity feed would be a deliberate future change, tracked separately.
-    "placement.reread" => [],
-    # Reading-lifecycle events (US-1.6.6), emitted by
-    # Shelving.update_reading_progress/3. Registered with an EMPTY handler set
-    # deliberately: `stg_bookshelf_placements` is a dbt `view` (it always
-    # reflects the live reading_status/current_page — nothing to refresh), and
-    # no mart consumes reading progress today, so a DbtRefreshHandler would map
-    # to no models and enqueue a no-op job. Registering with `[]` keeps the
-    # registry the complete catalog of emitted event types (surfaced by
-    # `all_event_types/0` for replay/diagnostics) without inventing a phantom
-    # handler. Add a handler here if/when a reading-analytics mart lands.
-    "placement.reading_started" => [],
-    "placement.reading_completed" => [],
     "enrichment.prices_scraped" => [
       Stacks.Workers.DbtRefreshHandler
     ],
+    # NOTE: nothing emits "enrichment.reviews_scraped". It has a handler here, a
+    # model mapping in DbtRefreshHandler, and a payload contract — and no emitter
+    # anywhere in apps/core. The subscription is left in place (it is correct for
+    # the event it describes, and removing it would lose the wiring) but it is dead
+    # until a review scraper emits. Kept out of @unsubscribed, which is for types
+    # that ARE emitted; this is the opposite drift and is tracked separately.
     "enrichment.reviews_scraped" => [
       Stacks.Workers.DbtRefreshHandler
     ],
@@ -107,6 +111,126 @@ defmodule Stacks.Events.Registry do
     ]
   }
 
+  # Event types that are emitted and have no subscriber.
+  #
+  # Grouped by why. "No handler" is a conclusion here, not an oversight: for most of
+  # these the durable `event_log` row IS the point — an audit trail with no side
+  # effect to trigger. Where that is not the reason, the reason is stated.
+  #
+  # A recurring one, so stated once: every dbt staging model in this codebase is
+  # `materialized='view'`, so it always reflects live rows. Wiring DbtRefreshHandler
+  # to an event whose only warehouse consumer is a view enqueues a job that refreshes
+  # nothing. Only the incremental marts (mart_community_read_count) justify a refresh
+  # subscription, which is why placement.created/moved/removed have one and these
+  # do not.
+  @unsubscribed [
+    # ---- Upload / image lifecycle -------------------------------------------
+    # The pipeline's own events, and the cluster most obviously "unobserved". They
+    # stay unsubscribed because the upload pipeline is already observed on two other
+    # channels, and neither is the event bus: `:telemetry` carries the live signal
+    # ([:stacks, :upload, :terminal] in IdentifyBookJob, [:stacks, :moderation,
+    # :tiering] in Books), and SSE PubSub carries progress to the browser. These
+    # events are the durable record of the same transitions — which is exactly what
+    # replay and diagnostics want, and exactly what a telemetry counter cannot give
+    # you after the fact. `stg_uploaded_images` is a view, so there is no refresh to
+    # trigger either. Adding a handler would duplicate telemetry, not extend it.
+    "image.submitted",
+    "image.rejected",
+    "image.resolved",
+    # Emitted by GDPR.ImageRetention's 30-day sweep. Deliberately audit-only: the
+    # evidence that retention ran is the deliverable.
+    "image.expired",
+
+    # ---- Marketplace listing lifecycle --------------------------------------
+    # The sibling asymmetry is intentional. "listing.activated" has a handler
+    # (WishlistAvailabilityHandler) because activation is the transition a user
+    # asked to hear about: a book on their wishlist became available. Sold, removed
+    # and expired are the inverse transition, and there is no notification anyone
+    # opted into that says a book they wanted is gone — WishlistAvailabilityHandler's
+    # 24h dedupe window is built around re-activation, not de-activation. The state
+    # change itself is already applied transactionally alongside the emit
+    # (update_placement_listing_status/4 clears the placement's listing_status in the
+    # same Multi), so nothing downstream is waiting on the event to converge.
+    # "listing.created" announces a listing that is not yet purchasable — activation
+    # is the event with news in it. Both warehouse consumers, stg_listings and
+    # mart_marketplace_activity, are views.
+    "listing.created",
+    "listing.sold",
+    "listing.removed",
+    "listing.expired",
+
+    # ---- Placement reading lifecycle ----------------------------------------
+    # US-1.6.3 / US-1.6.6. Previously registered as `"x" => []`, which is the same
+    # thing said less clearly. stg_bookshelf_placements is a view (reading_status and
+    # current_page are always live) and no mart consumes reading progress, so a
+    # refresh handler would map to no models. Surfacing re-reads in the activity feed
+    # would be a deliberate product change, not a missing wire.
+    "placement.reread",
+    "placement.reading_started",
+    "placement.reading_completed",
+
+    # ---- Books ---------------------------------------------------------------
+    # Confirmation and edition merges already write their result through Books
+    # before emitting; the event records that it happened.
+    "books.confirmed",
+    "books.edition_merged",
+
+    # ---- Blog authoring and associations -------------------------------------
+    # Only blog.post_published/updated/deleted change what the warehouse and caches
+    # show, and those three are subscribed above. Creating a draft, confirming or
+    # dismissing a suggested book association, and commenting are author-side
+    # actions whose effect is already persisted.
+    "blog.post_created",
+    "blog.association_confirmed",
+    "blog.association_dismissed",
+    "post.comment_created",
+
+    # ---- Social and groups ---------------------------------------------------
+    # Only group.invitation_sent needs a side effect (an email), and it has one.
+    # Membership changes and blocks are authorisation state, read live from op
+    # tables on every request — a handler would have nothing to do.
+    "group.created",
+    "group.member_joined",
+    "group.member_left",
+    "group.member_removed",
+    "social.user_blocked",
+    "social.user_unblocked",
+
+    # ---- Account and profile -------------------------------------------------
+    # Audit-only by design, and the GDPR-sensitive end of the catalog: these record
+    # that a user changed something about themselves. user.registered (confirmation
+    # email) and user.location_updated (discovery re-index) are the two with real
+    # side effects, and both are subscribed above.
+    "user.profile_updated",
+    "user.profile_visibility_changed",
+    "user.password_changed",
+    "user.notifications_updated",
+    "user.visibility_recap_completed",
+
+    # ---- Partner ingest ------------------------------------------------------
+    # Partner pushes are one-directional and land synchronously; the event is the
+    # receipt.
+    "partner.inventory_synced",
+    "partner.event_created",
+    "partner.event_deleted",
+
+    # ---- Discovery and platform operations -----------------------------------
+    # Job-completion records. enrichment.events_discovered has a refresh handler
+    # because int_event_matches consumes it; these have no equivalent consumer.
+    "enrichment.sources_discovered",
+    "enrichment.author_sources_discovered",
+    "third_space.created",
+    "third_space.delisted",
+    "costs.refreshed"
+  ]
+
+  # An event type in both lists would make all_event_types/0 return duplicates and
+  # leave it ambiguous which list is authoritative. Fail the compile instead.
+  @overlap Enum.filter(@unsubscribed, &Map.has_key?(@registry, &1))
+  if @overlap != [] do
+    raise CompileError, description: "event type in @registry and @unsubscribed: #{@overlap}"
+  end
+
   @doc """
   Returns the list of handler modules registered for the given event type.
 
@@ -123,12 +247,21 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-  Returns all registered event type strings.
+  Returns every event type the system can emit, sorted — subscribed or not.
 
-  Useful for documentation, replay tooling, and diagnostics.
+  This is the vocabulary for replay tooling and diagnostics, so it deliberately
+  includes types with no handler. Use `handlers_for/1` to ask what will actually run.
   """
   @spec all_event_types() :: [String.t()]
   def all_event_types do
-    Map.keys(@registry)
+    Enum.sort(Map.keys(@registry) ++ @unsubscribed)
   end
+
+  @doc """
+  Returns the event types that are emitted but have no subscriber.
+
+  The standing inventory of what this system announces and nothing acts on.
+  """
+  @spec unsubscribed_event_types() :: [String.t()]
+  def unsubscribed_event_types, do: @unsubscribed
 end
