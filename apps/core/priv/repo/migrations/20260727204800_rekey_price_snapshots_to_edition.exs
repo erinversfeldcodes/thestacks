@@ -51,19 +51,12 @@ defmodule Core.Repo.Migrations.RekeyPriceSnapshotsToEdition do
              from: :binary_id
     end
 
-    create index(:price_snapshots, [:book_edition_id], prefix: "op")
-
-    # The uniqueness grain moves with the key. Dropping the old index is what
-    # allows two editions of one work to hold separate prices at the same store.
-    drop unique_index(:price_snapshots, [:book_id, :store_id], prefix: "op")
-    create unique_index(:price_snapshots, [:book_edition_id, :store_id], prefix: "op")
+    # Index swap moved to 20260730090000_rekey_price_snapshots_indexes.exs:
+    # squawk requires CONCURRENTLY, which needs @disable_ddl_transaction —
+    # incompatible with this migration's guard + FK modify (#311 finalization).
   end
 
   def down do
-    drop unique_index(:price_snapshots, [:book_edition_id, :store_id], prefix: "op")
-    create unique_index(:price_snapshots, [:book_id, :store_id], prefix: "op")
-    drop index(:price_snapshots, [:book_edition_id], prefix: "op")
-
     alter table(:price_snapshots, prefix: "op") do
       modify :book_edition_id, :binary_id,
         from: references(:book_editions, type: :binary_id, prefix: "op")
