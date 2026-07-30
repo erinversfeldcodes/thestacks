@@ -85,6 +85,14 @@ type alias Model =
     -- ISBN lookup state
     , isbnLookupState : RemoteData Http.Error ()
 
+    -- Bookshelves the looked-up book is ALREADY on for this reader (#333).
+    -- The photo path has had duplicate awareness since the SSE payload's
+    -- `is_duplicate`; typing the ISBN by hand told the reader nothing, so they
+    -- placed a second copy without knowing. Purely informational — it is
+    -- rendered as a notice and never gates the confirm or the placement, since
+    -- a book on several bookshelves is a legal state the reader may well want.
+    , existingShelves : List String
+
     -- Merge format flow
     , mergeFormatState : RemoteData Http.Error MergeFormatResponse
     , mergeIsbn : String
@@ -161,6 +169,7 @@ init =
     , ageGateError = Nothing
     , ageGatingEnabled = False
     , isbnLookupState = NotAsked
+    , existingShelves = []
     , mergeFormatState = NotAsked
     , mergeIsbn = ""
     , mergeFormatLabel = ""
@@ -470,6 +479,12 @@ update msg model maybeToken =
                         | isbnLookupState = Success ()
                         , result = Identified [ response.book ]
                         , step = Verifying response.book
+
+                        -- Inform, never block (#333): the lookup reports which
+                        -- bookshelves the reader already has this on, and the
+                        -- flow continues to Verifying exactly as before.
+                        , existingShelves =
+                            List.filterMap .bookshelfName response.placements
                       }
                     , Cmd.none
                     , NoOut
@@ -709,7 +724,7 @@ view model maybeToken =
                 Just _ ->
                     case model.step of
                         Verifying book ->
-                            viewVerifying model.ageGatingEnabled book
+                            viewVerifying model.ageGatingEnabled model.existingShelves book
 
                         ChoosingShelf book ->
                             viewChoosingShelf model book
@@ -966,12 +981,54 @@ viewAgeGateNoticeIfNeeded ageGatingEnabled book =
             text ""
 
 
+{-| "You already have this on your Library shelf." — the manual-ISBN duplicate
+notice (#333).
+
+The photo path has told the reader about a duplicate since the SSE payload's
+`is_duplicate`; typing the ISBN by hand told them nothing at all, so a second
+placement happened silently. This informs and then gets out of the way: no
+button is disabled, no step is skipped, and a book on two bookshelves is a
+state the reader is allowed to want. `looking_for_home` is included here (it
+is still "you already have this"), unlike the book-detail multi-shelf notice,
+whose job is tidying up duplicate _collection_ entries.
+
+-}
+viewExistingShelvesNotice : List String -> Html Msg
+viewExistingShelvesNotice shelfNames =
+    case List.map shelfLabel shelfNames of
+        [] ->
+            text ""
+
+        labels ->
+            p
+                [ class "upload-verify__already-yours"
+                , testId "upload-already-yours"
+                ]
+                [ text ("You already have this on your " ++ joinWithAnd labels ++ ".") ]
+
+
+{-| "A", "A and B", "A, B and C".
+-}
+joinWithAnd : List String -> String
+joinWithAnd labels =
+    case List.reverse labels of
+        [] ->
+            ""
+
+        [ only ] ->
+            only
+
+        last :: rest ->
+            String.join ", " (List.reverse rest) ++ " and " ++ last
+
+
 {-| Verification step: "We think this is..." with confirm/reject.
 -}
-viewVerifying : Bool -> Book -> Html Msg
-viewVerifying ageGatingEnabled book =
+viewVerifying : Bool -> List String -> Book -> Html Msg
+viewVerifying ageGatingEnabled existingShelves book =
     div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
+        , viewExistingShelvesNotice existingShelves
         , viewAgeGateNoticeIfNeeded ageGatingEnabled book
         , div [ class "upload-verify__content" ]
             [ div [ class "upload-verify__book-info" ]
@@ -1027,6 +1084,10 @@ viewChoosingShelf model book =
     div [ class "upload-shelf-picker", testId "upload-shelf-picker" ]
         [ h2 [ class "upload-shelf-picker__heading" ]
             [ text ("Add \"" ++ book.title ++ "\" to a shelf") ]
+
+        -- Still informational at the moment of choosing (#333) — every shelf
+        -- stays selectable, including ones the book is already on.
+        , viewExistingShelvesNotice model.existingShelves
         , div [ class "upload-shelf-picker__shelves" ]
             (List.map
                 (\shelf ->

@@ -53,25 +53,21 @@ defmodule StacksWeb.BookController do
     case Books.confirm(user.id, params) do
       {:ok, :created, book} ->
         book = Books.get_book_detail(book.id)
-        placement = Shelving.get_placement_for_book(user.id, book.id)
+        # Decision (#333): the book was created by this very request, so there
+        # is exactly one placement by construction — but asking for "the one"
+        # is the assumption that broke `show`. Ask for the list and serialise
+        # all of it; the 201 then carries the same shape as every other branch.
+        placements = Shelving.get_placements_for_book(user.id, book.id)
 
         conn
         |> put_status(201)
-        |> json(%{book: ProtoJSON.book(book), placement: ProtoJSON.book_placement(placement)})
+        |> json(confirm_payload(book, placements, List.first(placements), nil))
 
-      {:ok, :existing, book, placement} ->
-        json(conn, %{
-          book: ProtoJSON.book(book),
-          placement: ProtoJSON.book_placement(placement),
-          source: "catalogue"
-        })
+      {:ok, :existing, book, placement, placements} ->
+        json(conn, confirm_payload(book, placements, placement, "catalogue"))
 
-      {:ok, :already_placed, book, placement} ->
-        json(conn, %{
-          book: ProtoJSON.book(book),
-          placement: ProtoJSON.book_placement(placement),
-          source: "collection"
-        })
+      {:ok, :already_placed, book, placement, placements} ->
+        json(conn, confirm_payload(book, placements, placement, "collection"))
 
       {:error, {:merge_required, work_id}} ->
         conn
@@ -93,6 +89,19 @@ defmodule StacksWeb.BookController do
         |> put_status(422)
         |> json(%{error: "isbn_not_found"})
     end
+  end
+
+  # `placement` is the one this request produced or matched; `placements` is
+  # every active placement the user now has of this book. When there is more
+  # than one the client informs ("also on your Wish List") — it never blocks.
+  defp confirm_payload(book, placements, placement, source) do
+    payload = %{
+      book: ProtoJSON.book(book),
+      placement: ProtoJSON.book_placement(placement),
+      placements: Enum.map(placements, &ProtoJSON.book_placement/1)
+    }
+
+    if source, do: Map.put(payload, :source, source), else: payload
   end
 
   @doc """
@@ -213,13 +222,14 @@ defmodule StacksWeb.BookController do
         conn |> put_status(404) |> json(%{error: "not_found"})
 
       true ->
-        placement = lookup_placement(conn, id)
+        placements = lookup_placements(conn, id)
         count = Books.community_read_count(book.id)
         my_writing = my_writing_for(conn, id)
 
         json(conn, %{
           book: ProtoJSON.book(book, community_read_count: count),
-          placement: ProtoJSON.book_placement(placement),
+          placement: ProtoJSON.book_placement(List.first(placements)),
+          placements: Enum.map(placements, &ProtoJSON.book_placement/1),
           my_writing:
             Enum.map(my_writing, &%{id: &1.id, title: &1.title, published_at: &1.published_at})
         })
@@ -244,7 +254,16 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  @doc "GET /api/books/isbn/:isbn — retrieve a book by ISBN."
+  @doc """
+  GET /api/books/isbn/:isbn — retrieve a book by ISBN.
+
+  This is the manual-ISBN entry path. It carries the viewer's existing
+  placements (#333) so the client can tell them the book is already in their
+  collection, and on which bookshelves, *before* they place it again. The
+  photo path has had that awareness since the SSE payload's `is_duplicate`;
+  this is its manual-path equivalent. It is purely informational — nothing
+  here refuses the lookup or the placement that follows.
+  """
   def show_by_isbn(conn, %{"isbn" => isbn}) do
     case Books.find_existing(isbn) do
       nil ->
@@ -258,7 +277,13 @@ defmodule StacksWeb.BookController do
         if conn.halted do
           conn
         else
-          json(conn, %{book: ProtoJSON.book(book)})
+          placements = lookup_placements(conn, book.id)
+
+          json(conn, %{
+            book: ProtoJSON.book(book),
+            placement: ProtoJSON.book_placement(List.first(placements)),
+            placements: Enum.map(placements, &ProtoJSON.book_placement/1)
+          })
         end
     end
   end
@@ -270,10 +295,16 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  defp lookup_placement(conn, book_id) do
+  # Decision (#333): the detail response carries ALL of the viewer's placements
+  # of this book. This call site is the live 500 — it fed `Repo.one()`, so the
+  # owner of a book sitting on two bookshelves got `Ecto.MultipleResultsError`
+  # on their own book detail. It is also the surface that must *show* the
+  # multi-shelf state, so a list is what it wanted all along; the singular
+  # `placement` key stays as the first (oldest) entry for wire compatibility.
+  defp lookup_placements(conn, book_id) do
     case Guardian.Plug.current_resource(conn) do
-      nil -> nil
-      user -> Shelving.get_placement_for_book(user.id, book_id)
+      nil -> []
+      user -> Shelving.get_placements_for_book(user.id, book_id)
     end
   end
 end

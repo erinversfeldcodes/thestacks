@@ -65,6 +65,8 @@ suite =
         , collectionAndPlatformSectionsRender
         , collectionAbovePlatform
         , collectionShelfLabel
+        , collectionShelfLabelNamesEveryShelf
+        , collectionShelfLabelJoinsThreeAsProse
         , platformLookingForHomeLabel
         , platformListedLabel
         , platformPlainHitHasNoLabel
@@ -590,6 +592,40 @@ collectionShelfLabel =
                 |> ProgramTest.expectViewHas [ Selector.text "On your Reading Pile shelf" ]
 
 
+{-| #333 — the annotation must name EVERY bookshelf a book sits on. It used to
+name one and silently drop the rest, which looked exactly like the whole truth:
+a book on the Wish List and the Reading Pile was reported as "On your Wish List
+shelf" and the reader had no way to know otherwise.
+-}
+collectionShelfLabelNamesEveryShelf : Test
+collectionShelfLabelNamesEveryShelf =
+    test "collection_shelf_label_multi: a two-shelf hit names both, not just the first" <|
+        \() ->
+            loadedSections
+                [ multiShelfCollectionHit [ "library", "wishlist" ]
+                    (fixtureBook "Mine Own" "Anna Blake" 2001)
+                ]
+                []
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "On your Library and Wish List shelves" ]
+
+
+{-| Three shelves join as prose ("A, B and C") rather than as a comma soup, and
+the noun stays plural.
+-}
+collectionShelfLabelJoinsThreeAsProse : Test
+collectionShelfLabelJoinsThreeAsProse =
+    test "collection_shelf_label_three: three shelves read as 'A, B and C shelves'" <|
+        \() ->
+            loadedSections
+                [ multiShelfCollectionHit [ "antilibrary", "library", "reading_pile" ]
+                    (fixtureBook "Mine Own" "Anna Blake" 2001)
+                ]
+                []
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "On your Antilibrary, Library and Reading Pile shelves" ]
+
+
 {-| An always-visible looking-for-home platform hit is labelled with the owner's
 handle.
 -}
@@ -849,6 +885,7 @@ type alias TestHit =
     , ownerHandle : String
     , price : String
     , bookshelfName : String
+    , bookshelfNames : List String
     , snippet : String
     }
 
@@ -858,28 +895,44 @@ no label fields.
 -}
 collectionHit : String -> Book -> TestHit
 collectionHit bookshelfName book =
-    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = bookshelfName, snippet = "" }
+    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = bookshelfName, bookshelfNames = [ bookshelfName ], snippet = "" }
+
+
+{-| A collection hit sitting on SEVERAL of the viewer's bookshelves (#333) — a
+legal state. `bookshelf_name` carries the first, exactly as the backend emits it
+for wire compatibility; `bookshelf_names` carries them all.
+-}
+multiShelfCollectionHit : List String -> Book -> TestHit
+multiShelfCollectionHit names book =
+    { book = book
+    , source = ""
+    , ownerHandle = ""
+    , price = ""
+    , bookshelfName = Maybe.withDefault "" (List.head names)
+    , bookshelfNames = names
+    , snippet = ""
+    }
 
 
 {-| A plain platform hit: a platform-visible book with no discoverable label.
 -}
 plainPlatformHit : Book -> TestHit
 plainPlatformHit book =
-    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = "", snippet = "" }
+    { book = book, source = "", ownerHandle = "", price = "", bookshelfName = "", bookshelfNames = [], snippet = "" }
 
 
 {-| An always-visible looking-for-home platform hit, carrying the owner handle.
 -}
 lookingForHomeHit : String -> Book -> TestHit
 lookingForHomeHit ownerHandle book =
-    { book = book, source = "looking_for_home", ownerHandle = ownerHandle, price = "", bookshelfName = "", snippet = "" }
+    { book = book, source = "looking_for_home", ownerHandle = ownerHandle, price = "", bookshelfName = "", bookshelfNames = [], snippet = "" }
 
 
 {-| An active-listing platform hit, carrying the seller handle and formatted price.
 -}
 listedHit : String -> String -> Book -> TestHit
 listedHit ownerHandle price book =
-    { book = book, source = "listed", ownerHandle = ownerHandle, price = price, bookshelfName = "", snippet = "" }
+    { book = book, source = "listed", ownerHandle = ownerHandle, price = price, bookshelfName = "", bookshelfNames = [], snippet = "" }
 
 
 {-| Attach a deep-search snippet (a `ts_headline` `<mark>` excerpt) to any hit —
@@ -913,6 +966,7 @@ encodeSearchHit hit =
         , ( "owner_handle", Encode.string hit.ownerHandle )
         , ( "price", Encode.string hit.price )
         , ( "bookshelf_name", Encode.string hit.bookshelfName )
+        , ( "bookshelf_names", Encode.list Encode.string hit.bookshelfNames )
         , ( "snippet", Encode.string hit.snippet )
         ]
 

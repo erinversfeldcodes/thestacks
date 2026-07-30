@@ -49,6 +49,15 @@ type alias AvailabilityItem =
 type alias Model =
     { book : RemoteData Http.Error Book
     , placement : Maybe Placement
+
+    -- EVERY bookshelf this book sits on for the current reader (#333). A book
+    -- may legally be on more than one; `placement` is the first of these and
+    -- owns the single-placement affordances (rating, visibility, progress).
+    , placements : List Placement
+
+    -- The placement currently being removed from the multi-shelf notice, so
+    -- only that row shows its pending state.
+    , removingPlacementId : Maybe String
     , bookshelfMoverOpen : Bool
     , removeModalOpen : Bool
     , formatPickerOpen : Bool
@@ -102,6 +111,8 @@ type Msg
     | CloseRemoveModal
     | ConfirmRemove
     | RemoveCompleted (Result Http.Error ())
+    | RemovePlacement String
+    | PlacementRemoved String (Result Http.Error ())
     | ToggleFormat Format
     | EditionSelected String
     | DismissAgeGate
@@ -136,6 +147,8 @@ init bookId maybeToken maybePreviousRoute =
     in
     ( { book = Loading
       , placement = Nothing
+      , placements = []
+      , removingPlacementId = Nothing
       , bookshelfMoverOpen = False
       , removeModalOpen = False
       , formatPickerOpen = False
@@ -401,6 +414,8 @@ update msg model maybeToken =
                     ( { model
                         | book = Success response.book
                         , placement = response.placement
+                        , placements = response.placements
+                        , removingPlacementId = Nothing
                         , currentBookshelf = bookshelf
                         , selectedBookshelf = firstAvailableBookshelf bookshelf
                         , selectedFormats = formats
@@ -594,6 +609,67 @@ update msg model maybeToken =
 
                     else
                         ( { model | removeState = Failure err }, Cmd.none, NoOut )
+
+        -- Per-placement remove from the multi-shelf notice (#333). Unlike the
+        -- danger-zone remove this does NOT confirm and does NOT navigate away:
+        -- the reader is tidying up an extra copy, not leaving their collection,
+        -- and the book is still on at least one other bookshelf afterwards.
+        RemovePlacement placementId ->
+            case maybeToken of
+                Just token ->
+                    ( { model | removingPlacementId = Just placementId }
+                    , Api.removeBook placementId token (PlacementRemoved placementId)
+                    , NoOut
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        PlacementRemoved placementId result ->
+            case result of
+                Ok _ ->
+                    let
+                        remaining =
+                            List.filter (\p -> p.id /= placementId) model.placements
+
+                        -- The removed row may have been the one driving the
+                        -- rating / visibility / progress affordances. Promote
+                        -- the next remaining placement rather than leaving the
+                        -- page pointing at a placement that no longer exists.
+                        primary =
+                            case model.placement of
+                                Just current ->
+                                    if current.id == placementId then
+                                        List.head remaining
+
+                                    else
+                                        Just current
+
+                                Nothing ->
+                                    List.head remaining
+                    in
+                    ( { model
+                        | placements = remaining
+                        , placement = primary
+                        , removingPlacementId = Nothing
+                        , currentBookshelf =
+                            primary
+                                |> Maybe.andThen .bookshelfName
+                                |> Maybe.withDefault model.currentBookshelf
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        ( model, Cmd.none, SessionExpired )
+
+                    else
+                        ( { model | removingPlacementId = Nothing, removeState = Failure err }
+                        , Cmd.none
+                        , NoOut
+                        )
 
         AvailabilityLoaded (Ok items) ->
             ( { model | availability = Success items }, Cmd.none, NoOut )
@@ -951,7 +1027,8 @@ viewBook model book =
          ]
             ++ (case ( model.placement, model.isAuthenticated ) of
                     ( Just _, _ ) ->
-                        [ viewProgressSection model
+                        [ viewMultiShelfNotice model
+                        , viewProgressSection model
                         , viewFormatsOnShelf model
                         , viewVisibilityControl model
                         , viewShelfActions model
@@ -1172,6 +1249,112 @@ viewFinishedReadPrompt =
             , onClick FinishedReadDismissed
             ]
             [ text "Not now" ]
+        ]
+
+
+{-| The four bookshelves that make a book "in your collection twice".
+
+Looking for a Home is deliberately absent: it is a marketplace state, not a
+place you keep a book, so a Library book you are also offering to rehome is one
+copy in one place — nothing to tidy up (owner ruling, 2026-07-30).
+
+-}
+collectionBookshelves : List String
+collectionBookshelves =
+    [ "library", "antilibrary", "reading_pile", "wishlist" ]
+
+
+{-| The placements that count toward the multi-shelf notice: active placements
+on the four collection bookshelves, in the order the server returned them
+(oldest first).
+-}
+collectionPlacements : Model -> List Placement
+collectionPlacements model =
+    List.filter
+        (\p ->
+            case p.bookshelfName of
+                Just name ->
+                    List.member name collectionBookshelves
+
+                Nothing ->
+                    False
+        )
+        model.placements
+
+
+{-| "This book is on two of your bookshelves" — the multi-shelf highlight
+(#333).
+
+Shown only when the book sits on 2+ of Library / Antilibrary / Reading Pile /
+Wish List. The reader put it there, so the copy is a plain observation with a
+way to act on it, not a warning: multi-shelf is a legal state and nothing here
+blocks anything. Each shelf gets its OWN remove button, because "remove this
+book" is ambiguous the moment there is more than one placement — the reader has
+to be able to say _which_ copy goes.
+
+-}
+viewMultiShelfNotice : Model -> Html Msg
+viewMultiShelfNotice model =
+    let
+        placements =
+            collectionPlacements model
+    in
+    if List.length placements < 2 then
+        text ""
+
+    else
+        section
+            [ class "book-detail__multi-shelf"
+            , testId "multi-shelf-notice"
+            , attribute "role" "region"
+            , attribute "aria-labelledby" "section-multi-shelf"
+            ]
+            [ h3
+                [ class "book-detail__section-title"
+                , id "section-multi-shelf"
+                ]
+                [ text
+                    ("This one is on "
+                        ++ String.fromInt (List.length placements)
+                        ++ " of your bookshelves"
+                    )
+                ]
+            , p [ class "book-detail__multi-shelf-note" ]
+                [ text "Keep it that way if you meant to — or take it off the ones you didn't." ]
+            , ul [ class "book-detail__multi-shelf-list" ]
+                (List.map (viewMultiShelfRow model) placements)
+            ]
+
+
+viewMultiShelfRow : Model -> Placement -> Html Msg
+viewMultiShelfRow model placement =
+    let
+        name =
+            Maybe.withDefault "" placement.bookshelfName
+
+        removing =
+            model.removingPlacementId == Just placement.id
+    in
+    li
+        [ class "book-detail__multi-shelf-item"
+        , testId ("multi-shelf-item-" ++ name)
+        ]
+        [ span [ class "book-detail__multi-shelf-name" ] [ text (bookshelfLabel name) ]
+        , button
+            [ class "btn btn--ghost btn--sm book-detail__multi-shelf-remove"
+            , testId ("multi-shelf-remove-" ++ name)
+            , disabled removing
+            , attribute "aria-label" ("Remove from your " ++ bookshelfLabel name ++ " shelf")
+            , onClick (RemovePlacement placement.id)
+            ]
+            [ text
+                (if removing then
+                    "Removing…"
+
+                 else
+                    "Remove from here"
+                )
+            ]
         ]
 
 

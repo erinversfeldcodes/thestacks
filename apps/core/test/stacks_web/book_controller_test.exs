@@ -104,6 +104,78 @@ defmodule StacksWeb.BookControllerTest do
       assert placement["bookshelf_visibility"] == "platform"
     end
 
+    # ── #333 regression: the multi-shelf 500 ────────────────────────────────
+    #
+    # A book may legally sit on several bookshelves at once (owner ruling,
+    # 2026-07-30). The detail lookup fed its query to `Repo.one()`, so the
+    # SECOND placement turned the owner's own book detail into an
+    # `Ecto.MultipleResultsError` — a live 500 driven on 2026-07-30.
+    #
+    # The fixture is a genuine two-shelf state and not a factory artefact:
+    # two bookshelves, ONE book, one placement on each. Factories are honest
+    # since #329 (`insert(:placement)` derives its shelf from its bookshelf),
+    # so this is exactly the row shape `Shelving.place_book/3` writes.
+    test "returns 200 carrying BOTH placements when the book sits on two bookshelves",
+         %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(title: "Middlemarch")
+      library = insert(:bookshelf, user: user, name: "library")
+      wishlist = insert(:bookshelf, user: user, name: "wishlist")
+      insert(:placement, book: book, bookshelf: library)
+      insert(:placement, book: book, bookshelf: wishlist)
+
+      conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
+
+      # The status assertion is the regression: before the fix this raised out
+      # of the controller rather than rendering anything at all.
+      assert %{"placements" => placements} = json_response(conn, 200)
+      assert length(placements) == 2
+
+      assert Enum.sort(Enum.map(placements, & &1["bookshelf_name"])) == ["library", "wishlist"]
+
+      # Every placement carries its own id, so the overlay can offer a remove
+      # per shelf rather than one ambiguous "remove from my collection".
+      assert Enum.map(placements, & &1["id"]) |> Enum.uniq() |> length() == 2
+    end
+
+    test "the legacy singular placement key still names one of the two", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition()
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "wishlist"))
+
+      conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
+
+      assert %{"placement" => placement, "placements" => [first | _]} = json_response(conn, 200)
+      assert placement["id"] == first["id"]
+    end
+
+    test "another user's second placement of the same book does not leak in", %{conn: conn} do
+      user = insert(:user)
+      stranger = insert(:user)
+      {book, _edition} = insert_book_with_edition()
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
+
+      insert(:placement,
+        book: book,
+        bookshelf: insert(:bookshelf, user: stranger, name: "wishlist")
+      )
+
+      conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
+
+      assert %{"placements" => [only]} = json_response(conn, 200)
+      assert only["bookshelf_name"] == "library"
+    end
+
+    test "returns an empty placements list for a book the viewer has not placed", %{conn: conn} do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition()
+
+      conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
+
+      assert %{"placement" => nil, "placements" => []} = json_response(conn, 200)
+    end
+
     test "returns 404 when book does not exist", %{conn: conn} do
       user = insert(:user)
 
@@ -299,22 +371,55 @@ defmodule StacksWeb.BookControllerTest do
       assert placement["book_id"] == book.id
     end
 
-    test "returns 200 with source=collection when user already owns the book", %{conn: conn} do
+    # ⚠️ #333 — this test used to assert `source: "collection"` for a book the
+    # user owned on a DIFFERENT bookshelf from the one being confirmed onto.
+    # That encoded the pre-ruling assumption that any existing placement means
+    # "already placed": confirming a library book onto your Wish List quietly
+    # did nothing and reported success. The owner's ruling (2026-07-30) makes
+    # the multi-shelf state legal and says to inform, never block — so the
+    # placement is now made and the OTHER shelves are reported alongside it.
+    test "already owning the book elsewhere does not block the requested shelf", %{conn: conn} do
       user = insert(:user)
       {book, _edition} = insert_book_with_edition(isbn: "9780743273565")
-      bookshelf = insert(:bookshelf, user: user, name: "library")
-      insert(:placement, book: book, bookshelf: bookshelf)
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
 
       conn =
         conn
         |> auth_conn(user)
-        |> post("/api/books/confirm", %{"isbn" => "9780743273565"})
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "wishlist"})
 
-      assert %{"book" => returned, "placement" => placement, "source" => "collection"} =
+      assert %{"book" => returned, "placement" => placement, "placements" => placements} =
                json_response(conn, 200)
 
       assert returned["id"] == book.id
-      assert placement["bookshelf_name"] == "library"
+      # The placement this request produced is the one that was asked for …
+      assert placement["bookshelf_name"] == "wishlist"
+      # … and the response tells the reader about the shelf they already had it
+      # on, so the client can inform without having to ask again.
+      assert Enum.sort(Enum.map(placements, & &1["bookshelf_name"])) == ["library", "wishlist"]
+    end
+
+    test "confirming onto a bookshelf the book is already on is a no-op, not a duplicate", %{
+      conn: conn
+    } do
+      user = insert(:user)
+      {book, _edition} = insert_book_with_edition(isbn: "9780743273565")
+      shelf = insert(:bookshelf, user: user, name: "library")
+      existing = insert(:placement, book: book, bookshelf: shelf)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "library"})
+
+      assert %{"placement" => placement, "placements" => placements, "source" => "collection"} =
+               json_response(conn, 200)
+
+      # Same row, not a second copy on the same bookshelf — the state rung 4's
+      # `bookshelf_placements_book_active_idx` forbids and the ruling keeps
+      # forbidden.
+      assert placement["id"] == existing.id
+      assert length(placements) == 1
     end
 
     test "returns 201 with the resolved book when a new ISBN resolves via metadata (mocked)", %{
@@ -529,6 +634,36 @@ defmodule StacksWeb.BookControllerTest do
       assert %{"book" => returned} = json_response(conn, 200)
       assert returned["primary_edition"]["isbn"] == "9780451524935"
       assert returned["id"] == book.id
+    end
+
+    # #333 — the manual-ISBN path's duplicate awareness. The photo path has had
+    # `is_duplicate` in its SSE payload for a long time; typing the ISBN by hand
+    # told the reader nothing, so they placed a second copy without knowing.
+    # This is informational only: the lookup still succeeds, and nothing here
+    # can refuse the placement that follows.
+    test "carries the viewer's existing placements so the client can say 'already yours'",
+         %{conn: conn} do
+      user = insert(:user)
+
+      {book, _edition} =
+        insert_book_with_edition(isbn: "9780451524935", visibility_tier: "public")
+
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
+      insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "wishlist"))
+
+      conn = conn |> auth_conn(user) |> get("/api/books/isbn/9780451524935")
+
+      assert %{"book" => _, "placements" => placements} = json_response(conn, 200)
+      assert Enum.sort(Enum.map(placements, & &1["bookshelf_name"])) == ["library", "wishlist"]
+    end
+
+    test "reports no placements for a book the viewer has never shelved", %{conn: conn} do
+      user = insert(:user)
+      insert_book_with_edition(isbn: "9780451524935", visibility_tier: "public")
+
+      conn = conn |> auth_conn(user) |> get("/api/books/isbn/9780451524935")
+
+      assert %{"placement" => nil, "placements" => []} = json_response(conn, 200)
     end
 
     test "returns 404 when ISBN is not found", %{conn: conn} do

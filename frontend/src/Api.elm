@@ -804,12 +804,20 @@ rejectIdentification { imageId, rejectedBookIds, token } toMsg =
         }
 
 
-{-| Response from GET /api/books/:id — book with optional placement data.
+{-| Response from GET /api/books/:id — book with the viewer's placement data.
+
+`placements` carries EVERY bookshelf the viewer has this book on; a book may
+legally sit on several at once (#333). `placement` is the first of them, kept
+because most of the page only ever needs one (the rating, the visibility
+control, the progress card all belong to a single placement) — but anything
+answering "where is this book of mine?" must read `placements`.
+
 -}
 type alias BookDetailResponse =
     { book : Book
     , placement : Maybe Placement
     , bookshelfVisibility : Maybe String
+    , placements : List Placement
     }
 
 
@@ -821,7 +829,7 @@ decoded through the existing app-level decoders which already delegate to proto.
 -}
 bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
-    Decode.map3 BookDetailResponse
+    Decode.map4 BookDetailResponse
         (Decode.field "book" bookDecoder)
         -- Decode.maybe alone is insufficient here: the proto-generated placementDecoder
         -- decodes JSON null as a default struct (all fields empty/zero) because each
@@ -838,6 +846,15 @@ bookDetailResponseDecoder =
         (Decode.oneOf
             [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
             , Decode.succeed Nothing
+            ]
+        )
+        -- Every placement the viewer has of this book, oldest first (#333). An
+        -- absent key decodes to [] rather than failing, so an older server (or
+        -- the /api/books/isbn lookup before it carried them) degrades to "no
+        -- multi-shelf notice" instead of a decode error that blanks the page.
+        (Decode.oneOf
+            [ Decode.field "placements" (Decode.list placementDecoder)
+            , Decode.succeed []
             ]
         )
 
@@ -1316,6 +1333,7 @@ only when the match was on the description/review under `scope=deep` (#284).
 type alias CollectionHit =
     { book : Book
     , bookshelfName : String
+    , bookshelfNames : List String
     , snippet : String
     }
 
@@ -1351,6 +1369,16 @@ fromProtoCollectionHit : ProtoBookResp.SearchHit -> CollectionHit
 fromProtoCollectionHit hit =
     { book = Types.Book.fromProtoBook hit.book
     , bookshelfName = hit.bookshelfName
+
+    -- A book on several bookshelves used to be annotated with just one of them
+    -- (#333). Fall back to the singular name when the list is absent, so an
+    -- older server still names the one shelf it knows about rather than none.
+    , bookshelfNames =
+        if List.isEmpty hit.bookshelfNames then
+            List.filter (\name -> name /= "") [ hit.bookshelfName ]
+
+        else
+            hit.bookshelfNames
     , snippet = hit.snippet
     }
 

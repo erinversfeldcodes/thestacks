@@ -26,6 +26,7 @@ import TestHelpers
         , bookDetailProgramWithOut
         , simulateBookDetailResponse
         , simulateBookDetailResponseWithPlacement
+        , simulateBookDetailResponseWithPlacements
         , simulateBookPricesResponse
         , simulateEmptyBookPricesResponse
         , testBook
@@ -82,7 +83,159 @@ suite =
         , removeModalTrapForwardWrap
         , removeModalTrapReverseWrap
         , removeModalTrapNaturalOrder
+        , multiShelfNoticeNamesEveryBookshelf
+        , multiShelfNoticeAbsentForASingleShelf
+        , multiShelfNoticeIgnoresLookingForAHome
+        , multiShelfRemoveTargetsThatPlacementOnly
+        , multiShelfRemoveKeepsTheReaderOnThePage
         ]
+
+
+{-| #333 multi-shelf highlight: a book on two collection bookshelves is a legal
+state, and the overlay must SAY SO. Before this the page rendered no indication
+at all — and the request behind it 500ed.
+-}
+multiShelfNoticeNamesEveryBookshelf : Test
+multiShelfNoticeNamesEveryBookshelf =
+    test "multi_shelf_notice: a book on Library and Wish List names both, with a remove for each" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                        ]
+                    )
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice")
+                    , Selector.text "This one is on 2 of your bookshelves"
+                    , Selector.text "Library"
+                    , Selector.text "Wish List"
+                    , Selector.attribute
+                        (Html.Attributes.attribute "data-testid" "multi-shelf-remove-library")
+                    , Selector.attribute
+                        (Html.Attributes.attribute "data-testid" "multi-shelf-remove-wishlist")
+                    ]
+
+
+{-| The notice is for tidying up duplicates, so one placement must not raise it
+— otherwise every shelved book carries a "you have this twice" aside.
+-}
+multiShelfNoticeAbsentForASingleShelf : Test
+multiShelfNoticeAbsentForASingleShelf =
+    test "multi_shelf_notice_single: one placement renders no multi-shelf notice" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" } ]
+                    )
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice") ]
+
+
+{-| Looking for a Home is a MARKETPLACE state, not a place you keep a book
+(owner ruling, 2026-07-30). A Library book also offered for rehoming is one
+copy in one place — there is nothing to tidy up, so no notice.
+-}
+multiShelfNoticeIgnoresLookingForAHome : Test
+multiShelfNoticeIgnoresLookingForAHome =
+    test "multi_shelf_notice_lfh: library + looking_for_home is not a duplicate" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-lfh", bookshelfName = "looking_for_home" }
+                        ]
+                    )
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice") ]
+
+
+{-| Per-placement remove: "remove this book" is ambiguous once there are two, so
+each row must DELETE its own placement id and no other.
+-}
+multiShelfRemoveTargetsThatPlacementOnly : Test
+multiShelfRemoveTargetsThatPlacementOnly =
+    test "multi_shelf_remove: removing the Wish List row DELETEs that placement id" <|
+        \() ->
+            startBookDetail
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                        ]
+                    )
+                |> ProgramTest.within
+                    (Query.find
+                        [ Selector.attribute
+                            (Html.Attributes.attribute "data-testid" "multi-shelf-item-wishlist")
+                        ]
+                    )
+                    (ProgramTest.clickButton "Remove from here")
+                |> ProgramTest.ensureHttpRequests "DELETE"
+                    "/api/placements/pl-wish"
+                    (List.length >> Expect.equal 1)
+                |> ProgramTest.expectHttpRequests "DELETE"
+                    "/api/placements/pl-lib"
+                    (List.length >> Expect.equal 0)
+
+
+{-| Unlike the danger-zone remove, tidying one extra shelf must NOT navigate the
+reader out of the book — they still have the book, just in one fewer place. The
+notice disappears because only one placement is left.
+-}
+multiShelfRemoveKeepsTheReaderOnThePage : Test
+multiShelfRemoveKeepsTheReaderOnThePage =
+    test "multi_shelf_remove_stays: after removing one of two, the page stays and the notice goes" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacements "book-test-001"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                        ]
+                    )
+                |> ProgramTest.within
+                    (Query.find
+                        [ Selector.attribute
+                            (Html.Attributes.attribute "data-testid" "multi-shelf-item-wishlist")
+                        ]
+                    )
+                    (ProgramTest.clickButton "Remove from here")
+                |> ProgramTest.simulateHttpResponse "DELETE"
+                    "/api/placements/pl-wish"
+                    (Http.GoodStatus_
+                        { url = "/api/placements/pl-wish"
+                        , statusCode = 200
+                        , statusText = "OK"
+                        , headers = Dict.empty
+                        }
+                        ""
+                    )
+                |> ProgramTest.ensureViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "multi-shelf-notice") ]
+                |> ProgramTest.expectModel
+                    (\model ->
+                        Expect.all
+                            [ \m -> Expect.equal BookDetail.NoOut m.lastOut
+                            , \m -> Expect.equal [ "pl-lib" ] (List.map .id m.page.placements)
+                            , \m -> Expect.equal (Just "pl-lib") (Maybe.map .id m.page.placement)
+                            ]
+                            model
+                    )
 
 
 {-| Simulate a `keydown` on the remove modal's dialog element and return the
@@ -238,7 +391,7 @@ loadedOverlayModel =
         ( m1, _, _ ) =
             BookDetail.update
                 (BookDetail.BookLoaded
-                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                    (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
                 )
                 m0
                 (Just "test-token")
@@ -787,7 +940,7 @@ confirmMoveNoPlacementIsNoOp =
             startBookDetail
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing })
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmMove
                 |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
@@ -805,7 +958,7 @@ confirmMoveNoTokenIsNoOp =
             ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmMove
                 |> ProgramTest.ensureHttpRequests "PUT" moveEndpoint (List.length >> Expect.equal 0)
@@ -822,7 +975,7 @@ confirmRemoveNoPlacementIsNoOp =
             startBookDetail
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing })
+                        (Ok { book = testBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmRemove
                 |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)
@@ -839,7 +992,7 @@ confirmRemoveNoTokenIsNoOp =
             ProgramTest.start () (bookDetailProgram "book-test-001" Nothing)
                 |> ProgramTest.update
                     (BookDetail.BookLoaded
-                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing })
+                        (Ok { book = testBook, placement = Just testPlacement, bookshelfVisibility = Nothing, placements = [] })
                     )
                 |> ProgramTest.update BookDetail.ConfirmRemove
                 |> ProgramTest.ensureHttpRequests "DELETE" removeEndpoint (List.length >> Expect.equal 0)

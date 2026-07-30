@@ -701,6 +701,116 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  # ── #333: the multi-shelf placement model ──────────────────────────────────
+  #
+  # Owner ruling, 2026-07-30: the same book MAY sit on several bookshelves at
+  # once. Two copies on the SAME bookshelf stay forbidden — enforced at rung 4
+  # by `bookshelf_placements_book_active_idx`, not in application code. These
+  # tests pin BOTH halves, because they are one rule: the legal state must be
+  # reachable and readable, the illegal one must still be refused.
+  describe "get_placements_for_book/2 — a book on several bookshelves" do
+    test "returns every active placement, oldest first" do
+      user = insert(:user)
+      book = insert(:book)
+      first = place_on(user, book, "library")
+      second = place_on(user, book, "wishlist")
+
+      placements = Shelving.get_placements_for_book(user.id, book.id)
+
+      assert Enum.map(placements, & &1.id) == [first.id, second.id]
+      assert Enum.map(placements, & &1.bookshelf.name) == ["library", "wishlist"]
+    end
+
+    test "the bookshelf is preloaded, so the serialiser never sees NotLoaded" do
+      user = insert(:user)
+      book = insert(:book)
+      place_on(user, book, "antilibrary")
+
+      assert [%Placement{bookshelf: %Bookshelf{name: "antilibrary"}}] =
+               Shelving.get_placements_for_book(user.id, book.id)
+    end
+
+    test "returns [] — never nil — for a book the user has not placed" do
+      assert Shelving.get_placements_for_book(insert(:user).id, insert(:book).id) == []
+    end
+
+    test "omits removed placements" do
+      user = insert(:user)
+      book = insert(:book)
+      place_on(user, book, "library")
+      place_on(user, book, "wishlist", removed_at: DateTime.utc_now())
+
+      assert [%{bookshelf: %{name: "library"}}] =
+               Shelving.get_placements_for_book(user.id, book.id)
+    end
+
+    test "does not return another user's placement of the same book" do
+      user = insert(:user)
+      stranger = insert(:user)
+      book = insert(:book)
+      place_on(user, book, "library")
+      place_on(stranger, book, "library")
+
+      assert [mine] = Shelving.get_placements_for_book(user.id, book.id)
+      assert mine.bookshelf.user_id == user.id
+    end
+
+    test "place_book/3 reaches four bookshelves through the production write path" do
+      user = insert(:user)
+      book = insert(:book)
+
+      for name <- ~w(library antilibrary reading_pile wishlist) do
+        assert {:ok, _} = Shelving.place_book(user.id, book.id, name)
+      end
+
+      assert user.id
+             |> Shelving.get_placements_for_book(book.id)
+             |> Enum.map(& &1.bookshelf.name)
+             |> Enum.sort() == ~w(antilibrary library reading_pile wishlist)
+    end
+
+    test "a second active placement on the SAME bookshelf is refused with a clean error" do
+      user = insert(:user)
+      book = insert(:book)
+      assert {:ok, _} = Shelving.place_book(user.id, book.id, "library")
+
+      assert {:error, %Ecto.Changeset{} = changeset} =
+               Shelving.place_book(user.id, book.id, "library")
+
+      assert "book is already on this bookshelf" in errors_on(changeset).book_id
+      assert length(Shelving.get_placements_for_book(user.id, book.id)) == 1
+    end
+
+    # The changeset's `unique_constraint` above is a *translation* of the DB
+    # error, not the guarantee. Insert straight past it to show the guarantee
+    # lives at rung 4 — `bookshelf_placements_book_active_idx` — so no write
+    # path, present or future, can reach two live copies on one bookshelf.
+    test "rung 4 refuses the same-bookshelf duplicate even when the changeset is bypassed" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+
+      assert_raise Ecto.ConstraintError, ~r/bookshelf_placements_book_active_idx/, fn ->
+        Repo.insert!(%Placement{
+          book_id: book.id,
+          bookshelf_id: placement.bookshelf_id,
+          shelf_id: placement.shelf_id,
+          placed_at: DateTime.utc_now()
+        })
+      end
+    end
+
+    test "re-placing on a bookshelf the book was REMOVED from is allowed" do
+      user = insert(:user)
+      book = insert(:book)
+      {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      assert {:ok, _} = Shelving.place_book(user.id, book.id, "library")
+      assert length(Shelving.get_placements_for_book(user.id, book.id)) == 1
+    end
+  end
+
   describe "update_placement_formats/3" do
     setup :setup_user_bookshelf_book
 
@@ -1358,7 +1468,11 @@ defmodule Stacks.ShelvingTest do
       assert Shelving.search_collection(user.id, "Vanished Copy") == []
     end
 
-    test "returns a book at most once even across multiple shelves", %{user: user} do
+    # #333 — one ROW per book, but every shelf named. Before this, the second
+    # bookshelf was dropped by an `Enum.uniq_by` and the search annotation said
+    # "On your Library shelf" about a book that was also on the Wish List. The
+    # de-duplication is right (one result row); the silent collapse was not.
+    test "returns a book at most once across multiple shelves, naming every shelf", %{user: user} do
       book = insert(:book, title: "Twice Shelved")
       place_on(user, book, "library")
       place_on(user, book, "wishlist")
@@ -1366,8 +1480,34 @@ defmodule Stacks.ShelvingTest do
       results = Shelving.search_collection(user.id, "Twice Shelved")
 
       assert Enum.count(results, &(&1.book.id == book.id)) == 1
-      # Deterministic: the alphabetically-first shelf name wins ("library" < "wishlist").
-      assert [%{bookshelf_name: "library"}] = results
+      # Deterministic: the alphabetically-first shelf name leads ("library" < "wishlist").
+      assert [%{bookshelf_name: "library", bookshelf_names: ["library", "wishlist"]}] = results
+    end
+
+    test "a single-shelf hit reports exactly that one shelf", %{user: user} do
+      book = insert(:book, title: "Once Shelved")
+      place_on(user, book, "reading_pile")
+
+      assert [%{bookshelf_names: ["reading_pile"]}] =
+               Shelving.search_collection(user.id, "Once Shelved")
+    end
+
+    test "a removed placement is not named among a book's shelves", %{user: user} do
+      book = insert(:book, title: "Partly Vanished")
+      place_on(user, book, "library")
+      place_on(user, book, "wishlist", removed_at: DateTime.utc_now())
+
+      assert [%{bookshelf_names: ["library"]}] =
+               Shelving.search_collection(user.id, "Partly Vanished")
+    end
+
+    test "another reader's shelves are never named on your hit", %{user: user, other: other} do
+      book = insert(:book, title: "Shared Title")
+      place_on(user, book, "library")
+      place_on(other, book, "reading_pile")
+
+      assert [%{bookshelf_names: ["library"]}] =
+               Shelving.search_collection(user.id, "Shared Title")
     end
 
     # #298 — deep-scope ranking consistency: mirror `Books.search_books/2` so the

@@ -1047,8 +1047,8 @@ defmodule Stacks.Books do
   """
   @spec confirm(binary(), map()) ::
           {:ok, :created, Book.t()}
-          | {:ok, :existing, Book.t(), Shelving.Placement.t()}
-          | {:ok, :already_placed, Book.t(), Shelving.Placement.t()}
+          | {:ok, :existing, Book.t(), Shelving.Placement.t(), [Shelving.Placement.t()]}
+          | {:ok, :already_placed, Book.t(), Shelving.Placement.t(), [Shelving.Placement.t()]}
           | {:error, {:merge_required, String.t()}}
           | {:error, term()}
   def confirm(user_id, attrs) do
@@ -1075,18 +1075,37 @@ defmodule Stacks.Books do
     end
   end
 
+  # Decision (#333): branch on "is it already on the bookshelf they asked for?",
+  # not on "does a placement exist anywhere?".
+  #
+  # The old `nil | placement` branch treated ANY existing placement as
+  # already-placed, so asking to add a wish-listed book to your Library quietly
+  # did nothing and reported success — a block dressed up as a no-op. The owner's
+  # ruling (2026-07-30) makes a book on several bookshelves a legal state, so the
+  # only genuine "already placed" is a placement on the *requested* bookshelf —
+  # which is also the one the rung-4 unique index would reject. Everything else
+  # gets its placement, and the caller is *informed* of the others via the
+  # returned list.
   defp place_or_return_existing(user_id, book, shelf_name) do
-    case Shelving.get_placement_for_book(user_id, book.id) do
-      nil -> create_placement_for_existing(user_id, book, shelf_name)
-      placement -> {:ok, :already_placed, book, placement}
+    placements = Shelving.get_placements_for_book(user_id, book.id)
+
+    case Enum.find(placements, &(&1.bookshelf.name == shelf_name)) do
+      nil -> create_placement_for_existing(user_id, book, shelf_name, placements)
+      placement -> {:ok, :already_placed, book, placement, placements}
     end
   end
 
-  defp create_placement_for_existing(user_id, book, shelf_name) do
+  # Decision (#333): take the placement `place_book/3` just created rather than
+  # re-querying for "the" placement. The re-query ended in `Repo.one()` and so
+  # raised the moment the book was already on another bookshelf — precisely the
+  # multi-shelf add this branch exists to perform. `place_book/3` hands back the
+  # row it inserted, so the answer is unambiguous and one query cheaper; only
+  # the bookshelf needs preloading for serialisation.
+  defp create_placement_for_existing(user_id, book, shelf_name, existing) do
     case Shelving.place_book(user_id, book.id, shelf_name) do
-      {:ok, _} ->
-        placement = Shelving.get_placement_for_book(user_id, book.id)
-        {:ok, :existing, book, placement}
+      {:ok, placement} ->
+        placement = Repo.preload(placement, :bookshelf)
+        {:ok, :existing, book, placement, existing ++ [placement]}
 
       {:error, reason} ->
         {:error, reason}

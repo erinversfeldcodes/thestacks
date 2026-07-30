@@ -16,7 +16,14 @@ import Page.Upload as Upload exposing (Msg(..))
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-import TestHelpers exposing (simulateBookResponse, simulateMergeFormatResponse, uploadProgram)
+import TestHelpers
+    exposing
+        ( simulateBookDetailResponseWithPlacements
+        , simulateBookResponse
+        , simulateMergeFormatResponse
+        , testBook
+        , uploadProgram
+        )
 
 
 {-| Helper to start an upload program with an auth token and age-gating ON
@@ -213,7 +220,70 @@ suite =
         , uploadRejectIdentificationRetries
         , uploadAdultsOnly
         , uploadAdultsOnlyHiddenWhenFlagOff
+        , manualIsbnDuplicateNoticeInformsWithoutBlocking
+        , manualIsbnNoNoticeForABookYouDoNotOwn
         ]
+
+
+{-| #333 — the manual-ISBN duplicate notice, driven through the real path:
+type an ISBN, get a book you already own back, and see the notice. The photo
+path has told the reader this since the SSE payload's `is_duplicate`; typing the
+ISBN by hand said nothing at all.
+
+The second half is the whole point of the ruling: the notice INFORMS. Every
+control still works — "Yes, that's it" still reaches the shelf picker, and the
+shelf picker still offers the shelf the book is already on.
+
+-}
+manualIsbnDuplicateNoticeInformsWithoutBlocking : Test
+manualIsbnDuplicateNoticeInformsWithoutBlocking =
+    test "manual_isbn_duplicate: an already-owned book shows the notice and still places" <|
+        \() ->
+            startUpload
+                |> ProgramTest.update EnterManualMode
+                |> ProgramTest.update (ManualIsbnChanged "9780306406157")
+                |> ProgramTest.update SubmitManualIsbn
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/isbn/9780306406157"
+                    (simulateBookDetailResponseWithPlacements "book-1"
+                        testBook
+                        [ { placementId = "pl-lib", bookshelfName = "library" }
+                        , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                        ]
+                    )
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours")
+                    , Selector.text "You already have this on your Library and Wish List."
+                    ]
+                -- Nothing is blocked: the verification step still advances.
+                |> ProgramTest.clickButton "Yes, that's it"
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-shelf-picker") ]
+                -- …and the notice follows the reader to the moment of choosing,
+                -- where every shelf — including the ones it is already on —
+                -- remains selectable.
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours") ]
+
+
+{-| The notice must not appear for a book the reader does not own — otherwise
+every manual add carries a false "you already have this".
+-}
+manualIsbnNoNoticeForABookYouDoNotOwn : Test
+manualIsbnNoNoticeForABookYouDoNotOwn =
+    test "manual_isbn_no_duplicate: a book with no placements shows no notice" <|
+        \() ->
+            startUpload
+                |> ProgramTest.update EnterManualMode
+                |> ProgramTest.update (ManualIsbnChanged "9780306406157")
+                |> ProgramTest.update SubmitManualIsbn
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/isbn/9780306406157"
+                    (simulateBookDetailResponseWithPlacements "book-1" testBook [])
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-verify") ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours") ]
 
 
 uploadHappyPath : Test

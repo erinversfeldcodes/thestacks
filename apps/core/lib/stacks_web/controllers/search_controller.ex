@@ -67,8 +67,9 @@ defmodule StacksWeb.SearchController do
       # #285/#292), so serialising a flat list was pure wasted work.
       results: [],
       collection:
-        Enum.map(collection, fn %{book: book, bookshelf_name: name} ->
-          ProtoJSON.search_hit(book, put_snippet(%{bookshelf_name: name}, snippets, book.id))
+        Enum.map(collection, fn %{book: book, bookshelf_name: name, bookshelf_names: names} ->
+          label = %{bookshelf_name: name, bookshelf_names: names}
+          ProtoJSON.search_hit(book, put_snippet(label, snippets, book.id))
         end),
       platform_hits: platform_hits
     })

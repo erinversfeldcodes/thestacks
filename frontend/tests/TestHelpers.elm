@@ -16,6 +16,7 @@ module TestHelpers exposing
     , simulateAuthResponse
     , simulateBookDetailResponse
     , simulateBookDetailResponseWithPlacement
+    , simulateBookDetailResponseWithPlacements
     , simulateBookDetailResponseWithVisibility
     , simulateBookPricesResponse
     , simulateBookResponse
@@ -664,6 +665,51 @@ simulateBookDetailResponseWithPlacement bookId book placement =
         json
 
 
+{-| A book-detail response carrying SEVERAL placements of the same book — the
+legal multi-shelf state (#333). Each entry is `{placement_id, bookshelf_name}`;
+the response emits both the `placements` list and the legacy singular
+`placement` key (the first entry), exactly as the controller does.
+-}
+simulateBookDetailResponseWithPlacements :
+    String
+    -> Book
+    -> List { placementId : String, bookshelfName : String }
+    -> Http.Response String
+simulateBookDetailResponseWithPlacements bookId book entries =
+    let
+        encodeOne entry =
+            Encode.object
+                [ ( "id", Encode.string entry.placementId )
+                , ( "book_id", Encode.string bookId )
+                , ( "bookshelf_name", Encode.string entry.bookshelfName )
+                , ( "formats", Encode.list Encode.string [] )
+                , ( "visibility", Encode.null )
+                , ( "bookshelf_visibility", Encode.null )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement"
+                      , entries
+                            |> List.head
+                            |> Maybe.map encodeOne
+                            |> Maybe.withDefault Encode.null
+                      )
+                    , ( "placements", Encode.list encodeOne entries )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
 {-| A book-detail response carrying a placement with an explicit visibility and
 a denormalised parent-shelf ceiling (`bookshelf_visibility`). Drives the
 placement-visibility dropdown and its ceiling-greying.
@@ -1260,6 +1306,27 @@ bookDetailEffects msg model maybeToken =
                         }
 
                 _ ->
+                    SimulatedEffect.Cmd.none
+
+        -- Per-placement remove from the multi-shelf notice (#333). Mirrors
+        -- `Api.removeBook placementId`, keyed on the id carried by the Msg
+        -- rather than `model.placement` — that is the whole point of it.
+        BookDetail.RemovePlacement placementId ->
+            case maybeToken of
+                Just token ->
+                    SimulatedEffect.Http.request
+                        { method = "DELETE"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placementId
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect =
+                            SimulatedEffect.Http.expectWhatever
+                                (BookDetail.PlacementRemoved placementId)
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                Nothing ->
                     SimulatedEffect.Cmd.none
 
         BookDetail.ConfirmPlace ->

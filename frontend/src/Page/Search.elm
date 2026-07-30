@@ -497,7 +497,45 @@ title) is carried through so the excerpt + "via deep search" label render (#284)
 -}
 viewCollectionHit : Api.CollectionHit -> Html Msg
 viewCollectionHit hit =
-    viewResultButton hit.book (Just ("On your " ++ bookshelfLabel hit.bookshelfName ++ " shelf")) hit.snippet
+    viewResultButton hit.book (collectionLabel hit.bookshelfNames) hit.snippet
+
+
+{-| "On your Library shelf" / "On your Library and Wish List shelves" / "On your
+Library, Reading Pile and Wish List shelves".
+
+A book may sit on several bookshelves at once (#333). This used to name one and
+drop the rest silently, so the answer to "where in my collection is it?" was
+sometimes only part of the truth — and looked exactly like the whole truth. An
+empty list yields no label at all rather than a dangling "On your shelf".
+
+-}
+collectionLabel : List String -> Maybe String
+collectionLabel names =
+    case List.map bookshelfLabel names of
+        [] ->
+            Nothing
+
+        [ only ] ->
+            Just ("On your " ++ only ++ " shelf")
+
+        labels ->
+            Just ("On your " ++ joinWithAnd labels ++ " shelves")
+
+
+{-| Joins a list into prose: "A and B", "A, B and C". Only ever called with two
+or more entries.
+-}
+joinWithAnd : List String -> String
+joinWithAnd labels =
+    case List.reverse labels of
+        [] ->
+            ""
+
+        [ only ] ->
+            only
+
+        last :: rest ->
+            String.join ", " (List.reverse rest) ++ " and " ++ last
 
 
 {-| A platform hit renders the book row with its discoverable-by-design label

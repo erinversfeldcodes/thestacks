@@ -279,10 +279,27 @@ defmodule StacksWeb.UploadController do
 
   defp extract_edition_isbns(_), do: []
 
+  # Decision (#333): undo exactly ONE placement — the most recent — not all of
+  # them.
+  #
+  # This is the reject-identification path: the reader is saying "that book was
+  # never in my photo", so we withdraw what the identification put on a shelf.
+  # Under the owner's multi-shelf ruling that book may legitimately sit on
+  # several bookshelves, and the other placements are ones the reader made
+  # deliberately — removing them would be destroying their data to undo our
+  # mistake. The identification's own placement was created last, so the newest
+  # active placement is the one to withdraw.
+  #
+  # "Newest" is a heuristic, not provenance: if the reader shelved the book by
+  # hand in the seconds between identification and rejection, the newest is
+  # theirs. The honest fix is a provenance column on the placement, which is
+  # #335's scope (`verification_source`) — until then, undoing one placement is
+  # the conservative error: an extra shelf entry the reader can remove beats a
+  # deliberate one we deleted for them.
   defp remove_placements_for_books(user_id, book_ids) do
     Enum.each(book_ids, fn book_id ->
       with {:ok, uuid} <- Ecto.UUID.cast(book_id),
-           %{id: placement_id} <- Shelving.get_placement_for_book(user_id, uuid) do
+           %{id: placement_id} <- List.last(Shelving.get_placements_for_book(user_id, uuid)) do
         Shelving.remove_book(placement_id, user_id)
       end
     end)
