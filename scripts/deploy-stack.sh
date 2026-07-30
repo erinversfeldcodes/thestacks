@@ -291,6 +291,13 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # parallel E2E suite (many public reads from one runner IP) isn't 429'd.
     RATE_LIMIT_PUBLIC=""
     RATE_LIMIT_E2E_HELPER=""
+    # The circuit-breaker smoke endpoint (POST /internal/smoke/circuit_breakers)
+    # blows every fuse and waits ~30s for probe-driven recovery — config/runtime.exs
+    # says "Never set SMOKE_TESTS_ENABLED in production". Force it empty here
+    # (same pattern as STACKS_E2E_TEST_HELPERS above) so the secrets-staging
+    # block below can never stage it onto the prod app; the prod-only purge
+    # block below also unsets any lingering value as defense-in-depth.
+    SMOKE_TESTS_ENABLED=""
     echo "==> Deploy stack in PRODUCTION mode"
 else
     # Preview-only preflight: the preview branch-creation block below
@@ -327,6 +334,11 @@ else
     # the parallel suite registers/confirms many users from one runner IP and
     # 429s. Raise it for preview only; prod never enables the helpers at all.
     RATE_LIMIT_E2E_HELPER="5000"
+    # Enable the circuit-breaker smoke endpoint on PREVIEW stacks only — the
+    # deployed smoke suite (scripts/smoke-circuit-breakers.sh) exercises it.
+    # The --production branch above forces it empty so it can never reach the
+    # prod app (config/runtime.exs: "Never set SMOKE_TESTS_ENABLED in production").
+    SMOKE_TESTS_ENABLED="true"
     echo "==> Deploy stack for branch: ${BRANCH}"
 
     # ── Upstream resolver preflight (preview only) ────────────────────────
@@ -861,7 +873,25 @@ fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
 #   prod:    NEON_STAGING_API_KEY is cleared → no branch → caller must provide
 #            DATABASE_URL directly in the environment (from a GitHub secret in CI,
 #            or an operator export for local prod-mode use).
+#
+# EMAIL_FROM (REQUIRED for working prod email, Issue #323): the transactional
+# sender address. The in-code default is Resend's `onboarding@resend.dev`
+# stopgap, which CANNOT deliver to real users (apps/core/config/config.exs) —
+# setting EMAIL_FROM to a verified-domain address (e.g. noreply@thestacks.app)
+# is the only remaining step for working prod email. Supplied by the caller's
+# environment (GitHub secret in CI / operator export), staged via the
+# `${EMAIL_FROM:+...}` expansion below like the other prod secrets; the value
+# is never committed here. Runbook: docs/runbooks/email-delivery-failure.md.
 EFFECTIVE_DATABASE_URL="${NEON_CONNECTION_URI:-${DATABASE_URL:-}}"
+
+# Surface a missing EMAIL_FROM loudly on prod deploys (warn, don't fail — the
+# deploy itself is healthy; only real-user email delivery is degraded).
+if [[ "$PROD_MODE" -eq 1 && -z "${EMAIL_FROM:-}" ]]; then
+    echo "WARN: EMAIL_FROM is not set — prod email keeps the onboarding@resend.dev"
+    echo "      stopgap sender, which CANNOT deliver to real users. Set it via:"
+    echo "      fly secrets set EMAIL_FROM=noreply@thestacks.app -a ${CORE_APP}"
+    echo "      (see docs/runbooks/email-delivery-failure.md)"
+fi
 
 fly secrets set \
     SECRET_KEY_BASE="${SECRET_KEY_BASE:-}" \
@@ -895,7 +925,8 @@ fly secrets set \
     ${AGE_GATING_ENABLED:+AGE_GATING_ENABLED="${AGE_GATING_ENABLED}"} \
     ${RATE_LIMIT_PUBLIC:+RATE_LIMIT_PUBLIC="${RATE_LIMIT_PUBLIC}"} \
     ${RATE_LIMIT_E2E_HELPER:+RATE_LIMIT_E2E_HELPER="${RATE_LIMIT_E2E_HELPER}"} \
-    SMOKE_TESTS_ENABLED="true" \
+    ${SMOKE_TESTS_ENABLED:+SMOKE_TESTS_ENABLED="${SMOKE_TESTS_ENABLED}"} \
+    ${EMAIL_FROM:+EMAIL_FROM="${EMAIL_FROM}"} \
     --app "${CORE_APP}" --stage
 
 # ── Purge test-helper flag (prod only, Issue #124) ───────────────────────────
@@ -912,6 +943,13 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     echo "==> Ensuring test-helper flag is unset on ${CORE_APP} (prod safety)..."
     fly secrets unset STACKS_E2E_TEST_HELPERS --app "${CORE_APP}" --stage 2>/dev/null \
         || echo "    (STACKS_E2E_TEST_HELPERS not present — nothing to unset)"
+    # SMOKE_TESTS_ENABLED was staged unconditionally onto every deploy (incl.
+    # prod) before Issue #323 gated it, so the persistent prod app carries the
+    # secret. Unset it explicitly — the smoke endpoint blows all circuit
+    # breakers and must never be callable in production (config/runtime.exs).
+    echo "==> Ensuring smoke-test flag is unset on ${CORE_APP} (prod safety)..."
+    fly secrets unset SMOKE_TESTS_ENABLED --app "${CORE_APP}" --stage 2>/dev/null \
+        || echo "    (SMOKE_TESTS_ENABLED not present — nothing to unset)"
 fi
 
 # ── Preview mail hermeticity (Issue #269) ────────────────────────────────────
