@@ -55,7 +55,6 @@ defmodule Stacks.AgeGatingFlagOffTest do
 
   test "(b) list_catalogue INCLUDES age-gated books for an unverified viewer" do
     book = insert(:book, title: "Dark Matter", visibility_tier: "age_gated")
-    insert(:book_edition, book: book, is_primary: true)
 
     unverified = insert(:user, age_verified: false)
     viewer = {:platform_user, unverified.id, false}

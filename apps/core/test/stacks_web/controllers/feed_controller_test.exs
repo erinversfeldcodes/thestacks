@@ -69,8 +69,14 @@ defmodule StacksWeb.FeedControllerTest do
       user = insert(:user, display_name: "Erin")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       author = insert(:author, name: "Donna Tartt")
-      book = insert(:book, title: "The Secret History", author: author)
-      _edition = insert(:book_edition, book: book, isbn: "9780140167771", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "The Secret History",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9780140167771")]
+        )
+
       _placement = insert(:placement, bookshelf: bookshelf, book: book)
 
       conn = get(as_reader(conn), "/api/feeds/#{user.id}/library")

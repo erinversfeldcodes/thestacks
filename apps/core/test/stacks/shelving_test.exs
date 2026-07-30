@@ -985,8 +985,7 @@ defmodule Stacks.ShelvingTest do
     end
 
     test "rejects current_page above the known primary-edition page count", %{user: user} do
-      book = insert(:book)
-      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, page_count: 112)])
       bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
       placement = insert(:placement, bookshelf: bookshelf, book: book)
 
@@ -1000,8 +999,7 @@ defmodule Stacks.ShelvingTest do
     end
 
     test "accepts current_page equal to the known page count (boundary)", %{user: user} do
-      book = insert(:book)
-      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, page_count: 112)])
       bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
       placement = insert(:placement, bookshelf: bookshelf, book: book)
 
@@ -1016,11 +1014,15 @@ defmodule Stacks.ShelvingTest do
 
     test "permits any current_page when the page count is unknown", %{
       user: user,
-      placement: placement
+      bookshelf: bookshelf
     } do
-      # The setup book has no edition, so the primary-edition page count is
-      # unknown. The ceiling is permissive in that case — a reader is never
-      # blocked on missing catalogue metadata.
+      # A work always has its primary edition (the ISBN gate), but that edition
+      # often has no page_count — Open Library omits it constantly. THAT is the
+      # unknown-page-count state, not an editionless work. The ceiling is
+      # permissive here: a reader is never blocked on missing catalogue metadata.
+      book = insert(:book, editions: [build(:primary_book_edition, page_count: nil)])
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
       assert {:ok, updated} =
                Shelving.update_reading_progress(placement.id, user.id, %{
                  reading_status: "reading",

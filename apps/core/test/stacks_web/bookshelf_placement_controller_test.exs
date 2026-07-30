@@ -635,8 +635,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
     test "returns 422 with a current_page field error when the page exceeds the book's page count",
          %{conn: conn, user: user} do
-      book = insert(:book)
-      insert(:book_edition, book: book, page_count: 112, is_primary: true)
+      book = insert(:book, editions: [build(:primary_book_edition, page_count: 112)])
       bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
       placement = insert(:placement, bookshelf: bookshelf, book: book)
 

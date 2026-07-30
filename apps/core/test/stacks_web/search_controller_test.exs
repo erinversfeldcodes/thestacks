@@ -13,14 +13,11 @@ defmodule StacksWeb.SearchControllerTest do
   end
 
   defp insert_book_with_edition(attrs) do
-    book = insert(:book, Keyword.take(attrs, [:title, :author]))
-
     insert(
-      :book_edition,
-      Keyword.merge([book: book, is_primary: true], Keyword.take(attrs, [:isbn]))
+      :book,
+      Keyword.take(attrs, [:title, :author]) ++
+        [editions: [build(:primary_book_edition, Keyword.take(attrs, [:isbn]))]]
     )
-
-    book
   end
 
   # Places `book` on `user`'s named bookshelf. `attrs` may carry :listing_status
@@ -168,12 +165,11 @@ defmodule StacksWeb.SearchControllerTest do
   describe "GET /api/search — visibility filtering" do
     test "excludes age_gated books from results for non-age-verified user", %{conn: conn} do
       insert_book_with_edition(title: "Thornfield Chronicles", isbn: "9781234567897")
-      age_gated_book = insert(:book, title: "Thornfield Secrets", visibility_tier: "age_gated")
 
-      insert(:book_edition,
-        book: age_gated_book,
-        isbn: "9781234567880",
-        is_primary: true
+      insert(:book,
+        title: "Thornfield Secrets",
+        visibility_tier: "age_gated",
+        editions: [build(:primary_book_edition, isbn: "9781234567880")]
       )
 
       conn = get(conn, "/api/search", q: "Thornfield")
@@ -191,13 +187,10 @@ defmodule StacksWeb.SearchControllerTest do
 
       insert_book_with_edition(title: "Gatekeeper Chronicles", isbn: "9780000000111")
 
-      age_gated_book =
-        insert(:book, title: "Gatekeeper Secrets", visibility_tier: "age_gated")
-
-      insert(:book_edition,
-        book: age_gated_book,
-        isbn: "9780000000222",
-        is_primary: true
+      insert(:book,
+        title: "Gatekeeper Secrets",
+        visibility_tier: "age_gated",
+        editions: [build(:primary_book_edition, isbn: "9780000000222")]
       )
 
       conn = get(verified_conn, "/api/search", q: "Gatekeeper")
@@ -377,9 +370,11 @@ defmodule StacksWeb.SearchControllerTest do
   describe "GET /api/search — deep scope (#284)" do
     # Seeds a platform-visible book that mentions the term only in its description.
     defp insert_description_only_book(title, description, isbn) do
-      book = insert(:book, title: title, description: description)
-      insert(:book_edition, book: book, isbn: isbn, is_primary: true)
-      book
+      insert(:book,
+        title: title,
+        description: description,
+        editions: [build(:primary_book_edition, isbn: isbn)]
+      )
     end
 
     test "scope=deep surfaces a description-only match with a highlighted snippet",
