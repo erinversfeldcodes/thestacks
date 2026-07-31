@@ -4,23 +4,106 @@
   "integration_branch": "feat/campaign-w6-316",
   "base": "feat/campaign-followups-a",
   "pr_opened": false,
-  "pr_policy": "DEFERRED — owner ruling 2026-07-30: wave PRs batch until the final wave",
+  "pr_policy": "DEFERRED \u2014 owner ruling 2026-07-30: wave PRs batch until the final wave",
   "children": {
-    "359": {"status": "in_progress", "title": "6a Persist-first login + AuthState (the founding defect)", "level": 1, "depends_on": [], "owns": ["frontend/src/Page/Login.elm", "frontend/src/Main.elm", "apps/core/assets/app.js"], "merged": false},
-    "332": {"status": "in_progress", "title": "6f readOnly guard in handleOrganiser (mutation guard moves from view to update fn)", "level": 1, "depends_on": [], "owns": ["frontend/src/Page/Bookshelf.elm"], "merged": false},
-    "360": {"status": "blocked", "title": "6b Title from Page; Arrival type; decodeFlags StoredAuth", "level": 2, "depends_on": [359], "owns": ["frontend/src/Main.elm"], "merged": false},
-    "361": {"status": "blocked", "title": "6c 401 wrapper + reflection gate + 3 write-form pages", "level": 2, "depends_on": [359], "owns": ["frontend/src/Api.elm", "frontend/src/Page/Settings/*"], "merged": false},
-    "362": {"status": "blocked", "title": "6d Loading != empty + Api timeouts + connectivity banner", "level": 3, "depends_on": [361, 332], "owns": ["frontend/src/Api.elm", "frontend/src/Page/Bookshelf.elm"], "merged": false},
-    "363": {"status": "blocked", "title": "6e Success/ack states + the five-family dedup sweep", "level": 4, "depends_on": [359, 360, 361, 362], "owns": ["frontend/src/Components/*", "many pages", "Duration (elixir)"], "merged": false}
+    "359": {
+      "status": "in_progress",
+      "title": "6a Persist-first login + AuthState (the founding defect)",
+      "level": 1,
+      "depends_on": [],
+      "owns": [
+        "frontend/src/Page/Login.elm",
+        "frontend/src/Main.elm",
+        "apps/core/assets/app.js"
+      ],
+      "merged": false
+    },
+    "332": {
+      "status": "complete",
+      "title": "6f readOnly guard in handleOrganiser (mutation guard moves from view to update fn)",
+      "level": 1,
+      "depends_on": [],
+      "owns": [
+        "frontend/src/Page/Bookshelf.elm"
+      ],
+      "merged": true,
+      "commit": "3a1f9d22",
+      "staff_review": "LGTM"
+    },
+    "360": {
+      "status": "blocked",
+      "title": "6b Title from Page; Arrival type; decodeFlags StoredAuth",
+      "level": 2,
+      "depends_on": [
+        359
+      ],
+      "owns": [
+        "frontend/src/Main.elm"
+      ],
+      "merged": false
+    },
+    "361": {
+      "status": "blocked",
+      "title": "6c 401 wrapper + reflection gate + 3 write-form pages",
+      "level": 2,
+      "depends_on": [
+        359
+      ],
+      "owns": [
+        "frontend/src/Api.elm",
+        "frontend/src/Page/Settings/*"
+      ],
+      "merged": false
+    },
+    "362": {
+      "status": "blocked",
+      "title": "6d Loading != empty + Api timeouts + connectivity banner",
+      "level": 3,
+      "depends_on": [
+        361,
+        332
+      ],
+      "owns": [
+        "frontend/src/Api.elm",
+        "frontend/src/Page/Bookshelf.elm"
+      ],
+      "merged": false
+    },
+    "363": {
+      "status": "blocked",
+      "title": "6e Success/ack states + the five-family dedup sweep",
+      "level": 4,
+      "depends_on": [
+        359,
+        360,
+        361,
+        362
+      ],
+      "owns": [
+        "frontend/src/Components/*",
+        "many pages",
+        "Duration (elixir)"
+      ],
+      "merged": false
+    }
   },
-  "ready_set": [359, 332],
-  "merge_order": [332, 359, 360, 361, 362, 363],
-  "sequencing_rationale": "This wave is almost entirely Elm and three files are contended: Main.elm (6a, 6b), Api.elm (6c, 6d), Bookshelf.elm (6f, 6d). The DAG is shaped by file ownership rather than pure logic — two agents in one Elm module is a merge conflict by construction (the #343/#344 lesson). 6a goes first because AuthState is the type every later auth change reads.",
+  "ready_set": [
+    359
+  ],
+  "merge_order": [
+    332,
+    359,
+    360,
+    361,
+    362,
+    363
+  ],
+  "sequencing_rationale": "This wave is almost entirely Elm and three files are contended: Main.elm (6a, 6b), Api.elm (6c, 6d), Bookshelf.elm (6f, 6d). The DAG is shaped by file ownership rather than pure logic \u2014 two agents in one Elm module is a merge conflict by construction (the #343/#344 lesson). 6a goes first because AuthState is the type every later auth change reads.",
   "discovered_issues": [],
   "kickoff_approved": "2026-07-31",
   "notes": [
-    "Founding defect, root-caused live 2026-07-30: the auth credential is downstream of a browser animation frame. With the window occluded, WAAPI never fires, so three login 200s were silently discarded — ten frozen 300ms transitions, zero animations, no follow-up XHR.",
-    "The epic's own warning: do NOT write per-page 401 tests before the wrapper lands (6c) — they would be deleted by it.",
+    "Founding defect, root-caused live 2026-07-30: the auth credential is downstream of a browser animation frame. With the window occluded, WAAPI never fires, so three login 200s were silently discarded \u2014 ten frozen 300ms transitions, zero animations, no follow-up XHR.",
+    "The epic's own warning: do NOT write per-page 401 tests before the wrapper lands (6c) \u2014 they would be deleted by it.",
     "#332 was assigned to this wave by owner ruling during Wave 3; it is a production mutation guard living in the view instead of the update function."
   ],
   "updated_at": "2026-07-31"

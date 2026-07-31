@@ -114,6 +114,25 @@ if [[ -f "$SOURCE_CHECKOUT/apps/core/assets/index.html" ]]; then
     echo "    priv/static/index.html copied"
 fi
 
+# 3b. Frontend node_modules. Without these, `npx elm-test`, `elm-review` and
+#     `elm-format` cannot run in a worktree at all — every Elm agent so far has
+#     hand-rolled a link or an install to get around it (#332 reported it).
+#     Symlinked rather than installed: it is ~200 MB of identical dependencies,
+#     and a worktree is short-lived.
+#
+#     ⚠️ The link is deliberately NOT left for `git add -A` to find. `.gitignore`
+#     carries `frontend/node_modules/` and `node_modules/` — both DIRECTORY-only
+#     patterns, which do not match a symlink, so a linked node_modules shows as
+#     untracked and a sweeping `git add -A` would commit it. The trailing-slash-
+#     free rule below is what makes the link ignorable; verify with
+#     `git check-ignore -v` rather than by reading .gitignore (#348's lesson).
+for dir in frontend apps/core/assets; do
+    if [[ -d "$SOURCE_CHECKOUT/$dir/node_modules" && ! -e "$WORKTREE_ROOT/$dir/node_modules" ]]; then
+        ln -s "$SOURCE_CHECKOUT/$dir/node_modules" "$WORKTREE_ROOT/$dir/node_modules"
+        echo "    $dir/node_modules linked"
+    fi
+done
+
 # 4. Dependencies BEFORE codegen — the generators run Mix tasks.
 echo "==> mix deps.get"
 (cd "$WORKTREE_ROOT" && mix deps.get >/dev/null)

@@ -24,6 +24,12 @@ frontend/elm.js
 # stale copy still carrying code deleted by #343 was poisoning repo-wide greps.
 frontend/index.html
 frontend/node_modules/
+# Slash-free twin: `foo/` matches only a DIRECTORY, so a symlinked node_modules
+# (what `just bootstrap-worktree` creates in a worktree) is NOT matched by the
+# rule above and would be swept in by `git add -A`. Verify with
+# `git check-ignore -v`, never by reading this file (#348).
+frontend/node_modules
+apps/core/assets/node_modules
 
 # Rust
 apps/scraper/target/
