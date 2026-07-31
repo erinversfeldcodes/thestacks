@@ -13,6 +13,7 @@ SUITES=(
     "$HERE/squawk_destructive_test.sh"
     "$HERE/lint_migrations_test.sh"
     "$HERE/migration_gate_syntax_test.sh"
+    "$HERE/squawk_worktree_selection_test.sh"
     "$HERE/schema_diff_test.sh"
     "$HERE/ci_migration_safety_job_test.sh"
     "$HERE/probe_production_test.sh"

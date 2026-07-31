@@ -668,7 +668,20 @@ jobs:
         # the Phase 2 fixtures). Bump both together.
         run: npm install -g squawk-cli@2.47.0
       - name: Lint changed migrations
-        run: scripts/security-squawk.sh origin/main
+        # Exit 2 means squawk inspected nothing. This job only runs when the
+        # `changes` filter saw a migration touched, so "nothing to inspect" is
+        # a contradiction worth surfacing — annotate it instead of letting the
+        # step go green and read as approval (#337).
+        run: |
+          set +e
+          scripts/security-squawk.sh origin/main
+          rc=$?
+          set -e
+          if [[ "$rc" == "2" ]]; then
+            echo "::warning title=squawk inspected 0 migrations::The migration-lint job ran because migrations changed, yet squawk found nothing to analyse. This is NOT a pass."
+            exit 0
+          fi
+          exit "$rc"
 
   check-licenses:
     needs: [changes, versions]
@@ -815,7 +828,19 @@ jobs:
 
       # ── 1. Squawk — destructive SQL patterns ──────────────────────────────
       - name: squawk — destructive migration rules
-        run: scripts/security-squawk.sh origin/main
+        # Exit 2 = nothing inspected. See the migration-lint job above: this
+        # job is gated on `migrations == true`, so a skip here means the gate
+        # and the path filter disagree. Annotate rather than pass silently.
+        run: |
+          set +e
+          scripts/security-squawk.sh origin/main
+          rc=$?
+          set -e
+          if [[ "$rc" == "2" ]]; then
+            echo "::warning title=squawk inspected 0 migrations::migration-safety ran because migrations changed, yet squawk found nothing to analyse. This is NOT a pass."
+            exit 0
+          fi
+          exit "$rc"
 
       # ── 2. @breaking_ok annotation on Ecto DSL destructive ops ────────────
       - name: lint-migrations — require @breaking_ok on destructive Ecto ops

@@ -38,9 +38,14 @@ tmpfile="$tmpfile.sql"
 trap 'rm -f "$tmpfile"' EXIT
 echo "$sql_block" > "$tmpfile"
 
-# Match security-squawk.sh: destructive rules on by default, timeouts and
-# the PG11+ false-positive rule excluded.
+# Match security-squawk.sh EXACTLY: destructive rules on by default; timeouts,
+# the PG11+ default false positive, and the @disable_ddl_transaction false
+# positive excluded. The two exclude lists had silently drifted apart —
+# security-squawk.sh also excluded ban-concurrent-index-creation-in-transaction
+# while this wrapper did not — which is precisely the "two gates can never
+# disagree" property #219 claimed and this file's header asserts. Keep them
+# byte-identical.
 squawk \
     --assume-in-transaction \
-    --exclude=require-timeout-settings,adding-field-with-default \
+    --exclude=require-timeout-settings,adding-field-with-default,ban-concurrent-index-creation-in-transaction \
     "$tmpfile"

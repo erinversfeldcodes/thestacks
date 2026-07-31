@@ -41,12 +41,21 @@ fi
 # Colours for section banners
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
 pass() { echo -e "${GREEN}${BOLD}PASS${RESET} $1"; }
 fail() { echo -e "${RED}${BOLD}FAIL${RESET} $1"; }
+# SKIP is neither PASS nor FAIL: the check ran but had nothing to inspect, so it
+# asserted nothing. Rendering that as PASS is how a gate quietly stops being one
+# (#337). Skips are collected and reprinted in the final roll-up.
+SKIPPED=()
+skip() {
+    echo -e "${YELLOW}${BOLD}SKIP${RESET} $1"
+    SKIPPED+=("$1")
+}
 
 run_group() {
     local name="$1"; shift
@@ -153,8 +162,20 @@ if has_group security; then
 fi
 
 # ── Squawk (migration safety) ──────────────────────────────────────────────────
+# Three-valued, unlike every other group here: security-squawk.sh exits 2 when
+# it inspected nothing (no changed migrations, or none with analysable SQL).
+# That must render as SKIP. Reporting PASS for a migration-safety gate that read
+# zero migrations is #337 — and it is the failure mode with the worst blast
+# radius, because the reassurance is strongest exactly when the check is absent.
 if has_group squawk; then
-    if ! run_group "squawk: migration lint" bash scripts/security-squawk.sh; then FAILED+=(squawk); fi
+    echo -e "\n${CYAN}${BOLD}=== squawk: migration lint ===${RESET}"
+    bash scripts/security-squawk.sh
+    _squawk_rc=$?
+    case "$_squawk_rc" in
+        0) pass "squawk: migration lint" ;;
+        2) skip "squawk: migration lint — 0 migrations inspected (nothing was checked)" ;;
+        *) fail "squawk: migration lint"; FAILED+=(squawk) ;;
+    esac
 fi
 
 # ── E2E ───────────────────────────────────────────────────────────────────────
@@ -188,10 +209,19 @@ fi
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [[ ${#FAILED[@]} -eq 0 ]]; then
-    echo -e "${GREEN}${BOLD}All checks passed.${RESET}"
+    if [[ ${#SKIPPED[@]} -eq 0 ]]; then
+        echo -e "${GREEN}${BOLD}All checks passed.${RESET}"
+    else
+        # Deliberately not "All checks passed" — some of them did not run.
+        echo -e "${GREEN}${BOLD}No failures.${RESET}"
+    fi
 else
     echo -e "${RED}${BOLD}Failed checks:${RESET}"
     for f in "${FAILED[@]}"; do echo "  - $f"; done
+fi
+if [[ ${#SKIPPED[@]} -ne 0 ]]; then
+    echo -e "${YELLOW}${BOLD}Skipped (inspected nothing — not evidence of anything):${RESET}"
+    for s in "${SKIPPED[@]}"; do echo "  - $s"; done
 fi
 
 # ── Deploy preview (runs only when full default suite passes) ─────────────────

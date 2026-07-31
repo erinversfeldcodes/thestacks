@@ -13,8 +13,18 @@ stream of SQL statements for squawk. Both `security-squawk.sh` and
 drift out of sync (drift being the exact failure mode #219 is about).
 
 It emits, one statement per stanza on stdout:
-  1. Raw SQL from every non-interpolated `execute(...)` block (as before).
-  2. A synthesised `CREATE [UNIQUE] INDEX ...` statement for every
+  1. A bare `CREATE TABLE <name> ();` for every table the migration itself
+     creates via `create table(...)` / `create_if_not_exists table(...)`.
+     No columns are rendered — squawk only needs to know the table is *new in
+     this migration*, and knowing that suppresses a whole class of false
+     positives (#337). An index built non-concurrently on a table that does not
+     exist yet blocks nothing, so `require-concurrent-index-creation` must not
+     fire there; likewise `adding-not-nullable-field` on a brand-new table.
+     Without this stanza squawk saw a naked `CREATE INDEX` with no context and
+     flagged 32 historically-correct table-creation migrations, which is how a
+     gate gets switched off.
+  2. Raw SQL from every non-interpolated `execute(...)` block (as before).
+  3. A synthesised `CREATE [UNIQUE] INDEX ...` statement for every
      `create index(...)` / `create unique_index(...)` DSL call, faithfully
      reflecting whether the author asked for `concurrently: true`. A
      non-concurrent build omits `CONCURRENTLY` and trips squawk's
@@ -111,10 +121,43 @@ def _parse_index_call(args: str) -> dict:
     }
 
 
+def _translate_create_table_dsl(src: str) -> list[str]:
+    """Declare every table this migration creates, so squawk has the context.
+
+    Emits a column-less `CREATE TABLE ...;` per `create table(...)` /
+    `create_if_not_exists table(...)` DSL call. squawk tracks table names
+    created earlier in the same source file and stops warning about operations
+    on them — which is correct, because a table nothing can read yet cannot be
+    locked out from under anyone. Columns are deliberately omitted: squawk does
+    not resolve column references, and inventing them would risk tripping
+    unrelated column-shape rules on statements the author never wrote.
+    """
+    out: list[str] = []
+    seen: list[str] = []
+    for m in re.finditer(r"\bcreate(?:_if_not_exists)?\s+table\s*\(", src):
+        args = _balanced_args(src, m.end())
+        info = _parse_index_call(args)
+        table = info["table"]
+        if not table:
+            continue
+        qualified = f"{info['prefix']}.{table}" if info["prefix"] else table
+        if qualified in seen:
+            continue
+        seen.append(qualified)
+        out.append(f"CREATE TABLE {qualified} ();")
+    return out
+
+
 def _translate_index_dsl(src: str) -> list[str]:
     """Synthesise CREATE INDEX SQL for each create (unique_)index DSL call."""
     out: list[str] = []
-    for m in re.finditer(r"\bcreate\s+(unique_)?index\s*\(", src):
+    # `create_if_not_exists` must be matched as well as `create`. It was not,
+    # which silently re-opened the whole #219 DSL blind spot for anyone who
+    # reached for the idempotent form: `create_if_not_exists index(...,
+    # concurrently: false)` was invisible to squawk. Found while auditing #337's
+    # own evidence — 20260730200500 builds two indexes this way and the gate
+    # extracted zero statements from it.
+    for m in re.finditer(r"\bcreate(?:_if_not_exists)?\s+(unique_)?index\s*\(", src):
         unique = bool(m.group(1))
         args = _balanced_args(src, m.end())
         info = _parse_index_call(args)
@@ -143,9 +186,15 @@ def _translate_index_dsl(src: str) -> list[str]:
 def extract(path: str) -> list[str]:
     with open(path) as f:
         src = f.read()
-    statements: list[str] = []
-    statements += _extract_execute_blocks(src)
-    statements += _translate_index_dsl(src)
+    subject: list[str] = []
+    subject += _extract_execute_blocks(src)
+    subject += _translate_index_dsl(src)
+    # The CREATE TABLE stanzas are context, not subject matter: they exist only
+    # so squawk can tell "new table" from "live table" while judging the
+    # statements above. On their own they assert nothing, so a migration that
+    # *only* creates tables still reports as having no analysable SQL rather
+    # than as a vacuous green.
+    statements = (_translate_create_table_dsl(src) + subject) if subject else []
     # Normalise trailing semicolons.
     return [s if s.rstrip().endswith(";") else s + ";" for s in statements]
 
