@@ -38,17 +38,19 @@
       "staff_review": "LGTM"
     },
     "331": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "Convert 35 ad-hoc vision-client modules to the #327 steering seam",
       "level": 2,
       "depends_on": [
         342
       ],
-      "merged": false,
-      "blocked_on": null
+      "merged": true,
+      "blocked_on": null,
+      "commit": "0181b7c7",
+      "staff_review": "LGTM"
     },
     "344": {
-      "status": "blocked",
+      "status": "in_progress",
       "title": "Resolver truth (4 collapse sites) + title_fallback catch-all + provisional-title UI",
       "level": 3,
       "depends_on": [
@@ -56,7 +58,8 @@
         342,
         343
       ],
-      "merged": false
+      "merged": false,
+      "blocked_on": null
     },
     "345": {
       "status": "blocked",
@@ -72,7 +75,7 @@
     }
   },
   "ready_set": [
-    331
+    344
   ],
   "merge_order": [
     342,
