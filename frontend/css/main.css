@@ -1548,6 +1548,7 @@ h4 {
 
 .book-detail__provisional,
 .upload-complete__already-yours,
+.upload-complete__shelf-hint,
 .upload-provisional-notice,
 .upload-verify__already-yours {
     font-family: var(--font-body);
@@ -5440,7 +5441,7 @@ h4 {
 .marketplace-create__success-details,
 .marketplace-detail__description,
 .settings-hub__content,
-.upload-duplicate__merge-success-text,
+.upload-complete__detail,
 .upload-manual__error-text,
 .upload-verify__age-gate-message,
 .upload-verify__content,
@@ -5834,8 +5835,7 @@ h4 {
 /* Confirmations: the mirror of `.admin__error`, in the accent. Same shape so success and failure are recognisably the same *kind* of message. */
 .groups-detail__invite-success,
 .login-card__notice,
-.marketplace-create__success,
-.upload-duplicate__merge-success {
+.marketplace-create__success {
     font-family: var(--font-body);
     font-size: var(--size-sm);
     color: var(--accent);

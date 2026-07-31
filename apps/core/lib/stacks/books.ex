@@ -714,11 +714,17 @@ defmodule Stacks.Books do
 
         case Repo.update(changeset) do
           {:ok, updated} ->
+            # `book_id` is here because the aggregate is the EDITION, and the
+            # one subscriber (CacheInvalidationHandler) is keyed by WORK. It
+            # used to evict under `aggregate_id`, i.e. under an edition id,
+            # which is never a cache key — so a confirmed cover stayed
+            # invisible for the full BookDetailCache TTL. Found by #355's
+            # sibling sweep. Public bibliographic identifier, no PII.
             Events.emit_safe(%{
               event_type: "book.cover_confirmed",
               aggregate_type: "book_edition",
               aggregate_id: updated.id,
-              payload: %{cover_image_url: final_url},
+              payload: %{book_id: updated.book_id, cover_image_url: final_url},
               metadata: %{actor: "vision_sidecar"}
             })
 

@@ -428,8 +428,31 @@ manualIsbnSameWorkOffersMerge =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/books/work-existing-1/merge-format"
                     (simulateMergeFormatResponse "work-existing-1" "edition-new-1" "9780156453806" "Paperback")
+                -- #355: the screen MOVES ON. The question that was just
+                -- answered, and the button that answered it, are gone — the
+                -- live drive found both still on screen after a 200, which is
+                -- indistinguishable from nothing having happened and invites a
+                -- second click that re-posts an applied merge.
+                -- Structural first, so a copy edit cannot quietly disarm this:
+                -- the prompt's own testid, asserted PRESENT above, is gone.
+                |> ProgramTest.ensureViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-same-work") ]
+                |> ProgramTest.ensureViewHasNot
+                    [ Selector.text "You already have \"The Name of the Rose\" by Umberto Eco. Add this edition to it?" ]
+                |> ProgramTest.ensureViewHasNot [ Selector.text "Yes, merge" ]
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-complete")
+                    , Selector.text "\"The Name of the Rose\" has a new edition"
+
+                    -- Named from the server's own answer, not a client-side
+                    -- edition-count guess.
+                    , Selector.text "The Paperback edition (ISBN 9780156453806) is now listed on the book's page."
+                    ]
+                -- Nothing was placed: `confirm/2` answered 409 before it placed
+                -- anything and a merge places nothing either, so this reader
+                -- must not be left believing they now own the book.
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Added as another edition of the same book." ]
+                    [ Selector.text "It isn't on one of your bookshelves yet — open the book to add it." ]
 
 
 {-| `Books.confirm/2`'s `:already_placed` branch (`source: "collection"`).
@@ -639,7 +662,7 @@ uploadMultiBook =
 
 uploadMergeFormatSuccess : Test
 uploadMergeFormatSuccess =
-    test "upload_merge_format_success: duplicate detected -> click Yes merge -> mock 200 response -> shows edition count" <|
+    test "upload_merge_format_success: duplicate detected -> click Yes merge -> mock 200 response -> completion card names the merged edition" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
@@ -653,8 +676,24 @@ uploadMergeFormatSuccess =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/books/book-1/merge-format"
                     (simulateMergeFormatResponse "book-1" "edition-new-1" "9780141988511" "Hardback")
-                |> ProgramTest.expectViewHas
-                    [ Selector.text "2 editions" ]
+                -- #355: the prompt is answered, so the prompt is gone.
+                |> ProgramTest.ensureViewHasNot [ Selector.text "Already in Your Library" ]
+                |> ProgramTest.ensureViewHasNot [ Selector.text "Yes, merge" ]
+                -- This used to assert "2 editions", computed as
+                -- `book.editionCount + 1` off a book fetched earlier — a number
+                -- the client cannot know and was reading from the very cache
+                -- #355 found stale. The card now reports the row the server
+                -- says it wrote.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-complete")
+                    , Selector.text "\"Duplicate Book\" has a new edition"
+                    , Selector.text "The Hardback edition (ISBN 9780141988511) is now listed on the book's page."
+                    ]
+                -- This reader was only offered a merge because the book is
+                -- already on one of their bookshelves, so the shelf hint would
+                -- be false here.
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-shelf-hint") ]
 
 
 uploadMergeFormatFailure : Test
