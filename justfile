@@ -66,6 +66,15 @@ dev:
 setup:
     bash setup.sh
 
+# Make a fresh git worktree buildable (idempotent). Run it from INSIDE the
+# worktree. Copies the untracked state a worktree does not inherit — .env, the
+# proto-generated gen/ tree, the esbuild index.html — then runs deps.get and all
+# FIVE codegen targets, and verifies there is no drift. A no-op in the main
+# checkout. Agents building in worktrees should run this first, instead of
+# rediscovering the steps by hand.
+bootstrap-worktree *ARGS:
+    bash scripts/bootstrap-worktree.sh {{ARGS}}
+
 # Install git hooks and ensure Claude Code hook scripts are executable.
 # Claude Code hooks (.claude/settings.json) activate automatically — this
 # just ensures execute bits are set after a fresh clone.
