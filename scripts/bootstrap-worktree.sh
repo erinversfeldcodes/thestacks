@@ -68,9 +68,17 @@ if [[ -z "$SOURCE_CHECKOUT" || ! -d "$SOURCE_CHECKOUT" ]]; then
 fi
 
 if [[ "$SOURCE_CHECKOUT" == "$WORKTREE_ROOT" ]]; then
+    # Nothing to SEED here — there is no other checkout to copy untracked state
+    # from. But the main checkout has the other half of the same problem: after
+    # merging a branch that touched a .proto file its generated artefacts are
+    # stale, most of them are gitignored so `git status` stays clean, and the
+    # first thing that notices is a gate failing in three places (Issue #354).
+    # Exiting 0 with advice was a dead end, so do the part that does apply.
     echo "==> Running in the main checkout, not a worktree — nothing to seed."
-    echo "    (This script copies untracked state FROM the main checkout INTO a worktree.)"
-    exit 0
+    echo "    Regenerating the proto artefacts instead, which is the step that"
+    echo "    does apply here. (Same as: just regen-proto)"
+    echo ""
+    exec bash "$WORKTREE_ROOT/scripts/regen-proto.sh"
 fi
 
 echo "==> Bootstrapping worktree"
@@ -110,20 +118,12 @@ fi
 echo "==> mix deps.get"
 (cd "$WORKTREE_ROOT" && mix deps.get >/dev/null)
 
-# 5. All five codegen targets. `lint-proto.sh` checks five; generating only the
-#    Elixir pair leaves the other three absent, and the gate fails on a fresh
-#    worktree for reasons that have nothing to do with the change under test.
+# 5. All five codegen targets, and the drift verification that proves the seed
+#    in step 2 was not stale. Delegated so there is ONE list of generators —
+#    generating only the Elixir pair leaves the other three absent and the gate
+#    fails for reasons unrelated to the change under test.
 echo "==> Generating proto artefacts (all five targets)"
-for gen in gen-ecto-proto gen-elixir-proto gen-elm-proto gen-python-proto gen-rust-proto; do
-    if [[ -x "$WORKTREE_ROOT/scripts/${gen}.sh" || -f "$WORKTREE_ROOT/scripts/${gen}.sh" ]]; then
-        echo "    ${gen}.sh"
-        bash "$WORKTREE_ROOT/scripts/${gen}.sh" >/dev/null
-    fi
-done
-
-# 6. Prove the seed in step 2 was not stale.
-echo "==> Verifying no codegen drift"
-(cd "$WORKTREE_ROOT/apps/core" && mix proto.sync --check)
+bash "$WORKTREE_ROOT/scripts/regen-proto.sh"
 
 echo ""
 echo "==> Worktree ready."
