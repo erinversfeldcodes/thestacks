@@ -1,0 +1,23 @@
+{
+  "batch": "followups-a",
+  "campaign": "staff-campaign-2026-07-30",
+  "integration_branch": "feat/campaign-followups-a",
+  "base": "feat/campaign-w5-315",
+  "pr_opened": false,
+  "pr_policy": "DEFERRED — owner ruling 2026-07-30: wave PRs batch until the final wave",
+  "rationale": "Owner pulled six filed discoveries forward on 2026-07-31 rather than deferring. Four are single-file tooling/plumbing; two are real defects found by the Wave 5 live drive. All mutually independent — run in parallel.",
+  "children": {
+    "354": {"status": "in_progress", "title": "Proto drift check cannot distinguish local staleness from real drift", "owns": ["scripts/lint-proto.sh", "justfile"]},
+    "337": {"status": "in_progress", "title": "Squawk gate passes without reading uncommitted migrations", "owns": ["scripts/security-squawk.sh"]},
+    "348": {"status": "in_progress", "title": "Delete the stale tracked Elm build artefact", "owns": ["frontend/index.html", ".gitignore"]},
+    "346": {"status": "in_progress", "title": "Upload path drops the resolver identifiers it just paid for", "owns": ["apps/core/lib/stacks/moderation.ex"]},
+    "349": {"status": "in_progress", "title": "Export the vision request duration metric", "owns": ["apps/core/lib/core/prom_ex/plugins/stacks.ex"]},
+    "355": {"status": "in_progress", "title": "A successful edition merge is invisible to the reader", "owns": ["frontend/src/Page/Upload.elm", "apps/core/lib/stacks/events/registry.ex"]}
+  },
+  "conflict_notes": [
+    "#354 owns the justfile for this batch (it may add a regen target); #337 must not touch it.",
+    "#346 edits moderation.ex; #355 edits books.ex/registry.ex + Page/Upload.elm — disjoint.",
+    "#349's acceptance needs a real preview upload; the agent builds and unit-tests, the LEAD verifies the series lands on the live preview at merge time."
+  ],
+  "updated_at": "2026-07-31"
+}
