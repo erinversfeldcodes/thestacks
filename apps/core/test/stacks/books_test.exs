@@ -1,16 +1,34 @@
 defmodule Stacks.BooksTest do
+  # Coverage note (#345): the three `describe "identify/2"` tests went with
+  # `Books.identify/2`, which had no route, worker or context caller — these
+  # tests were its only reachability. What they incidentally protected is still
+  # covered:
+  #
+  #   * the steerable `extract_isbn` vision seam — `ai/client_test.exs`,
+  #     `ai/mock_client_test.exs`, and end-to-end through the real pipeline in
+  #     `upload_pipeline_test.exs` / `upload_telemetry_test.exs` /
+  #     `observability_telemetry_test.exs`;
+  #   * many-ISBNs-per-image and the per-candidate resolve — `Stacks.Moderation`
+  #     (`moderation*_test.exs`) is the production owner of that fan-out, and
+  #     `IdentifyBookJob` drives it;
+  #   * the `ISBNResolver.resolve/1` miss falling back to the vision result's own
+  #     title/author — `isbn_resolver_test.exs`.
+  #
+  # Nothing must replace them: the only behaviour genuinely lost is that of a
+  # function no caller could reach.
   use Core.DataCase, async: true
 
   import Ecto.Query
   import Stacks.Factory
 
   alias Core.Repo
-  alias Stacks.AI.MockClient
   alias Stacks.Books
   alias Stacks.Books.Book
   alias Stacks.Books.BookEdition
+  alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
+  alias Stacks.Uploads
 
   describe "create/1" do
     test "creates a book (work) with edition for valid attributes" do
@@ -600,97 +618,6 @@ defmodule Stacks.BooksTest do
       insert(:book_edition, book: book)
 
       assert [] = Books.find_same_work("Something Completely Different", "Unknown Author")
-    end
-  end
-
-  describe "identify/2" do
-    # identify/2 calls the AI client (vision service). In test env the mock client is used.
-    setup do
-      original = Application.get_env(:core, :vision_client)
-      Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
-      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
-      :ok
-    end
-
-    test "returns one candidate per potential ISBN the vision service reported" do
-      # ⚠️ This asserted only `is_list(candidates)` against the mock's canned
-      # default — true for `[]`, so it passed whether or not `identify/2`
-      # carried a single book through, and it could not distinguish "the vision
-      # seam works" from "the vision seam returns nothing" (Issue #330).
-      #
-      # #327 made the seam steerable per endpoint, so the test can now name the
-      # payload and assert what came back out of it. `:isbn` is taken verbatim
-      # from `potential_isbns`, and with no resolver response registered
-      # `MockHttpClient` answers `{:ok, %{}}` → `ISBNResolver.resolve/1` finds
-      # nothing → title/author fall back to the vision result's own fields. So
-      # every asserted value below is one this test put in.
-      user = insert(:user)
-
-      MockClient.put_response(
-        "extract_isbn",
-        {:ok,
-         %{
-           "books" => [
-             %{
-               "title" => "Nineteen Eighty-Four",
-               "author" => "George Orwell",
-               "potential_isbns" => ["9780141036144"],
-               "confidence" => 0.91
-             },
-             %{
-               "title" => "Brave New World",
-               "author" => "Aldous Huxley",
-               "potential_isbns" => ["9780060850524", "9780060929879"],
-               "confidence" => 0.77
-             }
-           ],
-           "model_used" => "mock"
-         }}
-      )
-
-      assert {:ok, candidates} = Books.identify(user.id, {:b64, Base.encode64("bytes")})
-
-      # Two spines, three ISBNs between them: `identify/2` flat_maps over the
-      # books, so a candidate per ISBN — not per book.
-      assert Enum.map(candidates, & &1.isbn) == [
-               "9780141036144",
-               "9780060850524",
-               "9780060929879"
-             ]
-
-      assert Enum.map(candidates, & &1.title) == [
-               "Nineteen Eighty-Four",
-               "Brave New World",
-               "Brave New World"
-             ]
-
-      assert Enum.map(candidates, & &1.author) == [
-               "George Orwell",
-               "Aldous Huxley",
-               "Aldous Huxley"
-             ]
-    end
-
-    test "returns {:ok, []} when the vision service reports no books" do
-      # The empty case the old `is_list/1` assertion silently also accepted —
-      # now pinned as its own outcome, so the two cannot be confused again.
-      user = insert(:user)
-
-      MockClient.put_response("extract_isbn", {:ok, %{"books" => [], "model_used" => "mock"}})
-
-      assert {:ok, []} = Books.identify(user.id, {:b64, Base.encode64("bytes")})
-    end
-
-    test "returns {:error, reason} when vision service call fails" do
-      user = insert(:user)
-
-      # Steer the seam to fail on the endpoint identify/2 calls. Asserting the
-      # exact reason proves the steered response — not the mock's default — is
-      # what came back through Books.identify/2.
-      MockClient.put_response("extract_isbn", {:error, :simulated_failure})
-
-      result = Books.identify(user.id, {:b64, Base.encode64("bytes")})
-      assert {:error, :simulated_failure} = result
     end
   end
 
@@ -1328,7 +1255,7 @@ defmodule Stacks.BooksTest do
       upload = %Plug.Upload{path: tmp, filename: "test.jpg", content_type: "image/jpeg"}
       before_count = event_count("image.submitted")
 
-      Books.store_upload(user.id, upload)
+      Uploads.store_upload(user.id, upload)
 
       assert event_count("image.submitted") == before_count + 1
 
@@ -1342,7 +1269,7 @@ defmodule Stacks.BooksTest do
 
       upload = %Plug.Upload{path: tmp, filename: "test.jpg", content_type: "image/jpeg"}
 
-      assert {:ok, image} = Books.store_upload(user.id, upload)
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
       assert image.id != nil
       assert is_binary(image.storage_path)
       assert String.starts_with?(image.storage_path, "uploads/")
@@ -1359,7 +1286,7 @@ defmodule Stacks.BooksTest do
         content_type: "image/jpeg"
       }
 
-      assert {:error, _reason} = Books.store_upload(user.id, upload)
+      assert {:error, _reason} = Uploads.store_upload(user.id, upload)
     end
   end
 
@@ -1439,38 +1366,38 @@ defmodule Stacks.BooksTest do
     test "converts a valid ISBN-10 to its ISBN-13 form" do
       # The live production case: title-search memoised the OL doc's
       # ISBN-10 while rejection invalidated by the edition's ISBN-13.
-      assert Books.canonical_isbn13("0312864833") == "9780312864835"
+      assert ISBN.canonical_isbn13("0312864833") == "9780312864835"
     end
 
     test "converts a valid ISBN-10 with an X check digit" do
-      assert Books.canonical_isbn13("080442957X") == "9780804429573"
+      assert ISBN.canonical_isbn13("080442957X") == "9780804429573"
       # Lowercase x is upcased before the shape check.
-      assert Books.canonical_isbn13("080442957x") == "9780804429573"
+      assert ISBN.canonical_isbn13("080442957x") == "9780804429573"
     end
 
     test "strips hyphens and whitespace before converting" do
-      assert Books.canonical_isbn13("0-312-86483-3") == "9780312864835"
-      assert Books.canonical_isbn13(" 0 312 86483 3 ") == "9780312864835"
+      assert ISBN.canonical_isbn13("0-312-86483-3") == "9780312864835"
+      assert ISBN.canonical_isbn13(" 0 312 86483 3 ") == "9780312864835"
     end
 
     test "passes ISBN-13s through (normalised only)" do
-      assert Books.canonical_isbn13("9780312864835") == "9780312864835"
-      assert Books.canonical_isbn13("978-0-312-86483-5") == "9780312864835"
+      assert ISBN.canonical_isbn13("9780312864835") == "9780312864835"
+      assert ISBN.canonical_isbn13("978-0-312-86483-5") == "9780312864835"
     end
 
     test "leaves a checksum-invalid 10-digit string unconverted" do
-      assert Books.canonical_isbn13("0312864834") == "0312864834"
+      assert ISBN.canonical_isbn13("0312864834") == "0312864834"
     end
 
     test "returns garbage in stripped/upcased form, otherwise unchanged" do
-      assert Books.canonical_isbn13("garbage!") == "GARBAGE!"
-      assert Books.canonical_isbn13("") == ""
-      assert Books.canonical_isbn13("  - ") == ""
+      assert ISBN.canonical_isbn13("garbage!") == "GARBAGE!"
+      assert ISBN.canonical_isbn13("") == ""
+      assert ISBN.canonical_isbn13("  - ") == ""
     end
 
     test "returns nil for non-binary input" do
-      assert Books.canonical_isbn13(nil) == nil
-      assert Books.canonical_isbn13(123) == nil
+      assert ISBN.canonical_isbn13(nil) == nil
+      assert ISBN.canonical_isbn13(123) == nil
     end
   end
 

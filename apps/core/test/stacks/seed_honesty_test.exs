@@ -16,6 +16,7 @@ defmodule Stacks.SeedHonestyTest do
 
   alias Stacks.Books
   alias Stacks.Books.BookEdition
+  alias Stacks.Books.ISBN
   alias Stacks.DataCorrection.StaleSeedEditionIsbn
 
   @seeds_path Path.expand("../../priv/repo/seeds.exs", __DIR__)
@@ -41,7 +42,7 @@ defmodule Stacks.SeedHonestyTest do
     test "every seeded ISBN is thirteen digits with a valid EAN-13 check digit" do
       bad =
         Enum.reject(seeded_isbns(), fn isbn ->
-          String.length(isbn) == 13 and Books.valid_isbn_checksum?(isbn)
+          String.length(isbn) == 13 and ISBN.valid_isbn_checksum?(isbn)
         end)
 
       assert bad == [],

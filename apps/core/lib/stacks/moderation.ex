@@ -25,6 +25,7 @@ defmodule Stacks.Moderation do
   alias Stacks.AI.Client, as: AIClient
   alias Stacks.AI.VisionError
   alias Stacks.Books
+  alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolver
   alias Stacks.Workers.EnrichBookJob
 
@@ -316,7 +317,7 @@ defmodule Stacks.Moderation do
   # to (e.g. a screenshot whose barcode the model misread on round 1
   # then read the same way on round 2) and we'd resolve it again. The
   # comparison is hyphen/space- AND ISBN-10/13-form-insensitive (both
-  # sides canonicalised via `Books.canonical_isbn13/1`) — see
+  # sides canonicalised via `Stacks.Books.ISBN.canonical_isbn13/1`) — see
   # `Stacks.Books.ISBNResolver` `excluded_isbn?/2` for the same match.
   #
   # Candidates without a `potential_isbns` field (or with an empty list)
@@ -340,7 +341,7 @@ defmodule Stacks.Moderation do
 
   # Canonical ISBN-13 on both sides: a VLM candidate carrying the
   # ISBN-10 form of a rejected book's ISBN-13 must still be dropped.
-  defp normalise_isbn(value) when is_binary(value), do: Books.canonical_isbn13(value)
+  defp normalise_isbn(value) when is_binary(value), do: ISBN.canonical_isbn13(value)
 
   defp normalise_isbn(_), do: ""
 
@@ -628,7 +629,7 @@ defmodule Stacks.Moderation do
   # digit (~10% of random 13-digit strings) but isn't a real book. Only
   # `model_used == "local_ocr"` gives us scanner-level confidence.
   defp fast_path?(isbn, context) do
-    context[:vision_model_used] == "local_ocr" and Books.valid_isbn_checksum?(isbn)
+    context[:vision_model_used] == "local_ocr" and ISBN.valid_isbn_checksum?(isbn)
   end
 
   # Books enter the system `public` by default (the schema default on

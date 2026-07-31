@@ -14,6 +14,7 @@ defmodule Stacks.Acceptance.UploadBookTest do
   alias Stacks.Shelving
   alias Stacks.Shelving.Bookshelf
   alias Stacks.Shelving.Placement
+  alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
 
   describe "US-1.1.1 upload → identify → place on bookshelf" do
@@ -27,7 +28,7 @@ defmodule Stacks.Acceptance.UploadBookTest do
       # Step 1: upload image — enqueues job (manual mode, not executed)
       image_id = Ecto.UUID.generate()
       image_b64 = Base.encode64("fake image bytes")
-      assert {:ok, _job} = Books.upload_and_identify(user.id, image_id, image_b64)
+      assert {:ok, _job} = Uploads.upload_and_identify(user.id, image_id, image_b64)
 
       assert_enqueued(
         worker: IdentifyBookJob,
@@ -51,7 +52,7 @@ defmodule Stacks.Acceptance.UploadBookTest do
       image_b64 = Base.encode64("fake image bytes")
 
       # upload_and_identify only enqueues — does not validate image existence
-      assert {:ok, _job} = Books.upload_and_identify(user.id, image_id, image_b64)
+      assert {:ok, _job} = Uploads.upload_and_identify(user.id, image_id, image_b64)
 
       assert_enqueued(
         worker: IdentifyBookJob,

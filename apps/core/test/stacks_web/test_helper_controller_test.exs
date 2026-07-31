@@ -14,6 +14,7 @@ defmodule StacksWeb.TestHelperControllerTest do
 
   import Stacks.Factory
 
+  alias Stacks.Books.ISBN
   alias Swoosh.Adapters.Local.Storage.Memory
 
   @flag "STACKS_E2E_TEST_HELPERS"
@@ -490,7 +491,7 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert first["book_id"] != second["book_id"]
 
       isbn = Stacks.Books.get_book_detail(first["book_id"]).editions |> hd() |> Map.get(:isbn)
-      assert Stacks.Books.valid_isbn_checksum?(isbn)
+      assert ISBN.valid_isbn_checksum?(isbn)
     end
 
     test "auto-generated ISBN carries the recognisable E2E-seed block (Issue #297)", %{conn: conn} do
@@ -507,7 +508,7 @@ defmodule StacksWeb.TestHelperControllerTest do
       # checksum-valid ISBN-13 so Books.create accepts it past the ISBN Hard Gate.
       assert String.starts_with?(isbn, "97899999")
       assert String.length(isbn) == 13
-      assert Stacks.Books.valid_isbn_checksum?(isbn)
+      assert ISBN.valid_isbn_checksum?(isbn)
     end
 
     test "honours an explicit ISBN", %{conn: conn} do

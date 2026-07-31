@@ -16,6 +16,7 @@ defmodule Stacks.FactoryHonestyTest do
   alias Core.Repo
   alias Stacks.Books
   alias Stacks.Books.BookEdition
+  alias Stacks.Books.ISBN
   alias Stacks.Shelving.{Placement, Shelf}
 
   describe "probe 1 — a work always has its primary edition (ISBN hard gate)" do
@@ -39,7 +40,7 @@ defmodule Stacks.FactoryHonestyTest do
     test "1000 consecutive factory ISBNs are all checksum-valid and unique" do
       isbns = for _ <- 1..1000, do: build(:book_edition).isbn
 
-      refute Enum.any?(isbns, &(!Books.valid_isbn_checksum?(&1)))
+      refute Enum.any?(isbns, &(!ISBN.valid_isbn_checksum?(&1)))
       assert length(Enum.uniq(isbns)) == 1000
       assert Enum.all?(isbns, &(String.length(&1) == 13))
     end

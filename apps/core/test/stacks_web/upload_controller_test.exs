@@ -58,7 +58,7 @@ defmodule StacksWeb.UploadControllerTest do
   describe "POST /api/upload/:id/commit" do
     setup %{user: user} do
       # Seed an awaiting_upload row as if the user had already called init.
-      {:ok, init} = Stacks.Books.init_upload(user.id)
+      {:ok, init} = Stacks.Uploads.init_upload(user.id)
       {:ok, init: init}
     end
 

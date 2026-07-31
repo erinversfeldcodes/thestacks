@@ -13,6 +13,7 @@ defmodule StacksWeb.UploadController do
   alias Stacks.Books.TitleSearchCache
   alias Stacks.Books.UploadedImage
   alias Stacks.Shelving
+  alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
   alias StacksWeb.ProtoJSON
 
@@ -32,7 +33,7 @@ defmodule StacksWeb.UploadController do
     user = Guardian.Plug.current_resource(conn)
     content_type = Map.get(params, "content_type", "image/jpeg")
 
-    case Books.init_upload(user.id, content_type: content_type) do
+    case Uploads.init_upload(user.id, content_type: content_type) do
       {:ok, %{image_id: image_id, upload_url: url, expires_in: expires_in}} ->
         conn
         |> put_status(201)
@@ -56,7 +57,7 @@ defmodule StacksWeb.UploadController do
   def commit(conn, %{"image_id" => image_id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Books.commit_upload(user.id, image_id) do
+    case Uploads.commit_upload(user.id, image_id) do
       {:ok, %{image_id: id, job_id: _}} ->
         conn
         |> put_status(202)
@@ -93,7 +94,7 @@ defmodule StacksWeb.UploadController do
   def upload_data(conn, %{"image_id" => image_id}) do
     {:ok, body, conn} = Plug.Conn.read_body(conn, length: 20_971_520)
 
-    case Books.store_upload_bytes(image_id, body) do
+    case Uploads.store_upload_bytes(image_id, body) do
       :ok ->
         send_resp(conn, 200, "")
 
