@@ -4,23 +4,92 @@
   "integration_branch": "feat/campaign-w5-315",
   "base": "feat/campaign-w4-314",
   "pr_opened": false,
-  "pr_policy": "DEFERRED — owner ruling 2026-07-30: wave PRs batch until the final wave",
+  "pr_policy": "DEFERRED \u2014 owner ruling 2026-07-30: wave PRs batch until the final wave",
   "children": {
-    "341": {"status": "in_progress", "title": "Unify create transactions; restore google_books_id; merge_edition keeps metadata", "level": 1, "depends_on": [], "merged": false},
-    "342": {"status": "in_progress", "title": "Terminal-failure wrapper + closed vision error set + SSE timeout alignment", "level": 1, "depends_on": [], "merged": false},
-    "343": {"status": "blocked", "title": "Wire POST /api/books/confirm into the manual path; delete the DIY flow", "level": 2, "depends_on": [341], "merged": false},
-    "331": {"status": "blocked", "title": "Convert 35 ad-hoc vision-client modules to the #327 steering seam", "level": 2, "depends_on": [342], "merged": false},
-    "344": {"status": "blocked", "title": "Resolver truth (4 collapse sites) + title_fallback catch-all + provisional-title UI", "level": 3, "depends_on": [341, 342, 343], "merged": false},
-    "345": {"status": "blocked", "title": "Extract Stacks.Books.ISBN and Stacks.Uploads (pure move, no behaviour change)", "level": 4, "depends_on": [341, 342, 343, 344], "merged": false}
+    "341": {
+      "status": "complete",
+      "title": "Unify create transactions; restore google_books_id; merge_edition keeps metadata",
+      "level": 1,
+      "depends_on": [],
+      "merged": true,
+      "commit": "b67b4da8",
+      "staff_review": "LGTM"
+    },
+    "342": {
+      "status": "in_progress",
+      "title": "Terminal-failure wrapper + closed vision error set + SSE timeout alignment",
+      "level": 1,
+      "depends_on": [],
+      "merged": false
+    },
+    "343": {
+      "status": "in_progress",
+      "title": "Wire POST /api/books/confirm into the manual path; delete the DIY flow",
+      "level": 2,
+      "depends_on": [
+        341
+      ],
+      "merged": false,
+      "blocked_on": null
+    },
+    "331": {
+      "status": "blocked",
+      "title": "Convert 35 ad-hoc vision-client modules to the #327 steering seam",
+      "level": 2,
+      "depends_on": [
+        342
+      ],
+      "merged": false
+    },
+    "344": {
+      "status": "blocked",
+      "title": "Resolver truth (4 collapse sites) + title_fallback catch-all + provisional-title UI",
+      "level": 3,
+      "depends_on": [
+        341,
+        342,
+        343
+      ],
+      "merged": false
+    },
+    "345": {
+      "status": "blocked",
+      "title": "Extract Stacks.Books.ISBN and Stacks.Uploads (pure move, no behaviour change)",
+      "level": 4,
+      "depends_on": [
+        341,
+        342,
+        343,
+        344
+      ],
+      "merged": false
+    }
   },
-  "ready_set": [341, 342],
-  "merge_order": [342, 341, 331, 343, 344, 345],
-  "discovered_issues": [],
+  "ready_set": [
+    343
+  ],
+  "merge_order": [
+    342,
+    341,
+    331,
+    343,
+    344,
+    345
+  ],
+  "discovered_issues": [
+    {
+      "issue": 346,
+      "title": "Moderation.build_book_attrs/4 drops resolver identifiers (same class as #341, one caller upstream)",
+      "found_by": 341,
+      "needs": "owner wave assignment"
+    }
+  ],
   "kickoff_approved": "2026-07-31",
   "notes": [
-    "Headline: Books.confirm/2 is fully built (duplicate detection, find_same_work merge, atomic create-and-place) with ZERO frontend/E2E callers — the campaign's dominant 'built but not wired' class.",
-    "5d was SPLIT into #344 (behaviour: resolver truth + provisional-title UI) and #345 (pure extraction). Reason: the original item mixed 4 error-handling fixes, an Elm UI treatment, and two ~350-LOC module extractions — over the scope bar and mixed concerns. The extraction goes LAST so it moves settled code.",
+    "Headline: Books.confirm/2 is fully built (duplicate detection, find_same_work merge, atomic create-and-place) with ZERO frontend/E2E callers \u2014 the campaign's dominant 'built but not wired' class.",
+    "5d was SPLIT into #344 (behaviour: resolver truth + provisional-title UI) and #345 (pure extraction). Reason: the original item mixed 4 error-handling fixes, an Elm UI treatment, and two ~350-LOC module extractions \u2014 over the scope bar and mixed concerns. The extraction goes LAST so it moves settled code.",
     "Serialised #343 (Page.Upload.elm) ahead of #344 (also Page.Upload.elm) deliberately: two agents editing the same Elm page in parallel worktrees is a merge conflict by construction.",
     "Wave 4 landed underneath: multi-shelf placements legal (get_placement_for_book/2 DELETED, list-returning replacement), verification_source NOT NULL + CHECK, closed proto enums with a build-failing coverage gate, Stacks.DataCorrection, and correct-then-migrate via Stacks.Release.deploy/0."
-  ]
+  ],
+  "updated_at": "2026-07-31"
 }
