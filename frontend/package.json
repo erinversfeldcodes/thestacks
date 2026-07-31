@@ -7,7 +7,6 @@
   },
   "scripts": {
     "build": "elm make src/Main.elm --output=elm.js",
-    "start": "elm make src/Main.elm --output=elm.js && open index.html",
     "test": "elm-test --compiler node_modules/.bin/elm"
   },
   "devDependencies": {
