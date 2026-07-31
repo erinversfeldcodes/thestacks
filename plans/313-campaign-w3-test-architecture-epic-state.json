@@ -1,0 +1,72 @@
+{
+  "epic_issue": 313,
+  "campaign": "staff-campaign-2026-07-30",
+  "integration_branch": "feat/campaign-w3-313",
+  "base": "feat/campaign-w2-312",
+  "pr_opened": false,
+  "pr_policy": "DEFERRED \u2014 owner ruling 2026-07-30: all wave PRs batch until the final wave completes",
+  "children": {
+    "327": {
+      "status": "complete",
+      "title": "Steerable vision seam; mocks out of lib/",
+      "level": 1,
+      "depends_on": [],
+      "merged": true,
+      "branch": "worktree-agent-a83a070f03f991a16"
+    },
+    "328": {
+      "status": "complete",
+      "title": "One SSE wire format; contract-derived fixtures",
+      "level": 1,
+      "depends_on": [],
+      "merged": true,
+      "branch": "worktree-agent-a6c823e61cc34806f"
+    },
+    "329": {
+      "status": "complete",
+      "title": "Honest factories (changeset/public-API construction)",
+      "level": 2,
+      "depends_on": [
+        327
+      ],
+      "merged": true,
+      "branch": "worktree-agent-acad2d268f08885fc"
+    },
+    "330": {
+      "status": "complete",
+      "title": "Execute test-critique verdicts",
+      "level": 3,
+      "depends_on": [
+        327,
+        328,
+        329
+      ],
+      "merged": true
+    }
+  },
+  "ready_set": [],
+  "merge_order": [
+    328,
+    327,
+    329,
+    330
+  ],
+  "discovered_issues": [
+    {
+      "issue": 331,
+      "desc": "35 ad-hoc vision-client modules across 8 test files, now mechanically convertible against #327's seam",
+      "filed": true
+    }
+  ],
+  "kickoff_approved": "2026-07-30",
+  "notes": [
+    "3 levels, not fully parallel: 327/329/330 all touch apps/core/test files (upload_pipeline_test, books_test) so they are serialised; 328 is frontend-only and runs alongside 327.",
+    "Acceptance instrument for the wave = the probe battery: 5-field SSE break (328), 4 impossible-state probes (329), 3 falsifiability probes (330), 1 steering probe (327).",
+    "Process patterns carried from W0/W2: worktrees ff-merge the local integration branch (shared refs, no fetch \u2014 branch is unpushed); agent commits are denied so children stage + write a one-line message to scratchpad and the lead commits; long local suites run under caffeinate -i (machine sleep produced phantom ExUnit timeouts twice).",
+    "327 merged early (before 328) because 329 depends only on it and is the wave long pole; stacks are disjoint so merge order carried no conflict risk.",
+    "328 merged: six-field probe battery (16 red each) closes the wave premise; reviewer independently probed the new absence-based contract pin (4/1 red) and confirmed heartbeat Err-branch handling is intended.",
+    "Level 1 gate (327+328 merged): just ci 15/16 groups PASS under caffeinate \u2014 elixir test clean first try; only the standing dockle local-Docker-daemon exception (sobelow+Trivy clean within that group). squawk + licenses PASS.",
+    "329 merged: 154 tests reddened and repaired with ZERO lib/ changes; left 14 permanent guard-rail tests (factory_honesty_test.exs) rather than one-off probes; suite 3208/0. Found that price_snapshot_factory \u2014 the exemplar the spec cited \u2014 was itself committing the desync it warns about (Ecto has no identity map).",
+    "FINALIZED 2026-07-30: completion-audit PASS; live drive of the upload loop on preview validated #328 strict decoder (0 errors, 0 decode issues); wave gate just ci 15/16. PR deferred per owner batching ruling."
+  ]
+}

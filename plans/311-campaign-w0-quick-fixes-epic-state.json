@@ -1,0 +1,57 @@
+{
+  "epic_issue": 311,
+  "campaign": "staff-campaign-2026-07-30",
+  "integration_branch": "feat/campaign-w0-311",
+  "pr_opened": true,
+  "children": {
+    "322": {
+      "status": "complete",
+      "title": "Pipeline guards (0d,0e)",
+      "branch": "worktree-agent-ad321ff7a6cd7090e",
+      "worktree": "agent-managed",
+      "depends_on": [],
+      "merged": true,
+      "state_file": null
+    },
+    "323": {
+      "status": "complete",
+      "title": "Config/ops (0a,0b,0c)",
+      "branch": "worktree-agent-aec02aee7d6400bd2",
+      "worktree": "agent-managed",
+      "depends_on": [],
+      "merged": true,
+      "state_file": null
+    },
+    "324": {
+      "status": "complete",
+      "title": "Elm fixes (0f,0g,0h)",
+      "branch": "worktree-agent-ae0e176306628c5d7",
+      "worktree": "agent-managed",
+      "depends_on": [],
+      "merged": true,
+      "state_file": null
+    }
+  },
+  "ready_set": [],
+  "merge_order": [
+    323,
+    324,
+    322
+  ],
+  "discovered_issues": [
+    {
+      "desc": "cleanup-preview.sh drain dies under pipefail when core app absent (first deploy of new branch name)",
+      "fix_commit": "56a43dbe",
+      "folded_into": 323
+    }
+  ],
+  "kickoff_approved": "2026-07-30",
+  "notes": [
+    "Level 1 only \u2014 all children independent. just ci on integration branch is the gate. Finalization drive covers screenshot + live-signal evidence.",
+    "323+324 merged to integration e5b7a0f3; just ci running; 322 in flight. Subagent commits denied by permission system \u2014 lead commits staged work in worktrees (pattern for remaining waves).",
+    "BASE CORRECTION: integration branch was wrongly cut from main (110 commits behind feat/staff-engineer, which holds the prior campaign Wave 0 + the code this wave patches). Reset to feat/staff-engineer base and re-merged all three children (4c461444, 2f63cd90, 0f712b08). Gitignored proto gen/ artifacts had been regenerated against main proto by the killed CI run \u2014 regenerated via gen-ecto-proto.sh + gen-elixir-proto.sh. All three staff-reviews recorded in issues. Awaiting just ci, then finalization.",
+    "Discovered mid-finalization: teardown drain pipeline killed by missing app; fixed 56a43dbe (folded into #323 scope). Deploy retrying.",
+    "FINALIZED 2026-07-30: all evidence live-driven; completion-audit PASS with one named deferral (EMAIL_FROM delivery = owner prod action). Migration split 9dbfb9fa. Awaiting PR open via finalize-pr."
+  ],
+  "pr": "https://github.com/erinversfeldcodes/thestacks/pull/407"
+}

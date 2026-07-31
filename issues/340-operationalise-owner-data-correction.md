@@ -62,3 +62,6 @@ elixir-agent, with a scoping pass first.
 
 ## Progress Notes
 Filed 2026-07-30 by the lead, consolidating two owner rulings that asked for the same capability. Not scheduled — sequence after #339 and after the owner decides which wave it belongs to.
+
+**Wave assignment (owner-approved 2026-07-31): Wave 7.**
+Scheduled as item **7d**, deliberately alongside **7c** (owner-only un-merge process): your two rulings — un-merge as "a form of data correction that we should be building processes for" and the ISBN repair "operationalised … for the future" — describe **one** capability. 7c's un-merge is #340's first consumer; do not build two mechanisms.

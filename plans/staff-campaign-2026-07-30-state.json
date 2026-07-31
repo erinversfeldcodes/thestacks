@@ -1,0 +1,376 @@
+{
+  "campaign": "staff-campaign-2026-07-30",
+  "plan": "plans/staff-campaign-2026-07-30.md",
+  "created_at": "2026-07-30T00:00:00Z",
+  "updated_at": "2026-07-31",
+  "status": "approved_filed",
+  "current_wave": "5",
+  "_why": [
+    "Stage 6 artifact for the 2026-07-30 Phase 1 (+extension) campaign. Emitted with the plan,",
+    "before any issue exists: every item is not_started with issue: null. On approval, Stage 7",
+    "files ONE EPIC ISSUE PER WAVE via create-issue and writes its number into that wave's items;",
+    "the orchestrator's Epic Parallel Execution creates the real children. wave-status refuses",
+    "any item marked done without a backing issue file, an evidenced DoD, and a staff-review",
+    "verdict in Progress Notes.",
+    "Supersedes the unstarted Waves 1-9 of staff-campaign-2026-07-27 (its Wave 0 is complete and",
+    "stands); surviving items were absorbed into this plan with corrections.",
+    "Stage 7 complete 2026-07-30: epics 311-321 filed (one per wave; Wave 1 struck). Orchestrator/Mode E spins children per epic.",
+    "Owner ruling 2026-07-30: all wave PRs batch until the final wave completes (W0 PR #407 already open, stands).",
+    "Wave-3 discoveries assigned by owner 2026-07-30: #331 -> Wave 5 (same vision/upload test files), #332 -> Wave 6 (same visibility/Bookshelf module family)."
+  ],
+  "human_decisions_pending": [],
+  "_owner_rulings_wave7_2026_07_30": [
+    "undo-remove: SPEC \u2014 'Removed \u2014 Undo' toast in UI",
+    "un-merge: SPEC owner-only \u2014 platform-owner data-correction process, not public UI",
+    "cancel-deletion grace: EXCLUDE \u2014 immediate erasure stays",
+    "photo delete: EXCLUDE publicly; follow-up verifies the auto-deletion path (with deferred GDPR revisit)"
+  ],
+  "_owner_rulings_2026_07_30": [
+    "Wave 1 (GDPR completion) STRUCK \u2014 revisit R6 findings after implementation. All other waves and order approved.",
+    "DiscoverBookstoreEventsJob: WIRE, do not delete \u2192 Wave 11e (cron + structured extractor + read path).",
+    "Placement model: multi-shelf placement of one ISBN is legal; same-ISBN-same-shelf stays forbidden (existing index); book detail must highlight presence on 2+ of Library/Antilibrary/Reading Pile/Wish List with remove affordances. Wave 4a rewritten accordingly; no user-level unique constraint; no data repair needed."
+  ],
+  "waves": {
+    "0": {
+      "title": "Eight small fixes with outsized payoff",
+      "status": "complete",
+      "items": {
+        "0a": {
+          "title": "Fix metrics scrape auth (401 loop)",
+          "status": "complete",
+          "issue": 311
+        },
+        "0b": {
+          "title": "Set EMAIL_FROM; prod email deliverability",
+          "status": "complete",
+          "issue": 311
+        },
+        "0c": {
+          "title": "Stop SMOKE_TESTS_ENABLED being set unconditionally in prod",
+          "status": "complete",
+          "issue": 311
+        },
+        "0d": {
+          "title": "Interim SCRAPE_OUTCOME_RATE_LIMITED clause",
+          "status": "complete",
+          "issue": 311
+        },
+        "0e": {
+          "title": "Reject 0-byte uploads in verify_object_exists",
+          "status": "complete",
+          "issue": 311
+        },
+        "0f": {
+          "title": "Delete UserMenu inline position style (header reflow)",
+          "status": "complete",
+          "issue": 311
+        },
+        "0g": {
+          "title": "Re-parent reading-pile progress panel",
+          "status": "complete",
+          "issue": 311
+        },
+        "0h": {
+          "title": "Notifications.init NotAsked when tokenless",
+          "status": "complete",
+          "issue": 311
+        }
+      }
+    },
+    "1": {
+      "title": "GDPR completion \u2014 STRUCK by owner 2026-07-30 (revisit R6 findings post-implementation) \u2014 bucket now holds #338",
+      "status": "complete",
+      "items": {
+        "1x": {
+          "title": "Wave struck by owner ruling; R6 findings recorded in plan for later revisit",
+          "status": "complete",
+          "issue": null,
+          "note": "informal \u2014 struck at Stage 6 by owner, no work performed or required",
+          "informal": true
+        }
+      },
+      "deferred_bucket": [
+        {
+          "issue": 338,
+          "title": "placement notes free text in warehouse against house convention",
+          "ruled": "2026-07-30 owner: revisit R6 GDPR findings post-implementation"
+        }
+      ]
+    },
+    "2": {
+      "title": "Deletions (~2k LOC)",
+      "status": "complete",
+      "items": {
+        "2a": {
+          "title": "Four dead workers + reviews scaffolding + spine_data + tests",
+          "status": "complete",
+          "issue": 312
+        },
+        "2b": {
+          "title": "Route.Settings collapse + LogoutCompleted + phantom tokens + dead env vars + stale comments + superseded upload routes",
+          "status": "complete",
+          "issue": 312
+        }
+      }
+    },
+    "3": {
+      "title": "Test architecture",
+      "status": "complete",
+      "items": {
+        "3a": {
+          "title": "Factories through changesets/public API",
+          "status": "complete",
+          "issue": 313
+        },
+        "3b": {
+          "title": "Steerable vision mock; mocks to test/support",
+          "status": "complete",
+          "issue": 313
+        },
+        "3c": {
+          "title": "Single SSE wire format + proto-derived fixtures + decoder dedup",
+          "status": "complete",
+          "issue": 313
+        },
+        "3d": {
+          "title": "Rewrite/remove echo + unfalsifiable tests; fail-closed rate-limit; consumed-reset-token test; tag fixes",
+          "status": "complete",
+          "issue": 313
+        }
+      }
+    },
+    "4": {
+      "title": "Contracts and constraints",
+      "status": "complete",
+      "items": {
+        "4a": {
+          "title": "Multi-shelf placement model: de-raise lookup (fix live 500), multi-shelf highlight + remove in book detail, dup-notice parity, search shows all shelves; same-shelf index stays",
+          "status": "complete",
+          "issue": 314
+        },
+        "4b": {
+          "title": "verification_source; placements.book_edition_id; auth FKs; lower(email); ISBN CHECK",
+          "status": "complete",
+          "issue": 314
+        },
+        "4c": {
+          "title": "Proto-enum codegen for Elixir + lint coverage gate",
+          "status": "complete",
+          "issue": 314
+        },
+        "4d": {
+          "title": "Event-registry completeness + image.* observer decision",
+          "status": "complete",
+          "issue": 314
+        }
+      }
+    },
+    "5": {
+      "title": "Book identity: wire the deep verb",
+      "status": "not_started",
+      "items": {
+        "5a": {
+          "title": "Wire POST /api/books/confirm into manual path; delete DIY flow",
+          "status": "not_started",
+          "issue": 315
+        },
+        "5b": {
+          "title": "Unify create transactions; keep merge metadata; resolver-collapse fixes",
+          "status": "not_started",
+          "issue": 315
+        },
+        "5c": {
+          "title": "Terminal-failure marking + closed vision error set + SSE timeout alignment",
+          "status": "not_started",
+          "issue": 315
+        },
+        "5d": {
+          "title": "Provisional-title UI (D1); extract Books.ISBN + Uploads",
+          "status": "not_started",
+          "issue": 315
+        },
+        "5e": {
+          "title": "Convert 35 remaining ad-hoc vision-client modules to the #327 steering seam",
+          "status": "not_started",
+          "issue": 331
+        }
+      }
+    },
+    "6": {
+      "title": "Session UX + deduplication sweep",
+      "status": "not_started",
+      "items": {
+        "6a": {
+          "title": "Persist-first login + AuthState type + backstop + trap reset + redirectAfterLogin",
+          "status": "not_started",
+          "issue": 316
+        },
+        "6b": {
+          "title": "Title from Page; Arrival notice type; decodeFlags CorruptStoredAuth",
+          "status": "not_started",
+          "issue": 316
+        },
+        "6c": {
+          "title": "Authed-request wrapper + reflection gate + 3 write-form pages",
+          "status": "not_started",
+          "issue": 316
+        },
+        "6d": {
+          "title": "Loading!=empty + Api timeouts + shell connectivity",
+          "status": "not_started",
+          "issue": 316
+        },
+        "6e": {
+          "title": "Success/ack states (forgot/reset); save-button promotion; password-rule single source; Visibility type; Duration",
+          "status": "not_started",
+          "issue": 316
+        },
+        "6f": {
+          "title": "readOnly guard in handleOrganiser (mutation guard moves from view to update fn)",
+          "status": "not_started",
+          "issue": 332
+        }
+      }
+    },
+    "7": {
+      "title": "Recovery and unhappy paths",
+      "status": "not_started",
+      "items": {
+        "7a": {
+          "title": "Resend-confirmation (US-14.4.2) + 24h-erasure reconciliation",
+          "status": "not_started",
+          "issue": 317
+        },
+        "7b": {
+          "title": "Upload failure UX; 429 UX; W-10 distinct copy; double-send dedup",
+          "status": "not_started",
+          "issue": 317
+        },
+        "7c": {
+          "title": "Undo-remove toast (spec'd); owner-only un-merge process; record the two exclusions in mapping [un-merge process builds on #340 (7d) \u2014 same capability, do not solve twice]",
+          "status": "not_started",
+          "issue": 317
+        },
+        "7d": {
+          "title": "Operationalise owner-facilitated data correction (dry-run, idempotent, audited) \u2014 generalises the pattern #339 built; 7c's un-merge process is its first consumer",
+          "status": "not_started",
+          "issue": 340
+        }
+      }
+    },
+    "8": {
+      "title": "First impressions and navigation",
+      "status": "not_started",
+      "items": {
+        "8a": {
+          "title": "Nav IA rebuild: Elm-owned disclosure; Add Book primary; user menu",
+          "status": "not_started",
+          "issue": 318
+        },
+        "8b": {
+          "title": "Onboarding rebuild per D2 + modality honoured",
+          "status": "not_started",
+          "issue": 318
+        },
+        "8c": {
+          "title": "Authed home; settings hub style + IA fold; Looking-for-a-Home room; About copy",
+          "status": "not_started",
+          "issue": 318
+        },
+        "8d": {
+          "title": "Side-by-side verify; empty-state CTAs; widget styling; a11y follow-through",
+          "status": "not_started",
+          "issue": 318
+        }
+      }
+    },
+    "9": {
+      "title": "Token system + value gate",
+      "status": "not_started",
+      "items": {
+        "9a": {
+          "title": "Spacing scale; semantic state tokens; type-scale extension",
+          "status": "not_started",
+          "issue": 319
+        },
+        "9b": {
+          "title": "Hex migration (exact duplicates first); indicator rules",
+          "status": "not_started",
+          "issue": 319
+        },
+        "9c": {
+          "title": "Value-level third CSS gate",
+          "status": "not_started",
+          "issue": 319
+        }
+      }
+    },
+    "10": {
+      "title": "Documentation, stories, mapping",
+      "status": "not_started",
+      "items": {
+        "10a": {
+          "title": "Map 7 unmapped stories; fix mapping:1857 + phantom; refresh 6 stale stories",
+          "status": "not_started",
+          "issue": 320
+        },
+        "10b": {
+          "title": "Write missing launch + shipped-unstoried stories",
+          "status": "not_started",
+          "issue": 320
+        },
+        "10c": {
+          "title": "notes corrections; registry moduledoc; record exclusions in mapping; config key docs; re-scope #091 + #191",
+          "status": "not_started",
+          "issue": 320
+        }
+      }
+    },
+    "11": {
+      "title": "Launch gates (existing backlog, re-pointed)",
+      "status": "not_started",
+      "items": {
+        "11a": {
+          "title": "Invite-only registration",
+          "status": "not_started",
+          "issue": 321
+        },
+        "11b": {
+          "title": "Goodreads CSV import",
+          "status": "not_started",
+          "issue": 321
+        },
+        "11c": {
+          "title": "POSSE/Substack MVP",
+          "status": "not_started",
+          "issue": 321
+        },
+        "11d": {
+          "title": "Prod deploy execution (#163) + backup verification (#066) + beta feedback",
+          "status": "not_started",
+          "issue": 321
+        },
+        "11e": {
+          "title": "Wire bookstore-events vertical: cron + structured extractor + read path (owner ruling)",
+          "status": "not_started",
+          "issue": 321
+        },
+        "11f": {
+          "title": "Resolve the orphaned enrichment.reviews_scraped wiring (emitter deleted by Wave 2 45ddcc44; handler + payload contract + dbt mapping + 2 dbt models remain)",
+          "status": "not_started",
+          "issue": 336
+        },
+        "11g": {
+          "title": "Fix the squawk gate (vacuous for uncommitted migrations; SQUAWK_TARGET_DIR scans all history) \u2014 MUST land BEFORE 11d prod-deploy execution",
+          "status": "not_started",
+          "issue": 337
+        }
+      }
+    }
+  },
+  "_owner_rulings_wave4_2026_07_30": [
+    "ISBN bad-data repair: repair-then-validate, built as a REUSABLE operationalised capability (dry-run, idempotent, audited, explicitly scoped) \u2014 not a bespoke migration. Verbatim: \"we should do this in a way that informs how we handle the repair of bad data in the future, ideally operationalising this kind of repair.\"",
+    "ISBN hard-gate hole: trace it now inside #339. Verbatim: \"bear in mind this may be as a result of bad seed data. if it is then we need to correct the seed data and also tighten the seed process to not allow this.\"",
+    "Discovery assignments approved 2026-07-31: #340\u2192Wave 7 (7d, merged with 7c un-merge); #336\u2192Wave 11 (11f); #337\u2192Wave 11 (11g), sequenced BEFORE 11d prod-deploy execution; #338\u2192struck GDPR revisit bucket."
+  ]
+}
