@@ -16,11 +16,14 @@
       "staff_review": "LGTM"
     },
     "342": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "Terminal-failure wrapper + closed vision error set + SSE timeout alignment",
       "level": 1,
       "depends_on": [],
-      "merged": false
+      "merged": true,
+      "commit": "28d96aa3",
+      "staff_review": "LGTM",
+      "note": "built across two agents; first stalled, WIP preserved at 0d8d3bc5"
     },
     "343": {
       "status": "complete",
@@ -35,13 +38,14 @@
       "staff_review": "LGTM"
     },
     "331": {
-      "status": "blocked",
+      "status": "in_progress",
       "title": "Convert 35 ad-hoc vision-client modules to the #327 steering seam",
       "level": 2,
       "depends_on": [
         342
       ],
-      "merged": false
+      "merged": false,
+      "blocked_on": null
     },
     "344": {
       "status": "blocked",
@@ -67,7 +71,9 @@
       "merged": false
     }
   },
-  "ready_set": [],
+  "ready_set": [
+    331
+  ],
   "merge_order": [
     342,
     341,
