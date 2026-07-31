@@ -5,7 +5,6 @@ module Page.Login exposing
     , Msg(..)
     , OutMsg(..)
     , SubmitError(..)
-    , TransitionState(..)
     , errorMessage
     , expiredDraftInit
     , expiredInit
@@ -42,8 +41,12 @@ type alias Model =
     , passwordConfirm : String
     , displayName : String
     , mode : Mode
+
+    -- The whole lifecycle of a submission: `Loading` while the request is in
+    -- flight, `Success authResponse` once the shell has been handed the
+    -- credential, `Failure` otherwise. Deliberately the ONLY record of that
+    -- lifecycle — see `isSubmitDisabled` for why a second flag was removed.
     , submitState : RemoteData SubmitError AuthResponse
-    , transitionState : TransitionState
     , emailValidation : FieldValidation
     , passwordValidation : FieldValidation
     , passwordConfirmValidation : FieldValidation
@@ -85,12 +88,6 @@ type SubmitError
     | SubmitValidationError (List ( String, List String ))
 
 
-type TransitionState
-    = Idle
-    | Transitioning
-    | Complete
-
-
 type Msg
     = EmailChanged String
     | PasswordChanged String
@@ -102,12 +99,15 @@ type Msg
     | GotForgotResponse (Result Http.Error ())
     | GotAuthResponse (Result Http.Error AuthResponse)
     | GotRegisterResponse (Result RegisterError ())
-    | TransitionCompleted AuthResponse
 
 
+{-| What the card asks the shell to do. There is exactly one way to report a
+successful sign-in — `LoggedIn` — and it is emitted on the same update that
+decodes the `200`. The card has no "credential accepted but not yet handed over"
+outcome to report, because it never holds one (#359).
+-}
 type OutMsg
     = NoOut
-    | StartTransition AuthResponse
     | LoggedIn AuthResponse
     | RegistrationSucceeded String
 
@@ -120,7 +120,6 @@ init =
     , displayName = ""
     , mode = LoginMode
     , submitState = NotAsked
-    , transitionState = Idle
     , emailValidation = Pristine
     , passwordValidation = Pristine
     , passwordConfirmValidation = Pristine
@@ -305,9 +304,22 @@ update msg model =
             ( { model | submitState = Loading, sessionExpired = False, draftSaved = False, accountDeleted = False }, cmd, NoOut )
 
         GotAuthResponse (Ok authResponse) ->
-            ( { model | submitState = Success authResponse, transitionState = Transitioning }
+            -- ⛔ Persist-first (#359). The credential is handed to the shell on the
+            -- SAME update as the 200 — no port round-trip, no animation, nothing a
+            -- browser is free to decline to run. This branch used to emit
+            -- `StartTransition` and wait for a Web Animations `finished` promise
+            -- before `Main` was allowed to store the token; `requestAnimationFrame`
+            -- never fires while the window is occluded or backgrounded, so the
+            -- promise never settled and the credential was silently discarded —
+            -- three logins returning 200 with nothing in localStorage, driven live
+            -- 2026-07-30. The door animation is decoration and now runs strictly
+            -- after the token is durable.
+            --
+            -- Shape mirrors `GotRegisterResponse (Ok ())` below: decide here, hand
+            -- the outcome up exactly once, leave no half-finished state on the card.
+            ( { model | submitState = Success authResponse }
             , Cmd.none
-            , StartTransition authResponse
+            , LoggedIn authResponse
             )
 
         GotAuthResponse (Err err) ->
@@ -324,12 +336,6 @@ update msg model =
 
         GotRegisterResponse (Err registerError) ->
             ( { model | submitState = Failure (fromRegisterError registerError) }, Cmd.none, NoOut )
-
-        TransitionCompleted authResponse ->
-            ( { model | transitionState = Complete }
-            , Cmd.none
-            , LoggedIn authResponse
-            )
 
 
 view : Model -> Html Msg
@@ -596,6 +602,12 @@ viewCredentialsForm model =
             Loading ->
                 span [ class "spinner spinner--small" ] []
 
+            -- A handed-over credential keeps spinning: the shell has the token and
+            -- is navigating, so snapping the label back to "Enter the Stacks" would
+            -- read as "nothing happened" for the frame before the page changes.
+            Success _ ->
+                span [ class "spinner spinner--small" ] []
+
             _ ->
                 text
                     (case model.mode of
@@ -621,9 +633,35 @@ viewCredentialsForm model =
     ]
 
 
+{-| Is the submit button locked?
+
+⛔ Derived from `submitState` alone, on purpose. This used to read a SECOND flag,
+`transitionState`, which latched to `Transitioning` the moment a 200 arrived and
+had no reset path anywhere — not on `ModeSwitched`, not on a keystroke. A login
+whose door animation never finished (an occluded window: `requestAnimationFrame`
+does not fire, so the completion signal never arrives) therefore left the card
+permanently unable to submit, with no way back short of a reload — the visible
+half of #359. Deleting the duplicate makes that trap unrepresentable rather than
+merely reset: there is one field, and `ModeSwitched` already clears it.
+
+`Success` still locks the button — the shell has been handed the credential and
+is navigating; a second submit would be a second login.
+
+-}
 isSubmitDisabled : Model -> Bool
 isSubmitDisabled model =
     let
+        submissionHandedOver =
+            case model.submitState of
+                Loading ->
+                    True
+
+                Success _ ->
+                    True
+
+                _ ->
+                    False
+
         isInvalidOrPristine validation =
             case validation of
                 Valid ->
@@ -647,7 +685,7 @@ isSubmitDisabled model =
                 _ ->
                     True
     in
-    model.submitState == Loading || model.transitionState /= Idle || fieldsInvalid
+    submissionHandedOver || fieldsInvalid
 
 
 fieldClass : FieldValidation -> String

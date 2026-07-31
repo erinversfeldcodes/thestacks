@@ -6,6 +6,7 @@ module TestHelpers exposing
     , bookDetailProgramWithOut
     , bookshelfProgram
     , libraryProgram
+    , loginEffects
     , loginProgram
     , namedPlacement
     , placementWithPages

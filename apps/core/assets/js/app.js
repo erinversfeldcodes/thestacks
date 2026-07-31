@@ -336,11 +336,46 @@ if (app.ports && app.ports.requestListingDraft) {
 
 // ---------------------------------------------------------------------------
 // Port: WAAPI login dolly-shot transition (Issue #028)
+//
+// ⛔ This handler is DECORATION and nothing downstream of it may matter.
+//
+// It used to be load-bearing: `onLoginTransitionComplete` was the app's cue to
+// write the auth token to localStorage, and that cue was `Promise.all(...)` over
+// the WAAPI `finished` promises, inside a `requestAnimationFrame`. Neither fires
+// while the window is occluded or backgrounded — rAF is not throttled there, it
+// is not called at all — so the callback below never ran, the promise never
+// settled, and a login that had already returned 200 was silently discarded.
+// Driven live 2026-07-30: three logins, three 200s, nothing in localStorage, ten
+// frozen 300 ms transitions, zero WAAPI animations, no follow-up request (#359).
+//
+// Elm now persists the credential on the update that decodes the 200, so the
+// completion signal only retires a cosmetic state. Two rules keep it that way:
+//
+//   1. The signal fires EXACTLY ONCE, from whichever of the animations or the
+//      backstop timer gets there first — including the rejection path, because
+//      navigating away cancels these animations and `finished` then rejects.
+//   2. The backstop is armed OUTSIDE the frame callback. A timer in a background
+//      tab is throttled, not cancelled, and fires on wake; rAF is neither. Arming
+//      it inside would put it behind the very frame that never comes.
 // ---------------------------------------------------------------------------
 if (app.ports && app.ports.playLoginTransition) {
   app.ports.playLoginTransition.subscribe(function (config) {
+    var dur = (config && config.duration) || 4000;
+    var signalled = false;
+
+    function signalComplete() {
+      if (signalled) return;
+      signalled = true;
+      if (app.ports && app.ports.onLoginTransitionComplete) {
+        app.ports.onLoginTransitionComplete.send(null);
+      }
+    }
+
+    // Rule 2. Elm arms its own backstop as well; this one keeps the JS side from
+    // holding a promise nobody will ever settle.
+    setTimeout(signalComplete, dur + 1000);
+
     requestAnimationFrame(function () {
-      var dur = (config && config.duration) || 4000;
       var ease = "cubic-bezier(0.4, 0, 0.15, 1)";
       var animations = [];
 
@@ -492,15 +527,18 @@ if (app.ports && app.ports.playLoginTransition) {
         );
       }
 
+      // Nothing to animate — the login scene has already been unmounted by the
+      // navigation the 200 triggered. Settle now rather than wait out the timer.
+      if (animations.length === 0) {
+        signalComplete();
+        return;
+      }
+
       Promise.all(
         animations.map(function (a) {
           return a.finished;
         })
-      ).then(function () {
-        if (app.ports && app.ports.onLoginTransitionComplete) {
-          app.ports.onLoginTransitionComplete.send(null);
-        }
-      });
+      ).then(signalComplete, signalComplete);
     });
   });
 }

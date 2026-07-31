@@ -176,12 +176,12 @@ suite =
                 \() ->
                     List.member Main.InitOnboarding Main.loginEffects
                         |> Expect.equal True
-            , test "still persists the auth and navigates home" <|
+            , test "still persists the auth and navigates to the page they asked for" <|
                 \() ->
                     Main.loginEffects
                         |> Expect.all
                             [ \effects -> Expect.equal True (List.member Main.PersistAuth effects)
-                            , \effects -> Expect.equal True (List.member Main.NavigateHome effects)
+                            , \effects -> Expect.equal True (List.member Main.NavigateToRequestedPage effects)
                             ]
             ]
         , describe "shouldShowOnboarding"
