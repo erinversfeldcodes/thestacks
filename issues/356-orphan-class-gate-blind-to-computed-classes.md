@@ -80,3 +80,20 @@ elm-agent + design review.
 
 ## Progress Notes
 Filed 2026-07-31 by the lead. Verified by running the gate's own regex against `Page/Upload.elm`: `upload-shelf-picker__shelf` is **not** extracted, and `grep -cE "\.upload-shelf-picker__shelf[^a-z-]" frontend/css/main.css` → **0**. Repo-wide count of computed `class (…)` constructs: **42**.
+
+## Partial fix landed 2026-07-31 — the CSS, not the gate
+The owner asked for the visual defect to be fixed during the Wave 5 close, with **"a distinct un/selected treatment that is compatible with the rest of the aesthetic"**. Done in `frontend/css/main.css` beside `.upload-shelf-picker__shelves`:
+
+- **Unselected** recedes — transparent fill, `var(--border)` hairline, `var(--text-muted)`, normal weight.
+- **Selected** advances — `rgba(74, 124, 89, 0.22)` fill, `var(--accent)` border, `var(--text)`, weight 600.
+- The two states differ in **three channels** (fill, border, weight/colour) rather than hue alone, so the choice stays legible to a reader who cannot distinguish the green.
+- ⚠️ `.upload-shelf-picker__shelf--selected` is listed **with `:hover`** deliberately: bare, it is (0,1,0) and loses to `.upload-shelf-picker__shelf:hover` at (0,2,0) — the specificity trap that once cost this project seven modifiers their state on hover. Pointing at a chosen shelf must not make it look unchosen.
+
+Verified on the live preview by injecting the exact rules and reading **computed** styles rather than eyeballing a screenshot:
+```
+selected   bg rgba(74,124,89,0.22)  border rgb(74,124,89)      color rgb(232,220,200)  weight 600
+unselected bg rgba(0,0,0,0)         border rgba(255,255,255,.1) color rgb(160,144,112)  weight 400
+```
+Counterfactual: removing the injected rules reverts the button to `rgb(239,239,239)` — native grey — confirming the deployed build has no rule and this CSS is what fixes it. `check-css.sh` 732 rules / 0 problems / 0 collisions; `lint-elm.sh` clean.
+
+**⛔ The gate itself is still blind — this issue remains OPEN for that.** Requirements 1, 2 and 4 are untouched: the extractor still cannot see the 42 computed `class (…)` constructs, so the next class named only inside one will ship unstyled exactly as this one did. Fixing the symptom while the detector stays blind is the smaller half of the work.

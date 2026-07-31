@@ -5612,6 +5612,53 @@ h4 {
     gap: 0.75rem;
 }
 
+/* The shelf choices on the manual-ISBN and photo verification steps. These are
+   a radio group in behaviour — exactly one is chosen — but they are <button>s,
+   so without a reset they render as native controls: white bars with black
+   text on the dark ground. They had no rule at all until #356; the gate that
+   should have caught it is blind to the computed `class (if …)` form these use.
+   The container above still says `list-style: none` from when they were <li>s.
+
+   Unselected recedes and selected advances, and the two differ in THREE
+   channels — fill, border and text weight/colour — not in hue alone, so the
+   choice stays legible to a reader who cannot distinguish the green. */
+.upload-shelf-picker__shelf {
+    display: block;
+    width: 100%;
+    padding: 0.6rem 0.9rem;
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    text-align: left;
+    color: var(--text-muted);
+    background-color: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease;
+}
+
+.upload-shelf-picker__shelf:hover {
+    color: var(--text);
+    border-color: var(--accent);
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* `:hover` is listed on the selected rule deliberately. A bare
+   `.upload-shelf-picker__shelf--selected` is (0,1,0) and loses to
+   `.upload-shelf-picker__shelf:hover` at (0,2,0) — the exact specificity trap
+   that cost this project seven modifiers their state on hover. Pointing at a
+   chosen shelf must not make it look unchosen. */
+.upload-shelf-picker__shelf--selected,
+.upload-shelf-picker__shelf--selected:hover {
+    color: var(--text);
+    background-color: rgba(74, 124, 89, 0.22);
+    border-color: var(--accent);
+    font-weight: 600;
+}
+
 /* Assorted small text and controls that share no structural role. Given the body face at small size, which is the correct default for all of them; each still wants a look on its own surface. */
 .book-detail__author-events,
 .book-detail__author-rss,
