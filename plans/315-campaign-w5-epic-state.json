@@ -64,7 +64,7 @@
       "staff_review": "LGTM"
     },
     "345": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "Extract Stacks.Books.ISBN and Stacks.Uploads (pure move, no behaviour change)",
       "level": 4,
       "depends_on": [
@@ -73,13 +73,13 @@
         343,
         344
       ],
-      "merged": false,
-      "blocked_on": null
+      "merged": true,
+      "blocked_on": null,
+      "commit": "95713f86",
+      "staff_review": "LGTM"
     }
   },
-  "ready_set": [
-    345
-  ],
+  "ready_set": [],
   "merge_order": [
     342,
     341,
@@ -111,6 +111,13 @@
       "issue": 352,
       "title": "search_by_title swallows outages into :not_found and negative-caches them for 1h",
       "found_by": 344,
+      "needs": "owner wave assignment"
+    },
+    {
+      "issue": 353,
+      "title": "erasure leaves uploaded_images rows with user_id; schema guard structurally blind to a missing FK",
+      "found_by": 345,
+      "severity": "P1",
       "needs": "owner wave assignment"
     }
   ],

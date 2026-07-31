@@ -123,3 +123,26 @@ elixir-agent.
 Filed 2026-07-31 from the `gdpr-review` lens run during #345. #345 is a pure module
 extraction and neither caused nor worsened this; the review simply asked the erasure
 question against a real database and got a real answer.
+
+## Lead verification and the generalisation (2026-07-31)
+Independently confirmed against a live schema: `op.uploaded_images` carries exactly two foreign keys —
+`uploaded_images_book_id_fkey` and `uploaded_images_book_edition_id_fkey` — and **none to `op.users`**,
+despite holding a `user_id`.
+
+**The important part is not this table, it is the guard's shape.** The erasure schema-guard enumerates
+FKs that *reference* `op.users` and checks each is CASCADE or an allowlisted SET NULL. That makes it
+strong against the wrong-delete-behaviour defect — verified during #335's review, where weakening one
+FK to `NO ACTION` reddened it with `Offenders: ["auth_token_families.user_id (a)"]` — and **structurally
+blind to a column that should be an FK and is not**. A guard that audits the edges that exist cannot
+see a missing edge.
+
+So the fix in Technical Requirement 3 (extend the guard) is the load-bearing half of this issue, not a
+tidy-up. Whatever shape it takes, it should answer: *which columns look like they identify a user but
+have no FK to `op.users`?* — and the probe for it is to add such a column and confirm the guard reddens.
+
+Two related notes: **#335** removed two hand-rolled deletion steps precisely because the guard covered
+those FKs, which is correct *for FKs that exist* — that reasoning does not extend to this case, and the
+distinction is worth keeping straight when reading either issue. And the ~30-day TTL sweep that bounds
+this is `Stacks.GDPR.ImageRetention.cleanup_expired_images/0`; it deletes on `expires_at`, which is a
+retention policy, not an erasure guarantee — a reader who asks to be forgotten should not have to wait
+out a TTL.
