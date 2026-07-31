@@ -97,3 +97,5 @@ unselected bg rgba(0,0,0,0)         border rgba(255,255,255,.1) color rgb(160,14
 Counterfactual: removing the injected rules reverts the button to `rgb(239,239,239)` — native grey — confirming the deployed build has no rule and this CSS is what fixes it. `check-css.sh` 732 rules / 0 problems / 0 collisions; `lint-elm.sh` clean.
 
 **⛔ The gate itself is still blind — this issue remains OPEN for that.** Requirements 1, 2 and 4 are untouched: the extractor still cannot see the 42 computed `class (…)` constructs, so the next class named only inside one will ship unstyled exactly as this one did. Fixing the symptom while the detector stays blind is the smaller half of the work.
+
+**CSS fix confirmed on the deployed build 2026-07-31** (`stacks-core-pr-feat-campaign-followups-a`) — not an injection this time. The shelf choices render from the shipped stylesheet: unselected recede (transparent, hairline border, muted text), the selected one carries the accent fill and border with bold cream text. Screenshot in the batch record. The gate half of this issue remains open.

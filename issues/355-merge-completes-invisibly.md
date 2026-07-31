@@ -84,3 +84,16 @@ Probes: 4 — unsubscribe the handler → 1 red naming the exact symptom; handle
 Suites: elixir **3345/0**, elm **1374/0**, credo/format/elm-format/elm-review clean, `lint-proto.sh` 5/5, sobelow clean, `check-orphan-classes.sh` **88 / 0 unstyled** (baseline unchanged), `check-css.sh` 732 rules 0 problems.
 **⚠️ A fifth gate blind spot, reported and not acted on:** `check-prose-assertions.sh` matches `(?:hasNot|expectViewHasNot)` and therefore misses **`ensureViewHasNot`**, elm-program-test's non-terminal form, used **14×** in `frontend/tests/`. Auditing those by the gate's own rules turns up one genuine vacuous assertion — `Page/BookDetailProgressTest.elm` asserts the absence of `'p. 142 / 371'`, a string that appears nowhere in `frontend/src/`, so it can never fail. One token would close the regex; the agent correctly left widening a shared gate to the lead.
 **Outstanding:** the live drive on preview (worktrees have no preview stack), carried into the batch's integration drive.
+
+## Live drive 2026-07-31 — **BOTH halves confirmed fixed** (`stacks-core-pr-feat-campaign-followups-a`)
+Drove the exact journey that produced this issue. Entering `9780099466031` (Vintage *The Name of the Rose*; edition absent, work present) produced the merge prompt as before — `POST /api/books/confirm` → **409**, then the work fetch → 200.
+
+**Half 1 — the screen advances.** Clicking "Yes, merge" now leaves the prompt entirely and renders the completion card: heading *"This book has a new edition"*, detail *"ISBN 9780099466031 is now listed on the book's page as another edition."*, the honest placement note *"It isn't on one of your bookshelves yet — open the book to add it."*, and actions **View book details** / **Add another**. The question that had already been answered is gone. (The generic heading rather than the title is `headingSubject`'s provisional fallback — the work's original edition is `barcode_unverified` — so it is behaving as designed.)
+
+**Half 2 — the cache is evicted.** `GET /api/books/:id` with a cache-buster now returns **both** editions:
+```
+editions: ["9780099466031", "9780156030410"]   count: 2   merged_visible: true
+```
+The identical query during the Wave 5 drive returned **one** edition while Postgres held two. That is the defect closed, end to end, through the layer no test crossed.
+
+⚠️ **Method note for the next drive:** `get_page_text` reported the *pre-click* form on two separate occasions while the screen had already advanced — the same stale-snapshot trap hit during the Wave 4 drive. **Screenshot before concluding a page did not change.** The network log (`read_network_requests`) was the reliable signal throughout.
