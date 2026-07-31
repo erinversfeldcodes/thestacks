@@ -11,7 +11,10 @@ from contextlib import asynccontextmanager
 import httpx
 import structlog
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from PIL import Image
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.proto.gen.vision import (
@@ -115,6 +118,78 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="The Stacks Vision Service", version="0.1.0", lifespan=lifespan, debug=False)
 
 
+# Proto VisionErrorCode enum string values (wire format for VisionError.code).
+#
+# These name failures that are DETERMINISTIC: the same request repeated produces
+# the same answer. The caller (`Stacks.AI.VisionError`) cancels the upload on
+# any of them instead of retrying, which is the whole reason they are labelled.
+# A transient fault must NOT be given a code here — it is carried by the HTTP
+# status alone and stays retryable.
+_ERR_UNDECODABLE_IMAGE = "VISION_ERROR_CODE_UNDECODABLE_IMAGE"
+_ERR_IMAGE_TOO_LARGE = "VISION_ERROR_CODE_IMAGE_TOO_LARGE"
+_ERR_IMAGE_UNREACHABLE = "VISION_ERROR_CODE_IMAGE_UNREACHABLE"
+_ERR_NO_IMAGE_SUPPLIED = "VISION_ERROR_CODE_NO_IMAGE_SUPPLIED"
+_ERR_MALFORMED_REQUEST = "VISION_ERROR_CODE_MALFORMED_REQUEST"
+
+
+def _vision_error(code: str, message: str, status_code: int = 422) -> HTTPException:
+    """Build a deterministic-failure response carrying a `VisionError` body.
+
+    The structured detail is unwrapped to the top level by the handler below, so
+    the body on the wire is exactly `{"code": ..., "message": ...}` — the JSON
+    encoding of the proto message. Callers branch on `code`; `message` is for
+    logs and human eyes and is never parsed.
+    """
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Render `_vision_error` details as a bare `VisionError`, everything else as
+    FastAPI would.
+
+    Auth failures, validation errors raised elsewhere, and anything else with a
+    string detail keep the default `{"detail": "..."}` shape — they are not
+    determinations about an image, and giving them a code would tell the caller
+    to stop retrying something it should retry.
+    """
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Label schema-validation failures as deterministically malformed.
+
+    Pydantic validates the request model before a handler body runs, so the
+    mutual-exclusion and required-field checks declared on the generated proto
+    models reject here — never reaching the endpoint's own `_vision_error`
+    calls. Without this handler that whole class of failure went back as
+    FastAPI's default envelope, and core retried a request that could not
+    become valid by being sent again.
+
+    The summary deliberately drops Pydantic's `input` key. That field echoes the
+    offending request body, which for these endpoints is base64 image bytes and,
+    on `/associate`, user-linked identifiers — none of which belongs in an error
+    body the caller logs.
+    """
+    problems = "; ".join(
+        f"{'.'.join(str(part) for part in error.get('loc', []))}: {error.get('msg', '')}"
+        for error in exc.errors()
+    )
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code": _ERR_MALFORMED_REQUEST,
+            "message": f"Request failed schema validation — {problems}",
+        },
+    )
+
+
 @app.get("/health", status_code=200)
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "vision", "environment": settings.environment}
@@ -128,21 +203,23 @@ async def _download_image(image_url: str) -> bytes:
         client.stream("GET", image_url) as resp,
     ):
         if resp.status_code in (301, 302, 303, 307, 308):
-            detail = f"Image URL redirected (HTTP {resp.status_code}); redirects not permitted"
-            raise HTTPException(status_code=422, detail=detail)
+            raise _vision_error(
+                _ERR_IMAGE_UNREACHABLE,
+                f"Image URL redirected (HTTP {resp.status_code}); redirects not permitted",
+            )
         if resp.status_code != 200:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Failed to download image from URL: HTTP {resp.status_code}",
+            raise _vision_error(
+                _ERR_IMAGE_UNREACHABLE,
+                f"Failed to download image from URL: HTTP {resp.status_code}",
             )
         chunks: list[bytes] = []
         total = 0
         async for chunk in resp.aiter_bytes(chunk_size=65536):
             total += len(chunk)
             if total > _MAX_DOWNLOAD_BYTES:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Image URL exceeds max size of {_MAX_DOWNLOAD_BYTES} bytes",
+                raise _vision_error(
+                    _ERR_IMAGE_TOO_LARGE,
+                    f"Image URL exceeds max size of {_MAX_DOWNLOAD_BYTES} bytes",
                 )
             chunks.append(chunk)
     return b"".join(chunks)
@@ -246,11 +323,11 @@ async def extract(request: Request, body: ExtractRequest) -> ExtractResponse:
 
     # Mutual exclusion and size guard (proto carries no constraints; enforce here).
     if body.images and body.image_url is not None:
-        raise HTTPException(
-            status_code=422, detail="Provide either 'images' or 'image_url', not both"
+        raise _vision_error(
+            _ERR_MALFORMED_REQUEST, "Provide either 'images' or 'image_url', not both"
         )
     if len(body.images) > 3:
-        raise HTTPException(status_code=422, detail="'images' must contain at most 3 items")
+        raise _vision_error(_ERR_MALFORMED_REQUEST, "'images' must contain at most 3 items")
 
     # --- image_url path ---
     if body.image_url is not None:
@@ -273,8 +350,8 @@ async def extract(request: Request, body: ExtractRequest) -> ExtractResponse:
     else:
         # --- base64 images path ---
         if not body.images:
-            raise HTTPException(
-                status_code=422, detail="Either 'images' or 'image_url' must be provided"
+            raise _vision_error(
+                _ERR_NO_IMAGE_SUPPLIED, "Either 'images' or 'image_url' must be provided"
             )
         log = log.bind(image_count=len(body.images))
 
@@ -282,13 +359,13 @@ async def extract(request: Request, body: ExtractRequest) -> ExtractResponse:
             try:
                 decoded = base64.b64decode(img, validate=True)
             except Exception as exc:
-                raise HTTPException(
-                    status_code=422, detail=f"Image at index {idx} is not valid base64"
+                raise _vision_error(
+                    _ERR_UNDECODABLE_IMAGE, f"Image at index {idx} is not valid base64"
                 ) from exc
             if len(decoded) > settings.max_image_size_bytes:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Image at index {idx} exceeds max size of {settings.max_image_size_bytes} bytes",  # noqa: E501
+                raise _vision_error(
+                    _ERR_IMAGE_TOO_LARGE,
+                    f"Image at index {idx} exceeds max size of {settings.max_image_size_bytes} bytes",  # noqa: E501
                 )
 
         if settings.local_ocr_enabled:
@@ -351,9 +428,9 @@ async def associate(
     """
     # Proto3 scalar fields default to "" — explicitly reject empty required fields.
     if not body.isbn or not body.book_id or not body.edition_id or not body.cover_image_url:
-        raise HTTPException(
-            status_code=422,
-            detail="isbn, book_id, edition_id, and cover_image_url are required",
+        raise _vision_error(
+            _ERR_MALFORMED_REQUEST,
+            "isbn, book_id, edition_id, and cover_image_url are required",
         )
     # Pre-validate URL before queuing background task — provides fast rejection (422)
     # before accepting the job. _download_image also validates on fetch.
@@ -386,17 +463,17 @@ async def _load_image_b64(
         image_bytes = await _download_image(image_url)
         return base64.b64encode(image_bytes).decode()
     if image is None:
-        raise HTTPException(
-            status_code=422, detail="Either 'image' or 'image_url' must be provided"
+        raise _vision_error(
+            _ERR_NO_IMAGE_SUPPLIED, "Either 'image' or 'image_url' must be provided"
         )
     try:
         decoded = base64.b64decode(image, validate=True)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="Image is not valid base64") from exc
+        raise _vision_error(_ERR_UNDECODABLE_IMAGE, "Image is not valid base64") from exc
     if len(decoded) > settings.max_image_size_bytes:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
+        raise _vision_error(
+            _ERR_IMAGE_TOO_LARGE,
+            f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
         )
     return image
 
@@ -567,17 +644,17 @@ async def classify(request: Request, body: ClassifyRequest) -> ClassifyResponse:
     else:
         # --- base64 image path ---
         if body.image is None:
-            raise HTTPException(
-                status_code=422, detail="Either 'image' or 'image_url' must be provided"
+            raise _vision_error(
+                _ERR_NO_IMAGE_SUPPLIED, "Either 'image' or 'image_url' must be provided"
             )
         try:
             decoded = base64.b64decode(body.image, validate=True)
         except Exception as exc:
-            raise HTTPException(status_code=422, detail="Image is not valid base64") from exc
+            raise _vision_error(_ERR_UNDECODABLE_IMAGE, "Image is not valid base64") from exc
         if len(decoded) > settings.max_image_size_bytes:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
+            raise _vision_error(
+                _ERR_IMAGE_TOO_LARGE,
+                f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
             )
         image_b64 = body.image
 

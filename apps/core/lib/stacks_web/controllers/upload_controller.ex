@@ -411,9 +411,31 @@ defmodule StacksWeb.UploadController do
       |> put_resp_header("x-accel-buffering", "no")
       |> send_chunked(200)
 
-    max_ms = Application.get_env(:core, :sse_max_timeout_ms, 60_000)
-    deadline = System.monotonic_time(:millisecond) + max_ms
+    deadline = System.monotonic_time(:millisecond) + sse_max_timeout_ms()
     sse_receive_loop(conn, image_id, user, deadline)
+  end
+
+  # How long to hold the stream open before telling the reader we gave up.
+  #
+  # Derived from the job, not chosen to sit near it. `IdentifyBookJob` bounds
+  # every attempt with `timeout/1` and every gap with a deterministic
+  # `backoff/1`, so `worst_case_lifetime_ms/0` is the exact moment after which
+  # the job cannot still be working — and the job's final-attempt wrapper
+  # guarantees that by then the row is terminal and a result has been broadcast.
+  # Waiting for it is therefore waiting for an answer that is coming, and
+  # stopping earlier means reporting a timeout to a reader whose book is about
+  # to be identified. That was the old failure in both directions: the hardcoded
+  # 360s both outlived a job that had already died silently (the reader watched
+  # a spinner for six minutes after the fact) and expired while a slow job was
+  # still alive.
+  #
+  # `+ 5s` covers the marking and broadcast that happen after the last attempt
+  # returns. The `:sse_max_timeout_ms` key remains an override for tests, which
+  # need a deadline measured in milliseconds; setting it in a deployed
+  # environment re-introduces the divergence this derivation removes.
+  defp sse_max_timeout_ms do
+    Application.get_env(:core, :sse_max_timeout_ms) ||
+      IdentifyBookJob.worst_case_lifetime_ms() + 5_000
   end
 
   defp sse_receive_loop(conn, image_id, user, deadline) do

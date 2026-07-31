@@ -23,9 +23,27 @@ defmodule Stacks.Moderation do
   require Logger
 
   alias Stacks.AI.Client, as: AIClient
+  alias Stacks.AI.VisionError
   alias Stacks.Books
   alias Stacks.Books.ISBNResolver
   alias Stacks.Workers.EnrichBookJob
+
+  @typedoc """
+  Closed set of reasons the pipeline fails, following the convention
+  `Stacks.Books.ISBNResolver.error_reason/0` documents: the underlying client's
+  closed set, extended with the two determinations this layer makes itself.
+
+  `:not_a_book` and `:isbn_not_found` are conclusions about the image, so the
+  worker cancels on them. Everything else is a `Stacks.AI.VisionError.t/0` and
+  carries its own determination.
+
+  Adding a reason here means deciding, in `Stacks.Workers.IdentifyBookJob`,
+  whether it is a determination or a fault: `classify_failure/1` routes it, and
+  `rejection_token/1` names what the reader is told. Neither guesses — a reason
+  outside `Stacks.AI.VisionError.t/0` is retried and reported as
+  `processing_failed`, which is the safe answer, not a silent one.
+  """
+  @type failure_reason :: Stacks.AI.VisionError.t() | :not_a_book | :isbn_not_found
 
   @typedoc """
   Pipeline result. The success shape carries both the resolved books and any
@@ -36,7 +54,7 @@ defmodule Stacks.Moderation do
   """
   @type pipeline_result ::
           {:ok, %{resolved: [Stacks.Books.Book.t()], rejected: [{String.t(), atom()}]}}
-          | {:error, :not_a_book | :isbn_not_found | term()}
+          | {:error, failure_reason()}
 
   @doc """
   Runs the full moderation pipeline for an uploaded image.
@@ -105,8 +123,24 @@ defmodule Stacks.Moderation do
         emit_classification(classification_outcome(classification))
         {:error, :not_a_book}
 
-      error ->
-        error
+      {:error, reason} ->
+        {:error, reason}
+
+      # A 200 whose body carries no `classification` is a contract violation by
+      # the sidecar, not a determination about the image — a response that
+      # cannot say what it concluded is not evidence that nothing went wrong.
+      # Reported as a fault so it stays retryable and shows up as one, rather
+      # than falling through as a bare `{:ok, %{}}` the worker's `case` cannot
+      # match. That fall-through was real: it raised CaseClauseError, was
+      # rescued into `{:error, %CaseClauseError{}}`, retried to exhaustion, and
+      # left the image row `pending` for ever.
+      {:ok, other} ->
+        Logger.error(
+          "Moderation: /analyze returned an unrecognised response shape " <>
+            "(keys: #{inspect(other |> Map.keys() |> Enum.sort())})"
+        )
+
+        {:error, VisionError.from_transport(:unrecognised_response)}
     end
   end
 
@@ -187,10 +221,10 @@ defmodule Stacks.Moderation do
       |> Enum.with_index(1)
       |> Task.async_stream(
         fn {candidate, idx} -> resolve_and_store(candidate, idx, context) end,
-        # Same upper bound as run_pipeline's Task.await_many — matches
-        # the Modal/Open Library client receive_timeout ceilings. A
-        # genuinely slow candidate should not kill the task.
-        timeout: 210_000,
+        # Bounded by the vision client's own per-call ceiling, read from it
+        # rather than restated: a genuinely slow candidate should not be killed
+        # before the call it is waiting on has itself given up.
+        timeout: AIClient.receive_timeout_ms(),
         max_concurrency: concurrency,
         on_timeout: :kill_task
       )

@@ -20,10 +20,19 @@ defmodule Stacks.AI.Client do
     - Replay window: ±60 seconds (enforced by the Modal service)
     - Secret: `VISION_HMAC_SECRET` env var (shared between core and Modal vision service)
 
+  ## Failure contract
+
+  `call_vision/2` fails with a member of `Stacks.AI.VisionError.t/0` — a closed
+  set, so a caller can ask whether the failure was a determination about the
+  image (never retry) or a fault (retry). Before that type existed, callers saw
+  `:circuit_open`, a raw `%Finch.Error{}`, and a `%{status: _, body: _}` map,
+  which is why every vision failure was retried three times on a GPU.
+
   ## Circuit Breaker
 
   Protected by `:vision_fuse` — managed by `Stacks.CircuitBreakers`.
-  When blown, `call_vision/2` returns `{:error, :circuit_open}`.
+  When blown, `call_vision/2` returns `{:error, :circuit_open}`. Only transient
+  failures melt it: see `maybe_melt/1`.
 
   ## Cost Tracking
 
@@ -42,6 +51,7 @@ defmodule Stacks.AI.Client do
 
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.ClientBehaviour
+  alias Stacks.AI.VisionError
   alias Stacks.Proto.Vision.AssociateRequest
   alias Stacks.Proto.Vision.ExtractRequest
 
@@ -49,6 +59,21 @@ defmodule Stacks.AI.Client do
 
   @fuse_name :vision_fuse
   @default_modal_cost_per_call_cents 1
+
+  # 210s gives the Modal service headroom beyond its own 300s inference timeout.
+  @receive_timeout_ms 210_000
+
+  @doc """
+  The ceiling on a single vision HTTP call, in milliseconds.
+
+  Exposed because two other modules need to bound themselves by it and had each
+  written `210_000` in a comment saying "same as the client": `Stacks.Moderation`
+  bounds its per-candidate tasks, and `Stacks.Workers.IdentifyBookJob` bounds a
+  whole attempt (and derives the reader's SSE deadline from that bound). Three
+  copies of a number that must agree is three chances for it to stop agreeing.
+  """
+  @spec receive_timeout_ms() :: pos_integer()
+  def receive_timeout_ms, do: @receive_timeout_ms
 
   @impl true
   def call_vision(endpoint, payload) do
@@ -66,8 +91,12 @@ defmodule Stacks.AI.Client do
           :blown -> {:error, :circuit_open}
         end
 
-      {:error, reason} ->
-        {:error, reason}
+      # Both limits collapse to one reason on purpose. Which cap was hit is a
+      # spend question, already logged and counted by BudgetTracker; to a caller
+      # it is the same fact — no request will be made, and that will still be
+      # true a few seconds from now.
+      {:error, _daily_or_monthly} ->
+        {:error, :budget_exceeded}
     end
   end
 
@@ -156,8 +185,7 @@ defmodule Stacks.AI.Client do
       %{endpoint: endpoint}
     )
 
-    # 210s gives the Modal service headroom beyond its own 300s inference timeout.
-    result = Finch.request(req, Stacks.Finch, receive_timeout: 210_000)
+    result = Finch.request(req, Stacks.Finch, receive_timeout: @receive_timeout_ms)
 
     # Record the per-call cost regardless of outcome. Rejection ≠ free —
     # Modal bills for GPU time whether or not we use the result.
@@ -173,7 +201,7 @@ defmodule Stacks.AI.Client do
           %{endpoint: endpoint, status: 200}
         )
 
-        Jason.decode(resp_body)
+        decode_success_body(resp_body)
 
       {:ok, %Finch.Response{status: status, body: resp_body}} ->
         duration = System.monotonic_time() - start_time
@@ -184,8 +212,9 @@ defmodule Stacks.AI.Client do
           %{endpoint: endpoint, status: status}
         )
 
-        Stacks.CircuitBreakers.melt(@fuse_name)
-        {:error, %{status: status, body: resp_body}}
+        error = VisionError.from_http_error(status, resp_body)
+        maybe_melt(error)
+        {:error, error}
 
       {:error, reason} ->
         duration = System.monotonic_time() - start_time
@@ -196,8 +225,37 @@ defmodule Stacks.AI.Client do
           %{endpoint: endpoint, kind: :error, reason: reason}
         )
 
-        Stacks.CircuitBreakers.melt(@fuse_name)
-        {:error, reason}
+        error = VisionError.from_transport(reason)
+        maybe_melt(error)
+        {:error, error}
+    end
+  end
+
+  # A 200 we cannot parse is not a success. It is also not a determination about
+  # the image — the service never told us anything — so it is reported as the
+  # transport failure it functionally is, and stays retryable.
+  defp decode_success_body(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, decoded} ->
+        {:ok, decoded}
+
+      {:error, _} ->
+        error = VisionError.from_transport(:malformed_response)
+        maybe_melt(error)
+        {:error, error}
+    end
+  end
+
+  # The breaker exists to stop us hammering a service that is unwell. A
+  # deterministic rejection says nothing about the service's health — it says
+  # our image was unreadable, and the service told us so promptly and
+  # correctly. Melting on it would let a run of corrupt uploads disable vision
+  # for everybody, which is exactly the trap `SCRAPE_OUTCOME_ROBOTS_BLOCKED` was
+  # split out of the scraper's shared fuse to avoid.
+  defp maybe_melt(error) do
+    case VisionError.determination(error) do
+      :transient -> Stacks.CircuitBreakers.melt(@fuse_name)
+      :deterministic -> :ok
     end
   end
 
