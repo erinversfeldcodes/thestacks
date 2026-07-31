@@ -56,3 +56,41 @@ elixir-agent / observability.
 
 ## Progress Notes
 Filed 2026-07-31 by the lead. Confirmed: `grep -c vision apps/core/lib/core/prom_ex/plugins/stacks.ex` → 1, and that single hit is a comment.
+
+**2026-07-31 — built (elixir/observability agent).** The emitter → PromEx hop now exists:
+
+- `Core.PromEx.Plugins.Stacks` registers a `distribution` on
+  `[:stacks, :vision, :request, :stop]`, `measurement: :duration`,
+  `unit: {:native, :millisecond}`, `tags: [:endpoint, :status]` → exported as
+  `stacks_vision_request_stop_duration_milliseconds_{bucket,sum,count}`.
+- Buckets `[100, 250, 500, 1_000, 2_000, 3_000, 5_000, 8_000, 15_000, 30_000, 60_000, 120_000, 210_000]`.
+  3_000/8_000 are edges so the "~3–8s" estimate is read off two bucket counts with no
+  interpolation; the top finite bucket is `Stacks.AI.Client.receive_timeout_ms/0`
+  (210_000) — the point the client hangs up, above which no `:stop` event can exist —
+  so `+Inf` is structurally unreachable and no quantile can be the
+  `2 × max_finite_bucket` fallback that produced the false flat p95 on 2026-04-20.
+- Classified `:public` in `Core.PromEx.MetricAudience`; panel "Vision call latency
+  p50 / p95 / p99" added to `grafana/platform_ops.json` (Upload pipeline row).
+- `Core.PromEx.VisionLatencyTest` (9 tests) proves the metric is *attached*, not just
+  defined: it emits the real event and reads the series back out of
+  `PromEx.get_metrics/1`. Mutation-probed — a 20_000 ceiling fails 2 tests, a wrong
+  `event_name` fails 4.
+
+⚠️ **Still unproven here: that the series ARRIVES.** ADR-021 is push, and the #248
+lesson is that this stack once shipped structurally complete and blank. End-to-end
+proof needs a real upload against a deployed preview. Lead's verification query
+(VictoriaMetrics, after ≥1 real upload):
+
+```
+# does the series exist at all — the zero-series sweep, inverted
+count(stacks_vision_request_stop_duration_milliseconds_count{app="thestacks-core"})
+
+# p50 / p95 / p99 in ms, over the whole observed window
+histogram_quantile(0.50, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app="thestacks-core"}[1h])))
+histogram_quantile(0.95, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app="thestacks-core"}[1h])))
+histogram_quantile(0.99, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app="thestacks-core"}[1h])))
+
+# saturation check — MUST be 0, or the ceiling is wrong after all
+sum(rate(stacks_vision_request_stop_duration_milliseconds_bucket{app="thestacks-core",le="+Inf"}[1h]))
+  - sum(rate(stacks_vision_request_stop_duration_milliseconds_bucket{app="thestacks-core",le="210000"}[1h]))
+```

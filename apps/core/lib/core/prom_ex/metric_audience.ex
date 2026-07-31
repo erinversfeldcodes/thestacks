@@ -89,7 +89,11 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_visibility_recap_bookshelves_capped_total" => :public,
     "stacks_visibility_recap_count_total" => :public,
     "stacks_visibility_recap_placements_capped_total" => :public,
-    "stacks_visibility_recap_posts_capped_total" => :public
+    "stacks_visibility_recap_posts_capped_total" => :public,
+    # Issue #349 — vision call latency. Aggregate wall-time keyed only on the
+    # fixed endpoint set and the HTTP status; nothing about the uploaded image
+    # or its uploader is in the label set, so it is not de-anonymisable.
+    "stacks_vision_request_stop_duration_milliseconds" => :public
   }
 
   @type audience :: :public | :own | :break_glass

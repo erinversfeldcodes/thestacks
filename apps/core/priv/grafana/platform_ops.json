@@ -292,6 +292,42 @@
           "legendFormat": "{{outcome}}"
         }
       ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Vision call latency p50 / p95 / p99",
+      "description": "WHAT: wall-clock time for ONE Modal vision HTTP call (classify / extract / analyze / associate), at the 50th, 95th and 99th percentile. HOW: histogram_quantile over the rate of stacks_vision_request_stop_duration_milliseconds_bucket, emitted by Stacks.AI.Client on every call that got an HTTP response — success or not. MEANS: the value is milliseconds per call, and an upload makes up to two of these back to back, so the upload's own latency floor is roughly twice p50; the long-standing '~3–8s per upload' figure was an estimate in a comment and this panel is what checks it. WATCH: a p99 climbing toward the 210s bucket edge means calls are approaching the client's own give-up deadline and will start converting into timeouts (retried, so slow becomes slow three times) — size the timeout from this panel, not from a guess; a p50 that jumps while p99 is flat is a cold-start / GPU-contention shift on the Modal side, and both quantiles rising together with the upload-terminal timeout count is the vision backend degrading.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 0 },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "calcs": [] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "vision p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "vision p95"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
+          "legendFormat": "vision p99"
+        }
+      ]
     }
   ]
 }
