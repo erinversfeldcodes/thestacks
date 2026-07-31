@@ -7,7 +7,7 @@
   "pr_policy": "DEFERRED \u2014 owner ruling 2026-07-30: wave PRs batch until the final wave",
   "children": {
     "359": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "6a Persist-first login + AuthState (the founding defect)",
       "level": 1,
       "depends_on": [],
@@ -16,7 +16,9 @@
         "frontend/src/Main.elm",
         "apps/core/assets/app.js"
       ],
-      "merged": false
+      "merged": true,
+      "commit": "e3114305",
+      "staff_review": "LGTM"
     },
     "332": {
       "status": "complete",
@@ -31,7 +33,7 @@
       "staff_review": "LGTM"
     },
     "360": {
-      "status": "blocked",
+      "status": "in_progress",
       "title": "6b Title from Page; Arrival type; decodeFlags StoredAuth",
       "level": 2,
       "depends_on": [
@@ -40,10 +42,11 @@
       "owns": [
         "frontend/src/Main.elm"
       ],
-      "merged": false
+      "merged": false,
+      "blocked_on": null
     },
     "361": {
-      "status": "blocked",
+      "status": "in_progress",
       "title": "6c 401 wrapper + reflection gate + 3 write-form pages",
       "level": 2,
       "depends_on": [
@@ -53,7 +56,8 @@
         "frontend/src/Api.elm",
         "frontend/src/Page/Settings/*"
       ],
-      "merged": false
+      "merged": false,
+      "blocked_on": null
     },
     "362": {
       "status": "blocked",
@@ -88,7 +92,8 @@
     }
   },
   "ready_set": [
-    359
+    360,
+    361
   ],
   "merge_order": [
     332,
@@ -99,7 +104,9 @@
     363
   ],
   "sequencing_rationale": "This wave is almost entirely Elm and three files are contended: Main.elm (6a, 6b), Api.elm (6c, 6d), Bookshelf.elm (6f, 6d). The DAG is shaped by file ownership rather than pure logic \u2014 two agents in one Elm module is a merge conflict by construction (the #343/#344 lesson). 6a goes first because AuthState is the type every later auth change reads.",
-  "discovered_issues": [],
+  "discovered_issues": [
+    364
+  ],
   "kickoff_approved": "2026-07-31",
   "notes": [
     "Founding defect, root-caused live 2026-07-30: the auth credential is downstream of a browser animation frame. With the window occluded, WAAPI never fires, so three login 200s were silently discarded \u2014 ten frozen 300ms transitions, zero animations, no follow-up XHR.",
