@@ -23,14 +23,16 @@
       "merged": false
     },
     "343": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "Wire POST /api/books/confirm into the manual path; delete the DIY flow",
       "level": 2,
       "depends_on": [
         341
       ],
-      "merged": false,
-      "blocked_on": null
+      "merged": true,
+      "blocked_on": null,
+      "commit": "aae87217",
+      "staff_review": "LGTM"
     },
     "331": {
       "status": "blocked",
@@ -65,9 +67,7 @@
       "merged": false
     }
   },
-  "ready_set": [
-    343
-  ],
+  "ready_set": [],
   "merge_order": [
     342,
     341,
@@ -81,6 +81,18 @@
       "issue": 346,
       "title": "Moderation.build_book_attrs/4 drops resolver identifiers (same class as #341, one caller upstream)",
       "found_by": 341,
+      "needs": "owner wave assignment"
+    },
+    {
+      "issue": 347,
+      "title": "program-test effect translators rebuild Api requests; divergence invisible (lead probe: hardcoding confirmBook shelf left 1353/0 green)",
+      "found_by": "lead probe on 343",
+      "needs": "owner wave assignment"
+    },
+    {
+      "issue": 348,
+      "title": "frontend/index.html is a tracked 39,680-line stale Elm build artefact",
+      "found_by": 343,
       "needs": "owner wave assignment"
     }
   ],

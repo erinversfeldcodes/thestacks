@@ -247,7 +247,7 @@
           "issue": 317
         },
         "7c": {
-          "title": "Undo-remove toast (spec'd); owner-only un-merge process; record the two exclusions in mapping [un-merge process builds on #340 (7d) \u2014 same capability, do not solve twice]",
+          "title": "Undo-remove toast (spec'd); owner-only un-merge process; record the two exclusions in mapping [un-merge process builds on #340 (7d) \u2014 same capability, do not solve twice] [+ owner ruling 2026-07-31: the undo affordance ALSO covers a wrong manual-ISBN add \u2014 #343 removed the \"We think this is\u2026\" preview from that path and the owner accepted it in exchange for undo]",
           "status": "not_started",
           "issue": 317
         },
@@ -372,5 +372,8 @@
     "ISBN bad-data repair: repair-then-validate, built as a REUSABLE operationalised capability (dry-run, idempotent, audited, explicitly scoped) \u2014 not a bespoke migration. Verbatim: \"we should do this in a way that informs how we handle the repair of bad data in the future, ideally operationalising this kind of repair.\"",
     "ISBN hard-gate hole: trace it now inside #339. Verbatim: \"bear in mind this may be as a result of bad seed data. if it is then we need to correct the seed data and also tighten the seed process to not allow this.\"",
     "Discovery assignments approved 2026-07-31: #340\u2192Wave 7 (7d, merged with 7c un-merge); #336\u2192Wave 11 (11f); #337\u2192Wave 11 (11g), sequenced BEFORE 11d prod-deploy execution; #338\u2192struck GDPR revisit bucket."
+  ],
+  "_owner_rulings_wave5_2026_07_31": [
+    "Manual-ISBN preview: ACCEPT the loss of the \"We think this is\u2026\" step on the manual path (no resolve-without-create endpoint exists). Ship as built; cover a wrong add with the Wave 7 undo affordance rather than adding GET /api/books/resolve. Consistent with inform-never-block: act, then make it trivially reversible."
   ]
 }
