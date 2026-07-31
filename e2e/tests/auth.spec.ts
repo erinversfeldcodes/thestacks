@@ -231,6 +231,192 @@ test.describe("Unauthenticated access to protected pages (US-16.3.1)", () => {
   }
 });
 
+/**
+ * Issue #359 — the credential must land regardless of the door animation.
+ *
+ * The defect these two tests exist for: the app persisted the auth token only
+ * when the browser reported the WAAPI door animation finished. That report comes
+ * out of a `requestAnimationFrame` callback resolving `Animation.finished`
+ * promises, and neither runs while the window is occluded or backgrounded. So a
+ * login could return `200` and the credential be discarded in silence — driven
+ * live 2026-07-30: three logins, three 200s, nothing in localStorage.
+ *
+ * A test that only signs in with the window in front reproduces the bug's own
+ * blind spot, which is exactly why this shipped. So both tests below assert the
+ * token is stored WITHIN ONE SECOND of the 200, in a browser state where the
+ * animation's completion signal provably cannot arrive.
+ *
+ * ## Why not literally occlude the window
+ *
+ * A Playwright-driven Chromium will not background a page. Measured 2026-07-31
+ * against this stack, across three launch modes — headless, headed, and headed
+ * with `--disable-backgrounding-occluded-windows` / `--disable-renderer-
+ * backgrounding` / `--disable-background-timer-throttling` removed — and with
+ * the second page opened both as `context.newPage()` and as a same-window
+ * `target="_blank"` tab:
+ *
+ *     headless-default:   newPage=visible tabClick=visible rafFired=true
+ *     headed-default:     newPage=visible tabClick=visible rafFired=true
+ *     headed-no-bg-flags: newPage=visible tabClick=visible rafFired=true
+ *
+ * Every page Playwright drives is its own always-active CDP target, so
+ * `document.visibilityState` never leaves `"visible"` and rAF keeps being
+ * served. A first cut of the test below asserted `"hidden"` and failed on that
+ * assertion rather than passing vacuously — that failure is what produced this
+ * measurement.
+ *
+ * So both tests reproduce the DEFECT'S MECHANISM instead of its cause. What an
+ * occluded window does to this code is precisely one thing: the door
+ * animations' `finished` promises never settle, so anything waiting on them
+ * waits forever. That is reproduced here two ways, and each one fails closed —
+ * each asserts the stall really took hold before it asserts anything else, so
+ * neither can quietly stop reproducing the condition it exists for:
+ *
+ *   1. "the completion signal never arrives" — `Element.prototype.animate` is
+ *      replaced with animations whose `finished` promise has no resolver.
+ *      Engine-independent; works in any browser or headless mode.
+ *   2. "every animation is stalled" — the REAL animation engine is frozen at
+ *      the browser level (CDP `Animation.setPlaybackRate: 0`). Real
+ *      `Element.animate`, real `Animation` objects, real `finished` promises,
+ *      stalled exactly as an occluded compositor stalls them; and rAF still
+ *      fires, which reproduces the other half of the live evidence (frozen
+ *      transitions, zero completed animations).
+ *
+ * Under the pre-#359 code both hang until timeout: the token is never written.
+ */
+test.describe("Login is not downstream of the door animation (#359)", () => {
+  /** Poll localStorage until the auth token appears; return how long it took. */
+  async function msUntilTokenStored(page, deadlineMs: number) {
+    const start = Date.now();
+    while (Date.now() - start < deadlineMs) {
+      const token = await page.evaluate(() => {
+        try {
+          return JSON.parse(localStorage.getItem("stacks-auth") || "{}").token;
+        } catch {
+          return null;
+        }
+      });
+      if (token) return { elapsed: Date.now() - start, token };
+      await page.waitForTimeout(25);
+    }
+    return { elapsed: Date.now() - start, token: null };
+  }
+
+  /**
+   * Does a freshly-started animation refuse to finish? Run before each test's
+   * real assertions so a harness that quietly stops stalling animations makes
+   * the test FAIL rather than pass for the wrong reason.
+   */
+  async function stallProof(page): Promise<boolean> {
+    return page.evaluate(() => {
+      const probe = document.createElement("div");
+      document.body.appendChild(probe);
+      const animation = probe.animate([{ opacity: 1 }, { opacity: 0 }], {
+        duration: 30,
+      });
+      return Promise.race([
+        Promise.resolve(animation.finished).then(() => false),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 400)),
+      ]);
+    });
+  }
+
+  test("the completion signal never arrives: a 200 is still persisted", async ({
+    page,
+  }) => {
+    // Replace WAAPI with animations that start and never finish. `finished` is a
+    // promise with no resolver, so anything waiting on it waits forever — the
+    // occluded window's behaviour, made engine-independent. Installed before any
+    // script runs so the very first login is covered.
+    await page.addInitScript(() => {
+      const neverFinishes = new Promise(() => {});
+      Element.prototype.animate = function () {
+        return {
+          finished: neverFinishes,
+          cancel() {},
+          finish() {},
+          pause() {},
+          play() {},
+          addEventListener() {},
+          removeEventListener() {},
+        } as unknown as Animation;
+      };
+    });
+
+    await page.goto("/login");
+
+    // Fail closed: prove the stall is real before asserting anything about it.
+    const stalled = await stallProof(page);
+    expect(
+      stalled,
+      "WAAPI still finishes — this test must not pass without reproducing the condition"
+    ).toBe(true);
+
+    await page.fill('input[id="email"]', DEV_EMAIL);
+    await page.fill('input[id="password"]', DEV_PASSWORD);
+
+    const response = page.waitForResponse(
+      (r) => r.url().includes("/api/auth/login") && r.status() === 200
+    );
+    await page.getByTestId("login-submit").click();
+    await response;
+
+    const { elapsed, token } = await msUntilTokenStored(page, 1000);
+    expect(
+      token,
+      "the 200 was discarded: no stacks-auth token within 1s (#359)"
+    ).toBeTruthy();
+    expect(elapsed).toBeLessThan(1000);
+
+    // And the reader really is in — the session survives a reload, which is the
+    // whole point of persisting it.
+    await page.reload();
+    await expect(page.getByTestId("user-menu")).toBeVisible({ timeout: 15000 });
+  });
+
+  test("every animation is stalled: the real engine is frozen and the 200 still lands", async ({
+    page,
+    context,
+  }) => {
+    // Freeze the browser's own animation timeline. Unlike the test above this
+    // leaves `Element.animate` and `Animation.finished` entirely real — the door
+    // animations are created and started, they simply never advance, so their
+    // `finished` promises never settle. rAF keeps firing, so the port's callback
+    // body still runs: the exact shape of the 2026-07-30 evidence.
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Animation.enable");
+    await cdp.send("Animation.setPlaybackRate", { playbackRate: 0 });
+
+    await page.goto("/login");
+
+    const stalled = await stallProof(page);
+    expect(
+      stalled,
+      "the animation timeline is not frozen — this test must not pass without reproducing the condition"
+    ).toBe(true);
+
+    await page.fill('input[id="email"]', DEV_EMAIL);
+    await page.fill('input[id="password"]', DEV_PASSWORD);
+
+    const response = page.waitForResponse(
+      (r) => r.url().includes("/api/auth/login") && r.status() === 200
+    );
+    await page.getByTestId("login-submit").click();
+    await response;
+
+    const { elapsed, token } = await msUntilTokenStored(page, 1000);
+    expect(
+      token,
+      "the 200 was discarded while every animation was stalled (#359)"
+    ).toBeTruthy();
+    expect(elapsed).toBeLessThan(1000);
+
+    // The reader lands on their shelves without the animation ever completing —
+    // the ornament gates nothing.
+    await page.waitForURL("**/antilibrary", { timeout: 15000 });
+  });
+});
+
 test.describe("Session expiry", () => {
   test("an expired/revoked token redirects to login with a session-expired notice on the next authed action", async ({
     page,

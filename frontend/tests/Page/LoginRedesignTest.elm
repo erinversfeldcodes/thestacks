@@ -4,13 +4,13 @@ module Page.LoginRedesignTest exposing (suite)
 
 These tests assert on the new bookshelf-wall / parchment-card / dolly-shot
 design. Tests verify the layer structure, parchment card classes, form
-validation, ARIA attributes, and transition state using TransitionState.
+validation, ARIA attributes, and what a successful auth leaves on the card.
 
 -}
 
 import Html.Attributes
 import Http
-import Page.Login as Login exposing (FieldValidation(..), Mode(..), SubmitError(..), TransitionState(..))
+import Page.Login as Login exposing (FieldValidation(..), Mode(..), SubmitError(..))
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -170,7 +170,6 @@ formValidationTests =
                         , displayName = "Reader"
                         , mode = RegisterMode
                         , submitState = Failure (SubmitHttpError (Http.BadStatus 409))
-                        , transitionState = Idle
                         , emailValidation = Pristine
                         , passwordValidation = Pristine
                         , passwordConfirmValidation = Pristine
@@ -207,7 +206,6 @@ formValidationTests =
                         , displayName = ""
                         , mode = LoginMode
                         , submitState = Failure (SubmitHttpError (Http.BadStatus 401))
-                        , transitionState = Idle
                         , emailValidation = Pristine
                         , passwordValidation = Pristine
                         , passwordConfirmValidation = Pristine

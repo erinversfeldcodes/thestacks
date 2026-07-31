@@ -46,6 +46,21 @@ registerModelWith password confirm =
     m5
 
 
+{-| A LoginMode model whose email and password both validate, driven through the
+real update function so the field validations match production.
+-}
+validLoginModel : Login.Model
+validLoginModel =
+    let
+        ( m1, _, _ ) =
+            Login.update (EmailChanged "reader@stacks.dev") Login.init
+
+        ( m2, _, _ ) =
+            Login.update (PasswordChanged "secret123") m1
+    in
+    m2
+
+
 suite : Test
 suite =
     describe "Page.Login"
@@ -53,9 +68,6 @@ suite =
             [ test "starts in LoginMode" <|
                 \_ ->
                     Login.init.mode |> Expect.equal Login.LoginMode
-            , test "starts with Idle transition state" <|
-                \_ ->
-                    Login.init.transitionState |> Expect.equal Login.Idle
             , test "starts with NotAsked submit state" <|
                 \_ ->
                     Login.init.submitState |> Expect.equal NotAsked
@@ -105,7 +117,6 @@ suite =
                             , mode = Login.LoginMode
                             , passwordConfirm = ""
                             , submitState = Failure (SubmitHttpError Http.NetworkError)
-                            , transitionState = Login.Idle
                             , emailValidation = Pristine
                             , passwordValidation = Pristine
                             , passwordConfirmValidation = Pristine
@@ -138,24 +149,24 @@ suite =
                     outMsg |> Expect.equal Login.NoOut
             ]
         , describe "auth response"
-            [ test "GotAuthResponse Ok sets Success and transitions to Transitioning" <|
+            [ test "GotAuthResponse Ok records the response as the submission's outcome" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Login.update (GotAuthResponse (Ok fakeAuthResponse)) Login.init
                     in
-                    Expect.all
-                        [ \m -> m.submitState |> Expect.equal (Success fakeAuthResponse)
-                        , \m -> m.transitionState |> Expect.equal Login.Transitioning
-                        ]
-                        model
-            , test "GotAuthResponse Ok emits StartTransition (not LoggedIn yet)" <|
+                    model.submitState |> Expect.equal (Success fakeAuthResponse)
+            , test "persist_first: GotAuthResponse Ok hands the credential up on the SAME update (#359)" <|
                 \_ ->
+                    -- The regression this replaces: the card used to answer
+                    -- `StartTransition`, and the shell only learned the token
+                    -- after a Web Animations promise resolved — which never
+                    -- happens on an occluded window.
                     let
                         ( _, _, outMsg ) =
                             Login.update (GotAuthResponse (Ok fakeAuthResponse)) Login.init
                     in
-                    outMsg |> Expect.equal (Login.StartTransition fakeAuthResponse)
+                    outMsg |> Expect.equal (Login.LoggedIn fakeAuthResponse)
             , test "GotAuthResponse Err sets Failure" <|
                 \_ ->
                     let
@@ -164,18 +175,35 @@ suite =
                     in
                     model.submitState |> Expect.equal (Failure (SubmitHttpError Http.NetworkError))
             ]
-        , describe "transition completion"
-            [ test "TransitionCompleted sets transitionState to Complete and emits LoggedIn" <|
+        , describe "submit lock (#359 — the trap that had no reset path)"
+            [ test "a handed-over credential locks the button so a second submit is impossible" <|
                 \_ ->
                     let
-                        ( model, _, outMsg ) =
-                            Login.update (TransitionCompleted fakeAuthResponse) Login.init
+                        ( succeeded, _, _ ) =
+                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) validLoginModel
                     in
-                    Expect.all
-                        [ \_ -> model.transitionState |> Expect.equal Login.Complete
-                        , \_ -> outMsg |> Expect.equal (Login.LoggedIn fakeAuthResponse)
-                        ]
-                        ()
+                    Login.isSubmitDisabled succeeded |> Expect.equal True
+            , test "submit_lock_resets: switching mode after a success unlocks the card" <|
+                \_ ->
+                    -- The old `transitionState` latched on success and NOTHING
+                    -- cleared it — not `ModeSwitched`, not a keystroke — so a
+                    -- login whose door animation never finished left the card
+                    -- permanently unable to submit. The lock now lives on
+                    -- `submitState`, which `ModeSwitched` already resets.
+                    let
+                        ( succeeded, _, _ ) =
+                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) validLoginModel
+
+                        ( switched, _, _ ) =
+                            Login.update (ModeSwitched Login.LoginMode) succeeded
+
+                        ( retyped, _, _ ) =
+                            Login.update (EmailChanged "reader@stacks.dev") switched
+
+                        ( ready, _, _ ) =
+                            Login.update (PasswordChanged "secret123") retyped
+                    in
+                    Login.isSubmitDisabled ready |> Expect.equal False
             ]
         , describe "error messages"
             [ test "GotAuthResponse Err BadStatus 401 produces credential error" <|
@@ -324,7 +352,7 @@ suite =
                     in
                     Expect.all
                         [ \_ -> succeededEmail |> Expect.equal (Just "user@test.com")
-                        , \_ -> model.transitionState |> Expect.equal Login.Idle
+                        , \_ -> model.submitState |> Expect.equal NotAsked
                         ]
                         ()
             , test "GotRegisterResponse Ok does not store a Success auth response (no blank JWT)" <|

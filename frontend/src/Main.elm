@@ -1,6 +1,8 @@
 port module Main exposing
     ( AppConfig
     , Auth
+    , AuthState(..)
+    , CompletedLogin
     , ExternalAuthOutcome(..)
     , LoginEffect(..)
     , Msg(..)
@@ -8,16 +10,20 @@ port module Main exposing
     , PendingLogout
     , StoredAuthResolution(..)
     , adoptExternalAuth
+    , completeLogin
+    , currentAuth
     , decodeConfig
     , decodeFlags
     , decodeSwipe
     , initPage
     , loginEffects
+    , loginRedirectFor
     , main
     , parkPending
     , renewAuthToken
     , requiresAuth
     , resolveRecheck
+    , settleArrival
     , shouldShowOnboarding
     , viewFooter
     , viewHome
@@ -223,6 +229,68 @@ type alias Auth =
     }
 
 
+{-| Who the app currently believes is signed in.
+
+⛔ The point of this type is what it makes impossible. The old field was
+`auth : Maybe Auth`, and a login could set it from a value the app had NOT yet
+persisted: `Main` parked the response in `pendingAuthResponse`, fired the door
+animation, and only wrote the token to localStorage when the browser reported
+the animation finished. On an occluded window that report never came, so the
+reader was authenticated in memory and anonymous on disk — a state that looked
+fine until the tab reloaded and the session was simply gone (#359, three logins
+returning `200` with nothing stored, driven live 2026-07-30).
+
+Now the ONLY way an `AuthResponse` becomes either authenticated constructor is
+`completeLogin`, which returns the state and the effects that make it durable as
+one value. There is no half-authenticated variant to put a not-yet-saved
+credential into, because there is no variant that means "we have a token but
+have not written it".
+
+`Arriving` and `Authenticated` are deliberately indistinguishable to every
+consumer — `currentAuth` answers `Just` for both, and it is the only accessor.
+`Arriving` names the seconds while the door ornament is still owed a completion
+signal; if that signal never comes (occluded window, sleeping machine) nothing
+about the session degrades. That is the guarantee: the animation cannot reach
+the credential, in either direction.
+
+-}
+type AuthState
+    = Anonymous
+    | Arriving Auth
+    | Authenticated Auth
+
+
+{-| The session, whatever stage of arrival it is in. The ONE accessor — nothing
+outside this function may pattern-match `AuthState` to decide whether a request
+can be made, or `Arriving` would start meaning "not really signed in".
+-}
+currentAuth : AuthState -> Maybe Auth
+currentAuth authState =
+    case authState of
+        Anonymous ->
+            Nothing
+
+        Arriving auth ->
+            Just auth
+
+        Authenticated auth ->
+            Just auth
+
+
+{-| Settle an arrival. Total and idempotent on purpose: it is driven by two
+racing sources — the door animation's completion signal from JS, and the
+`ArmArrivalBackstop` timer — and either may arrive first, twice, or never.
+-}
+settleArrival : AuthState -> AuthState
+settleArrival authState =
+    case authState of
+        Arriving auth ->
+            Authenticated auth
+
+        settled ->
+            settled
+
+
 {-| A parked session-expiry intent (Issue #180 Phase 2). Raised when an
 authenticated 401 wants to log out; the actual clear+redirect is deferred one
 port round-trip (`requestStoredAuth` → `gotStoredAuth`) so a token another tab
@@ -263,7 +331,7 @@ type alias Model =
     { key : Nav.Key
     , url : Url
     , route : Route
-    , auth : Maybe Auth
+    , auth : AuthState
 
     -- The MFA-verified admin-session token (#303). Held IN MEMORY and deliberately never
     -- persisted: it needs no port, it is the highest-value credential here, and MFA expires after
@@ -273,7 +341,13 @@ type alias Model =
     , page : Page
     , previousRoute : Maybe Route
     , transition : Maybe String
-    , pendingAuthResponse : Maybe Api.AuthResponse
+
+    -- The page the reader actually asked for and was bounced off, captured the
+    -- moment `initPage` swaps it for the sign-in gate (see `loginRedirectFor`).
+    -- Without it, a deep link to /upload sent them to their antilibrary after
+    -- signing in and the page they wanted was simply lost. Recomputed on every
+    -- `UrlChanged`, so it cannot outlive the bounce that raised it.
+    , redirectAfterLogin : Maybe Route
     , bookDetailOverlay : Maybe BookDetailOverlay
     , userMenu : UserMenu.Model
     , onboarding : OnboardingOverlay.Model
@@ -362,12 +436,16 @@ init flags url key =
     ( { key = key
       , url = url
       , route = route
-      , auth = maybeAuth
+      , auth =
+            -- A token read back from localStorage is durable by definition, so it
+            -- boots straight into the settled state — nothing is owed a completion
+            -- signal.
+            maybeAuth |> Maybe.map Authenticated |> Maybe.withDefault Anonymous
       , adminAuth = Nothing
       , page = page
       , previousRoute = Nothing
       , transition = Nothing
-      , pendingAuthResponse = Nothing
+      , redirectAfterLogin = loginRedirectFor route maybeAuth
       , bookDetailOverlay = Nothing
       , userMenu = UserMenu.init
       , onboarding = OnboardingOverlay.init
@@ -551,9 +629,33 @@ adminTokenFor model =
     model.adminAuth
 
 
+{-| The page the reader asked for but is being bounced off, or `Nothing` when
+they are not being bounced.
+
+⛔ Named once, and read by BOTH the bounce itself (`initPage`, immediately below)
+and the model field that has to remember it (`Model.redirectAfterLogin`). The
+condition is the bounce: a second copy of `requiresAuth route && …` at the
+remembering site is how "capture the asked-for page" drifts out of step with
+"bounce to the sign-in gate" and starts remembering a page nobody was denied —
+the #309 lesson, applied before it can happen.
+
+Note the URL does NOT change on this bounce: `initPage` swaps the _page_ for the
+sign-in gate and leaves the reader standing at `/upload`. That is what makes the
+capture possible at all — the asked-for route is still `model.route`.
+
+-}
+loginRedirectFor : Route -> Maybe Auth -> Maybe Route
+loginRedirectFor route maybeAuth =
+    if requiresAuth route && maybeAuth == Nothing then
+        Just route
+
+    else
+        Nothing
+
+
 initPage : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> ( Page, Cmd Msg )
 initPage config route maybeAuth adminToken maybePreviousRoute =
-    if requiresAuth route && maybeAuth == Nothing then
+    if loginRedirectFor route maybeAuth /= Nothing then
         ( PageLogin Login.init, Cmd.none )
 
     else if isAdminRoute route && adminToken == Nothing then
@@ -984,7 +1086,7 @@ notice survives the `Nav.pushUrl`-driven `UrlChanged` re-init via the flag.
 forceSessionExpiry : Bool -> Model -> ( Model, Cmd Msg )
 forceSessionExpiry draftSaved model =
     ( { model
-        | auth = Nothing
+        | auth = Anonymous
         , adminAuth = Nothing
         , sessionExpiredNotice = True
         , draftSavedNotice = model.draftSavedNotice || draftSaved
@@ -1012,7 +1114,7 @@ successful action.
 handleAccountDeleted : Model -> ( Model, Cmd Msg )
 handleAccountDeleted model =
     ( { model
-        | auth = Nothing
+        | auth = Anonymous
         , adminAuth = Nothing
         , accountDeletedNotice = True
         , userMenu = UserMenu.init
@@ -1161,38 +1263,107 @@ login must run the _same_ effects, otherwise `hasAnyPlacements` never leaves its
 optimistic init value (`True`) and the onboarding overlay can never appear for a
 brand-new, placement-free user. Exposed so tests can assert the fetch happens.
 
+`PlayDoorAnimation` is in this list rather than in a branch of its own so that
+"the animation runs last" is a fact about ONE ordered value a test can read,
+instead of an ordering buried in a `Cmd.batch` nobody can inspect.
+
 -}
 type LoginEffect
     = PersistAuth
-    | NavigateHome
     | FetchPlacements
     | InitOnboarding
     | ScheduleRenewal
+    | NavigateToRequestedPage
+    | ArmArrivalBackstop
+    | PlayDoorAnimation
 
 
-{-| Effects performed when a login completes (form login, both the immediate and
-post-transition paths). Mirrors what `init` does for a stored auth.
+{-| Effects performed when a login completes. Mirrors what `init` does for a
+stored auth, plus the arrival ornament.
+
+⛔ The ORDER is the fix (#359). `PersistAuth` is first and `PlayDoorAnimation` is
+last, and every one of them is fired from the single update that decodes the
+`200` — nothing here waits for a message from the browser. It used to be the
+other way round: the animation was started, and the token was written only when
+the browser reported the animation had finished. `requestAnimationFrame` does
+not fire while a window is occluded, so on a backgrounded tab the report never
+came and the login was discarded in silence. Anything a browser may decline to
+run belongs after the credential is durable, never in front of it.
+
 -}
 loginEffects : List LoginEffect
 loginEffects =
     [ PersistAuth
-    , NavigateHome
     , FetchPlacements
     , InitOnboarding
     , ScheduleRenewal
+    , NavigateToRequestedPage
+    , ArmArrivalBackstop
+    , PlayDoorAnimation
     ]
 
 
-{-| Realise a single `LoginEffect` as a concrete `Cmd` for a completed login.
+{-| Everything a completed login produces, as one indivisible value: the session
+to hold in memory, the state that session puts the app in, and the effects that
+make it durable.
+
+⛔ This is the ONLY function that turns an `AuthResponse` into an `AuthState`.
+Returning the state and its effects together is what makes "authenticated but
+never saved" unwritable: a caller cannot reach `Arriving auth` without also
+being handed the `PersistAuth` that backs it.
+
 -}
-loginEffectCmd : Nav.Key -> Auth -> LoginEffect -> Cmd Msg
-loginEffectCmd key auth effect =
+type alias CompletedLogin =
+    { session : Auth
+    , authState : AuthState
+    , effects : List LoginEffect
+    }
+
+
+{-| Build the completed login for a `200` from `POST /api/auth/login`. Pure and
+key-free, so the persist-first guarantee is unit-testable rather than only
+observable in a browser.
+-}
+completeLogin : Api.AuthResponse -> CompletedLogin
+completeLogin authResponse =
+    let
+        session =
+            { user =
+                { id = authResponse.userId
+                , email = authResponse.email
+                , displayName = authResponse.displayName
+                , handle = authResponse.handle
+                , role = authResponse.role
+                , countryCode = Nothing
+                , city = Nothing
+                , consentAnalytics = authResponse.consentAnalytics
+                , consentWritingAssistant = authResponse.consentWritingAssistant
+                }
+            , token = authResponse.token
+            }
+    in
+    { session = session
+    , authState = Arriving session
+    , effects = loginEffects
+    }
+
+
+{-| How long the app will wait for the door ornament to report itself finished
+before settling the arrival anyway. Comfortably past the 4 s animation.
+-}
+arrivalBackstopMs : Float
+arrivalBackstopMs =
+    6000
+
+
+{-| Realise a single `LoginEffect` as a concrete `Cmd` for a completed login.
+`redirect` is the page the reader was bounced off, if any.
+-}
+loginEffectCmd : Nav.Key -> Maybe Route -> Auth -> LoginEffect -> Cmd Msg
+loginEffectCmd key redirect auth effect =
     case effect of
         PersistAuth ->
             saveAuth (encodeAuth auth)
-
-        NavigateHome ->
-            Nav.pushUrl key (Route.toPath AntiLibrary)
 
         FetchPlacements ->
             Api.getMyPlacements auth.token GotPlacementCheck
@@ -1203,13 +1374,50 @@ loginEffectCmd key auth effect =
         ScheduleRenewal ->
             scheduleRenewal
 
+        NavigateToRequestedPage ->
+            -- Back to the page they asked for, or the antilibrary if they simply
+            -- signed in. Note this fires even when the target equals the current
+            -- URL (the bounce leaves the URL alone), which is what re-runs
+            -- `initPage` with a token in hand and swaps the gate for the real page.
+            Nav.pushUrl key (Route.toPath (Maybe.withDefault AntiLibrary redirect))
+
+        ArmArrivalBackstop ->
+            -- The sleep race (#359, requirement 3). The ornament's completion
+            -- signal comes from JS and can be lost outright: an occluded window
+            -- never runs `requestAnimationFrame`, and a machine that suspends
+            -- mid-animation may never settle the promise at all. A timer is the
+            -- backstop because timers are throttled in a background tab, not
+            -- cancelled, and fire on wake. Belt and braces, though: the arrival
+            -- settling late — or never — costs nothing, because `Arriving` and
+            -- `Authenticated` answer `currentAuth` identically.
+            Process.sleep arrivalBackstopMs |> Task.perform (\_ -> ArrivalSettled)
+
+        PlayDoorAnimation ->
+            -- Decoration, fired last, gating nothing. See `loginEffects`.
+            --
+            -- ⚠️ Measured 2026-07-31: with the navigation above firing in the same
+            -- update, the login scene is unmounted before the port's frame
+            -- callback runs, so the dolly-shot starts ZERO animations. The
+            -- ornament is not merely ungating — it no longer plays. That is the
+            -- direct cost of "the animation cannot gate anything", and it is a
+            -- design decision to take rather than a bug to fix here: bringing the
+            -- flourish back means rendering the door layers from the SHELL while
+            -- `AuthState` is `Arriving`, over the destination page, which is what
+            -- `Arriving` is shaped for and is its own issue. Reported as a
+            -- finding on #359 rather than smuggled in.
+            playLoginTransition
+                (Json.Encode.object [ ( "duration", Json.Encode.int 4000 ) ])
+
 
 {-| All commands a completed login must fire, given the base command already
 produced by the login sub-update.
 -}
-loginCompletionCmd : Nav.Key -> Auth -> Cmd Msg -> Cmd Msg
-loginCompletionCmd key auth baseCmd =
-    Cmd.batch (baseCmd :: List.map (loginEffectCmd key auth) loginEffects)
+loginCompletionCmd : Nav.Key -> Maybe Route -> CompletedLogin -> Cmd Msg -> Cmd Msg
+loginCompletionCmd key redirect arrival baseCmd =
+    Cmd.batch
+        (baseCmd
+            :: List.map (loginEffectCmd key redirect arrival.session) arrival.effects
+        )
 
 
 
@@ -1222,7 +1430,9 @@ type Msg
     | TransitionEnded String
     | LoginMsg Login.Msg
     | ResetPasswordMsg ResetPassword.Msg
-    | LoginTransitionCompleted
+      -- The door ornament finished, or the backstop timer gave up waiting for it.
+      -- Both mean the same thing and neither touches the credential (#359).
+    | ArrivalSettled
     | BookshelfMsg Bookshelf.Msg
     | ReadingPileMsg ReadingPile.Msg
     | LookingForHomeMsg LookingForHome.Msg
@@ -1301,7 +1511,7 @@ update msg model =
                     Just (transitionClass model.route newRoute)
 
                 ( initialisedPage, cmd ) =
-                    initPage model.config newRoute model.auth (adminTokenFor model) (Just model.route)
+                    initPage model.config newRoute (currentAuth model.auth) (adminTokenFor model) (Just model.route)
 
                 -- Consume a pending session-expiry notice: when the redirect lands
                 -- on /login, build the Login page in its expired-notice state so the
@@ -1326,6 +1536,12 @@ update msg model =
                 , page = page
                 , previousRoute = Just model.route
                 , transition = transition
+
+                -- Recomputed, never accumulated: the asked-for page is whatever
+                -- THIS navigation was bounced off, and `Nothing` the moment it
+                -- was not bounced. (`pendingAuthResponse` used to be cleared
+                -- here too; it no longer exists — see `AuthState`.)
+                , redirectAfterLogin = loginRedirectFor newRoute (currentAuth model.auth)
                 , userMenu = UserMenu.init
                 , sessionExpiredNotice =
                     model.sessionExpiredNotice && newRoute /= Login
@@ -1366,36 +1582,18 @@ update msg model =
                         Login.NoOut ->
                             ( baseModel, baseCmd )
 
-                        Login.StartTransition authResponse ->
-                            ( { baseModel | pendingAuthResponse = Just authResponse }
-                            , Cmd.batch
-                                [ baseCmd
-                                , playLoginTransition
-                                    (Json.Encode.object
-                                        [ ( "duration", Json.Encode.int 4000 ) ]
-                                    )
-                                ]
-                            )
-
                         Login.LoggedIn authResponse ->
+                            -- The whole login lands here, in the update that decoded
+                            -- the 200: the session goes into the model and the token
+                            -- goes to localStorage in the same breath. Nothing waits
+                            -- on the browser, so an occluded window signs in exactly
+                            -- like a focused one (#359).
                             let
-                                auth =
-                                    { user =
-                                        { id = authResponse.userId
-                                        , email = authResponse.email
-                                        , displayName = authResponse.displayName
-                                        , handle = authResponse.handle
-                                        , role = authResponse.role
-                                        , countryCode = Nothing
-                                        , city = Nothing
-                                        , consentAnalytics = authResponse.consentAnalytics
-                                        , consentWritingAssistant = authResponse.consentWritingAssistant
-                                        }
-                                    , token = authResponse.token
-                                    }
+                                arrival =
+                                    completeLogin authResponse
                             in
-                            ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , loginCompletionCmd model.key auth baseCmd
+                            ( { baseModel | auth = arrival.authState }
+                            , loginCompletionCmd model.key model.redirectAfterLogin arrival baseCmd
                             )
 
                         Login.RegistrationSucceeded _ ->
@@ -1407,46 +1605,14 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
-        LoginTransitionCompleted ->
-            case ( model.page, model.pendingAuthResponse ) of
-                ( PageLogin subModel, Just authResponse ) ->
-                    let
-                        ( newSubModel, subCmd, outMsg ) =
-                            Login.update (Login.TransitionCompleted authResponse) subModel
-
-                        baseModel =
-                            { model | page = PageLogin newSubModel }
-
-                        baseCmd =
-                            Cmd.map LoginMsg subCmd
-                    in
-                    case outMsg of
-                        Login.LoggedIn ar ->
-                            let
-                                auth =
-                                    { user =
-                                        { id = ar.userId
-                                        , email = ar.email
-                                        , displayName = ar.displayName
-                                        , handle = ar.handle
-                                        , role = ar.role
-                                        , countryCode = Nothing
-                                        , city = Nothing
-                                        , consentAnalytics = ar.consentAnalytics
-                                        , consentWritingAssistant = ar.consentWritingAssistant
-                                        }
-                                    , token = ar.token
-                                    }
-                            in
-                            ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , loginCompletionCmd model.key auth baseCmd
-                            )
-
-                        _ ->
-                            ( baseModel, baseCmd )
-
-                _ ->
-                    ( model, Cmd.none )
+        ArrivalSettled ->
+            -- ⛔ Cosmetic by design. This used to be `LoginTransitionCompleted`, and
+            -- it was where the token got written — the browser telling us an
+            -- animation had finished was the app's only cue to persist a credential
+            -- it had been holding since the 200. Now the credential is long since
+            -- durable and there is nothing left for this message to do but retire
+            -- the arrival state. Losing it entirely changes nothing observable.
+            ( { model | auth = settleArrival model.auth }, Cmd.none )
 
         BookshelfMsg subMsg ->
             case model.page of
@@ -1567,7 +1733,7 @@ update msg model =
                 PageBookDetail subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             BookDetail.update subMsg subModel maybeToken
@@ -1609,7 +1775,7 @@ update msg model =
                 PageUpload subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Upload.update subMsg subModel maybeToken
@@ -1651,7 +1817,7 @@ update msg model =
                 PageSearch subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Search.update subMsg subModel maybeToken
@@ -1685,7 +1851,7 @@ update msg model =
                 PageSettingsConsent subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Consent.update subMsg subModel maybeToken
@@ -1745,7 +1911,7 @@ update msg model =
                 PageSettingsProfile subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd ) =
                             Profile.update subMsg subModel maybeToken
@@ -1762,7 +1928,7 @@ update msg model =
                 PageSettingsPassword subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd ) =
                             Password.update subMsg subModel maybeToken
@@ -1793,7 +1959,7 @@ update msg model =
                 PageSettingsNotifications subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd ) =
                             Notifications.update subMsg subModel maybeToken
@@ -1852,7 +2018,7 @@ update msg model =
                 PageCatalogue subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Catalogue.update subMsg subModel maybeToken
@@ -1888,10 +2054,10 @@ update msg model =
                 PageMarketplaceCreate subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         maybeUserId =
-                            Maybe.map (.user >> .id) model.auth
+                            Maybe.map (.user >> .id) (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             CreateListing.update subMsg subModel maybeToken maybeUserId
@@ -1940,7 +2106,7 @@ update msg model =
                 PageMarketplaceMyListings subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             MyListings.update subMsg subModel maybeToken
@@ -1976,7 +2142,7 @@ update msg model =
                 PageSettingsPrivacy subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Privacy.update subMsg subModel maybeToken
@@ -2015,7 +2181,7 @@ update msg model =
                 PageBlogEditor subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             BlogEditor.update subMsg subModel maybeToken
@@ -2037,7 +2203,7 @@ update msg model =
                 PageBlogPost subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             BlogPostPage.update subMsg subModel maybeToken
@@ -2138,7 +2304,7 @@ update msg model =
                 PageAdminGate gatedRoute subModel ->
                     let
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminSession.update subMsg subModel (Maybe.map .token model.auth)
+                            AdminSession.update subMsg subModel (Maybe.map .token (currentAuth model.auth))
                     in
                     case outMsg of
                         AdminSession.NoOut ->
@@ -2160,7 +2326,7 @@ update msg model =
                                     -- remove. One way to obtain the admin token, everywhere.
                                     initPage model.config
                                         gatedRoute
-                                        model.auth
+                                        (currentAuth model.auth)
                                         (adminTokenFor withToken)
                                         (Just model.route)
                             in
@@ -2277,7 +2443,7 @@ update msg model =
                 Just overlay ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newDetail, subCmd, outMsg ) =
                             BookDetail.update subMsg overlay.detail maybeToken
@@ -2338,14 +2504,14 @@ update msg model =
                 UserMenu.SignOut ->
                     let
                         logoutCmd =
-                            case model.auth of
+                            case currentAuth model.auth of
                                 Just auth ->
                                     Api.logout auth.token (always FocusResult)
 
                                 Nothing ->
                                     Cmd.none
                     in
-                    ( { model | userMenu = newUserMenu, auth = Nothing, adminAuth = Nothing, page = PageLogin Login.init }
+                    ( { model | userMenu = newUserMenu, auth = Anonymous, adminAuth = Nothing, page = PageLogin Login.init }
                     , Cmd.batch
                         [ logoutCmd
                         , clearAuth ()
@@ -2367,7 +2533,7 @@ update msg model =
                 Just overlay ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         -- Give the overlay first dibs on Escape: it dismisses a
                         -- nested surface (remove modal / progress-edit form) if
@@ -2405,7 +2571,7 @@ update msg model =
                         PageBookDetail subModel ->
                             let
                                 maybeToken =
-                                    Maybe.map .token model.auth
+                                    Maybe.map .token (currentAuth model.auth)
 
                                 ( newSubModel, subCmd, outMsg ) =
                                     BookDetail.update BookDetail.EscapePressed subModel maybeToken
@@ -2434,7 +2600,7 @@ update msg model =
 
                 -- When the user clicks Next, record the completed step via the API
                 apiCmd =
-                    case ( subMsg, model.auth ) of
+                    case ( subMsg, currentAuth model.auth ) of
                         ( OnboardingOverlay.NextStep, Just auth ) ->
                             Cmd.map OnboardingMsg
                                 (OnboardingOverlay.completeStep auth.token model.onboarding.step)
@@ -2491,7 +2657,7 @@ update msg model =
         RenewToken ->
             -- Proactive silent renewal tick. Only meaningful while authenticated;
             -- a signed-out session simply drops the tick.
-            case model.auth of
+            case currentAuth model.auth of
                 Just auth ->
                     ( model, Api.refresh auth.token TokenRefreshed )
 
@@ -2501,13 +2667,13 @@ update msg model =
         TokenRefreshed (Ok authResponse) ->
             -- Renewal succeeded: adopt the fresh token (keeping the same user),
             -- persist it, and roll the next renewal. No navigation, no logout.
-            case model.auth of
+            case currentAuth model.auth of
                 Just auth ->
                     let
                         renewedAuth =
                             renewAuthToken authResponse auth
                     in
-                    ( { model | auth = Just renewedAuth }
+                    ( { model | auth = Authenticated renewedAuth }
                     , Cmd.batch [ saveAuth (encodeAuth renewedAuth), scheduleRenewal ]
                     )
 
@@ -2522,7 +2688,7 @@ update msg model =
 
         AuthChangedExternally value ->
             -- A sibling tab wrote `stacks-auth` (Issue #180 Phase 2).
-            case adoptExternalAuth value model.auth of
+            case adoptExternalAuth value (currentAuth model.auth) of
                 AdoptAuth newAuth ->
                     -- Adopt the token another tab rotated in. No `saveAuth` (that
                     -- tab already persisted it) and NO reschedule: this tab still
@@ -2534,7 +2700,7 @@ update msg model =
                     -- otherwise an in-flight `gotStoredAuth` (whose stored value now
                     -- equals this adopted token → IgnoreExternal) would force a
                     -- logout on a tab that just adopted a live credential.
-                    ( { model | auth = Just newAuth, pendingLogout = Nothing }
+                    ( { model | auth = Authenticated newAuth, pendingLogout = Nothing }
                     , Cmd.none
                     )
 
@@ -2549,12 +2715,12 @@ update msg model =
             -- The re-check-before-logout answer (Issue #180 Phase 2). The pure
             -- resolver folds in the parked intent (origin + draft flags); a stray
             -- answer with no parked intent is a no-op (P1a).
-            case resolveRecheck model.pendingLogout (adoptExternalAuth value model.auth) of
+            case resolveRecheck model.pendingLogout (adoptExternalAuth value (currentAuth model.auth)) of
                 ResolveAdopt newAuth reschedule ->
                     -- localStorage holds a newer token than the one that 401'd —
                     -- adopt it and cancel the logout. Re-arm renewal ONLY for a
                     -- renewal-origin expiry, whose proactive tick was consumed (P1b).
-                    ( { model | auth = Just newAuth, pendingLogout = Nothing }
+                    ( { model | auth = Authenticated newAuth, pendingLogout = Nothing }
                     , if reschedule then
                         scheduleRenewal
 
@@ -2633,7 +2799,7 @@ openOverlayWithTrigger : Model -> String -> String -> ( Model, Cmd Msg )
 openOverlayWithTrigger model bookId triggerId =
     let
         maybeToken =
-            Maybe.map .token model.auth
+            Maybe.map .token (currentAuth model.auth)
 
         ( detailModel, detailCmd ) =
             BookDetail.init bookId maybeToken (Just model.route)
@@ -2665,7 +2831,7 @@ subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
         [ onSwipe decodeSwipe
-        , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
+        , onLoginTransitionComplete (\_ -> ArrivalSettled)
         , onOnboardingStatus OnboardingStatusReceived
         , authChanged AuthChangedExternally
         , gotStoredAuth GotStoredAuth
@@ -2724,7 +2890,7 @@ view model =
         , ViewAsBar.view model.url
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
-            , viewNav model.route model.auth model.userMenu
+            , viewNav model.route (currentAuth model.auth) model.userMenu
             , main_
                 [ id "main-content"
 
@@ -3027,7 +3193,7 @@ viewPage model =
             Html.map BookDetailMsg (BookDetail.view subModel)
 
         PageUpload subModel ->
-            Html.map UploadMsg (Upload.view subModel (Maybe.map .token model.auth))
+            Html.map UploadMsg (Upload.view subModel (Maybe.map .token (currentAuth model.auth)))
 
         PageSearch subModel ->
             Html.map SearchMsg (Search.view subModel)
@@ -3167,7 +3333,7 @@ who haven't completed onboarding yet.
 -}
 viewOnboarding : Model -> Html Msg
 viewOnboarding model =
-    if shouldShowOnboarding model.auth model.onboardingCompleted model.hasAnyPlacements then
+    if shouldShowOnboarding (currentAuth model.auth) model.onboardingCompleted model.hasAnyPlacements then
         Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
 
     else
