@@ -1105,23 +1105,31 @@ does — from the **pre-update** model. `BookshelfProgramTest`'s
 happen is only worth the positive control that proves the harness can see it
 happening at all.
 
+⚠️ **The organiser branches read `Bookshelf.mutationToken`, not `model.token`** —
+production's own read-only guard (Issue #332), _called_, not re-implemented. A
+mirror of a guard is a second place for it to be wrong, and the whole reason this
+translator needed rewriting was a harness quietly disagreeing with the page. The
+guard's own falsifiability does not rest here either way: `BookshelfReadOnlyTest`'s
+`read_only_organiser_is_inert_SECURITY` asserts on the `Cmd` that
+`Page.Bookshelf.update` actually returns, with no translator in the path.
+
 -}
 libraryEffects : Bookshelf.Msg -> Bookshelf.Model -> SimulatedEffect Bookshelf.Msg
 libraryEffects msg model =
-    case ( msg, model.token ) of
-        ( Bookshelf.OrganiserMsg ShelfOrganiser.AddShelf, Just token ) ->
+    case ( msg, Bookshelf.mutationToken model, model.token ) of
+        ( Bookshelf.OrganiserMsg ShelfOrganiser.AddShelf, Just token, _ ) ->
             shelfCreateEffect model.config.apiName token
 
-        ( Bookshelf.OrganiserMsg (ShelfOrganiser.RemoveShelf id), Just token ) ->
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.RemoveShelf id), Just token, _ ) ->
             shelfDeleteEffect id token
 
-        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveUp id), Just token ) ->
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveUp id), Just token, _ ) ->
             reorderEffect model token (ShelfOrganiser.moveUp id)
 
-        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveDown id), Just token ) ->
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveDown id), Just token, _ ) ->
             reorderEffect model token (ShelfOrganiser.moveDown id)
 
-        ( Bookshelf.OrganiserMsg (ShelfOrganiser.DropOn targetId), Just token ) ->
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.DropOn targetId), Just token, _ ) ->
             case model.organiser.dragging of
                 Just draggedId ->
                     reorderEffect model token (moveShelfToId draggedId targetId)
@@ -1129,9 +1137,11 @@ libraryEffects msg model =
                 Nothing ->
                     SimulatedEffect.Cmd.none
 
-        ( Bookshelf.ShelfMutated _, Just token ) ->
+        ( Bookshelf.ShelfMutated _, _, Just token ) ->
             -- Both the Ok and Err branches refetch: the page never trusts its
-            -- local order after a mutation.
+            -- local order after a mutation. Keyed off the *plain* token, matching
+            -- `reloadShelves` — a refetch is a GET, and read-only browse reloads
+            -- through the same path it loaded through.
             bookshelfInitEffects model.config (Just token)
 
         _ ->

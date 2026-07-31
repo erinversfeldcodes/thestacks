@@ -6,6 +6,7 @@ module Page.Bookshelf exposing
     , antiLibraryConfig
     , init
     , libraryConfig
+    , mutationToken
     , profileConfig
     , requestKey
     , update
@@ -46,6 +47,12 @@ Everything else (model, update, view structure) is identical.
 `/u/:handle/:bookshelf_name`: the fetch targets the profile endpoint (via
 `profileHandle`) and all mutating affordances (add shelf, RSS feed, the
 per-placement visibility / move / remove controls) are stripped. See US-10.5.3.
+
+⚠️ **Read-only is enforced in `update`, not only in `view`.** Not rendering a
+control is a convention; `mutationToken` below is the structure. Every mutating
+organiser branch takes its credential from there, so a message that reaches this
+page by any other route — a stale click, a `Html.map` from a future caller, a
+test — still cannot produce a mutating effect. See `handleOrganiser`.
 
 -}
 type alias Config =
@@ -340,6 +347,41 @@ update msg model =
                 )
 
 
+{-| The credential a **mutating** organiser branch requires.
+
+`Nothing` whenever the page is read-only, whatever token the viewer happens to be
+carrying — so in read-only mode every `Just token` branch below is simply not
+selectable and the dispatch falls through to the silent catch-all.
+
+⚠️ **This is the enforcement point for read-only, and it is deliberately one place.**
+It used to be `model.token`, and the only thing stopping a viewer's browse of
+someone else's shelf from issuing `POST /api/bookshelves/:name/shelves` was that
+`viewOrganiser` does not render the button (Issue #332, found by #330). That is a
+guarantee living in the view: strip the view, dispatch a synthetic `OrganiserMsg`,
+and the update function mutated happily. The blast radius was bounded — the request
+carries the _viewer's_ token, so the server scoped the write to the viewer's own
+bookshelf of that name rather than the owner's — but "the button isn't drawn" is a
+convention, not a structure.
+
+Reading the credential through one function rather than checking `config.readOnly`
+in five branches means a **new** mutating branch inherits the guard by construction:
+to issue a request it needs a token, and this is the only place a token comes from.
+A branch that reached past this into `model.token` would be reintroducing the bug.
+
+`view` keeps its own check (`viewOrganiser`, and the RSS/attribution branches):
+hiding an affordance a viewer cannot use is a separate, legitimate job — it just is
+no longer the thing standing between a read-only page and a write.
+
+-}
+mutationToken : Model -> Maybe String
+mutationToken model =
+    if model.config.readOnly then
+        Nothing
+
+    else
+        model.token
+
+
 {-| Shelf organisation, split out so `update` stays flat.
 
 Reorders are **optimistic** — the row moves immediately and the full order is sent — because
@@ -347,10 +389,15 @@ a reorder with a round trip of latency before anything moves feels broken. Creat
 are not optimistic: both change positions the server assigns, so guessing would show a
 number that is about to change.
 
+Dispatches on `mutationToken` rather than `model.token`: see above for why the
+difference matters. The drag-state branches match `_` because tracking which row is
+mid-drag is local bookkeeping, not a mutation — a read-only page may hold a drag it
+can never complete, because `DropOn` needs the credential it does not have.
+
 -}
 handleOrganiser : ShelfOrganiser.Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 handleOrganiser subMsg model =
-    case ( subMsg, model.token, model.shelves ) of
+    case ( subMsg, mutationToken model, model.shelves ) of
         ( ShelfOrganiser.AddShelf, Just token, _ ) ->
             ( { model | organiserBusy = True }
             , Api.createShelf model.config.apiName token ShelfMutated
@@ -395,8 +442,10 @@ handleOrganiser subMsg model =
                     ( model, Cmd.none, NoOut )
 
         _ ->
-            -- No token, or shelves not loaded: nothing to organise. Silent because the
-            -- controls are not rendered in that state, so reaching here is a stale click.
+            -- Read-only, no token, or shelves not loaded: nothing this page may organise.
+            -- Silent because the controls are not rendered in any of those states, so
+            -- reaching here is a stale click — or, in read-only, a message that had no
+            -- business arriving at all.
             ( model, Cmd.none, NoOut )
 
 
@@ -620,6 +669,10 @@ manages the physical shelves alongside the bookcase instead of reshaping it.
 
 Hidden when `readOnly` (someone else's bookshelf) or when there is no token: organising
 another reader's shelves is not a thing, and the controls would 403.
+
+⚠️ **This check hides the affordance; it no longer _is_ the guard.** `mutationToken`
+is (Issue #332). Both are wanted — a control that cannot work should not be drawn —
+but if this one were deleted tomorrow the page would look wrong, not act wrong.
 
 -}
 viewOrganiser : Model -> List Shelf -> Html Msg
