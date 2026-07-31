@@ -45,7 +45,7 @@ Verdict: baseline ❌ ×3.
 - [x] Coverage-safety notes per removed test — evidence: #325 Progress Notes (lead-reconstructed, sourced from campaign test-inventory)
 - [x] Round-trip property + entry-mapping pin — evidence: RouteTest.elm, both probed red/green (#326 Progress Notes, c34b302b)
 - [x] Suites green — evidence: elixir 3,187/0 (caffeinated coveralls, b2z0yx18i); elm 1331/0
-- [x] Standards — evidence: `just ci` all groups PASS except documented dockle-daemon local exception; squawk clean
+- [x] Standards — evidence: `just ci` all groups PASS except documented dockle-daemon local exception; squawk clean (0 migrations of this wave's own — Wave 2 added none, so the run inspected only inherited files; not false, but not evidence about Wave 2 either. Qualified by #337, 2026-07-31.)
 - [x] Test audit GREEN — evidence: both punch items delivered (property test; census-style greps)
 - [x] `completion-audit` passed — evidence: 2026-07-30 run, Progress Notes below
 - [x] Completion Bar — evidence: /settings live drive ss_0513sacfo + DOM `settings-hub__nav-item--active :: Profile`; select "Profile"; title correct

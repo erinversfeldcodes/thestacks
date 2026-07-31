@@ -44,7 +44,7 @@ Verdict: baseline ❌ — the probe battery IS the exit criterion.
 - [x] All 4 phases landed; probe battery run with verbatim output — evidence: #327 steering+$callers, #328 six-field × 16 red, #329 8 impossibility probes + 14 guard rails, #330 three falsifiability probes (SECURITY / rate-limit counterfactual / reset-token replay). Lead independently re-probed one per child.
 - [x] No module under `lib/` matches `Mock*` — evidence: `grep -rl "defmodule.*Mock" apps/core/lib` → 0 (lead-verified at wave gate); MIX_ENV=prod 266 files vs test 281
 - [x] Coverage note per removed/rewritten test — evidence: in-file at each #330 site; #329 category-level repair notes
-- [x] Suites green — evidence: `just ci` 15/16 groups PASS at wave gate (elixir 3,206/0 · elm 1,332/0 · squawk · licenses); only the standing dockle local-daemon exception
+- [x] Suites green — evidence: `just ci` 15/16 groups PASS at wave gate (elixir 3,206/0 · elm 1,332/0 · squawk · licenses); only the standing dockle local-daemon exception. (squawk qualified by #337, 2026-07-31: Wave 3 added no migrations, so its squawk run inspected only inherited files and says nothing about this wave.)
 - [x] Test audit GREEN — evidence: every ❌ in the four child audits delivered; the wave's own acceptance instrument (probe battery) is green
 - [x] `completion-audit` passed — evidence: 2026-07-30 run, Progress Notes below
 - [x] Completion Bar met — #328 changed production decode behaviour (`Api.elm` SSE path), so a live drive WAS required and performed on preview: see Progress Notes. Remaining children are test-only (production diff empty for #330, zero lib/ lines for #329).
