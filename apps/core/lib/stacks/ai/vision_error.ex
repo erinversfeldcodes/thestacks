@@ -33,7 +33,12 @@ defmodule Stacks.AI.VisionError do
     * `:budget_exceeded` — the Modal spend cap is reached. No request left.
     * `{:undecodable_image, token}` — the service looked at the input and
       concluded it cannot be processed. `token` is a stable snake_case string,
-      written verbatim to `uploaded_images.rejection_reason`.
+      written verbatim to `uploaded_images.rejection_reason`. The constructor is
+      named for the common case; it carries every determination the service
+      makes about an input it will not accept, including the two that are about
+      the request rather than the pixels (`no_image_supplied`,
+      `malformed_request`). What unites them is the only thing a caller acts on:
+      the service has already decided, and asking again changes nothing.
     * `{:upstream_status, status}` — a non-200 the service did not label with a
       `VisionErrorCode`. Deliberately NOT deterministic: see `determination/1`.
     * `{:transport, term}` — no usable answer arrived. Covers a refused socket,
@@ -116,6 +121,9 @@ defmodule Stacks.AI.VisionError do
   def message({:undecodable_image, "no_image_supplied"}),
     do: "vision received a request carrying no image"
 
+  def message({:undecodable_image, "malformed_request"}),
+    do: "vision rejected the request shape (core sent a combination it does not accept)"
+
   def message({:undecodable_image, token}), do: "vision rejected the image: #{token}"
   def message(:circuit_open), do: "vision service circuit is open"
   def message(:budget_exceeded), do: "vision service budget exhausted"
@@ -175,6 +183,9 @@ defmodule Stacks.AI.VisionError do
 
   defp from_code("VISION_ERROR_CODE_NO_IMAGE_SUPPLIED", _status),
     do: emit(:no_image_supplied, {:undecodable_image, "no_image_supplied"})
+
+  defp from_code("VISION_ERROR_CODE_MALFORMED_REQUEST", _status),
+    do: emit(:malformed_request, {:undecodable_image, "malformed_request"})
 
   defp from_code(other, status) do
     Logger.warning(

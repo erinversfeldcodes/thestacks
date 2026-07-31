@@ -10,9 +10,10 @@ defmodule Stacks.Workers.IdentifyBookJob do
   ## The terminal guarantee
 
   **No exit from this worker may leave the `uploaded_images` row `pending`.**
-  Every return, every raise, every exit, on every attempt, passes through
-  `with_terminal_guarantee/3`; when the job has no attempts left, the row is
-  marked rejected and the reader's SSE stream is closed with a real answer.
+  Every return, every raise, every throw, and an attempt that simply runs too
+  long, on every attempt, passes through `with_terminal_guarantee/3`; when the
+  job has no attempts left, the row is marked rejected and the reader's SSE
+  stream is closed with a real answer.
 
   This is written as a wrapper and not as a fix to the branch that was known to
   be broken, because the shape of the bug is what recurs. There were two live
@@ -34,6 +35,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.AI.Client, as: AIClient
   alias Stacks.AI.VisionError
   alias Stacks.Books.UploadedImage
   alias Stacks.Events
@@ -42,13 +44,9 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
   @max_attempts 3
 
-  # Ceiling on ONE attempt. Set so the worst-case lifetime is a number rather
-  # than "however long Modal feels like taking": `Stacks.AI.Client` gives Finch a
-  # 210s receive timeout and `Stacks.Moderation` bounds its candidate tasks at
-  # the same 210s, so 240s is that ceiling plus room for the surrounding DB work.
-  # Without this, `worst_case_lifetime_ms/0` below would be a guess, and the
-  # reader's give-up time would be a guess about a guess.
-  @attempt_timeout_ms 240_000
+  # Slack above the calls an attempt is actually waiting on, for the DB writes,
+  # event emission and PubSub broadcast that bracket them.
+  @attempt_slack_ms 30_000
 
   # ── Retry schedule ────────────────────────────────────────────────────────
 
@@ -66,19 +64,41 @@ defmodule Stacks.Workers.IdentifyBookJob do
   def backoff(%Oban.Job{attempt: attempt}), do: 15 + Integer.pow(2, attempt)
 
   @doc """
-  Hard timeout for a single attempt. See `@attempt_timeout_ms`.
+  Ceiling on ONE attempt, in milliseconds.
+
+  Composed from the bound each attempt is really waiting on rather than picked:
+  an attempt makes at most two sequential waits of `Stacks.AI.Client.receive_timeout_ms/0`
+  — the `/analyze` call, then the per-candidate resolution `Stacks.Moderation`
+  bounds by the same number — plus `#{@attempt_slack_ms}ms` for the surrounding
+  database work.
+
+  Note there is deliberately **no** `c:Oban.Worker.timeout/1`. Oban implements
+  that with `:timer.exit_after/2`, an asynchronous exit signal delivered to the
+  executing process; a `try/catch` cannot intercept one, so an attempt killed
+  that way would skip the terminal guarantee entirely and leave the row
+  `pending` — the exact bug this module exists to prevent, reintroduced by the
+  mechanism meant to bound it. `run_bounded/1` enforces the same ceiling from
+  inside instead, where a timeout is a value the wrapper handles.
+
+  `:identify_attempt_timeout_ms` overrides the derivation. It exists so the
+  timeout branch can be exercised in a test that finishes in milliseconds
+  rather than in minutes — a branch reachable only by waiting seven minutes is
+  a branch nobody ever checks, and this one is load-bearing.
   """
-  @impl Oban.Worker
-  def timeout(%Oban.Job{}), do: @attempt_timeout_ms
+  @spec attempt_timeout_ms() :: pos_integer()
+  def attempt_timeout_ms do
+    Application.get_env(:core, :identify_attempt_timeout_ms) ||
+      2 * AIClient.receive_timeout_ms() + @attempt_slack_ms
+  end
 
   @doc """
   The longest this job can stay alive, in milliseconds, from first attempt to
   the moment its last attempt can no longer be running.
 
-  Every attempt runs at most `timeout/1`, and every gap between attempts is
-  exactly `backoff/1` — so this is a sum, not an estimate. It exists so the
-  reader's SSE deadline can be *derived* from when the job actually dies rather
-  than picked to sit near it: see `StacksWeb.UploadController`.
+  Every attempt runs at most `attempt_timeout_ms/0`, and every gap between
+  attempts is exactly `backoff/1` — so this is a sum, not an estimate. It exists
+  so the reader's SSE deadline can be *derived* from when the job actually dies
+  rather than picked to sit near it: see `StacksWeb.UploadController`.
   """
   @spec worst_case_lifetime_ms() :: pos_integer()
   def worst_case_lifetime_ms do
@@ -86,7 +106,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
       Enum.sum(for attempt <- 1..(@max_attempts - 1), do: backoff(%Oban.Job{attempt: attempt})) *
         1_000
 
-    @max_attempts * @attempt_timeout_ms + backoff_ms
+    @max_attempts * attempt_timeout_ms() + backoff_ms
   end
 
   # ── Entry point ───────────────────────────────────────────────────────────
@@ -201,20 +221,68 @@ defmodule Stacks.Workers.IdentifyBookJob do
   # `{:error, exception}`: Oban records the kind, reason and stacktrace of a
   # raised error, and flattening it into a return value threw that away. The row
   # is terminal either way; this way the operator can also see why.
+  #
+  # What this cannot cover: the BEAM losing the node, or an operator killing the
+  # machine mid-attempt. Nothing in-process can. Those leave the job `executing`
+  # rather than the row silently abandoned, and Oban's stager returns an orphaned
+  # executing job to `available`, so the next run re-enters this wrapper. The row
+  # is terminal a retry later, not never — which is the difference that matters.
   defp with_terminal_guarantee(job, image_id, body) do
-    result = body.()
-    finalise(job, image_id, result)
-  catch
-    kind, reason ->
-      stacktrace = __STACKTRACE__
+    case run_bounded(body) do
+      {:returned, result} ->
+        finalise(job, image_id, result)
 
-      Logger.error(
-        "IdentifyBookJob: unhandled #{kind} for image #{inspect(image_id)}: " <>
-          Exception.format(kind, reason, stacktrace)
-      )
+      {:raised, kind, reason, stacktrace} ->
+        Logger.error(
+          "IdentifyBookJob: unhandled #{kind} for image #{inspect(image_id)}: " <>
+            Exception.format(kind, reason, stacktrace)
+        )
 
-      if final_attempt?(job), do: mark_rejected(image_id, "processing_failed")
-      :erlang.raise(kind, reason, stacktrace)
+        if final_attempt?(job), do: mark_rejected(image_id, "processing_failed")
+        :erlang.raise(kind, reason, stacktrace)
+
+      :timed_out ->
+        Logger.error(
+          "IdentifyBookJob: attempt #{job.attempt}/#{job.max_attempts} for image " <>
+            "#{inspect(image_id)} exceeded #{attempt_timeout_ms()}ms and was killed"
+        )
+
+        finalise(job, image_id, {:error, :attempt_timeout})
+    end
+  end
+
+  # Runs the body under `attempt_timeout_ms/0`, in a task, so that "this attempt
+  # took too long" is a value rather than a dead process.
+  #
+  # The task catches everything itself and reports it as data. That is not
+  # belt-and-braces: `Task.async/1` links, so a task that genuinely crashed
+  # would send an exit signal to this process and kill it before `Task.yield/2`
+  # could return — turning a catchable raise into an uncatchable one, which is
+  # the failure mode we are here to remove. Nothing may escape the task except
+  # by being returned.
+  #
+  # Logger metadata is copied across because it is process-local: Oban sets the
+  # job's id and queue on the executing process, and without this every log line
+  # the pipeline writes would lose the job it belongs to — a silent cost of
+  # moving the work one process sideways.
+  defp run_bounded(body) do
+    metadata = Logger.metadata()
+
+    task =
+      Task.async(fn ->
+        Logger.metadata(metadata)
+
+        try do
+          {:returned, body.()}
+        catch
+          kind, reason -> {:raised, kind, reason, __STACKTRACE__}
+        end
+      end)
+
+    case Task.yield(task, attempt_timeout_ms()) || Task.shutdown(task, :brutal_kill) do
+      {:ok, outcome} -> outcome
+      _timed_out_or_killed -> :timed_out
+    end
   end
 
   # Translates the body's vocabulary into Oban's, marking the row on the way

@@ -27,7 +27,10 @@ defmodule Stacks.Storage.Mock do
   @impl true
   @spec presigned_url(String.t(), pos_integer()) :: {:ok, String.t()} | {:error, term()}
   def presigned_url(key, _ttl_seconds \\ 900) do
-    {:ok, "https://mock-storage.test/#{key}?signed=true"}
+    case presign_error() do
+      nil -> {:ok, "https://mock-storage.test/#{key}?signed=true"}
+      reason -> {:error, reason}
+    end
   end
 
   @impl true
@@ -73,10 +76,49 @@ defmodule Stacks.Storage.Mock do
     :ok
   end
 
+  @doc """
+  Make `presigned_url/2` fail with `reason` for the current process.
+
+  Presigning is the one storage call that happens *before* anything else in
+  `Stacks.Workers.IdentifyBookJob`, so it is the only way to exercise that
+  worker's earliest exit — the branch that returns `{:error, reason}` without
+  the pipeline ever running. Without this seam a test aiming at that branch
+  quietly takes the happy path instead and passes for the wrong reason.
+
+  Pass `nil` to restore success.
+  """
+  @spec put_presign_error(term()) :: :ok
+  def put_presign_error(reason) do
+    Process.put({__MODULE__, :presign_error}, reason)
+    :ok
+  end
+
+  # Walks `$callers` for the same reason `Stacks.AI.MockClient` does: the worker
+  # runs its body in a Task, so the registration made in the test process has to
+  # be visible from a descendant.
+  defp presign_error do
+    case Process.get({__MODULE__, :presign_error}, :undefined) do
+      :undefined -> find_presign_error_in_callers(Process.get(:"$callers", []))
+      reason -> reason
+    end
+  end
+
+  defp find_presign_error_in_callers([]), do: nil
+
+  defp find_presign_error_in_callers([pid | rest]) do
+    with {:dictionary, dict} <- Process.info(pid, :dictionary),
+         {_key, reason} <- List.keyfind(dict, {__MODULE__, :presign_error}, 0) do
+      reason
+    else
+      _ -> find_presign_error_in_callers(rest)
+    end
+  end
+
   @doc "Clear all mock storage for the current process."
   @spec clear() :: :ok
   def clear do
     Process.delete(__MODULE__)
+    Process.delete({__MODULE__, :presign_error})
     :ok
   end
 end

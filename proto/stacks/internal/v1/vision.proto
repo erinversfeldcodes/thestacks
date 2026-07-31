@@ -54,6 +54,15 @@ enum VisionErrorCode {
   // Neither `image` nor `image_url` was supplied. A malformed request from
   // core; retrying sends the identical malformed request.
   VISION_ERROR_CODE_NO_IMAGE_SUPPLIED = 4;
+  // The request violates an endpoint constraint that is not about the image
+  // bytes at all: both `images` and `image_url` set when they are mutually
+  // exclusive, or more `images` than the endpoint accepts. Distinct from
+  // NO_IMAGE_SUPPLIED, which means the request named no image; here it named
+  // too many, or named them in a combination the endpoint rejects. Kept
+  // separate so an operator reading the counter can tell "core sent nothing"
+  // from "core sent a contradiction" — both are core bugs, but not the same
+  // one.
+  VISION_ERROR_CODE_MALFORMED_REQUEST = 5;
 }
 
 // Error body returned by any vision endpoint that fails deterministically.

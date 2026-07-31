@@ -60,6 +60,21 @@ defmodule Stacks.AI.Client do
   @fuse_name :vision_fuse
   @default_modal_cost_per_call_cents 1
 
+  # 210s gives the Modal service headroom beyond its own 300s inference timeout.
+  @receive_timeout_ms 210_000
+
+  @doc """
+  The ceiling on a single vision HTTP call, in milliseconds.
+
+  Exposed because two other modules need to bound themselves by it and had each
+  written `210_000` in a comment saying "same as the client": `Stacks.Moderation`
+  bounds its per-candidate tasks, and `Stacks.Workers.IdentifyBookJob` bounds a
+  whole attempt (and derives the reader's SSE deadline from that bound). Three
+  copies of a number that must agree is three chances for it to stop agreeing.
+  """
+  @spec receive_timeout_ms() :: pos_integer()
+  def receive_timeout_ms, do: @receive_timeout_ms
+
   @impl true
   def call_vision(endpoint, payload) do
     case configured_client() do
@@ -170,8 +185,7 @@ defmodule Stacks.AI.Client do
       %{endpoint: endpoint}
     )
 
-    # 210s gives the Modal service headroom beyond its own 300s inference timeout.
-    result = Finch.request(req, Stacks.Finch, receive_timeout: 210_000)
+    result = Finch.request(req, Stacks.Finch, receive_timeout: @receive_timeout_ms)
 
     # Record the per-call cost regardless of outcome. Rejection ≠ free —
     # Modal bills for GPU time whether or not we use the result.
