@@ -250,6 +250,19 @@ defmodule Stacks.Workers.EnrichBookJob do
           "publication_year" =>
             coerce_integer(metadata[:publication_year]) || edition.publication_year,
           "page_count" => coerce_integer(metadata[:page_count]) || edition.page_count,
+          # The other half of #346. Moderation's barcode fast path resolves no
+          # metadata at all, so it has no identifier to hand the create — this
+          # job IS the round-trip for those rows, and it was writing the
+          # provenance claim below while dropping the two ids that claim is
+          # read off. A fast-path edition therefore ended up saying
+          # "open_library" with `open_library_id` NULL: the claim and its
+          # evidence stored separately, which is the whole defect.
+          #
+          # `||` on the existing value for the same reason as the fields above
+          # and as `Books.insert_edition/5`: enrichment fills what is missing,
+          # it never destroys what an earlier resolve established.
+          "open_library_id" => metadata[:open_library_id] || edition.open_library_id,
+          "google_books_id" => metadata[:google_books_id] || edition.google_books_id,
           "verification_source" => Books.verification_source_from(metadata)
         }
 

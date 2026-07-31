@@ -643,24 +643,41 @@ defmodule Stacks.Moderation do
     base_attrs = %{
       "isbn" => isbn,
       "title" => derive_title(isbn, metadata, used_fast_path),
+      # The cross-reference ids the resolver just returned (#346). They were
+      # absent here for as long as this function existed, so EVERY edition
+      # minted from an upload lost them — 40 of 40 rows in production, all of
+      # them with a real resolver-supplied title, i.e. all of them resolved
+      # successfully and then had the answer dropped on the floor. Nothing
+      # noticed because `verification_source` was stated explicitly below and
+      # so never had to read them.
+      #
+      # `Books.edition_attrs/2` is the one place these are persisted (#341);
+      # this map is the only thing standing between the resolver and it.
+      "open_library_id" => metadata[:open_library_id],
+      "google_books_id" => metadata[:google_books_id],
       # ISBN provenance (#335 D1). The fast path deliberately skipped the
       # OL/GB round-trip, so nothing external has confirmed this ISBN — say
       # so on the row rather than leaving it to be inferred from the
       # `"ISBN <isbn>"` placeholder title, which `EnrichBookJob` overwrites
-      # the moment enrichment succeeds. Otherwise the identifiers the
-      # resolver returned name the source (Books.verification_source_from/1).
+      # the moment enrichment succeeds.
       #
       # The fast-path branch is written out even though `resolve_metadata/3`
       # currently returns `%{}` alongside `used_fast_path == true`, which the
       # derivation would map to the same answer. That coincidence is not the
       # reason: `used_fast_path` means "we deliberately skipped the external
       # lookup", and if the fast path ever carries partial metadata, deriving
-      # from it would silently claim a verification that never happened.
-      "verification_source" =>
-        if(used_fast_path,
-          do: "barcode_unverified",
-          else: Books.verification_source_from(metadata)
-        ),
+      # from it would silently claim a verification that never happened. It is
+      # the one thing about this row that no column records.
+      #
+      # Every other path leaves this nil for `Books.edition_attrs/2` to derive
+      # (#346). It used to call `Books.verification_source_from/1` here on the
+      # resolver metadata, which is the same answer — but computed from a
+      # DIFFERENT map than the one being written. Two maps allowed to disagree
+      # is exactly how the identifiers above went missing for so long: the
+      # provenance claim looked right while the columns it claims to describe
+      # were empty. Derived downstream, the claim and the ids it reads are
+      # always the same row.
+      "verification_source" => if(used_fast_path, do: "barcode_unverified"),
       "subjects" => metadata[:subjects] || [],
       "bisac_codes" => metadata[:bisac_codes] || [],
       "description" => metadata[:description],

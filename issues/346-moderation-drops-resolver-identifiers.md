@@ -46,11 +46,11 @@ n/a — no new story surface. The pre-check that matters is a **zero/null sweep*
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Identifiers passed through to the unified create — evidence: diff + test name
-- [ ] `verification_source` behaviour on the barcode fast path unchanged — evidence: test still green, cited
-- [ ] Null sweep captured; backfill decision stated (via `Stacks.DataCorrection` if taken) — evidence: counts + decision
-- [ ] Mutation probe on the new assertion — evidence: red transcript
-- [ ] Suites green — evidence: counts
+- [x] Identifiers passed through to the unified create — evidence: `Moderation.build_book_attrs/4` now sets `"open_library_id"`/`"google_books_id"`; tests `run_pipeline/1 — the resolver's cross-reference ids reach the row (#346)` (3 tests, `moderation_test.exs`)
+- [x] `verification_source` behaviour on the barcode fast path unchanged — evidence: `the barcode fast path still records that nothing external confirmed it` (new) plus the two pre-existing `local-OCR fast path` tests, all green
+- [x] Null sweep captured; backfill decision stated — evidence: prod 40/40 editions carry neither identifier while 38/40 carry a resolver-supplied `publication_year`; backfill warranted, vehicle is re-enqueuing `EnrichBookJob`, NOT `Stacks.DataCorrection` (its `plan/0` runs inside `fly deploy` via `Release.deploy/0`, and the value needs a third-party lookup rather than arithmetic on the row)
+- [x] Mutation probe on the new assertion — evidence: 3 probes, each red on exactly its own assertion (see Progress Notes)
+- [x] Suites green — evidence: 15 properties, 3343 tests, 0 failures, 9 excluded; `mix format --check-formatted` clean; `mix credo --strict` 4114 mods/funs, no issues
 - [ ] `staff-review` verdict recorded below
 
 ## Dependencies
@@ -61,3 +61,75 @@ elixir-agent.
 
 ## Progress Notes
 Filed 2026-07-31 by the lead from #341's finding 1, during Wave 5.
+
+**2026-07-31 — built (elixir-agent).**
+
+*Null sweep (production, `square-art-39019825`).* 40 editions, **40 with neither
+`open_library_id` nor `google_books_id`** — 0 with either. All 40 came from the
+upload path: 40 `book.created` events, 0 `books.confirmed`, 0
+`books.edition_merged`, against 7 123 `image.submitted` / 2 911 `image.resolved`.
+All 40 have a real (non-`"ISBN …"`) title and 38 have a resolver-supplied
+`publication_year`, 17 a `publisher`, 17 a `cover_image_url` — every one of those
+fields travels in the SAME metadata map as the two identifiers, so the payload
+demonstrably reached the row and exactly the two id keys were dropped. Staging
+and local hold 200 rows each, all from `seeds.exs`; not evidence either way.
+
+*Fix.* Two functions, four lines: `Moderation.build_book_attrs/4` (the sync
+resolve) and `EnrichBookJob.update_primary_edition/2` (the async half — the
+barcode fast path resolves no metadata, so the create has no id to carry and
+this job is the round-trip for those rows; without it the fix would not have
+reached the dominant upload path at all). Both route through the single
+`Multi.insert(:book, …)`/`edition_attrs/2` contract from #341 — no new path.
+
+*`verification_source` decision.* The explicit `"barcode_unverified"` stays on
+the barcode fast path, unchanged. On every OTHER upload path the explicit set is
+**removed** and the value is now derived by `Books.edition_attrs/2`. It called
+`Books.verification_source_from/1` on the resolver metadata, which is the same
+answer — but computed from a different map than the one being written, and two
+maps allowed to disagree is precisely how this bug hid: the provenance claim
+looked right while the columns it describes sat NULL. Derived downstream, the
+claim and its evidence are always the same row. The fast path keeps stating it
+because `used_fast_path` ("we deliberately skipped the lookup") is the one fact
+about that row no column records.
+
+*Backfill decision — warranted, but not as a `Stacks.DataCorrection`.* Warranted
+because migration `20260730200000` (this release, undeployed) stamps
+`verification_source` from these columns and then freezes it NOT NULL + CHECK:
+with both NULL it writes `barcode_unverified` for all 40, and since #344 the SPA
+renders a provisional book distinguishably off exactly that value — 40 fully
+identified books would show as unidentified. Not a `DataCorrection` because the
+value is not derivable from the row (`NormaliseEditionIsbn10` states the rule:
+"the conversion is arithmetic, not a lookup"), and `Stacks.Release.deploy/0`
+runs `correct_data(apply: true)` as Fly's `release_command`
+(`deploy/fly.core.toml:12`) with `run_corrections/1` raising on failure — so 40
+Open Library round-trips in `plan/0` would put a third-party outage in the path
+of every deployment, inverting #339's reason for existing, and would never empty
+for a permanently unresolvable ISBN. The vehicle is the path this fix repaired:
+`EnrichBookJob` resolves the ISBN and now writes both ids and the derived
+provenance. **After this release deploys**, re-enqueue it for the affected rows:
+
+```
+/app/bin/core rpc 'import Ecto.Query; alias Stacks.Books.BookEdition; Core.Repo.all(from e in BookEdition, where: is_nil(e.open_library_id) and is_nil(e.google_books_id), select: e.isbn) |> Enum.each(&Oban.insert!(Stacks.Workers.EnrichBookJob.new(%{"isbn" => &1})))'
+```
+
+Order is safe: the migration's `barcode_unverified` stamp is a legal CHECK value
+and `update_primary_edition/2` overwrites it once the resolver answers.
+
+*Mutation probes* (each reverted with Edit, never `git checkout`; restoration
+confirmed with `grep -c`):
+
+| probe | result |
+|-------|--------|
+| drop `"open_library_id"` from `build_book_attrs/4` | RED — `an Open Library hit stores open_library_id, and the provenance agrees`: *"the upload path dropped the Open Library id it had just been handed"* (`moderation_test.exs:128`), 35 tests 1 failure |
+| drop `"google_books_id"` from `build_book_attrs/4` | RED — `a Google Books hit stores google_books_id, and the provenance agrees`: *"the upload path dropped the Google Books id it had just been handed"* (`moderation_test.exs:157`) |
+| drop `"open_library_id"` from `update_primary_edition/2` | RED — `enrichment stores the cross-reference id its provenance claim is read off (#346)`: *"enrichment resolved the ISBN and threw the cross-reference away"* (`enrich_book_job_test.exs:180`) |
+
+*Wiring trace.* Every insert path into `op.book_editions` now carries both ids:
+`create_work/2` → `edition_attrs/2` (books.ex:240-241), `insert_edition/5`
+(books.ex:976-977), `EnrichBookJob.update_primary_edition/2` (this change). The
+seed's `castable_edition_row/1` and the test factory do not — see findings.
+
+*Out-of-scope findings (not fixed here).*
+1. The issue's Wiring section says the ids "become visible via `ProtoJSON.edition/1`, which already serialises them". It does **not** — its `Map.take` list carries `verification_source` but neither id. Nothing on the wire changes; the fix is observable via `verification_source` (derived) and `wh.stg_book_editions`.
+2. `priv/repo/seeds.exs:659` hardcodes `verification_source: "open_library"` with no `open_library_id`, so every seeded edition builds a state no production write path can now produce — the exact rule books.ex:1135 cites from #329. 200 such rows in staging and local.
+3. Nothing in the schema forbids `verification_source IN ('open_library','google_books')` with both id columns NULL. A CHECK would have made this bug unrepresentable, but it cannot be added until the 40 prod rows are backfilled (migration + ordering — its own issue).
