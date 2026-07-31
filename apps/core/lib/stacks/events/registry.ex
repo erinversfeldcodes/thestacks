@@ -43,6 +43,16 @@ defmodule Stacks.Events.Registry do
     "book.cover_confirmed" => [
       Stacks.Books.Handlers.CacheInvalidationHandler
     ],
+    # An edition merge is a WRITE to what `GET /api/books/:id` serves: the work
+    # gains a row in its `editions` preload, which is the very thing
+    # BookDetailCache holds. Nothing else announced it, so the cache went on
+    # serving the pre-merge work for its full 5-minute TTL and the merge
+    # prompt's own "View Book" link showed the reader a book without the
+    # edition they had just added (#355). Emitted by `Books.merge_edition/2`,
+    # so `Stacks.Workers.DiscoverEditionsJob` is covered by the same wire.
+    "books.edition_merged" => [
+      Stacks.Books.Handlers.CacheInvalidationHandler
+    ],
     "blog.post_published" => [
       Stacks.Blog.Handlers.BlogAssociationHandler,
       Stacks.Workers.DbtRefreshHandler
@@ -170,10 +180,12 @@ defmodule Stacks.Events.Registry do
     "placement.reading_completed",
 
     # ---- Books ---------------------------------------------------------------
-    # Confirmation and edition merges already write their result through Books
-    # before emitting; the event records that it happened.
+    # Confirmation already writes its result through Books before emitting; the
+    # event records that it happened. It needs no cache invalidation for the
+    # reason its sibling `books.edition_merged` (now subscribed, see @registry)
+    # did: `confirm/2` emits this only on the branch that CREATES the work, and
+    # a work id nobody has read yet cannot have a cache entry to stale.
     "books.confirmed",
-    "books.edition_merged",
 
     # ---- Blog authoring and associations -------------------------------------
     # Only blog.post_published/updated/deleted change what the warehouse and caches

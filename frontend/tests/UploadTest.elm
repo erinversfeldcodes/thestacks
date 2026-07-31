@@ -862,8 +862,13 @@ suite =
                             Upload.update (ConfirmMergeFormat "book-1") dup Nothing
                     in
                     model.mergeFormatState |> Expect.equal NotAsked
-            , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
-              test "MergeFormatCompleted Ok increments editionCount on DuplicateDetected book" <|
+            , -- US-1.1.6, US-1.1.8 | Suite 10: Elm | #355
+              --
+              -- The transition itself, at the level the screen is decided. The
+              -- test this replaces asserted `editionCount` had been bumped on a
+              -- still-`DuplicateDetected` result — i.e. it pinned the merge
+              -- staying inside the prompt, which is the defect.
+              test "MergeFormatCompleted Ok leaves the duplicate prompt for the completion card" <|
                 \_ ->
                     let
                         mergeResponse =
@@ -876,11 +881,47 @@ suite =
                             Upload.update (MergeFormatCompleted (Ok mergeResponse)) dup Nothing
                     in
                     case model.result of
-                        DuplicateDetected book ->
-                            book.editionCount |> Expect.equal 1
+                        EditionMerged merged ->
+                            Expect.all
+                                [ \m -> m.workId |> Expect.equal dummyBook.id
+                                , \m -> m.edition |> Expect.equal dummyEdition
+
+                                -- The photo path only offers a merge because
+                                -- the book is already on one of this reader's
+                                -- bookshelves (`is_duplicate`).
+                                , \m -> m.onAReaderShelf |> Expect.equal True
+                                ]
+                                merged
 
                         _ ->
-                            Expect.fail "Expected DuplicateDetected"
+                            Expect.fail "Expected EditionMerged"
+            , -- US-1.1.8 | Suite 10: Elm | #355
+              test "MergeFormatCompleted Ok from the same-work prompt does not claim a bookshelf" <|
+                \_ ->
+                    let
+                        mergeResponse =
+                            { edition = dummyEdition }
+
+                        sameWork =
+                            { init_ | result = SameWorkFound "work-1" (Just dummyBook) }
+
+                        ( model, _, _ ) =
+                            Upload.update (MergeFormatCompleted (Ok mergeResponse)) sameWork Nothing
+                    in
+                    case model.result of
+                        EditionMerged merged ->
+                            Expect.all
+                                [ \m -> m.workId |> Expect.equal "work-1"
+                                , \m -> m.work |> Expect.equal (Just dummyBook)
+
+                                -- `confirm/2` answered 409 before placing
+                                -- anything, and a merge places nothing.
+                                , \m -> m.onAReaderShelf |> Expect.equal False
+                                ]
+                                merged
+
+                        _ ->
+                            Expect.fail "Expected EditionMerged"
             , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
               test "MergeFormatCompleted Err sets mergeFormatState to Failure" <|
                 \_ ->

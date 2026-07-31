@@ -1,8 +1,31 @@
 defmodule Stacks.Books.Handlers.CacheInvalidationHandler do
   @moduledoc """
-  Event handler that invalidates `BookDetailCache` entries when book data changes.
+  Evicts `BookDetailCache` entries when the thing that cache holds changes.
 
-  Handles `book.created`, `book.cover_confirmed`, and `blog.associations_suggested`.
+  What it holds is `Stacks.Books.get_book_detail/1` — an `%Book{}` with its
+  `:author` and `:editions` preloaded — keyed by **work id**. So the only
+  question this handler ever asks of an event is *which work did that change?*,
+  and the answer is not always `aggregate_id`.
+
+  Handles `book.created`, `book.cover_confirmed`, `books.edition_merged` and
+  `blog.associations_suggested`.
+
+  ## Where the work id comes from, and why it differs per event
+
+  `book.created` aggregates the work, so `aggregate_id` IS the cache key.
+
+  The other three aggregate something else — an edition, an edition, a blog post
+  — and carry the work id in the payload. Reading `aggregate_id` for those is a
+  key that can never be in the cache, so the eviction silently does nothing:
+  exactly the `book.cover_confirmed` defect found while fixing #355, where the
+  handler evicted under an *edition* id and a confirmed cover stayed invisible
+  for the full 5-minute TTL. The handler's own test passed throughout, because
+  it built the event by hand with a book id in `aggregate_id` — a shape
+  `confirm_cover_association/2` has never emitted.
+
+  Payload keys arrive as strings in production (the event is read back out of
+  `event_log`'s jsonb by `SubscriberWorker`) and as atoms when a handler is
+  called directly, so every lookup accepts both.
   """
 
   @behaviour Stacks.Events.Handler
@@ -17,9 +40,16 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandler do
     :ok
   end
 
-  def handle_event(%{event_type: "book.cover_confirmed", aggregate_id: book_id}) do
-    BookDetailCache.invalidate(book_id)
-    :ok
+  # aggregate_type "book_edition": the cover was confirmed on an EDITION, and
+  # the work it belongs to is in the payload.
+  def handle_event(%{event_type: "book.cover_confirmed", payload: payload}) do
+    invalidate_from_payload(payload, {"book_id", :book_id}, "book.cover_confirmed")
+  end
+
+  # aggregate_type "book_edition" again: `merge_edition/2` aggregates the new
+  # edition and names the work it was merged into as `work_id`.
+  def handle_event(%{event_type: "books.edition_merged", payload: payload}) do
+    invalidate_from_payload(payload, {"work_id", :work_id}, "books.edition_merged")
   end
 
   def handle_event(%{event_type: "blog.associations_suggested", payload: payload}) do
@@ -30,4 +60,24 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandler do
   end
 
   def handle_event(_event), do: :ok
+
+  # A payload missing its work id is a contract break, not a reason to crash the
+  # dispatch: log it and let the TTL do the job the eviction should have. Loud
+  # enough to be found, quiet enough not to retry a handler that can never
+  # succeed for this row.
+  defp invalidate_from_payload(payload, {key, atom_key}, event_type) do
+    case Map.get(payload, key) || Map.get(payload, atom_key) do
+      nil ->
+        Logger.warning(
+          "CacheInvalidationHandler: #{event_type} payload has no #{key}; " <>
+            "BookDetailCache not evicted (falling back to its TTL)"
+        )
+
+        :ok
+
+      book_id ->
+        BookDetailCache.invalidate(book_id)
+        :ok
+    end
+  end
 end

@@ -47,7 +47,13 @@ defmodule Stacks.Events.PayloadContract do
     "post.comment_created" => %{version: 1, keys: ~w(author_id comment_id)},
     # ── books ─────────────────────────────────────────────────────────────────
     "book.created" => %{version: 1, keys: ~w(isbn title visibility_tier)},
-    "book.cover_confirmed" => %{version: 1, keys: ~w(cover_image_url)},
+    # `book_id` stays v1 rather than becoming v2: it was ADDED (#355), and an
+    # upcaster cannot invent it for the historical rows that predate it — it
+    # would have to query. So the contract states what every emit from this
+    # codebase now carries, the one consumer degrades to the cache TTL when an
+    # old row arrives without it, and no version pretends to a migration that
+    # cannot be written.
+    "book.cover_confirmed" => %{version: 1, keys: ~w(book_id cover_image_url)},
     "books.confirmed" => %{version: 1, keys: ~w(isbn shelf title)},
     "books.edition_merged" => %{version: 1, keys: ~w(isbn work_id)},
     "image.submitted" => %{version: 1, keys: ~w(storage_path)},

@@ -587,6 +587,29 @@ defmodule Stacks.BooksTest do
 
       assert event_count("book.cover_confirmed") == before_count
     end
+
+    # #355 sibling sweep. The event aggregates the EDITION, and the only
+    # subscriber (CacheInvalidationHandler) is keyed by WORK — so without
+    # `book_id` in the payload the handler had nothing to evict with, and the
+    # test above ("an event was emitted") could not tell. Assert the wire, not
+    # the count: the emitted row must name the work whose detail just changed.
+    test "the emitted event names the WORK, which is what the cache is keyed by" do
+      edition = insert(:book_edition)
+
+      Books.confirm_cover_association(edition.id, "https://example.com/cover.jpg")
+
+      payload =
+        Core.Repo.one!(
+          from(e in "event_log",
+            prefix: "op",
+            where: e.event_type == "book.cover_confirmed",
+            where: e.aggregate_id == type(^edition.id, Ecto.UUID),
+            select: e.payload
+          )
+        )
+
+      assert payload["book_id"] == edition.book_id
+    end
   end
 
   # ---------------------------------------------------------------------------

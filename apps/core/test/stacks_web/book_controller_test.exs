@@ -1024,6 +1024,110 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # POST /api/books/:id/merge-format -> GET /api/books/:id (Issue #355)
+  #
+  # The boundary neither existing test crossed. #343's program tests assert the
+  # merge REQUEST is made; #341's context tests assert `merge_edition/2`
+  # PERSISTS. Both were true and both passed while the reader was shown a book
+  # without the edition they had just merged into it — because BookDetailCache
+  # sits between the two, and nothing invalidated it.
+  #
+  # So the test has to hold all three in one picture: read (which caches),
+  # write, read again. Reading FIRST is the whole point; a test that merges into
+  # a cold cache passes no matter how the invalidation is wired, or whether it
+  # is wired at all.
+  # ---------------------------------------------------------------------------
+
+  describe "POST /api/books/:id/merge-format then GET /api/books/:id" do
+    test "the merged edition is visible on the next read of the book" do
+      user = insert(:user)
+
+      book =
+        insert(:book,
+          title: "The Name of the Rose",
+          author: insert(:author, name: "Umberto Eco"),
+          editions: [build(:primary_book_edition, isbn: "9780156030410")]
+        )
+
+      BookDetailCache.invalidate(book.id)
+
+      original = Application.get_env(:core, :isbn_http_client)
+
+      try do
+        Application.put_env(:core, :isbn_http_client, MockHttpClient)
+
+        MockHttpClient.put_response("googleapis.com", {
+          :ok,
+          %{
+            "items" => [
+              %{
+                "id" => "mock-rose-vintage",
+                "volumeInfo" => %{
+                  "title" => "The Name of the Rose",
+                  "authors" => ["Umberto Eco"],
+                  "industryIdentifiers" => [
+                    %{"type" => "ISBN_13", "identifier" => "9780099466031"}
+                  ]
+                }
+              }
+            ]
+          }
+        })
+
+        # 1. The reader looks at the work — exactly what the merge prompt does
+        #    (`Api.getBook workId`) to put the title in its sentence. This is
+        #    what puts the pre-merge work in BookDetailCache.
+        before_body =
+          build_conn()
+          |> auth_conn(user)
+          |> get("/api/books/#{book.id}")
+          |> json_response(200)
+
+        assert before_body["book"]["edition_count"] == 1
+
+        # 2. The merge the reader accepts.
+        merge_body =
+          build_conn()
+          |> auth_conn(user)
+          |> post("/api/books/#{book.id}/merge-format", %{
+            "isbn" => "9780099466031",
+            "format_label" => "Paperback"
+          })
+          |> json_response(200)
+
+        assert merge_body["edition"]["isbn"] == "9780099466031"
+
+        # The write landed, and landed on the SAME work — the merge itself was
+        # never the defect and must not become one.
+        assert Core.Repo.aggregate(
+                 from(e in Stacks.Books.BookEdition, where: e.book_id == ^book.id),
+                 :count
+               ) == 2
+
+        # 3. Oban delivers `books.edition_merged` to CacheInvalidationHandler.
+        #    In production this is the events queue doing its job; here it is
+        #    the same worker, run inline.
+        Oban.drain_queue(queue: :events)
+
+        # 4. "View Book" — the merge prompt's own follow-on action.
+        after_body =
+          build_conn()
+          |> auth_conn(user)
+          |> get("/api/books/#{book.id}")
+          |> json_response(200)
+
+        assert after_body["book"]["edition_count"] == 2,
+               "GET /api/books/:id served a stale work after a 200 merge — " <>
+                 "the reader is shown a book without the edition they just added"
+
+        assert "9780099466031" in Enum.map(after_body["book"]["editions"], & &1["isbn"])
+      after
+        Application.put_env(:core, :isbn_http_client, original)
+      end
+    end
+  end
+
   defp total_event_count do
     Core.Repo.aggregate(from(e in "event_log", prefix: "op"), :count)
   end

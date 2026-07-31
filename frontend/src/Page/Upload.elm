@@ -19,7 +19,7 @@ import Html.Events exposing (onCheck, onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
-import Types.Book exposing (Book, VisibilityTier(..), authorName, bookCoverImageUrl, bookIsbn, displayTitle, isProvisional)
+import Types.Book exposing (Book, Edition, VisibilityTier(..), authorName, bookCoverImageUrl, bookIsbn, displayTitle, isProvisional)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -39,6 +39,39 @@ type UploadResult
       -- prompt can name the title. The prompt renders either way — a failed
       -- fetch degrades the copy, it does not strand the reader.
     | SameWorkFound String (Maybe Book)
+      -- The server accepted a merge (#355). Terminal, and deliberately a
+      -- separate result rather than a `Success` branch inside the two prompts:
+      -- while the merge lived inside the prompt, answering "Yes, merge" left
+      -- the heading, the question and the buttons on screen with a line of
+      -- confirmation threaded between them, so a reader who had just changed
+      -- the catalogue was still being asked whether they wanted to. The prompt
+      -- is a question; once it is answered it should not still be on screen.
+    | EditionMerged MergedEdition
+
+
+{-| What the completion card is allowed to say, and where each part comes from.
+
+`edition` is the SERVER's answer — the row it actually wrote — so the card names
+an ISBN and format that exist rather than a client-side guess. (The card this
+replaces said `"X" now has N editions`, computed as `book.editionCount + 1` from
+a book the client had fetched earlier: a number that is wrong the moment anyone
+else merged, and that was being read off the very cache #355 found stale.)
+
+`onAReaderShelf` is the difference between the two ways in, and it is why this
+is a record and not just a work id. The photo path only shows a merge prompt
+because `is_duplicate` said the book is already on one of this reader's
+bookshelves. The manual path is the opposite: `confirm/2` answered 409 _before_
+placing anything, and merging an edition places nothing either — so that reader
+does not own this book, and a card that let them assume otherwise would be the
+same untruth #333 removed from the confirm path.
+
+-}
+type alias MergedEdition =
+    { workId : String
+    , work : Maybe Book
+    , edition : Edition
+    , onAReaderShelf : Bool
+    }
 
 
 {-| The step within the upload flow after a book has been identified.
@@ -607,27 +640,13 @@ update msg model maybeToken =
         MergeFormatCompleted result ->
             case result of
                 Ok response ->
-                    case model.result of
-                        DuplicateDetected book ->
-                            let
-                                newEditionCount =
-                                    book.editionCount + 1
-                            in
-                            ( { model
-                                | mergeFormatState = Success response
-                                , result =
-                                    DuplicateDetected
-                                        { book | editionCount = newEditionCount }
-                              }
-                            , Cmd.none
-                            , NoOut
-                            )
-
-                        _ ->
-                            ( { model | mergeFormatState = Success response }
-                            , Cmd.none
-                            , NoOut
-                            )
+                    ( { model
+                        | mergeFormatState = Success response
+                        , result = mergeCompletionFor response.edition model.result
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err err ->
                     if Api.isUnauthorized err then
@@ -829,6 +848,9 @@ view model maybeToken =
 
                                 SameWorkFound workId maybeBook ->
                                     viewSameWork model workId maybeBook
+
+                                EditionMerged merged ->
+                                    viewEditionMerged merged
             ]
         ]
 
@@ -1191,6 +1213,37 @@ otherShelves usedShelf placements =
         |> List.filter (\name -> name /= usedShelf)
 
 
+{-| The screen a merge lands on (#355), given the prompt it was answered from.
+
+Both prompts that offer "Yes, merge" end in the same completion card, but only
+one of them means the reader has this book: see `MergedEdition`. Anything else
+is a merge with no prompt behind it, which nothing can produce — leaving the
+result untouched keeps that unreachable case from inventing a screen.
+
+-}
+mergeCompletionFor : Edition -> UploadResult -> UploadResult
+mergeCompletionFor edition result =
+    case result of
+        DuplicateDetected book ->
+            EditionMerged
+                { workId = book.id
+                , work = Just book
+                , edition = edition
+                , onAReaderShelf = True
+                }
+
+        SameWorkFound workId maybeBook ->
+            EditionMerged
+                { workId = workId
+                , work = maybeBook
+                , edition = edition
+                , onAReaderShelf = False
+                }
+
+        other ->
+            other
+
+
 {-| How a heading names the book it is about.
 
 A quoted title is how you refer to a book by name, so it is only used when the
@@ -1470,9 +1523,6 @@ viewDuplicate model book =
                 )
             ]
         , case model.mergeFormatState of
-            Success _ ->
-                viewMergeSuccess book
-
             Loading ->
                 div [ class "upload-duplicate__merge-loading" ]
                     [ span [ class "spinner" ] []
@@ -1486,6 +1536,13 @@ viewDuplicate model book =
                     ]
 
             NotAsked ->
+                viewMergePrompt book
+
+            -- Unreachable: an accepted merge moves `result` to `EditionMerged`,
+            -- and this view only renders for `DuplicateDetected` (#355). Kept
+            -- explicit rather than swept into a `_` so that if the transition
+            -- is ever removed, this reads as the question it still is.
+            Success _ ->
                 viewMergePrompt book
         , div [ class "upload-duplicate__secondary" ]
             [ a
@@ -1539,18 +1596,6 @@ viewSameWork model workId maybeBook =
         [ h2 [] [ text "Already in the Catalogue" ]
         , p [] [ text (sameWorkPrompt maybeBook) ]
         , case model.mergeFormatState of
-            Success _ ->
-                div [ class "upload-duplicate__merge-success" ]
-                    [ p [ class "upload-duplicate__merge-success-text" ]
-                        [ text "Added as another edition of the same book." ]
-                    , a
-                        [ href (Route.toPath (Route.BookDetail workId))
-                        , class "btn btn--primary"
-                        ]
-                        [ text "View book details" ]
-                    , button [ class "btn btn--secondary", onClick Reset ] [ text "Add another" ]
-                    ]
-
             Loading ->
                 div [ class "upload-duplicate__merge-loading" ]
                     [ span [ class "spinner" ] []
@@ -1564,6 +1609,11 @@ viewSameWork model workId maybeBook =
                     ]
 
             NotAsked ->
+                viewSameWorkActions workId
+
+            -- Unreachable: see `viewDuplicate`. An accepted merge leaves this
+            -- prompt entirely rather than growing a confirmation inside it.
+            Success _ ->
                 viewSameWorkActions workId
         , div [ class "upload-duplicate__secondary" ]
             [ a
@@ -1608,31 +1658,80 @@ sameWorkPrompt maybeBook =
             "We already have this book in the catalogue. Add this edition to it?"
 
 
-viewMergeSuccess : Book -> Html Msg
-viewMergeSuccess book =
-    div [ class "upload-duplicate__merge-success" ]
-        [ p [ class "upload-duplicate__merge-success-text" ]
-            [ text
-                ("\""
-                    ++ book.title
-                    ++ "\" now has "
-                    ++ String.fromInt book.editionCount
-                    ++ " edition"
-                    ++ (if book.editionCount == 1 then
-                            ""
+{-| The card an accepted merge lands on — US-1.1.8's completion (#355).
 
-                        else
-                            "s"
-                       )
-                )
+Deliberately the same shape as `viewComplete`: heading, notice, actions, and
+`role="status"` so a screen reader is told the screen changed. Both merge
+prompts end here, and neither of them is still on screen when it does.
+
+Every sentence is checkable against something the reader can then go and look
+at. The ISBN and format are the server's own answer, and "on the book's page"
+is only true because the merge now evicts `BookDetailCache` — before that fix,
+this card would have named an edition that `View book details` did not show,
+which is the same defect in better clothes.
+
+-}
+viewEditionMerged : MergedEdition -> Html Msg
+viewEditionMerged merged =
+    div [ class "upload-complete", testId "upload-merge-complete", attribute "role" "status" ]
+        [ h2 [ class "upload-complete__heading" ] [ text (mergedHeading merged.work) ]
+        , p [ class "upload-complete__detail" ] [ text (mergedDetail merged.edition) ]
+        , viewMergedShelfHint merged.onAReaderShelf
+        , div [ class "upload-complete__actions" ]
+            [ a
+                [ href (Route.toPath (Route.BookDetail merged.workId))
+                , class "btn btn--primary"
+                ]
+                [ text "View book details" ]
+            , button [ class "btn btn--secondary", onClick Reset ] [ text "Add another" ]
             ]
-        , a
-            [ href (Route.toPath (Route.BookDetail book.id))
-            , class "btn btn--primary"
-            ]
-            [ text "View book details" ]
-        , button [ class "btn btn--secondary", onClick Reset ] [ text "Add another" ]
         ]
+
+
+{-| Same naming rule as `completeHeading` — `headingSubject` decides whether the
+book has a title worth quoting, so a provisional work is never quoted as if
+`Not yet identified` were its name.
+
+`Nothing` is the work whose fetch failed: it is fetched purely so the prompt can
+name it, so losing it degrades the sentence rather than stranding the reader.
+
+-}
+mergedHeading : Maybe Book -> String
+mergedHeading maybeBook =
+    case maybeBook of
+        Just book ->
+            headingSubject book ++ " has a new edition"
+
+        Nothing ->
+            "Edition added"
+
+
+{-| The merged edition, described from the row the server actually wrote.
+-}
+mergedDetail : Edition -> String
+mergedDetail edition =
+    case edition.formatLabel of
+        Just label ->
+            "The " ++ label ++ " edition (ISBN " ++ edition.isbn ++ ") is now listed on the book's page."
+
+        Nothing ->
+            "ISBN " ++ edition.isbn ++ " is now listed on the book's page as another edition."
+
+
+{-| The one thing a merge does NOT do, said only to the reader for whom it is
+news. A merge adds an edition to the catalogue; it places nothing on anybody's
+bookshelf. The photo path's reader already has the book — that is why they were
+offered a merge at all — so telling them would be noise. The manual path's
+reader asked to add a book and, so far, has not got one.
+-}
+viewMergedShelfHint : Bool -> Html Msg
+viewMergedShelfHint onAReaderShelf =
+    if onAReaderShelf then
+        text ""
+
+    else
+        p [ class "upload-complete__shelf-hint", testId "upload-merge-shelf-hint" ]
+            [ text "It isn't on one of your bookshelves yet — open the book to add it." ]
 
 
 {-| Map a shelf value to its display label.
