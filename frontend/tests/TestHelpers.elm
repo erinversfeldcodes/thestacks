@@ -22,6 +22,8 @@ module TestHelpers exposing
     , simulateBookResponse
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
+    , simulateConfirmMergeRequiredResponse
+    , simulateConfirmResponse
     , simulateEmptyBookPricesResponse
     , simulateMergeFormatResponse
     , simulateMultiShelfResponse
@@ -710,6 +712,100 @@ simulateBookDetailResponseWithPlacements bookId book entries =
         json
 
 
+{-| A `POST /api/books/confirm` success body, exactly as
+`StacksWeb.BookController.confirm_payload/4` builds it
+(`apps/core/lib/stacks_web/controllers/book_controller.ex:97-106`) and as
+`proto/stacks/api/v1/book_responses.proto`'s `BookConfirmResponse` declares it:
+`book`, the singular `placement` this request produced or matched, the full
+`placements` list, and — on the two non-created branches only — `source`.
+
+`source` is `Nothing` for the 201 created branch (the controller omits the key
+entirely there), `Just "catalogue"` when the work already existed and this
+request placed it, and `Just "collection"` when it was already on the requested
+bookshelf.
+
+-}
+simulateConfirmResponse :
+    { statusCode : Int
+    , bookId : String
+    , title : String
+    , authorName : String
+    , source : Maybe String
+    , placements : List { placementId : String, bookshelfName : String }
+    }
+    -> Http.Response String
+simulateConfirmResponse config =
+    let
+        book =
+            { testBook
+                | id = config.bookId
+                , title = config.title
+                , author =
+                    Just
+                        { id = "author-confirm-1"
+                        , name = config.authorName
+                        , bio = Nothing
+                        , website = Nothing
+                        }
+            }
+
+        encodeOne entry =
+            Encode.object
+                [ ( "id", Encode.string entry.placementId )
+                , ( "book_id", Encode.string config.bookId )
+                , ( "bookshelf_name", Encode.string entry.bookshelfName )
+                , ( "formats", Encode.list Encode.string [] )
+                , ( "visibility", Encode.null )
+                , ( "bookshelf_visibility", Encode.null )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    ([ ( "book", encodeBook book )
+                     , ( "placement"
+                       , config.placements
+                            |> List.head
+                            |> Maybe.map encodeOne
+                            |> Maybe.withDefault Encode.null
+                       )
+                     , ( "placements", Encode.list encodeOne config.placements )
+                     ]
+                        ++ encodeMaybe "source" Encode.string config.source
+                    )
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/confirm"
+        , statusCode = config.statusCode
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| The 409 `POST /api/books/confirm` body — `Books.confirm/2` found an
+existing work whose title+author fuzzy-matches (Jaro-Winkler > 0.8) the
+metadata this ISBN resolved to, so it refused to mint a second work and named
+the one to merge into (`book_controller.ex:71-74`).
+-}
+simulateConfirmMergeRequiredResponse : String -> Http.Response String
+simulateConfirmMergeRequiredResponse workId =
+    Http.BadStatus_
+        { url = "/api/books/confirm"
+        , statusCode = 409
+        , statusText = "Conflict"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "error", Encode.string "merge_required" )
+                , ( "work_id", Encode.string workId )
+                ]
+            )
+        )
+
+
 {-| A book-detail response carrying a placement with an explicit visibility and
 a denormalised parent-shelf ceiling (`bookshelf_visibility`). Drives the
 placement-visibility dropdown and its ceiling-greying.
@@ -843,11 +939,20 @@ uploadEffects msg model maybeToken =
                 case maybeToken of
                     Just token ->
                         SimulatedEffect.Http.request
-                            { method = "GET"
+                            { method = "POST"
                             , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                            , url = "/api/books/isbn/" ++ model.manualIsbn
-                            , body = SimulatedEffect.Http.emptyBody
-                            , expect = SimulatedEffect.Http.expectJson Upload.IsbnLookupResult Api.bookDetailResponseDecoder
+                            , url = "/api/books/confirm"
+                            , body =
+                                SimulatedEffect.Http.jsonBody
+                                    (Encode.object
+                                        [ ( "isbn", Encode.string model.manualIsbn )
+                                        , ( "shelf_name", Encode.string model.selectedShelf )
+                                        ]
+                                    )
+                            , expect =
+                                SimulatedEffect.Http.expectStringResponse
+                                    Upload.ConfirmCompleted
+                                    Api.confirmResponseToResult
                             , timeout = Nothing
                             , tracker = Nothing
                             }
@@ -857,6 +962,22 @@ uploadEffects msg model maybeToken =
 
             else
                 SimulatedEffect.Cmd.none
+
+        Upload.ConfirmCompleted (Err (Api.ConfirmMergeRequired workId)) ->
+            case maybeToken of
+                Just token ->
+                    SimulatedEffect.Http.request
+                        { method = "GET"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/books/" ++ workId
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect = SimulatedEffect.Http.expectJson Upload.GotSameWorkBook Api.bookDetailResponseDecoder
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                Nothing ->
+                    SimulatedEffect.Cmd.none
 
         Upload.ConfirmMergeFormat bookId ->
             case maybeToken of

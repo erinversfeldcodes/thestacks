@@ -9,8 +9,10 @@ simulated user interactions and SSE stream events (replacing the old HTTP pollin
 
 import Api exposing (PollStatus(..))
 import Dict
+import Expect
 import Html.Attributes
 import Http
+import Json.Decode as Decode
 import Json.Encode as Encode
 import Page.Upload as Upload exposing (Msg(..))
 import ProgramTest
@@ -20,6 +22,8 @@ import TestHelpers
     exposing
         ( simulateBookDetailResponseWithPlacements
         , simulateBookResponse
+        , simulateConfirmMergeRequiredResponse
+        , simulateConfirmResponse
         , simulateMergeFormatResponse
         , testBook
         , uploadProgram
@@ -222,40 +226,162 @@ suite =
         , uploadAdultsOnlyHiddenWhenFlagOff
         , manualIsbnDuplicateNoticeInformsWithoutBlocking
         , manualIsbnNoNoticeForABookYouDoNotOwn
+        , manualIsbnNewBookIsCreatedThroughConfirm
+        , manualIsbnSameWorkOffersMerge
+        , manualIsbnAlreadyOnThatShelfSaysSo
+        , manualIsbnHonoursTheChosenShelf
+        , photoPathDuplicateNoticeInformsWithoutBlocking
         ]
 
 
-{-| #333 — the manual-ISBN duplicate notice, driven through the real path:
-type an ISBN, get a book you already own back, and see the notice. The photo
-path has told the reader this since the SSE payload's `is_duplicate`; typing the
-ISBN by hand said nothing at all.
+{-| #343 — the wave's headline, and the acceptance test for it.
 
-The second half is the whole point of the ruling: the notice INFORMS. Every
-control still works — "Yes, that's it" still reaches the shelf picker, and the
-shelf picker still offers the shelf the book is already on.
+`9780156453806` is checksum-valid and is NOT in the catalogue. Against the DIY
+flow this ISBN was a dead end: `SubmitManualIsbn` issued
+`GET /api/books/isbn/9780156453806`, which only ever consults
+`Books.find_existing/1`, so a valid ISBN the platform had never seen came back
+404 and the reader was told to "check the ISBN and try again" — for a number
+that was correct. `Books.confirm/2` resolves it externally, creates the work
+and its primary edition, and places it, all in one transaction; it simply had
+no caller.
+
+The assertion is therefore about the REQUEST, not only the rendering: the
+manual path must dispatch `POST /api/books/confirm`. Simulating a response for
+a request the program never made is what fails here on the old flow.
+
+-}
+manualIsbnNewBookIsCreatedThroughConfirm : Test
+manualIsbnNewBookIsCreatedThroughConfirm =
+    test "manual_isbn_new_book: a checksum-valid ISBN absent from the catalogue is created and placed via POST /api/books/confirm" <|
+        \() ->
+            startUpload
+                |> ProgramTest.update EnterManualMode
+                |> ProgramTest.update (ManualIsbnChanged "9780156453806")
+                |> ProgramTest.update SubmitManualIsbn
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/confirm"
+                    (simulateConfirmResponse
+                        { statusCode = 201
+                        , bookId = "book-new-1"
+                        , title = "The Book of Disquiet"
+                        , authorName = "Fernando Pessoa"
+                        , source = Nothing
+                        , placements = [ { placementId = "pl-1", bookshelfName = "wishlist" } ]
+                        }
+                    )
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-complete") ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "\"The Book of Disquiet\" added to Wish List" ]
+
+
+{-| #333, re-driven over the wired path (#343).
+
+The manual add now goes through `POST /api/books/confirm`, which places the
+book and reports every bookshelf the reader has it on. The duplicate awareness
+survives the rewiring — and the ruling's point survives with it: the notice
+INFORMS. It appears alongside a completed add, not instead of one. The flow
+reached its terminal screen, "Add another" and "View on shelf" are both live,
+and nothing anywhere was refused.
 
 -}
 manualIsbnDuplicateNoticeInformsWithoutBlocking : Test
 manualIsbnDuplicateNoticeInformsWithoutBlocking =
-    test "manual_isbn_duplicate: an already-owned book shows the notice and still places" <|
+    test "manual_isbn_duplicate: an already-owned book shows the notice and is still added" <|
         \() ->
             startUpload
                 |> ProgramTest.update EnterManualMode
                 |> ProgramTest.update (ManualIsbnChanged "9780306406157")
                 |> ProgramTest.update SubmitManualIsbn
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/confirm"
+                    (simulateConfirmResponse
+                        { statusCode = 200
+                        , bookId = "book-1"
+                        , title = "The Power of Habit"
+                        , authorName = "Charles Duhigg"
+                        , source = Just "catalogue"
+                        , placements =
+                            [ { placementId = "pl-lib", bookshelfName = "library" }
+                            , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                            ]
+                        }
+                    )
+                -- The add HAPPENED — this is the terminal screen, not a block.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-complete")
+                    , Selector.text "\"The Power of Habit\" added to Wish List"
+                    ]
+                -- …and the reader is told about the shelf they already had it on.
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours")
+                    , Selector.text "You already have this on your Library."
+                    ]
+                -- Every control on the completion card still works: "Add
+                -- another" returns to the drop zone rather than dead-ending.
+                |> ProgramTest.clickButton "Add another"
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Drag a photo of a book cover here" ]
+
+
+{-| The notice must not appear for a book the reader does not own — otherwise
+every manual add carries a false "you already have this". The bookshelf this
+very request used is not "already", either: it is what just happened, and the
+heading already says so.
+-}
+manualIsbnNoNoticeForABookYouDoNotOwn : Test
+manualIsbnNoNoticeForABookYouDoNotOwn =
+    test "manual_isbn_no_duplicate: a book placed on one shelf shows no already-yours notice" <|
+        \() ->
+            startUpload
+                |> ProgramTest.update EnterManualMode
+                |> ProgramTest.update (ManualIsbnChanged "9780306406157")
+                |> ProgramTest.update SubmitManualIsbn
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/confirm"
+                    (simulateConfirmResponse
+                        { statusCode = 201
+                        , bookId = "book-1"
+                        , title = "The Power of Habit"
+                        , authorName = "Charles Duhigg"
+                        , source = Nothing
+                        , placements = [ { placementId = "pl-wish", bookshelfName = "wishlist" } ]
+                        }
+                    )
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-complete") ]
+                |> ProgramTest.expectViewHasNot
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours") ]
+
+
+{-| The photo path's half of the same ruling (#333/#343).
+
+`GET /api/books/:id` has carried every placement since #333, but the upload
+flow read only the book out of it, so the verify step — the last moment before
+a second copy is filed — said nothing. It now shows the notice, and "Yes,
+that's it" is still live: informational, never blocking.
+
+-}
+photoPathDuplicateNoticeInformsWithoutBlocking : Test
+photoPathDuplicateNoticeInformsWithoutBlocking =
+    test "photo_duplicate: a resolved book the reader already owns shows the notice and still advances" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.update (StreamEvent (simulateStreamEvent Resolved (Just "book-1") False))
                 |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/books/isbn/9780306406157"
+                    "/api/books/book-1"
                     (simulateBookDetailResponseWithPlacements "book-1"
                         testBook
                         [ { placementId = "pl-lib", bookshelfName = "library" }
-                        , { placementId = "pl-wish", bookshelfName = "wishlist" }
+                        , { placementId = "pl-anti", bookshelfName = "antilibrary" }
                         ]
                     )
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours")
-                    , Selector.text "You already have this on your Library and Wish List."
+                    , Selector.text "You already have this on your Library and Antilibrary."
                     ]
-                -- Nothing is blocked: the verification step still advances.
+                -- Nothing is blocked: the verification step still advances…
                 |> ProgramTest.clickButton "Yes, that's it"
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-shelf-picker") ]
@@ -266,24 +392,107 @@ manualIsbnDuplicateNoticeInformsWithoutBlocking =
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours") ]
 
 
-{-| The notice must not appear for a book the reader does not own — otherwise
-every manual add carries a false "you already have this".
+{-| US-1.1.8 over the wired path (#343).
+
+A second ISBN of a work the platform already holds must offer a MERGE, not
+mint a second work. `Books.confirm/2` does the matching (`find_same_work/2`,
+Jaro-Winkler > 0.8) and answers 409 with the work id; the client's whole job is
+to consume that — it does no matching of its own, which is why the only thing
+it needs from the work is a title to put in the sentence.
+
 -}
-manualIsbnNoNoticeForABookYouDoNotOwn : Test
-manualIsbnNoNoticeForABookYouDoNotOwn =
-    test "manual_isbn_no_duplicate: a book with no placements shows no notice" <|
+manualIsbnSameWorkOffersMerge : Test
+manualIsbnSameWorkOffersMerge =
+    test "manual_isbn_same_work: a second ISBN of an existing work offers the merge prompt, not a second work" <|
+        \() ->
+            startUpload
+                |> ProgramTest.update EnterManualMode
+                |> ProgramTest.update (ManualIsbnChanged "9780156453806")
+                |> ProgramTest.update SubmitManualIsbn
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/confirm"
+                    (simulateConfirmMergeRequiredResponse "work-existing-1")
+                -- The 409 is an OUTCOME, not an error: no "check the number".
+                |> ProgramTest.ensureViewHasNot
+                    [ Selector.text "We couldn't find a book with that ISBN. Please check the number and try again." ]
+                -- The work is fetched only to name it in the prompt.
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/work-existing-1"
+                    (simulateBookResponse "work-existing-1" "The Name of the Rose" "Umberto Eco")
+                |> ProgramTest.ensureViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-same-work")
+                    , Selector.text "You already have \"The Name of the Rose\" by Umberto Eco. Add this edition to it?"
+                    ]
+                -- Merging adds an edition to the named work.
+                |> ProgramTest.clickButton "Yes, merge"
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/work-existing-1/merge-format"
+                    (simulateMergeFormatResponse "work-existing-1" "edition-new-1" "9780156453806" "Paperback")
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "Added as another edition of the same book." ]
+
+
+{-| `Books.confirm/2`'s `:already_placed` branch (`source: "collection"`).
+
+Nothing changed server-side, so saying "added to your Wish List" would be the
+same untruth as the pre-#333 silent second placement. The completion card must
+report what actually happened.
+
+-}
+manualIsbnAlreadyOnThatShelfSaysSo : Test
+manualIsbnAlreadyOnThatShelfSaysSo =
+    test "manual_isbn_already_placed: confirming onto a shelf the book is already on says so rather than claiming an add" <|
         \() ->
             startUpload
                 |> ProgramTest.update EnterManualMode
                 |> ProgramTest.update (ManualIsbnChanged "9780306406157")
                 |> ProgramTest.update SubmitManualIsbn
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/books/isbn/9780306406157"
-                    (simulateBookDetailResponseWithPlacements "book-1" testBook [])
-                |> ProgramTest.ensureViewHas
-                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-verify") ]
-                |> ProgramTest.expectViewHasNot
-                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours") ]
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/confirm"
+                    (simulateConfirmResponse
+                        { statusCode = 200
+                        , bookId = "book-1"
+                        , title = "The Power of Habit"
+                        , authorName = "Charles Duhigg"
+                        , source = Just "collection"
+                        , placements = [ { placementId = "pl-wish", bookshelfName = "wishlist" } ]
+                        }
+                    )
+                -- `completeHeading` is one `case` returning one string, so
+                -- matching the already-on wording is the same guarantee as
+                -- refuting the added-to wording — without a prose negative
+                -- that could pass by matching nothing.
+                |> ProgramTest.expectViewHas
+                    [ Selector.text "\"The Power of Habit\" is already on your Wish List" ]
+
+
+{-| The reader picks the bookshelf on the manual-entry screen, and that choice
+must reach the request — `Books.confirm/2` creates AND places in one
+transaction, so a shelf chosen after the fact could only be honoured by filing
+the book twice. Clicking "Antilibrary" then the submit button must produce a
+confirm whose `shelf_name` is `antilibrary`; the completion card names it back.
+-}
+manualIsbnHonoursTheChosenShelf : Test
+manualIsbnHonoursTheChosenShelf =
+    test "manual_isbn_shelf_choice: the bookshelf chosen on the manual screen is the one the book is added to" <|
+        \() ->
+            startUpload
+                |> ProgramTest.clickButton "Enter ISBN manually instead"
+                |> ProgramTest.update (ManualIsbnChanged "9780156453806")
+                |> ProgramTest.clickButton "Antilibrary"
+                |> ProgramTest.clickButton "Add to Antilibrary"
+                |> ProgramTest.expectHttpRequest "POST"
+                    "/api/books/confirm"
+                    (Expect.all
+                        [ \body ->
+                            Expect.equal (Ok "9780156453806")
+                                (Decode.decodeString (Decode.field "isbn" Decode.string) body)
+                        , \body ->
+                            Expect.equal (Ok "antilibrary")
+                                (Decode.decodeString (Decode.field "shelf_name" Decode.string) body)
+                        ]
+                        << .body
+                    )
 
 
 uploadHappyPath : Test
@@ -368,9 +577,14 @@ uploadDuplicateDetected =
                     [ Selector.text "Yes, merge" ]
 
 
+{-| The manual path driven entirely through the affordances a reader can see:
+the "Enter ISBN manually instead" link, the ISBN field, and the submit button —
+whose label names the bookshelf it will use, because that is what the click
+does now.
+-}
 uploadManualIsbnEntry : Test
 uploadManualIsbnEntry =
-    test "upload_manual_isbn_entry: click manual mode -> enter valid ISBN -> submit -> mock lookup response -> verify step shows book title" <|
+    test "upload_manual_isbn_entry: click manual mode -> enter valid ISBN -> Add to Wish List -> completion card names the resolved book" <|
         \() ->
             startUpload
                 |> ProgramTest.clickButton "Enter ISBN manually instead"
@@ -379,12 +593,20 @@ uploadManualIsbnEntry =
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "isbn-input" ]
                 |> ProgramTest.update (ManualIsbnChanged "9780141988511")
-                |> ProgramTest.update SubmitManualIsbn
-                |> ProgramTest.simulateHttpResponse "GET"
-                    "/api/books/isbn/9780141988511"
-                    (simulateBookResponse "book-isbn-1" "Crime and Punishment" "Fyodor Dostoevsky")
+                |> ProgramTest.clickButton "Add to Wish List"
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/books/confirm"
+                    (simulateConfirmResponse
+                        { statusCode = 201
+                        , bookId = "book-isbn-1"
+                        , title = "Crime and Punishment"
+                        , authorName = "Fyodor Dostoevsky"
+                        , source = Nothing
+                        , placements = [ { placementId = "pl-1", bookshelfName = "wishlist" } ]
+                        }
+                    )
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "We think this is…" ]
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-complete") ]
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Crime and Punishment" ]
 

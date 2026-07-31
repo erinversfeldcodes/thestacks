@@ -32,6 +32,13 @@ type UploadResult
     | NotABook
     | ManualISBNEntry
     | DuplicateDetected Book
+      -- `Books.confirm/2` answered 409 `merge_required`: the ISBN resolved to a
+      -- title+author that fuzzy-matches a work we already hold, so it refused
+      -- to mint a second one and named the work to merge into (US-1.1.8). The
+      -- id is that work; the `Maybe Book` is it once fetched, purely so the
+      -- prompt can name the title. The prompt renders either way — a failed
+      -- fetch degrades the copy, it does not strand the reader.
+    | SameWorkFound String (Maybe Book)
 
 
 {-| The step within the upload flow after a book has been identified.
@@ -82,15 +89,21 @@ type alias Model =
     -- placement never fires the raise-only age-gate call.
     , ageGatingEnabled : Bool
 
-    -- ISBN lookup state
-    , isbnLookupState : RemoteData Http.Error ()
+    -- Manual-entry confirm state (#343). The manual path is one round trip
+    -- through `POST /api/books/confirm`, so this covers resolving, creating and
+    -- placing together — there is no separate lookup state to be in.
+    , confirmState : RemoteData Api.ConfirmError ()
 
-    -- Bookshelves the looked-up book is ALREADY on for this reader (#333).
-    -- The photo path has had duplicate awareness since the SSE payload's
-    -- `is_duplicate`; typing the ISBN by hand told the reader nothing, so they
-    -- placed a second copy without knowing. Purely informational — it is
-    -- rendered as a notice and never gates the confirm or the placement, since
-    -- a book on several bookshelves is a legal state the reader may well want.
+    -- Which branch of `Books.confirm/2` answered the manual add, so the
+    -- completion card can say "added to" rather than "already on" (and vice
+    -- versa) instead of guessing. `Nothing` on the photo path, which does not
+    -- go through the verb.
+    , confirmOutcome : Maybe Api.ConfirmOutcome
+
+    -- Bookshelves this book is ALREADY on for this reader, other than the one
+    -- this action just used (#333). Purely informational — it is rendered as a
+    -- notice and never gates a confirm or a placement, since a book on several
+    -- bookshelves is a legal state the reader may well want.
     , existingShelves : List String
 
     -- Merge format flow
@@ -145,7 +158,8 @@ type Msg
     | ConfirmPlacement
     | PlacementCompleted (Result Api.PlaceError Placement)
     | AgeGateSet (Result Http.Error ())
-    | IsbnLookupResult (Result Http.Error BookDetailResponse)
+    | ConfirmCompleted (Result Api.ConfirmError Api.ConfirmResponse)
+    | GotSameWorkBook (Result Http.Error BookDetailResponse)
     | GoToShelf String
 
 
@@ -168,7 +182,8 @@ init =
     , markAdultsOnly = False
     , ageGateError = Nothing
     , ageGatingEnabled = False
-    , isbnLookupState = NotAsked
+    , confirmState = NotAsked
+    , confirmOutcome = Nothing
     , existingShelves = []
     , mergeFormatState = NotAsked
     , mergeIsbn = ""
@@ -373,6 +388,16 @@ update msg model maybeToken =
                                     , collectedBooks = []
                                     , pendingBookIds = []
                                     , step = Verifying singleBook
+
+                                    -- The photo path gets the same "already
+                                    -- yours" notice the manual path does: the
+                                    -- book-detail response has carried every
+                                    -- placement since #333, and the verify step
+                                    -- is the last moment before a second copy
+                                    -- is filed. Informational — "Yes, that's
+                                    -- it" stays enabled.
+                                    , existingShelves =
+                                        List.filterMap .bookshelfName response.placements
                                   }
                                 , Cmd.none
                                 , NoOut
@@ -383,6 +408,11 @@ update msg model maybeToken =
                                     | result = Identified newCollected
                                     , collectedBooks = []
                                     , pendingBookIds = []
+
+                                    -- The multi-book list has no notice to
+                                    -- carry; clearing keeps a previous book's
+                                    -- shelves from surfacing on a later step.
+                                    , existingShelves = []
                                   }
                                 , Cmd.none
                                 , NoOut
@@ -457,12 +487,23 @@ update msg model maybeToken =
         ManualIsbnChanged isbn ->
             ( { model | manualIsbn = isbn, showIsbnError = False }, Cmd.none, NoOut )
 
+        -- The manual path is now ONE hop (#343). It used to be
+        -- `GET /api/books/isbn/:isbn` for metadata and then
+        -- `POST /api/bookshelves/:name/placements` to file it — a client-side
+        -- reassembly of `Books.confirm/2` that was missing the middle step the
+        -- verb has and the client cannot do: resolving the ISBN against Open
+        -- Library / Google Books. Without it, a perfectly good ISBN the
+        -- catalogue had never seen came back 404 and the reader was told to
+        -- check a number that was correct.
         SubmitManualIsbn ->
             if isValidISBN model.manualIsbn then
                 case maybeToken of
                     Just token ->
-                        ( { model | isbnLookupState = Loading }
-                        , Api.lookupByIsbn model.manualIsbn token IsbnLookupResult
+                        ( { model | confirmState = Loading, existingShelves = [] }
+                        , Api.confirmBook
+                            { isbn = model.manualIsbn, shelfName = model.selectedShelf }
+                            token
+                            ConfirmCompleted
                         , NoOut
                         )
 
@@ -472,33 +513,67 @@ update msg model maybeToken =
             else
                 ( { model | showIsbnError = True }, Cmd.none, NoOut )
 
-        IsbnLookupResult result ->
-            case result of
-                Ok response ->
-                    ( { model
-                        | isbnLookupState = Success ()
-                        , result = Identified [ response.book ]
-                        , step = Verifying response.book
+        ConfirmCompleted (Ok response) ->
+            ( { model
+                | confirmState = Success ()
+                , confirmOutcome = Just response.outcome
+                , result = Identified [ response.book ]
+                , step = Complete response.book model.selectedShelf
 
-                        -- Inform, never block (#333): the lookup reports which
-                        -- bookshelves the reader already has this on, and the
-                        -- flow continues to Verifying exactly as before.
-                        , existingShelves =
-                            List.filterMap .bookshelfName response.placements
-                      }
+                -- Inform, never block: the verb has already done the work, and
+                -- the completion card reports every OTHER bookshelf this book
+                -- is on so a second copy is never a surprise. Nothing here can
+                -- refuse anything — the placement exists by the time we render.
+                , existingShelves = otherShelves model.selectedShelf response.placements
+              }
+            , Cmd.none
+            , NoOut
+            )
+
+        ConfirmCompleted (Err (Api.ConfirmMergeRequired workId)) ->
+            -- US-1.1.8. Not a failure: the server declined to mint a second
+            -- work and told us which one this is an edition of. Fetch it only
+            -- so the prompt can name the title.
+            ( { model
+                | confirmState = NotAsked
+                , result = SameWorkFound workId Nothing
+                , mergeIsbn = model.manualIsbn
+                , mergeFormatState = NotAsked
+              }
+            , case maybeToken of
+                Just token ->
+                    Api.getBook workId (Just token) GotSameWorkBook
+
+                Nothing ->
+                    Cmd.none
+            , NoOut
+            )
+
+        ConfirmCompleted (Err (Api.ConfirmHttpError err)) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | confirmState = Failure (Api.ConfirmHttpError err) }, Cmd.none, NoOut )
+
+        ConfirmCompleted (Err confirmError) ->
+            ( { model | confirmState = Failure confirmError }, Cmd.none, NoOut )
+
+        GotSameWorkBook result ->
+            case ( result, model.result ) of
+                ( Ok response, SameWorkFound workId _ ) ->
+                    ( { model | result = SameWorkFound workId (Just response.book) }
                     , Cmd.none
                     , NoOut
                     )
 
-                Err err ->
-                    if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
-
-                    else
-                        ( { model | isbnLookupState = Failure err }, Cmd.none, NoOut )
+                _ ->
+                    -- The prompt already renders without a title; a failed
+                    -- fetch just leaves the generic copy in place.
+                    ( model, Cmd.none, NoOut )
 
         EnterManualMode ->
-            ( { model | result = ManualISBNEntry, isbnLookupState = NotAsked }, Cmd.none, NoOut )
+            ( { model | result = ManualISBNEntry, confirmState = NotAsked }, Cmd.none, NoOut )
 
         ConfirmMergeFormat bookId ->
             case maybeToken of
@@ -730,7 +805,7 @@ view model maybeToken =
                             viewChoosingShelf model book
 
                         Complete book shelfName ->
-                            viewComplete model.ageGateError book shelfName
+                            viewComplete model book shelfName
 
                         Uploading ->
                             case model.result of
@@ -751,6 +826,9 @@ view model maybeToken =
 
                                 DuplicateDetected book ->
                                     viewDuplicate model book
+
+                                SameWorkFound workId maybeBook ->
+                                    viewSameWork model workId maybeBook
             ]
         ]
 
@@ -925,6 +1003,16 @@ viewNotABook =
         ]
 
 
+{-| Manual ISBN entry (US-1.1.5), now a single screen and a single request.
+
+The bookshelf is chosen here rather than on a later step because
+`Books.confirm/2` creates and places in one transaction — asking afterwards
+would mean either placing on a shelf the reader never picked or filing the book
+twice. There is no intervening "We think this is…" step either: that exists on
+the photo path because a vision model GUESSED, and the resolved title is shown
+on the completion card. The reader typed the ISBN; the ISBN is the identity.
+
+-}
 viewManualEntry : Model -> Html Msg
 viewManualEntry model =
     div [ class "upload-result upload-result--manual" ]
@@ -934,26 +1022,54 @@ viewManualEntry model =
             , onInput = ManualIsbnChanged
             , showError = model.showIsbnError
             }
-        , case model.isbnLookupState of
+        , viewShelfChoices model.selectedShelf
+        , case model.confirmState of
             Loading ->
                 div [ class "upload-manual__loading" ]
                     [ span [ class "spinner" ] []
-                    , p [] [ text "Looking up book..." ]
+                    , p [] [ text "Adding your book..." ]
                     ]
 
-            Failure _ ->
+            Failure confirmError ->
                 div [ class "upload-manual__error" ]
                     [ p [ class "upload-manual__error-text" ]
-                        [ text "Book not found. Please check the ISBN and try again." ]
-                    , button [ class "btn btn--primary", testId "upload-manual-isbn-submit", onClick SubmitManualIsbn ]
-                        [ text "Look Up Book" ]
+                        [ text (confirmErrorMessage confirmError) ]
+                    , viewManualSubmit model.selectedShelf
                     ]
 
             _ ->
-                button [ class "btn btn--primary", testId "upload-manual-isbn-submit", onClick SubmitManualIsbn ]
-                    [ text "Look Up Book" ]
+                viewManualSubmit model.selectedShelf
         , button [ class "btn btn--ghost", onClick Reset ] [ text "Cancel" ]
         ]
+
+
+viewManualSubmit : String -> Html Msg
+viewManualSubmit selectedShelf =
+    button
+        [ class "btn btn--primary"
+        , testId "upload-manual-isbn-submit"
+        , onClick SubmitManualIsbn
+        ]
+        [ text ("Add to " ++ shelfLabel selectedShelf) ]
+
+
+{-| A wrong ISBN and a broken server are different problems and get different
+sentences — the old copy said "check the ISBN" for both, which was actively
+misleading for the case this issue exists to fix (a correct ISBN the catalogue
+simply had never seen). `ConfirmMergeRequired` never reaches here: it is an
+outcome with its own screen, not a failure.
+-}
+confirmErrorMessage : Api.ConfirmError -> String
+confirmErrorMessage confirmError =
+    case confirmError of
+        Api.ConfirmIsbnNotFound ->
+            "We couldn't find a book with that ISBN. Please check the number and try again."
+
+        Api.ConfirmMergeRequired _ ->
+            "This looks like another edition of a book we already have."
+
+        Api.ConfirmHttpError _ ->
+            "We couldn't add that book just now. Please try again."
 
 
 {-| Render an in-flow age-gate notice when the resolved book is
@@ -1005,6 +1121,48 @@ viewExistingShelvesNotice shelfNames =
                 , testId "upload-already-yours"
                 ]
                 [ text ("You already have this on your " ++ joinWithAnd labels ++ ".") ]
+
+
+{-| The same notice on the completion card (#343). The manual path learns the
+reader's other bookshelves from the confirm response, which by definition
+arrives after the placement — so this is where it can be said. Same wording,
+same muted register; still nothing but a sentence.
+-}
+viewCompleteExistingShelvesNotice : List String -> Html Msg
+viewCompleteExistingShelvesNotice shelfNames =
+    case List.map shelfLabel shelfNames of
+        [] ->
+            text ""
+
+        labels ->
+            p
+                [ class "upload-complete__already-yours"
+                , testId "upload-already-yours"
+                ]
+                [ text ("You already have this on your " ++ joinWithAnd labels ++ ".") ]
+
+
+{-| Every bookshelf the reader has this book on EXCEPT the one this action just
+used — that one is already named in the heading, so repeating it would read as
+a duplicate that isn't one.
+-}
+otherShelves : String -> List Placement -> List String
+otherShelves usedShelf placements =
+    placements
+        |> List.filterMap .bookshelfName
+        |> List.filter (\name -> name /= usedShelf)
+
+
+{-| The heading for each branch of `Books.confirm/2`.
+-}
+completeHeading : Maybe Api.ConfirmOutcome -> String -> String -> String
+completeHeading outcome title shelfName =
+    case outcome of
+        Just Api.ConfirmAlreadyPlaced ->
+            "\"" ++ title ++ "\" is already on your " ++ shelfLabel shelfName
+
+        _ ->
+            "\"" ++ title ++ "\" added to " ++ shelfLabel shelfName
 
 
 {-| "A", "A and B", "A, B and C".
@@ -1088,23 +1246,7 @@ viewChoosingShelf model book =
         -- Still informational at the moment of choosing (#333) — every shelf
         -- stays selectable, including ones the book is already on.
         , viewExistingShelvesNotice model.existingShelves
-        , div [ class "upload-shelf-picker__shelves" ]
-            (List.map
-                (\shelf ->
-                    button
-                        [ class
-                            (if shelf.value == model.selectedShelf then
-                                "upload-shelf-picker__shelf upload-shelf-picker__shelf--selected"
-
-                             else
-                                "upload-shelf-picker__shelf"
-                            )
-                        , onClick (ShelfSelected shelf.value)
-                        ]
-                        [ text shelf.label ]
-                )
-                allShelves
-            )
+        , viewShelfChoices model.selectedShelf
         , if model.ageGatingEnabled then
             viewAdultsOnlyToggle model.markAdultsOnly
 
@@ -1147,6 +1289,31 @@ viewChoosingShelf model book =
         ]
 
 
+{-| The five bookshelves, as a row of selectable buttons. Shared by the shelf
+picker (photo path) and the manual-entry screen (#343) so the two ways of
+adding a book offer the same choice in the same markup.
+-}
+viewShelfChoices : String -> Html Msg
+viewShelfChoices selectedShelf =
+    div [ class "upload-shelf-picker__shelves" ]
+        (List.map
+            (\shelf ->
+                button
+                    [ class
+                        (if shelf.value == selectedShelf then
+                            "upload-shelf-picker__shelf upload-shelf-picker__shelf--selected"
+
+                         else
+                            "upload-shelf-picker__shelf"
+                        )
+                    , onClick (ShelfSelected shelf.value)
+                    ]
+                    [ text shelf.label ]
+            )
+            allShelves
+        )
+
+
 {-| "Adults only" (age-gate raise) opt-in checkbox shown on the shelf
 picker. When ticked, ConfirmPlacement additionally fires the raise-only
 user age-gate endpoint for the book being placed.
@@ -1170,19 +1337,25 @@ viewAdultsOnlyToggle isChecked =
 
 
 {-| Success step: book placed on shelf.
+
+The heading distinguishes `Books.confirm/2`'s `:already_placed` branch from the
+two that changed something. Saying "added to your Wish List" when the book was
+already sitting there is the same class of untruth as the pre-#333 silent
+second placement — the reader must be able to tell what actually happened.
+`Nothing` is the photo path, which places directly and always added.
+
 -}
-viewComplete : Maybe String -> Book -> String -> Html Msg
-viewComplete ageGateError book shelfName =
+viewComplete : Model -> Book -> String -> Html Msg
+viewComplete model book shelfName =
     div [ class "upload-complete", testId "upload-complete", attribute "role" "status" ]
         [ h2 [ class "upload-complete__heading" ]
-            [ text
-                ("\""
-                    ++ book.title
-                    ++ "\" added to "
-                    ++ shelfLabel shelfName
-                )
-            ]
-        , case ageGateError of
+            [ text (completeHeading model.confirmOutcome book.title shelfName) ]
+
+        -- Inform, never block: every OTHER bookshelf this book is on, so a
+        -- reader who now has it in two places knows it. Nothing here is a
+        -- control — the placement has already happened.
+        , viewCompleteExistingShelvesNotice model.existingShelves
+        , case model.ageGateError of
             Just err ->
                 p [ class "upload-complete__age-gate-error", testId "upload-adults-only-error" ]
                     [ text err ]
@@ -1282,6 +1455,93 @@ viewMergePrompt book =
                 [ text "No, add as separate" ]
             ]
         ]
+
+
+{-| US-1.1.8, reached from the manual path's 409 (#343).
+
+`Books.confirm/2` matched the ISBN's resolved title+author to a work already in
+the catalogue (Jaro-Winkler > 0.8) and refused to create a second one. The
+matching is entirely server-side — this screen only consumes the work id it
+was handed, and fetches the work purely to name it.
+
+There is deliberately no "no, add it separately": the server has no such
+affordance, and offering a button that cannot work is worse than not offering
+it. A reader who disagrees with the match can go and look at the work.
+
+-}
+viewSameWork : Model -> String -> Maybe Book -> Html Msg
+viewSameWork model workId maybeBook =
+    div [ class "upload-result upload-result--duplicate", testId "upload-same-work" ]
+        [ h2 [] [ text "Already in the Catalogue" ]
+        , p [] [ text (sameWorkPrompt maybeBook) ]
+        , case model.mergeFormatState of
+            Success _ ->
+                div [ class "upload-duplicate__merge-success" ]
+                    [ p [ class "upload-duplicate__merge-success-text" ]
+                        [ text "Added as another edition of the same book." ]
+                    , a
+                        [ href (Route.toPath (Route.BookDetail workId))
+                        , class "btn btn--primary"
+                        ]
+                        [ text "View book details" ]
+                    , button [ class "btn btn--secondary", onClick Reset ] [ text "Add another" ]
+                    ]
+
+            Loading ->
+                div [ class "upload-duplicate__merge-loading" ]
+                    [ span [ class "spinner" ] []
+                    , p [] [ text "Merging format..." ]
+                    ]
+
+            Failure _ ->
+                div [ class "upload-duplicate__merge-error" ]
+                    [ p [] [ text "Merge failed. Please try again." ]
+                    , viewSameWorkActions workId
+                    ]
+
+            NotAsked ->
+                viewSameWorkActions workId
+        , div [ class "upload-duplicate__secondary" ]
+            [ a
+                [ href (Route.toPath (Route.BookDetail workId))
+                , class "btn btn--ghost"
+                ]
+                [ text "View Book" ]
+            , button [ class "btn btn--ghost", onClick Reset ] [ text "Go Back" ]
+            ]
+        ]
+
+
+viewSameWorkActions : String -> Html Msg
+viewSameWorkActions workId =
+    div [ class "upload-duplicate__merge" ]
+        [ div [ class "upload-duplicate__merge-actions" ]
+            [ button
+                [ class "btn btn--primary"
+                , testId "upload-same-work-merge"
+                , onClick (ConfirmMergeFormat workId)
+                ]
+                [ text "Yes, merge" ]
+            ]
+        ]
+
+
+{-| US-1.1.8 copy: "You own [Title] as a [format]. Add the [new format]
+edition?" — degraded to a title-free sentence when the work could not be
+fetched, which is a cosmetic loss rather than a dead end.
+-}
+sameWorkPrompt : Maybe Book -> String
+sameWorkPrompt maybeBook =
+    case maybeBook of
+        Just book ->
+            "You already have \""
+                ++ book.title
+                ++ "\" by "
+                ++ authorName book
+                ++ ". Add this edition to it?"
+
+        Nothing ->
+            "We already have this book in the catalogue. Add this edition to it?"
 
 
 viewMergeSuccess : Book -> Html Msg

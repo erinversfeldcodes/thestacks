@@ -117,6 +117,24 @@ dummyPlacement =
     }
 
 
+{-| A `POST /api/books/confirm` success body as the page sees it, carrying one
+placement per named bookshelf.
+-}
+confirmResponse : Api.ConfirmOutcome -> List String -> Api.ConfirmResponse
+confirmResponse outcome shelfNames =
+    let
+        placements =
+            List.map
+                (\name -> { dummyPlacement | id = "p-" ++ name, bookshelfName = Just name })
+                shelfNames
+    in
+    { book = dummyBook
+    , placement = List.head placements
+    , placements = placements
+    , outcome = outcome
+    }
+
+
 modelWithImage : Upload.Model
 modelWithImage =
     let
@@ -443,9 +461,13 @@ suite =
                 \_ ->
                     Upload.init.placementState |> Expect.equal NotAsked
             , -- US-1.1.5 | Suite 10: Elm
-              test "isbnLookupState is NotAsked" <|
+              test "confirmState is NotAsked" <|
                 \_ ->
-                    Upload.init.isbnLookupState |> Expect.equal NotAsked
+                    Upload.init.confirmState |> Expect.equal NotAsked
+            , -- US-1.1.5 | Suite 10: Elm
+              test "confirmOutcome is Nothing" <|
+                \_ ->
+                    Upload.init.confirmOutcome |> Expect.equal Nothing
             , -- US-1.1.6, US-1.1.8 | Suite 10: Elm
               test "mergeFormatState is NotAsked" <|
                 \_ ->
@@ -573,16 +595,16 @@ suite =
                     in
                     model.result |> Expect.equal ManualISBNEntry
             , -- US-1.1.5 | Suite 10: Elm
-              test "EnterManualMode resets isbnLookupState to NotAsked" <|
+              test "EnterManualMode resets confirmState to NotAsked" <|
                 \_ ->
                     let
                         withFailure =
-                            { init_ | isbnLookupState = Failure Http.NetworkError }
+                            { init_ | confirmState = Failure (Api.ConfirmHttpError Http.NetworkError) }
 
                         ( model, _, _ ) =
                             Upload.update EnterManualMode withFailure Nothing
                     in
-                    model.isbnLookupState |> Expect.equal NotAsked
+                    model.confirmState |> Expect.equal NotAsked
             , -- US-1.1.5 | Suite 10: Elm
               test "ManualIsbnChanged updates manualIsbn" <|
                 \_ ->
@@ -603,7 +625,7 @@ suite =
                     in
                     model.showIsbnError |> Expect.equal False
             , -- US-1.1.5 | Suite 10: Elm
-              test "SubmitManualIsbn with valid ISBN sets isbnLookupState to Loading" <|
+              test "SubmitManualIsbn with valid ISBN sets confirmState to Loading" <|
                 \_ ->
                     let
                         withIsbn =
@@ -612,7 +634,7 @@ suite =
                         ( model, _, _ ) =
                             Upload.update SubmitManualIsbn withIsbn (Just "tok")
                     in
-                    model.isbnLookupState |> Expect.equal Loading
+                    model.confirmState |> Expect.equal Loading
             , -- US-1.1.5 | Suite 10: Elm
               test "SubmitManualIsbn with invalid ISBN sets showIsbnError" <|
                 \_ ->
@@ -634,90 +656,138 @@ suite =
                         ( model, _, _ ) =
                             Upload.update SubmitManualIsbn withIsbn Nothing
                     in
-                    model.isbnLookupState |> Expect.equal NotAsked
-            , -- US-1.1.5 | Suite 10: Elm
-              test "IsbnLookupResult Ok sets result to Identified and step to Verifying" <|
+                    model.confirmState |> Expect.equal NotAsked
+            , -- US-1.1.5 | Suite 10: Elm — `Books.confirm/2` created the work,
+              -- its primary edition and the placement in one transaction, so
+              -- the manual path lands on the completion card. There is no
+              -- intervening verification step: the reader typed the ISBN.
+              test "ConfirmCompleted Ok created lands on Complete for the chosen shelf" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Upload.update
+                                (ConfirmCompleted (Ok (confirmResponse Api.ConfirmCreated [])))
+                                { init_ | selectedShelf = "library" }
+                                Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.result |> Expect.equal (Identified [ dummyBook ])
+                        , \m -> m.step |> Expect.equal (Complete dummyBook "library")
+                        , \m -> m.confirmState |> Expect.equal (Success ())
+                        , \m -> m.confirmOutcome |> Expect.equal (Just Api.ConfirmCreated)
+                        ]
+                        model
+            , -- US-1.1.6 / #333 | Suite 10: Elm — the duplicate notice. The
+              -- confirm response reports EVERY bookshelf the reader has this
+              -- book on; the ones other than the shelf just used are the
+              -- notice.
+              test "ConfirmCompleted Ok records the OTHER bookshelves the book is on" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Upload.update
+                                (ConfirmCompleted
+                                    (Ok
+                                        (confirmResponse Api.ConfirmPlacedFromCatalogue
+                                            [ "library", "wishlist" ]
+                                        )
+                                    )
+                                )
+                                { init_ | selectedShelf = "wishlist" }
+                                Nothing
+                    in
+                    model.existingShelves |> Expect.equal [ "library" ]
+            , -- #333 — inform, NEVER block: an already-owned book still
+              -- completes the add. If this ever diverges, the notice has
+              -- become a gate.
+              test "ConfirmCompleted Ok on an already-owned book still reaches Complete" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Upload.update
+                                (ConfirmCompleted
+                                    (Ok
+                                        (confirmResponse Api.ConfirmPlacedFromCatalogue
+                                            [ "library", "wishlist" ]
+                                        )
+                                    )
+                                )
+                                { init_ | selectedShelf = "wishlist" }
+                                Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.step |> Expect.equal (Complete dummyBook "wishlist")
+                        , \m -> m.result |> Expect.equal (Identified [ dummyBook ])
+                        , \m -> m.confirmState |> Expect.equal (Success ())
+                        ]
+                        model
+            , -- #333 — a book the reader does not already own leaves the
+              -- notice empty; so does the shelf this very request used.
+              test "ConfirmCompleted Ok with only the used shelf records no existing shelves" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Upload.update
+                                (ConfirmCompleted (Ok (confirmResponse Api.ConfirmCreated [ "wishlist" ])))
+                                init_
+                                Nothing
+                    in
+                    model.existingShelves |> Expect.equal []
+            , -- US-1.1.8 | Suite 10: Elm — the 409 is an OUTCOME, not a
+              -- failure. It must not land in confirmState as an error, or the
+              -- reader is told to check a number that was correct.
+              test "ConfirmCompleted merge_required opens the same-work prompt, not an error" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Upload.update
+                                (ConfirmCompleted (Err (Api.ConfirmMergeRequired "work-1")))
+                                { init_ | manualIsbn = "9780156453806" }
+                                Nothing
+                    in
+                    Expect.all
+                        [ \m -> m.result |> Expect.equal (SameWorkFound "work-1" Nothing)
+                        , \m -> m.mergeIsbn |> Expect.equal "9780156453806"
+                        , \m -> m.confirmState |> Expect.equal NotAsked
+                        ]
+                        model
+            , -- US-1.1.8 | Suite 10: Elm — the work is fetched only to name it.
+              test "GotSameWorkBook Ok fills the prompt's title" <|
                 \_ ->
                     let
                         response =
                             { book = dummyBook, placement = Nothing, bookshelfVisibility = Nothing, placements = [] }
 
                         ( model, _, _ ) =
-                            Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
+                            Upload.update
+                                (GotSameWorkBook (Ok response))
+                                { init_ | result = SameWorkFound "work-1" Nothing }
+                                Nothing
                     in
-                    Expect.all
-                        [ \m -> m.result |> Expect.equal (Identified [ dummyBook ])
-                        , \m -> m.step |> Expect.equal (Verifying dummyBook)
-                        , \m -> m.isbnLookupState |> Expect.equal (Success ())
-                        ]
-                        model
-            , -- US-1.1.6 / #333 | Suite 10: Elm — the manual-ISBN duplicate
-              -- notice. The photo path has had `is_duplicate` for a long time;
-              -- typing the ISBN by hand told the reader nothing, so a second
-              -- placement happened silently.
-              test "IsbnLookupResult Ok records the bookshelves the book is already on" <|
+                    model.result |> Expect.equal (SameWorkFound "work-1" (Just dummyBook))
+            , -- A failed title fetch degrades the copy; it must not strand the
+              -- reader on a screen with no merge button.
+              test "GotSameWorkBook Err leaves the prompt open without a title" <|
                 \_ ->
                     let
-                        response =
-                            { book = dummyBook
-                            , placement = Just { dummyPlacement | bookshelfName = Just "library" }
-                            , bookshelfVisibility = Nothing
-                            , placements =
-                                [ { dummyPlacement | id = "p1", bookshelfName = Just "library" }
-                                , { dummyPlacement | id = "p2", bookshelfName = Just "wishlist" }
-                                ]
-                            }
-
                         ( model, _, _ ) =
-                            Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
+                            Upload.update
+                                (GotSameWorkBook (Err Http.NetworkError))
+                                { init_ | result = SameWorkFound "work-1" Nothing }
+                                Nothing
                     in
-                    model.existingShelves |> Expect.equal [ "library", "wishlist" ]
-            , -- #333 — inform, NEVER block: an already-owned book still walks
-              -- the same path to the verification step. If this ever diverges,
-              -- the notice has become a gate.
-              test "IsbnLookupResult Ok on an already-owned book still reaches Verifying" <|
-                \_ ->
-                    let
-                        response =
-                            { book = dummyBook
-                            , placement = Just { dummyPlacement | bookshelfName = Just "library" }
-                            , bookshelfVisibility = Nothing
-                            , placements =
-                                [ { dummyPlacement | bookshelfName = Just "library" } ]
-                            }
-
-                        ( model, _, _ ) =
-                            Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
-                    in
-                    Expect.all
-                        [ \m -> m.step |> Expect.equal (Verifying dummyBook)
-                        , \m -> m.result |> Expect.equal (Identified [ dummyBook ])
-                        , \m -> m.isbnLookupState |> Expect.equal (Success ())
-                        ]
-                        model
-            , -- #333 — a book the reader does not own leaves the notice empty.
-              test "IsbnLookupResult Ok with no placements records no existing shelves" <|
-                \_ ->
-                    let
-                        response =
-                            { book = dummyBook
-                            , placement = Nothing
-                            , bookshelfVisibility = Nothing
-                            , placements = []
-                            }
-
-                        ( model, _, _ ) =
-                            Upload.update (IsbnLookupResult (Ok response)) Upload.init Nothing
-                    in
-                    model.existingShelves |> Expect.equal []
+                    model.result |> Expect.equal (SameWorkFound "work-1" Nothing)
             , -- US-1.1.5 | Suite 10: Elm
-              test "IsbnLookupResult Err sets isbnLookupState to Failure" <|
+              test "ConfirmCompleted Err sets confirmState to Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Upload.update (IsbnLookupResult (Err Http.NetworkError)) Upload.init Nothing
+                            Upload.update
+                                (ConfirmCompleted (Err Api.ConfirmIsbnNotFound))
+                                Upload.init
+                                Nothing
                     in
-                    model.isbnLookupState |> Expect.equal (Failure Http.NetworkError)
+                    model.confirmState |> Expect.equal (Failure Api.ConfirmIsbnNotFound)
             ]
         , describe "Duplicate detection"
             [ -- US-1.1.6, US-1.1.8 | Suite 10: Elm
