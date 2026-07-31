@@ -35,6 +35,7 @@ defmodule Stacks.UploadPipelineTest do
   alias Stacks.Shelving
   alias Stacks.Storage
   alias Stacks.Storage.Mock, as: StorageMock
+  alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
 
   @image_b64 Base.encode64("fake image bytes for testing")
@@ -528,13 +529,13 @@ defmodule Stacks.UploadPipelineTest do
   describe "Suite 3 — commit gate on undersized stored objects" do
     test "a 0-byte stored object is rejected at commit and enqueues no vision job",
          %{user: user} do
-      {:ok, init} = Books.init_upload(user.id)
+      {:ok, init} = Uploads.init_upload(user.id)
 
       # The client's presigned PUT "landed" but wrote zero bytes. No sub-1KB
       # blob is a real book photo, and each accepted image costs a GPU call.
       StorageMock.seed("uploads/#{init.image_id}", "")
 
-      assert {:error, :image_too_small} = Books.commit_upload(user.id, init.image_id)
+      assert {:error, :image_too_small} = Uploads.commit_upload(user.id, init.image_id)
 
       # Same rejection path an invalid commit takes: the row is terminal
       # rejected, the SSE stream reads status/rejection_reason straight from
@@ -548,10 +549,10 @@ defmodule Stacks.UploadPipelineTest do
     end
 
     test "a sub-1KB stored object is rejected identically", %{user: user} do
-      {:ok, init} = Books.init_upload(user.id)
+      {:ok, init} = Uploads.init_upload(user.id)
       StorageMock.seed("uploads/#{init.image_id}", String.duplicate("x", 512))
 
-      assert {:error, :image_too_small} = Books.commit_upload(user.id, init.image_id)
+      assert {:error, :image_too_small} = Uploads.commit_upload(user.id, init.image_id)
       assert Repo.get!(UploadedImage, init.image_id).status == "rejected"
       refute_enqueued(worker: IdentifyBookJob)
     end
@@ -568,7 +569,7 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      assert {:ok, image} = Books.store_upload(user.id, upload)
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
 
       assert image.status == "pending"
       assert image.storage_path =~ ~r/^uploads\//
@@ -1076,7 +1077,7 @@ defmodule Stacks.UploadPipelineTest do
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
 
-      assert {:error, :unavailable} = Books.store_upload(user.id, upload)
+      assert {:error, :unavailable} = Uploads.store_upload(user.id, upload)
 
       assert event_count("image.submitted") == before_count
     end
@@ -1089,7 +1090,7 @@ defmodule Stacks.UploadPipelineTest do
 
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
-      {:ok, _image} = Books.store_upload(user.id, upload)
+      {:ok, _image} = Uploads.store_upload(user.id, upload)
 
       assert event_count("image.submitted") == before_count + 1
 
@@ -1102,7 +1103,7 @@ defmodule Stacks.UploadPipelineTest do
     test "image.submitted payload contains storage_path", %{user: user} do
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
-      {:ok, _image} = Books.store_upload(user.id, upload)
+      {:ok, _image} = Uploads.store_upload(user.id, upload)
 
       events = events_of_type("image.submitted")
       latest = List.last(events)
@@ -1287,7 +1288,7 @@ defmodule Stacks.UploadPipelineTest do
       # 1. Upload image
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
-      {:ok, image} = Books.store_upload(user.id, upload)
+      {:ok, image} = Uploads.store_upload(user.id, upload)
 
       # 2. Run identification job (uses pre-inserted book via default MockClient)
       perform_job(IdentifyBookJob, %{
@@ -1377,7 +1378,7 @@ defmodule Stacks.UploadPipelineTest do
       image_id = Ecto.UUID.generate()
       storage_key = "uploads/#{image_id}"
 
-      {:ok, job} = Books.upload_and_identify(user.id, image_id, storage_key)
+      {:ok, job} = Uploads.upload_and_identify(user.id, image_id, storage_key)
 
       assert job.queue == "vision"
 
@@ -1393,7 +1394,7 @@ defmodule Stacks.UploadPipelineTest do
 
     @tag stories: ["US-1.1.1"], suite: :jobs
     test "job is enqueued with correct worker" do
-      Books.upload_and_identify("user-id", "image-id", "uploads/image-id")
+      Uploads.upload_and_identify("user-id", "image-id", "uploads/image-id")
 
       assert_enqueued(
         worker: IdentifyBookJob,
@@ -2008,7 +2009,7 @@ defmodule Stacks.UploadPipelineTest do
       # Verify store_upload succeeds with a valid file and storage is populated.
       tmp_path = create_temp_image()
       upload = %Plug.Upload{path: tmp_path, filename: "test.jpg", content_type: "image/jpeg"}
-      assert {:ok, image} = Books.store_upload(user.id, upload)
+      assert {:ok, image} = Uploads.store_upload(user.id, upload)
 
       # Verify the storage key was written
       key = image.storage_path
@@ -2019,7 +2020,7 @@ defmodule Stacks.UploadPipelineTest do
       # or insert_uploaded_image. Testing the actual failure path would require
       # injecting a DB failure mid-transaction, which is not feasible without
       # modifying production code. The cleanup logic is verified by code
-      # inspection of Books.store_upload/2.
+      # inspection of Uploads.store_upload/2.
     end
 
     @tag stories: ["US-1.1.1"], suite: :storage
@@ -2034,7 +2035,7 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      assert {:error, _reason} = Books.store_upload(user.id, upload)
+      assert {:error, _reason} = Uploads.store_upload(user.id, upload)
 
       # The key would have been "uploads/<generated-uuid>". Since File.read
       # fails before upload_image is called, nothing was stored — but the else
@@ -2319,7 +2320,7 @@ defmodule Stacks.UploadPipelineTest do
       book: _book
     } do
       # Step 1: Store the upload (the legacy multipart POST /api/upload route
-      # was removed; Books.store_upload/2 is the same entry point it wrapped)
+      # was removed; Uploads.store_upload/2 is the same entry point it wrapped)
       tmp_path = create_temp_image()
 
       upload = %Plug.Upload{
@@ -2328,7 +2329,7 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      assert {:ok, stored} = Books.store_upload(user.id, upload)
+      assert {:ok, stored} = Uploads.store_upload(user.id, upload)
       image_id = stored.id
 
       # Step 2: Assert DB state — image is pending
@@ -2399,7 +2400,7 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      assert {:ok, stored} = Books.store_upload(user.id, upload)
+      assert {:ok, stored} = Uploads.store_upload(user.id, upload)
       image_id = stored.id
 
       # Step 2: Run identification with not-a-book mock
@@ -2431,7 +2432,7 @@ defmodule Stacks.UploadPipelineTest do
         content_type: "image/jpeg"
       }
 
-      assert {:ok, stored} = Books.store_upload(user.id, upload)
+      assert {:ok, stored} = Uploads.store_upload(user.id, upload)
       image_id = stored.id
 
       with_vision(no_isbn(), fn ->

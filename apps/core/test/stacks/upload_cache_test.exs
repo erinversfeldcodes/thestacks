@@ -16,6 +16,7 @@ defmodule Stacks.UploadCacheTest do
   alias Stacks.Books
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.Handlers.CacheInvalidationHandler
+  alias Stacks.Uploads
   alias StacksWeb.Plugs.AgeGate
 
   setup do
@@ -169,7 +170,7 @@ defmodule Stacks.UploadCacheTest do
       bogus_path = "/tmp/nonexistent_#{System.unique_integer([:positive])}.jpg"
       upload = %Plug.Upload{path: bogus_path, filename: "x.jpg", content_type: "image/jpeg"}
 
-      assert {:error, _reason} = Books.store_upload(user.id, upload)
+      assert {:error, _reason} = Uploads.store_upload(user.id, upload)
 
       # No cache entry was inserted as a side-effect of the failed upload.
       # This protects against the upload path inadvertently writing
@@ -181,7 +182,7 @@ defmodule Stacks.UploadCacheTest do
     @tag stories: ["US-1.1.1"], suite: :cache, security: true
     test "storage backend failure does not insert any entry into the cache" do
       # Same property under a different mid-flow failure: the storage
-      # backend rejects the upload. Books.store_upload short-circuits on
+      # backend rejects the upload. Uploads.store_upload short-circuits on
       # the {:error, :unavailable} from the backend before any DB or
       # cache write would happen.
       defmodule __MODULE__.FailingStorage do
@@ -210,7 +211,7 @@ defmodule Stacks.UploadCacheTest do
 
       upload = %Plug.Upload{path: tmp_path, filename: "x.jpg", content_type: "image/jpeg"}
 
-      assert {:error, :unavailable} = Books.store_upload(user.id, upload)
+      assert {:error, :unavailable} = Uploads.store_upload(user.id, upload)
 
       assert :ets.info(:book_detail_cache, :size) == 0
     end

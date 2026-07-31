@@ -44,7 +44,7 @@ defmodule Stacks.Books.TitleSearchCache do
   import Ecto.Query
 
   alias Core.Repo
-  alias Stacks.Books
+  alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolverCache
   alias Stacks.Books.TitleSearchCacheEntry
 
@@ -144,7 +144,7 @@ defmodule Stacks.Books.TitleSearchCache do
   upload of the same image (retry rounds carry `excluded_isbns` and
   bypass the cache; round one does not).
 
-  Matching is canonical-ISBN-13 equality (`Stacks.Books.canonical_isbn13/1`)
+  Matching is canonical-ISBN-13 equality (`Stacks.Books.ISBN.canonical_isbn13/1`)
   on BOTH the argument and the stored ISBN: hyphens/whitespace stripped,
   upcased, and any valid ISBN-10 converted to its ISBN-13 form. The
   conversion matters in production — title searches memoise whatever
@@ -178,7 +178,7 @@ defmodule Stacks.Books.TitleSearchCache do
   """
   @spec invalidate_by_isbn(String.t()) :: :ok
   def invalidate_by_isbn(isbn) when is_binary(isbn) do
-    case Books.canonical_isbn13(isbn) do
+    case ISBN.canonical_isbn13(isbn) do
       "" ->
         :ok
 
@@ -268,7 +268,7 @@ defmodule Stacks.Books.TitleSearchCache do
     |> :ets.tab2list()
     |> Enum.count(fn
       {key, {:ok, stored_isbn, _metadata}, _expires_at} ->
-        if Books.canonical_isbn13(stored_isbn) == canonical_isbn do
+        if ISBN.canonical_isbn13(stored_isbn) == canonical_isbn do
           :ets.delete(@table, key)
           true
         else
@@ -383,7 +383,7 @@ defmodule Stacks.Books.TitleSearchCache do
   # Delete L2 rows whose stored ISBN canonicalises to the (already
   # canonicalised) target: fetch (id, isbn) for `outcome = 'found'` rows
   # (the only ones carrying an ISBN; negative rows store ""), run
-  # `Books.canonical_isbn13/1` in Elixir rather than replicating the
+  # `Stacks.Books.ISBN.canonical_isbn13/1` in Elixir rather than replicating the
   # ISBN-10 → 13 conversion in SQL, then delete by id list. Best-effort,
   # non-transactional — see `invalidate_by_isbn/1` doc for the rationale.
   defp db_delete_by_isbn(canonical_isbn) do
@@ -394,7 +394,7 @@ defmodule Stacks.Books.TitleSearchCache do
           select: {e.id, e.isbn}
         )
         |> Repo.all()
-        |> Enum.filter(fn {_id, isbn} -> Books.canonical_isbn13(isbn) == canonical_isbn end)
+        |> Enum.filter(fn {_id, isbn} -> ISBN.canonical_isbn13(isbn) == canonical_isbn end)
         |> Enum.map(fn {id, _isbn} -> id end)
 
       case matching_ids do

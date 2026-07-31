@@ -9,6 +9,7 @@ defmodule Stacks.Books.ISBNResolver do
 
   alias Stacks.Books.CandidateScorer
   alias Stacks.Books.HttpClientBehaviour
+  alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolverCache
   alias Stacks.Books.TitleSearchCache
 
@@ -449,7 +450,7 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   defp normalise_isbn_for_compare(value) when is_binary(value),
-    do: Stacks.Books.canonical_isbn13(value)
+    do: ISBN.canonical_isbn13(value)
 
   defp normalise_isbn_for_compare(_), do: ""
 

@@ -15,8 +15,8 @@ defmodule Stacks.DataCorrectionTest do
   import Stacks.Factory
 
   alias Core.Repo
-  alias Stacks.Books
   alias Stacks.Books.BookEdition
+  alias Stacks.Books.ISBN
   alias Stacks.DataCorrection
   alias Stacks.DataCorrection.NormaliseEditionIsbn10
   alias Stacks.DataCorrection.StaleSeedEditionIsbn
@@ -92,20 +92,20 @@ defmodule Stacks.DataCorrectionTest do
   describe "ISBN-10 to ISBN-13 conversion, against the real production values" do
     test "both production ISBN-10s convert to the expected ISBN-13" do
       for {isbn10, isbn13, _title} <- @prod_isbn10s do
-        assert Books.canonical_isbn13(isbn10) == isbn13
+        assert ISBN.canonical_isbn13(isbn10) == isbn13
       end
     end
 
     test "both production ISBN-10s are genuinely valid ISBN-10s" do
       for {isbn10, _isbn13, _title} <- @prod_isbn10s do
-        assert Books.valid_isbn_checksum?(isbn10),
+        assert ISBN.valid_isbn_checksum?(isbn10),
                "#{isbn10} must be a valid ISBN-10 — the conversion is only sound if it is"
       end
     end
 
     test "the converted values pass the checksum the CHECK constraint enforces" do
       for {_isbn10, isbn13, _title} <- @prod_isbn10s do
-        assert Books.valid_isbn_checksum?(isbn13)
+        assert ISBN.valid_isbn_checksum?(isbn13)
         assert String.length(isbn13) == 13
       end
     end
@@ -119,7 +119,7 @@ defmodule Stacks.DataCorrectionTest do
 
     test "a ten-digit string with a bad check digit is not claimed as convertible" do
       # 0071615690 — same nine digits, wrong check digit.
-      refute Books.valid_isbn_checksum?("0071615690")
+      refute ISBN.valid_isbn_checksum?("0071615690")
     end
   end
 

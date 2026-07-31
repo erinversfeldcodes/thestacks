@@ -23,7 +23,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
   both, the reader watched a spinner until the SSE deadline expired, minutes
   after the job was dead. A wrapper covers the branch nobody has written yet.
 
-  `Stacks.Books.reject_image/2` is idempotent and scoped to in-flight rows, so
+  `Stacks.Uploads.reject_image/2` is idempotent and scoped to in-flight rows, so
   applying it broadly is safe: a row that already reached `resolved` is not
   touched, and a second call on a rejected row is a no-op.
   """
@@ -457,8 +457,8 @@ defmodule Stacks.Workers.IdentifyBookJob do
       Logger.error("IdentifyBookJob: failed to resolve image #{image_id}: #{inspect(error)}")
   end
 
-  # Rejection machinery lives in `Stacks.Books.reject_image/2` (terminal row
+  # Rejection machinery lives in `Stacks.Uploads.reject_image/2` (terminal row
   # state + telemetry + SSE PubSub + image.rejected event) so the commit-time
   # undersized-object gate and this pipeline share one observable path.
-  defp mark_rejected(image_id, reason), do: Stacks.Books.reject_image(image_id, reason)
+  defp mark_rejected(image_id, reason), do: Stacks.Uploads.reject_image(image_id, reason)
 end

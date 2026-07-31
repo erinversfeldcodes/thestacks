@@ -12,7 +12,7 @@ defmodule Stacks.DataCorrection.NormaliseEditionIsbn10 do
 
   The conversion is arithmetic, not a lookup: prefix `978`, keep the first nine
   digits, discard the ISBN-10 check digit (it does not carry over) and recompute
-  the EAN-13 check digit over the resulting twelve. `Stacks.Books.canonical_isbn13/1`
+  the EAN-13 check digit over the resulting twelve. `Stacks.Books.ISBN.canonical_isbn13/1`
   is that function, and is the same one `find_existing/1` compares against — so a
   repaired row becomes findable by the identity the rest of the system already uses.
 
@@ -26,7 +26,7 @@ defmodule Stacks.DataCorrection.NormaliseEditionIsbn10 do
 
   @behaviour Stacks.DataCorrection
 
-  alias Stacks.Books
+  alias Stacks.Books.ISBN
   alias Stacks.DataCorrection.EditionIsbn
 
   @impl true
@@ -43,12 +43,12 @@ defmodule Stacks.DataCorrection.NormaliseEditionIsbn10 do
   def plan do
     "^[0-9]{10}$"
     |> EditionIsbn.matching()
-    |> Enum.filter(fn {_id, isbn} -> Books.valid_isbn_checksum?(isbn) end)
+    |> Enum.filter(fn {_id, isbn} -> ISBN.valid_isbn_checksum?(isbn) end)
     |> Enum.map(fn {id, isbn} ->
       %{
         id: id,
         from: isbn,
-        to: Books.canonical_isbn13(isbn),
+        to: ISBN.canonical_isbn13(isbn),
         because: "ISBN-10 stored unnormalised; converted to its ISBN-13 equivalent"
       }
     end)
