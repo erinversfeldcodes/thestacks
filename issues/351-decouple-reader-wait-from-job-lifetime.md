@@ -3,7 +3,7 @@
 ## Summary
 Raised by the owner on 2026-07-31, on seeing that #342 derived the SSE deadline from actual job death: *"what is the operational impact of this? should we be investigating terminating the job earlier to tighten this down?"*
 
-The investigation's answer: the deadline itself is近 inert — but the reader's *experience* is coupled to the job's full retry budget, and that is the thing worth changing.
+The investigation's answer: the deadline itself is near-inert — but the reader's *experience* is coupled to the job's full retry budget, and that is the thing worth changing.
 
 Today `UploadController` sets the SSE deadline from `IdentifyBookJob.worst_case_lifetime_ms/0` = 3 attempts × 450s + 36s backoff ≈ **23.1 minutes** (and #350, if it raises the client timeout, pushes this toward ~35 minutes). The stream stays open across Oban retries, so a reader whose upload hits repeated *transient* failures watches an undifferentiated spinner for as long as the job keeps trying.
 
