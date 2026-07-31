@@ -883,6 +883,59 @@ GENERATORS = {
 }
 
 
+def classify(path: Path) -> str:
+    """Classify a generated artefact as tracked / ignored / untracked (Issue #354).
+
+    Delegates to scripts/generated-file-class.sh so the tracked-vs-gitignored
+    policy has exactly one implementation, shared by this generator, the Elm
+    generator and `mix proto.sync`. That script answers with git itself —
+    parsing .gitignore by hand is the failure mode this project has been bitten
+    by before, and it fails silently.
+
+    Only called once drift has already been detected, so the clean path pays
+    nothing for it.
+    """
+    try:
+        result = subprocess.run(
+            [str(REPO_ROOT / "scripts" / "generated-file-class.sh"), str(path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        # Fail closed: if we cannot prove the artefact is disposable, treat it
+        # like a tracked one and let the drift fail the build.
+        return "untracked"
+    return result.stdout.strip()
+
+
+def _resolve_drift(output: Path, generated: str, language: str, missing: bool) -> bool:
+    """Handle one drifted artefact. Returns True if it should fail the build.
+
+    Gitignored + stale can only ever be LOCAL staleness — CI regenerates these
+    from scratch every run — so regenerate it and say so. Anything else has to
+    fail: that is the case the drift check exists for.
+    """
+    rel = output.relative_to(REPO_ROOT)
+    reason = "does not exist" if missing else "is out of date"
+
+    if classify(output) == "ignored":
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(generated)
+        print(
+            f"REGENERATED: {rel} {reason} — gitignored, so this can only be "
+            "local staleness; regenerated from proto and continuing.",
+            file=sys.stderr,
+        )
+        return False
+
+    print(
+        f"DRIFT: {rel} {reason} — run: scripts/gen-{language}-proto.sh",
+        file=sys.stderr,
+    )
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -916,20 +969,11 @@ def main() -> None:
         generated = generate(descriptor, proto_file)
 
         if args.check:
-            if not output.exists():
-                print(
-                    f"DRIFT: {output.relative_to(REPO_ROOT)} does not exist — "
-                    f"run: scripts/gen-{language}-proto.sh",
-                    file=sys.stderr,
+            missing = not output.exists()
+            if missing or output.read_text() != generated:
+                drift_detected = (
+                    _resolve_drift(output, generated, language, missing) or drift_detected
                 )
-                drift_detected = True
-            elif output.read_text() != generated:
-                print(
-                    f"DRIFT: {output.relative_to(REPO_ROOT)} is out of date — "
-                    f"run: scripts/gen-{language}-proto.sh",
-                    file=sys.stderr,
-                )
-                drift_detected = True
             else:
                 print(f"OK: {output.relative_to(REPO_ROOT)}", file=sys.stderr)
         else:
@@ -976,12 +1020,7 @@ def _check_package_inits(targets: list[dict]) -> bool:
         if target["language"] == "python":
             init = target["output"].parent / "__init__.py"
             if not init.exists():
-                print(
-                    f"DRIFT: {init.relative_to(REPO_ROOT)} does not exist — "
-                    "run: scripts/gen-python-proto.sh",
-                    file=sys.stderr,
-                )
-                drift = True
+                drift = _resolve_drift(init, "", "python", missing=True) or drift
             else:
                 print(f"OK: {init.relative_to(REPO_ROOT)}", file=sys.stderr)
 
@@ -994,20 +1033,14 @@ def _check_package_inits(targets: list[dict]) -> bool:
         # In check mode pass empty string so stale stems (modules removed from TARGETS)
         # are detected as drift rather than silently preserved.
         expected = _compute_mod_rs(targets, "")
-        if not mod_rs.exists():
-            print(
-                f"DRIFT: {mod_rs.relative_to(REPO_ROOT)} does not exist — "
-                "run: scripts/gen-rust-proto.sh",
-                file=sys.stderr,
-            )
-            drift = True
-        elif existing != expected:
-            print(
-                f"DRIFT: {mod_rs.relative_to(REPO_ROOT)} is out of date — "
-                "run: scripts/gen-rust-proto.sh",
-                file=sys.stderr,
-            )
-            drift = True
+        if not mod_rs.exists() or existing != expected:
+            # Self-heal with `expected` — the from-scratch content, not the
+            # merge-with-existing one `_write_package_inits` uses. Writing the
+            # merged form would preserve the very stale stem the check flagged,
+            # so the next run would report REGENERATED again and never
+            # converge: a self-heal that does not fix anything is worse than
+            # the failure it replaced.
+            drift = _resolve_drift(mod_rs, expected, "rust", missing=not mod_rs.exists()) or drift
         else:
             print(f"OK: {mod_rs.relative_to(REPO_ROOT)}", file=sys.stderr)
     return drift

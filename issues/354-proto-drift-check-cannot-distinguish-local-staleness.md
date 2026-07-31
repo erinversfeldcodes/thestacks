@@ -50,9 +50,9 @@ Router wiring: none.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Tracked vs gitignored distinguished via git, not `.gitignore` parsing — evidence: diff
-- [ ] Gitignored staleness regenerates and reports; tracked drift still fails — evidence: both counterfactual transcripts
-- [ ] Main-checkout regeneration gap closed, with the chosen approach stated — evidence: diff + rationale
+- [x] Tracked vs gitignored distinguished via git, not `.gitignore` parsing — evidence: `scripts/generated-file-class.sh` (`git ls-files --error-unmatch`, then `git check-ignore`)
+- [x] Gitignored staleness regenerates and reports; tracked drift still fails — evidence: both counterfactual transcripts (Progress Notes)
+- [x] Main-checkout regeneration gap closed, with the chosen approach stated — evidence: `just regen-proto` + `bootstrap-worktree.sh` main-checkout path
 - [ ] `staff-review` verdict recorded below
 
 ## Dependencies
@@ -60,3 +60,32 @@ None. Related to **#337** (same class). Needs an owner wave assignment — worth
 
 ## Progress Notes
 Filed 2026-07-31 by the lead after Wave 5's gate reported three failures that were all one cause. Wave 4 hit the identical thing with `gen/proto/enums.ex`. Every drifted file in both incidents was gitignored, confirmed with `git ls-files --error-unmatch`.
+
+**Implemented 2026-07-31.** The policy lives in one place — `scripts/generated-file-class.sh`, which prints `tracked` / `ignored` / `untracked` and is consulted by all three drift checks (`gen_python_proto.py --check`, `gen-elm-proto.sh --check`, `Mix.Tasks.ProtoSync.DriftChecker`). It is only reached once drift is already known, so the clean path costs nothing. `untracked` fails closed: an artefact that cannot be proven disposable is treated like a tracked one.
+
+Counterfactual (a) — the exact Wave 5 trio, made stale, then `scripts/lint-proto.sh`:
+
+```
+### STEP 2 — classify each (git, not .gitignore)
+  apps/core/lib/stacks/gen/proto/enums.ex        -> ignored
+  apps/core/lib/stacks/gen/proto/vision.ex       -> ignored
+  apps/vision/app/proto/gen/vision.py            -> ignored
+
+### STEP 3 — run the gate
+REGENERATED: apps/vision/app/proto/gen/vision.py is out of date — gitignored, so this can only be local staleness; regenerated from proto and continuing.
+REGENERATED: apps/core/lib/stacks/gen/proto/vision.ex is out of date — gitignored, so this can only be local staleness; regenerated from proto and continuing.
+REGENERATED: apps/core/lib/stacks/gen/proto/enums.ex is out of date — gitignored, so this can only be local staleness; regenerated from proto and continuing.
+### GATE EXIT: 0
+```
+
+Counterfactual (b) — the *same file* with the *same drift*, the only variable changed being that git now tracks it:
+
+```
+### B1 — the SAME artefact as counterfactual (a), now tracked
+  classified: tracked
+DRIFT: apps/core/lib/stacks/gen/proto/enums.ex is out of date — run: scripts/gen-elixir-proto.sh
+### GATE EXIT: 1   (must be 1)
+  STALE MARKER still present (NOT silently regenerated): 1
+```
+
+Main-checkout gap: chose **`just regen-proto`** (`scripts/regen-proto.sh`) as a first-class recipe, and made `bootstrap-worktree.sh`'s main-checkout branch `exec` it instead of exiting 0 with advice — so the one command an agent is already told to run is correct in both places. `proto-sync-all` and `bootstrap-worktree.sh` now both delegate to it, which is how the missing fifth target was found: `proto-sync-all` ran four of five, omitting `gen-python-proto.sh` — exactly the artefact Wave 5 tripped over.

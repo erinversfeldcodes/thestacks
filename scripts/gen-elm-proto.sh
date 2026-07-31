@@ -51,10 +51,6 @@ generate_to() {
 
 if [[ "${1:-}" == "--check" ]]; then
     echo "==> Checking Elm proto gen is up to date..."
-    if [[ ! -d "$OUTPUT_DIR" ]]; then
-        echo "ERROR: $OUTPUT_DIR does not exist. Run: scripts/gen-elm-proto.sh" >&2
-        exit 1
-    fi
     TMPDIR_CHECK="$(mktemp -d)"
     trap 'rm -rf "$TMPDIR_CHECK"' EXIT
 
@@ -65,16 +61,29 @@ if [[ "${1:-}" == "--check" ]]; then
     generate_to "$GEN_DIR" "$DESC_FILE"
 
     # Diff against current output
-    if diff -r --brief "$GEN_DIR" "$OUTPUT_DIR" >/dev/null 2>&1; then
+    if [[ -d "$OUTPUT_DIR" ]] && diff -r --brief "$GEN_DIR" "$OUTPUT_DIR" >/dev/null 2>&1; then
         echo "==> Elm proto gen is up to date."
         exit 0
-    else
-        echo "ERROR: Elm proto gen is out of date. Diff:" >&2
-        diff -r -u "$OUTPUT_DIR" "$GEN_DIR" || true
-        echo "" >&2
-        echo "Run: scripts/gen-elm-proto.sh" >&2
-        exit 1
     fi
+
+    # Drifted (or absent). Whether that is a defect depends entirely on whether
+    # the output is tracked — see scripts/generated-file-class.sh (Issue #354).
+    CLASS="$(bash "$REPO_ROOT/scripts/generated-file-class.sh" "$OUTPUT_DIR")"
+    if [[ "$CLASS" == "ignored" ]]; then
+        mkdir -p "$OUTPUT_DIR"
+        # --delete so a module dropped from proto/ disappears here too; a
+        # self-heal that leaves stale files behind would never converge.
+        rsync -a --delete "$GEN_DIR/" "$OUTPUT_DIR/"
+        echo "REGENERATED: proto/gen/elm/ was out of date — gitignored, so this" >&2
+        echo "             can only be local staleness; regenerated and continuing." >&2
+        exit 0
+    fi
+
+    echo "ERROR: Elm proto gen is out of date ($CLASS). Diff:" >&2
+    diff -r -u "$OUTPUT_DIR" "$GEN_DIR" 2>&1 || true
+    echo "" >&2
+    echo "Run: scripts/gen-elm-proto.sh" >&2
+    exit 1
 fi
 
 # ── Staleness check: skip regeneration if output is newer than all inputs ─────

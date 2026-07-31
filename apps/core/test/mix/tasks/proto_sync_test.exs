@@ -520,6 +520,71 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       assert msg =~ "file not found"
     end
+
+    # Issue #354. Drift in a GITIGNORED generated file can only ever be local
+    # staleness — CI builds those from scratch every run — so failing the gate
+    # for it cost two full `just ci` re-runs and reported three failing groups
+    # that were one cause and zero real. Drift in a TRACKED one is the real
+    # thing this check exists for and must still fail.
+    #
+    # These drive the actual working tree, not a mock: the whole point is that
+    # git is the oracle, so a stubbed classifier would prove nothing.
+    test "regenerates a stale GITIGNORED generated file instead of failing" do
+      # Inside apps/core/lib/stacks/gen/, which .gitignore covers.
+      path =
+        Path.join(
+          @repo_root,
+          "apps/core/lib/stacks/gen/proto/drift_probe_#{:erlang.phash2(self())}.ex"
+        )
+
+      File.write!(path, "# stale\n")
+
+      try do
+        assert {:regenerated, ^path} = DriftChecker.check("# fresh\n", path, @repo_root)
+        assert File.read!(path) == "# fresh\n"
+      after
+        File.rm(path)
+      end
+    end
+
+    test "still fails for a TRACKED generated file that has drifted" do
+      # The assertion is "the implementation must NOT write here", so a broken
+      # implementation writes here anyway — which means the file has to be
+      # disposable. Aiming this at a real committed artefact is not a stricter
+      # test, it is a test that corrupts the working tree when it fails.
+      path = Path.join(@repo_root, "drift_probe_tracked_#{:erlang.phash2(self())}.tmp")
+      File.write!(path, "committed\n")
+      {_, 0} = System.cmd("git", ["-C", @repo_root, "add", "-f", "--", path])
+
+      try do
+        assert {:drift, ^path, _diff} =
+                 DriftChecker.check("deliberately wrong\n", path, @repo_root)
+
+        assert File.read!(path) == "committed\n"
+      after
+        System.cmd("git", ["-C", @repo_root, "rm", "--cached", "-f", "--quiet", "--", path])
+        File.rm(path)
+      end
+    end
+
+    test "fails closed when no repo root is given" do
+      path =
+        Path.join(
+          @repo_root,
+          "apps/core/lib/stacks/gen/proto/drift_probe_norepo_#{:erlang.phash2(self())}.ex"
+        )
+
+      File.write!(path, "# stale\n")
+
+      try do
+        # Same gitignored file as the self-heal case above — without a root to
+        # classify against, the answer must be the conservative one.
+        assert {:drift, ^path, _diff} = DriftChecker.check("# fresh\n", path)
+        assert File.read!(path) == "# stale\n"
+      after
+        File.rm(path)
+      end
+    end
   end
 
   describe "MigrationGenerator.add_columns_slug" do

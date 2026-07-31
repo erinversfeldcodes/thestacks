@@ -262,7 +262,8 @@ defmodule Mix.Tasks.Proto.Sync do
             [
               DriftChecker.check(
                 EctoGenerator.generate(table, fields),
-                Path.join(core_root, table.ecto_path)
+                Path.join(core_root, table.ecto_path),
+                repo_root
               )
             ]
           end
@@ -279,7 +280,8 @@ defmodule Mix.Tasks.Proto.Sync do
           dbt_result =
             DriftChecker.check(
               DbtGenerator.generate(table, fields),
-              Path.join(dbt_root, table.dbt_path)
+              Path.join(dbt_root, table.dbt_path),
+              repo_root
             )
 
           model_name = "stg_#{table.table_name}"
@@ -300,11 +302,21 @@ defmodule Mix.Tasks.Proto.Sync do
       if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
         proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
         proto_json_path = Path.join(core_root, "lib/stacks/gen/proto_json.ex")
-        proto_json_result = DriftChecker.check(proto_json_content, proto_json_path)
+        proto_json_result = DriftChecker.check(proto_json_content, proto_json_path, repo_root)
         results ++ List.wrap(proto_json_result)
       else
         results
       end
+
+    # A gitignored generated file that was merely stale has already been fixed
+    # in place — say so, but do not fail: it could not have been committed wrong
+    # (Issue #354).
+    for {:regenerated, path} <- results do
+      Mix.shell().info(
+        "REGENERATED: #{path} was stale — gitignored, so this can only be " <>
+          "local staleness; regenerated from proto and continuing."
+      )
+    end
 
     drifted = Enum.filter(results, &match?({:drift, _, _}, &1))
 

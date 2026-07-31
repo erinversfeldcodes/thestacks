@@ -205,37 +205,29 @@ db-reset:
     mix ecto.reset
     mix run apps/core/priv/repo/seeds.exs
 
+# Regenerate all FIVE proto codegen targets and verify no drift remains.
+#
+# Run this in the MAIN checkout after merging anything that touched a .proto file.
+# Most generated artefacts are gitignored, so a stale tree looks clean in `git status`
+# and only announces itself as a gate failure — in three groups at once, since the
+# Elixir and Python suites compile against the stale code (Issue #354).
+#
+# `just bootstrap-worktree` does this for a worktree; this is the main-checkout door.
+regen-proto:
+    bash scripts/regen-proto.sh
+
 # Regenerate every target after a .proto change, then name the steps codegen CANNOT do.
 #
 # Added 2026-07-28 after adding five proto fields cost three separate gate failures in one
 # day: `mix proto.sync` writes the Ecto schema, the dbt model and the migration, but four
 # follow-ons are hand-written and each fails in a different place — one of them silently.
 #
-# Run this instead of remembering the order.
-proto-sync-all:
+# The codegen itself is `regen-proto` — one list of generators, so this recipe cannot
+# fall behind it. (It did: this used to run four of the five, omitting the Python
+# target, which is exactly the artefact Wave 5 tripped over.)
+proto-sync-all: regen-proto
     #!/usr/bin/env bash
     set -euo pipefail
-
-    echo "==> 1/4  Ecto schemas, dbt models, migrations (mix proto.sync)"
-    # Subshell so the cd cannot leak into the steps below — `cd ..` from apps/core
-    # lands in apps/, not the repo root, which is how the first version of this broke.
-    (cd apps/core && mix proto.sync)
-
-    echo "==> 2/4  Elixir proto structs"
-    bash scripts/gen-elixir-proto.sh
-
-    echo "==> 3/4  Rust serde structs"
-    bash scripts/gen-rust-proto.sh
-
-    echo "==> 4/4  Elm decoders"
-    bash scripts/gen-elm-proto.sh
-
-    # A generated migration is UNTRACKED, and `mix test` deletes untracked
-    # `_add_*_to_*` migrations. Staging immediately is the only reliable protection.
-    for f in $(git status --porcelain apps/core/priv/repo/migrations/ | awk '/^\?\?/ {print $2}'); do
-        git add "$f"
-        echo "    staged generated migration: $f"
-    done
 
     echo ""
     echo "==> Codegen done. Four things it CANNOT do for you:"
