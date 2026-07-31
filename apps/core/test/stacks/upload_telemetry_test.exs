@@ -8,25 +8,6 @@ defmodule Stacks.UploadTelemetryTest.RaisingHandler do
   def handle_event(_event), do: raise("test-induced crash")
 end
 
-defmodule Stacks.UploadTelemetryTest.NoIsbnClient do
-  @moduledoc false
-  @behaviour Stacks.AI.ClientBehaviour
-  @impl true
-  # Consolidated /analyze shape — BOOK classification but empty books
-  # list triggers :isbn_not_found in Moderation.analyze/2.
-  def call_vision("analyze", _payload),
-    do:
-      {:ok,
-       %{
-         "classification" => "CLASSIFICATION_RESULT_BOOK",
-         "confidence" => 0.9,
-         "books" => [],
-         "model_used" => "mock"
-       }}
-
-  def call_vision(_endpoint, _payload), do: {:ok, %{}}
-end
-
 defmodule Stacks.UploadTelemetryTest do
   @moduledoc """
   Suite 11 — Metrics & Telemetry tests for the upload pipeline (Issue #111).
@@ -51,6 +32,7 @@ defmodule Stacks.UploadTelemetryTest do
   use CoreWeb.ConnCase, async: false
   use Oban.Testing, repo: Core.Repo
 
+  import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
@@ -354,13 +336,9 @@ defmodule Stacks.UploadTelemetryTest do
 
       image = insert(:uploaded_image, status: "pending")
 
-      original = Application.get_env(:core, :vision_client)
+      steer_vision(no_isbn())
 
-      on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
-
-      Application.put_env(:core, :vision_client, Stacks.UploadTelemetryTest.NoIsbnClient)
-
-      # NoIsbnClient classifies the image as a book but returns no ISBNs,
+      # `no_isbn()` classifies the image as a book but returns no ISBNs,
       # causing IdentifyBookJob to return {:cancel, "isbn_not_found"}.
       {:ok, _job} =
         Oban.insert(

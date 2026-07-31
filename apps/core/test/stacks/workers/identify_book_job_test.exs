@@ -1,10 +1,12 @@
 defmodule Stacks.Workers.IdentifyBookJobTest do
-  # async: false — tests swap Application.put_env(:core, :vision_client)
-  # which is global state; concurrent execution would cause race conditions.
+  # async: false — Core.DataCase's sandbox mode. Vision steering itself is
+  # process-local (Stacks.AI.MockClient), so it is not what serialises this
+  # file; the ISBN resolver's :fuse state and Stacks.Books.MockHttpClient are.
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query
+  import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
   alias Core.Repo
@@ -63,11 +65,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       book2 = insert(:book)
       insert(:book_edition, book: book2, isbn: "9780385333481")
 
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.MultiBookClient)
-
+      with_vision(multi_book(), fn ->
         assert :ok =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -80,9 +78,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
         assert book.id in resolved.book_ids
         assert book2.id in resolved.book_ids
         assert length(resolved.book_ids) == 2
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
   end
 
@@ -91,20 +87,14 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       user: user,
       image: image
     } do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.MultiBookNoResolveClient)
-
+      with_vision(multi_book_no_resolve(), fn ->
         assert {:cancel, "isbn_not_found"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
                    "image_id" => image.id,
                    "image_b64" => @image_b64
                  })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
   end
 
@@ -114,11 +104,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       image: image,
       book: book
     } do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.MultiBookPartialClient)
-
+      with_vision(multi_book_partial(), fn ->
         assert :ok =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -130,29 +116,22 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
         assert resolved.status == "resolved"
         assert resolved.book_ids == [book.id]
         assert length(resolved.book_ids) == 1
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
 
     test "emits image.resolved plus one image.rejected per failed ISBN, all tied to the same image_id",
          %{user: user, image: image, book: book} do
-      original = Application.get_env(:core, :vision_client)
       resolved_before = event_count("image.resolved")
       rejected_before = event_count("image.rejected")
 
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.MultiBookPartialClient)
-
+      with_vision(multi_book_partial(), fn ->
         assert :ok =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
                    "image_id" => image.id,
                    "image_b64" => @image_b64
                  })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
 
       # Exactly one image.resolved (the upload succeeded overall) and one
       # image.rejected per failed candidate (the MultiBookPartialClient
@@ -186,19 +165,13 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
           storage_path: "uploads/test-#{System.unique_integer([:positive])}.jpg"
         )
 
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
-
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
           "image_b64" => @image_b64
         })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
 
       updated = Repo.get!(UploadedImage, image.id)
       assert updated.status == "rejected"
@@ -229,20 +202,14 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
 
       image = insert(:uploaded_image)
 
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.AgeGatedBookClient)
-
+      with_vision(age_gated_book(), fn ->
         assert :ok =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
                    "image_id" => image.id,
                    "image_b64" => @image_b64
                  })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
 
       updated_image = Repo.get!(UploadedImage, image.id)
       assert updated_image.status == "resolved"
@@ -256,37 +223,26 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       user: user,
       image: image
     } do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
-
+      with_vision(not_a_book(), fn ->
         assert {:cancel, "image does not contain a book"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
                    "image_id" => image.id,
                    "image_b64" => @image_b64
                  })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
 
     test "emits image.rejected event", %{user: user, image: image} do
-      original = Application.get_env(:core, :vision_client)
       before_count = event_count("image.rejected")
 
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
-
+      with_vision(not_a_book(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
           "image_b64" => @image_b64
         })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
 
       assert event_count("image.rejected") == before_count + 1
     end
@@ -297,20 +253,14 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       user: user,
       image: image
     } do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.NoIsbnClient)
-
+      with_vision(no_isbn(), fn ->
         assert {:cancel, "isbn_not_found"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
                    "image_id" => image.id,
                    "image_b64" => @image_b64
                  })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
   end
 
@@ -319,20 +269,15 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       user: user,
       image: image
     } do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.ErrorClient)
-
+      # `:any` — the old ErrorClient failed every endpoint, not just /analyze.
+      with_vision(:any, service_error(), fn ->
         assert {:error, :service_unavailable} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
                    "image_id" => image.id,
                    "image_b64" => @image_b64
                  })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
   end
 
@@ -347,12 +292,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       user: user,
       image: image
     } do
-      original = Application.get_env(:core, :vision_client)
-      :persistent_term.put({__MODULE__, :capture_pid}, self())
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.CapturePayloadClient)
-
+      with_vision(capture_payload(self()), fn ->
         _ =
           perform_job(IdentifyBookJob, %{
             "user_id" => user.id,
@@ -363,10 +303,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
 
         assert_receive {:vision_payload, payload}, 1_000
         assert payload[:excluded_books] == ["The Great Gatsby by F. Scott Fitzgerald"]
-      after
-        :persistent_term.erase({__MODULE__, :capture_pid})
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
 
     test "forwards excluded_isbns from job args into the moderation context" do
@@ -377,11 +314,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       user = insert(:user)
       image = insert(:uploaded_image, user_id: user.id)
 
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.SingleIsbnExcludableClient)
-
+      with_vision(single_isbn_excludable(), fn ->
         assert {:cancel, "isbn_not_found"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
@@ -389,18 +322,11 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
                    "image_b64" => @image_b64,
                    "excluded_isbns" => ["9780743273565"]
                  })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
 
     test "omits excluded_books from payload when arg is missing", %{user: user, image: image} do
-      original = Application.get_env(:core, :vision_client)
-      :persistent_term.put({__MODULE__, :capture_pid}, self())
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.CapturePayloadClient)
-
+      with_vision(capture_payload(self()), fn ->
         _ =
           perform_job(IdentifyBookJob, %{
             "user_id" => user.id,
@@ -410,10 +336,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
 
         assert_receive {:vision_payload, payload}, 1_000
         refute Map.has_key?(payload, :excluded_books)
-      after
-        :persistent_term.erase({__MODULE__, :capture_pid})
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
   end
 
@@ -431,20 +354,14 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     test "returns {:cancel, reason} and logs warning when rejected image_id does not exist", %{
       user: user
     } do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.NotABookClient)
-
+      with_vision(not_a_book(), fn ->
         assert {:cancel, "image does not contain a book"} =
                  perform_job(IdentifyBookJob, %{
                    "user_id" => user.id,
                    "image_id" => Ecto.UUID.generate(),
                    "image_b64" => @image_b64
                  })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
     end
   end
 
@@ -488,232 +405,29 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Inline mock modules
+  # Vision scenarios
   # ---------------------------------------------------------------------------
+  #
+  # Each is a response the real seam (Stacks.AI.MockClient) is steered with —
+  # no bespoke replacement client modules. All use the consolidated /analyze
+  # shape (classification + books in one response), which is what the
+  # post-consolidation Moderation pipeline calls.
 
-  # All inline mocks now return the consolidated /analyze shape
-  # (classification + books in one response). The legacy
-  # "is_book"/"extract_isbn" clauses were deleted when Moderation
-  # switched to the single-request /analyze endpoint — Moderation no
-  # longer calls them, so keeping them around would be confusing dead
-  # code.
+  defp age_gated_book, do: books_with_isbns(["9780385490818"])
 
-  defmodule AgeGatedBookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780385490818"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
+  defp multi_book,
+    do: books_with_isbns(["9780743273565", "9780385333481"], confidence: 0.95)
 
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
+  defp multi_book_no_resolve,
+    do: books_with_isbns(["9780000000001", "9780000000002"], confidence: 0.95)
 
-  defmodule NotABookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
-           "confidence" => 0.95,
-           "books" => [],
-           "model_used" => "mock"
-         }}
+  # One resolvable candidate (pre-inserted in setup) plus one that no lookup
+  # can satisfy — the partial-resolve branch.
+  defp multi_book_partial,
+    do: books_with_isbns(["9780743273565", "9780000000003"], confidence: 0.95)
 
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule NoIsbnClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule ErrorClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload), do: {:error, :service_unavailable}
-    def call_vision(_endpoint, _payload), do: {:error, :service_unavailable}
-  end
-
-  defmodule MultiBookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.95,
-           "books" => [
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             },
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780385333481"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule MultiBookNoResolveClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.95,
-           "books" => [
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780000000001"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             },
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780000000002"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule CapturePayloadClient do
-    @moduledoc """
-    Captures the outgoing /analyze payload (via the test PID stashed in
-    persistent_term) and returns a short-circuit empty-books response.
-    Used by the excluded_books arg tests so we can assert the worker
-    threaded the Oban arg into the moderation context → vision payload.
-    """
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", payload) do
-      case :persistent_term.get({Stacks.Workers.IdentifyBookJobTest, :capture_pid}, nil) do
-        nil -> :ok
-        pid -> send(pid, {:vision_payload, payload})
-      end
-
-      {:ok,
-       %{
-         "classification" => "CLASSIFICATION_RESULT_BOOK",
-         "confidence" => 0.95,
-         "books" => [],
-         "model_used" => "mock"
-       }}
-    end
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule SingleIsbnExcludableClient do
-    @moduledoc """
-    One direct-ISBN candidate — used by the `excluded_isbns` arg test
-    to verify that the args → context → drop-candidate plumbing works
-    end-to-end through the worker.
-    """
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.95,
-           "books" => [
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule MultiBookPartialClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.95,
-           "books" => [
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780743273565"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             },
-             %{
-               "title" => nil,
-               "author" => nil,
-               "potential_isbns" => ["9780000000003"],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
+  # One direct-ISBN candidate — used by the `excluded_isbns` arg test to verify
+  # that the args → context → drop-candidate plumbing works end-to-end through
+  # the worker.
+  defp single_isbn_excludable, do: books_with_isbns(["9780743273565"], confidence: 0.95)
 end

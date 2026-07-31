@@ -19,6 +19,7 @@ defmodule Stacks.UploadTerminalTelemetryTest do
   use CoreWeb.ConnCase, async: false
   use Oban.Testing, repo: Core.Repo
 
+  import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
   alias Stacks.Accounts.Guardian
@@ -94,34 +95,12 @@ defmodule Stacks.UploadTerminalTelemetryTest do
   # 2. :rejected outcome — IdentifyBookJob cancel path
   # ---------------------------------------------------------------------------
 
-  defmodule NotABookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    # Returns the consolidated /analyze shape — classification + (empty)
-    # books field in one response. Matches what Moderation calls via the
-    # single-request /analyze endpoint post-consolidation.
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
-           "confidence" => 0.95,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
   describe "terminal counter — :rejected" do
     test "emits [:stacks, :upload, :terminal] with outcome: :rejected on not_a_book cancel",
          %{user: user} do
       attach_terminal_handler()
 
-      original_client = Application.get_env(:core, :vision_client)
-      Application.put_env(:core, :vision_client, NotABookClient)
-      on_exit(fn -> Application.put_env(:core, :vision_client, original_client) end)
+      steer_vision(not_a_book())
 
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
