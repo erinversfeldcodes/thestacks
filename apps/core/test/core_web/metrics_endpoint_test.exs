@@ -15,6 +15,7 @@ defmodule CoreWeb.MetricsEndpointTest do
 
   use CoreWeb.ConnCase, async: false
 
+  import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
   alias Stacks.Accounts
@@ -105,15 +106,10 @@ defmodule CoreWeb.MetricsEndpointTest do
       assert {:ok, _} = Stacks.Books.set_visibility_tier(book, "age_gated", source: :user)
 
       # Compound-title ("… OR …") expansion through the real pipeline.
-      original = Application.get_env(:core, :vision_client)
-      Application.put_env(:core, :vision_client, __MODULE__.CompoundTitleClient)
-
-      try do
+      with_vision(compound_title(), fn ->
         assert {:error, :isbn_not_found} =
                  Moderation.run_pipeline(%{image_b64: @test_image_b64})
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
 
       body = scrape(conn)
 
@@ -509,32 +505,9 @@ defmodule CoreWeb.MetricsEndpointTest do
     Plug.Conn.put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  # Vision client returning a single candidate whose title is two titles
-  # joined by " OR " — drives expand_compound_candidates/1 (compound
-  # expansion counter) without resolving.
-  defmodule CompoundTitleClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "First Book OR Second Book",
-               "author" => nil,
-               "potential_isbns" => [],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
+  # A single candidate whose title is two titles joined by " OR " — drives
+  # expand_compound_candidates/1 (compound expansion counter) without resolving.
+  defp compound_title do
+    book_response([book_candidate(title: "First Book OR Second Book", confidence: 0.9)])
   end
 end

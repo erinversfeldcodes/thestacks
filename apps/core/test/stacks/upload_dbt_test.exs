@@ -33,6 +33,7 @@ defmodule Stacks.UploadDbtTest do
   use Oban.Testing, repo: Core.Repo
 
   import Ecto.Query
+  import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
   alias Core.Repo
@@ -384,19 +385,13 @@ defmodule Stacks.UploadDbtTest do
       user = insert(:user)
       image = insert(:uploaded_image, status: "pending")
 
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, __MODULE__.NoIsbnClient)
-
+      with_vision(no_isbn(), fn ->
         perform_job(IdentifyBookJob, %{
           "user_id" => user.id,
           "image_id" => image.id,
           "image_b64" => Base.encode64("fake image bytes for testing")
         })
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
+      end)
 
       assert Repo.aggregate(Book, :count, :id) == book_count_before
     end
@@ -873,24 +868,5 @@ defmodule Stacks.UploadDbtTest do
       # In non-deployed, community_read_count returns 0 (graceful fallback)
       assert is_integer(count)
     end
-  end
-
-  defmodule NoIsbnClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-    @impl true
-    # Consolidated /analyze shape — BOOK classification + empty books
-    # triggers :isbn_not_found in Moderation.
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 end

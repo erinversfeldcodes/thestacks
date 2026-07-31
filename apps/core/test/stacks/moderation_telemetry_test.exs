@@ -24,6 +24,7 @@ defmodule Stacks.ModerationTelemetryTest do
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
+  import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
   alias Stacks.Books
@@ -47,16 +48,15 @@ defmodule Stacks.ModerationTelemetryTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  defp with_vision_client(module, fun) do
-    original = Application.get_env(:core, :vision_client)
-    Application.put_env(:core, :vision_client, module)
-
-    try do
-      fun.()
-    after
-      Application.put_env(:core, :vision_client, original)
-    end
+  # A candidate whose title is two book titles joined with " OR " — exercises
+  # expand_compound_candidates/1.
+  defp compound_title_text do
+    book_response([book_candidate(title: "First Book OR Second Book", confidence: 0.9)])
   end
+
+  # BOOK classification with a candidate that has no ISBN and a nil title —
+  # title_fallback returns :isbn_not_found for it.
+  defp no_resolvable, do: book_response([book_candidate()])
 
   # ── Step 1: classification outcome ─────────────────────────────────────
 
@@ -74,7 +74,7 @@ defmodule Stacks.ModerationTelemetryTest do
     test "emits :not_a_book when the image is not a book (sad)" do
       attach_telemetry([[:stacks, :moderation, :classification]])
 
-      with_vision_client(__MODULE__.NotABookClient, fn ->
+      with_vision(not_a_book(), fn ->
         assert {:error, :not_a_book} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
       end)
 
@@ -85,7 +85,7 @@ defmodule Stacks.ModerationTelemetryTest do
     test "emits :ambiguous when the classification is ambiguous (sad)" do
       attach_telemetry([[:stacks, :moderation, :classification]])
 
-      with_vision_client(__MODULE__.AmbiguousClient, fn ->
+      with_vision(ambiguous(), fn ->
         assert {:error, :not_a_book} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
       end)
 
@@ -110,7 +110,7 @@ defmodule Stacks.ModerationTelemetryTest do
     test "emits :isbn_not_found when a candidate cannot be resolved (sad)" do
       attach_telemetry([[:stacks, :moderation, :isbn_resolution]])
 
-      with_vision_client(__MODULE__.NoResolvableClient, fn ->
+      with_vision(no_resolvable(), fn ->
         assert {:error, :isbn_not_found} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
       end)
 
@@ -155,7 +155,7 @@ defmodule Stacks.ModerationTelemetryTest do
     test "emits a split measurement when a ' OR '-joined title is expanded" do
       attach_telemetry([[:stacks, :moderation, :compound_expansion]])
 
-      with_vision_client(__MODULE__.CompoundTitleTextClient, fn ->
+      with_vision(compound_title_text(), fn ->
         # Neither part resolves (no HTTP responses registered) so the pipeline
         # ends in :isbn_not_found — but the expansion event fires regardless.
         assert {:error, :isbn_not_found} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
@@ -173,93 +173,5 @@ defmodule Stacks.ModerationTelemetryTest do
 
       refute_receive {:telemetry_event, [:stacks, :moderation, :compound_expansion], _, _}, 100
     end
-  end
-
-  # ── Inline mock vision clients ─────────────────────────────────────────
-
-  defmodule NotABookClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_NOT_BOOK",
-           "confidence" => 0.95,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule AmbiguousClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_AMBIGUOUS",
-           "confidence" => 0.5,
-           "books" => [],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule NoResolvableClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    # BOOK classification with a candidate that has no ISBN and a nil title —
-    # title_fallback returns :isbn_not_found for it.
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{"title" => nil, "author" => nil, "potential_isbns" => [], "raw_text" => nil}
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
-  end
-
-  defmodule CompoundTitleTextClient do
-    @moduledoc false
-    @behaviour Stacks.AI.ClientBehaviour
-
-    # A single candidate whose title is two book titles joined with " OR " —
-    # exercises expand_compound_candidates/1.
-    @impl true
-    def call_vision("analyze", _payload),
-      do:
-        {:ok,
-         %{
-           "classification" => "CLASSIFICATION_RESULT_BOOK",
-           "confidence" => 0.9,
-           "books" => [
-             %{
-               "title" => "First Book OR Second Book",
-               "author" => nil,
-               "potential_isbns" => [],
-               "raw_text" => nil,
-               "confidence" => 0.9
-             }
-           ],
-           "model_used" => "mock"
-         }}
-
-    def call_vision(_endpoint, _payload), do: {:ok, %{}}
   end
 end
