@@ -18,13 +18,71 @@ defmodule Stacks.Books.ISBNResolver do
   reasons: `:not_found` (no upstream returned a match) and
   `:circuit_open` (the relevant Fuse breaker is blown). Adding a new
   reason here requires adding a matching clause in
-  `Stacks.Workers.EnrichBookJob.outcome_tag/1` — dialyzer enforces the
+  `Stacks.Workers.EnrichBookJob.outcome_tag/1` and in `determination/1` —
+  both are written without a catch-all, so dialyzer enforces the
   exhaustiveness end-to-end.
   """
   @type error_reason ::
           HttpClientBehaviour.error_reason()
           | :not_found
           | :circuit_open
+
+  @doc """
+  Whether a failure said something about the *ISBN* or about *us*.
+
+  This is the question every caller of `resolve/1` actually has, and until #344
+  none of them asked it: they matched `{:error, _}` and recorded the answer as a
+  property of the book. So a Google Books 503 — our dependency being down — was
+  written down as `:invalid_book` on the moderation funnel and answered to the
+  reader as `isbn_not_found`, i.e. "this is not a real book". It is not a
+  statement about the book at all; nobody looked.
+
+  Exactly one reason is a conclusion:
+
+    * `:not_found` — both upstreams answered, and neither knows this ISBN.
+      That IS a property of the ISBN, and recording it as one is correct.
+
+  The rest are statements about the lookup, which did not happen: a blown fuse,
+  a 5xx, a body we could not parse, a dead socket, a timeout. Repeating the
+  request may well produce a different answer, and nothing has been learned
+  about the book in the meantime.
+
+  Written without a catch-all on purpose, and mirroring
+  `Stacks.AI.VisionError.determination/1`, which splits vision failures on the
+  same axis: a new `error_reason/0` must be classified here before it can ship,
+  rather than defaulting into "the book's fault", which is the failure mode this
+  function exists to end.
+  """
+  @spec determination(error_reason()) :: :not_found | :unavailable
+  def determination(:not_found), do: :not_found
+  def determination(:circuit_open), do: :unavailable
+  def determination(:unexpected_status), do: :unavailable
+  def determination(:malformed_response), do: :unavailable
+  def determination(:transport_error), do: :unavailable
+  def determination(:timeout), do: :unavailable
+
+  @doc """
+  True when `reason` is a member of `error_reason/0`.
+
+  Callers that receive failures from more than one source — `Stacks.Books.confirm/2`
+  hands back changesets and `Stacks.Shelving` errors alongside resolver ones — use
+  this to decide whether `determination/1` applies, instead of assuming it does
+  and being met with a `FunctionClauseError`. Mirrors
+  `Stacks.AI.VisionError.vision_error?/1`.
+  """
+  @spec resolver_error?(term()) :: boolean()
+  def resolver_error?(reason)
+      when reason in [
+             :not_found,
+             :circuit_open,
+             :unexpected_status,
+             :malformed_response,
+             :transport_error,
+             :timeout
+           ],
+      do: true
+
+  def resolver_error?(_other), do: false
 
   @open_library_url "https://openlibrary.org/api/books"
   @open_library_search_url "https://openlibrary.org/search.json"

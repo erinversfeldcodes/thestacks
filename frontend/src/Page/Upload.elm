@@ -19,7 +19,7 @@ import Html.Events exposing (onCheck, onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
-import Types.Book exposing (Book, VisibilityTier(..), authorName, bookCoverImageUrl)
+import Types.Book exposing (Book, VisibilityTier(..), authorName, bookCoverImageUrl, bookIsbn, displayTitle, isProvisional)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
@@ -948,7 +948,8 @@ viewIdentified books failedBookIds =
 viewIdentifiedBook : Book -> Html Msg
 viewIdentifiedBook book =
     li [ class "upload-result__book-item" ]
-        [ p [ class "upload-result__book-title" ] [ text book.title ]
+        [ p [ class "upload-result__book-title" ] [ text (displayTitle book) ]
+        , viewProvisionalNoticeIfNeeded book
         , p [ class "upload-result__book-author" ] [ text (authorName book) ]
         , a
             [ href (Route.toPath (Route.BookDetail book.id))
@@ -1072,6 +1073,43 @@ confirmErrorMessage confirmError =
             "We couldn't add that book just now. Please try again."
 
 
+{-| "We've got the barcode but haven't matched it to a book yet."
+
+The barcode fast path deliberately skips the Open Library / Google Books
+round-trip on the upload hot path, so a book can be legitimately shelved before
+anything knows its title. Until enrichment lands, the server's stand-in title is
+the ISBN — and rendered as a title it reads as a book actually named after a
+number, which is a bug, a rare book, and a pending lookup all at once, with no
+way for the reader to tell which.
+
+Two rules this notice keeps, both deliberate:
+
+  - It says what happened to the BOOK, not what the reader did wrong. The ISBN
+    gate passed; a provisional book is a legal state, not a rejected one.
+  - It informs and stops. No button below it is disabled and no step is skipped
+    — the standing owner ruling, and the same shape as the duplicate notices.
+
+-}
+viewProvisionalNoticeIfNeeded : Book -> Html Msg
+viewProvisionalNoticeIfNeeded book =
+    if isProvisional book then
+        p
+            [ class "upload-provisional-notice"
+            , testId "upload-provisional-notice"
+            , attribute "role" "status"
+            ]
+            [ text
+                ("We read the barcode ("
+                    ++ bookIsbn book
+                    ++ ") but haven't matched it to a catalogue record yet. "
+                    ++ "The title and cover will fill in shortly — you can shelve it now."
+                )
+            ]
+
+    else
+        text ""
+
+
 {-| Render an in-flow age-gate notice when the resolved book is
 age-gated AND age-gating is enabled (ADR-020). Per US-1.1.4 the upload
 flow proceeds normally for the identification step, but the user is
@@ -1153,16 +1191,33 @@ otherShelves usedShelf placements =
         |> List.filter (\name -> name /= usedShelf)
 
 
+{-| How a heading names the book it is about.
+
+A quoted title is how you refer to a book by name, so it is only used when the
+book has one. A provisional book does not — quoting `Not yet identified` would
+present a status as if it were the title, which is the same untruth as quoting
+the ISBN. `this book` is what a person would say.
+
+-}
+headingSubject : Book -> String
+headingSubject book =
+    if isProvisional book then
+        "This book"
+
+    else
+        "\"" ++ book.title ++ "\""
+
+
 {-| The heading for each branch of `Books.confirm/2`.
 -}
-completeHeading : Maybe Api.ConfirmOutcome -> String -> String -> String
-completeHeading outcome title shelfName =
+completeHeading : Maybe Api.ConfirmOutcome -> Book -> String -> String
+completeHeading outcome book shelfName =
     case outcome of
         Just Api.ConfirmAlreadyPlaced ->
-            "\"" ++ title ++ "\" is already on your " ++ shelfLabel shelfName
+            headingSubject book ++ " is already on your " ++ shelfLabel shelfName
 
         _ ->
-            "\"" ++ title ++ "\" added to " ++ shelfLabel shelfName
+            headingSubject book ++ " added to " ++ shelfLabel shelfName
 
 
 {-| "A", "A and B", "A, B and C".
@@ -1187,6 +1242,7 @@ viewVerifying ageGatingEnabled existingShelves book =
     div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
         , viewExistingShelvesNotice existingShelves
+        , viewProvisionalNoticeIfNeeded book
         , viewAgeGateNoticeIfNeeded ageGatingEnabled book
         , div [ class "upload-verify__content" ]
             [ div [ class "upload-verify__book-info" ]
@@ -1203,7 +1259,7 @@ viewVerifying ageGatingEnabled existingShelves book =
                         div [ class "upload-verify__cover upload-verify__cover--placeholder" ]
                             [ text "No cover" ]
                 , div [ class "upload-verify__details" ]
-                    [ p [ class "upload-verify__title" ] [ text book.title ]
+                    [ p [ class "upload-verify__title" ] [ text (displayTitle book) ]
                     , p [ class "upload-verify__author" ] [ text (authorName book) ]
                     ]
                 ]
@@ -1241,11 +1297,15 @@ viewChoosingShelf : Model -> Book -> Html Msg
 viewChoosingShelf model book =
     div [ class "upload-shelf-picker", testId "upload-shelf-picker" ]
         [ h2 [ class "upload-shelf-picker__heading" ]
-            [ text ("Add \"" ++ book.title ++ "\" to a shelf") ]
+            [ text ("Add " ++ headingSubject book ++ " to a shelf") ]
 
         -- Still informational at the moment of choosing (#333) — every shelf
         -- stays selectable, including ones the book is already on.
         , viewExistingShelvesNotice model.existingShelves
+
+        -- Every shelf stays selectable for a provisional book too: the ISBN gate
+        -- passed, only the lookup is outstanding.
+        , viewProvisionalNoticeIfNeeded book
         , viewShelfChoices model.selectedShelf
         , if model.ageGatingEnabled then
             viewAdultsOnlyToggle model.markAdultsOnly
@@ -1349,12 +1409,16 @@ viewComplete : Model -> Book -> String -> Html Msg
 viewComplete model book shelfName =
     div [ class "upload-complete", testId "upload-complete", attribute "role" "status" ]
         [ h2 [ class "upload-complete__heading" ]
-            [ text (completeHeading model.confirmOutcome book.title shelfName) ]
+            [ text (completeHeading model.confirmOutcome book shelfName) ]
 
         -- Inform, never block: every OTHER bookshelf this book is on, so a
         -- reader who now has it in two places knows it. Nothing here is a
         -- control — the placement has already happened.
         , viewCompleteExistingShelvesNotice model.existingShelves
+
+        -- Same register, same rule: the book IS shelved. This says why it has
+        -- no name on it yet, so the reader is not left to guess.
+        , viewProvisionalNoticeIfNeeded book
         , case model.ageGateError of
             Just err ->
                 p [ class "upload-complete__age-gate-error", testId "upload-adults-only-error" ]

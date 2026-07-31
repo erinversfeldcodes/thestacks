@@ -30,7 +30,7 @@ import Http
 import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
 import Task
-import Types.Book exposing (Book, Edition, authorName)
+import Types.Book exposing (Book, Edition, authorName, bookIsbn, displayTitle, isProvisional)
 import Types.Placement exposing (Format, Placement, ReadingStatus(..), readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility as Visibility exposing (Visibility)
@@ -1084,13 +1084,45 @@ viewHero model book =
                 ]
             ]
         , div [ class "book-detail__meta" ]
-            [ h1 [ class "book-detail__title", testId "book-title", id "section-hero" ] [ text book.title ]
+            [ h1 [ class "book-detail__title", testId "book-title", id "section-hero" ]
+                [ text (displayTitle book) ]
+            , viewProvisionalNotice book
             , h2 [ class "book-detail__author", testId "book-author" ] [ text (authorName book) ]
             , viewEditionSelector book model.selectedEdition
             , viewEditionDetails edition
             , viewRating model
             ]
         ]
+
+
+{-| The book's own page is where a reader lands when the ISBN-shaped title on
+their shelf made no sense to them, so it is the page that owes them the
+explanation (#344).
+
+Informational only, and deliberately placed after the title rather than in front
+of the page: everything below it — shelving, rating, notes, writing — stays
+available, because a provisional book is a book the reader legitimately owns and
+the ISBN gate legitimately passed. Only the lookup is outstanding.
+
+-}
+viewProvisionalNotice : Book -> Html Msg
+viewProvisionalNotice book =
+    if isProvisional book then
+        p
+            [ class "book-detail__provisional"
+            , testId "book-provisional-notice"
+            , attribute "role" "status"
+            ]
+            [ text
+                ("We have this book's barcode ("
+                    ++ bookIsbn book
+                    ++ ") but haven't matched it to a catalogue record yet, "
+                    ++ "so we can't show its title or cover. It is still yours and still on your shelf."
+                )
+            ]
+
+    else
+        text ""
 
 
 viewRating : Model -> Html Msg

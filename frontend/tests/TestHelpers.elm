@@ -84,6 +84,7 @@ testEdition =
     , publisher = Just "Random House"
     , publicationYear = Just 2012
     , isPrimary = True
+    , verificationSource = "open_library"
     }
 
 

@@ -91,6 +91,53 @@ defmodule Stacks.Workers.EnrichBookJobTest do
       assert updated.author.name == "Umberto Eco"
     end
 
+    test "enrichment stops the edition claiming nothing ever verified it (#344)" do
+      # `verification_source` is a CURRENT state — "no external source has
+      # confirmed this ISBN YET" — not a record of how the ISBN first arrived.
+      # Left unwritten here it was permanent: a book that entered on the barcode
+      # fast path and was identified by Open Library seconds later went on saying
+      # for ever that nobody had verified it. That makes the column useless for
+      # the one question it exists to answer, and since #344 renders a
+      # provisional book distinguishably off exactly this value, it would show a
+      # fully identified book as unidentified.
+      isbn = "9780679783268"
+
+      {:ok, book} =
+        Books.create(%{
+          "isbn" => isbn,
+          "title" => "ISBN #{isbn}",
+          "verification_source" => "barcode_unverified",
+          "visibility_tier" => "public"
+        })
+
+      edition = hd(book.editions)
+
+      assert edition.verification_source == "barcode_unverified",
+             "precondition: the fast path recorded that nothing external had confirmed this ISBN"
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:#{isbn}" => %{
+             "title" => "Pride and Prejudice",
+             "authors" => [%{"name" => "Jane Austen"}],
+             "key" => "/works/OL66554W"
+           }
+         }}
+      )
+
+      assert :ok = perform_job(EnrichBookJob, %{"isbn" => isbn})
+
+      reloaded = Repo.get!(Stacks.Books.BookEdition, edition.id)
+
+      refute reloaded.verification_source == "barcode_unverified",
+             "Open Library has now confirmed this ISBN; the row must stop saying otherwise"
+
+      assert reloaded.verification_source == "open_library"
+      assert Repo.get!(Book, book.id).title == "Pride and Prejudice"
+    end
+
     test "no-ops when book row for the ISBN doesn't exist" do
       # No book seeded — worker should log + succeed, not crash.
       assert :ok = perform_job(EnrichBookJob, %{"isbn" => "9780000000000"})

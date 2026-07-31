@@ -375,13 +375,66 @@ defmodule Stacks.Books do
   @doc """
   Resolves book metadata from an ISBN via Open Library / Google Books,
   then creates the book (work) and edition records.
+
+  A resolver failure is reported as what it was — `:isbn_not_found` only when
+  the upstreams answered and did not know the ISBN, `:resolver_unavailable`
+  when they did not answer at all. See `resolver_failure/1`.
   """
   @spec create_from_isbn(String.t()) ::
-          {:ok, Book.t()} | {:error, :not_found | Ecto.Changeset.t()}
+          {:ok, Book.t()}
+          | {:error, :isbn_not_found | :resolver_unavailable | Ecto.Changeset.t()}
   def create_from_isbn(isbn) do
     with :ok <- validate_isbn_format(isbn),
-         {:ok, metadata} <- ISBNResolver.resolve(isbn) do
+         {:ok, metadata} <- resolve_for_write(isbn) do
       isbn |> attrs_from_resolved(metadata) |> create()
+    end
+  end
+
+  # The one place a resolver result becomes this context's vocabulary.
+  #
+  # Every write path that needs metadata (`create_from_isbn/1`, `confirm/2`,
+  # `merge_edition/2`) goes through here, so none of them can reintroduce the
+  # `{:error, _}` collapse that made a Google Books outage indistinguishable
+  # from an ISBN nobody has ever heard of.
+  defp resolve_for_write(isbn) do
+    case ISBNResolver.resolve(isbn) do
+      {:ok, metadata} -> {:ok, metadata}
+      {:error, reason} -> {:error, resolver_failure(reason)}
+    end
+  end
+
+  # `:isbn_not_found` is a claim about the ISBN and is only made when the
+  # upstreams actually made it. `:resolver_unavailable` says the lookup did not
+  # happen — nothing was learned about this book, so nothing about this book is
+  # recorded. Callers map the two to different HTTP answers (422 vs 503).
+  #
+  # The `resolver_error?/1` guard is not ceremony. `determination/1` is written
+  # without a catch-all so that a NEW `error_reason/0` cannot ship unclassified,
+  # and that property is worth keeping — but it means an atom from outside the
+  # contract raises, and this runs inside a Phoenix action, where a raise is a
+  # 500. An HTTP client that breaks its behaviour (or a test double that invents
+  # a reason, which is how this was found: `:service_unavailable`, a value
+  # `Stacks.Books.HttpClient` cannot produce) then costs the reader a crash.
+  #
+  # It degrades to `:resolver_unavailable`, never to `:isbn_not_found`, because
+  # that is the whole rule: a failure we cannot even name is certainly not
+  # evidence about the book. Same shape as
+  # `Stacks.Workers.IdentifyBookJob.rejection_token/1`.
+  @spec resolver_failure(term()) :: :isbn_not_found | :resolver_unavailable
+  defp resolver_failure(reason) do
+    if ISBNResolver.resolver_error?(reason) do
+      case ISBNResolver.determination(reason) do
+        :not_found -> :isbn_not_found
+        :unavailable -> :resolver_unavailable
+      end
+    else
+      Logger.warning(
+        "Books: ISBN resolver returned #{inspect(reason)}, which is outside " <>
+          "ISBNResolver.error_reason/0 — treating as unavailable (a reason we cannot " <>
+          "name says nothing about the ISBN)"
+      )
+
+      :resolver_unavailable
     end
   end
 
@@ -1119,7 +1172,7 @@ defmodule Stacks.Books do
 
     with {:ok, isbn} <- require_isbn(isbn),
          nil <- find_existing(isbn),
-         {:ok, metadata} <- ISBNResolver.resolve(isbn),
+         {:ok, metadata} <- resolve_for_write(isbn),
          [] <- find_same_work(metadata[:title] || "Unknown Title", metadata[:author] || "") do
       create_confirmed_book(user_id, isbn, metadata, shelf_name)
     else
@@ -1199,6 +1252,8 @@ defmodule Stacks.Books do
 
   Returns `{:ok, edition}` on success.
   Returns `{:error, :not_found}` when `work_id` does not exist.
+  Returns `{:error, :isbn_not_found}` when the upstreams do not know the ISBN.
+  Returns `{:error, :resolver_unavailable}` when they could not be asked.
   Returns `{:error, changeset}` on validation failure (e.g. duplicate ISBN).
   """
   @spec merge_edition(String.t(), map()) :: {:ok, BookEdition.t()} | {:error, term()}
@@ -1206,11 +1261,15 @@ defmodule Stacks.Books do
     isbn = attrs[:isbn] || attrs["isbn"]
     format_label = attrs[:format_label] || attrs["format_label"]
 
-    with {:ok, meta} <- ISBNResolver.resolve(isbn),
+    with {:ok, meta} <- resolve_for_write(isbn),
          book when not is_nil(book) <- Repo.get(Book, work_id) do
       insert_edition(book, isbn, format_label, work_id, meta)
     else
-      {:error, _} -> {:error, :isbn_not_found}
+      # `resolve_for_write/1` has already said which of the two this is; the
+      # old clause here overwrote both with `:isbn_not_found`, so a merge
+      # attempted during a Google Books outage told the reader their ISBN was
+      # not a book.
+      {:error, reason} -> {:error, reason}
       nil -> {:error, :not_found}
     end
   end

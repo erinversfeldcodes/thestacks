@@ -37,13 +37,23 @@ defmodule Stacks.Moderation do
   worker cancels on them. Everything else is a `Stacks.AI.VisionError.t/0` and
   carries its own determination.
 
+  `:resolver_unavailable` is the exception that proves the rule (#344): it is a
+  conclusion about neither the image nor the vision service, but about Open
+  Library / Google Books. It deliberately stays OUTSIDE
+  `Stacks.AI.VisionError.t/0` so the routing below treats it as a fault — which
+  is what it is.
+
   Adding a reason here means deciding, in `Stacks.Workers.IdentifyBookJob`,
   whether it is a determination or a fault: `classify_failure/1` routes it, and
   `rejection_token/1` names what the reader is told. Neither guesses — a reason
   outside `Stacks.AI.VisionError.t/0` is retried and reported as
   `processing_failed`, which is the safe answer, not a silent one.
   """
-  @type failure_reason :: Stacks.AI.VisionError.t() | :not_a_book | :isbn_not_found
+  @type failure_reason ::
+          Stacks.AI.VisionError.t()
+          | :not_a_book
+          | :isbn_not_found
+          | :resolver_unavailable
 
   @typedoc """
   Pipeline result. The success shape carries both the resolved books and any
@@ -243,17 +253,50 @@ defmodule Stacks.Moderation do
     rejected = for {:rejected, candidate_id, reason} <- outcomes, do: {candidate_id, reason}
 
     case resolved do
-      [] -> {:error, :isbn_not_found}
+      [] -> {:error, no_resolution_reason(outcomes)}
       _ -> {:ok, %{resolved: resolved, rejected: rejected}}
     end
+  end
+
+  # Nothing resolved — but "we looked and found nothing" and "we never got to
+  # look" are different answers, and only the first is about the image.
+  #
+  # `:isbn_not_found` is terminal: `Stacks.Workers.IdentifyBookJob` rejects the
+  # row with that token and the reader is told their photo had no readable ISBN
+  # in it. Saying that because Open Library and Google Books were both
+  # unreachable would be false, and permanently so — the upload is never retried.
+  # `:resolver_unavailable` is not in `Stacks.AI.VisionError.t/0`, so the worker
+  # retries it and, if the retries run out, records the generic
+  # `processing_failed` rather than a determination nobody made.
+  # No candidate ran at all — every one was dropped as already-rejected, or the
+  # list was empty. `Enum.all?/2` is vacuously true on `[]`, so without this
+  # clause "nothing to do" would be reported as an outage.
+  defp no_resolution_reason([]), do: :isbn_not_found
+
+  defp no_resolution_reason(outcomes) do
+    if Enum.all?(outcomes, &match?({:rejected, _id, :resolver_unavailable}, &1)),
+      do: :resolver_unavailable,
+      else: :isbn_not_found
   end
 
   # Step-2 ISBN-resolution funnel counter, one per candidate. `outcome` is a
   # whitelisted atom: :resolved for a resolved book, or the (bounded)
   # rejection reason (:isbn_not_found / :low_confidence / :invalid_book /
-  # :store_failed / :task_exit), coerced to :other for anything unexpected.
-  # No ISBN/title/PII ever reaches metadata.
-  @resolution_reasons [:isbn_not_found, :low_confidence, :invalid_book, :store_failed, :task_exit]
+  # :resolver_unavailable / :store_failed / :task_exit), coerced to :other for
+  # anything unexpected. No ISBN/title/PII ever reaches metadata.
+  #
+  # `:resolver_unavailable` has to be a member rather than fall into `:other`:
+  # the funnel is what an operator reads to tell "readers are photographing
+  # things we cannot identify" from "our metadata providers are down", and a
+  # reason that collapses into `:other` answers neither question.
+  @resolution_reasons [
+    :isbn_not_found,
+    :low_confidence,
+    :invalid_book,
+    :resolver_unavailable,
+    :store_failed,
+    :task_exit
+  ]
 
   defp emit_resolution_outcome({:resolved, _book}), do: emit_resolution(:resolved)
 
@@ -448,6 +491,23 @@ defmodule Stacks.Moderation do
   defp title_fallback("", _author, _raw_text, _excluded_isbns, _excluded_descriptors),
     do: {:error, :isbn_not_found}
 
+  # There is no catch-all clause below, and that is the answer rather than an
+  # oversight (#344 asked which it was).
+  #
+  # `ISBNResolver.search_by_title/4` has exactly two exit shapes, and not merely
+  # by `@spec`: `do_search_by_title/5` ends in
+  # `Enum.find_value(candidates, {:error, :not_found}, &try_candidate/4)`, and
+  # `try_candidate/4` returns `{:ok, isbn, metadata}` or `nil`. The cache branch
+  # replays a value `do_search_by_title/5` produced. So the missing clause is
+  # unreachable today — defence-in-depth, not a live crash, and
+  # `moderation_test.exs` records that as a property of the resolver rather than
+  # asserting it here where it cannot be driven.
+  #
+  # It stays absent deliberately. A catch-all could only guess, and the only
+  # guess available is `{:error, :isbn_not_found}` — which is precisely the
+  # untruth this issue exists to remove: an unrecognised failure written down as
+  # a property of the book. A `CaseClauseError` is loud, is retried by Oban, and
+  # names the offending shape in the log; a silent `:isbn_not_found` is neither.
   defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors) do
     case ISBNResolver.search_by_title(title, author, raw_text,
            excluded_isbns: excluded_isbns,
@@ -468,15 +528,29 @@ defmodule Stacks.Moderation do
       :persistence,
       %{upload_id: Map.get(context, :image_id), isbn: isbn},
       fn ->
-        {metadata, used_fast_path} = resolve_metadata(isbn, prefetched_metadata, context)
-        attrs = build_book_attrs(isbn, metadata, used_fast_path, context)
-
-        case Books.find_existing(isbn) do
-          nil -> Books.create(attrs)
-          existing -> {:ok, existing}
-        end
+        isbn
+        |> resolve_metadata(prefetched_metadata, context)
+        |> persist(isbn, context)
       end
     )
+  end
+
+  defp persist({:ok, metadata, used_fast_path}, isbn, context) do
+    case Books.find_existing(isbn) do
+      nil -> Books.create(build_book_attrs(isbn, metadata, used_fast_path, context))
+      existing -> {:ok, existing}
+    end
+  end
+
+  # The lookup did not happen, so we know nothing new about this ISBN — but we
+  # may already know the book. A catalogue hit needs no metadata at all, and
+  # refusing one because Google Books was down would be the same untruth this
+  # clause exists to stop telling.
+  defp persist({:error, :resolver_unavailable}, isbn, _context) do
+    case Books.find_existing(isbn) do
+      nil -> {:error, :resolver_unavailable}
+      existing -> {:ok, existing}
+    end
   end
 
   # `used_fast_path` tracks whether the synchronous OL/GB lookup was
@@ -490,18 +564,56 @@ defmodule Stacks.Moderation do
   #     the books table)
   defp resolve_metadata(_isbn, prefetched_metadata, _context)
        when not is_nil(prefetched_metadata) do
-    {prefetched_metadata, false}
+    {:ok, prefetched_metadata, false}
   end
 
   defp resolve_metadata(isbn, _prefetched_metadata, context) do
     if fast_path?(isbn, context) do
       enqueue_metadata_enrichment(isbn)
-      {%{}, true}
+      {:ok, %{}, true}
     else
       case Books.resolve_isbn(isbn) do
-        {:ok, data} -> {data, false}
-        _ -> {%{}, false}
+        {:ok, data} -> {:ok, data, false}
+        {:error, reason} -> resolver_outcome(reason)
       end
+    end
+  end
+
+  # The `_ -> {%{}, false}` this replaces is the collapse the issue names.
+  #
+  # Both upstreams answering "we do not know this ISBN" and Google Books
+  # returning a 503 arrived here as the same empty metadata map. Empty metadata
+  # means `derive_title/3` leaves the title nil, the create changeset rejects the
+  # row for a missing title, and `store_failure_reason/1` reads that changeset as
+  # `:invalid_book` — so an outage in OUR dependency was recorded, on the
+  # operator's rejection funnel and in the `image.rejected` event, as "this is
+  # not a real book".
+  #
+  # `:not_found` keeps exactly that path, because for `:not_found` it is true:
+  # the VLM produced an ISBN string that is neither checksum-trusted nor known to
+  # Open Library or Google Books, and refusing to mint a row for it is the whole
+  # point of the non-fast path (see `resolve_metadata/3`'s note above).
+  #
+  # The `resolver_error?/1` guard exists for the same reason as the one in
+  # `Stacks.Books.resolver_failure/1`: `determination/1` has no catch-all, on
+  # purpose, so a reason from outside `ISBNResolver.error_reason/0` raises. Here
+  # that raise would be caught by the candidate `Task.async_stream` and land as
+  # `:task_exit` — a reason about our own scheduler, on the funnel, describing an
+  # upstream error. It degrades to `:resolver_unavailable` instead: a failure we
+  # cannot name is not evidence about the book.
+  defp resolver_outcome(reason) do
+    if ISBNResolver.resolver_error?(reason) do
+      case ISBNResolver.determination(reason) do
+        :not_found -> {:ok, %{}, false}
+        :unavailable -> {:error, :resolver_unavailable}
+      end
+    else
+      Logger.warning(
+        "Moderation: ISBN resolver returned #{inspect(reason)}, which is outside " <>
+          "ISBNResolver.error_reason/0 — treating as unavailable"
+      )
+
+      {:error, :resolver_unavailable}
     end
   end
 

@@ -1835,15 +1835,29 @@ defmodule Stacks.UploadPipelineTest do
     end
 
     @tag stories: ["US-1.1.6"], suite: :external
-    test "merge_format endpoint surfaces 503 ISBN-service outage as 422 isbn_not_found", %{
+    test "merge_format endpoint surfaces an ISBN-service outage as 503 resolver_unavailable", %{
       conn: conn,
       token: token,
       book: book
     } do
-      # End-to-end graceful degradation: when the duplicate-check / merge
-      # path calls ISBNResolver.resolve and both upstreams are down, the
-      # controller does NOT 5xx — it returns a clean 422 isbn_not_found
-      # body so the client can show the user a "try again later" message.
+      # ⚠️ Rewritten by #344. This test used to be named "…surfaces 503
+      # ISBN-service outage as 422 isbn_not_found" and asserted exactly that,
+      # with a comment calling it graceful degradation. It was the defect,
+      # written down as the specification: `isbn_not_found` is a claim about the
+      # ISBN, the reader's ISBN may be perfectly good, and a 4xx tells them the
+      # mistake was theirs. Neither is true when Open Library and Google Books
+      # simply did not answer.
+      #
+      # What the original test was RIGHT about is kept and still asserted: the
+      # controller must not bubble the outage up as an unhandled 500. It answers
+      # 503 — "we could not check, try later" — which is the honest version of
+      # the same graceful degradation.
+      #
+      # `:service_unavailable` is deliberately left as the mocked reason. It is
+      # outside `ISBNResolver.error_reason/0` — `Stacks.Books.HttpClient` maps a
+      # real 503 to `:unexpected_status` — so this also covers the unknown-reason
+      # guard in `Books.resolver_failure/1`, which must degrade an unnameable
+      # failure to "unavailable" rather than to "not a book".
       MockHttpClient.put_response("openlibrary.org/api/books", {:error, :service_unavailable})
       MockHttpClient.put_response("googleapis.com", {:error, :service_unavailable})
 
@@ -1852,10 +1866,12 @@ defmodule Stacks.UploadPipelineTest do
         |> auth_conn(token)
         |> post("/api/books/#{book.id}/merge-format", %{"isbn" => "9780451524935"})
 
-      # Controller stays graceful: the 503 from ISBN service is mapped to
-      # a structured 422 (isbn_not_found) rather than bubbling up as a 500.
-      assert resp = json_response(conn, 422)
-      assert resp["error"] == "isbn_not_found"
+      assert resp = json_response(conn, 503)
+
+      refute resp["error"] == "isbn_not_found",
+             "the catalogues never answered — nothing was learned about this ISBN"
+
+      assert resp["error"] == "resolver_unavailable"
     end
   end
 

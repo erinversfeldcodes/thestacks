@@ -208,8 +208,7 @@ message Edition {
   // When this edition record was last updated.
   google.protobuf.Timestamp updated_at = 15 [json_name = "updated_at"];
 
-  // Where this edition's ISBN verification came from. DB-only provenance field,
-  // never serialised on the wire. Exactly one of:
+  // Where this edition's ISBN verification came from. Exactly one of:
   //
   //   "open_library"       — the ISBN was resolved against Open Library.
   //   "google_books"       — the ISBN was resolved against Google Books.
@@ -220,6 +219,12 @@ message Edition {
   // "barcode_unverified" is what makes "never externally verified" auditable
   // rather than inferred from a placeholder `title LIKE 'ISBN %'`, which
   // vanishes the moment async enrichment succeeds.
+  //
+  // It is a CURRENT state, not a record of how the ISBN first arrived:
+  // `Stacks.Workers.EnrichBookJob` rewrites it to whichever source answered the
+  // moment enrichment succeeds (#344). Serialised on the wire since #344 so the
+  // SPA can render a not-yet-identified book as such instead of showing its
+  // placeholder title as if it were the book's name.
   //
   // Persisted as a plain string (NOT a proto enum) because the DB values are
   // the lowercase domain names above, not `VERIFICATION_SOURCE_*` wire names;
