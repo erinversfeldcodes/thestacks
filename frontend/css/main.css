@@ -1534,9 +1534,21 @@ h4 {
    same muted register as the other upload hints, with nothing disabled. Two
    surfaces carry it — the verify step (photo path, before the placement) and
    the completion card (manual path, where the one-shot confirm verb only
-   reports the other bookshelves once the placement is done). */
+   reports the other bookshelves once the placement is done).
 
+   The provisional-book notice (#344) joins them deliberately rather than
+   getting an alert style of its own. It is the same KIND of thing: a true
+   statement about the book that changes nothing the reader may do. A book whose
+   ISBN nothing has matched yet is a legal state — the ISBN gate passed and only
+   the catalogue lookup is outstanding — so styling it as a warning would say the
+   reader had done something wrong. Muted italic says "aside", which is what it
+   is. `.upload-provisional-notice` is not prefixed per-step because the same
+   sentence appears on four of them (verify, shelf picker, completion, and the
+   multi-book list). */
+
+.book-detail__provisional,
 .upload-complete__already-yours,
+.upload-provisional-notice,
 .upload-verify__already-yours {
     font-family: var(--font-body);
     font-size: var(--size-sm);

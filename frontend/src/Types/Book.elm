@@ -9,8 +9,10 @@ module Types.Book exposing
     , bookIsbn
     , bookPageCount
     , bookPublicationYear
+    , displayTitle
     , fromProtoBook
     , fromProtoEdition
+    , isProvisional
     )
 
 import Json.Decode as Decode exposing (Decoder)
@@ -42,6 +44,10 @@ type alias Edition =
     , publisher : Maybe String
     , publicationYear : Maybe Int
     , isPrimary : Bool
+
+    -- Which catalogue confirmed this ISBN: "open_library", "google_books", or
+    -- "barcode_unverified" for none of them yet. See `isProvisional`.
+    , verificationSource : String
     }
 
 
@@ -100,6 +106,7 @@ fromProtoEdition pe =
     , publisher = emptyToNothing pe.publisher
     , publicationYear = zeroToNothing pe.publicationYear
     , isPrimary = pe.isPrimary
+    , verificationSource = pe.verificationSource
     }
 
 
@@ -170,6 +177,52 @@ bookPageCount bk =
 bookPublicationYear : Book -> Maybe Int
 bookPublicationYear bk =
     bk.primaryEdition |> Maybe.andThen .publicationYear
+
+
+{-| True when nothing outside The Stacks has yet confirmed this book's ISBN.
+
+The ISBN gate has still passed — a barcode decoded cleanly and its EAN-13 check
+digit is good — but Open Library and Google Books have not told us what the book
+IS, so `title` is the `"ISBN 978…"` placeholder the server minted and the cover
+and author are empty. Enrichment runs asynchronously and usually fills it in
+within seconds.
+
+Driven by `verificationSource`, never by whether the title happens to start with
+`"ISBN "` (#344). The title is a guess about the state; this field IS the state.
+The guess is wrong in both directions: a real book could be titled `ISBN` and,
+worse, the moment enrichment succeeds the title changes and a title test quietly
+stops finding anything — which is exactly the population it most needs to find.
+The server rewrites `verificationSource` in the same transaction that writes the
+real title, so the two never disagree.
+
+This is a legitimate state, not an error, and nothing in the UI may block on it.
+
+-}
+isProvisional : Book -> Bool
+isProvisional bk =
+    case bk.primaryEdition of
+        Just ed ->
+            ed.verificationSource == "barcode_unverified"
+
+        Nothing ->
+            False
+
+
+{-| What to call this book on screen.
+
+A provisional book has no name yet, only a number, and showing that number where
+a title goes tells the reader something false — they cannot tell a bug from a
+rare book from a lookup still in flight. Say the true thing instead; the ISBN is
+still shown beside it, as an ISBN.
+
+-}
+displayTitle : Book -> String
+displayTitle bk =
+    if isProvisional bk then
+        "Not yet identified"
+
+    else
+        bk.title
 
 
 

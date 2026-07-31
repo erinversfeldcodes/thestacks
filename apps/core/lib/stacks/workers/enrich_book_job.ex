@@ -198,6 +198,20 @@ defmodule Stacks.Workers.EnrichBookJob do
     {:error, :update_failed}
   end
 
+  # `verification_source` is part of the update, not just the cosmetic fields
+  # (#344). It is not a record of how an ISBN first ARRIVED — the proto and the
+  # column comment both define `"barcode_unverified"` as "no external source has
+  # confirmed it YET" — and this job is the moment that stops being true. Left
+  # unwritten, a book that entered on the barcode fast path and was successfully
+  # enriched by Open Library seconds later kept claiming for ever that nobody had
+  # verified it, which makes the column useless for the one question it exists to
+  # answer and, since the SPA now renders a provisional book distinguishably off
+  # exactly this value, would show a fully identified book as unidentified.
+  #
+  # Only reached on the `{:ok, metadata}` branch of `enrich/1`, so "the resolver
+  # answered" is a precondition; `verification_source_from/1` then names which of
+  # the two answered.
+
   # Bug-fix history: previous versions cast only `title` and
   # `description` from the resolver metadata. The resolver returns
   # `author` as a string (e.g. `"Umberto Eco"`), but `op.books` stores it
@@ -235,7 +249,8 @@ defmodule Stacks.Workers.EnrichBookJob do
           "publisher" => metadata[:publisher] || edition.publisher,
           "publication_year" =>
             coerce_integer(metadata[:publication_year]) || edition.publication_year,
-          "page_count" => coerce_integer(metadata[:page_count]) || edition.page_count
+          "page_count" => coerce_integer(metadata[:page_count]) || edition.page_count,
+          "verification_source" => Books.verification_source_from(metadata)
         }
 
         edition

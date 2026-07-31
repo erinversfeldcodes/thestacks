@@ -81,6 +81,7 @@ dummyEdition =
     , publisher = Nothing
     , publicationYear = Nothing
     , isPrimary = True
+    , verificationSource = "open_library"
     }
 
 

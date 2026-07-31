@@ -27,11 +27,27 @@ defmodule StacksWeb.BookController do
         |> put_status(422)
         |> json(%{error: "validation_failed", details: format_errors(changeset)})
 
+      {:error, :resolver_unavailable} ->
+        resolver_unavailable(conn)
+
       {:error, _} ->
         conn
         |> put_status(422)
         |> json(%{error: "isbn_not_found"})
     end
+  end
+
+  # 503, not 422 (#344). A 4xx says "your request was wrong" and `isbn_not_found`
+  # says "that is not a book" — both are false when Open Library and Google Books
+  # simply did not answer. The ISBN the reader typed may be perfectly good; we
+  # could not check. `retry_after` is advisory and matches the shortest fuse
+  # reset, so a client that honours it does not hammer a service that is already
+  # struggling.
+  defp resolver_unavailable(conn) do
+    conn
+    |> put_resp_header("retry-after", "30")
+    |> put_status(503)
+    |> json(%{error: "resolver_unavailable"})
   end
 
   @doc """
@@ -83,6 +99,9 @@ defmodule StacksWeb.BookController do
         conn
         |> put_status(422)
         |> json(%{error: "validation_failed", details: format_errors(changeset)})
+
+      {:error, :resolver_unavailable} ->
+        resolver_unavailable(conn)
 
       {:error, _reason} ->
         conn
@@ -136,6 +155,9 @@ defmodule StacksWeb.BookController do
         conn
         |> put_status(422)
         |> json(%{error: "isbn_not_found"})
+
+      {:error, :resolver_unavailable} ->
+        resolver_unavailable(conn)
 
       {:error, %Ecto.Changeset{} = changeset} ->
         conn

@@ -356,6 +356,103 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # #344 — a resolver outage is reported as an outage, on every write path
+  # ---------------------------------------------------------------------------
+  #
+  # All three of these endpoints ended in `{:error, _} -> 422 "isbn_not_found"`.
+  # That branch caught the reason nobody had classified, and the one thing it
+  # could not distinguish is the one thing the reader most needs distinguished:
+  # "we asked, and this is not a book" from "we could not ask". The second is a
+  # fault of ours, the ISBN they typed may be perfectly good, and telling them
+  # to check the number sends them to re-read a barcode that was right.
+  describe "a resolver outage is a 503, not 'isbn_not_found' (#344)" do
+    setup do
+      # A 5xx from BOTH upstreams. `race_resolve/1` hands back the last error,
+      # so `ISBNResolver.resolve/1` returns `{:error, :unexpected_status}` —
+      # `:unavailable`, not `:not_found`.
+      MockHttpClient.put_response("openlibrary.org", {:error, :unexpected_status})
+      MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
+      :ok
+    end
+
+    test "POST /api/books answers 503 resolver_unavailable", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books", %{"isbn" => "9780743273565"})
+
+      body = json_response(conn, 503)
+
+      refute body["error"] == "isbn_not_found",
+             "a 5xx from Open Library says nothing about whether 9780743273565 is a book"
+
+      assert body["error"] == "resolver_unavailable"
+      assert get_resp_header(conn, "retry-after") == ["30"]
+    end
+
+    test "POST /api/books/confirm answers 503 resolver_unavailable", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "wishlist"})
+
+      assert %{"error" => "resolver_unavailable"} = json_response(conn, 503)
+    end
+
+    test "POST /api/books/:id/merge-format answers 503 resolver_unavailable", %{conn: conn} do
+      user = insert(:user)
+      book = insert(:book)
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/#{book.id}/merge-format", %{"isbn" => "9780141036144"})
+
+      assert %{"error" => "resolver_unavailable"} = json_response(conn, 503)
+    end
+
+    test "nothing is written when the resolver could not be reached", %{conn: conn} do
+      # The negative half: an outage must not leave a half-identified book
+      # behind for the catalogue to inherit.
+      user = insert(:user)
+      before = Core.Repo.aggregate(Stacks.Books.Book, :count)
+
+      conn
+      |> auth_conn(user)
+      |> post("/api/books", %{"isbn" => "9780743273565"})
+      |> json_response(503)
+
+      assert Core.Repo.aggregate(Stacks.Books.Book, :count) == before
+    end
+  end
+
+  describe "an ISBN the catalogues denied is still 422 isbn_not_found (#344)" do
+    # The control that keeps the 503 honest. When the upstreams DO answer and
+    # neither knows the ISBN, that IS a fact about the ISBN, and 422 is right.
+    setup do
+      MockHttpClient.put_response("openlibrary.org", {:ok, %{}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+      :ok
+    end
+
+    test "POST /api/books/confirm still answers 422", %{conn: conn} do
+      user = insert(:user)
+
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/books/confirm", %{"isbn" => "9780743273565", "shelf_name" => "wishlist"})
+
+      assert %{"error" => "isbn_not_found"} = json_response(conn, 422)
+    end
+  end
+
   describe "POST /api/books/confirm" do
     test "returns 200 with book data when ISBN resolves to existing book", %{conn: conn} do
       user = insert(:user)

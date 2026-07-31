@@ -231,6 +231,18 @@ defmodule StacksWeb.ProtoJSON do
 
   Matches the `format_edition/1` used identically across BookController,
   BookshelfController, SearchController, and CatalogueController.
+
+  `verification_source` is on the wire as of #344. It was DB-only when #335
+  added it, because nothing outside the platform needed the provenance; the SPA
+  now does. A book whose ISBN nothing external has confirmed carries an
+  `"ISBN 978…"` placeholder title, and the reader has to be able to tell that
+  from a book actually called that — which the client can only do if it is told
+  which one it has. Deriving it there from `title` starting with `"ISBN "` is the
+  guess this field exists to replace: it is wrong for a real title of that shape
+  and, worse, stops working the moment enrichment succeeds.
+
+  It is provenance, not personal data — which of two public catalogues answered
+  a public ISBN lookup — so serialising it exposes nothing about a reader.
   """
   @spec edition(map()) :: map()
   def edition(ed) do
@@ -243,7 +255,8 @@ defmodule StacksWeb.ProtoJSON do
       :page_count,
       :publisher,
       :publication_year,
-      :is_primary
+      :is_primary,
+      :verification_source
     ])
   end
 

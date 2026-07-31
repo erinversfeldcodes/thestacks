@@ -59,7 +59,8 @@ defmodule StacksWeb.ProtoJSONTest do
                    page_count: 320,
                    publisher: "Penguin",
                    publication_year: 2003,
-                   is_primary: true
+                   is_primary: true,
+                   verification_source: edition.verification_source
                  }
                ],
                edition_count: 1,
@@ -71,7 +72,8 @@ defmodule StacksWeb.ProtoJSONTest do
                  page_count: 320,
                  publisher: "Penguin",
                  publication_year: 2003,
-                 is_primary: true
+                 is_primary: true,
+                 verification_source: edition.verification_source
                },
                community_read_count: 42
              }
@@ -343,7 +345,8 @@ defmodule StacksWeb.ProtoJSONTest do
           page_count: 450,
           publisher: "HarperCollins",
           publication_year: 2021,
-          is_primary: false
+          is_primary: false,
+          verification_source: "barcode_unverified"
         )
 
       assert ProtoJSON.edition(ed) == %{
@@ -354,7 +357,11 @@ defmodule StacksWeb.ProtoJSONTest do
                page_count: 450,
                publisher: "HarperCollins",
                publication_year: 2021,
-               is_primary: false
+               is_primary: false,
+               # On the wire since #344 — the SPA needs it to tell a book called
+               # "ISBN 978…" because nothing has identified it yet from a book
+               # actually called that.
+               verification_source: "barcode_unverified"
              }
     end
 

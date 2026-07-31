@@ -20,12 +20,28 @@ defmodule Stacks.ModerationTest do
   import Stacks.AI.VisionFixtures
   import Stacks.Factory
 
+  alias Stacks.Books.ISBNResolver
   alias Stacks.Books.MockHttpClient
   alias Stacks.Moderation
 
   # The pipeline now receives base64-encoded image data. Any non-empty string
   # works for unit tests since MockClient ignores the payload content.
   @test_image_b64 Base.encode64("fake image bytes")
+
+  # Reset the resolver's circuit breakers before each test. `:fuse` state is
+  # GLOBAL (ETS-backed) and survives the DB sandbox, so a fuse melted by an
+  # earlier test in this file leaks into later ones as `:circuit_open` — which,
+  # since #344, is `:resolver_unavailable` rather than the silent degradation to
+  # empty metadata it used to be. That made it visible: the #344 outage tests
+  # melt both fuses on purpose, and without this an unrelated later test
+  # ("non-excluded VLM ISBN candidate is still resolved") failed with
+  # `{:error, :resolver_unavailable}` purely because of the file's test order.
+  # Same guard, same reason as `isbn_resolver_test.exs`.
+  setup do
+    :fuse.reset(:open_library_fuse)
+    :fuse.reset(:google_books_fuse)
+    :ok
+  end
 
   describe "run_pipeline/1 — happy path" do
     test "returns {:ok, [book]} when vision model confirms it is a book with valid ISBN" do
@@ -484,6 +500,150 @@ defmodule Stacks.ModerationTest do
         # No enrichment job enqueued — the fast path didn't fire.
         refute_enqueued(worker: Stacks.Workers.EnrichBookJob)
       end)
+    end
+  end
+
+  describe "run_pipeline/1 — a resolver outage is not the book's fault (#344)" do
+    # The defect: `resolve_metadata/3` matched `_ ->  {%{}, false}`, so "Open
+    # Library and Google Books both 503'd" arrived at `build_book_attrs/4`
+    # indistinguishable from "neither has heard of this ISBN". Empty metadata
+    # leaves the title nil, the create changeset rejects the row for a missing
+    # title, and `store_failure_reason/1` reads that changeset as
+    # `:invalid_book` — so an outage in OUR dependency was written down, on the
+    # operator's funnel and in the `image.rejected` event, as "this is not a
+    # real book".
+    setup do
+      # A 5xx from BOTH upstreams. `race_resolve/1` returns the last error, so
+      # this is `{:error, :unexpected_status}` — `:unavailable`, not
+      # `:not_found`.
+      MockHttpClient.put_response("openlibrary.org/api/books", {:error, :unexpected_status})
+      MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
+      :ok
+    end
+
+    test "a candidate whose lookup 5xx'd is recorded as :resolver_unavailable, never :invalid_book" do
+      # Two candidates, one of which the platform already holds — so the
+      # pipeline still succeeds and hands back the `rejected` list, which is the
+      # thing an operator reads and the payload of the `image.rejected` event.
+      existing = insert(:book)
+      insert(:book_edition, book: existing, isbn: "9780743273565")
+
+      with_vision(books_with_isbns(["9780743273565", "9780385333481"]), fn ->
+        assert {:ok, %{resolved: [resolved], rejected: rejected}} =
+                 Moderation.run_pipeline(%{image_b64: @test_image_b64})
+
+        assert resolved.id == existing.id
+
+        assert [{"9780385333481", reason}] = rejected
+
+        refute reason == :invalid_book,
+               "a 5xx from Google Books is not evidence that the reader photographed a non-book"
+
+        assert reason == :resolver_unavailable
+      end)
+    end
+
+    test "the funnel counter names the outage rather than coercing it to :other" do
+      # `whitelist_resolution_reason/1` maps anything outside `@resolution_reasons`
+      # to `:other`. A reason that lands in `:other` cannot answer the one
+      # question the funnel exists for — "are readers photographing things we
+      # cannot identify, or are our metadata providers down?"
+      test_pid = self()
+      handler_id = "test-344-funnel-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:stacks, :moderation, :isbn_resolution],
+        fn _event, _measurements, metadata, _ ->
+          send(test_pid, {:resolution_outcome, metadata.outcome})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      with_vision(books_with_isbns(["9780743273565"]), fn ->
+        assert {:error, :resolver_unavailable} =
+                 Moderation.run_pipeline(%{image_b64: @test_image_b64})
+      end)
+
+      assert_receive {:resolution_outcome, :resolver_unavailable}
+    end
+
+    test "the whole-image failure is retryable, not a terminal 'no ISBN in this photo'" do
+      # `:isbn_not_found` is terminal: IdentifyBookJob rejects the row with that
+      # token and the reader is told their photo had no readable ISBN in it.
+      # Saying that because both catalogues were unreachable is false, and
+      # permanently so — the upload is never retried.
+      with_vision(books_with_isbns(["9780743273565"]), fn ->
+        assert {:error, :resolver_unavailable} =
+                 Moderation.run_pipeline(%{image_b64: @test_image_b64})
+      end)
+    end
+
+    test "a book we already hold is still resolved while the resolver is down" do
+      # The lookup exists to LEARN about an unknown ISBN. When we already know
+      # the book, nothing was needed from Open Library, and refusing the upload
+      # because it was unavailable would be the same untruth one layer up.
+      existing = insert(:book)
+      insert(:book_edition, book: existing, isbn: "9780743273565")
+
+      with_vision(books_with_isbns(["9780743273565"]), fn ->
+        assert {:ok, %{resolved: [book], rejected: []}} =
+                 Moderation.run_pipeline(%{image_b64: @test_image_b64})
+
+        assert book.id == existing.id
+      end)
+    end
+
+    test "an ISBN both catalogues have HEARD of and denied is still :invalid_book" do
+      # The counterpart that keeps the fix honest. `:not_found` IS a property of
+      # the ISBN — the VLM produced a string neither catalogue knows and whose
+      # checksum we never trusted — so the old path is exactly right for it and
+      # must not be swept into the new reason.
+      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      existing = insert(:book)
+      insert(:book_edition, book: existing, isbn: "9780743273565")
+
+      with_vision(books_with_isbns(["9780743273565", "9780385333481"]), fn ->
+        assert {:ok, %{rejected: [{"9780385333481", :invalid_book}]}} =
+                 Moderation.run_pipeline(%{image_b64: @test_image_b64})
+      end)
+    end
+  end
+
+  describe "title_fallback/5's missing catch-all (#344)" do
+    # The issue asked whether the two-clause `case` in `title_fallback/5` is a
+    # live crash or defence-in-depth. It is DEFENSIVE: `search_by_title/4` has
+    # exactly two exit shapes and not merely by `@spec` — `do_search_by_title/5`
+    # ends in `Enum.find_value(candidates, {:error, :not_found}, ...)` and
+    # `try_candidate/4` returns `{:ok, isbn, metadata}` or `nil`.
+    #
+    # This test records that as a property of the resolver rather than asserting
+    # it where it cannot be driven, and it is the assertion that would break if a
+    # future change made the gap reachable — at which point the decision has to
+    # be made deliberately instead of arriving as a CaseClauseError in
+    # production.
+    test "search_by_title/4 returns only :not_found on every reachable failure" do
+      for failure <- [
+            {:error, :unexpected_status},
+            {:error, :malformed_response},
+            {:error, :transport_error},
+            {:error, :timeout},
+            {:ok, %{}},
+            {:ok, %{"docs" => []}}
+          ] do
+        MockHttpClient.clear()
+        MockHttpClient.put_response("openlibrary.org", failure)
+        MockHttpClient.put_response("googleapis.com", failure)
+
+        assert {:error, :not_found} =
+                 ISBNResolver.search_by_title("A Title", "An Author", nil),
+               "search_by_title/4 grew a third return shape for #{inspect(failure)} — " <>
+                 "Moderation.title_fallback/5 has no clause for it"
+      end
     end
   end
 
