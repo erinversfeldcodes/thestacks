@@ -50,7 +50,7 @@
       "staff_review": "LGTM"
     },
     "344": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "Resolver truth (4 collapse sites) + title_fallback catch-all + provisional-title UI",
       "level": 3,
       "depends_on": [
@@ -58,11 +58,13 @@
         342,
         343
       ],
-      "merged": false,
-      "blocked_on": null
+      "merged": true,
+      "blocked_on": null,
+      "commit": "8b7c143f",
+      "staff_review": "LGTM"
     },
     "345": {
-      "status": "blocked",
+      "status": "in_progress",
       "title": "Extract Stacks.Books.ISBN and Stacks.Uploads (pure move, no behaviour change)",
       "level": 4,
       "depends_on": [
@@ -71,11 +73,12 @@
         343,
         344
       ],
-      "merged": false
+      "merged": false,
+      "blocked_on": null
     }
   },
   "ready_set": [
-    344
+    345
   ],
   "merge_order": [
     342,
@@ -102,6 +105,12 @@
       "issue": 348,
       "title": "frontend/index.html is a tracked 39,680-line stale Elm build artefact",
       "found_by": 343,
+      "needs": "owner wave assignment"
+    },
+    {
+      "issue": 352,
+      "title": "search_by_title swallows outages into :not_found and negative-caches them for 1h",
+      "found_by": 344,
       "needs": "owner wave assignment"
     }
   ],
