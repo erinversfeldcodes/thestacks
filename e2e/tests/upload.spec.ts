@@ -614,3 +614,69 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
     }
   );
 });
+
+// The duplicate notice (#343/#333) — the last moment before a reader files a
+// second copy. It has Elm program-test coverage on both paths, and had NO
+// end-to-end coverage until this block: nothing drove it through a browser
+// against a real server, which is exactly how three surfaces in this project
+// once shipped fully unstyled.
+//
+// The governing rule is the owner's standing ruling: the notice INFORMS, it
+// never BLOCKS. So each test asserts both halves — the notice is there, and the
+// reader can still complete the add. A test that only checked for the text
+// would pass just as happily against a flow that had been wedged shut.
+test.describe(
+  "Upload pipeline — duplicate awareness",
+  { tag: ["@US-1.1.6"] },
+  () => {
+    test("manual entry of a book already shelved informs, and still lets the reader add it", async ({
+      page,
+    }) => {
+      test.setTimeout(60_000);
+
+      // A checksum-valid ISBN the catalogue resolves. Added twice on purpose.
+      const isbn = "9780061470769";
+
+      const addOnce = async (shelf: RegExp) => {
+        await page.goto("/upload");
+        await page.getByRole("button", { name: /Enter ISBN manually/i }).click();
+        await page.getByTestId("upload-manual-isbn-input").fill(isbn);
+        const choice = page.getByRole("button", { name: shelf });
+        if (await choice.isVisible().catch(() => false)) await choice.click();
+        await page.getByTestId("upload-manual-isbn-submit").click();
+        await expect(page.getByTestId("upload-complete")).toBeVisible({
+          timeout: 20_000,
+        });
+      };
+
+      await addOnce(/Wish List/i);
+
+      // Second time: same ISBN, different shelf. Multi-shelf is a LEGAL state
+      // (owner ruling, #333) — so the expected outcome is a notice plus a
+      // completed add, not a refusal.
+      await page.goto("/upload");
+      await page.getByRole("button", { name: /Enter ISBN manually/i }).click();
+      await page.getByTestId("upload-manual-isbn-input").fill(isbn);
+
+      // The notice names where it already is, before the reader commits.
+      await expect(
+        page.getByText(/already have this|already on your/i)
+      ).toBeVisible({ timeout: 20_000 });
+
+      // ...and the submit control is still live. This is the assertion that
+      // distinguishes "informed" from "blocked".
+      const submit = page.getByTestId("upload-manual-isbn-submit");
+      await expect(submit).toBeEnabled();
+
+      const antilibrary = page.getByRole("button", { name: /Antilibrary/i });
+      if (await antilibrary.isVisible().catch(() => false)) {
+        await antilibrary.click();
+      }
+      await submit.click();
+
+      await expect(page.getByTestId("upload-complete")).toBeVisible({
+        timeout: 20_000,
+      });
+    });
+  }
+);
