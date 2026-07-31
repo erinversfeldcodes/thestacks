@@ -23,9 +23,24 @@ defmodule Stacks.Moderation do
   require Logger
 
   alias Stacks.AI.Client, as: AIClient
+  alias Stacks.AI.VisionError
   alias Stacks.Books
   alias Stacks.Books.ISBNResolver
   alias Stacks.Workers.EnrichBookJob
+
+  @typedoc """
+  Closed set of reasons the pipeline fails, following the convention
+  `Stacks.Books.ISBNResolver.error_reason/0` documents: the underlying client's
+  closed set, extended with the two determinations this layer makes itself.
+
+  `:not_a_book` and `:isbn_not_found` are conclusions about the image, so the
+  worker cancels on them. Everything else is a `Stacks.AI.VisionError.t/0` and
+  carries its own determination.
+
+  Adding a reason here requires `Stacks.Workers.IdentifyBookJob` to classify it
+  — its `terminal_reason/1` has no catch-all that guesses.
+  """
+  @type failure_reason :: Stacks.AI.VisionError.t() | :not_a_book | :isbn_not_found
 
   @typedoc """
   Pipeline result. The success shape carries both the resolved books and any
@@ -36,7 +51,7 @@ defmodule Stacks.Moderation do
   """
   @type pipeline_result ::
           {:ok, %{resolved: [Stacks.Books.Book.t()], rejected: [{String.t(), atom()}]}}
-          | {:error, :not_a_book | :isbn_not_found | term()}
+          | {:error, failure_reason()}
 
   @doc """
   Runs the full moderation pipeline for an uploaded image.
@@ -105,8 +120,24 @@ defmodule Stacks.Moderation do
         emit_classification(classification_outcome(classification))
         {:error, :not_a_book}
 
-      error ->
-        error
+      {:error, reason} ->
+        {:error, reason}
+
+      # A 200 whose body carries no `classification` is a contract violation by
+      # the sidecar, not a determination about the image — a response that
+      # cannot say what it concluded is not evidence that nothing went wrong.
+      # Reported as a fault so it stays retryable and shows up as one, rather
+      # than falling through as a bare `{:ok, %{}}` the worker's `case` cannot
+      # match. That fall-through was real: it raised CaseClauseError, was
+      # rescued into `{:error, %CaseClauseError{}}`, retried to exhaustion, and
+      # left the image row `pending` for ever.
+      {:ok, other} ->
+        Logger.error(
+          "Moderation: /analyze returned an unrecognised response shape " <>
+            "(keys: #{inspect(other |> Map.keys() |> Enum.sort())})"
+        )
+
+        {:error, VisionError.from_transport(:unrecognised_response)}
     end
   end
 

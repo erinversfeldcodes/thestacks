@@ -330,8 +330,12 @@ if config_env() == :prod do
         ]
     end
 
-    # Vision pipeline (Modal) can take 60–300s on cold starts. The SSE stream
-    # must stay open long enough for the job to complete and broadcast its result.
-    config :core, :sse_max_timeout_ms, 360_000
+    # `:sse_max_timeout_ms` is deliberately NOT set here. It used to be pinned at
+    # 360_000 — a number chosen to be "about how long a Modal cold start plus
+    # retries takes", maintained by hand alongside the worker's retry schedule
+    # and wrong whenever either moved. `StacksWeb.UploadController` now derives
+    # the deadline from `Stacks.Workers.IdentifyBookJob.worst_case_lifetime_ms/0`,
+    # so the reader's give-up time follows the job's death by construction.
+    # Setting the key in a deployed environment reinstates the divergence.
   end
 end
