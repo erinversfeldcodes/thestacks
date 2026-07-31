@@ -179,63 +179,117 @@ defmodule Stacks.Books do
   @doc """
   Creates a book (work) with its first edition from attributes.
   Requires `:isbn` and `:title`.
+
+  Attributes are string-keyed. `"author"` (a name) is resolved to an
+  `op.authors` row; callers holding an id may pass `"author_id"` instead.
+  `"verification_source"` may be stated explicitly by a caller that knows the
+  provenance; otherwise it is derived from the identifiers in `attrs`.
   """
   @spec create(map()) :: {:ok, Book.t()} | {:error, Ecto.Changeset.t()}
-  def create(attrs) do
-    book_changeset =
-      %Book{}
-      |> book_changeset(attrs)
-      |> maybe_create_author(attrs)
+  def create(attrs), do: create_work(attrs, event: &book_created_event/2)
 
-    Multi.new()
-    |> Multi.insert(:book, book_changeset)
-    |> Multi.insert(:edition, fn %{book: book} ->
-      %BookEdition{}
-      |> book_edition_changeset(%{
-        "isbn" => attrs["isbn"],
-        "book_id" => book.id,
-        "format_label" => attrs["format_label"],
-        "cover_image_url" => attrs["cover_image_url"],
-        "page_count" => attrs["page_count"],
-        "publisher" => attrs["publisher"],
-        "publication_year" => attrs["publication_year"],
-        "open_library_id" => attrs["open_library_id"],
-        "google_books_id" => attrs["google_books_id"],
-        "is_primary" => true,
-        # Callers that KNOW the provenance say so (Moderation's barcode fast
-        # path); everyone else has it read off the identifiers the resolver
-        # returned.
-        "verification_source" => attrs["verification_source"] || verification_source_from(attrs)
-      })
-    end)
-    |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
-      Events.emit_safe(%{
-        event_type: "book.created",
-        aggregate_type: "book",
-        aggregate_id: book.id,
-        payload: %{
-          isbn: edition.isbn,
-          title: book.title,
-          visibility_tier: book.visibility_tier
-        }
-      })
+  # ── The one create transaction (#341) ────────────────────────────────────
+  #
+  # Every path that mints a work and its first edition arrives here. There used
+  # to be two — `create/1` and a private `create_confirmed_book/4` — and they had
+  # drifted: the confirmed one silently dropped `google_books_id`, so an edition
+  # the platform had just paid a Google Books round-trip for lost both the
+  # cross-reference AND (since `verification_source_from/1` reads provenance off
+  # exactly those identifiers) its claim to have been verified at all.
+  #
+  # The two callers differ only in what they ADD to the create — a bookshelf
+  # placement, and which event they emit — so those are options, not a reason for
+  # a second implementation.
+  #
+  # `opts`:
+  #   * `:event` — `(book, edition -> map)` building the event to emit.
+  #   * `:place` — `{user_id, shelf_name}` to place the new book inside the same
+  #     transaction, or absent for a catalogue-only create.
+  defp create_work(attrs, opts) do
+    # Resolved before the Multi so an author-insert failure is reported as
+    # itself rather than as an aborted transaction. `create/1` used to swallow
+    # this error and mint an author-less book; the confirmed path already
+    # propagated it, and propagating is the answer that cannot lose data.
+    with {:ok, author} <- find_or_create_author(attrs["author"]) do
+      Multi.new()
+      |> Multi.insert(:book, book_changeset(%Book{}, book_attrs(attrs, author)))
+      |> Multi.insert(:edition, fn %{book: book} ->
+        book_edition_changeset(%BookEdition{}, edition_attrs(attrs, book))
+      end)
+      |> maybe_place(opts[:place])
+      |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
+        Events.emit_safe(opts[:event].(book, edition))
+        {:ok, book}
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{book: book, edition: edition}} ->
+          {:ok, %{book | editions: [edition]}}
 
-      {:ok, book}
-    end)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{book: book, edition: edition}} ->
-        {:ok, %{book | editions: [edition]}}
+        {:error, :book, changeset, _} ->
+          {:error, changeset}
 
-      {:error, :book, changeset, _} ->
-        {:error, changeset}
+        {:error, :edition, changeset, _} ->
+          {:error, changeset}
 
-      {:error, :edition, changeset, _} ->
-        {:error, changeset}
-
-      {:error, _, reason, _} ->
-        {:error, reason}
+        {:error, _, reason, _} ->
+          {:error, reason}
+      end
     end
+  end
+
+  defp book_attrs(attrs, nil), do: attrs
+  defp book_attrs(attrs, author), do: Map.put(attrs, "author_id", author.id)
+
+  # The edition columns the create transaction writes. This list IS the contract
+  # the two former implementations disagreed about — keep it exhaustive.
+  defp edition_attrs(attrs, book) do
+    %{
+      "isbn" => attrs["isbn"],
+      "book_id" => book.id,
+      "format_label" => attrs["format_label"],
+      "cover_image_url" => attrs["cover_image_url"],
+      "page_count" => attrs["page_count"],
+      "publisher" => attrs["publisher"],
+      "publication_year" => attrs["publication_year"],
+      "open_library_id" => attrs["open_library_id"],
+      "google_books_id" => attrs["google_books_id"],
+      "is_primary" => true,
+      # Callers that KNOW the provenance say so (Moderation's barcode fast
+      # path); everyone else has it read off the identifiers the resolver
+      # returned.
+      "verification_source" => attrs["verification_source"] || verification_source_from(attrs)
+    }
+  end
+
+  defp maybe_place(multi, nil), do: multi
+
+  defp maybe_place(multi, {user_id, shelf_name}) do
+    Multi.run(multi, :placement, fn _repo, %{book: book} ->
+      Shelving.place_book(user_id, book.id, shelf_name)
+    end)
+  end
+
+  defp book_created_event(book, edition) do
+    %{
+      event_type: "book.created",
+      aggregate_type: "book",
+      aggregate_id: book.id,
+      payload: %{
+        isbn: edition.isbn,
+        title: book.title,
+        visibility_tier: book.visibility_tier
+      }
+    }
+  end
+
+  defp books_confirmed_event(book, edition, shelf_name) do
+    %{
+      event_type: "books.confirmed",
+      aggregate_type: "book",
+      aggregate_id: book.id,
+      payload: %{isbn: edition.isbn, title: book.title, shelf: shelf_name}
+    }
   end
 
   @doc """
@@ -326,9 +380,8 @@ defmodule Stacks.Books do
           {:ok, Book.t()} | {:error, :not_found | Ecto.Changeset.t()}
   def create_from_isbn(isbn) do
     with :ok <- validate_isbn_format(isbn),
-         {:ok, metadata} <- ISBNResolver.resolve(isbn),
-         {:ok, author} <- find_or_create_author(metadata[:author]) do
-      isbn |> build_book_attrs(metadata, author) |> create()
+         {:ok, metadata} <- ISBNResolver.resolve(isbn) do
+      isbn |> attrs_from_resolved(metadata) |> create()
     end
   end
 
@@ -1124,56 +1177,18 @@ defmodule Stacks.Books do
   defp require_isbn(isbn) when is_nil(isbn) or isbn == "", do: {:error, :missing_isbn}
   defp require_isbn(isbn), do: {:ok, isbn}
 
+  # The confirmed path is `create_work/2` plus a placement and its own event —
+  # nothing more. All it has to do first is translate the resolver's atom-keyed
+  # metadata into the string-keyed attrs the create transaction speaks.
   defp create_confirmed_book(user_id, isbn, metadata, shelf_name) do
-    author_name = metadata[:author]
+    attrs = attrs_from_resolved(isbn, metadata)
 
-    with {:ok, author} <- find_or_create_author(author_name) do
-      attrs = build_book_attrs(isbn, metadata, author)
-
-      Multi.new()
-      |> Multi.insert(:book, %Book{} |> book_changeset(attrs))
-      |> Multi.insert(:edition, fn %{book: book} ->
-        %BookEdition{}
-        |> book_edition_changeset(%{
-          "isbn" => isbn,
-          "book_id" => book.id,
-          "format_label" => metadata[:format_label],
-          "cover_image_url" => metadata[:cover_image_url],
-          "page_count" => metadata[:page_count],
-          "publisher" => metadata[:publisher],
-          "publication_year" => metadata[:publication_year],
-          "open_library_id" => metadata[:open_library_id],
-          "is_primary" => true,
-          "verification_source" => verification_source_from(metadata)
-        })
-      end)
-      |> Multi.run(:placement, fn _repo, %{book: book} ->
-        Shelving.place_book(user_id, book.id, shelf_name)
-      end)
-      |> Multi.run(:emit_event, fn _repo, %{book: book, edition: edition} ->
-        Events.emit_safe(%{
-          event_type: "books.confirmed",
-          aggregate_type: "book",
-          aggregate_id: book.id,
-          payload: %{isbn: edition.isbn, title: book.title, shelf: shelf_name}
-        })
-
-        {:ok, book}
-      end)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{book: book, edition: edition}} ->
-          {:ok, :created, %{book | editions: [edition]}}
-
-        {:error, :book, changeset, _} ->
-          {:error, changeset}
-
-        {:error, :edition, changeset, _} ->
-          {:error, changeset}
-
-        {:error, _, reason, _} ->
-          {:error, reason}
-      end
+    case create_work(attrs,
+           place: {user_id, shelf_name},
+           event: &books_confirmed_event(&1, &2, shelf_name)
+         ) do
+      {:ok, book} -> {:ok, :created, book}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -1200,12 +1215,41 @@ defmodule Stacks.Books do
     end
   end
 
+  # Conflict rule (#341): the CALLER states `isbn` and `format_label`; the
+  # RESOLVER fills everything else.
+  #
+  # This function used to keep only the ISBN, the work id, the caller's format
+  # label and the provenance, throwing away every other field of the metadata it
+  # had just paid an Open Library / Google Books round-trip for — so a merged
+  # edition had no cover, publisher, page count or cross-reference id, and
+  # nothing downstream could tell "this edition has no publisher" from "nobody
+  # ever asked".
+  #
+  # The rule is the conservative one — fill only what would otherwise be null.
+  # It cannot destroy anything: the insert only ever creates a NEW row (a
+  # duplicate ISBN is rejected as `:duplicate_isbn`, never updated), so no value
+  # a reader or an earlier resolve established is reachable from here.
+  #
+  # The caller's half is deliberately narrow rather than "caller wins on every
+  # field". `StacksWeb.BookController.merge_format/2` hands this function the
+  # raw request params, so honouring a caller-supplied `publisher`,
+  # `open_library_id` or `google_books_id` would make
+  # `POST /api/books/:id/merge-format` a mass-assignment hole over exactly the
+  # columns that record where an ISBN's verification came from. `format_label`
+  # ("Hardcover", "Slipcased") is the one field the endpoint documents as the
+  # caller's to choose, and the resolver never supplies it.
   defp insert_edition(book, isbn, format_label, work_id, meta) do
     %BookEdition{}
     |> book_edition_changeset(%{
       "isbn" => isbn,
       "book_id" => book.id,
       "format_label" => format_label,
+      "cover_image_url" => meta[:cover_image_url],
+      "page_count" => meta[:page_count],
+      "publisher" => meta[:publisher],
+      "publication_year" => meta[:publication_year],
+      "open_library_id" => meta[:open_library_id],
+      "google_books_id" => meta[:google_books_id],
       "is_primary" => false,
       # merge_edition/2 only gets here after ISBNResolver.resolve/1 succeeded,
       # so the provenance is whichever source answered.
@@ -1235,15 +1279,6 @@ defmodule Stacks.Books do
       field == :isbn and opts[:constraint] == :unique
     end)
   end
-
-  defp maybe_create_author(changeset, %{"author" => name}) when is_binary(name) and name != "" do
-    case find_or_create_author(name) do
-      {:ok, author} -> Ecto.Changeset.put_change(changeset, :author_id, author.id)
-      _ -> changeset
-    end
-  end
-
-  defp maybe_create_author(changeset, _attrs), do: changeset
 
   @doc """
   Looks up an author row by exact `name`, inserting a new row if none
@@ -1279,24 +1314,30 @@ defmodule Stacks.Books do
     end
   end
 
-  defp build_book_attrs(isbn, metadata, author) do
-    base = %{
+  # `ISBNResolver.resolve/1` hands back atom-keyed metadata; the create
+  # transaction speaks string-keyed attrs. Translating here — rather than
+  # keeping a second copy of the insert — is what makes ONE create transaction
+  # possible, and it is the single place a newly-resolved field has to be added
+  # for every create path to carry it.
+  #
+  # `verification_source` is deliberately absent: `edition_attrs/2` derives it
+  # from the `open_library_id` / `google_books_id` copied above, which is the
+  # same answer `verification_source_from/1` gives for the metadata itself.
+  defp attrs_from_resolved(isbn, metadata) do
+    %{
       "isbn" => isbn,
       "title" => metadata[:title] || "Unknown Title",
+      "author" => metadata[:author],
       "description" => metadata[:description],
+      "subjects" => metadata[:subjects] || [],
+      "format_label" => metadata[:format_label],
       "cover_image_url" => metadata[:cover_image_url],
       "publisher" => metadata[:publisher],
       "publication_year" => metadata[:publication_year],
       "page_count" => metadata[:page_count],
-      "subjects" => metadata[:subjects] || [],
       "open_library_id" => metadata[:open_library_id],
       "google_books_id" => metadata[:google_books_id]
     }
-
-    case author do
-      nil -> base
-      author -> Map.put(base, "author_id", author.id)
-    end
   end
 
   # ── Changeset functions (moved from schema modules) ────────────────────

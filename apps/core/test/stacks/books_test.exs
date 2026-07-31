@@ -866,6 +866,252 @@ defmodule Stacks.BooksTest do
     end
   end
 
+  # ── #341: one create transaction ──────────────────────────────────────────
+  #
+  # `Books.create/1` and the private `create_confirmed_book/4` were two
+  # independent implementations of "mint a work and its first edition", and they
+  # had drifted. Enumerated from both bodies BEFORE the collapse, the
+  # `op.book_editions` columns each of them set were:
+  #
+  #   create/1                 isbn book_id format_label cover_image_url
+  #                            page_count publisher publication_year
+  #                            open_library_id google_books_id is_primary
+  #                            verification_source
+  #   create_confirmed_book/4  all of the above EXCEPT google_books_id
+  #
+  # and on the work row:
+  #
+  #   create/1                 title author_id description language subjects
+  #                            bisac_codes visibility_tier  (whatever the caller
+  #                            passed — book_changeset/2's whole cast list)
+  #   create_confirmed_book/4  title author_id description subjects
+  #                            (the resolver carries no language, bisac_codes or
+  #                            visibility_tier, so those were never a drift)
+  #
+  # The union is asserted below by handing the SAME facts to both entry points
+  # and comparing the two rows column by column. Drop a field from the unified
+  # `edition_attrs/2` and the comparison goes red.
+  describe "create/1 and the confirmed path are one transaction" do
+    setup do
+      original_http = Application.get_env(:core, :isbn_http_client)
+      Application.put_env(:core, :isbn_http_client, MockHttpClient)
+      on_exit(fn -> Application.put_env(:core, :isbn_http_client, original_http) end)
+      :ok
+    end
+
+    # Deliberately excludes `:isbn` and `:book_id`, which identify the row rather
+    # than describe the book: the two paths must be given different ISBNs (the
+    # column is unique) and they mint different works.
+    @edition_columns_both_create_paths_set [
+      :format_label,
+      :cover_image_url,
+      :page_count,
+      :publisher,
+      :publication_year,
+      :open_library_id,
+      :google_books_id,
+      :is_primary,
+      :verification_source
+    ]
+
+    @tag stories: ["US-1.1.5"]
+    test "the confirmed path writes every edition column the direct path writes (Google Books)" do
+      confirmed_isbn = "9780451524935"
+
+      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
+
+      MockHttpClient.put_response(
+        "googleapis.com",
+        {:ok, %{"items" => [google_volume(confirmed_isbn)]}}
+      )
+
+      # Confirm FIRST: `confirm/2` refuses to mint a second work whose title and
+      # author fuzzy-match one already in the catalogue, and the direct create
+      # below is deliberately the same book.
+      user = insert(:user)
+      assert {:ok, :created, confirmed} = Books.confirm(user.id, %{isbn: confirmed_isbn})
+
+      assert {:ok, direct} =
+               Books.create(%{
+                 "isbn" => "9780743273565",
+                 "title" => "The Great Gatsby",
+                 "author" => "F. Scott Fitzgerald",
+                 "description" => "A novel.",
+                 "subjects" => ["Fiction"],
+                 "cover_image_url" => "http://books.google.com/cover.jpg",
+                 "publisher" => "Scribner",
+                 "publication_year" => 1925,
+                 "page_count" => 180,
+                 "google_books_id" => "gb-gatsby"
+               })
+
+      direct_edition = hd(direct.editions)
+      confirmed_edition = hd(confirmed.editions)
+
+      assert Map.take(confirmed_edition, @edition_columns_both_create_paths_set) ==
+               Map.take(direct_edition, @edition_columns_both_create_paths_set),
+             "the two create entry points disagree about an edition column given identical facts"
+
+      # …and the agreement must not be two all-null rows agreeing about nothing.
+      for column <- [
+            :cover_image_url,
+            :page_count,
+            :publisher,
+            :publication_year,
+            :google_books_id,
+            :verification_source
+          ] do
+        refute is_nil(Map.fetch!(confirmed_edition, column)),
+               "#{column} is nil on the confirmed edition — the union assertion is vacuous"
+      end
+
+      # The work row carries the same facts too.
+      assert confirmed.title == direct.title
+      assert confirmed.description == direct.description
+      assert confirmed.subjects == direct.subjects
+      refute is_nil(confirmed.author_id)
+    end
+
+    @tag stories: ["US-1.1.5"]
+    test "the confirmed path writes every edition column the direct path writes (Open Library)" do
+      confirmed_isbn = "9780451524935"
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok, %{"ISBN:#{confirmed_isbn}" => open_library_book()}}
+      )
+
+      # Confirm FIRST — see the Google Books twin above.
+      user = insert(:user)
+      assert {:ok, :created, confirmed} = Books.confirm(user.id, %{isbn: confirmed_isbn})
+
+      assert {:ok, direct} =
+               Books.create(%{
+                 "isbn" => "9780743273565",
+                 "title" => "Nineteen Eighty-Four",
+                 "author" => "George Orwell",
+                 "cover_image_url" => "https://covers.openlibrary.org/b/id/1-L.jpg",
+                 "publisher" => "Secker & Warburg",
+                 "publication_year" => 1949,
+                 "page_count" => 328,
+                 "open_library_id" => "/books/OL7353617M"
+               })
+
+      direct_edition = hd(direct.editions)
+      confirmed_edition = hd(confirmed.editions)
+
+      assert Map.take(confirmed_edition, @edition_columns_both_create_paths_set) ==
+               Map.take(direct_edition, @edition_columns_both_create_paths_set),
+             "the two create entry points disagree about an edition column given identical facts"
+
+      for column <- [
+            :cover_image_url,
+            :page_count,
+            :publisher,
+            :publication_year,
+            :open_library_id,
+            :verification_source
+          ] do
+        refute is_nil(Map.fetch!(confirmed_edition, column)),
+               "#{column} is nil on the confirmed edition — the union assertion is vacuous"
+      end
+    end
+
+    # The specific field the drift had already eaten (#341 requirement 2). The
+    # cost is not only a missing cross-reference: `verification_source_from/1`
+    # reads the identifiers off the row's attrs, so an edition that loses its
+    # `google_books_id` also loses its claim to have been verified at all.
+    @tag stories: ["US-1.1.5"]
+    test "the confirmed path keeps the google_books_id the resolver returned" do
+      isbn = "9780451524935"
+      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [google_volume(isbn)]}})
+
+      user = insert(:user)
+      assert {:ok, :created, book} = Books.confirm(user.id, %{isbn: isbn})
+
+      assert hd(book.editions).google_books_id == "gb-gatsby",
+             "the resolver returned a Google Books id and the create transaction dropped it"
+    end
+
+    # `ISBNResolver.resolve/1` RACES the two sources and returns whichever
+    # answered, so each provenance gets its own test with exactly one source
+    # able to answer. Registering both and confirming twice in one test makes
+    # the second confirm's provenance a coin flip.
+    @tag stories: ["US-1.1.5"]
+    test "verification_source is google_books when Google Books answered the confirm" do
+      isbn = "9780451524935"
+      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [google_volume(isbn)]}})
+
+      user = insert(:user)
+      assert {:ok, :created, book} = Books.confirm(user.id, %{isbn: isbn})
+      assert hd(book.editions).verification_source == "google_books"
+    end
+
+    @tag stories: ["US-1.1.5"]
+    test "verification_source is open_library when Open Library answered the confirm" do
+      isbn = "9780743273565"
+      MockHttpClient.put_response("googleapis.com", {:ok, %{}})
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok, %{"ISBN:#{isbn}" => open_library_book()}}
+      )
+
+      user = insert(:user)
+      assert {:ok, :created, book} = Books.confirm(user.id, %{isbn: isbn})
+      assert hd(book.editions).verification_source == "open_library"
+    end
+
+    @tag suite: :events
+    test "each entry point still emits its own event" do
+      created_before = event_count("book.created")
+      confirmed_before = event_count("books.confirmed")
+
+      isbn = "9780451524935"
+      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [google_volume(isbn)]}})
+
+      assert {:ok, _} = Books.create(%{"isbn" => "9780743273565", "title" => "Direct"})
+      user = insert(:user)
+      assert {:ok, :created, _} = Books.confirm(user.id, %{isbn: isbn})
+
+      assert event_count("book.created") == created_before + 1
+      assert event_count("books.confirmed") == confirmed_before + 1
+    end
+
+    defp google_volume(isbn) do
+      %{
+        "id" => "gb-gatsby",
+        "volumeInfo" => %{
+          "title" => "The Great Gatsby",
+          "authors" => ["F. Scott Fitzgerald"],
+          "description" => "A novel.",
+          "categories" => ["Fiction"],
+          "imageLinks" => %{"thumbnail" => "http://books.google.com/cover.jpg"},
+          "publisher" => "Scribner",
+          "publishedDate" => "1925-04-10",
+          "pageCount" => 180,
+          "industryIdentifiers" => [%{"type" => "ISBN_13", "identifier" => isbn}]
+        }
+      }
+    end
+
+    defp open_library_book do
+      %{
+        "title" => "Nineteen Eighty-Four",
+        "authors" => [%{"name" => "George Orwell"}],
+        "publishers" => [%{"name" => "Secker & Warburg"}],
+        "cover" => %{"large" => "https://covers.openlibrary.org/b/id/1-L.jpg"},
+        "publish_date" => "1949",
+        "number_of_pages" => 328,
+        "subjects" => [],
+        "key" => "/books/OL7353617M"
+      }
+    end
+  end
+
   describe "merge_edition/2" do
     setup do
       # Seed mock responses so ISBNResolver.resolve/1 succeeds for test ISBNs
@@ -939,6 +1185,79 @@ defmodule Stacks.BooksTest do
       Books.merge_edition(book.id, %{isbn: "9780451524935", format_label: "Paperback"})
 
       assert event_count("books.edition_merged") == before_count + 1
+    end
+
+    # #341 requirement 3. `merge_edition/2` resolves the ISBN — an Open Library /
+    # Google Books round-trip the platform pays for — and then wrote only the
+    # ISBN, the work id, the caller's format label and the provenance, throwing
+    # every resolved field away. The merged edition had no cover, no publisher,
+    # no page count and no cross-reference id, and nothing downstream could tell
+    # "this edition has no publisher" from "nobody ever asked".
+    @tag stories: ["US-1.1.8"]
+    test "keeps the metadata it just resolved instead of discarding it" do
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
+      merged_isbn = "9780316769174"
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:#{merged_isbn}" => %{
+             "title" => "The Catcher in the Rye",
+             "authors" => [%{"name" => "J.D. Salinger"}],
+             "publishers" => [%{"name" => "Little, Brown"}],
+             "cover" => %{"large" => "https://covers.openlibrary.org/b/id/2-L.jpg"},
+             "publish_date" => "1951",
+             "number_of_pages" => 277,
+             "subjects" => [],
+             "key" => "/books/OL15290M"
+           }
+         }}
+      )
+
+      assert {:ok, edition} =
+               Books.merge_edition(book.id, %{isbn: merged_isbn, format_label: "Hardcover"})
+
+      assert edition.cover_image_url == "https://covers.openlibrary.org/b/id/2-L.jpg"
+      assert edition.publisher == "Little, Brown"
+      assert edition.publication_year == 1951
+      assert edition.page_count == 277
+      assert edition.open_library_id == "/books/OL15290M"
+      assert edition.verification_source == "open_library"
+    end
+
+    # The stated conflict rule: the caller supplies `isbn` and `format_label`
+    # (the endpoint's documented contract) and the resolver fills the rest. A
+    # caller-supplied `publisher` is NOT honoured — `BookController.merge_format/2`
+    # hands `merge_edition/2` the raw request params, so widening the
+    # caller-wins set would turn `POST /api/books/:id/merge-format` into mass
+    # assignment over the edition's provenance columns.
+    @tag stories: ["US-1.1.8"]
+    test "the caller's format_label wins; the rest of the row comes from the resolver" do
+      book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
+
+      assert {:ok, edition} =
+               Books.merge_edition(book.id, %{
+                 isbn: "9780451524935",
+                 format_label: "Slipcased",
+                 publisher: "Not The Caller's To Set",
+                 google_books_id: "not-the-callers-to-set"
+               })
+
+      assert edition.format_label == "Slipcased"
+
+      # The resolver's answer for this ISBN, filled in: 328 pages, Open Library key.
+      assert edition.page_count == 328
+      assert edition.open_library_id == "/works/OL1168007W"
+      assert edition.verification_source == "open_library"
+
+      # Open Library carried no publisher and no Google Books id for this ISBN,
+      # so both columns stay null — the caller's values did not land.
+      assert is_nil(edition.publisher),
+             "a caller-supplied publisher reached the row — merge_format/2's raw params are user input"
+
+      assert is_nil(edition.google_books_id),
+             "a caller-supplied google_books_id reached the row — that column records provenance"
     end
 
     @tag stories: ["US-1.1.8"], suite: :events
