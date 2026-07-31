@@ -138,6 +138,52 @@ defmodule Stacks.Workers.EnrichBookJobTest do
       assert Repo.get!(Book, book.id).title == "Pride and Prejudice"
     end
 
+    test "enrichment stores the cross-reference id its provenance claim is read off (#346)" do
+      # The other half of #346. The fast path resolves no metadata, so
+      # `Moderation.build_book_attrs/4` has no identifier to hand the create —
+      # THIS job is the OL/GB round-trip for those rows. It wrote the
+      # `verification_source` claim above while dropping the two ids that claim
+      # is derived from, so a fast-path edition ended up saying "open_library"
+      # with `open_library_id` NULL: the claim and its evidence stored apart,
+      # and only the claim ever asserted.
+      isbn = "9780141439518"
+
+      {:ok, book} =
+        Books.create(%{
+          "isbn" => isbn,
+          "title" => "ISBN #{isbn}",
+          "verification_source" => "barcode_unverified",
+          "visibility_tier" => "public"
+        })
+
+      edition = hd(book.editions)
+
+      assert is_nil(edition.open_library_id),
+             "precondition: the fast path had no identifier to write"
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:#{isbn}" => %{
+             "title" => "Pride and Prejudice",
+             "authors" => [%{"name" => "Jane Austen"}],
+             "key" => "/books/OL24236411M"
+           }
+         }}
+      )
+
+      assert :ok = perform_job(EnrichBookJob, %{"isbn" => isbn})
+
+      reloaded = Repo.get!(Stacks.Books.BookEdition, edition.id)
+
+      assert reloaded.open_library_id == "/books/OL24236411M",
+             "enrichment resolved the ISBN and threw the cross-reference away"
+
+      assert reloaded.verification_source == "open_library",
+             "the claim and the id it is read off must land on the row together"
+    end
+
     test "no-ops when book row for the ISBN doesn't exist" do
       # No book seeded — worker should log + succeed, not crash.
       assert :ok = perform_job(EnrichBookJob, %{"isbn" => "9780000000000"})

@@ -96,6 +96,91 @@ defmodule Stacks.ModerationTest do
     end
   end
 
+  # The assertion whose absence let #346 live: nothing on the upload path ever
+  # looked at the identifier columns. `build_book_attrs/4` resolved an ISBN and
+  # then built a create-attrs map with neither `open_library_id` nor
+  # `google_books_id` in it, so the round-trip the platform had just paid for was
+  # thrown away between the resolver and `Books.edition_attrs/2` — the one place
+  # (#341) that persists them. Every edition minted from an upload lost them:
+  # 40 of 40 rows in production at the time of the fix.
+  #
+  # It produced no symptom because `verification_source` was stated explicitly
+  # rather than derived, so the row could claim "open_library" while the column
+  # that claim is read off sat NULL. These tests assert the claim and its
+  # evidence together, which is the pairing that cannot be true by halves.
+  describe "run_pipeline/1 — the resolver's cross-reference ids reach the row (#346)" do
+    test "an Open Library hit stores open_library_id, and the provenance agrees" do
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:9780743273565" => %{
+             "title" => "The Great Gatsby",
+             "authors" => [%{"name" => "F. Scott Fitzgerald"}],
+             "key" => "/books/OL7353617M"
+           }
+         }}
+      )
+
+      assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
+      edition = hd(book.editions)
+
+      assert edition.open_library_id == "/books/OL7353617M",
+             "the upload path dropped the Open Library id it had just been handed"
+
+      assert edition.verification_source == "open_library",
+             "provenance must be derived from the id on the row, not asserted beside it"
+    end
+
+    test "a Google Books hit stores google_books_id, and the provenance agrees" do
+      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
+
+      MockHttpClient.put_response(
+        "googleapis.com",
+        {:ok,
+         %{
+           "items" => [
+             %{
+               "id" => "gb-gatsby",
+               "volumeInfo" => %{
+                 "title" => "The Great Gatsby",
+                 "authors" => ["F. Scott Fitzgerald"]
+               }
+             }
+           ]
+         }}
+      )
+
+      assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
+      edition = hd(book.editions)
+
+      assert edition.google_books_id == "gb-gatsby",
+             "the upload path dropped the Google Books id it had just been handed"
+
+      assert is_nil(edition.open_library_id),
+             "Open Library did not answer — it must not be credited with one"
+
+      assert edition.verification_source == "google_books"
+    end
+
+    test "the barcode fast path still records that nothing external confirmed it" do
+      # The negative control for the change above. Deriving provenance from the
+      # identifiers is only safe while the one case that has none — a barcode
+      # scan whose external lookup was deliberately SKIPPED — keeps saying so
+      # explicitly. Both must hold at once, which is why they are asserted
+      # together on the same row.
+      with_vision(local_ocr(), fn ->
+        assert {:ok, %{resolved: [book]}} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
+        edition = hd(book.editions)
+
+        assert is_nil(edition.open_library_id) and is_nil(edition.google_books_id),
+               "the fast path resolves no metadata, so it has no id to claim"
+
+        assert edition.verification_source == "barcode_unverified"
+      end)
+    end
+  end
+
   describe "run_pipeline/1 — not_a_book path" do
     test "returns {:error, :not_a_book} when vision model says it is not a book" do
       with_vision(not_a_book(), fn ->
