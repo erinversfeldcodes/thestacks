@@ -26,6 +26,46 @@ enum AssociationStatus {
   ASSOCIATION_STATUS_REJECTED = 2;
 }
 
+// Why a request to the vision service could not be answered.
+//
+// Every value here names a DETERMINISTIC failure: the same bytes sent again
+// produce the same answer, so the caller must stop rather than retry. That is
+// the whole reason the enum exists. Before it, a corrupt upload and a Modal
+// cold-start timeout were both "the vision call failed", and Oban spent three
+// GPU attempts re-proving that a JPEG header is still not a JPEG header.
+//
+// Transient faults deliberately have NO value here. They are carried by the
+// HTTP status alone (5xx, a refused connection, a blown breaker) and stay
+// retryable. Adding a transient value to this enum would be a category error:
+// `Stacks.AI.VisionError` maps every value below to a cancel.
+enum VisionErrorCode {
+  // Zero value — unset. Never sent deliberately; a response carrying it is
+  // treated as an unrecognised code, which is retryable and counted.
+  VISION_ERROR_CODE_UNSPECIFIED = 0;
+  // The bytes are not a decodable image — invalid base64, a truncated file,
+  // or a format the service cannot open.
+  VISION_ERROR_CODE_UNDECODABLE_IMAGE = 1;
+  // The image decoded but exceeds the service's size ceiling.
+  VISION_ERROR_CODE_IMAGE_TOO_LARGE = 2;
+  // The `image_url` could not be fetched: a non-200 from storage, a redirect
+  // (never followed — SSRF guard), or a body over the download cap. The
+  // presigned URL in hand will not start working within one job's lifetime.
+  VISION_ERROR_CODE_IMAGE_UNREACHABLE = 3;
+  // Neither `image` nor `image_url` was supplied. A malformed request from
+  // core; retrying sends the identical malformed request.
+  VISION_ERROR_CODE_NO_IMAGE_SUPPLIED = 4;
+}
+
+// Error body returned by any vision endpoint that fails deterministically.
+// Replaces FastAPI's default `{"detail": "<prose>"}` for these cases so the
+// caller branches on a value from a closed set rather than parsing English.
+message VisionError {
+  // Which deterministic failure occurred; see VisionErrorCode.
+  VisionErrorCode code = 1 [json_name = "code"];
+  // Human-readable detail, for logs and operator eyes. NEVER parsed.
+  string message = 2 [json_name = "message"];
+}
+
 // POST /classify — determine if an image contains a book cover.
 message ClassifyRequest {
   // Base64-encoded image OR URL — mutually exclusive; exactly one must be set.

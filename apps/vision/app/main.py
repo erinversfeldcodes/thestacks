@@ -11,7 +11,9 @@ from contextlib import asynccontextmanager
 import httpx
 import structlog
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from PIL import Image
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.proto.gen.vision import (
@@ -115,6 +117,45 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="The Stacks Vision Service", version="0.1.0", lifespan=lifespan, debug=False)
 
 
+# Proto VisionErrorCode enum string values (wire format for VisionError.code).
+#
+# These name failures that are DETERMINISTIC: the same request repeated produces
+# the same answer. The caller (`Stacks.AI.VisionError`) cancels the upload on
+# any of them instead of retrying, which is the whole reason they are labelled.
+# A transient fault must NOT be given a code here — it is carried by the HTTP
+# status alone and stays retryable.
+_ERR_UNDECODABLE_IMAGE = "VISION_ERROR_CODE_UNDECODABLE_IMAGE"
+_ERR_IMAGE_TOO_LARGE = "VISION_ERROR_CODE_IMAGE_TOO_LARGE"
+_ERR_IMAGE_UNREACHABLE = "VISION_ERROR_CODE_IMAGE_UNREACHABLE"
+_ERR_NO_IMAGE_SUPPLIED = "VISION_ERROR_CODE_NO_IMAGE_SUPPLIED"
+
+
+def _vision_error(code: str, message: str, status_code: int = 422) -> HTTPException:
+    """Build a deterministic-failure response carrying a `VisionError` body.
+
+    The structured detail is unwrapped to the top level by the handler below, so
+    the body on the wire is exactly `{"code": ..., "message": ...}` — the JSON
+    encoding of the proto message. Callers branch on `code`; `message` is for
+    logs and human eyes and is never parsed.
+    """
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Render `_vision_error` details as a bare `VisionError`, everything else as
+    FastAPI would.
+
+    Auth failures, validation errors raised elsewhere, and anything else with a
+    string detail keep the default `{"detail": "..."}` shape — they are not
+    determinations about an image, and giving them a code would tell the caller
+    to stop retrying something it should retry.
+    """
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 @app.get("/health", status_code=200)
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "vision", "environment": settings.environment}
@@ -128,21 +169,23 @@ async def _download_image(image_url: str) -> bytes:
         client.stream("GET", image_url) as resp,
     ):
         if resp.status_code in (301, 302, 303, 307, 308):
-            detail = f"Image URL redirected (HTTP {resp.status_code}); redirects not permitted"
-            raise HTTPException(status_code=422, detail=detail)
+            raise _vision_error(
+                _ERR_IMAGE_UNREACHABLE,
+                f"Image URL redirected (HTTP {resp.status_code}); redirects not permitted",
+            )
         if resp.status_code != 200:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Failed to download image from URL: HTTP {resp.status_code}",
+            raise _vision_error(
+                _ERR_IMAGE_UNREACHABLE,
+                f"Failed to download image from URL: HTTP {resp.status_code}",
             )
         chunks: list[bytes] = []
         total = 0
         async for chunk in resp.aiter_bytes(chunk_size=65536):
             total += len(chunk)
             if total > _MAX_DOWNLOAD_BYTES:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Image URL exceeds max size of {_MAX_DOWNLOAD_BYTES} bytes",
+                raise _vision_error(
+                    _ERR_IMAGE_TOO_LARGE,
+                    f"Image URL exceeds max size of {_MAX_DOWNLOAD_BYTES} bytes",
                 )
             chunks.append(chunk)
     return b"".join(chunks)
@@ -246,11 +289,11 @@ async def extract(request: Request, body: ExtractRequest) -> ExtractResponse:
 
     # Mutual exclusion and size guard (proto carries no constraints; enforce here).
     if body.images and body.image_url is not None:
-        raise HTTPException(
-            status_code=422, detail="Provide either 'images' or 'image_url', not both"
+        raise _vision_error(
+            _ERR_NO_IMAGE_SUPPLIED, "Provide either 'images' or 'image_url', not both"
         )
     if len(body.images) > 3:
-        raise HTTPException(status_code=422, detail="'images' must contain at most 3 items")
+        raise _vision_error(_ERR_NO_IMAGE_SUPPLIED, "'images' must contain at most 3 items")
 
     # --- image_url path ---
     if body.image_url is not None:
@@ -386,17 +429,17 @@ async def _load_image_b64(
         image_bytes = await _download_image(image_url)
         return base64.b64encode(image_bytes).decode()
     if image is None:
-        raise HTTPException(
-            status_code=422, detail="Either 'image' or 'image_url' must be provided"
+        raise _vision_error(
+            _ERR_NO_IMAGE_SUPPLIED, "Either 'image' or 'image_url' must be provided"
         )
     try:
         decoded = base64.b64decode(image, validate=True)
     except Exception as exc:
-        raise HTTPException(status_code=422, detail="Image is not valid base64") from exc
+        raise _vision_error(_ERR_UNDECODABLE_IMAGE, "Image is not valid base64") from exc
     if len(decoded) > settings.max_image_size_bytes:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
+        raise _vision_error(
+            _ERR_IMAGE_TOO_LARGE,
+            f"Image exceeds max size of {settings.max_image_size_bytes} bytes",
         )
     return image
 
