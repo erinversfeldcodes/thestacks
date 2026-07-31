@@ -255,6 +255,11 @@
           "title": "Operationalise owner-facilitated data correction (dry-run, idempotent, audited) \u2014 generalises the pattern #339 built; 7c's un-merge process is its first consumer",
           "status": "not_started",
           "issue": 340
+        },
+        "7e": {
+          "title": "VERIFY #349: drive a real upload on the Wave 7 preview, then confirm the vision-latency series ARRIVES in VictoriaMetrics and record p50/p95/p99 (the input to #350). Rides on 7b, which drives the vision path anyway.",
+          "status": "not_started",
+          "issue": 349
         }
       }
     },
@@ -377,6 +382,7 @@
     "Manual-ISBN preview: ACCEPT the loss of the \"We think this is\u2026\" step on the manual path (no resolve-without-create endpoint exists). Ship as built; cover a wrong add with the Wave 7 undo affordance rather than adding GET /api/books/resolve. Consistent with inform-never-block: act, then make it trivially reversible.",
     "#351 policy SETTLED: option (b) \u2014 the reader is never held hostage to the upload page. Identification is asynchronous (reader free to leave); confirmation + shelf choice stay synchronous and human. Verbatim: \"a user should never be held hostage to a page and incorrect classifications should never end up on shelves they are not intended for\".",
     "#351 surface: an inbox accessible from the upload page itself; a notification count on the Add Book nav marker. Add Book STAYS inside the Catalogue dropdown \u2014 \"we don't need to render it outside of the drop down, it can remain low-but-easy-visibility\". So #351 does NOT depend on Wave 8 nav work, needs NO email/consent column, and needs NO image.resolved subscriber (the count is a query).",
-    "#349 \u2192 #350 \u2192 re-read retry frequency \u2192 then size #351. Measure before building a retry UI for retries that should not be happening."
+    "#349 \u2192 #350 \u2192 re-read retry frequency \u2192 then size #351. Measure before building a retry UI for retries that should not be happening.",
+    "#349 verification scheduled into Wave 7 as 7e, riding on 7b (upload failure UX) since that wave drives the vision path regardless. Wave 6 is session UX and touches no uploads."
   ]
 }

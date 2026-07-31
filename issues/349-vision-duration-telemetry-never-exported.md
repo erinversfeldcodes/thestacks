@@ -99,3 +99,17 @@ sum(rate(stacks_vision_request_stop_duration_milliseconds_bucket{app="thestacks-
 **⚠️ Finding worth carrying into #350 — the timeout tail is invisible by construction.** A call that actually reaches the 210s deadline emits `[:stacks, :vision, :request, :exception]`, not `:stop`, so it contributes **no duration sample**. The p50/p95/p99 this exports are therefore *conditional on having received an HTTP response* and structurally under-report the true tail. **#350 must not size a timeout from this histogram alone** — the count of 210s give-ups has to come from an `:exception` counter that does not yet exist. Two further vision events remain emitted-and-unregistered (`[:stacks, :vision, :error]`, `[:stacks, :vision, :unknown_association_status]`), each one plugin entry.
 Probes: ceiling → 20_000 fails 2 tests; `event_name` → `:finish` fails 4. Suites: **3348/0**, observability surface 79/0, credo clean.
 **Outstanding: the series has not been observed arriving.** The lead will run the handed-over queries against the preview after a real upload before this is called done.
+
+## What remains unverified, and where it gets closed (lead, 2026-07-31)
+**Proven:** the metric is defined, classified `:public`, has a Grafana panel, and 9 unit tests emit the *real* event and read the series back out of `PromEx.get_metrics/1`. Mutation-probed two ways.
+
+**Not proven — one thing only: that a series ARRIVES in the store.** ADR-021 made the pipeline **push**, so registration in-process says nothing about delivery. #248 is the precedent: the whole observability stack once shipped structurally complete and blank.
+
+**Why the lead could not close it during the follow-ups drive.** Two access facts, both discovered rather than assumed: `/internal/metrics` is gated by `StacksWeb.Plugs.MetricsAuth` (`endpoint.ex:38-45`) and the preview carries **no `METRICS_SCRAPE_TOKEN` secret** — only `STACKS_METRICS_PUSH_URL`, which is consistent with push. And VictoriaMetrics sits on an internal address (`stacks-vm-pr-<branch>.flycast:8428`) unreachable from a laptop. Attempts to read the family off the running node via `core rpc` were lost to shell escaping; abandoned rather than half-done.
+
+**The three steps that close it** — all need a deployed preview with Modal available:
+1. Drive a **real photo upload** through the vision path, so `[:stacks, :vision, :request, :stop]` actually fires with a duration.
+2. Run the zero-series sweep, inverted: `count(stacks_vision_request_stop_duration_milliseconds_count{app="thestacks-core"})` — **non-zero is the acceptance test.**
+3. Read p50/p95/p99 and the `+Inf` saturation check (queries already recorded above). Easiest access is the preview Grafana (`stacks-grafana-pr-<branch>.fly.dev`, Upload pipeline row) — the panel rendering with real data *is* the proof; otherwise query VM from inside the Fly network.
+
+**Scheduled: Wave 7, riding on item 7b.** 7b is "Upload failure UX; 429 UX" — it drives the vision path anyway, so the upload that generates the sample is work that wave is doing regardless. No other wave before it touches uploads (Wave 6 is session UX). Recording the p50/p95/p99 there also unblocks **#350**, which must not size a timeout from this histogram alone: a call that reaches the 210s deadline emits `:exception`, not `:stop`, so the percentiles are conditional on having received a response and structurally under-report the tail.
