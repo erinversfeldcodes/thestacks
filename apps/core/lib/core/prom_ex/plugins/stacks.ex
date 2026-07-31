@@ -74,6 +74,43 @@ defmodule Core.PromEx.Plugins.Stacks do
     300_000
   ]
 
+  # Buckets for ONE Modal vision HTTP call (Issue #349). Chosen from the two
+  # written claims this histogram exists to test, not from round numbers:
+  #
+  #   * The ESTIMATE. The `@route_duration_buckets` note above puts upload's
+  #     real cost at "~3–8s (two sequential Modal vision calls + R2 upload +
+  #     DB writes)". 3_000 and 8_000 are therefore bucket EDGES here, so the
+  #     share of calls inside the claimed band is read straight off two bucket
+  #     counts with no interpolation — the estimate becomes falsifiable rather
+  #     than smoothed away.
+  #   * The CEILING. `Stacks.AI.Client.receive_timeout_ms/0` is 210_000: the
+  #     point the client hangs up. A slower call never reaches this event at
+  #     all (it exits via `[:stacks, :vision, :request, :exception]`), so a top
+  #     finite bucket AT the deadline makes `+Inf` structurally unreachable for
+  #     `:stop` — which is exactly what the 2026-04-20 incident above was: a
+  #     ceiling below the real tail left `+Inf` as the only bucket with counts,
+  #     the p95 fell back to `2 × max_finite_bucket`, and reported a flat,
+  #     false 10_000ms. A 20_000 ceiling here would reproduce that incident.
+  #
+  # `Core.PromEx.VisionLatencyTest` asserts the top bucket still equals the
+  # client's timeout, so retuning that timeout (Issue #350) cannot silently
+  # leave the histogram short of it.
+  @vision_duration_buckets [
+    100,
+    250,
+    500,
+    1_000,
+    2_000,
+    3_000,
+    5_000,
+    8_000,
+    15_000,
+    30_000,
+    60_000,
+    120_000,
+    210_000
+  ]
+
   @impl true
   def event_metrics(_opts) do
     [
@@ -163,6 +200,34 @@ defmodule Core.PromEx.Plugins.Stacks do
           event_name: [:stacks, :upload, :terminal],
           description: "Upload pipeline terminal outcomes (resolved/rejected/timeout).",
           tags: [:outcome]
+        ),
+
+        # ── Vision request latency (Issue #349) ───────────────────────
+        # Wall-clock for ONE Modal vision HTTP call. Emitted by
+        # `Stacks.AI.Client.make_vision_request/2` on both the 200 and the
+        # non-200 path — and, until now, consumed by nothing: the duration was
+        # measured and never left the BEAM, so every timeout in the upload path
+        # was sized from an estimate in a comment (Issues #350, #351).
+        #
+        # `endpoint` ∈ is_book|extract_isbn|analyze|associate (the fixed set
+        # `Stacks.AI.Client.endpoint_path/1` accepts — an unknown value raises
+        # there, so this label cannot be widened by user input) and `status` is
+        # the HTTP status integer. Both are bounded and neither is derived from
+        # an upload: no ISBN, title, filename, image or user id reaches a label
+        # (GDPR: telemetry is warehouse-adjacent). The `:exception` path carries
+        # an unbounded `reason` term and is deliberately NOT registered here.
+        #
+        # Exported as
+        # `stacks_vision_request_stop_duration_milliseconds_{bucket,sum,count}`.
+        distribution(
+          [:stacks, :vision, :request, :stop, :duration, :milliseconds],
+          event_name: [:stacks, :vision, :request, :stop],
+          measurement: :duration,
+          unit: {:native, :millisecond},
+          description:
+            "Per-call Modal vision request latency (ms), by endpoint and HTTP status — the distribution timeouts are sized from.",
+          tags: [:endpoint, :status],
+          reporter_options: [buckets: @vision_duration_buckets]
         ),
 
         # ── Route-dispatch latency by route group ─────────────────────
