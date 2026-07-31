@@ -17,6 +17,9 @@ module Api exposing
     , BookDetailResponse
     , CatalogueResponse
     , CollectionHit
+    , ConfirmError(..)
+    , ConfirmOutcome(..)
+    , ConfirmResponse
     , Deanonymisation
     , InterestProfile
     , ListingParams
@@ -68,6 +71,8 @@ module Api exposing
     , commitUpload
     , completeOnboardingStep
     , confirmAssociation
+    , confirmBook
+    , confirmResponseToResult
     , createBlogPost
     , createComment
     , createGroup
@@ -115,7 +120,6 @@ module Api exposing
     , listBlockedUsers
     , login
     , logout
-    , lookupByIsbn
     , mergeFormat
     , mergeFormatResponseDecoder
     , moveBook
@@ -1772,20 +1776,177 @@ placementsMineDecoder =
         |> Decode.map (List.map fromProtoPlacementSummary)
 
 
-{-| GET /api/books/isbn/:isbn — look up a book by ISBN.
+{-| Which of `Books.confirm/2`'s branches answered (#343).
+
+The verb is one round trip that resolves the ISBN, creates the work and its
+primary edition if the platform has never seen it, and places it — so the
+outcome is not derivable from "did it 2xx". `source` carries it on the wire:
+absent on the created branch, `"catalogue"` when the work already existed and
+this request placed it, `"collection"` when it was already on the requested
+bookshelf and nothing changed.
+
 -}
-lookupByIsbn :
-    String
+type ConfirmOutcome
+    = ConfirmCreated
+    | ConfirmPlacedFromCatalogue
+    | ConfirmAlreadyPlaced
+
+
+{-| Response body of `POST /api/books/confirm`.
+
+`placements` is EVERY active placement the reader now has of this book, oldest
+first; `placement` is the one this request produced or matched. The difference
+between the two is the duplicate notice — informational, never blocking (owner
+ruling 2026-07-30).
+
+-}
+type alias ConfirmResponse =
+    { book : Book
+    , placement : Maybe Placement
+    , placements : List Placement
+    , outcome : ConfirmOutcome
+    }
+
+
+{-| A confirm failure the page has to tell apart.
+
+`ConfirmMergeRequired` is the 409: the resolved title+author fuzzy-matched an
+existing work (`Books.find_same_work/2`, Jaro-Winkler > 0.8), so the server
+refused to mint a second work and named the one to merge into. It is the
+US-1.1.8 prompt's trigger, not an error to show as "something went wrong" —
+collapsing it into `Http.BadStatus 409` is what would lose it.
+
+-}
+type ConfirmError
+    = ConfirmMergeRequired String
+    | ConfirmIsbnNotFound
+    | ConfirmHttpError Http.Error
+
+
+{-| Pure request → result mapping, so the elm-program-test simulated effect
+reuses the exact mapping the real `Cmd` does (mirrors `placeResponseToResult`).
+-}
+confirmResponseToResult : Http.Response String -> Result ConfirmError ConfirmResponse
+confirmResponseToResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (ConfirmHttpError (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (ConfirmHttpError Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (ConfirmHttpError Http.NetworkError)
+
+        Http.BadStatus_ metadata bodyText ->
+            Err (confirmErrorFromBody metadata.statusCode bodyText)
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString confirmResponseDecoder bodyText of
+                Ok confirmed ->
+                    Ok confirmed
+
+                Err err ->
+                    Err (ConfirmHttpError (Http.BadBody (Decode.errorToString err)))
+
+
+confirmErrorFromBody : Int -> String -> ConfirmError
+confirmErrorFromBody statusCode bodyText =
+    let
+        errorCode =
+            Decode.decodeString (Decode.field "error" Decode.string) bodyText
+
+        workId =
+            Decode.decodeString (Decode.field "work_id" Decode.string) bodyText
+    in
+    case ( statusCode, errorCode, workId ) of
+        ( 409, Ok "merge_required", Ok id ) ->
+            ConfirmMergeRequired id
+
+        ( 422, Ok "isbn_not_found", _ ) ->
+            ConfirmIsbnNotFound
+
+        _ ->
+            ConfirmHttpError (Http.BadStatus statusCode)
+
+
+{-| Adapter: the `BookConfirmResponse` wire shape → the app-level record.
+
+Hand-rolled over the app-level `bookDecoder` / `placementDecoder` for the same
+reason `bookDetailResponseDecoder` is: the proto-generated placement decoder
+turns a JSON `null` into a default struct rather than `Nothing`.
+
+-}
+confirmResponseDecoder : Decoder ConfirmResponse
+confirmResponseDecoder =
+    Decode.map4 ConfirmResponse
+        (Decode.field "book" bookDecoder)
+        (Decode.oneOf
+            [ Decode.field "placement" (Decode.nullable placementDecoder)
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "placements" (Decode.list placementDecoder)
+            , Decode.succeed []
+            ]
+        )
+        (Decode.map confirmOutcomeFromSource
+            (Decode.oneOf
+                [ Decode.field "source" Decode.string
+                , Decode.succeed ""
+                ]
+            )
+        )
+
+
+confirmOutcomeFromSource : String -> ConfirmOutcome
+confirmOutcomeFromSource source =
+    case source of
+        "catalogue" ->
+            ConfirmPlacedFromCatalogue
+
+        "collection" ->
+            ConfirmAlreadyPlaced
+
+        _ ->
+            ConfirmCreated
+
+
+{-| POST /api/books/confirm — the manual-entry verb (#343).
+
+One round trip does the whole of "add this ISBN to that bookshelf": resolve it
+against Open Library / Google Books, create the work and primary edition if the
+platform has never seen the ISBN, refuse (409) if it is a second edition of a
+work we already hold, and place it — atomically. The client used to reassemble
+this out of `GET /api/books/isbn/:isbn` plus
+`POST /api/bookshelves/:name/placements`, which could only ever add books the
+catalogue already had.
+
+The body is encoded inline rather than through `Stacks.Api.V1.Requests` because
+no `ConfirmBookRequest` message exists in `proto/stacks/api/v1/requests.proto`
+(the endpoint predates it and the controller reads raw params) — same as
+`setBookAgeGate`.
+
+-}
+confirmBook :
+    { isbn : String, shelfName : String }
     -> String
-    -> (Result Http.Error BookDetailResponse -> msg)
+    -> (Result ConfirmError ConfirmResponse -> msg)
     -> Cmd msg
-lookupByIsbn isbn token toMsg =
+confirmBook body token toMsg =
     Http.request
-        { method = "GET"
+        { method = "POST"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/isbn/" ++ isbn
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg bookDetailResponseDecoder
+        , url = baseUrl ++ "/api/books/confirm"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "isbn", Encode.string body.isbn )
+                    , ( "shelf_name", Encode.string body.shelfName )
+                    ]
+                )
+        , expect = Http.expectStringResponse toMsg confirmResponseToResult
         , timeout = Nothing
         , tracker = Nothing
         }

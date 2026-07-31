@@ -452,7 +452,7 @@ defmodule StacksWeb.BookControllerTest do
         conn =
           conn
           |> auth_conn(user)
-          |> post("/api/books/confirm", %{"isbn" => "9780451524935"})
+          |> post("/api/books/confirm", %{"isbn" => "9780451524935", "shelf_name" => "library"})
 
         # ⚠️ This was `assert conn.status in [201, 409]` with the comment
         # "accept 201 (new book created) or 409 (merge required — unlikely with
@@ -469,8 +469,19 @@ defmodule StacksWeb.BookControllerTest do
         # then hedged anyway.
         assert conn.status == 201
 
-        assert %{"book" => book} = json_response(conn, 201)
+        assert %{"book" => book, "placement" => placement, "placements" => placements} =
+                 json_response(conn, 201)
+
         assert book["title"] == "Confirm Test Book"
+
+        # The manual-entry path (#343) has no separate "now file it" call to
+        # fall back on — `confirm/2` creates the work, its primary edition and
+        # the placement in one transaction, so a 201 that resolved the metadata
+        # but placed nothing (or placed it on the default bookshelf rather than
+        # the requested one) would leave the reader's add silently half-done.
+        assert placement["bookshelf_name"] == "library"
+        assert Enum.map(placements, & &1["bookshelf_name"]) == ["library"]
+        assert book["primary_edition"]["isbn"] == "9780451524935"
       after
         Application.put_env(:core, :isbn_http_client, original)
       end
@@ -508,6 +519,8 @@ defmodule StacksWeb.BookControllerTest do
           }
         })
 
+        works_before = Core.Repo.aggregate(Stacks.Books.Book, :count)
+
         conn =
           conn
           |> auth_conn(user)
@@ -515,6 +528,20 @@ defmodule StacksWeb.BookControllerTest do
 
         assert %{"error" => "merge_required", "work_id" => work_id} = json_response(conn, 409)
         assert work_id == book.id
+
+        # W-13 (the two-Name-of-the-Rose defect) in its regression form. The
+        # 409 alone only proves the endpoint said "merge"; what the campaign
+        # found live was a SECOND work sitting in the catalogue next to the
+        # first. `merge_required` has to be a refusal, not a warning issued on
+        # the way to creating one anyway.
+        assert Core.Repo.aggregate(Stacks.Books.Book, :count) == works_before
+
+        # …and no edition was quietly attached either: merging is the client's
+        # next call (`POST /api/books/:id/merge-format`), not a side effect of
+        # being told to merge.
+        refute Core.Repo.exists?(
+                 from(e in Stacks.Books.BookEdition, where: e.isbn == "9780451524935")
+               )
       after
         Application.put_env(:core, :isbn_http_client, original)
       end

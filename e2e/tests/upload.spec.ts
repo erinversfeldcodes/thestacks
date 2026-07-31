@@ -137,10 +137,13 @@ test.describe("Upload pipeline — non-book rejection", () => {
 
 test.describe("Upload pipeline — ISBN not found", () => {
   test(
-    "nonexistent ISBN-13 with valid checksum returns Book not found",
+    "nonexistent ISBN-13 with valid checksum is refused by the ISBN hard gate",
     async ({ page }) => {
-      // 9780000000019 has a valid ISBN-13 checksum but does not exist in any
-      // catalogue, so the backend hard gate returns 404 and the UI rejects it.
+      // 9780000000019 has a valid ISBN-13 checksum but exists in no external
+      // catalogue, so `ISBNResolver.resolve/1` finds nothing and the hard gate
+      // refuses it. This is the ONLY case in which the manual path may say
+      // "check the number" — before #343 it said it for every valid ISBN the
+      // platform had not already stored, which is the opposite of a hard gate.
       test.setTimeout(30_000);
 
       await page.goto("/upload");
@@ -153,7 +156,9 @@ test.describe("Upload pipeline — ISBN not found", () => {
       await isbnInput.fill("9780000000019");
       await page.getByTestId("upload-manual-isbn-submit").click();
 
-      await expect(page.getByText("Book not found")).toBeVisible({
+      await expect(
+        page.getByText("We couldn't find a book with that ISBN")
+      ).toBeVisible({
         timeout: 15_000,
       });
     }
@@ -528,7 +533,12 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
 
   // Real internal DB lookup — uses a seeded book so no external API dependency.
   // 0061470767 = The Dispossessed by Ursula K. Le Guin (seeded in all environments).
-  test("valid ISBN-10 resolves to real book in verify view", async ({ page }) => {
+  //
+  // #343: the manual path is one hop through POST /api/books/confirm, which
+  // resolves, creates if needed, and places — so the terminal screen is the
+  // completion card, not the "We think this is…" verification the photo path
+  // shows (a vision model guessed there; here the reader typed the ISBN).
+  test("valid ISBN-10 is added to the chosen bookshelf", async ({ page }) => {
     test.setTimeout(15_000);
 
     await page.goto("/upload");
@@ -536,17 +546,19 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
 
     const isbnInput = page.getByTestId("upload-manual-isbn-input");
     await isbnInput.fill("0061470767");
+    await page.getByRole("button", { name: "Antilibrary" }).click();
     await page.getByTestId("upload-manual-isbn-submit").click();
 
-    await expect(page.getByTestId("upload-verify")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("upload-verify")).toContainText(/Dispossessed|Le Guin/i);
-    await expect(page.getByTestId("upload-confirm-btn")).toBeVisible();
-    await expect(page.getByTestId("upload-reject-btn")).toBeVisible();
+    const complete = page.getByTestId("upload-complete");
+    await expect(complete).toBeVisible({ timeout: 10_000 });
+    await expect(complete).toContainText(/Dispossessed/i);
+    await expect(complete).toContainText(/Antilibrary/i);
+    await expect(page.getByRole("button", { name: "View on shelf" })).toBeVisible();
   });
 
   // Same book, ISBN-13 format — verifies both input formats are accepted end-to-end.
   // 9780061470769 = The Dispossessed ISBN-13 (seeded).
-  test("valid ISBN-13 resolves to real book in verify view", async ({ page }) => {
+  test("valid ISBN-13 is added to the chosen bookshelf", async ({ page }) => {
     test.setTimeout(15_000);
 
     await page.goto("/upload");
@@ -556,8 +568,8 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
     await isbnInput.fill("9780061470769");
     await page.getByTestId("upload-manual-isbn-submit").click();
 
-    await expect(page.getByTestId("upload-verify")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("upload-verify")).toContainText(/Dispossessed|Le Guin/i);
+    await expect(page.getByTestId("upload-complete")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("upload-complete")).toContainText(/Dispossessed/i);
   });
 
   // Full recovery flow: real non-book image triggers rejection, then the user
@@ -593,11 +605,11 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
       await page.getByTestId("upload-manual-isbn-input").fill("9780061470769");
       await page.getByTestId("upload-manual-isbn-submit").click();
 
-      await expect(page.getByTestId("upload-verify")).toBeVisible({
+      await expect(page.getByTestId("upload-complete")).toBeVisible({
         timeout: 10_000,
       });
-      await expect(page.getByTestId("upload-verify")).toContainText(
-        /Dispossessed|Le Guin/i
+      await expect(page.getByTestId("upload-complete")).toContainText(
+        /Dispossessed/i
       );
     }
   );

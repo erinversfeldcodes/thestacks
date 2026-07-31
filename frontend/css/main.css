@@ -1529,10 +1529,14 @@ h4 {
     flex-shrink: 0;
 }
 
-/* -- Manual-ISBN "already yours" notice (#333) --
+/* -- "Already yours" notice (#333, extended #343) --
    Informational, never blocking: an aside above the confirm buttons, in the
-   same muted register as the other upload hints, with nothing disabled. */
+   same muted register as the other upload hints, with nothing disabled. Two
+   surfaces carry it — the verify step (photo path, before the placement) and
+   the completion card (manual path, where the one-shot confirm verb only
+   reports the other bookshelves once the placement is done). */
 
+.upload-complete__already-yours,
 .upload-verify__already-yours {
     font-family: var(--font-body);
     font-size: var(--size-sm);
