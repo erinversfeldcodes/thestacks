@@ -17,6 +17,12 @@ apps/core/tmp/
 # Elm
 elm-stuff/
 frontend/elm.js
+# `elm make src/Main.elm --output=index.html` output — a self-contained dev page
+# that embeds its own compiled JS. Nothing serves it: the SPA shell is
+# apps/core/assets/index.html, copied to priv/static by apps/core/assets/build.js
+# and sent by CoreWeb.PageController. It was tracked until #348, where a 39,680-line
+# stale copy still carrying code deleted by #343 was poisoning repo-wide greps.
+frontend/index.html
 frontend/node_modules/
 
 # Rust
