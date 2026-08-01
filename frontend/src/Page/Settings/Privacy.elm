@@ -9,6 +9,7 @@ module Page.Settings.Privacy exposing
     )
 
 import Api
+import Components.SaveButton as SaveButton
 import Html exposing (Html, button, div, h1, h2, input, label, option, p, select, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
@@ -445,7 +446,7 @@ view model =
                     ]
                 ]
             , div [ class "settings-actions" ]
-                [ viewSaveButton model.savingProfile SaveProfileVisibility "Save Profile Visibility"
+                [ SaveButton.primary model.savingProfile SaveProfileVisibility "Save Profile Visibility"
                 ]
             , viewFeedback model.savingProfile
             ]
@@ -735,22 +736,6 @@ viewShelfRow profileVisibility sv =
             ]
             [ text "Save" ]
         ]
-
-
-viewSaveButton : RemoteData Http.Error () -> Msg -> String -> Html Msg
-viewSaveButton saving onClickMsg labelText =
-    case saving of
-        Loading ->
-            button [ class "btn btn--primary btn--disabled", disabled True ]
-                [ text "Saving…" ]
-
-        Success _ ->
-            button [ class "btn btn--primary" ]
-                [ text "Saved!" ]
-
-        _ ->
-            button [ class "btn btn--primary", onClick onClickMsg ]
-                [ text labelText ]
 
 
 viewFeedback : RemoteData Http.Error () -> Html Msg

@@ -23,6 +23,7 @@ defmodule Stacks.Accounts do
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Accounts.ReservedHandles
   alias Stacks.Accounts.User
+  alias Stacks.Duration
   alias Stacks.Events
   alias Stacks.GDPR.Deletion
   alias Stacks.Social.UserBlock
@@ -1308,20 +1309,19 @@ defmodule Stacks.Accounts do
   defp within_rotation_grace?(_family, _jti), do: false
 
   # Grace window expressed as `{n, unit}` in config, converted to seconds here at
-  # the check site (mirrors the AuthController session-cap `unit_in_seconds/1`).
+  # the check site.
+  #
+  # ⛔ This function's previous comment said it mirrored the AuthController
+  # session-cap converter. It did not: its private unit table stopped at `:hour`,
+  # so a `session_rotation_grace` of `{1, :day}` fell into the catch-all and was
+  # honoured as ONE SECOND. `Stacks.Duration` carries the fail-safe (unknown unit
+  # → seconds, so a misconfig fails toward LESS grace) that made the catch-all
+  # right, and the units that made it wrong.
   defp rotation_grace_seconds do
-    {n, unit} = Application.get_env(:core, :session_rotation_grace, {20, :second})
-    n * grace_unit_in_seconds(unit)
+    :core
+    |> Application.get_env(:session_rotation_grace, {20, :second})
+    |> Duration.to_seconds()
   end
-
-  defp grace_unit_in_seconds(:second), do: 1
-  defp grace_unit_in_seconds(:minute), do: 60
-  defp grace_unit_in_seconds(:hour), do: 3_600
-  # Fail-safe catch-all: a misconfigured unit must NOT raise on every authed
-  # request (this runs in the verify gate). Treat unknown units as seconds — the
-  # smallest window, so a misconfig fails toward LESS grace (more secure), never
-  # toward an auth outage or a wider honoured-token window.
-  defp grace_unit_in_seconds(_unknown), do: 1
 
   # Reuse response: mark the family revoked and burn all the user's live tokens.
   # `update_all` (not scoped to unrevoked) is fine — re-stamping an already-set

@@ -2,6 +2,7 @@ module Types.Placement exposing
     ( Format(..)
     , Placement
     , ReadingStatus(..)
+    , isHidden
     , parseReadingStatus
     , placementDecoder
     , placementSummaryDecoder
@@ -12,6 +13,7 @@ import Json.Decode as Decode exposing (Decoder)
 import Stacks.Common.V1.Placement as Proto
 import Types.Book exposing (Book, VisibilityTier(..), fromProtoBook)
 import Types.ProtoHelpers exposing (emptyToNothing, zeroToNothing)
+import Types.Visibility as Visibility exposing (Visibility)
 
 
 type Format
@@ -40,7 +42,7 @@ type alias Placement =
     , currentPage : Maybe Int
     , startedAt : Maybe String
     , finishedAt : Maybe String
-    , visibility : Maybe String
+    , visibility : Maybe Visibility
     , hasUserWriting : Bool
     }
 
@@ -84,6 +86,25 @@ parseReadingStatus s =
             Nothing
 
 
+{-| Whether this placement is hidden from everyone but its owner.
+
+⛔ The ONE reader of `placement.visibility` for this question. It was written out
+three times — twice in `Page.Bookshelf.Helpers`, once in
+`Page.Bookshelf.ReadingPile` — each as `placement.visibility == Just "owner"`,
+and each feeding the same `hidden` field of `Components.Spine.book`. Three copies
+of one sentence ("an owner-only placement is a hidden one"), none of which the
+compiler could check against the enum.
+
+Note what this is NOT: it is not "the shelf is private". A placement on a public
+shelf can be owner-only, which is exactly the case the spine's hidden treatment
+exists to show.
+
+-}
+isHidden : Placement -> Bool
+isHidden placement =
+    placement.visibility == Just Visibility.Owner
+
+
 {-| The wire value for a reading status — the inverse of `parseReadingStatus`.
 Used when building the `PUT /api/placements/:id/progress` request body.
 -}
@@ -122,9 +143,21 @@ placementDecoder =
     -- so we layer these optional reads on top. `has_user_writing` (#287) is a
     -- server-computed flag (not a proto field) that the bookshelf payload adds
     -- alongside each PlacementDetail; absent/false → no bookmark ribbon.
+    --
+    -- ⛔ `visibility` is parsed HERE, at the boundary, not at each use site. It
+    -- was a `Maybe String` carried into the view layer, where three separate
+    -- places asked `placement.visibility == Just "owner"` and a fourth called
+    -- `Visibility.fromString` on it again. A wire string that survives into the
+    -- app's own types is a decode that has not finished: every reader has to
+    -- know the enum's spelling, a typo in any one of them is a silent `False`,
+    -- and the compiler cannot tell "not owner-only" from "not a visibility I
+    -- recognise". After this the app holds a `Visibility` and the string exists
+    -- only between the socket and this line.
     Decode.map3 (\p vis writing -> { p | visibility = vis, hasUserWriting = writing })
         placementBaseDecoder
-        (Decode.maybe (Decode.field "visibility" Decode.string))
+        (Decode.maybe (Decode.field "visibility" Decode.string)
+            |> Decode.map (Maybe.andThen Visibility.fromString)
+        )
         (Decode.oneOf
             [ Decode.field "has_user_writing" Decode.bool
             , Decode.succeed False

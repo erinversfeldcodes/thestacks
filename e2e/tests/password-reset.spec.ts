@@ -20,7 +20,9 @@ test.describe("Password reset", () => {
     page,
     request,
   }) => {
-    const session = await mintOrSkip(request, { email: uniqueEmail("e2e-forgot") });
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-forgot"),
+    });
     const email = session.email;
 
     // Clicking "Forgot your password?" swaps the login card into its
@@ -29,21 +31,31 @@ test.describe("Password reset", () => {
     await page.goto("/login");
     await page.getByTestId("forgot-password-link").click();
     await expect(page.locator(".login-card__subtitle").first()).toContainText(
-      "Reset your password"
+      "Reset your password",
     );
     await expect(page.getByTestId("forgot-email")).toBeVisible();
 
     // Submitting the email shows the generic (no-enumeration) confirmation...
     await page.getByTestId("forgot-email").fill(email);
     await page.getByTestId("forgot-submit").click();
-    await expect(page.getByTestId("forgot-success")).toBeVisible();
+    const ack = page.getByTestId("forgot-success");
+    await expect(ack).toBeVisible();
+
+    // ...as an announced NOTICE, not as another line of helper text (#363).
+    // Sending the mail is the whole outcome of this form and this sentence is
+    // the only evidence of it, so a screen reader has to be told. It used to
+    // carry `login-card__subtitle` — the same class as the "Enter your email
+    // and we'll send you a link" instruction above it — and no live region.
+    await expect(ack).toHaveAttribute("role", "status");
+    await expect(ack).toHaveClass(/login-card__notice/);
+    await expect(ack).not.toHaveClass(/login-card__subtitle/);
 
     // ...and a reset email is actually sent. (Skipped when the mailbox isn't
     // the delivery target — e.g. a preview using a real Resend provider.)
     const emails = await fetchSentEmails(request, email);
     test.skip(
       emails === null,
-      "requires the readable Local mailbox (/api/test/sent-emails)"
+      "requires the readable Local mailbox (/api/test/sent-emails)",
     );
     const reset = emails!.find((e) => /reset/i.test(e.subject));
     expect(reset, "expected a password-reset email").toBeTruthy();
@@ -54,7 +66,9 @@ test.describe("Password reset", () => {
     page,
     request,
   }) => {
-    const session = await mintOrSkip(request, { email: uniqueEmail("e2e-reset") });
+    const session = await mintOrSkip(request, {
+      email: uniqueEmail("e2e-reset"),
+    });
     const email = session.email;
     const newPassword = "brand-new-password-2";
 
@@ -75,14 +89,24 @@ test.describe("Password reset", () => {
     // 3. Follow the link and set a new password.
     await page.goto(link!);
     await expect(page.locator(".page--login h1")).toHaveText(
-      "Choose a new password"
+      "Choose a new password",
     );
     await page.getByTestId("reset-password").fill(newPassword);
     await page.getByTestId("reset-confirm").fill(newPassword);
     await page.getByTestId("reset-submit").click();
     await expect(page.getByTestId("reset-success")).toBeVisible();
 
-    // 4. The new password logs in; the old one no longer does.
+    // 4. THE WIRE (#363). `Main.update`'s ResetPasswordMsg branch turns the
+    //    page's `AdvanceToLogin` into a `Nav.pushUrl`, and `Main.Model` embeds
+    //    an unconstructable `Nav.Key`, so no Elm test can reach that step —
+    //    stubbing the branch to `[]` leaves all 1,549 of them passing (probed).
+    //    This is the layer where the push is observable, so it is asserted here.
+    //    The confirmation must be readable BEFORE the move, which the preceding
+    //    assertion establishes: a redirect the reader never sees is the same as
+    //    not telling them.
+    await expect(page).toHaveURL(/\/login$/, { timeout: 10_000 });
+
+    // 5. The new password logs in; the old one no longer does.
     await signInViaForm(page, email, newPassword);
     await expect(page).toHaveURL(/\/antilibrary/);
   });

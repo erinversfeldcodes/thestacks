@@ -8,9 +8,10 @@ module Page.Settings.Profile exposing
     )
 
 import Api
-import Html exposing (Html, button, div, h1, h2, input, label, p, text)
-import Html.Attributes exposing (class, disabled, placeholder, type_, value)
-import Html.Events exposing (onClick, onInput)
+import Components.SaveButton as SaveButton
+import Html exposing (Html, div, h1, h2, input, label, p, text)
+import Html.Attributes exposing (class, placeholder, type_, value)
+import Html.Events exposing (onInput)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
 import Types.User exposing (User)
@@ -283,7 +284,7 @@ view model =
                     []
                 ]
             , div [ class "settings-actions" ]
-                [ viewSaveButton model.savingProfile SaveProfile "Save Profile"
+                [ SaveButton.primary model.savingProfile SaveProfile "Save Profile"
                 ]
             , viewProfileFeedback model.savingProfile
             ]
@@ -312,7 +313,7 @@ view model =
                     []
                 ]
             , div [ class "settings-actions" ]
-                [ viewSaveButton model.savingLocation SaveLocation "Save Location"
+                [ SaveButton.primary model.savingLocation SaveLocation "Save Location"
                 ]
             , viewFeedback model.savingLocation "Location saved." "Could not save location. Please try again."
             ]
@@ -348,22 +349,6 @@ viewCurrentPasswordField model =
 
     else
         text ""
-
-
-viewSaveButton : RemoteData e () -> Msg -> String -> Html Msg
-viewSaveButton saving onClickMsg label =
-    case saving of
-        Loading ->
-            button [ class "btn btn--primary btn--disabled", disabled True ]
-                [ text "Saving..." ]
-
-        Success _ ->
-            button [ class "btn btn--primary" ]
-                [ text "Saved!" ]
-
-        _ ->
-            button [ class "btn btn--primary", onClick onClickMsg ]
-                [ text label ]
 
 
 viewFeedback : RemoteData Http.Error () -> String -> String -> Html Msg

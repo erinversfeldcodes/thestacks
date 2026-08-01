@@ -14,6 +14,7 @@ import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
 import TestHelpers exposing (loginProgram, simulateAuthErrorResponse, simulateAuthResponse, simulateRegisterResponse, simulateRegisterValidationResponse)
+import Types.PasswordRule as PasswordRule
 
 
 {-| Helper to start a login program test.
@@ -129,7 +130,7 @@ registerValidationEmailShowsMessage =
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "A reader with that email already frequents these halls. Try signing in instead." ]
                 |> ProgramTest.expectViewHasNot
-                    [ Selector.text "That password is too slight; please choose at least eight characters." ]
+                    [ Selector.text PasswordRule.tooShort ]
 
 
 registerWeakPasswordShowsPasswordMessage : Test
@@ -142,7 +143,7 @@ registerWeakPasswordShowsPasswordMessage =
                     "/api/auth/register"
                     (simulateRegisterValidationResponse [ ( "password", [ "must be at least 8 characters" ] ) ])
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "That password is too slight; please choose at least eight characters." ]
+                    [ Selector.text PasswordRule.tooShort ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "A reader with that email already frequents these halls. Try signing in instead." ]
 

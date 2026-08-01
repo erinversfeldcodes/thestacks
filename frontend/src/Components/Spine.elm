@@ -301,27 +301,54 @@ book config =
                 ++ notesSuffix
                 ++ hiddenSuffix
 
-        -- A well-loved (Softened) book earns a muted, worn treatment via the
-        -- book--softened class (see .book--softened in main.css); Pristine books
-        -- get nothing. Composed alongside book/book--hidden below.
-        wearClass =
-            case config.wearLevel of
-                Pristine ->
-                    ""
+        -- The wrapper's classes: `book`, plus `book--hidden` for an owner-only
+        -- placement and `book--softened` for a well-loved one. All four
+        -- combinations are spelled out as whole `class "…"` literals rather than
+        -- assembled with `++`, because `scripts/check-orphan-classes.sh` matches
+        -- `class "…"` in Elm source and cannot see a composed one (#356) — these
+        -- two modifiers were previously invisible to it, which is precisely how
+        -- `book--hidden` came to have no CSS rule at all.
+        wrapperClass =
+            case ( config.hidden, config.wearLevel ) of
+                ( True, Softened ) ->
+                    class "book book--hidden book--softened"
 
-                Softened ->
-                    " book--softened"
+                ( True, Pristine ) ->
+                    class "book book--hidden"
 
-        -- Owner-only placements on an otherwise-visible shelf render as a
-        -- faint outline so the owner still sees the book is there but private.
-        hiddenAttrs =
+                ( False, Softened ) ->
+                    class "book book--softened"
+
+                ( False, Pristine ) ->
+                    class "book"
+
+        -- ⛔ An owner-private book must be legible to a SIGHTED reader too.
+        --
+        -- The whole affordance used to be `style "opacity" "0.35"` plus a
+        -- ", hidden (only visible to you)" suffix on the aria-label. So a screen
+        -- reader was told; everyone else got a book that was merely faint, with
+        -- nothing to say the faintness meant anything — indistinguishable from a
+        -- rendering artefact, or from the shelf's own depth shading. And 0.35
+        -- composites the spine's title text 65% of the way toward the shelf
+        -- behind it, which takes the label under the 4.5:1 contrast floor: the
+        -- one book you cannot read is the one whose privacy you might want to
+        -- check.
+        --
+        -- Now: a padlock that is actually visible, a dashed brass outline, and an
+        -- opacity that still reads as "set apart" without erasing the title. The
+        -- treatment moved OUT of an inline style, because an inline style beats
+        -- every rule in the stylesheet and so cannot be reviewed, overridden, or
+        -- seen by `scripts/check-css.sh`.
+        --
+        -- The padlock is `aria-hidden`: the aria-label already says it, and a
+        -- screen reader announcing "lock" after "hidden (only visible to you)"
+        -- is the same fact twice.
+        lockEls =
             if config.hidden then
-                [ class ("book book--hidden" ++ wearClass)
-                , style "opacity" "0.35"
-                ]
+                [ div [ class "book__lock", attribute "aria-hidden" "true" ] [ text "🔒" ] ]
 
             else
-                [ class ("book" ++ wearClass) ]
+                []
 
         -- Additive bookmark ribbon for a book the owner has written about (#287).
         -- A direct child of the `.book` container (not the overflow-hidden spine
@@ -335,15 +362,14 @@ book config =
                 []
     in
     div
-        (hiddenAttrs
-            ++ [ testId "book-spine"
-               , style "width" (String.fromInt widthPx ++ "px")
-               , style "height" (String.fromInt heightPx ++ "px")
-               , style "transform-style" "preserve-3d"
-               , title (config.title ++ " — " ++ config.author)
-               , attribute "aria-label" ariaLabel
-               ]
-        )
+        [ wrapperClass
+        , testId "book-spine"
+        , style "width" (String.fromInt widthPx ++ "px")
+        , style "height" (String.fromInt heightPx ++ "px")
+        , style "transform-style" "preserve-3d"
+        , title (config.title ++ " — " ++ config.author)
+        , attribute "aria-label" ariaLabel
+        ]
         ([ div
             [ class "book__face book__spine"
             , style "background-color" tex.bg
@@ -392,4 +418,5 @@ book config =
             []
          ]
             ++ ribbonEls
+            ++ lockEls
         )

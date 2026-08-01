@@ -3,7 +3,8 @@ module PlacementDecoder exposing (suite)
 import Expect
 import Json.Decode as Decode
 import Test exposing (Test, describe, test)
-import Types.Placement exposing (Format(..), ReadingStatus(..), placementDecoder, placementSummaryDecoder)
+import Types.Placement as Placement exposing (Format(..), ReadingStatus(..), placementDecoder, placementSummaryDecoder)
+import Types.Visibility as Visibility
 
 
 summaryJson : String
@@ -237,4 +238,66 @@ suite =
                         Err err ->
                             Expect.fail (Decode.errorToString err)
             ]
+        , describe "visibility is parsed at the boundary, not carried as a string (#363)"
+            [ test "a wire visibility becomes a Visibility" <|
+                \_ ->
+                    decodedVisibility """{"id":"p-1","visibility":"owner"}"""
+                        |> Expect.equal (Ok (Just Visibility.Owner))
+            , test "every level the server can send round-trips" <|
+                \_ ->
+                    [ "owner", "group", "platform", "public" ]
+                        |> List.map
+                            (\level ->
+                                decodedVisibility
+                                    ("{\"id\":\"p-1\",\"visibility\":\"" ++ level ++ "\"}")
+                            )
+                        |> Expect.equalLists
+                            [ Ok (Just Visibility.Owner)
+                            , Ok (Just Visibility.Group)
+                            , Ok (Just Visibility.Platform)
+                            , Ok (Just Visibility.Public)
+                            ]
+            , test "an absent visibility is Nothing" <|
+                \_ ->
+                    decodedVisibility """{"id":"p-1"}"""
+                        |> Expect.equal (Ok Nothing)
+            , test "a visibility the client does not recognise is Nothing, not a silent mis-classification" <|
+                \_ ->
+                    -- The decoder must not invent a level. `Nothing` means
+                    -- "no opinion", and every reader falls back explicitly.
+                    decodedVisibility """{"id":"p-1","visibility":"onwer"}"""
+                        |> Expect.equal (Ok Nothing)
+            ]
+        , describe "isHidden — one reader of the owner-only rule (#363)"
+            [ test "an owner-only placement is hidden" <|
+                \_ ->
+                    decodedPlacement """{"id":"p-1","visibility":"owner"}"""
+                        |> Result.map Placement.isHidden
+                        |> Expect.equal (Ok True)
+            , test "a platform placement is not hidden" <|
+                \_ ->
+                    decodedPlacement """{"id":"p-1","visibility":"platform"}"""
+                        |> Result.map Placement.isHidden
+                        |> Expect.equal (Ok False)
+            , test "a placement with no visibility is not hidden" <|
+                \_ ->
+                    decodedPlacement """{"id":"p-1"}"""
+                        |> Result.map Placement.isHidden
+                        |> Expect.equal (Ok False)
+            , test "an unrecognised visibility is not hidden (it is not owner)" <|
+                \_ ->
+                    decodedPlacement """{"id":"p-1","visibility":"onwer"}"""
+                        |> Result.map Placement.isHidden
+                        |> Expect.equal (Ok False)
+            ]
         ]
+
+
+decodedPlacement : String -> Result Decode.Error Placement.Placement
+decodedPlacement json =
+    Decode.decodeString placementDecoder json
+
+
+decodedVisibility : String -> Result Decode.Error (Maybe Visibility.Visibility)
+decodedVisibility json =
+    decodedPlacement json |> Result.map .visibility

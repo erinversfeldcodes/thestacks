@@ -21,7 +21,7 @@ import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers exposing (pickTexture)
 import Task
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
-import Types.Placement exposing (Placement, ReadingStatus(..), readingStatusToString)
+import Types.Placement as Placement exposing (Placement, ReadingStatus(..), readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Shelf exposing (Shelf)
 import Util.TestId exposing (testId)
@@ -471,7 +471,7 @@ viewPiledBook selectedBookId index placement =
                 , title = bookData.title
                 , author = Types.Book.authorName bookData
                 , coverImageUrl = bookCoverImageUrl bookData
-                , hidden = placement.visibility == Just "owner"
+                , hidden = Placement.isHidden placement
                 , hasWriting = placement.hasUserWriting
                 }
             ]

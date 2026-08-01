@@ -12,6 +12,7 @@ defmodule StacksWeb.AuthController do
   alias Stacks.Accounts
   alias Stacks.Accounts.Guardian
   alias Stacks.Audit
+  alias Stacks.Duration
   alias Stacks.Email
   alias StacksWeb.ProtoJSON
 
@@ -346,17 +347,14 @@ defmodule StacksWeb.AuthController do
   end
 
   # Absolute session cap expressed as `{n, unit}` in config, converted to
-  # seconds (NOT milliseconds) here at the check site.
+  # seconds (NOT milliseconds) here at the check site. The conversion itself
+  # lives in `Stacks.Duration` — this used to carry its own copy of the unit
+  # table, and one of the three copies had silently lost `:day` and `:week`.
   defp session_cap_seconds do
-    {n, unit} = Application.get_env(:core, :session_absolute_cap, {7, :day})
-    n * unit_in_seconds(unit)
+    :core
+    |> Application.get_env(:session_absolute_cap, {7, :day})
+    |> Duration.to_seconds()
   end
-
-  defp unit_in_seconds(:second), do: 1
-  defp unit_in_seconds(:minute), do: 60
-  defp unit_in_seconds(:hour), do: 3_600
-  defp unit_in_seconds(:day), do: 86_400
-  defp unit_in_seconds(:week), do: 604_800
 
   @doc "GET /api/auth/me — return the current authenticated user."
   def me(conn, _params) do

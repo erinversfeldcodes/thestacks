@@ -24,6 +24,7 @@ import Html exposing (Html, button, div, h1, input, label, p, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Types.PasswordRule as PasswordRule
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -242,11 +243,11 @@ validatePassword password =
     if String.isEmpty password then
         Pristine
 
-    else if String.length password >= 8 then
+    else if PasswordRule.isLongEnough password then
         Valid
 
     else
-        Invalid "Password must be at least 8 characters"
+        Invalid PasswordRule.tooShort
 
 
 validateDisplayName : String -> FieldValidation
@@ -515,14 +516,32 @@ viewForgotForm model =
                 _ ->
                     text "Send reset link"
             ]
-        , case model.forgotState of
+        , -- ⛔ The acknowledgement is a NOTICE, not a subtitle.
+          --
+          -- Sending the reset mail is the entire point of this form, and the only
+          -- evidence it happened is this sentence — the reader's inbox is
+          -- somewhere else, and the endpoint deliberately answers the same way
+          -- whether or not the address is registered, so there is nothing else to
+          -- go on. It was rendered as `login-card__subtitle`: the same class as
+          -- the "Enter your email and we'll send you a link" helper text two
+          -- elements above, in a live region belonging to nobody. A screen-reader
+          -- user pressed the button and was told nothing at all; a sighted one
+          -- got a line of helper text where a confirmation should be.
+          --
+          -- `notice` is the card's own component and already stamps
+          -- `role="status"`, which is why this is an adoption and not an
+          -- invention. The class literal stays here at the call site — see
+          -- `notice`'s own note on #356.
+          case model.forgotState of
             Success _ ->
-                p [ class "login-card__subtitle", testId "forgot-success" ]
-                    [ text "If that email is registered, a reset link is on its way. Check your inbox." ]
+                notice
+                    [ class "login-card__notice", testId "forgot-success" ]
+                    "If that email is registered, a reset link is on its way. Check your inbox."
 
             Failure _ ->
-                p [ class "login-card__subtitle", testId "forgot-error" ]
-                    [ text "Something went wrong. Please try again." ]
+                notice
+                    [ class "login-card__error", testId "forgot-error" ]
+                    "Something went wrong. Please try again."
 
             _ ->
                 text ""
@@ -847,9 +866,11 @@ viewArrivalNotice model =
                     "A saved sign-in was found here but could not be read, so you have been signed out. Please sign in again."
 
 
-{-| One notice, one shape. Three hand-written notice blocks would be three
+{-| One notice, one shape. Five hand-written notice blocks would be five
 chances for the `role="status"` that makes a notice announce itself to be
-present on only two of them.
+present on only four of them — and that is not hypothetical: the
+forgot-password acknowledgement was written by hand, as a `login-card__subtitle`
+paragraph, and had no live region at all until it was routed through here.
 
 ⚠️ The class stays at each CALL SITE, spelled as a literal `class "…"`.
 `scripts/check-orphan-classes.sh` finds classes by matching `class "…"` in Elm
@@ -925,7 +946,14 @@ registerValidationMessage errors =
         "A reader with that email already frequents these halls. Try signing in instead."
 
     else if hasField "password" then
-        "That password is too slight; please choose at least eight characters."
+        -- ⛔ The one branch of this warm, in-world copy that does NOT get its own
+        -- voice. The rest of this function speaks the library's language because
+        -- each message is the only thing the reader is told. This one is not:
+        -- the register card has already shown the length rule inline under the
+        -- field (`validatePassword`, above), so a second, differently-worded
+        -- version of the same requirement — "eight" where the hint said "8" —
+        -- reads as a second, different requirement. One rule, one sentence.
+        PasswordRule.tooShort
 
     else if hasField "display_name" then
         "Please give a name for your reader's card."

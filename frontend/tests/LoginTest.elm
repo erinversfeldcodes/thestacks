@@ -5,6 +5,7 @@ import Expect
 import Http
 import Page.Login as Login exposing (FieldValidation(..), Msg(..), SubmitError(..))
 import Test exposing (Test, describe, test)
+import Types.PasswordRule as PasswordRule
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -232,7 +233,7 @@ suite =
                     Login.validatePassword "12345678" |> Expect.equal Valid
             , test "short password is Invalid" <|
                 \_ ->
-                    Login.validatePassword "short" |> Expect.equal (Invalid "Password must be at least 8 characters")
+                    Login.validatePassword "short" |> Expect.equal (Invalid PasswordRule.tooShort)
             ]
         , describe "validateDisplayName"
             [ test "empty display name is Pristine" <|
@@ -385,7 +386,7 @@ suite =
                 \_ ->
                     Login.errorMessage Login.RegisterMode
                         (SubmitValidationError [ ( "password", [ "must be at least 8 characters" ] ) ])
-                        |> Expect.equal "That password is too slight; please choose at least eight characters."
+                        |> Expect.equal PasswordRule.tooShort
             , test "a password validation error is NOT the email-in-use copy" <|
                 \_ ->
                     Login.errorMessage Login.RegisterMode

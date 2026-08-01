@@ -9,6 +9,7 @@ module Page.Settings.Consent exposing
     )
 
 import Api
+import Components.SaveButton as SaveButton
 import Html exposing (Html, button, div, h1, h2, label, p, text)
 import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
@@ -61,7 +62,28 @@ update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         ToggleAnalytics ->
-            ( { model | analyticsConsent = not model.analyticsConsent }, Cmd.none, NoOut )
+            -- ⛔ `saving = NotAsked` is the load-bearing half of this line.
+            --
+            -- Analytics consent is a STAGED preference: the toggle changes the
+            -- model and the "Save Preferences" button sends it. Once a save
+            -- succeeded, `saving` stayed `Success ()` forever — nothing on this
+            -- page could return it to `NotAsked` — and the save button's
+            -- `Success` branch had no `onClick`. So flipping this toggle a
+            -- second time left the reader with a button that said "Saved!",
+            -- looked pressable, and was inert: **their consent choice could not
+            -- be changed again without reloading the page**, and the label
+            -- actively claimed the unsent value was saved.
+            --
+            -- `Components.SaveButton` now keeps `Success` clickable, so the
+            -- reader is no longer stuck. This line fixes the other half — the
+            -- lie. An edit means the on-screen values are no longer the saved
+            -- ones, so the button must stop saying they are. `Settings.Profile`
+            -- and `Settings.Privacy` have always done this on every edit
+            -- message; this page was the one that did not.
+            ( { model | analyticsConsent = not model.analyticsConsent, saving = NotAsked }
+            , Cmd.none
+            , NoOut
+            )
 
         ToggleWritingAssistant ->
             let
@@ -185,19 +207,7 @@ view model =
                 ]
             ]
         , div [ class "settings-actions" ]
-            [ case model.saving of
-                Loading ->
-                    button [ class "btn btn--primary btn--disabled" ]
-                        [ text "Saving..." ]
-
-                Success _ ->
-                    button [ class "btn btn--primary" ]
-                        [ text "Saved!" ]
-
-                _ ->
-                    button [ class "btn btn--primary", onClick SaveConsent ]
-                        [ text "Save Preferences" ]
-            ]
+            [ SaveButton.primary model.saving SaveConsent "Save Preferences" ]
         , case model.saving of
             Failure _ ->
                 p [ class "error" ]
