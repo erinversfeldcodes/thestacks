@@ -195,7 +195,8 @@ test.describe("404 Not Found page", () => {
   }) => {
     await page.goto("/nonexistent-page");
 
-    // Browser tab title (pageTitle NotFound).
+    // Browser tab title (`Main.pageTitle PageNotFound` — derived from the page
+    // that was built, not from the route that was asked for, since #360).
     await expect(page).toHaveTitle("Not Found — The Stacks");
 
     // Page content.

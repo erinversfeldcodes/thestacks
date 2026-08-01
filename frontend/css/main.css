@@ -2663,6 +2663,33 @@ h4 {
     line-height: 1.5;
 }
 
+/* -- Unreadable stored sign-in (Issue #360): a saved credential was present at
+      boot and would not decode, so the reader is anonymous without having asked
+      to be.
+
+      ⚠️ Deliberately declares ONLY the two properties that are actually its own.
+      The panel treatment (colour, background, border, padding, font) comes from
+      the base `.login-card__notice` rule further down this file — which, at
+      equal specificity and later in the sheet, WINS over any colour set here.
+      That is measured, not assumed: with a full amber block written here, the
+      computed style of this notice on a live page was
+      `rgba(74, 124, 89, 0.15)` — the base rule's accent green. Writing the
+      amber anyway would be dead declarations that read as intent.
+
+      The same collision silently kills most of `--session-expired` and
+      `--account-deleted` above; that is a PRE-EXISTING defect on two shipped
+      surfaces and is reported as a finding rather than repainted here.
+
+      `cursor` and `text-decoration` are not set by the base rule, so these two
+      do apply: they are the affordance for the `title` attribute, which carries
+      the decoder's own account of the failure. -- */
+
+.login-card__notice--stored-session-unreadable {
+    text-decoration: underline dotted rgba(74, 124, 89, 0.5);
+    text-underline-offset: 0.25em;
+    cursor: help;
+}
+
 /* -- Submit button -- */
 
 .login-card__submit {

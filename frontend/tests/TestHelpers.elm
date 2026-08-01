@@ -1919,7 +1919,7 @@ loginEffects msg model =
 loginProgram : ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginProgram =
     ProgramTest.createElement
-        { init = \() -> ( Login.init, SimulatedEffect.Cmd.none )
+        { init = \() -> ( Login.init Login.Fresh, SimulatedEffect.Cmd.none )
         , update =
             \msg model ->
                 let

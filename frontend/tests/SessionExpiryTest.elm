@@ -22,9 +22,10 @@ reachable:
     `SimulatedEffect` harness whose success path calls the real key-free
     `Main.renewAuthToken`; success adopts the new token (no logout), failure
     clears auth (the `sessionExpired` fall-through).
-  - **Notice + scheduling:** `Login.expiredInit` renders the distinct notice
-    (the visible outcome of `Main.sessionExpired`'s flag), and `Main.loginEffects`
-    includes `ScheduleRenewal` (renewal is armed on login).
+  - **Notice + scheduling:** a card built with the `SessionExpired` arrival
+    renders the distinct notice (the visible outcome of the expiry path — since
+    #360 that is an `Arrival` constructor, not a boolean), and
+    `Main.loginEffects` includes `ScheduleRenewal` (renewal is armed on login).
 
 `Main.sessionExpired`'s full redirect + `clearAuth` port (needs `Nav.Key`) is
 covered by the deployed E2E gate (`e2e/tests/auth.spec.ts`).
@@ -381,14 +382,14 @@ loginArmsRenewal =
 -- NOTICE — the distinct session-expired message on the redirect target
 
 
-{-| The redirect target of `Main.sessionExpired` (`Login.expiredInit`) renders a
-notice distinct from invalid-credentials.
+{-| The redirect target of the expiry path — a login card built with the
+`SessionExpired` arrival — renders a notice distinct from invalid-credentials.
 -}
 expiredInitRendersDistinctNotice : Test
 expiredInitRendersDistinctNotice =
     test "expired_init_renders_distinct_notice: the expired-notice login state shows the session-expired message" <|
         \() ->
-            ProgramTest.start () (loginModelProgram Login.expiredInit)
+            ProgramTest.start () (loginModelProgram (Login.init (Login.SessionExpired { draftSaved = False })))
                 |> ProgramTest.expectViewHas
                     [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
 
@@ -399,13 +400,13 @@ freshInitHasNoNotice : Test
 freshInitHasNoNotice =
     test "fresh_init_has_no_notice: an ordinary login has no session-expired notice" <|
         \() ->
-            ProgramTest.start () (loginModelProgram Login.init)
+            ProgramTest.start () (loginModelProgram (Login.init Login.Fresh))
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "The library closed your session for safekeeping — sign in again to return." ]
 
 
 {-| A minimal Login ProgramTest seeded with a specific starting model, so the
-view of `Login.expiredInit` vs `Login.init` can be asserted directly.
+view of a `SessionExpired` arrival vs a `Fresh` one can be asserted directly.
 -}
 loginModelProgram : Login.Model -> ProgramTest.ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginModelProgram startModel =

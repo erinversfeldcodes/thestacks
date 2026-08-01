@@ -8,9 +8,12 @@ port module Main exposing
     , Msg(..)
     , Page(..)
     , PendingLogout
+    , StoredAuth(..)
     , StoredAuthResolution(..)
     , adoptExternalAuth
+    , arrivalForBoot
     , completeLogin
+    , consumeArrival
     , currentAuth
     , decodeConfig
     , decodeFlags
@@ -19,6 +22,7 @@ port module Main exposing
     , loginEffects
     , loginRedirectFor
     , main
+    , pageTitle
     , parkPending
     , redirectAfterNavigation
     , renewAuthToken
@@ -26,6 +30,7 @@ port module Main exposing
     , resolveRecheck
     , settleArrival
     , shouldShowOnboarding
+    , storedSession
     , viewFooter
     , viewHome
     , viewNav
@@ -355,19 +360,16 @@ type alias Model =
     , onboardingCompleted : Bool
     , hasAnyPlacements : Bool
 
-    -- Raised by `sessionExpired`; consumed when the Login page is (re)built so the
-    -- global session-expiry notice survives the redirect's `UrlChanged`.
-    , sessionExpiredNotice : Bool
-
-    -- Raised alongside `sessionExpiredNotice` when the expiry happened while
-    -- composing a marketplace listing (Issue #182), so the login notice can
-    -- reassure the user their draft was saved.
-    , draftSavedNotice : Bool
-
-    -- Raised after a successful account-deletion request (Issue #188); consumed
-    -- when the Login page is (re)built so a warm farewell survives the redirect's
-    -- `UrlChanged`, mirroring `sessionExpiredNotice`.
-    , accountDeletedNotice : Bool
+    -- Why the reader will be standing at the login door when they next get
+    -- there (Issue #360). Raised by whatever ended the session — expiry,
+    -- account deletion, an unreadable stored credential — and consumed the
+    -- moment a login card is built, so the reason survives the redirect's
+    -- `UrlChanged` and no further.
+    --
+    -- ⛔ This ONE field replaced three booleans here, which shadowed three more
+    -- on `Login.Model`. Six independently-settable flags for four mutually
+    -- exclusive facts: see `Login.Arrival`.
+    , arrival : Login.Arrival
 
     -- A deferred session-expiry intent (Issue #180 Phase 2): set while the
     -- re-check-before-logout port round-trip is in flight, cleared when it
@@ -422,8 +424,14 @@ decodeConfig flags =
 init : Decode.Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
     let
-        maybeAuth =
+        stored =
             decodeFlags flags
+
+        maybeAuth =
+            storedSession stored
+
+        arrival =
+            arrivalForBoot stored
 
         config =
             decodeConfig flags
@@ -432,7 +440,7 @@ init flags url key =
             Route.fromUrl url
 
         ( page, cmd ) =
-            initPage config route maybeAuth Nothing Nothing
+            initPage config route maybeAuth Nothing Nothing arrival
     in
     ( { key = key
       , url = url
@@ -452,9 +460,7 @@ init flags url key =
       , onboarding = OnboardingOverlay.init
       , onboardingCompleted = False
       , hasAnyPlacements = True
-      , sessionExpiredNotice = False
-      , draftSavedNotice = False
-      , accountDeletedNotice = False
+      , arrival = consumeArrival page arrival
       , pendingLogout = Nothing
       , config = config
       }
@@ -522,10 +528,136 @@ authDecoder =
         )
 
 
-decodeFlags : Decode.Value -> Maybe Auth
+{-| What boot found in localStorage (Issue #360).
+
+⛔ Three outcomes, three constructors. `decodeFlags` used to answer
+`Maybe Auth`, which has room for only two — so "there was no stored credential"
+and "there was one and it would not decode" arrived as the same `Nothing`, and
+the app treated both as an ordinary signed-out boot.
+
+That is not a cosmetic loss. The blob is written by `saveAuth` and read back
+through the same `authDecoder`, so a mismatch means something rewrote it: a
+half-written record, a shape from an older release, or the flat-vs-nested blob
+that the SPA auth-injection recipe warns about — _"`stacks-auth` must be a FLAT
+blob; nesting under `user` fails silently and looks exactly like logged-out"_.
+Looking exactly like logged-out is the defect. The reader is put back at the
+door with no explanation, and the one artefact that would have explained it —
+the decoder's error — was thrown away by `Result.toMaybe` at the moment of
+maximum information.
+
+`CorruptStoredAuth` keeps that error and `Main.init` turns it into an `Arrival`
+the login card renders, so the failure is told to the person it happened to
+instead of being inferred later from a bug report.
+
+-}
+type StoredAuth
+    = NoStoredAuth
+    | CorruptStoredAuth String
+    | ValidStoredAuth Auth
+
+
+{-| The session a boot recovered, if any. The ONE accessor — mirroring
+`currentAuth` for `AuthState` — so no consumer pattern-matches `StoredAuth` to
+decide whether a request can be made and accidentally makes `CorruptStoredAuth`
+mean something other than "signed out".
+-}
+storedSession : StoredAuth -> Maybe Auth
+storedSession stored =
+    case stored of
+        ValidStoredAuth auth ->
+            Just auth
+
+        NoStoredAuth ->
+            Nothing
+
+        CorruptStoredAuth _ ->
+            Nothing
+
+
+{-| What a boot owes the reader an explanation for.
+
+⛔ This is the whole point of `CorruptStoredAuth` (#360): the boot outcome is
+turned into something the reader can SEE. Before, `decodeFlags` answered
+`Nothing` and `init` simply started anonymous — the app knew a credential had
+been found and rejected, and told nobody. A silent sign-out is indistinguishable
+from a deliberate one, so the failure could only ever be diagnosed from the
+outside, which is exactly what made the private-session auth bug expensive.
+
+Named and exposed rather than inlined in `init`, because `init` needs a
+`Nav.Key` and is therefore unreachable from elm-test: the whole chain from raw
+boot flags to rendered notice would otherwise have no test that could run.
+
+-}
+arrivalForBoot : StoredAuth -> Login.Arrival
+arrivalForBoot stored =
+    case stored of
+        CorruptStoredAuth reason ->
+            Login.StoredSessionUnreadable reason
+
+        NoStoredAuth ->
+            Login.Fresh
+
+        ValidStoredAuth _ ->
+            Login.Fresh
+
+
+{-| The flag keys that mean "a stored credential was here". `authDecoder`
+failing tells us the blob is not a session; these tell us a blob was _attempted_,
+which is the difference between a corrupt credential and a clean signed-out boot.
+
+`user` is in the list although no valid blob has it: it is the exact shape of the
+nested-blob mistake, and the whole point is to name that case rather than let it
+fall through to "never signed in". Every other entry is a field `encodeAuth`
+writes, so any partial or truncated write is caught by at least one.
+
+-}
+storedAuthMarkers : List String
+storedAuthMarkers =
+    [ "token", "userId", "user", "email", "displayName" ]
+
+
+{-| Read the stored credential out of the boot flags.
+
+`storedAuthUnreadable` is checked first: `app.js` cannot hand over a blob it
+could not `JSON.parse`, or could not read at all because `localStorage` threw
+(private browsing, storage disabled), so it sends the reason under that key
+instead of dropping it in a bare `catch`. Those are the two failure modes Elm
+cannot see for itself.
+
+-}
+decodeFlags : Decode.Value -> StoredAuth
 decodeFlags flags =
-    Decode.decodeValue authDecoder flags
-        |> Result.toMaybe
+    case Decode.decodeValue (Decode.field "storedAuthUnreadable" Decode.string) flags of
+        Ok reason ->
+            CorruptStoredAuth reason
+
+        Err _ ->
+            case Decode.decodeValue authDecoder flags of
+                Ok auth ->
+                    ValidStoredAuth auth
+
+                Err decodeError ->
+                    if hasStoredAuthMarker flags then
+                        CorruptStoredAuth (Decode.errorToString decodeError)
+
+                    else
+                        NoStoredAuth
+
+
+{-| Whether the flags carry any trace of a stored credential.
+-}
+hasStoredAuthMarker : Decode.Value -> Bool
+hasStoredAuthMarker flags =
+    List.any
+        (\field ->
+            case Decode.decodeValue (Decode.field field Decode.value) flags of
+                Ok _ ->
+                    True
+
+                Err _ ->
+                    False
+        )
+        storedAuthMarkers
 
 
 isOwner : Maybe Auth -> Bool
@@ -692,10 +824,28 @@ redirectAfterNavigation navigation =
         loginRedirectFor navigation.arrivingAt navigation.auth
 
 
-initPage : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> ( Page, Cmd Msg )
-initPage config route maybeAuth adminToken maybePreviousRoute =
+{-| Build the page for a route.
+
+`arrival` is the reason the reader would be looking at a login card if this
+route produces one — see `Login.Arrival`. It is threaded in rather than applied
+afterwards because there is more than one way to end up at the card (the
+protected-route bounce below, `/login` itself, `/forgot-password`), and the
+notice used to be attached at only one of them: `UrlChanged` re-built the page
+and then overwrote it with an `expiredInit`/`farewellInit` variant when the new
+route happened to be `Login`. A reader bounced off `/library` by an expired
+session therefore got the plain card with no explanation, because the bounce
+does not change the URL to `/login`.
+
+⚠️ Note how this composes with `redirectAfterNavigation` immediately above:
+#361 makes the expiry bounce remember the page it is leaving, and #360 makes the
+card it lands on say WHY. Same bounce, two independent things the reader was
+previously not told.
+
+-}
+initPage : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
+initPage config route maybeAuth adminToken maybePreviousRoute arrival =
     if loginRedirectFor route maybeAuth /= Nothing then
-        ( PageLogin Login.init, Cmd.none )
+        ( PageLogin (Login.init arrival), Cmd.none )
 
     else if isAdminRoute route && adminToken == Nothing then
         -- ⛔ The gate that makes #303's four surfaces reachable. `/api/admin/*` needs an
@@ -706,7 +856,7 @@ initPage config route maybeAuth adminToken maybePreviousRoute =
         ( PageAdminGate route AdminSession.init, Cmd.none )
 
     else
-        initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute
+        initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arrival
 
 
 {-| The routes behind the `:admin` pipeline. Exhaustive on purpose — a `_ -> False` catch-all would
@@ -746,8 +896,8 @@ initBookshelf config maybeAuth =
     ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
 
 
-initPageAuthenticated : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> ( Page, Cmd Msg )
-initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute =
+initPageAuthenticated : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
+initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arrival =
     let
         maybeToken =
             Maybe.map .token maybeAuth
@@ -757,7 +907,7 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute =
             ( PageHome, Cmd.none )
 
         Login ->
-            ( PageLogin Login.init, Cmd.none )
+            ( PageLogin (Login.init arrival), Cmd.none )
 
         Library ->
             initBookshelf Bookshelf.libraryConfig maybeAuth
@@ -1045,8 +1195,10 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute =
         ForgotPassword ->
             -- The forgot-password form is a mode of the login card, not a
             -- standalone page — deep-linking /forgot-password opens the login
-            -- card straight onto that mode.
-            ( PageLogin Login.forgotInit, Cmd.none )
+            -- card straight onto that mode. Asking to reset a password is
+            -- itself an arrival reason, which is why it is a constructor of the
+            -- same type and not a fourth boolean (#360).
+            ( PageLogin (Login.init Login.ForgotPassword), Cmd.none )
 
         ResetPassword token ->
             ( PageResetPassword (ResetPassword.init token), Cmd.none )
@@ -1127,8 +1279,14 @@ forceSessionExpiry draftSaved model =
     ( { model
         | auth = Anonymous
         , adminAuth = Nothing
-        , sessionExpiredNotice = True
-        , draftSavedNotice = model.draftSavedNotice || draftSaved
+
+        -- `draftSaved` is STICKY: a second, plain expiry arriving on top of a
+        -- draft expiry must not withdraw the reassurance that the listing was
+        -- saved. It was two fields OR-ed independently; now the OR is inside the
+        -- one constructor that gives the flag any meaning.
+        , arrival =
+            Login.SessionExpired
+                { draftSaved = draftSaved || Login.draftWasSaved model.arrival }
         , userMenu = UserMenu.init
         , bookDetailOverlay = Nothing
         , pendingLogout = Nothing
@@ -1155,7 +1313,7 @@ handleAccountDeleted model =
     ( { model
         | auth = Anonymous
         , adminAuth = Nothing
-        , accountDeletedNotice = True
+        , arrival = Login.AccountDeleted
         , userMenu = UserMenu.init
         , bookDetailOverlay = Nothing
         , pendingLogout = Nothing
@@ -1166,6 +1324,27 @@ handleAccountDeleted model =
         , Nav.pushUrl model.key (Route.toPath Login)
         ]
     )
+
+
+{-| Spend the pending arrival once a login card has actually been built with it.
+
+⛔ The condition is "a login card was rendered", NOT "the route is `/login`".
+The three booleans this replaced were each cleared by `… && newRoute /= Login`,
+which is the same test written three times and wrong in the same way three
+times: the protected-route bounce (`initPage`) shows the login card **without
+changing the URL**, so an expiry notice raised on `/library` was never marked as
+delivered and would resurface on the reader's next navigation. Asking the page
+that was built removes the possibility of the two disagreeing.
+
+-}
+consumeArrival : Page -> Login.Arrival -> Login.Arrival
+consumeArrival page arrival =
+    case page of
+        PageLogin _ ->
+            Login.Fresh
+
+        _ ->
+            arrival
 
 
 {-| The outcome of interpreting a stored-auth value (Issue #180 Phase 2), used
@@ -1549,25 +1728,19 @@ update msg model =
                 transition =
                     Just (transitionClass model.route newRoute)
 
-                ( initialisedPage, cmd ) =
-                    initPage model.config newRoute (currentAuth model.auth) (adminTokenFor model) (Just model.route)
-
-                -- Consume a pending session-expiry notice: when the redirect lands
-                -- on /login, build the Login page in its expired-notice state so the
-                -- message survives this `UrlChanged` re-init.
-                page =
-                    if newRoute == Login && model.accountDeletedNotice then
-                        PageLogin Login.farewellInit
-
-                    else if newRoute == Login && model.sessionExpiredNotice then
-                        if model.draftSavedNotice then
-                            PageLogin Login.expiredDraftInit
-
-                        else
-                            PageLogin Login.expiredInit
-
-                    else
-                        initialisedPage
+                -- The pending arrival goes IN, so whichever branch of `initPage`
+                -- produces a login card produces it already carrying its reason.
+                -- This replaced a three-branch `if newRoute == Login && …` ladder
+                -- that re-built the page and then threw it away — and which only
+                -- fired for the literal `/login` route, so the notice was lost on
+                -- every bounce that leaves the URL alone.
+                ( page, cmd ) =
+                    initPage model.config
+                        newRoute
+                        (currentAuth model.auth)
+                        (adminTokenFor model)
+                        (Just model.route)
+                        model.arrival
             in
             ( { model
                 | url = url
@@ -1579,16 +1752,15 @@ update msg model =
                     redirectAfterNavigation
                         { arrivingAt = newRoute
                         , leaving = model.route
-                        , sessionExpiring = model.sessionExpiredNotice
+
+                        -- #361's question, answered by #360's value. Read
+                        -- BEFORE `consumeArrival` spends it, just as the boolean
+                        -- this replaced was read before `UrlChanged` cleared it.
+                        , sessionExpiring = Login.isSessionExpiry model.arrival
                         , auth = currentAuth model.auth
                         }
                 , userMenu = UserMenu.init
-                , sessionExpiredNotice =
-                    model.sessionExpiredNotice && newRoute /= Login
-                , draftSavedNotice =
-                    model.draftSavedNotice && newRoute /= Login
-                , accountDeletedNotice =
-                    model.accountDeletedNotice && newRoute /= Login
+                , arrival = consumeArrival page model.arrival
               }
             , cmd
             )
@@ -2384,8 +2556,11 @@ update msg model =
                                         (currentAuth model.auth)
                                         (adminTokenFor withToken)
                                         (Just model.route)
+                                        model.arrival
                             in
-                            ( { withToken | page = page }, pageCmd )
+                            ( { withToken | page = page, arrival = consumeArrival page model.arrival }
+                            , pageCmd
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -2566,7 +2741,17 @@ update msg model =
                                 Nothing ->
                                     Cmd.none
                     in
-                    ( { model | userMenu = newUserMenu, auth = Anonymous, adminAuth = Nothing, page = PageLogin Login.init }
+                    ( { model
+                        | userMenu = newUserMenu
+                        , auth = Anonymous
+                        , adminAuth = Nothing
+
+                        -- A deliberate sign-out needs no explanation, so the
+                        -- card is built `Fresh` — and any arrival left pending
+                        -- from an earlier session goes with it.
+                        , page = PageLogin (Login.init Login.Fresh)
+                        , arrival = Login.Fresh
+                      }
                     , Cmd.batch
                         [ logoutCmd
                         , clearAuth ()
@@ -2938,7 +3123,7 @@ decodeSwipe value =
 
 view : Model -> Browser.Document Msg
 view model =
-    { title = pageTitle model.route
+    { title = pageTitle model.page
     , body =
         [ viewOverlay model
         , viewOnboarding model
@@ -2975,137 +3160,230 @@ view model =
     }
 
 
-pageTitle : Route -> String
-pageTitle route =
-    case route of
-        Home ->
+{-| The document title, derived from the page that is actually on screen.
+
+⛔ It used to be `pageTitle : Route -> String`, and a route is not a page. The
+route is what the reader ASKED for; `Page` is what the shell BUILT, and the two
+differ by design at six sites:
+
+1.  `initPage`'s protected-route bounce swaps the page for the sign-in gate and
+    deliberately leaves the URL alone — so a signed-out reader at `/upload` was
+    looking at a login card in a tab titled "Add a Book".
+2.  `initPage`'s admin gate does the same for `/admin/*`, titling the MFA
+    challenge "Source Approval".
+3.  An owner-guard failure resolves those routes to `PageNotFound`, still titled
+    with the admin surface a non-owner was just refused.
+4.  `AdminBookModeration` does likewise when age-gating is off (ADR-020).
+5.  Signing out replaces the page immediately, so the login card wore the title
+    of whatever page the reader signed out from.
+6.  `handleAdminSessionExpiry` puts the admin gate back **without touching the
+    URL at all**, so that title stayed wrong for as long as the operator did.
+
+Deriving from `Page` closes all six by construction — there is no longer a
+second value that could disagree. It also lets a title say what a route cannot
+know: which bookshelf, whose shelf, which book, which mode the card is in.
+
+This is not decoration. `Browser.Document.title` is what a screen reader
+announces on navigation, and the only page identity a tab, a bookmark and a
+history entry keep.
+
+⚠️ Exhaustive over `Page`, with no `_ ->` fallback. A catch-all is how the next
+page constructor would silently inherit a title belonging to something else,
+which is the defect being fixed.
+
+-}
+pageTitle : Page -> String
+pageTitle page =
+    case page of
+        PageHome ->
             "The Stacks"
 
-        Login ->
-            "Sign In — The Stacks"
+        PageLogin loginModel ->
+            -- Derived from the card's CURRENT mode, not from the route that
+            -- opened it: switching to Register or to the reset form now
+            -- retitles the document, which a route-derived title structurally
+            -- could not do — the URL does not change when the card does.
+            titled (loginCardTitle loginModel.mode)
 
-        Library ->
-            "Library — The Stacks"
+        PageBookshelf bookshelfModel ->
+            titled (bookshelfTitle bookshelfModel)
 
-        AntiLibrary ->
-            "Antilibrary — The Stacks"
+        PageReadingPile _ ->
+            titled "Reading Pile"
 
-        WishList ->
-            "Wish List — The Stacks"
+        PageLookingForHome _ ->
+            titled "Looking for a Home"
 
-        ReadingPile ->
-            "Reading Pile — The Stacks"
+        PageBookDetail detailModel ->
+            titled (bookDetailTitle detailModel)
 
-        LookingForHome ->
-            "Looking for a Home — The Stacks"
+        PageUpload _ ->
+            titled "Add a Book"
 
-        BookDetail _ ->
-            "Book — The Stacks"
+        PageSearch _ ->
+            titled "Search"
 
-        Upload ->
-            "Add a Book — The Stacks"
+        PageSettingsConsent _ ->
+            titled "Privacy Settings"
 
-        Search ->
-            "Search — The Stacks"
+        PageSettingsAuditLog _ ->
+            titled "Audit Log"
 
-        SettingsProfile ->
-            "Profile — The Stacks"
+        PageInsights _ ->
+            titled "What Your Data Reveals"
 
-        SettingsPassword ->
-            "Password — The Stacks"
+        PageSettingsProfile _ ->
+            titled "Profile"
 
-        SettingsNotifications ->
-            "Notifications — The Stacks"
+        PageSettingsPassword _ ->
+            titled "Password"
 
-        SettingsConsent ->
-            "Privacy Settings — The Stacks"
+        PageSettingsNotifications _ ->
+            titled "Notifications"
 
-        SettingsAuditLog ->
-            "Audit Log — The Stacks"
+        PageCostTransparency _ ->
+            titled "Cost Transparency"
 
-        Insights ->
-            "What Your Data Reveals — The Stacks"
+        PageMetrics _ ->
+            titled "What We Measure"
 
-        CostTransparency ->
-            "Cost Transparency — The Stacks"
+        PageAbout ->
+            titled "About"
 
-        Metrics ->
-            "What We Measure — The Stacks"
+        PageListingRemoval _ ->
+            titled "Remove a listing"
 
-        About ->
-            "About — The Stacks"
+        PageCatalogue _ ->
+            titled "Catalogue"
 
-        ListingRemoval ->
-            "Remove a listing — The Stacks"
+        PageMarketplaceBrowse _ ->
+            titled "Marketplace"
 
-        Catalogue ->
-            "Catalogue — The Stacks"
+        PageMarketplaceCreate _ ->
+            titled "Create Listing"
 
-        MarketplaceBrowse ->
-            "Marketplace — The Stacks"
+        PageMarketplaceMyListings _ ->
+            titled "My Listings"
 
-        MarketplaceCreate ->
-            "Create Listing — The Stacks"
+        PageMarketplaceDetail _ ->
+            titled "Listing"
 
-        MarketplaceMyListings ->
-            "My Listings — The Stacks"
+        PageSettingsPrivacy _ ->
+            titled "Privacy"
 
-        MarketplaceDetail _ ->
-            "Listing — The Stacks"
+        PageBlogArchive _ ->
+            titled "Blog"
 
-        SettingsPrivacy ->
-            "Privacy — The Stacks"
+        PageBlogEditor editorModel ->
+            case editorModel.mode of
+                BlogEditor.New ->
+                    titled "New Post"
 
-        BlogArchive ->
-            "Blog — The Stacks"
+                BlogEditor.Edit _ ->
+                    titled "Edit Post"
 
-        BlogNew ->
-            "New Post — The Stacks"
+        PageBlogPost _ ->
+            titled "Blog Post"
 
-        BlogEdit _ ->
-            "Edit Post — The Stacks"
+        PageAdminSourceApproval _ ->
+            titled "Source Approval"
 
-        BlogPost _ ->
-            "Blog Post — The Stacks"
+        PageAdminScraperConfig _ ->
+            titled "Scraper Health"
 
-        Route.AdminSourceApproval ->
-            "Source Approval — The Stacks"
+        PageAdminBookModeration _ ->
+            titled "Book Moderation"
 
-        Route.AdminScraperConfig ->
-            "Scraper Health — The Stacks"
+        PageAdminRemovalRequests _ ->
+            titled "Removal Requests"
 
-        Route.AdminBookModeration ->
-            "Book Moderation — The Stacks"
+        PageAdminGate _ _ ->
+            -- Drift sites 2 and 6. The operator is looking at an MFA challenge,
+            -- not at the surface behind it. The gated route IS carried by this
+            -- constructor and is deliberately not read here: naming the surface
+            -- is precisely the claim that was false.
+            titled "Admin Sign-In"
 
-        Route.AdminRemovalRequests ->
-            "Removal Requests — The Stacks"
+        PageGroups _ ->
+            titled "My Groups"
 
-        Groups ->
-            "My Groups — The Stacks"
+        PageGroupsDetail _ ->
+            titled "Group"
 
-        GroupDetail _ ->
-            "Group — The Stacks"
+        PageProfile profileModel ->
+            titled ("@" ++ profileModel.handle)
 
-        Profile _ ->
-            "Reader — The Stacks"
+        PageConfirmEmail EmailConfirmed ->
+            titled "Email Confirmed"
 
-        ProfileShelf _ _ ->
-            "Reader — The Stacks"
+        PageConfirmEmail EmailConfirmFailed ->
+            titled "Confirmation Failed"
 
-        ConfirmEmail EmailConfirmed ->
-            "Email Confirmed — The Stacks"
+        PageResetPassword _ ->
+            titled "Reset Password"
 
-        ConfirmEmail EmailConfirmFailed ->
-            "Confirmation Failed — The Stacks"
+        PageNotFound ->
+            -- Drift sites 3 and 4. A refused admin route renders this page; it
+            -- must not keep announcing the surface it refused.
+            titled "Not Found"
 
-        ForgotPassword ->
-            "Reset Password — The Stacks"
 
-        ResetPassword _ ->
-            "Reset Password — The Stacks"
+{-| Every title but the home page's is the page's own name followed by the
+product's. Written once, so a stray dash or a missing suffix cannot appear on
+one page out of forty.
+-}
+titled : String -> String
+titled name =
+    name ++ " — The Stacks"
 
-        NotFound ->
-            "Not Found — The Stacks"
+
+{-| The login card names its current mode. Drift sites 1 and 5 — the
+protected-route bounce and sign-out both render this card — resolve here.
+-}
+loginCardTitle : Login.Mode -> String
+loginCardTitle mode =
+    case mode of
+        Login.LoginMode ->
+            "Sign In"
+
+        Login.RegisterMode ->
+            "Create Account"
+
+        Login.RegistrationPending _ ->
+            "Check Your Email"
+
+        Login.ForgotPasswordMode ->
+            "Reset Password"
+
+
+{-| Library, Antilibrary and Wish List all render through one `PageBookshelf`,
+and so does another reader's shelf — so the route was the only thing that could
+tell them apart, and for `/u/:handle/:bookshelf` it gave up and said "Reader".
+The page itself knows: its config carries the shelf's label and, when it is
+being browsed read-only, whose shelf it is.
+-}
+bookshelfTitle : Bookshelf.Model -> String
+bookshelfTitle bookshelfModel =
+    case bookshelfModel.config.profileHandle of
+        Just handle ->
+            bookshelfModel.config.label ++ " — @" ++ handle
+
+        Nothing ->
+            bookshelfModel.config.label
+
+
+{-| Once the book has loaded, the tab says which book. A route can only say
+"Book", which is what every book-detail tab, bookmark and history entry used to
+say — indistinguishable from one another.
+-}
+bookDetailTitle : BookDetail.Model -> String
+bookDetailTitle detailModel =
+    case detailModel.book of
+        Types.RemoteData.Success book ->
+            book.title
+
+        _ ->
+            "Book"
 
 
 viewNav : Route -> Maybe Auth -> UserMenu.Model -> Html Msg

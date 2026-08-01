@@ -16,6 +16,7 @@ union forces a compile error here until it is classified, and every route in
 import Expect
 import Main
 import Navigation.Route exposing (ConfirmStatus(..), Route(..))
+import Page.Login as Login
 import Test exposing (Test, describe, test)
 
 
@@ -288,13 +289,13 @@ suite =
                     -- which needs a `typ: "admin_session"` token. Four surfaces were built, routed,
                     -- tested and unreachable — and nothing failed, because each page's own tests
                     -- passed a token straight into a mocked API.
-                    Main.initPage config AdminRemovalRequests (Just ownerAuth) Nothing Nothing
+                    Main.initPage config AdminRemovalRequests (Just ownerAuth) Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageAdminGate
                         |> Expect.equal True
             , test "with an admin token the real page loads" <|
                 \() ->
-                    Main.initPage config AdminRemovalRequests (Just ownerAuth) (Just "admin-tok") Nothing
+                    Main.initPage config AdminRemovalRequests (Just ownerAuth) (Just "admin-tok") Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageAdminGate
                         |> Expect.equal False
@@ -306,14 +307,14 @@ suite =
                     [ AdminSourceApproval, AdminScraperConfig, AdminBookModeration, AdminRemovalRequests ]
                         |> List.map
                             (\r ->
-                                Main.initPage config r (Just ownerAuth) Nothing Nothing
+                                Main.initPage config r (Just ownerAuth) Nothing Nothing Login.Fresh
                                     |> Tuple.first
                                     |> isPageAdminGate
                             )
                         |> Expect.equal [ True, True, True, True ]
             , test "a non-admin route is unaffected by the admin token being absent" <|
                 \() ->
-                    Main.initPage config Library (Just ownerAuth) Nothing Nothing
+                    Main.initPage config Library (Just ownerAuth) Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageAdminGate
                         |> Expect.equal False
@@ -321,19 +322,19 @@ suite =
         , describe "initPage redirect guard"
             [ test "a protected route with no auth renders the Login page (login-at-URL)" <|
                 \() ->
-                    Main.initPage config Upload Nothing Nothing Nothing
+                    Main.initPage config Upload Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal True
             , test "a second protected route with no auth also renders Login" <|
                 \() ->
-                    Main.initPage config SettingsProfile Nothing Nothing Nothing
+                    Main.initPage config SettingsProfile Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal True
             , test "a public route with no auth does NOT force the Login page" <|
                 \() ->
-                    Main.initPage config Home Nothing Nothing Nothing
+                    Main.initPage config Home Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal False

@@ -7,7 +7,8 @@ the full update loop cannot be program-tested. Following the pattern in
 NavigationProgramTest, we test the pure surfaces directly:
 
 1.  `viewNav` renders the correct nav for authenticated vs unauthenticated state
-2.  `decodeFlags` restores a `Maybe Auth` from localStorage-shaped flags
+2.  `decodeFlags` restores a `StoredAuth` from localStorage-shaped flags (the
+    corrupt and unreadable outcomes have their own suite, `StoredAuthTest`)
 3.  `shouldShowOnboarding` encodes the onboarding display condition
 
 -}
@@ -131,17 +132,19 @@ suite =
             [ test "restores an Auth from valid flags" <|
                 \() ->
                     Main.decodeFlags (flags "user")
+                        |> Main.storedSession
                         |> Maybe.map (.user >> .displayName)
                         |> Expect.equal (Just "A Reader")
             , test "restores the role from flags" <|
                 \() ->
                     Main.decodeFlags (flags "owner")
+                        |> Main.storedSession
                         |> Maybe.map (.user >> .role)
                         |> Expect.equal (Just "owner")
-            , test "returns Nothing when flags are empty" <|
+            , test "empty flags are a clean signed-out boot, not a corrupt one" <|
                 \() ->
                     Main.decodeFlags (Encode.object [])
-                        |> Expect.equal Nothing
+                        |> Expect.equal Main.NoStoredAuth
             ]
         , describe "decodeConfig (server-config channel — ADR-020)"
             [ test "decodes ageGatingEnabled: true" <|
