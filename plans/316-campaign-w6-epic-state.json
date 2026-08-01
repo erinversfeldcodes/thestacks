@@ -82,7 +82,7 @@
       "staff_review": "LGTM"
     },
     "363": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "6e Success/ack states + the five-family dedup sweep",
       "level": 4,
       "depends_on": [
@@ -96,13 +96,14 @@
         "many pages",
         "Duration (elixir)"
       ],
-      "merged": false,
-      "blocked_on": null
+      "merged": true,
+      "blocked_on": null,
+      "note": "Unblocked when #362 merged; the lead marked it in_progress but did not launch it \u2014 corrected 2026-08-01.",
+      "commit": "79c6c355",
+      "staff_review": "LGTM"
     }
   },
-  "ready_set": [
-    363
-  ],
+  "ready_set": [],
   "merge_order": [
     332,
     359,
@@ -133,5 +134,6 @@
       "merge_order_changed": "361 now merges BEFORE 360; #360 re-merges the integration branch and reconciles in its own worktree rather than the lead hand-resolving Elm conflicts at the merge point.",
       "why": "The type system forces it: pages returning 3-tuples do not compile against a Main.elm expecting 2-tuples, so no Main-free variant of #361 could build or test itself. The alternative (page-local expiry banner) would invent a 26th convention and bypass the cross-tab re-check net."
     }
-  ]
+  ],
+  "status": "children complete \u2014 gate + live drive outstanding"
 }
