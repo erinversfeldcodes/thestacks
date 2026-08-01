@@ -20,6 +20,7 @@ port module Main exposing
     , loginRedirectFor
     , main
     , parkPending
+    , redirectAfterNavigation
     , renewAuthToken
     , requiresAuth
     , resolveRecheck
@@ -651,6 +652,44 @@ loginRedirectFor route maybeAuth =
 
     else
         Nothing
+
+
+{-| The page to return the reader to after they sign in, recomputed for THIS
+navigation — never accumulated. Read once, from `UrlChanged`.
+
+⛔ **An expiry bounce is a bounce too** (#361, found while building #359). This
+used to be a bare `loginRedirectFor newRoute auth`, which is right when a route
+guard turns someone away at the door and wrong when a session dies underneath
+them. `forceSessionExpiry` pushes `/login`; `/login` requires no auth; so the
+recompute answered `Nothing` and the page the reader was standing on was dropped
+on the floor. They signed back in and landed on the home page instead of the
+settings form they were half-way through — the one case where returning them
+matters most, because they did not choose to leave it.
+
+`leaving` is the route being navigated AWAY from, which on an expiry bounce is
+that page: `forceSessionExpiry` only pushed the URL, and this is the update that
+consumes the push. `auth` is pinned to `Nothing` in that branch because the
+expiry has already cleared it — asking `loginRedirectFor` about a session that
+no longer exists is the whole point.
+
+Key-free and pure so it can be unit-tested: `Main.Model` embeds an
+unconstructable `Nav.Key` (the seam documented in `SessionExpiryTest`), so a
+decision left inline inside `update` cannot be tested at all.
+
+-}
+redirectAfterNavigation :
+    { arrivingAt : Route
+    , leaving : Route
+    , sessionExpiring : Bool
+    , auth : Maybe Auth
+    }
+    -> Maybe Route
+redirectAfterNavigation navigation =
+    if navigation.arrivingAt == Login && navigation.sessionExpiring then
+        loginRedirectFor navigation.leaving Nothing
+
+    else
+        loginRedirectFor navigation.arrivingAt navigation.auth
 
 
 initPage : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> ( Page, Cmd Msg )
@@ -1536,12 +1575,13 @@ update msg model =
                 , page = page
                 , previousRoute = Just model.route
                 , transition = transition
-
-                -- Recomputed, never accumulated: the asked-for page is whatever
-                -- THIS navigation was bounced off, and `Nothing` the moment it
-                -- was not bounced. (`pendingAuthResponse` used to be cleared
-                -- here too; it no longer exists — see `AuthState`.)
-                , redirectAfterLogin = loginRedirectFor newRoute (currentAuth model.auth)
+                , redirectAfterLogin =
+                    redirectAfterNavigation
+                        { arrivingAt = newRoute
+                        , leaving = model.route
+                        , sessionExpiring = model.sessionExpiredNotice
+                        , auth = currentAuth model.auth
+                        }
                 , userMenu = UserMenu.init
                 , sessionExpiredNotice =
                     model.sessionExpiredNotice && newRoute /= Login
@@ -1913,12 +1953,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token (currentAuth model.auth)
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Profile.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsProfile newSubModel }
-                    , Cmd.map ProfileMsg subCmd
-                    )
+                    case outMsg of
+                        Profile.NoOut ->
+                            ( { model | page = PageSettingsProfile newSubModel }
+                            , Cmd.map ProfileMsg subCmd
+                            )
+
+                        Profile.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1930,12 +1975,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token (currentAuth model.auth)
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Password.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsPassword newSubModel }
-                    , Cmd.map PasswordMsg subCmd
-                    )
+                    case outMsg of
+                        Password.NoOut ->
+                            ( { model | page = PageSettingsPassword newSubModel }
+                            , Cmd.map PasswordMsg subCmd
+                            )
+
+                        Password.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1961,12 +2011,17 @@ update msg model =
                         maybeToken =
                             Maybe.map .token (currentAuth model.auth)
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Notifications.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsNotifications newSubModel }
-                    , Cmd.map NotificationsMsg subCmd
-                    )
+                    case outMsg of
+                        Notifications.NoOut ->
+                            ( { model | page = PageSettingsNotifications newSubModel }
+                            , Cmd.map NotificationsMsg subCmd
+                            )
+
+                        Notifications.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )

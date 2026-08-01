@@ -36,6 +36,7 @@ import Expect
 import Html
 import Http
 import Main
+import Navigation.Route as Route
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
 import Page.Login as Login
@@ -72,6 +73,13 @@ suite =
         , describe "Notice — the redirect target shows a distinct session-expired message"
             [ expiredInitRendersDistinctNotice
             , freshInitHasNoNotice
+            ]
+        , describe "#361 — an expiry bounce remembers the page it bounced off"
+            [ expiryCapturesThePageTheReaderWasOn
+            , expiryCaptureSurvivesTheRedirectToLogin
+            , ordinaryNavigationToLoginCapturesNothing
+            , expiryOffAPublicPageCapturesNothing
+            , routeGuardBounceStillCaptures
             ]
         ]
 
@@ -412,3 +420,103 @@ loginModelProgram startModel =
 sansEffect : ( Login.Model, cmd, out ) -> Login.Model
 sansEffect ( model, _, _ ) =
     model
+
+
+
+-- #361 — THE EXPIRY BOUNCE'S OWN REDIRECT
+--
+-- Found while building #359 and fixed here because it is expiry routing, not
+-- login routing. `forceSessionExpiry` pushes `/login`; the `UrlChanged` that
+-- consumes the push used to recompute `redirectAfterLogin` from the ARRIVING
+-- route, which is `/login`, which requires no auth — so the answer was `Nothing`
+-- and the page the reader was mid-way through was forgotten. They signed back in
+-- and landed on the home page.
+--
+-- `Main.redirectAfterNavigation` is the whole decision, key-free so it is
+-- reachable at all: `Main.Model` embeds an unconstructable `Nav.Key` (see the
+-- seam note at the top of this module), so nothing left inline in `update` can
+-- be tested.
+--
+-- Mutation probe (run 2026-08-01): deleting the `sessionExpiring` branch — i.e.
+-- restoring the bare `loginRedirectFor navigation.arrivingAt navigation.auth` —
+-- reddens `expiry_captures_the_page_the_reader_was_on` and
+-- `expiry_capture_survives_the_redirect_to_login`, and leaves the three controls
+-- green. That is the defect, verbatim.
+
+
+{-| The reader was on `/settings/password` when the session died.
+-}
+expiryCapturesThePageTheReaderWasOn : Test
+expiryCapturesThePageTheReaderWasOn =
+    test "expiry_captures_the_page_the_reader_was_on: an expiry bounce off a settings form remembers the form" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Login
+                , leaving = Route.SettingsPassword
+                , sessionExpiring = True
+                , auth = Nothing
+                }
+                |> Expect.equal (Just Route.SettingsPassword)
+
+
+{-| The same for a half-finished upload — the journey #359 named.
+-}
+expiryCaptureSurvivesTheRedirectToLogin : Test
+expiryCaptureSurvivesTheRedirectToLogin =
+    test "expiry_capture_survives_the_redirect_to_login: /upload is remembered across the push to /login" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Login
+                , leaving = Route.Upload
+                , sessionExpiring = True
+                , auth = Nothing
+                }
+                |> Expect.equal (Just Route.Upload)
+
+
+{-| Control: someone who clicks "Sign in" of their own accord is not being
+bounced off anything, and must not be sent somewhere they did not ask for.
+-}
+ordinaryNavigationToLoginCapturesNothing : Test
+ordinaryNavigationToLoginCapturesNothing =
+    test "ordinary_navigation_to_login_captures_nothing: a deliberate visit to /login remembers nothing" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Login
+                , leaving = Route.SettingsPassword
+                , sessionExpiring = False
+                , auth = Nothing
+                }
+                |> Expect.equal Nothing
+
+
+{-| Control: an expiry while reading a PUBLIC page captures nothing. There is
+nothing to return them to that they cannot reach signed out.
+-}
+expiryOffAPublicPageCapturesNothing : Test
+expiryOffAPublicPageCapturesNothing =
+    test "expiry_off_a_public_page_captures_nothing: expiry on /about remembers nothing" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Login
+                , leaving = Route.About
+                , sessionExpiring = True
+                , auth = Nothing
+                }
+                |> Expect.equal Nothing
+
+
+{-| Control: the ORIGINAL route-guard bounce (#359) still works. This is the
+behaviour the expiry branch must not have broken.
+-}
+routeGuardBounceStillCaptures : Test
+routeGuardBounceStillCaptures =
+    test "route_guard_bounce_still_captures: an anonymous visit to /upload is still remembered" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Route.Upload
+                , leaving = Route.Home
+                , sessionExpiring = False
+                , auth = Nothing
+                }
+                |> Expect.equal (Just Route.Upload)

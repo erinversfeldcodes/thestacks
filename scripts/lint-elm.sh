@@ -31,6 +31,15 @@ bash "$REPO_ROOT/scripts/check-orphan-classes.sh"
 # token as an argument and so cannot notice that `Main` chose the wrong one.
 bash "$REPO_ROOT/scripts/check-admin-token-routing.sh"
 
+# Pages that make an authenticated Api call and drop the 401 (Issue #361). Same family again,
+# and the sharpest instance of it: there WAS an Elm test for this contract, green for four
+# months, listing eight pages by hand while three settings write-forms told readers to "try
+# again" against a session that no longer existed. The roster here is a set difference over
+# Api.elm × src/Page/, so a page is covered the day it is written. Measured: unwiring the
+# `onExpired` handler on Settings/Password reintroduces the defect verbatim and leaves all
+# 1427 Elm tests passing.
+bash "$REPO_ROOT/scripts/check-session-expiry-coverage.sh"
+
 # The stylesheet itself (Issue #306). Nothing in this gate looked at main.css before — not its syntax,
 # not its specificity. Three defects shipped through a green `just verify` in one change on
 # 2026-07-29, including CSS a browser cannot parse. Checks well-formedness, bans `[class*=]`
