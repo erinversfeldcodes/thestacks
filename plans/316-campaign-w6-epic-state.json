@@ -46,7 +46,7 @@
       "blocked_on": null
     },
     "361": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "6c 401 wrapper + reflection gate + 3 write-form pages",
       "level": 2,
       "depends_on": [
@@ -56,8 +56,10 @@
         "frontend/src/Api.elm",
         "frontend/src/Page/Settings/*"
       ],
-      "merged": false,
-      "blocked_on": null
+      "merged": true,
+      "blocked_on": null,
+      "commit": "896242ae",
+      "staff_review": "LGTM"
     },
     "362": {
       "status": "blocked",
