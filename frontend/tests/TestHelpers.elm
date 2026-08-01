@@ -625,7 +625,7 @@ simulateBookDetailResponseWithPlacement bookId book placement =
                  , ( "formats", Encode.list Encode.string [] )
                  , ( "visibility"
                    , placement.visibility
-                        |> Maybe.map Encode.string
+                        |> Maybe.map (Types.Visibility.toString >> Encode.string)
                         |> Maybe.withDefault Encode.null
                    )
                  ]
@@ -1867,6 +1867,22 @@ registerResponseResult response =
 loginEffects : Login.Msg -> Login.Model -> SimulatedEffect Login.Msg
 loginEffects msg model =
     case msg of
+        Login.ForgotSubmitted ->
+            -- Mirrors `Api.forgotPassword`. The backend always answers 200 (no
+            -- user enumeration), so a test drives the acknowledgement by
+            -- responding 200 and reading what the card then says.
+            SimulatedEffect.Http.request
+                { method = "POST"
+                , headers = []
+                , url = "/api/auth/forgot-password"
+                , body =
+                    SimulatedEffect.Http.jsonBody
+                        (Encode.object [ ( "email", Encode.string model.email ) ])
+                , expect = SimulatedEffect.Http.expectWhatever Login.GotForgotResponse
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
         Login.FormSubmitted ->
             case model.mode of
                 Login.LoginMode ->

@@ -3391,6 +3391,53 @@ h4 {
         transparent 55%, rgba(0, 0, 0, 0.22) 100%);
 }
 
+/* --- Owner-private placement (#363) --- */
+
+/* An owner-only book on an otherwise-visible shelf. The whole affordance used to
+   be an INLINE `opacity: 0.35` on the wrapper plus an aria-label suffix — so a
+   screen reader was told and a sighted reader was not, since a faint book says
+   nothing on a shelf that already shades by depth.
+
+   ⛔ There is deliberately NO opacity here. Measured in a browser, on this
+   stylesheet, with getComputedStyle: the spine's own title against its own spine
+   face is 4.71:1 at full opacity — the palette has barely any headroom over the
+   4.5:1 floor — and every point of transparency composites BOTH toward the
+   backdrop, so it eats that headroom directly. 0.35 gave **1.80:1**. Even 0.88
+   gives 4.12:1, and it takes 0.97 to get back over 4.5, at which point the fade
+   is invisible anyway. So the state is carried by a marker (the padlock below)
+   and an outline, never by making the one book whose privacy you might want to
+   check the one book you cannot read.
+
+   The outline goes on the spine FACE, not the wrapper: `.book` carries
+   `transform-style: preserve-3d`, and an outline or filter on that element
+   flattens the 3D book. `--softened` takes the same care.
+
+   Placed AFTER `.book` (line ~3297) deliberately. `.book--hidden` and `.book` are
+   both (0,1,0), so the later rule wins — the same collision that silently killed
+   three login-card notices (#365) when the base was written last. `.book:hover`
+   is (0,2,0) and sets only `z-index` and `animation`, neither of which is touched
+   here, so the treatment survives a hover. */
+.book--hidden .book__spine {
+    outline: 1px dashed rgba(214, 178, 94, 0.85);
+    outline-offset: -3px;
+}
+
+/* The padlock itself: a direct child of the `.book` wrapper (not the
+   overflow-hidden spine face), same as the bookmark ribbon, so it sits over the
+   spine's foot without being clipped. Decorative — `aria-hidden` in the markup,
+   because the aria-label already says "hidden (only visible to you)". */
+.book__lock {
+    position: absolute;
+    bottom: 5px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.62rem;
+    line-height: 1;
+    z-index: 5;
+    pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
 /* --- Bookmark ribbon: books the owner has written about (#287) --- */
 
 /* A slim cloth ribbon tucked into the head of the spine and poking a little

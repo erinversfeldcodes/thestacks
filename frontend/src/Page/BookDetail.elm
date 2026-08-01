@@ -380,10 +380,13 @@ update msg model maybeToken =
                                 |> Maybe.map .formats
                                 |> Maybe.withDefault []
 
+                        -- No `Visibility.fromString` here any more: the
+                        -- placement decoder parses the wire enum at the
+                        -- boundary, so this reads a `Visibility` rather than
+                        -- re-parsing a string the app had already been handed.
                         placementVisibility =
                             response.placement
                                 |> Maybe.andThen .visibility
-                                |> Maybe.andThen Visibility.fromString
                                 |> Maybe.withDefault Visibility.Platform
 
                         shelfCeiling =

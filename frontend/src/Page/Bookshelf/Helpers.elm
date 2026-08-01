@@ -15,7 +15,7 @@ import Html exposing (Html, button, div, p, span, text)
 import Html.Attributes exposing (attribute, class, id, style, tabindex)
 import Html.Events exposing (onClick)
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
-import Types.Placement exposing (Placement)
+import Types.Placement as Placement exposing (Placement)
 
 
 {-| Pick a texture deterministically from the title.
@@ -149,7 +149,7 @@ viewSpine wearLevel placement =
             , title = bookData.title
             , author = bookData.author
             , coverImageUrl = bookData.coverUrl
-            , hidden = placement.visibility == Just "owner"
+            , hidden = Placement.isHidden placement
             , hasWriting = placement.hasUserWriting
             }
         ]
@@ -333,7 +333,7 @@ viewClickableSpine wearLevel onBookClicked placement =
             , title = bookData.title
             , author = Types.Book.authorName bookData
             , coverImageUrl = bookCoverImageUrl bookData
-            , hidden = placement.visibility == Just "owner"
+            , hidden = Placement.isHidden placement
             , hasWriting = placement.hasUserWriting
             }
         ]

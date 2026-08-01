@@ -29,6 +29,7 @@ port module Main exposing
     , redirectAfterNavigation
     , renewAuthToken
     , requiresAuth
+    , resetPasswordDestination
     , resolveRecheck
     , settleArrival
     , shouldShowOnboarding
@@ -843,6 +844,28 @@ loginRedirectFor route maybeAuth =
 
     else
         Nothing
+
+
+{-| Where a finished password reset carries the reader, or `Nothing` when the
+reset page is not asking to go anywhere.
+
+⛔ Key-free and exposed on purpose. `Model` embeds an unconstructable `Nav.Key`,
+so `update`'s `ResetPasswordMsg` branch cannot be driven from a test — and a
+wire whose far end is untestable is a wire that gets stubbed and stays stubbed
+(the seam #360/#361 found, where both ends were right and the join between them
+was never exercised). `update` **calls** this rather than re-deciding the
+destination inline, so the branch a test can reach is the branch that ships:
+change the answer here and the running app changes with it.
+
+-}
+resetPasswordDestination : ResetPassword.OutMsg -> Maybe Route
+resetPasswordDestination outMsg =
+    case outMsg of
+        ResetPassword.NoOut ->
+            Nothing
+
+        ResetPassword.AdvanceToLogin ->
+            Just Route.Login
 
 
 {-| The page to return the reader to after they sign in, recomputed for THIS
@@ -2226,11 +2249,19 @@ update msg model =
             case model.page of
                 PageResetPassword subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             ResetPassword.update subMsg subModel
+
+                        advanced =
+                            case resetPasswordDestination outMsg of
+                                Just route ->
+                                    [ Nav.pushUrl model.key (Route.toPath route) ]
+
+                                Nothing ->
+                                    []
                     in
                     ( { model | page = PageResetPassword newSubModel }
-                    , Cmd.map ResetPasswordMsg subCmd
+                    , Cmd.batch (Cmd.map ResetPasswordMsg subCmd :: advanced)
                     )
 
                 _ ->

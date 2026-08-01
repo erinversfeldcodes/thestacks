@@ -28,6 +28,7 @@ defmodule Stacks.Workers.GuardianTokenSweepJob do
   alias Core.Repo
   alias Guardian.DB.Token
   alias Stacks.Accounts.AuthTokenFamily
+  alias Stacks.Duration
 
   # Grace period kept AFTER a family becomes dead before it is physically
   # removed. Conservative: a revoked family is already rejected by the
@@ -70,16 +71,13 @@ defmodule Stacks.Workers.GuardianTokenSweepJob do
     count
   end
 
-  # Absolute session cap in seconds, mirroring AuthController's `{n, unit}`
-  # config shape so the two never disagree on how long a session may live.
+  # Absolute session cap in seconds. Reads the same config key as
+  # `StacksWeb.AuthController` and converts it through the same
+  # `Stacks.Duration.to_seconds/1`, so "the two never disagree on how long a
+  # session may live" is now structural rather than a comment asking politely.
   defp session_cap_seconds do
-    {n, unit} = Application.get_env(:core, :session_absolute_cap, {7, :day})
-    n * unit_in_seconds(unit)
+    :core
+    |> Application.get_env(:session_absolute_cap, {7, :day})
+    |> Duration.to_seconds()
   end
-
-  defp unit_in_seconds(:second), do: 1
-  defp unit_in_seconds(:minute), do: 60
-  defp unit_in_seconds(:hour), do: 3_600
-  defp unit_in_seconds(:day), do: 86_400
-  defp unit_in_seconds(:week), do: 604_800
 end

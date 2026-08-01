@@ -9,9 +9,10 @@ module Page.Blog.Editor exposing
     )
 
 import Api
-import Html exposing (Html, button, div, h1, label, option, p, select, text, textarea)
-import Html.Attributes exposing (class, disabled, placeholder, rows, selected, value)
-import Html.Events exposing (onClick, onInput)
+import Components.SaveButton as SaveButton
+import Html exposing (Html, div, h1, label, option, p, select, text, textarea)
+import Html.Attributes exposing (class, placeholder, rows, selected, value)
+import Html.Events exposing (onInput)
 import Http
 import Types.BlogPost exposing (BlogPost, Visibility(..), visibilityToString)
 import Types.RemoteData exposing (RemoteData(..))
@@ -301,36 +302,34 @@ viewForm model =
         ]
 
 
+{-| "Save Draft" and "Publish" are the same button in different clothes: the
+same three `RemoteData` branches, differing only in weight and in the verb they
+conjugate. Both go through `Components.SaveButton`, so the fix to its inert
+`Success` branch reaches them too — a "Draft saved!" button that cannot save the
+next edit is the same defect as a "Saved!" one that cannot.
+-}
 viewSaveButton : RemoteData Http.Error () -> Html Msg
 viewSaveButton saving =
-    case saving of
-        Loading ->
-            button [ class "btn btn--secondary btn--disabled", disabled True ]
-                [ text "Saving..." ]
-
-        Success _ ->
-            button [ class "btn btn--secondary" ]
-                [ text "Draft saved!" ]
-
-        _ ->
-            button [ class "btn btn--secondary", onClick SaveDraft ]
-                [ text "Save Draft" ]
+    SaveButton.view
+        { state = saving
+        , onSave = SaveDraft
+        , label = "Save Draft"
+        , busyLabel = "Saving…"
+        , savedLabel = "Draft saved!"
+        , variant = SaveButton.Secondary
+        }
 
 
 viewPublishButton : Model -> Html Msg
 viewPublishButton model =
-    case model.publishing of
-        Loading ->
-            button [ class "btn btn--primary btn--disabled", disabled True ]
-                [ text "Publishing..." ]
-
-        Success _ ->
-            button [ class "btn btn--primary" ]
-                [ text "Published!" ]
-
-        _ ->
-            button [ class "btn btn--primary", onClick Publish ]
-                [ text "Publish" ]
+    SaveButton.view
+        { state = model.publishing
+        , onSave = Publish
+        , label = "Publish"
+        , busyLabel = "Publishing…"
+        , savedLabel = "Published!"
+        , variant = SaveButton.Primary
+        }
 
 
 viewFeedback : Model -> Html Msg
