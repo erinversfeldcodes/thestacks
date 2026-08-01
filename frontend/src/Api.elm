@@ -156,6 +156,7 @@ module Api exposing
     , searchUsers
     , setBookAgeGate
     , soldListing
+    , standardTimeout
     , streamEventDecoder
     , transparencyMetricsDecoder
     , unblockUser
@@ -168,6 +169,7 @@ module Api exposing
     , updateProfileVisibility
     , updateProgress
     , updateShelfVisibility
+    , uploadTimeout
     )
 
 {-| Every HTTP call the SPA makes, and every decoder that reads a server
@@ -213,6 +215,53 @@ import Url.Builder
 baseUrl : String
 baseUrl =
     ""
+
+
+{-| How long a request may hang before `elm/http` gives up and reports
+`Http.Timeout` (Issue #362).
+
+⛔ **`timeout = Nothing` does not mean "no timeout configured". It means "wait
+forever".** Every request in this file carried it, and the consequence is not
+abstract: a connection that opens and then stalls — a machine that went to sleep
+mid-response, a proxy holding the socket, a captive portal — never resolves, so
+the page's `RemoteData` never leaves `Loading`. The `Failure` branch that every
+page carefully writes is, for that whole class of failure, dead code. The reader
+waits on a spinner with no end and no explanation, and their only move is to
+reload a page that gave them no reason to.
+
+A dropped connection is not this case: the browser reports `NetworkError` at
+once, and offline navigation is caught earlier still by the connectivity banner.
+This bound is for the failure that looks, from inside the app, exactly like a
+slow success.
+
+**Fifteen seconds.** Every JSON endpoint here answers in well under a second in
+practice; the slowest real path is a cold Fly machine, seconds not tens of
+seconds. Below ~10s a reader on a genuinely poor connection would be cut off
+mid-success; much above 15s and "it is broken" has already been the honest
+answer for some time. Fifteen buys the cold start and still fails inside the
+span of a person's patience.
+
+-}
+standardTimeout : Maybe Float
+standardTimeout =
+    Just 15000
+
+
+{-| The bound for a request whose body is a file (Issue #362).
+
+Two minutes, not fifteen seconds, because this clock is measuring something
+else. `standardTimeout` bounds _waiting for an answer_; an upload's elapsed time
+is mostly **bytes crossing the wire**, and a phone photo on a weak connection can
+legitimately take a minute. Cancelling that would turn a slow success into a
+failure — the timeout would be the bug.
+
+It is still bounded. A stalled upload that will never finish is exactly as
+useless as a stalled read, and "wait forever" is not the alternative on offer.
+
+-}
+uploadTimeout : Maybe Float
+uploadTimeout =
+    Just 120000
 
 
 type alias AuthResponse =
@@ -375,8 +424,10 @@ register :
     -> (Result RegisterError () -> msg)
     -> Cmd msg
 register body toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/auth/register"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/register"
         , body =
             Http.jsonBody
                 (Requests.encodeRegisterRequest
@@ -386,6 +437,8 @@ register body toMsg =
                     }
                 )
         , expect = expectRegister toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -434,8 +487,10 @@ login :
     -> (Result Http.Error AuthResponse -> msg)
     -> Cmd msg
 login body toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/auth/login"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/login"
         , body =
             Http.jsonBody
                 (Requests.encodeLoginRequest
@@ -444,6 +499,8 @@ login body toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg authResponseDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -452,10 +509,14 @@ enumeration), so the caller only distinguishes success from a transport error.
 -}
 forgotPassword : String -> (Result Http.Error () -> msg) -> Cmd msg
 forgotPassword email toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/auth/forgot-password"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/forgot-password"
         , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
         , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -467,8 +528,10 @@ resetPassword :
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 resetPassword body toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/auth/reset-password"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/reset-password"
         , body =
             Http.jsonBody
                 (Encode.object
@@ -477,6 +540,8 @@ resetPassword body toMsg =
                     ]
                 )
         , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -507,8 +572,10 @@ requestListingRemoval :
     -> (Result Http.Error RemovalOutcome -> msg)
     -> Cmd msg
 requestListingRemoval body toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/opt-out"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/opt-out"
         , body =
             Http.jsonBody
                 (Encode.object
@@ -518,6 +585,8 @@ requestListingRemoval body toMsg =
                     ]
                 )
         , expect = Http.expectJson toMsg removalOutcomeDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -749,7 +818,7 @@ refresh token toMsg =
         , url = baseUrl ++ "/api/auth/refresh"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg authResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -770,7 +839,7 @@ logout token toMsg =
         , url = baseUrl ++ "/api/auth/logout"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -856,9 +925,14 @@ getTransparencyMetrics :
     (Result Http.Error TransparencyMetrics -> msg)
     -> Cmd msg
 getTransparencyMetrics toMsg =
-    Http.get
-        { url = baseUrl ++ "/api/transparency/metrics"
+    Http.request
+        { method = "GET"
+        , headers = []
+        , url = baseUrl ++ "/api/transparency/metrics"
+        , body = Http.emptyBody
         , expect = Http.expectJson toMsg transparencyMetricsDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -899,7 +973,7 @@ initUpload contentType token toMsg =
             Http.jsonBody
                 (Encode.object [ ( "content_type", Encode.string contentType ) ])
         , expect = Http.expectJson toMsg decodeUploadInit
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -909,6 +983,11 @@ Elm's Http uses XHR under the hood, so the JS-side compression
 monkey-patch in `apps/core/assets/js/app.js` intercepts this
 automatically. No auth header — the presigned URL signature IS the
 authorisation.
+
+The one request on `uploadTimeout` rather than `standardTimeout`: it is the only
+one carrying a file body, so its elapsed time is bytes moving rather than a
+server thinking. See `uploadTimeout`.
+
 -}
 putFileToR2 :
     String
@@ -922,7 +1001,7 @@ putFileToR2 url file toMsg =
         , url = url
         , body = Http.fileBody file
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = uploadTimeout
         , tracker = Nothing
         }
 
@@ -944,7 +1023,7 @@ commitUpload imageId token toMsg =
         , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/commit"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "image_id" Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -970,7 +1049,7 @@ rejectIdentification { imageId, rejectedBookIds, token } toMsg =
                     [ ( "rejected_book_ids", Encode.list Encode.string rejectedBookIds ) ]
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1066,7 +1145,7 @@ getBook bookId maybeToken toMsg =
         , url = baseUrl ++ "/api/books/" ++ bookId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg bookDetailResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1104,7 +1183,7 @@ searchBooks query deep token toMsg =
         -- generated proto decoder (mirrors catalogueResponseDecoder) into the
         -- typed `SearchSections` the search page renders as two sections (#285).
         , expect = Http.expectJson toMsg searchResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1121,7 +1200,7 @@ getBookshelf shelfName token toMsg =
         , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg bookshelfResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1190,7 +1269,7 @@ moveBook placementId targetBookshelf token toMsg =
                     { bookshelf = targetBookshelf }
                 )
         , expect = expectMove toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1207,7 +1286,7 @@ removeBook placementId token toMsg =
         , url = baseUrl ++ "/api/placements/" ++ placementId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1353,7 +1432,7 @@ updateProgress placementId body token toMsg =
         , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/progress"
         , body = Http.jsonBody (encodeProgressBody body)
         , expect = Http.expectStringResponse toMsg progressResponseToResult
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1390,7 +1469,7 @@ requestExport token toMsg =
         , url = baseUrl ++ "/api/gdpr/export"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1414,7 +1493,7 @@ deleteAccount token toMsg =
         , url = baseUrl ++ "/api/gdpr/account"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1433,7 +1512,7 @@ saveConsent consent token toMsg =
         , url = baseUrl ++ "/api/gdpr/consent"
         , body = Http.jsonBody (Requests.encodeConsentRequest { consent = consent })
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1461,7 +1540,7 @@ saveWritingAssistantConsent consent token toMsg =
                     ]
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1640,7 +1719,7 @@ getAuditLog token toMsg =
         , url = baseUrl ++ "/api/settings/audit-log?page=1"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg auditLogResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1808,7 +1887,7 @@ getInferences revealRisk token toMsg =
                    )
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg personalInferencesDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1888,7 +1967,7 @@ placeBook bookshelfName bookId token toMsg =
                     { bookId = bookId }
                 )
         , expect = expectPlace toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1909,7 +1988,7 @@ setBookAgeGate bookId token toMsg =
         , url = baseUrl ++ "/api/books/" ++ bookId ++ "/age-gate"
         , body = Http.jsonBody (Encode.object [ ( "adults_only", Encode.bool True ) ])
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1927,7 +2006,7 @@ getUserPlacements token toMsg =
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg placementsMineDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2114,7 +2193,7 @@ confirmBook body token toMsg =
                     ]
                 )
         , expect = Http.expectStringResponse toMsg confirmResponseToResult
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2145,7 +2224,7 @@ getCatalogue params toMsg =
         , url = Url.Builder.absolute [ "api", "catalogue" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg catalogueResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2189,7 +2268,7 @@ updateProfile body request =
         , url = baseUrl ++ "/api/settings/profile"
         , body = Http.jsonBody (encodeProfileBody body)
         , expect = authedExpect resolveProfile request
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2307,7 +2386,7 @@ updateLocation body request =
                     }
                 )
         , expect = authedExpect resolveWhatever request
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2331,7 +2410,7 @@ updatePassword body request =
                     }
                 )
         , expect = authedExpect resolveWhatever request
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2361,7 +2440,7 @@ getNotifications request =
         , url = baseUrl ++ "/api/settings/notifications"
         , body = Http.emptyBody
         , expect = authedExpect (resolveJson notificationPreferencesDecoder) request
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2401,7 +2480,7 @@ updateNotifications prefs request =
                     }
                 )
         , expect = authedExpect resolveWhatever request
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2443,7 +2522,7 @@ mergeFormat bookId body token toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg mergeFormatResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2483,7 +2562,7 @@ getListings maybeToken toMsg =
         , url = baseUrl ++ "/api/listings"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg listingsResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2501,7 +2580,7 @@ getMyListings token toMsg =
         , url = baseUrl ++ "/api/listings/mine"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg listingsResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2533,7 +2612,7 @@ createListing params token toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2552,7 +2631,7 @@ activateListing listingId token toMsg =
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/activate"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2571,7 +2650,7 @@ deactivateListing listingId token toMsg =
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/deactivate"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2590,7 +2669,7 @@ soldListing listingId token toMsg =
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/sold"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2609,7 +2688,7 @@ getMyPlacements token toMsg =
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementSummaryDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2637,7 +2716,7 @@ getBlogPosts maybeToken toMsg =
         , url = baseUrl ++ "/api/blog/posts"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "posts" (Decode.list blogPostSummaryDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2662,7 +2741,7 @@ getBlogPost postId maybeToken toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "post" blogPostDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2688,7 +2767,7 @@ createBlogPost postData token toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2715,7 +2794,7 @@ updateBlogPost postId postData token toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2734,7 +2813,7 @@ publishBlogPost postId token toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/publish"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2754,7 +2833,7 @@ confirmAssociation postId associationId token toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/confirm"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2774,7 +2853,7 @@ dismissAssociation postId associationId token toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/dismiss"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2799,7 +2878,7 @@ getPostComments postId maybeToken toMsg =
         , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "comments" (Decode.list commentDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2833,7 +2912,7 @@ createComment postId body maybeParentId token toMsg =
                     ([ ( "body", Encode.string body ) ] ++ parentField)
                 )
         , expect = Http.expectJson toMsg (Decode.field "comment" commentDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2852,7 +2931,7 @@ deleteComment commentId token toMsg =
         , url = baseUrl ++ "/api/comments/" ++ commentId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2879,7 +2958,7 @@ updateProfileVisibility visibility token toMsg =
                     { profileVisibility = visibility }
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2903,7 +2982,7 @@ updateShelfVisibility shelfName visibility token toMsg =
                     { visibility = visibility }
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2933,7 +3012,7 @@ updatePlacementVisibility placementId visibility token toMsg =
                     { visibility = visibility }
                 )
         , expect = Http.expectJson toMsg (Decode.field "visibility" Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3045,7 +3124,7 @@ blockUser targetUserId token toMsg =
         , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
         , body = Http.emptyBody
         , expect = expectBlock toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3065,7 +3144,7 @@ unblockUser targetUserId token toMsg =
         , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3086,7 +3165,7 @@ listBlockedUsers token page toMsg =
         , url = baseUrl ++ "/api/settings/blocked-users?page=" ++ String.fromInt page
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg blockedUsersResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3137,7 +3216,7 @@ getPrivacySettings token toMsg =
         , url = baseUrl ++ "/api/settings/privacy"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg privacySettingsDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3214,7 +3293,7 @@ getProfile maybeToken handle toMsg =
         , url = baseUrl ++ "/api/u/" ++ handle
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg publicProfileDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3233,7 +3312,7 @@ createShelf bookshelfName token toMsg =
         , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
         , body = Http.jsonBody (Encode.object [])
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3255,7 +3334,7 @@ deleteShelf shelfId token toMsg =
         , url = baseUrl ++ "/api/shelves/" ++ shelfId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3279,7 +3358,7 @@ reorderShelves bookshelfName shelfIds token toMsg =
             Http.jsonBody
                 (Encode.object [ ( "shelf_ids", Encode.list Encode.string shelfIds ) ])
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3304,7 +3383,7 @@ getProfileShelf maybeToken handle bookshelfName toMsg =
         , url = baseUrl ++ "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg shelvesResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3350,7 +3429,7 @@ searchUsers maybeToken query toMsg =
         , url = Url.Builder.crossOrigin baseUrl [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3488,7 +3567,7 @@ adminLogin body toMsg =
         , expect =
             expectAdminJson toMsg
                 (Decode.map AdminSession (Decode.field "session_id" Decode.string))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3512,7 +3591,7 @@ adminVerifyMfa body toMsg =
                     ]
                 )
         , expect = expectAdminJson toMsg (Decode.field "token" Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3541,7 +3620,7 @@ adminMfaSetup ownerToken toMsg =
                     (Decode.field "provisioning_uri" Decode.string)
                     (Decode.field "recovery_codes" (Decode.list Decode.string))
                 )
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3577,7 +3656,7 @@ adminMfaConfirm ownerToken body toMsg =
                     ]
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3676,7 +3755,7 @@ getRemovalRequests token toMsg =
         , body = Http.emptyBody
         , expect =
             Http.expectJson toMsg (Decode.field "requests" (Decode.list removalRequestDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3709,7 +3788,7 @@ removalDecision requestId action token toMsg =
         , url = baseUrl ++ "/api/admin/removal-requests/" ++ requestId ++ "/" ++ action
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3735,7 +3814,7 @@ getAdminSources params token toMsg =
         , url = Url.Builder.absolute [ "api", "admin", "sources" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminSourcesResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3754,7 +3833,7 @@ approveSource sourceId token toMsg =
         , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/approve"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3773,7 +3852,7 @@ rejectSource sourceId token toMsg =
         , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/reject"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3847,7 +3926,7 @@ adminListBooks params token toMsg =
         , url = Url.Builder.absolute [ "api", "admin", "books" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminBooksResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3868,7 +3947,7 @@ adminSetBookAgeGate bookId ageGated token toMsg =
         , url = baseUrl ++ "/api/admin/books/" ++ bookId ++ "/age-gate"
         , body = Http.jsonBody (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
         , expect = Http.expectJson toMsg (Decode.field "book" adminBookDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3925,7 +4004,7 @@ getSourceHealth token toMsg =
         , url = baseUrl ++ "/api/admin/source-health"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg sourceHealthListDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3968,7 +4047,7 @@ getOnboardingStatus token toMsg =
         , url = baseUrl ++ "/api/onboarding/status"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg onboardingStatusDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3987,7 +4066,7 @@ completeOnboardingStep step token toMsg =
         , url = baseUrl ++ "/api/onboarding/step/" ++ step
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg onboardingStatusDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -4010,7 +4089,7 @@ createGroup name token toMsg =
                     ]
                 )
         , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -4027,7 +4106,7 @@ getGroup groupId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -4054,7 +4133,7 @@ getGroupFeed groupId token maybeCursor toMsg =
         , url = url
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg feedResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -4077,7 +4156,7 @@ inviteToGroup groupId identifier token toMsg =
                     ]
                 )
         , expect = Http.expectJson toMsg (Decode.field "invitation" groupInvitationDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -4095,7 +4174,7 @@ acceptInvitation groupId invitationId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/accept"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -4113,7 +4192,7 @@ declineInvitation groupId invitationId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -4130,6 +4209,6 @@ leaveGroup groupId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/leave"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }

@@ -4,14 +4,15 @@ module Page.Bookshelf.Helpers exposing
     , pickTexture
     , viewBookcase
     , viewEmptyShelfMessage
+    , viewLoadingShelfRows
     , viewShelfLabel
     , viewShelfRow
     , viewShelfRowClickable
     )
 
-import Components.Spine exposing (SpineTexture(..), WearLevel, book, spineWidth)
+import Components.Spine exposing (SpineTexture(..), WearLevel, book, spineHeight, spineWidth)
 import Html exposing (Html, button, div, p, span, text)
-import Html.Attributes exposing (attribute, class, id, tabindex)
+import Html.Attributes exposing (attribute, class, id, style, tabindex)
 import Html.Events exposing (onClick)
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement exposing (Placement)
@@ -190,6 +191,82 @@ viewEmptyShelfMessage message =
         , div [ class "shelf-row__plank" ] []
         , div [ class "shelf-row__lip" ] []
         ]
+
+
+{-| A bookcase-full of placeholder spines, for the moment the shelves are still
+in flight.
+
+⛔ **This exists because "no books yet" and "we do not know yet" used to render
+the same thing.** `Page.Bookshelf` gave `Loading` the same branch as `NotAsked`
+— an empty bookcase — which is also what an empty shelf looks like. Driven live
+on 2026-07-30: navigating to a shelf with no connection painted a serene, empty
+bookcase and stopped. The reader is told their shelves are empty; the truth is
+that the request never completed. For a product whose whole subject is the books
+someone owns, that is the worst sentence the page can say wrongly.
+
+So the loading row is not a spinner bolted onto the empty state — it is the
+opposite claim, made in the same visual language: spine-shaped placeholders on a
+real shelf, saying "books are coming" where the empty row says "there are none".
+The widths come from `spineWidth` on a fixed spread of page counts, so the rows
+have the irregular rhythm of an actual shelf rather than rows of identical bars.
+
+⚠️ **It returns every row, not one row to pad out with `minShelfRows`.** Padding
+would fill the rest of the bookcase with `shelf-row--empty` — the empty state's
+own marker — putting "this shelf is empty" back on the waiting page in the one
+place a reader and a test both look.
+
+`aria-hidden` on the placeholders: they carry no information a screen reader can
+use. The announcement is the `role="status"` region around the bookcase (see
+`Page.Bookshelf.viewLoadingBookshelf`), which says it once, in words.
+
+-}
+viewLoadingShelfRows : List (Html msg)
+viewLoadingShelfRows =
+    List.map viewLoadingShelfRow skeletonRows
+
+
+viewLoadingShelfRow : List Int -> Html msg
+viewLoadingShelfRow pageCounts =
+    div [ class "shelf-row shelf-row--loading" ]
+        [ div [ class "shelf-row__back" ] []
+        , div
+            [ class "shelf-row__books shelf-row__books--loading"
+            , attribute "aria-hidden" "true"
+            ]
+            (List.map viewSkeletonSpine pageCounts)
+        , div [ class "shelf-row__plank" ] []
+        , div [ class "shelf-row__lip" ] []
+        ]
+
+
+{-| Page counts for the placeholder spines, a row at a time. Arbitrary, but
+fixed rather than random: a shelf whose skeleton reshuffles on every re-render
+reads as broken.
+
+Row lengths are chosen to fill `bookcaseInnerWidth` (~990px at ~42px a spine,
+including the 2px gap) — the first draft used twelve and left half of every
+shelf visibly bare, which reads as an emptying shelf rather than a filling one.
+Found by looking at it in a browser. The last row runs short on purpose: a
+bookcase that is still being filled.
+
+-}
+skeletonRows : List (List Int)
+skeletonRows =
+    [ [ 320, 180, 640, 240, 900, 150, 420, 700, 260, 540, 200, 380, 610, 230, 480, 170, 730, 290, 550, 210, 660, 340, 450 ]
+    , [ 210, 760, 300, 480, 160, 620, 340, 900, 220, 400, 580, 250, 690, 190, 520, 360, 270, 810, 230, 440, 600, 180, 500 ]
+    , [ 640, 190, 430, 820, 270, 350, 700, 200, 560, 310, 240, 470, 880, 220, 390, 650, 180, 530, 300, 720, 250, 410, 590 ]
+    , [ 380, 520, 170, 660, 290, 750, 230, 460, 340 ]
+    ]
+
+
+viewSkeletonSpine : Int -> Html msg
+viewSkeletonSpine pageCount =
+    div
+        [ class "book-skeleton"
+        , style "width" (String.fromInt (spineWidth pageCount) ++ "px")
+        , style "height" (String.fromInt (spineHeight pageCount) ++ "px")
+        ]
+        []
 
 
 {-| An empty shelf row — just the back, plank, and lip with no books.

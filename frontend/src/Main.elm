@@ -3,6 +3,7 @@ port module Main exposing
     , Auth
     , AuthState(..)
     , CompletedLogin
+    , Connectivity(..)
     , ExternalAuthOutcome(..)
     , LoginEffect(..)
     , Msg(..)
@@ -13,6 +14,7 @@ port module Main exposing
     , adoptExternalAuth
     , arrivalForBoot
     , completeLogin
+    , connectivityFromOnline
     , consumeArrival
     , currentAuth
     , decodeConfig
@@ -31,6 +33,7 @@ port module Main exposing
     , settleArrival
     , shouldShowOnboarding
     , storedSession
+    , viewConnectivity
     , viewFooter
     , viewHome
     , viewNav
@@ -96,6 +99,7 @@ import Types.Placement
 import Types.RemoteData
 import Types.User exposing (AuthToken, User)
 import Url exposing (Url)
+import Util.TestId exposing (testId)
 
 
 port onSwipe : (Decode.Value -> msg) -> Sub msg
@@ -170,6 +174,25 @@ network round-trip never blocks first paint. The payload is the resolved
 (`False`) stands.
 -}
 port ageGatingConfig : (Bool -> msg) -> Sub msg
+
+
+{-| Browser connectivity (Issue #362). `app.js` subscribes to the `online` and
+`offline` window events and sends `navigator.onLine` here, plus one send at boot
+so a tab opened while already offline is not told it is connected.
+
+⛔ **The shell, not the page.** This is the same shape as `handleSessionExpiry`:
+a condition that is true of the whole app rather than of any one request, so it
+is answered once, centrally, and every page inherits the answer. The alternative
+— each page inferring "probably offline" from its own `Http.NetworkError` — is a
+decision copied N times, arrives only after a request has already failed, and
+says nothing at all on a page that happens not to be fetching anything.
+
+`Bool` on the wire because that is exactly what `navigator.onLine` is; it
+becomes a `Connectivity` the moment it crosses into Elm, so nothing downstream
+has to remember which way round the boolean goes.
+
+-}
+port connectivityChanged : (Bool -> msg) -> Sub msg
 
 
 main : Program Decode.Value Model Msg
@@ -264,6 +287,31 @@ type AuthState
     = Anonymous
     | Arriving Auth
     | Authenticated Auth
+
+
+{-| Whether the browser currently has a network connection (Issue #362).
+
+A two-constructor type rather than `isOffline : Bool` on the model. The banner
+is the only reader today, but a boolean named for one of its two states is how
+`not online` and `offline` end up being written in different places and drifting;
+this cannot be read backwards.
+
+-}
+type Connectivity
+    = Online
+    | Offline
+
+
+{-| Read a `navigator.onLine` boolean at the port boundary, so the rest of the
+app never sees the boolean at all.
+-}
+connectivityFromOnline : Bool -> Connectivity
+connectivityFromOnline isOnline =
+    if isOnline then
+        Online
+
+    else
+        Offline
 
 
 {-| The session, whatever stage of arrival it is in. The ONE accessor — nothing
@@ -380,6 +428,11 @@ type alias Model =
     -- and merged into the boot flags. The app's first global config channel;
     -- keep it minimal and extensible. Currently just the age-gating flag.
     , config : AppConfig
+
+    -- Whether the browser has a network connection (Issue #362). Fed by the
+    -- `connectivityChanged` port; read only by the shell's banner, so no page
+    -- has to work this out from its own failed request.
+    , connectivity : Connectivity
     }
 
 
@@ -463,6 +516,12 @@ init flags url key =
       , arrival = consumeArrival page arrival
       , pendingLogout = Nothing
       , config = config
+
+      -- Fail-safe: boot as connected. `app.js` sends the real
+      -- `navigator.onLine` immediately, so an offline tab corrects itself
+      -- within a tick — whereas booting `Offline` would flash a banner at
+      -- every reader whose browser happens to answer a moment late.
+      , connectivity = Online
       }
     , Cmd.batch
         [ cmd
@@ -1698,6 +1757,7 @@ type Msg
     | AuthChangedExternally Decode.Value
     | GotStoredAuth Decode.Value
     | AgeGatingConfigReceived Bool
+    | ConnectivityChanged Bool
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -2877,6 +2937,14 @@ update msg model =
             in
             ( { model | config = { config | ageGatingEnabled = enabled } }, Cmd.none )
 
+        ConnectivityChanged isOnline ->
+            -- The browser's own `online`/`offline` event (Issue #362). No
+            -- effect: the banner is the whole response. Deliberately NOT a
+            -- retry trigger — a page that refetches on reconnect is a separate
+            -- decision, and quietly re-issuing a request the reader has since
+            -- navigated away from is how stale data lands on the wrong page.
+            ( { model | connectivity = connectivityFromOnline isOnline }, Cmd.none )
+
         FocusResult ->
             -- Shared fire-and-forget no-op: absorbs focus-attempt results and
             -- the logout request's result (best-effort server-side revocation).
@@ -3076,6 +3144,7 @@ subscriptions model =
         , authChanged AuthChangedExternally
         , gotStoredAuth GotStoredAuth
         , ageGatingConfig AgeGatingConfigReceived
+        , connectivityChanged ConnectivityChanged
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string
                 |> Decode.andThen
@@ -3130,6 +3199,7 @@ view model =
         , ViewAsBar.view model.url
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
+            , viewConnectivity model.connectivity
             , viewNav model.route (currentAuth model.auth) model.userMenu
             , main_
                 [ id "main-content"
@@ -3737,6 +3807,47 @@ viewFooter =
         [ p [ class "app-footer__text" ]
             [ text "The Stacks — open source book management" ]
         ]
+
+
+{-| The shell's connectivity banner (Issue #362).
+
+⛔ **The reason this is in the shell.** Losing your connection is a fact about
+the app, not about a request, and the page that most needed to say so was the
+one saying least: a shelf whose fetch never returned rendered an empty bookcase,
+so the reader was told their library was empty. Answering that per-page means
+copying the same inference N times, and it can only ever speak AFTER a request
+has failed — it has nothing to say on a page that is simply sitting there.
+Here it is one banner, above everything, correct the instant the browser knows.
+
+Rendered above the nav rather than fixed over it: it pushes the page down, which
+is honest — something has changed about the whole app — where an overlay would
+cover a control the reader may be reaching for.
+
+`role="status"` + `aria-live="polite"` so it is announced without stealing focus
+mid-task. It says what is true (nothing is reaching the library) and what will
+happen (it comes back on its own), so nobody is left hunting for a retry button
+that would not help.
+
+Nothing renders when online. An "everything is fine" banner is noise, and it
+would push the page down on every reader, forever, to say nothing.
+
+-}
+viewConnectivity : Connectivity -> Html Msg
+viewConnectivity connectivity =
+    case connectivity of
+        Online ->
+            text ""
+
+        Offline ->
+            div
+                [ class "connectivity-banner"
+                , testId "connectivity-offline"
+                , attribute "role" "status"
+                , attribute "aria-live" "polite"
+                ]
+                [ p [ class "connectivity-banner__text" ]
+                    [ text "You are offline. The Stacks can’t reach the library right now — anything already on screen stays put, and this will clear as soon as you reconnect." ]
+                ]
 
 
 {-| An admin API call came back unauthorised.

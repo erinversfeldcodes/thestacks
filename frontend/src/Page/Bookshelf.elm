@@ -31,6 +31,7 @@ import Page.Bookshelf.Helpers
         , minShelfRows
         , viewBookcase
         , viewEmptyShelfMessage
+        , viewLoadingShelfRows
         , viewShelfLabel
         , viewShelfRowClickable
         )
@@ -208,7 +209,14 @@ type Msg
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
-        apiCmd =
+        -- ⛔ The state and the command are decided TOGETHER, and that is the
+        -- point. `shelves` used to be an unconditional `Loading` while the
+        -- command below could be `Cmd.none` — a page claiming a request was in
+        -- flight when none had been made. Nothing would ever resolve it, so the
+        -- loading view (below) would have become a skeleton that shimmers
+        -- forever. `Loading` is a promise; only issue it with the request that
+        -- keeps it.
+        ( apiCmd, initialShelves ) =
             case ( config.readOnly, config.profileHandle ) of
                 ( True, Just handle ) ->
                     -- Browsing another reader's shelf: optional-auth GET so the
@@ -216,20 +224,24 @@ init config maybeToken userId =
                     -- The read-only path never renders RSS, so the profile
                     -- payload carries no visibility; default it to "owner" to
                     -- reuse the shared ShelvesLoaded response shape.
-                    Api.getProfileShelf maybeToken
+                    ( Api.getProfileShelf maybeToken
                         handle
                         config.apiName
                         (ShelvesLoaded (requestKey config) << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
+                    , Loading
+                    )
 
                 _ ->
                     case maybeToken of
                         Just token ->
-                            Api.getBookshelf config.apiName token (ShelvesLoaded (requestKey config))
+                            ( Api.getBookshelf config.apiName token (ShelvesLoaded (requestKey config))
+                            , Loading
+                            )
 
                         Nothing ->
-                            Cmd.none
+                            ( Cmd.none, NotAsked )
     in
-    ( { shelves = Loading
+    ( { shelves = initialShelves
       , showAgeGate = False
       , config = config
       , userId = userId
@@ -508,6 +520,40 @@ reloadShelves model =
             Cmd.none
 
 
+{-| A load failure in the reader's terms (Issue #362).
+
+The two cases split out from the generic "Please try again" are the two the
+reader can do something about, and both only became REACHABLE with this issue's
+timeout: before it, a stalled connection sat in `Loading` forever and never
+arrived here at all.
+
+  - `Timeout` — the request was given up on after `Api.standardTimeout`. Saying
+    "could not load" would be a shrug; naming the wait is what tells the reader
+    the shelf is not empty, the answer just never came.
+  - `NetworkError` — there is no connection. "Try again" alone would send them
+    round the same loop; the fix is upstream of the app.
+
+Everything else stays generic on purpose. A reader cannot act on a 500, and
+inventing detail for it would be noise dressed as helpfulness.
+
+-}
+loadError : Config -> Http.Error -> String
+loadError config err =
+    let
+        shelf =
+            String.toLower config.label
+    in
+    case err of
+        Http.Timeout ->
+            "Your " ++ shelf ++ " is taking too long to arrive. The library may be busy — please try again."
+
+        Http.NetworkError ->
+            "The library is unreachable. Check your connection, then try again."
+
+        _ ->
+            "Could not load your " ++ shelf ++ ". Please try again."
+
+
 {-| A mutation failure in the reader's terms.
 -}
 mutationError : Http.Error -> String
@@ -569,19 +615,22 @@ view model =
                         div [ attribute "aria-live" "polite" ]
                             [ case model.shelves of
                                 NotAsked ->
+                                    -- No request was issued (no credential), so
+                                    -- there is nothing to wait for and nothing
+                                    -- to report: the bare bookcase frame.
                                     viewBookshelfFromShelves model []
 
                                 Loading ->
-                                    viewBookshelfFromShelves model []
+                                    viewLoadingBookshelf model
 
-                                Failure _ ->
+                                Failure err ->
                                     if cfg.readOnly then
                                         p [ class "shelf-unavailable", testId "shelf-unavailable" ]
                                             [ text "Reader not found, or this shelf isn't available." ]
 
                                     else
-                                        p [ class "error" ]
-                                            [ text ("Could not load your " ++ String.toLower cfg.label ++ ". Please try again.") ]
+                                        p [ class "error", testId "shelf-error" ]
+                                            [ text (loadError cfg err) ]
 
                                 Success shelves ->
                                     let
@@ -604,6 +653,55 @@ viewEmptyBookshelf model =
     div [ class "bookshelf", testId "bookshelf-empty" ]
         [ viewBookcase
             (minShelfRows 4 [ viewEmptyShelfMessage model.config.emptyMessage ])
+        ]
+
+
+{-| The shelves are on their way (Issue #362).
+
+⛔ **`Loading` used to share `NotAsked`'s branch — an empty bookcase — which is
+also what `Success []` looks like.** Three different facts, one picture. Driven
+live on 2026-07-30, offline shelf navigation rendered a serene empty bookcase:
+the page told the reader their library was empty when the truth was that the
+request never completed.
+
+Every difference below is deliberate, because the two states have to be
+distinguishable by whatever a person or a test is actually looking at:
+
+  - **by structure** — `data-testid="bookshelf-loading"` against the empty
+    state's `bookshelf-empty`, so a test cannot pass in the wrong one;
+  - **by markup** — `role="status"` + `aria-busy="true"`, so a screen reader is
+    told a fetch is running rather than reading an empty shelf;
+  - **by words** — the shelf is named ("Fetching your Library…") where the empty
+    state offers an invitation to fill it;
+  - **by picture** — spine-shaped placeholders where the empty state has a
+    centred message on a bare plank.
+
+Any one of those alone would be a detail. Together they are the reason a reader
+who glances at the page for half a second draws the right conclusion.
+
+-}
+viewLoadingBookshelf : Model -> Html Msg
+viewLoadingBookshelf model =
+    let
+        -- Whose shelf is being fetched. "your Library" is wrong on someone
+        -- else's shelf, and read-only browse reaches this same view.
+        whose =
+            case model.config.profileHandle of
+                Just handle ->
+                    "@" ++ handle ++ "’s "
+
+                Nothing ->
+                    "your "
+    in
+    div
+        [ class "bookshelf bookshelf--loading"
+        , testId "bookshelf-loading"
+        , attribute "role" "status"
+        , attribute "aria-busy" "true"
+        ]
+        [ p [ class "bookshelf__loading-text" ]
+            [ text ("Fetching " ++ whose ++ model.config.label ++ "…") ]
+        , viewBookcase viewLoadingShelfRows
         ]
 
 

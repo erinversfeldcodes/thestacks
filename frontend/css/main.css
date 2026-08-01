@@ -167,6 +167,33 @@ h4 {
     width: 100%;
 }
 
+/* ===== Connectivity banner (#362) =====
+
+   Above the header in the DOM and in the flow, so it pushes the whole app down
+   rather than covering a control the reader may be reaching for. Amber on a
+   deep, warm ground: this is not an error the reader caused, and red would say
+   it was. Only ever rendered when offline — an "everything is fine" bar is a
+   permanent tax on every reader to say nothing. */
+
+.connectivity-banner {
+    position: relative;
+    z-index: 200;
+    background-color: #4a3320;
+    border-bottom: 1px solid rgba(212, 175, 55, 0.45);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    padding: 0.75rem 1.5rem;
+}
+
+.connectivity-banner__text {
+    max-width: 1200px;
+    margin: 0 auto;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    line-height: 1.45;
+    color: #f0dfae;
+    text-align: center;
+}
+
 /* ===== Header & Navigation ===== */
 
 .app-header {
@@ -3465,6 +3492,65 @@ h4 {
     opacity: 0.7;
 }
 
+/* Shelves in flight (#362)
+
+   Deliberately NOT the empty shelf with a spinner on it. An empty bookcase is
+   what "you have no books" looks like, and for a while it was also what "the
+   request has not come back" looked like — offline shelf navigation painted a
+   serene empty bookcase and stopped. These rules give the waiting state its own
+   picture: spine-shaped placeholders on a real plank, catching a slow sweep of
+   sconce light, so the shelf reads as filling rather than as bare. */
+
+.bookshelf--loading {
+    position: relative;
+}
+
+.bookshelf__loading-text {
+    font-family: var(--font-heading);
+    font-size: var(--size-base);
+    font-style: italic;
+    color: var(--text-muted, #a09070);
+    text-align: center;
+    padding: 0 0 0.75rem;
+    opacity: 0.75;
+}
+
+.shelf-row--loading {
+    /* Held back a little from a settled shelf: the placeholders are not books
+       yet, and reading at full contrast would make the arrival of the real
+       spines look like nothing happened. */
+    opacity: 0.85;
+}
+
+.shelf-row__books--loading {
+    gap: 2px;
+}
+
+.book-skeleton {
+    border-radius: 2px 1px 1px 2px;
+    background:
+        linear-gradient(100deg,
+            rgba(255, 220, 160, 0) 20%,
+            rgba(255, 220, 160, 0.13) 50%,
+            rgba(255, 220, 160, 0) 80%
+        ),
+        linear-gradient(180deg, #2b2119 0%, #221a14 100%);
+    background-size: 220% 100%, 100% 100%;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35),
+                0 1px 2px rgba(0, 0, 0, 0.45);
+    animation: shelf-shimmer 1.9s ease-in-out infinite;
+}
+
+@keyframes shelf-shimmer {
+    from {
+        background-position: 160% 0, 0 0;
+    }
+
+    to {
+        background-position: -60% 0, 0 0;
+    }
+}
+
 /* Book button wrapper (clickable spine in Library) */
 
 .book-button {
@@ -3483,6 +3569,12 @@ h4 {
     }
 
     .book:hover {
+        animation: none;
+    }
+
+    /* The shimmer is decoration; the loading state's meaning is carried by the
+       `role="status"` text and the placeholder shapes, both of which survive. */
+    .book-skeleton {
         animation: none;
     }
 }

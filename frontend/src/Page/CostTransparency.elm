@@ -23,6 +23,7 @@ Follows the 5-layer model from the cost transparency research:
 
 -}
 
+import Api
 import Html exposing (Html, div, h1, h2, h3, p, span, text)
 import Html.Attributes exposing (class)
 import Http
@@ -112,11 +113,21 @@ update msg model =
 -- HTTP
 
 
+{-| `Http.request` rather than the shorter `Http.get`, because `Http.get` has no
+`timeout` field at all — it is `Nothing` by construction, i.e. wait forever
+(#362). The extra four lines are what buys this page a reachable `Failure`
+branch.
+-}
 fetchCosts : Cmd Msg
 fetchCosts =
-    Http.get
-        { url = "/api/costs"
+    Http.request
+        { method = "GET"
+        , headers = []
+        , url = "/api/costs"
+        , body = Http.emptyBody
         , expect = Http.expectJson CostsReceived costBreakdownDecoder
+        , timeout = Api.standardTimeout
+        , tracker = Nothing
         }
 
 
