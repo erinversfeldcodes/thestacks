@@ -63,13 +63,78 @@ suite =
         ]
 
 
+{-| ⛔ **`Loading` and `Success []` must not render the same page.**
+
+This suite replaced a single test that asserted the loading view has a
+`.bookcase` — which is true in `Loading`, in `Success []`, and in
+`Success [book]` alike. It passed for as long as the defect existed and would
+have passed after any repair, so it reported nothing. The bug it could not see:
+`Loading` shared `NotAsked`'s branch (an empty bookcase), so navigating to a
+shelf with no connection told the reader their library was empty.
+
+Each test below is therefore written to be **false in the other state**, and
+every negative assertion is paired with the positive control that proves the
+selector is real:
+
+  - `bookshelf_loading_shows_a_loading_state` — the loading marks are present
+    while loading; `bookshelf_empty_is_not_the_loading_state` shows the same
+    marks are absent once an empty response lands (so `ensureViewHasNot` there
+    is not vacuous).
+  - `bookshelf_loading_is_not_the_empty_state` — the empty state's marks are
+    absent while loading; `bookshelfEmptyState` below is the control proving
+    those marks do appear on `Success []`.
+
+Mutation probe: restore `Loading -> viewBookshelfFromShelves model []` in
+`Page/Bookshelf.elm` and all three redden.
+
+-}
 bookshelfLoadingState : Test
 bookshelfLoadingState =
-    test "bookshelf_loading_state: before HTTP response arrives, empty bookcase is shown" <|
-        \() ->
-            startLibrary
-                |> ProgramTest.expectViewHas
-                    [ Selector.class "bookcase" ]
+    describe "Loading is not the empty shelf (#362)"
+        [ test "bookshelf_loading_shows_a_loading_state: before the response arrives the page says so, in markup a screen reader can use" <|
+            \() ->
+                startLibrary
+                    |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "data-testid" "bookshelf-loading") ]
+                    |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
+                    |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true") ]
+                    |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "role" "status") ]
+                    |> ProgramTest.ensureViewHas [ Selector.text "Fetching your Library…" ]
+                    -- The placeholders are the picture, and there are several:
+                    -- one shimmering bar would read as a progress indicator, not
+                    -- as a shelf filling up.
+                    |> ProgramTest.expectView
+                        (Query.findAll [ Selector.class "book-skeleton" ]
+                            >> Query.count (Expect.greaterThan 1)
+                        )
+        , test "bookshelf_loading_is_not_the_empty_state: nothing on the loading page claims the shelf is empty" <|
+            \() ->
+                startLibrary
+                    -- Positive control for the two negatives: this IS the
+                    -- loading page, so their absence means something.
+                    |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
+                    |> ProgramTest.ensureViewHasNot [ Selector.attribute (Html.Attributes.attribute "data-testid" "bookshelf-empty") ]
+                    |> ProgramTest.ensureViewHasNot [ Selector.class "shelf-row--empty" ]
+                    |> ProgramTest.expectViewHasNot [ Selector.text "Your library is waiting. Move a book here when you've finished reading it." ]
+        , test "bookshelf_empty_is_not_the_loading_state: once an empty shelf arrives the waiting marks are gone" <|
+            \() ->
+                startLibrary
+                    -- Control: the marks asserted absent below were present a
+                    -- moment ago, on the very same program.
+                    |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
+                    |> ProgramTest.simulateHttpResponse "GET"
+                        "/api/bookshelves/library"
+                        (simulateBookshelfResponse [])
+                    |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "data-testid" "bookshelf-empty") ]
+                    |> ProgramTest.ensureViewHasNot [ Selector.class "bookshelf--loading" ]
+                    |> ProgramTest.ensureViewHasNot [ Selector.class "book-skeleton" ]
+                    |> ProgramTest.expectViewHasNot
+                        [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true") ]
+        , test "profile_shelf_loading_names_whose_shelf: read-only browse does not call it 'your' library" <|
+            \() ->
+                ProgramTest.start () (bookshelfProgram (Bookshelf.profileConfig "ada" "library") Nothing)
+                    |> ProgramTest.ensureViewHas [ Selector.text "Fetching @ada’s Library…" ]
+                    |> ProgramTest.expectViewHasNot [ Selector.text "Fetching your Library…" ]
+        ]
 
 
 bookshelfRendersPlacements : Test
@@ -274,6 +339,24 @@ noTokenSuite =
                     -- may appear — and no error may be shown either.
                     |> ProgramTest.ensureViewHasNot [ Selector.class "book-button" ]
                     |> ProgramTest.expectViewHasNot [ Selector.class "error" ]
+        , test "no_token_is_not_asked_not_loading: with no request issued the page does not claim one is in flight" <|
+            \() ->
+                -- `shelves` was an unconditional `Loading` while the command
+                -- could be `Cmd.none` (#362). Harmless while `Loading` drew an
+                -- empty bookcase; with a real loading state it is a skeleton
+                -- that shimmers forever, because nothing will ever resolve it.
+                ProgramTest.start () (libraryProgram Nothing)
+                    -- Control: the same assertions are TRUE of the token case,
+                    -- so their falsity here is about the missing request.
+                    |> ProgramTest.ensureViewHasNot [ Selector.class "bookshelf--loading" ]
+                    |> ProgramTest.expectViewHasNot
+                        [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true") ]
+        , test "token_is_loading: the same harness WITH a token does claim a request is in flight" <|
+            \() ->
+                startLibrary
+                    |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
+                    |> ProgramTest.expectViewHas
+                        [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true") ]
         ]
 
 

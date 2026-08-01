@@ -610,6 +610,29 @@ if (app.ports && app.ports.ageGatingConfig) {
       // Stay false — do nothing.
     });
 }
+
+// ---------------------------------------------------------------------------
+// Port: browser connectivity (Issue #362)
+//
+// The `online`/`offline` window events are the browser telling us its own
+// answer to a question the app otherwise has to guess at from a failed request
+// — and a guess arrives only AFTER something has already gone wrong, and only
+// on a page that happened to be fetching. Elm holds a `Connectivity` value fed
+// solely from here.
+//
+// `navigator.onLine` rather than the event's identity, because the two events
+// are just edges on that one value and reading it keeps this a single source.
+// One send at boot too: a tab OPENED while offline fires no event at all, so
+// without it the banner would stay hidden until connectivity next changed.
+// ---------------------------------------------------------------------------
+if (app.ports && app.ports.connectivityChanged) {
+  var sendConnectivity = function () {
+    app.ports.connectivityChanged.send(navigator.onLine !== false);
+  };
+  window.addEventListener("online", sendConnectivity);
+  window.addEventListener("offline", sendConnectivity);
+  sendConnectivity();
+}
 }
 
 // Boot immediately — the server config arrives asynchronously (see boot()).

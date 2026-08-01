@@ -197,7 +197,7 @@ fetchAvailability bookId maybeToken =
         , url = "/api/books/" ++ bookId ++ "/availability"
         , body = Http.emptyBody
         , expect = Http.expectJson AvailabilityLoaded availabilityDecoder
-        , timeout = Nothing
+        , timeout = Api.standardTimeout
         , tracker = Nothing
         }
 
@@ -233,7 +233,7 @@ fetchPrices bookId maybeToken =
         , url = "/api/books/" ++ bookId ++ "/prices"
         , body = Http.emptyBody
         , expect = Http.expectJson PricesLoaded pricesDecoder
-        , timeout = Nothing
+        , timeout = Api.standardTimeout
         , tracker = Nothing
         }
 

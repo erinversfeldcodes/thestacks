@@ -10,6 +10,7 @@ module Page.ThirdSpaces exposing
     , view
     )
 
+import Api
 import Html exposing (Html, a, button, div, h3, li, p, text, ul)
 import Html.Attributes exposing (class, href)
 import Html.Events exposing (onClick)
@@ -72,7 +73,7 @@ init maybeToken =
         , url = "/api/third-spaces"
         , body = Http.emptyBody
         , expect = Http.expectJson SpacesLoaded thirdSpacesResponseDecoder
-        , timeout = Nothing
+        , timeout = Api.standardTimeout
         , tracker = Nothing
         }
     )
