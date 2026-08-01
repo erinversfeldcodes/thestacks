@@ -20,12 +20,21 @@ import Test.Html.Selector as Selector
 import Types.RemoteData exposing (RemoteData(..))
 
 
+{-| The model out of the page's `( Model, Cmd Msg, OutMsg )` triple. The page
+gained an `OutMsg` in #361 so a mid-form 401 can reach the global session-expiry
+interceptor; the `OutMsg` itself is asserted in `Page.SessionExpiryPagesTest`.
+-}
+modelOf : ( Password.Model, Cmd Msg, Password.OutMsg ) -> Password.Model
+modelOf ( model, _, _ ) =
+    model
+
+
 {-| Apply one message with a token present (the save-dispatch path only fires
 with a token; the non-dispatch branches ignore it).
 -}
 applyWithToken : Msg -> Password.Model -> Password.Model
 applyWithToken msg model =
-    Password.update msg model (Just "test-token") |> Tuple.first
+    Password.update msg model (Just "test-token") |> modelOf
 
 
 {-| A model with valid, matching input ready to save.
@@ -146,7 +155,7 @@ suite =
             , test "valid input without a token is a no-op (no dispatch)" <|
                 \_ ->
                     Password.update SavePassword validInput Nothing
-                        |> Tuple.first
+                        |> modelOf
                         |> .saving
                         |> Expect.equal NotAsked
             ]

@@ -41,12 +41,21 @@ initialModel =
     Profile.init sampleUser
 
 
+{-| The model out of the page's `( Model, Cmd Msg, OutMsg )` triple. The page
+gained an `OutMsg` in #361 so a mid-form 401 can reach the global session-expiry
+interceptor; the `OutMsg` itself is asserted in `Page.SessionExpiryPagesTest`.
+-}
+modelOf : ( Profile.Model, Cmd Msg, Profile.OutMsg ) -> Profile.Model
+modelOf ( model, _, _ ) =
+    model
+
+
 {-| Apply one message with no token needed (SetHandle / SaveProfileCompleted
 never dispatch a command).
 -}
 apply : Msg -> Profile.Model -> Profile.Model
 apply msg model =
-    Profile.update msg model Nothing |> Tuple.first
+    Profile.update msg model Nothing |> modelOf
 
 
 handleInputValue : Profile.Model -> Query.Single Msg
@@ -67,7 +76,7 @@ by the save-dispatch and email-change paths that only fire with a token.
 -}
 applyWithToken : Msg -> Profile.Model -> Profile.Model
 applyWithToken msg model =
-    Profile.update msg model (Just "test-token") |> Tuple.first
+    Profile.update msg model (Just "test-token") |> modelOf
 
 
 currentPasswordPlaceholder : Selector.Selector

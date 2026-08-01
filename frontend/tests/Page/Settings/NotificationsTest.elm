@@ -38,6 +38,15 @@ allOff =
     }
 
 
+{-| The model out of the page's `( Model, Cmd Msg, OutMsg )` triple. The page
+gained an `OutMsg` in #361 so a mid-form 401 can reach the global session-expiry
+interceptor; the `OutMsg` itself is asserted in `Page.SessionExpiryPagesTest`.
+-}
+modelOf : ( Notifications.Model, Cmd Msg, Notifications.OutMsg ) -> Notifications.Model
+modelOf ( model, _, _ ) =
+    model
+
+
 {-| A model that has finished loading the given preferences from the server.
 -}
 loadedWith : Api.NotificationPreferences -> Notifications.Model
@@ -45,7 +54,7 @@ loadedWith prefs =
     Notifications.init (Just "test-token")
         |> Tuple.first
         |> (\model -> Notifications.update (Loaded (Ok prefs)) model (Just "test-token"))
-        |> Tuple.first
+        |> modelOf
 
 
 toggleButtons : Notifications.Model -> Query.Single Msg
@@ -104,7 +113,7 @@ suite =
                         Notifications.init (Just "test-token")
                             |> Tuple.first
                             |> (\model -> Notifications.update (Loaded (Err (Http.BadStatus 500))) model (Just "test-token"))
-                            |> Tuple.first
+                            |> modelOf
                 in
                 Expect.all
                     [ \_ ->
@@ -121,25 +130,25 @@ suite =
         , test "toggling a loaded preference flips only that value" <|
             \_ ->
                 Notifications.update TogglePriceDrops (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | priceDrops = True })
         , test "ToggleNewReviews flips only new reviews" <|
             \_ ->
                 Notifications.update ToggleNewReviews (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | newReviews = True })
         , test "ToggleAuthorUpdates flips only author updates" <|
             \_ ->
                 Notifications.update ToggleAuthorUpdates (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | authorUpdates = True })
         , test "ToggleEventAlerts flips only event alerts" <|
             \_ ->
                 Notifications.update ToggleEventAlerts (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal (Success { allOff | eventAlerts = True })
         , test "toggling a loaded preference clears any prior save result" <|
@@ -149,9 +158,9 @@ suite =
                 -- over a freshly-flipped (not-yet-confirmed) value.
                 loadedWith allOff
                     |> (\model -> Notifications.update (SaveCompleted (Ok ())) model (Just "test-token"))
-                    |> Tuple.first
+                    |> modelOf
                     |> (\model -> Notifications.update ToggleNewReviews model (Just "test-token"))
-                    |> Tuple.first
+                    |> modelOf
                     |> .saving
                     |> Expect.equal NotAsked
         , test "a toggle before the preferences load is a no-op" <|
@@ -161,20 +170,20 @@ suite =
                         Notifications.init (Just "test-token") |> Tuple.first
                 in
                 Notifications.update TogglePriceDrops loadingModel (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> .prefs
                     |> Expect.equal Loading
         , test "a completed save shows the saved confirmation" <|
             \_ ->
                 Notifications.update (SaveCompleted (Ok ())) (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "Preferences saved." ]
         , test "a failed save shows the save-error copy" <|
             \_ ->
                 Notifications.update (SaveCompleted (Err Http.NetworkError)) (loadedWith allOff) (Just "test-token")
-                    |> Tuple.first
+                    |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "Could not save notification preferences. Please try again." ]

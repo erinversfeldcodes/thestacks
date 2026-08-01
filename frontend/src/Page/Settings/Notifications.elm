@@ -1,6 +1,7 @@
 module Page.Settings.Notifications exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -32,14 +33,38 @@ type Msg
     | ToggleAuthorUpdates
     | ToggleEventAlerts
     | SaveCompleted (Result Http.Error ())
+    | SessionExpiryDetected
 
 
+{-| `SessionExpired` bubbles to `Main.handleSessionExpiry` (#173/#178).
+
+Until #361 this page had no `OutMsg`, so an expired session showed either
+"Could not load your notification preferences. Please refresh to try again." or
+"Could not save notification preferences. Please try again." Refreshing an
+expired session reloads the same 401; the toggle, meanwhile, had already been
+flipped optimistically, so the reader was looking at a value the server never
+stored.
+
+-}
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
+{-| `init` keeps its 2-tuple: the load's 401 arrives as `SessionExpiryDetected`
+in `update`, which is the only place an `OutMsg` can be raised anyway.
+-}
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
     case maybeToken of
         Just token ->
             ( { prefs = Loading, saving = NotAsked }
-            , Api.getNotifications token Loaded
+            , Api.getNotifications
+                (Api.authed token
+                    { onExpired = SessionExpiryDetected
+                    , onResult = Loaded
+                    }
+                )
             )
 
         Nothing ->
@@ -48,14 +73,14 @@ init maybeToken =
             ( { prefs = NotAsked, saving = NotAsked }, Cmd.none )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         Loaded (Ok prefs) ->
-            ( { model | prefs = Success prefs }, Cmd.none )
+            ( { model | prefs = Success prefs }, Cmd.none, NoOut )
 
         Loaded (Err err) ->
-            ( { model | prefs = Failure err }, Cmd.none )
+            ( { model | prefs = Failure err }, Cmd.none, NoOut )
 
         TogglePriceDrops ->
             flipAndSave model maybeToken (\prefs -> { prefs | priceDrops = not prefs.priceDrops })
@@ -72,16 +97,20 @@ update msg model maybeToken =
         SaveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | saving = Success () }, Cmd.none )
+                    ( { model | saving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | saving = Failure err }, Cmd.none )
+                    -- 401 is gone from this branch: `Api.authed` claims it first.
+                    ( { model | saving = Failure err }, Cmd.none, NoOut )
+
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
 
 
 {-| Flip one preference on the loaded values and immediately auto-save. A toggle
 is a no-op until the preferences have loaded — there is nothing to flip yet.
 -}
-flipAndSave : Model -> Maybe String -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg )
+flipAndSave : Model -> Maybe String -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg, OutMsg )
 flipAndSave model maybeToken flip =
     case model.prefs of
         Success prefs ->
@@ -91,17 +120,23 @@ flipAndSave model maybeToken flip =
             in
             ( { model | prefs = Success newPrefs, saving = NotAsked }
             , savePreferences newPrefs maybeToken
+            , NoOut
             )
 
         _ ->
-            ( model, Cmd.none )
+            ( model, Cmd.none, NoOut )
 
 
 savePreferences : NotificationPreferences -> Maybe String -> Cmd Msg
 savePreferences prefs maybeToken =
     case maybeToken of
         Just token ->
-            Api.updateNotifications prefs token SaveCompleted
+            Api.updateNotifications prefs
+                (Api.authed token
+                    { onExpired = SessionExpiryDetected
+                    , onResult = SaveCompleted
+                    }
+                )
 
         Nothing ->
             Cmd.none

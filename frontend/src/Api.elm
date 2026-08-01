@@ -9,6 +9,7 @@ module Api exposing
     , AuditLogEntry
     , AuditLogResponse
     , AuthResponse
+    , Authed
     , Behaviour
     , BisacCount
     , BlockError(..)
@@ -65,6 +66,7 @@ module Api exposing
     , approveSource
     , auditLogResponseDecoder
     , authResponseDecoder
+    , authed
     , blockUser
     , bookDetailResponseDecoder
     , catalogueResponseDecoder
@@ -113,6 +115,7 @@ module Api exposing
     , getUserPlacements
     , honourRemovalRequest
     , initUpload
+    , interpretAuthed
     , inviteToGroup
     , isNotFound
     , isUnauthorized
@@ -144,6 +147,8 @@ module Api exposing
     , requestExport
     , requestListingRemoval
     , resetPassword
+    , resolveProfile
+    , resolveWhatever
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
@@ -563,6 +568,168 @@ isNotFound err =
 
         _ ->
             False
+
+
+{-| An authenticated request's credential AND the handler for the one failure
+every authenticated request can suffer: the session is gone (Issue #361).
+
+⛔ **Why this is a type and not a convention.** An authed call used to take a
+bare `String` token and a `Result Http.Error a -> msg` callback, which makes a
+401 just another `Err` — indistinguishable, at the type level, from a timeout.
+Noticing it was therefore opt-in, and three settings write-forms did not opt in:
+`Password`, `Profile` and `Notifications` each answered a mid-form 401 with
+"Please try again". That is a lie. The session is gone; retrying cannot work,
+and the reader retypes a password into a form that will 401 again. No test
+failed, and none could: there was no place in the types where the question was
+even asked. `isUnauthorized` exists, but a helper you have to remember to call
+is a convention, and this codebase has already measured what conventions are
+worth (#303/#309 — four admin surfaces, unit-tested and unreachable).
+
+A page cannot call an `Authed` endpoint without building one of these, and it
+cannot build one without naming `onExpired`: a record literal must supply every
+field. There is no default, no wildcard, and no `_ ->` branch to hide behind —
+unlike an exhaustiveness check, which `_ ->` satisfies. A page that ignores
+session expiry does not compile.
+
+`onExpired` is a plain `msg` rather than `Http.Error -> msg` on purpose: a 401
+on a request that definitely carried a credential means exactly one thing, so
+there is nothing left to inspect and no way to mistake it for a rate limit.
+
+Note the phrase "definitely carried a credential". This is for MANDATORY auth
+only. Optional-auth endpoints (`authHeaders : Maybe String -> …`, e.g.
+`getProfile`, `getListings`) are valid anonymously, so a 401 from one of those
+is not an expiry signal and must not be routed as one.
+
+-}
+type Authed err ok msg
+    = Authed
+        { token : String
+        , onExpired : msg
+        , onResult : Result err ok -> msg
+        }
+
+
+{-| Build the credential-plus-handlers an authenticated endpoint requires.
+
+The record is the gate: `onExpired` cannot be omitted, defaulted, or inferred.
+
+-}
+authed :
+    String
+    -> { onExpired : msg, onResult : Result err ok -> msg }
+    -> Authed err ok msg
+authed token handlers =
+    Authed
+        { token = token
+        , onExpired = handlers.onExpired
+        , onResult = handlers.onResult
+        }
+
+
+{-| The `Authorization` header for an authenticated request. Unconditional by
+construction — an `Authed` always holds a token — which is what makes a 401 from
+one of these requests unambiguous.
+
+`scripts/check-session-expiry-coverage.sh` reads this function's name to decide
+which `Api` endpoints are mandatorily authenticated, so keep the header
+construction here rather than inlining it at a call site.
+
+-}
+authedHeaders : Authed err ok msg -> List Http.Header
+authedHeaders (Authed request) =
+    [ Http.header "Authorization" ("Bearer " ++ request.token) ]
+
+
+{-| The `Http.Expect` for an authenticated request: a 401 is diverted to
+`onExpired` before the endpoint's own resolver ever sees the response.
+
+Built on `expectStringResponse` rather than `expectJson`/`expectWhatever`
+because those two collapse every non-2xx into an opaque `BadStatus` after the
+fact — by then the status is a number in an error value that a caller may
+ignore. Here the branch happens before the caller is handed anything.
+
+-}
+authedExpect :
+    (Http.Response String -> Result err ok)
+    -> Authed err ok msg
+    -> Http.Expect msg
+authedExpect resolve request =
+    Http.expectStringResponse unwrapNever
+        (\response -> Ok (interpretAuthed resolve request response))
+
+
+{-| `Http.expectStringResponse` insists on a `Result`; `interpretAuthed` already
+produces the final message, so the error side is uninhabited.
+-}
+unwrapNever : Result Never a -> a
+unwrapNever result =
+    case result of
+        Ok value ->
+            value
+
+        Err impossible ->
+            never impossible
+
+
+{-| The whole 401 decision, as a pure function of the response — so it can be
+tested directly instead of through a simulated effect that mirrors it (#302,
+#328: a test that re-implements the thing under test agrees only with itself).
+-}
+interpretAuthed :
+    (Http.Response String -> Result err ok)
+    -> Authed err ok msg
+    -> Http.Response String
+    -> msg
+interpretAuthed resolve (Authed request) response =
+    case response of
+        Http.BadStatus_ metadata _ ->
+            if metadata.statusCode == 401 then
+                request.onExpired
+
+            else
+                request.onResult (resolve response)
+
+        _ ->
+            request.onResult (resolve response)
+
+
+{-| Resolver for an authenticated endpoint whose 2xx body is ignored — the
+`Http.expectWhatever` equivalent.
+-}
+resolveWhatever : Http.Response String -> Result Http.Error ()
+resolveWhatever =
+    resolveBody (\_ -> Ok ())
+
+
+{-| Resolver for an authenticated endpoint whose 2xx body is JSON — the
+`Http.expectJson` equivalent.
+-}
+resolveJson : Decoder a -> Http.Response String -> Result Http.Error a
+resolveJson decoder =
+    resolveBody (Decode.decodeString decoder >> Result.mapError Decode.errorToString)
+
+
+{-| The standard `Http.Response` → `Result Http.Error` translation that
+`expectJson`/`expectWhatever` perform internally and do not export. The 401 case
+never reaches here: `interpretAuthed` has already claimed it.
+-}
+resolveBody : (String -> Result String a) -> Http.Response String -> Result Http.Error a
+resolveBody decode response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (Http.BadUrl url)
+
+        Http.Timeout_ ->
+            Err Http.Timeout
+
+        Http.NetworkError_ ->
+            Err Http.NetworkError
+
+        Http.BadStatus_ metadata _ ->
+            Err (Http.BadStatus metadata.statusCode)
+
+        Http.GoodStatus_ _ bodyText ->
+            decode bodyText |> Result.mapError Http.BadBody
 
 
 {-| POST /api/auth/refresh — exchange the current (still-valid) access token for
@@ -2013,16 +2180,15 @@ updateProfile :
     , emailChanged : Bool
     , handleChanged : Bool
     }
-    -> String
-    -> (Result ProfileError String -> msg)
+    -> Authed ProfileError String msg
     -> Cmd msg
-updateProfile body token toMsg =
+updateProfile body request =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = baseUrl ++ "/api/settings/profile"
         , body = Http.jsonBody (encodeProfileBody body)
-        , expect = expectProfile toMsg
+        , expect = authedExpect resolveProfile request
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -2082,53 +2248,56 @@ encodeProfileBody body =
 can surface the real reason a profile save was rejected (mirrors
 `expectRegister`). On success it hands back the server-normalised handle (the
 200 body echoes the lowercased value) so the settings page can reflect it.
+
+There is deliberately no 401 branch: `interpretAuthed` diverts a 401 to
+`onExpired` before this runs, so "session expired" cannot arrive here disguised
+as `ProfileRequestFailed (BadStatus 401)` — which is precisely how the page
+came to render "Please try again" at it.
+
 -}
-expectProfile : (Result ProfileError String -> msg) -> Http.Expect msg
-expectProfile toMsg =
-    Http.expectStringResponse toMsg <|
-        \response ->
-            case response of
-                Http.BadUrl_ url ->
-                    Err (ProfileRequestFailed (Http.BadUrl url))
+resolveProfile : Http.Response String -> Result ProfileError String
+resolveProfile response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (ProfileRequestFailed (Http.BadUrl url))
 
-                Http.Timeout_ ->
-                    Err (ProfileRequestFailed Http.Timeout)
+        Http.Timeout_ ->
+            Err (ProfileRequestFailed Http.Timeout)
 
-                Http.NetworkError_ ->
-                    Err (ProfileRequestFailed Http.NetworkError)
+        Http.NetworkError_ ->
+            Err (ProfileRequestFailed Http.NetworkError)
 
-                Http.BadStatus_ metadata bodyText ->
-                    if metadata.statusCode == 422 then
-                        case Decode.decodeString registerErrorsDecoder bodyText of
-                            Ok errors ->
-                                Err (ProfileValidationFailed errors)
+        Http.BadStatus_ metadata bodyText ->
+            if metadata.statusCode == 422 then
+                case Decode.decodeString registerErrorsDecoder bodyText of
+                    Ok errors ->
+                        Err (ProfileValidationFailed errors)
 
-                            Err _ ->
-                                Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
-
-                    else
+                    Err _ ->
                         Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
 
-                Http.GoodStatus_ _ bodyText ->
-                    case Decode.decodeString (Decode.field "handle" Decode.string) bodyText of
-                        Ok handle ->
-                            Ok handle
+            else
+                Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
 
-                        Err _ ->
-                            Ok ""
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString (Decode.field "handle" Decode.string) bodyText of
+                Ok handle ->
+                    Ok handle
+
+                Err _ ->
+                    Ok ""
 
 
 {-| PUT /api/settings/location — update the user's location.
 -}
 updateLocation :
     { countryCode : String, city : String }
-    -> String
-    -> (Result Http.Error () -> msg)
+    -> Authed Http.Error () msg
     -> Cmd msg
-updateLocation body token toMsg =
+updateLocation body request =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = "/api/settings/location"
         , body =
             Http.jsonBody
@@ -2137,7 +2306,7 @@ updateLocation body token toMsg =
                     , city = body.city
                     }
                 )
-        , expect = Http.expectWhatever toMsg
+        , expect = authedExpect resolveWhatever request
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -2147,13 +2316,12 @@ updateLocation body token toMsg =
 -}
 updatePassword :
     { currentPassword : String, newPassword : String }
-    -> String
-    -> (Result Http.Error () -> msg)
+    -> Authed Http.Error () msg
     -> Cmd msg
-updatePassword body token toMsg =
+updatePassword body request =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = baseUrl ++ "/api/settings/password"
         , body =
             Http.jsonBody
@@ -2162,7 +2330,7 @@ updatePassword body token toMsg =
                     , newPassword = body.newPassword
                     }
                 )
-        , expect = Http.expectWhatever toMsg
+        , expect = authedExpect resolveWhatever request
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -2184,16 +2352,15 @@ hardcoded defaults. The endpoint always returns all four booleans (never null),
 so a strict field decoder is safe.
 -}
 getNotifications :
-    String
-    -> (Result Http.Error NotificationPreferences -> msg)
+    Authed Http.Error NotificationPreferences msg
     -> Cmd msg
-getNotifications token toMsg =
+getNotifications request =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = baseUrl ++ "/api/settings/notifications"
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg notificationPreferencesDecoder
+        , expect = authedExpect (resolveJson notificationPreferencesDecoder) request
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -2217,13 +2384,12 @@ notificationPreferencesDecoder =
 -}
 updateNotifications :
     NotificationPreferences
-    -> String
-    -> (Result Http.Error () -> msg)
+    -> Authed Http.Error () msg
     -> Cmd msg
-updateNotifications prefs token toMsg =
+updateNotifications prefs request =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = baseUrl ++ "/api/settings/notifications"
         , body =
             Http.jsonBody
@@ -2234,7 +2400,7 @@ updateNotifications prefs token toMsg =
                     , notifyEventMatches = prefs.eventAlerts
                     }
                 )
-        , expect = Http.expectWhatever toMsg
+        , expect = authedExpect resolveWhatever request
         , timeout = Nothing
         , tracker = Nothing
         }
