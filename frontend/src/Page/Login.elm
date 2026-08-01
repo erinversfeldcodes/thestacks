@@ -9,6 +9,7 @@ module Page.Login exposing
     , draftWasSaved
     , errorMessage
     , init
+    , isSessionExpiry
     , isSubmitDisabled
     , update
     , validateDisplayName
@@ -117,6 +118,31 @@ draftWasSaved arrival =
     case arrival of
         SessionExpired details ->
             details.draftSaved
+
+        _ ->
+            False
+
+
+{-| Whether the navigation now being consumed is the one a session expiry
+pushed (#361's question, #360's value).
+
+⛔ `Main.redirectAfterNavigation` needs to know "did the session die underneath
+this reader", because an expiry bounce must return them to the page they were
+standing on rather than to nothing. That used to be `model.sessionExpiredNotice`
+— one of the six booleans. It is the same fact, so it is read from the same
+value rather than kept as a seventh: an expiry that raises the notice but not
+the redirect (or the reverse) is now unwritable.
+
+Named here beside `draftWasSaved` for the same reason `Main.currentAuth` is the
+only reader of `AuthState`: a `case` on `Arrival` scattered through `update` is
+how one site starts disagreeing with another about what counts as an expiry.
+
+-}
+isSessionExpiry : Arrival -> Bool
+isSessionExpiry arrival =
+    case arrival of
+        SessionExpired _ ->
+            True
 
         _ ->
             False

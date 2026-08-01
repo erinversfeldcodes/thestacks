@@ -16,6 +16,30 @@ Before the conversion these modules return 2-tuples with no `OutMsg` type, so
 this suite fails to compile (RED). After the conversion each page returns a
 `( Model, Cmd Msg, OutMsg )` and these assertions pass (GREEN).
 
+
+## ⚠️ This list does not prove coverage — `check-session-expiry-coverage.sh` does
+
+Read the imports above: eight pages, chosen by hand in #178. Three settings
+write-forms that make authed calls are absent, and stayed absent for four
+months while this suite was green — `Password`, `Profile` and `Notifications`
+each answered a mid-form 401 with "Please try again" (#361). A hand-written
+roster of covered pages cannot report what is missing from it; that is what it
+is missing. `scripts/check-session-expiry-coverage.sh` derives the roster from
+`Api.elm` and `src/Page/` instead, so a page added tomorrow is checked without
+anyone editing a list.
+
+What this suite is still for: the per-page behaviour the source-level gate
+cannot see — that the 401 signal produces `SessionExpired` and that a non-401
+does not.
+
+
+## The #361 pages
+
+For the three converted pages the 401 no longer arrives as an `Err` at all:
+`Api.authed` claims it and emits the page's `SessionExpiryDetected` (proved in
+`ApiAuthedTest`). So the assertions below drive that message, and pair it with
+the `Err`/`Ok` controls that must stay local.
+
 -}
 
 import Api
@@ -29,8 +53,14 @@ import Page.Catalogue as Catalogue
 import Page.Marketplace.MyListings as MyListings
 import Page.Search as Search
 import Page.Settings.Consent as Consent
+import Page.Settings.Notifications as Notifications
+import Page.Settings.Password as Password
 import Page.Settings.Privacy as Privacy
+import Page.Settings.Profile as Profile
 import Test exposing (Test, describe, test)
+import Test.Html.Query as Query
+import Test.Html.Selector as Selector
+import Types.User exposing (User)
 
 
 unauthorized : Http.Error
@@ -41,6 +71,20 @@ unauthorized =
 nonAuth : Http.Error
 nonAuth =
     Http.NetworkError
+
+
+settingsUser : User
+settingsUser =
+    { id = "user-1"
+    , email = "ada@example.com"
+    , displayName = "Ada"
+    , handle = "ada"
+    , role = "user"
+    , countryCode = Nothing
+    , city = Nothing
+    , consentAnalytics = False
+    , consentWritingAssistant = False
+    }
 
 
 suite : Test
@@ -369,6 +413,153 @@ suite =
                                 (Just "tok")
                     in
                     outMsg |> Expect.equal Catalogue.NoOut
+            ]
+        , describe "#361 — Settings.Password (the three write-forms that lied)"
+            [ test "password_401_bubbles: the wrapper's expiry signal → SessionExpired" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Password.update
+                                Password.SessionExpiryDetected
+                                Password.init
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Password.SessionExpired
+            , test "password_non401_stays_local: SaveCompleted network error → NoOut" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Password.update
+                                (Password.SaveCompleted (Err nonAuth))
+                                Password.init
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Password.NoOut
+            , test "password_success_stays_local: SaveCompleted Ok → NoOut" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Password.update
+                                (Password.SaveCompleted (Ok ()))
+                                Password.init
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Password.NoOut
+            , test "password_expiry_does_not_repaint_the_form_as_failed" <|
+                \() ->
+                    -- `Main` is about to re-check for a sibling tab's newer token.
+                    -- Rendering "Could not change password" now would be wrong if
+                    -- that re-check adopts one — and is the copy this issue removed.
+                    let
+                        ( newModel, _, _ ) =
+                            Password.update
+                                Password.SessionExpiryDetected
+                                Password.init
+                                (Just "tok")
+                    in
+                    Password.view newModel
+                        |> Query.fromHtml
+                        |> Query.hasNot [ Selector.text "Could not change password. Please try again." ]
+            , test "password_a_real_failure_still_says_try_again (positive control)" <|
+                \() ->
+                    -- The control for the assertion above: with the 401 routed
+                    -- away, what is left really is retryable, and the copy must
+                    -- still appear for it. Without this, the `hasNot` above would
+                    -- pass just as well against a page that renders nothing ever.
+                    let
+                        ( newModel, _, _ ) =
+                            Password.update
+                                (Password.SaveCompleted (Err nonAuth))
+                                Password.init
+                                (Just "tok")
+                    in
+                    Password.view newModel
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "Could not change password. Please try again." ]
+            ]
+        , describe "#361 — Settings.Profile"
+            [ test "profile_save_401_bubbles: the wrapper's expiry signal → SessionExpired" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Profile.update
+                                Profile.SessionExpiryDetected
+                                (Profile.init settingsUser)
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Profile.SessionExpired
+            , test "profile_validation_failure_stays_local: a 422 → NoOut" <|
+                \() ->
+                    -- The 422 field errors are why `ProfileError` exists; routing
+                    -- them to the interceptor would log a user out for typing a
+                    -- taken handle.
+                    let
+                        ( _, _, outMsg ) =
+                            Profile.update
+                                (Profile.SaveProfileCompleted
+                                    (Err (Api.ProfileValidationFailed [ ( "handle", [ "has already been taken" ] ) ]))
+                                )
+                                (Profile.init settingsUser)
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Profile.NoOut
+            , test "profile_location_non401_stays_local: SaveLocationCompleted network error → NoOut" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Profile.update
+                                (Profile.SaveLocationCompleted (Err nonAuth))
+                                (Profile.init settingsUser)
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Profile.NoOut
+            , test "profile_expiry_keeps_the_typed_current_password_on_screen" <|
+                \() ->
+                    -- The password was typed to authorise an email change. It is
+                    -- not cleared on expiry: the re-check may still adopt a token.
+                    let
+                        ( typed, _, _ ) =
+                            Profile.update
+                                (Profile.SetCurrentPassword "hunter2")
+                                (Profile.init settingsUser)
+                                (Just "tok")
+
+                        ( afterExpiry, _, _ ) =
+                            Profile.update Profile.SessionExpiryDetected typed (Just "tok")
+                    in
+                    afterExpiry.currentPassword |> Expect.equal "hunter2"
+            ]
+        , describe "#361 — Settings.Notifications"
+            [ test "notifications_save_401_bubbles: the wrapper's expiry signal → SessionExpired" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Notifications.update
+                                Notifications.SessionExpiryDetected
+                                (Tuple.first (Notifications.init (Just "tok")))
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Notifications.SessionExpired
+            , test "notifications_load_non401_stays_local: Loaded network error → NoOut" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Notifications.update
+                                (Notifications.Loaded (Err nonAuth))
+                                (Tuple.first (Notifications.init (Just "tok")))
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Notifications.NoOut
+            , test "notifications_save_non401_stays_local: SaveCompleted network error → NoOut" <|
+                \() ->
+                    let
+                        ( _, _, outMsg ) =
+                            Notifications.update
+                                (Notifications.SaveCompleted (Err nonAuth))
+                                (Tuple.first (Notifications.init (Just "tok")))
+                                (Just "tok")
+                    in
+                    outMsg |> Expect.equal Notifications.NoOut
             ]
         , describe "Phase 2 — Search"
             [ test "search_401_bubbles: SearchCompleted 401 → SessionExpired" <|

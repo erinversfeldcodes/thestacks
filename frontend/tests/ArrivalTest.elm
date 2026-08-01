@@ -80,6 +80,11 @@ suite =
             ]
         , describe "draftWasSaved is total"
             [ draftFlagIsOnlyMeaningfulForAnExpiry ]
+        , describe "the #360/#361 seam — one value answers both questions"
+            [ onlyAnExpiryIsAnExpiry
+            , expiryArrivalDrivesTheRedirectCapture
+            , everyOtherArrivalLeavesTheCaptureAlone
+            ]
         ]
 
 
@@ -337,3 +342,78 @@ draftFlagIsOnlyMeaningfulForAnExpiry =
             ]
                 |> List.map Login.draftWasSaved
                 |> Expect.equalLists [ False, False, False, False, False, True ]
+
+
+
+-- THE #360/#361 SEAM
+--
+-- ⛔ These exist because of a gap MEASURED during the #361 reconcile, not
+-- because they seemed like a good idea. #361 needs to know "is this navigation
+-- an expiry bounce" and read it from `Main.Model.sessionExpiredNotice`; #360
+-- collapsed that boolean into `Arrival`, so the wire now runs through
+-- `Login.isSessionExpiry`. `SessionExpiryTest`'s five #361 tests call
+-- `Main.redirectAfterNavigation` with `sessionExpiring` passed as a LITERAL, so
+-- none of them can see whether the call site computes it correctly.
+--
+-- Probe (2026-08-01): stubbing `isSessionExpiry` to `always False` — which is
+-- the #361 defect restored, an expiry bounce forgetting the page it left —
+-- left ALL 1464 tests green. These three are what makes that probe redden.
+
+
+onlyAnExpiryIsAnExpiry : Test
+onlyAnExpiryIsAnExpiry =
+    test "expiry_predicate_totality: every arrival answers, and only an expiry answers True" <|
+        \() ->
+            [ Login.Fresh
+            , Login.AccountDeleted
+            , Login.ForgotPassword
+            , Login.StoredSessionUnreadable "boom"
+            , Login.SessionExpired { draftSaved = False }
+            , Login.SessionExpired { draftSaved = True }
+            ]
+                |> List.map Login.isSessionExpiry
+                |> Expect.equalLists [ False, False, False, False, True, True ]
+
+
+{-| The seam, joined: the arrival `Main.forceSessionExpiry` raises, fed through
+the predicate `Main.UrlChanged` uses, into #361's decision. This is the journey
+— expiry on `/settings/password` → push `/login` → sign back in → land back on
+the form — with only the `Nav.Key` left out.
+-}
+expiryArrivalDrivesTheRedirectCapture : Test
+expiryArrivalDrivesTheRedirectCapture =
+    test "expiry_arrival_drives_capture: the arrival an expiry raises is what makes #361 remember the page" <|
+        \() ->
+            Main.redirectAfterNavigation
+                { arrivingAt = Navigation.Route.Login
+                , leaving = Navigation.Route.SettingsPassword
+                , sessionExpiring =
+                    Login.isSessionExpiry (Login.SessionExpired { draftSaved = False })
+                , auth = Nothing
+                }
+                |> Expect.equal (Just Navigation.Route.SettingsPassword)
+
+
+{-| The paired control. Without it, the test above would pass just as well if
+`isSessionExpiry` were `always True` — which would send a reader who clicked
+"Sign in" of their own accord to a page they never asked for.
+-}
+everyOtherArrivalLeavesTheCaptureAlone : Test
+everyOtherArrivalLeavesTheCaptureAlone =
+    test "non_expiry_arrival_captures_nothing: a deliberate visit to /login is not treated as a bounce" <|
+        \() ->
+            [ Login.Fresh
+            , Login.AccountDeleted
+            , Login.ForgotPassword
+            , Login.StoredSessionUnreadable "boom"
+            ]
+                |> List.map
+                    (\arrival ->
+                        Main.redirectAfterNavigation
+                            { arrivingAt = Navigation.Route.Login
+                            , leaving = Navigation.Route.SettingsPassword
+                            , sessionExpiring = Login.isSessionExpiry arrival
+                            , auth = Nothing
+                            }
+                    )
+                |> Expect.equalLists [ Nothing, Nothing, Nothing, Nothing ]

@@ -1,6 +1,7 @@
 module Page.Settings.Password exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -28,6 +29,21 @@ type Msg
     | SetConfirmPassword String
     | SavePassword
     | SaveCompleted (Result Http.Error ())
+    | SessionExpiryDetected
+
+
+{-| `SessionExpired` bubbles to `Main.handleSessionExpiry` (#173/#178): the
+re-check net that adopts a sibling tab's newer token before it logs anyone out.
+
+Until #361 this page had no `OutMsg` at all, so a mid-form 401 landed in
+`SaveCompleted`'s `Err` branch and rendered "Could not change password. Please
+try again." — asking the reader to retype a password into a form whose session
+no longer exists.
+
+-}
+type OutMsg
+    = NoOut
+    | SessionExpired
 
 
 init : Model
@@ -58,22 +74,22 @@ validate model =
         Nothing
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetCurrentPassword val ->
-            ( { model | currentPassword = val, saving = NotAsked }, Cmd.none )
+            ( { model | currentPassword = val, saving = NotAsked }, Cmd.none, NoOut )
 
         SetNewPassword val ->
-            ( { model | newPassword = val, saving = NotAsked }, Cmd.none )
+            ( { model | newPassword = val, saving = NotAsked }, Cmd.none, NoOut )
 
         SetConfirmPassword val ->
-            ( { model | confirmPassword = val, saving = NotAsked }, Cmd.none )
+            ( { model | confirmPassword = val, saving = NotAsked }, Cmd.none, NoOut )
 
         SavePassword ->
             case validate model of
                 Just _ ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
                 Nothing ->
                     case maybeToken of
@@ -83,20 +99,33 @@ update msg model maybeToken =
                                 { currentPassword = model.currentPassword
                                 , newPassword = model.newPassword
                                 }
-                                token
-                                SaveCompleted
+                                (Api.authed token
+                                    { onExpired = SessionExpiryDetected
+                                    , onResult = SaveCompleted
+                                    }
+                                )
+                            , NoOut
                             )
 
                         Nothing ->
-                            ( model, Cmd.none )
+                            ( model, Cmd.none, NoOut )
 
         SaveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { init | saving = Success () }, Cmd.none )
+                    ( { init | saving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | saving = Failure err }, Cmd.none )
+                    -- A 401 can no longer reach here: `Api.authed` routes it to
+                    -- `SessionExpiryDetected` before the resolver runs. What is
+                    -- left really is retryable, so "Please try again" is true.
+                    ( { model | saving = Failure err }, Cmd.none, NoOut )
+
+        SessionExpiryDetected ->
+            -- Leave the model untouched: `Main` is about to re-check for a newer
+            -- token from a sibling tab, and repainting the form as failed would
+            -- be wrong if that re-check adopts one.
+            ( model, Cmd.none, SessionExpired )
 
 
 view : Model -> Html Msg

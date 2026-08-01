@@ -46,7 +46,7 @@
       "blocked_on": null
     },
     "361": {
-      "status": "in_progress",
+      "status": "complete",
       "title": "6c 401 wrapper + reflection gate + 3 write-form pages",
       "level": 2,
       "depends_on": [
@@ -56,8 +56,10 @@
         "frontend/src/Api.elm",
         "frontend/src/Page/Settings/*"
       ],
-      "merged": false,
-      "blocked_on": null
+      "merged": true,
+      "blocked_on": null,
+      "commit": "896242ae",
+      "staff_review": "LGTM"
     },
     "362": {
       "status": "blocked",
@@ -98,8 +100,8 @@
   "merge_order": [
     332,
     359,
-    360,
     361,
+    360,
     362,
     363
   ],
@@ -113,5 +115,15 @@
     "The epic's own warning: do NOT write per-page 401 tests before the wrapper lands (6c) \u2014 they would be deleted by it.",
     "#332 was assigned to this wave by owner ruling during Wave 3; it is a production mutation guard living in the view instead of the update function."
   ],
-  "updated_at": "2026-07-31"
+  "updated_at": "2026-08-01",
+  "coordination_decisions": [
+    {
+      "date": "2026-08-01",
+      "raised_by": "#361",
+      "issue": "The 3-tuple OutMsg session-expiry convention (~25 sites) requires Main.elm routing blocks, but Main.elm was assigned to #360 at this level. A page cannot reach the expiry net alone \u2014 requestStoredAuth/clearAuth/Nav.pushUrl all live in Main.",
+      "decision": "#361 makes the three additive Main.elm blocks, mirroring Consent.SessionExpired exactly, staged last and isolated. It also takes the redirectAfterLogin-on-expiry fix (#359 finding) since forceSessionExpiry is session-expiry logic and #360 has no reason to touch it.",
+      "merge_order_changed": "361 now merges BEFORE 360; #360 re-merges the integration branch and reconciles in its own worktree rather than the lead hand-resolving Elm conflicts at the merge point.",
+      "why": "The type system forces it: pages returning 3-tuples do not compile against a Main.elm expecting 2-tuples, so no Main-free variant of #361 could build or test itself. The alternative (page-local expiry banner) would invent a 26th convention and bypass the cross-tab re-check net."
+    }
+  ]
 }

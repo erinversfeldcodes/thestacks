@@ -1,6 +1,7 @@
 module Page.Settings.Profile exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -43,6 +44,20 @@ type Msg
     | SaveProfileCompleted (Result Api.ProfileError String)
     | SaveLocation
     | SaveLocationCompleted (Result Http.Error ())
+    | SessionExpiryDetected
+
+
+{-| `SessionExpired` bubbles to `Main.handleSessionExpiry` (#173/#178).
+
+Until #361 this page had no `OutMsg`, so an expired session came back as
+`ProfileRequestFailed (BadStatus 401)` and rendered "Could not save profile.
+Please try again." — over a form still holding the reader's current password,
+typed in to authorise an email change that can no longer happen.
+
+-}
+type OutMsg
+    = NoOut
+    | SessionExpired
 
 
 init : User -> Model
@@ -86,29 +101,29 @@ handleChanged model =
     model.handle /= model.initialHandle
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         SetDisplayName val ->
-            ( { model | displayName = val, savingProfile = NotAsked }, Cmd.none )
+            ( { model | displayName = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetHandle val ->
-            ( { model | handle = val, savingProfile = NotAsked }, Cmd.none )
+            ( { model | handle = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetEmail val ->
-            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none )
+            ( { model | email = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetCurrentPassword val ->
-            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none )
+            ( { model | currentPassword = val, currentPasswordError = Nothing, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetWebsiteUrl val ->
-            ( { model | websiteUrl = val, savingProfile = NotAsked }, Cmd.none )
+            ( { model | websiteUrl = val, savingProfile = NotAsked }, Cmd.none, NoOut )
 
         SetCountryCode val ->
-            ( { model | countryCode = val, savingLocation = NotAsked }, Cmd.none )
+            ( { model | countryCode = val, savingLocation = NotAsked }, Cmd.none, NoOut )
 
         SetCity val ->
-            ( { model | city = val, savingLocation = NotAsked }, Cmd.none )
+            ( { model | city = val, savingLocation = NotAsked }, Cmd.none, NoOut )
 
         SaveProfile ->
             if emailChanged model && String.isEmpty (String.trim model.currentPassword) then
@@ -117,6 +132,7 @@ update msg model maybeToken =
                 -- request the server would reject.
                 ( { model | currentPasswordError = Just "Please enter your current password to change your email." }
                 , Cmd.none
+                , NoOut
                 )
 
             else
@@ -132,12 +148,16 @@ update msg model maybeToken =
                             , emailChanged = emailChanged model
                             , handleChanged = handleChanged model
                             }
-                            token
-                            SaveProfileCompleted
+                            (Api.authed token
+                                { onExpired = SessionExpiryDetected
+                                , onResult = SaveProfileCompleted
+                                }
+                            )
+                        , NoOut
                         )
 
                     Nothing ->
-                        ( model, Cmd.none )
+                        ( model, Cmd.none, NoOut )
 
         SaveProfileCompleted result ->
             case result of
@@ -166,10 +186,14 @@ update msg model maybeToken =
                         , initialHandle = settledHandle
                       }
                     , Cmd.none
+                    , NoOut
                     )
 
                 Err err ->
-                    ( { model | savingProfile = Failure err }, Cmd.none )
+                    -- 401 no longer arrives as `ProfileRequestFailed`: `Api.authed`
+                    -- claims it before `resolveProfile` runs. A 422's field errors
+                    -- still land here, which is the point of keeping them distinct.
+                    ( { model | savingProfile = Failure err }, Cmd.none, NoOut )
 
         SaveLocation ->
             case maybeToken of
@@ -177,20 +201,31 @@ update msg model maybeToken =
                     ( { model | savingLocation = Loading }
                     , Api.updateLocation
                         { countryCode = model.countryCode, city = model.city }
-                        token
-                        SaveLocationCompleted
+                        (Api.authed token
+                            { onExpired = SessionExpiryDetected
+                            , onResult = SaveLocationCompleted
+                            }
+                        )
+                    , NoOut
                     )
 
                 Nothing ->
-                    ( model, Cmd.none )
+                    ( model, Cmd.none, NoOut )
 
         SaveLocationCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | savingLocation = Success () }, Cmd.none )
+                    ( { model | savingLocation = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | savingLocation = Failure err }, Cmd.none )
+                    ( { model | savingLocation = Failure err }, Cmd.none, NoOut )
+
+        SessionExpiryDetected ->
+            -- Both saves route here. The model is left alone: the reader's typed
+            -- values (including a current password entered for an email change)
+            -- stay on screen while `Main` re-checks for a sibling tab's newer
+            -- token, and are only lost if that re-check confirms the expiry.
+            ( model, Cmd.none, SessionExpired )
 
 
 view : Model -> Html Msg
