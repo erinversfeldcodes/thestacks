@@ -2,9 +2,9 @@
   "campaign": "staff-campaign-2026-07-30",
   "plan": "plans/staff-campaign-2026-07-30.md",
   "created_at": "2026-07-30T00:00:00Z",
-  "updated_at": "2026-07-31",
+  "updated_at": "2026-08-01",
   "status": "approved_filed",
-  "current_wave": "5",
+  "current_wave": "6",
   "_why": [
     "Stage 6 artifact for the 2026-07-30 Phase 1 (+extension) campaign. Emitted with the plan,",
     "before any issue exists: every item is not_started with issue: null. On approval, Stage 7",
@@ -167,38 +167,38 @@
     },
     "5": {
       "title": "Book identity: wire the deep verb",
-      "status": "not_started",
+      "status": "complete",
       "items": {
         "5a": {
           "title": "Wire POST /api/books/confirm into manual path; delete DIY flow",
-          "status": "not_started",
+          "status": "complete",
           "issue": 315
         },
         "5b": {
           "title": "Unify create transactions; keep merge metadata; resolver-collapse fixes",
-          "status": "not_started",
+          "status": "complete",
           "issue": 315
         },
         "5c": {
           "title": "Terminal-failure marking + closed vision error set + SSE timeout alignment",
-          "status": "not_started",
+          "status": "complete",
           "issue": 315
         },
         "5d": {
           "title": "Provisional-title UI (D1); extract Books.ISBN + Uploads",
-          "status": "not_started",
+          "status": "complete",
           "issue": 315
         },
         "5e": {
           "title": "Convert 35 remaining ad-hoc vision-client modules to the #327 steering seam",
-          "status": "not_started",
+          "status": "complete",
           "issue": 331
         }
       }
     },
     "6": {
       "title": "Session UX + deduplication sweep",
-      "status": "not_started",
+      "status": "in_progress",
       "items": {
         "6a": {
           "title": "Persist-first login + AuthState type + backstop + trap reset + redirectAfterLogin",
@@ -227,7 +227,7 @@
         },
         "6f": {
           "title": "readOnly guard in handleOrganiser (mutation guard moves from view to update fn)",
-          "status": "not_started",
+          "status": "complete",
           "issue": 332
         }
       }
