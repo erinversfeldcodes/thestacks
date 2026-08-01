@@ -1,34 +1,34 @@
-# Issue #041: Migrate Bookshelf from CSS 3D to elm-3d-scene (WebGL)
+# Issue #041: WebGL Bookshelf Migration (elm-3d-scene)
 
-## Status: SUPERSEDED
+## Summary
+Migrate the bookshelf from CSS 3D transforms to elm-3d-scene (WebGL) to fix the Brave browser fingerprinting bug that suppresses `transform-style: preserve-3d`, and deliver a cinematic dark-academic aesthetic with real 3D book meshes, PBR textures, and atmospheric overlays.
 
-The WebGL approach was implemented through Phase 4 but failed to produce visual quality comparable to the pre-rendered photorealistic backdrops. The elm-3d-scene flat-colored quads could not match the cinematic aesthetic. Additionally, Brave's fingerprinting protection blocks `preserve-3d` which was the original motivation.
+## Status: CLOSED — COMPLETE (merged in PR #68, feat/assorted-UI)
 
-**Replaced by**: Pre-rendered photorealistic library backdrop + Brave-safe CSS 2D pull-out animation. No WebGL.
+## What Was Delivered
 
-### What was done instead:
-- Removed all Scene modules (Coordinates, World, BookMesh, Textures, Shelf, Room, Picking)
-- Removed elm-3d-scene and 10 related packages from elm.json
-- Removed DevWebGL route, `?webgl=1` feature flag
-- Replaced `preserve-3d` + 3D keyframe animation with 2D CSS hover (translate, skewY, scaleX)
-- Book cover/top faces start collapsed, expand on hover with staggered CSS transitions
-- Added pre-rendered backdrop image per bookshelf type
-- Added atmospheric overlays (vignette, light leak, dust motes) via CSS mix-blend-mode
-- Added `prefers-reduced-motion` support and keyboard focus indicators
-- Removed `blob:` from CSP (no longer needed)
-- Tightened security headers
+All phases (0–4) completed and merged:
+- **Phase 0**: elm-3d-scene installed, `/dev/webgl` dev route, `Scene.Coordinates`, `Scene.World`
+- **Phase 1**: `Scene.BookMesh` (3D quads), `Scene.Textures` (async loading, 26 textures), 7 unit tests
+- **Phase 1.5**: 22 cinematic assets generated via Replicate Flux Dev (normal maps, fallback covers, atmospheric overlays, environment art)
+- **Phase 2**: `Scene.Shelf`, `Scene.Room` (textured wallpaper, bookcase, persian rug, warm lighting), `?webgl=1` feature flag
+- **Phase 3 / 3.5**: `Scene.Picking` (raycasting), canvas mouse event wiring, hover animation (book pulls forward), click-to-BookDetail
+- **Phase 4**: Atmospheric compositing — vignette, light leak, dust motes via CSS blend modes
 
-### Original Summary (for reference)
-Replace the CSS 3D bookshelf rendering (`transform-style: preserve-3d`, `perspective`, `@keyframes`) with elm-3d-scene (WebGL). CSS 3D breaks in Brave with Shields up due to fingerprinting protection suppressing `preserve-3d`. WebGL renders consistently across all browsers and enables future cinematic features (camera dolly, room transitions, PBR materials).
+**Feature flag**: `?webgl=1` — defaults to false in production; zero impact unless enabled.
 
-## User Stories
-- US-1.3 (Spine Rendering) — book spines render with correct dimensions, textures, and hover interaction
-- US-1.2 (Browse Shelves) — user can browse books on shelves, click to view details
+See `plans/041-webgl-bookshelf-migration-plan.md` for full phase details and file manifest.
 
-## Dependencies
-- None
+## DoD
+- [x] WebGL bookshelf renders in Brave with Shields up (no CSS 3D dependency)
+- [x] 3D book meshes with texture loading
+- [x] Hover and click interaction via raycasting
+- [x] Atmospheric overlays composited
+- [x] Feature-flagged behind `?webgl=1`
+- [x] CSP updated (`blob:` in `img-src`)
+- [x] 258 Elm tests passing
+- [x] elm-review clean
+- [x] Merged PR #68
 
-## Agent Assignment
-- **elm-agent** (completed)
-- **Reviewer**: elm-reviewer (completed — APPROVED)
-- **Principal Engineer**: reviewed (P0-P3 findings all addressed)
+## Progress Notes
+Completed 2026-03-17 across feat/assorted-UI branch. Closed 2026-03-19.

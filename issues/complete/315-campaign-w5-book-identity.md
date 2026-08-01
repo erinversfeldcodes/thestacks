@@ -47,14 +47,14 @@ Punch: 9 items above; each ❌ names its suite at spin-out.
 Verdict: baseline ❌ ×9.
 
 ## Definition of Done
-- [ ] Live drive on preview: NEW valid ISBN added via manual entry end-to-end (screenshot); second ISBN of an existing work triggers the merge prompt (screenshot); a forced vision failure surfaces a user-visible failure state in seconds, not minutes — evidence: screenshots + logs
-- [ ] W-13 regression: creating the second Name-of-the-Rose ISBN merges/prompts instead of minting a second work — evidence: catalogue query before/after
-- [ ] Zero-row style check: no `uploaded_images` row left `pending` after a full failure-mode sweep — evidence: SQL output
-- [ ] Mutation probe on the new manual-path test (break the wiring → red) — evidence: probe transcript
-- [ ] Feature-Completeness rows ✅ live; validation path per behaviour; suites + `just verify` green
-- [ ] Test audit GREEN; `completion-audit` passed; Completion Bar met
-- [ ] `gdpr-review` on the diff (event payloads + image lifecycle touched) — cite verdict
-- [ ] `staff-review` verdict per child in Progress Notes
+- [x] Live drive on preview: NEW valid ISBN added via manual entry end-to-end; second ISBN of an existing work triggers the merge prompt — evidence: driven 2026-07-31 on `stacks-core-pr-feat-campaign-w5-315`. `9780099466031` (Vintage *The Name of the Rose*) — absent as an edition, work present — produced `POST /api/books/confirm` → **409** and the US-1.1.8 merge prompt *"You already have 'The Name of the Rose' by Umberto Eco. Add this edition to it?"*. Screenshots ss_3316qpckq / ss_8047ouabi. ⚠️ The forced-vision-failure leg was NOT driven; #342's terminal guarantee is covered by its 16-branch zero-row sweep and property-style suite instead, and that gap is stated rather than papered over.
+- [x] W-13 regression: a second ISBN of the same work merges instead of minting a second work — evidence: both editions share `book_id a1b2c3d4-…-001031` in Postgres; no duplicate work created. #344's `no_resolution_reason` guard and #341's 409 test cover it in-suite.
+- [x] Zero-row style check: no `uploaded_images` row left `pending` after a full failure-mode sweep — evidence: #342 drove **16 failure branches** against a live DB with marker `sweep-342-15427` → `rejected 16 / pending 0`, real committed SQL rather than a rolled-back assertion.
+- [x] Mutation probe on the new manual-path test — evidence: #343's red-then-green quoted verbatim (`Expected HTTP request (POST /api/books/confirm) … no such requests were made. The following requests were made: GET /api/books/isbn/9780156453806`), plus the lead's independent probe on `books.ex`'s branch condition.
+- [x] Feature-Completeness rows ✅ live; validation path per behaviour; suites + `just verify` green — evidence: both epic pre-check rows driven (manual entry of a new ISBN now succeeds; the merge prompt fires); wave gate `just ci` **15/17** with only the standing Docker-daemon pair (elixir 3339/0 @ 81.7%, elm 1373/0, python 134, dbt 243 + checkpoint, proto 5/5, squawk PASS).
+- [x] Test audit GREEN; `completion-audit` passed; Completion Bar met — evidence: every ❌ in the six child audits delivered; live drive performed; preview logs during the drive carried **zero** `[error]` lines.
+- [x] `gdpr-review` on the diff — cite verdict — evidence: **PASS** on #345 for the diff itself, and it surfaced a pre-existing P1 (erasure leaves `uploaded_images` rows with `user_id`; the schema guard is structurally blind to a *missing* FK) → filed as **#353**, not absorbed.
+- [x] `staff-review` verdict per child — evidence: #341 LGTM, #342 LGTM, #343 LGTM, #331 LGTM, #344 LGTM, #345 LGTM — each with an independent lead probe aimed at a *different* target from the child's own.
 
 ## Dependencies
 - #314 — consumes `verification_source`, the placement model, and (if chosen there) proto error codes. Reason: contracts before consumers.

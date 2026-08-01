@@ -260,6 +260,21 @@
           "title": "VERIFY #349: drive a real upload on the Wave 7 preview, then confirm the vision-latency series ARRIVES in VictoriaMetrics and record p50/p95/p99 (the input to #350). Rides on 7b, which drives the vision path anyway.",
           "status": "not_started",
           "issue": 349
+        },
+        "7f": {
+          "title": "Title search swallows outages into :not_found AND negative-caches them for an hour \u2014 an unhappy path in the resolver contract",
+          "status": "not_started",
+          "issue": 352
+        },
+        "7g": {
+          "title": "Vision client gives up 90s before Modal does, amplifying retries \u2014 sized from 7e's p99",
+          "status": "not_started",
+          "issue": 350
+        },
+        "7h": {
+          "title": "Reader is never held hostage to the upload page: async identify, synchronous confirm+place, inbox on the upload page, count on the Add Book nav marker (owner design 2026-07-31)",
+          "status": "not_started",
+          "issue": 351
         }
       }
     },
@@ -286,6 +301,11 @@
           "title": "Side-by-side verify; empty-state CTAs; widget styling; a11y follow-through",
           "status": "not_started",
           "issue": 318
+        },
+        "8e": {
+          "title": "Restore the login door dolly-shot over the arrival, driven from AuthState.Arriving \u2014 the disclosed cost of #359",
+          "status": "not_started",
+          "issue": 364
         }
       }
     },
@@ -307,6 +327,26 @@
           "title": "Value-level third CSS gate",
           "status": "not_started",
           "issue": 319
+        },
+        "9d": {
+          "title": "Orphan-class gate is blind to computed `class (if \u2026)` forms \u2014 42 sites",
+          "status": "not_started",
+          "issue": 356
+        },
+        "9e": {
+          "title": "check-css.sh misses a base rule placed AFTER its own modifier; three login-card notices have never rendered their declared amber",
+          "status": "not_started",
+          "issue": 365
+        },
+        "9f": {
+          "title": "Finish the orphan-class styling backlog (one item outstanding: per-group screenshots)",
+          "status": "not_started",
+          "issue": 306
+        },
+        "9g": {
+          "title": "Convert test-hook classes to data-testid and remove the orphan gate's hook exemption",
+          "status": "not_started",
+          "issue": 310
         }
       }
     },
@@ -369,6 +409,41 @@
           "title": "Fix the squawk gate (vacuous for uncommitted migrations; SQUAWK_TARGET_DIR scans all history) \u2014 MUST land BEFORE 11d prod-deploy execution",
           "status": "not_started",
           "issue": 337
+        },
+        "11h": {
+          "title": "Program-test effect translators rebuild Api requests, so a divergence is invisible",
+          "status": "not_started",
+          "issue": 347
+        },
+        "11i": {
+          "title": "No gate ties an Elm port name to the app.js that answers it \u2014 a typo fails silently",
+          "status": "not_started",
+          "issue": 366
+        },
+        "11j": {
+          "title": "e2e_warmup_guard_test.sh never terminates (two stub defects) \u2014 blocks a full run_all.sh",
+          "status": "not_started",
+          "issue": 358
+        },
+        "11k": {
+          "title": "Bookstore-events extraction validated against a real events page \u2014 BLOCKED, pairs with 11e",
+          "status": "not_started",
+          "issue": 304
+        },
+        "11l": {
+          "title": "Resolve each store events page \u2014 BLOCKED on a live run, pairs with 11e",
+          "status": "not_started",
+          "issue": 307
+        },
+        "11m": {
+          "title": "\u26a0\ufe0f P1: erasure leaves uploaded_images rows carrying user_id; the schema guard is structurally blind to a MISSING FK. MUST land before 11d (prod deploy).",
+          "status": "not_started",
+          "issue": 353
+        },
+        "11n": {
+          "title": "\u26a0\ufe0f Age-gate raise is not enforced for the 5-minute BookDetailCache TTL. MUST land before AGE_GATING_ENABLED is ever turned on.",
+          "status": "not_started",
+          "issue": 357
         }
       }
     }
@@ -384,5 +459,8 @@
     "#351 surface: an inbox accessible from the upload page itself; a notification count on the Add Book nav marker. Add Book STAYS inside the Catalogue dropdown \u2014 \"we don't need to render it outside of the drop down, it can remain low-but-easy-visibility\". So #351 does NOT depend on Wave 8 nav work, needs NO email/consent column, and needs NO image.resolved subscriber (the count is a query).",
     "#349 \u2192 #350 \u2192 re-read retry frequency \u2192 then size #351. Measure before building a retry UI for retries that should not be happening.",
     "#349 verification scheduled into Wave 7 as 7e, riding on 7b (upload failure UX) since that wave drives the vision path regardless. Wave 6 is session UX and touches no uploads."
+  ],
+  "_owner_rulings_wave6_2026_08_01": [
+    "Full issue audit 2026-08-01: 29 completed issues moved to issues/complete/; #315 (W5 epic) DoD closed out; every remaining open issue assigned to a numbered wave. Two flagged as launch-blocking: #353 (GDPR erasure gap) and #357 (age-gate cache bypass), both scheduled before 11d prod-deploy execution."
   ]
 }
