@@ -174,9 +174,7 @@ formValidationTests =
                         , passwordValidation = Pristine
                         , passwordConfirmValidation = Pristine
                         , displayNameValidation = Pristine
-                        , sessionExpired = False
-                        , draftSaved = False
-                        , accountDeleted = False
+                        , arrival = Login.Fresh
                         , forgotState = NotAsked
                         }
 
@@ -210,9 +208,7 @@ formValidationTests =
                         , passwordValidation = Pristine
                         , passwordConfirmValidation = Pristine
                         , displayNameValidation = Pristine
-                        , sessionExpired = False
-                        , draftSaved = False
-                        , accountDeleted = False
+                        , arrival = Login.Fresh
                         , forgotState = NotAsked
                         }
 
@@ -298,7 +294,7 @@ ariaTests =
             \() ->
                 let
                     model =
-                        Login.init
+                        Login.init Login.Fresh
 
                     html =
                         Login.view model
@@ -315,7 +311,7 @@ ariaTests =
             \() ->
                 let
                     model =
-                        Login.init
+                        Login.init Login.Fresh
 
                     html =
                         Login.view model

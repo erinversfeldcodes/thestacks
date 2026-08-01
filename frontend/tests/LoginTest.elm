@@ -29,7 +29,7 @@ registerModelWith : String -> String -> Login.Model
 registerModelWith password confirm =
     let
         ( m1, _, _ ) =
-            Login.update (ModeSwitched Login.RegisterMode) Login.init
+            Login.update (ModeSwitched Login.RegisterMode) (Login.init Login.Fresh)
 
         ( m2, _, _ ) =
             Login.update (EmailChanged "user@test.com") m1
@@ -53,7 +53,7 @@ validLoginModel : Login.Model
 validLoginModel =
     let
         ( m1, _, _ ) =
-            Login.update (EmailChanged "reader@stacks.dev") Login.init
+            Login.update (EmailChanged "reader@stacks.dev") (Login.init Login.Fresh)
 
         ( m2, _, _ ) =
             Login.update (PasswordChanged "secret123") m1
@@ -67,17 +67,17 @@ suite =
         [ describe "init"
             [ test "starts in LoginMode" <|
                 \_ ->
-                    Login.init.mode |> Expect.equal Login.LoginMode
+                    (Login.init Login.Fresh).mode |> Expect.equal Login.LoginMode
             , test "starts with NotAsked submit state" <|
                 \_ ->
-                    Login.init.submitState |> Expect.equal NotAsked
+                    (Login.init Login.Fresh).submitState |> Expect.equal NotAsked
             ]
         , describe "field updates"
             [ test "EmailChanged updates email and resets submitState" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (EmailChanged "test@test.com") Login.init
+                            Login.update (EmailChanged "test@test.com") (Login.init Login.Fresh)
                     in
                     Expect.all
                         [ \m -> m.email |> Expect.equal "test@test.com"
@@ -88,14 +88,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (PasswordChanged "secret") Login.init
+                            Login.update (PasswordChanged "secret") (Login.init Login.Fresh)
                     in
                     model.password |> Expect.equal "secret"
             , test "DisplayNameChanged updates displayName" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (DisplayNameChanged "Reader") Login.init
+                            Login.update (DisplayNameChanged "Reader") (Login.init Login.Fresh)
                     in
                     model.displayName |> Expect.equal "Reader"
             ]
@@ -104,7 +104,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (ModeSwitched Login.RegisterMode) Login.init
+                            Login.update (ModeSwitched Login.RegisterMode) (Login.init Login.Fresh)
                     in
                     model.mode |> Expect.equal Login.RegisterMode
             , test "ModeSwitched resets submitState" <|
@@ -121,9 +121,7 @@ suite =
                             , passwordValidation = Pristine
                             , passwordConfirmValidation = Pristine
                             , displayNameValidation = Pristine
-                            , sessionExpired = False
-                            , draftSaved = False
-                            , accountDeleted = False
+                            , arrival = Login.Fresh
                             , forgotState = NotAsked
                             }
 
@@ -137,14 +135,14 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update FormSubmitted Login.init
+                            Login.update FormSubmitted (Login.init Login.Fresh)
                     in
                     model.submitState |> Expect.equal Loading
             , test "FormSubmitted produces NoOut" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
-                            Login.update FormSubmitted Login.init
+                            Login.update FormSubmitted (Login.init Login.Fresh)
                     in
                     outMsg |> Expect.equal Login.NoOut
             ]
@@ -153,7 +151,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) Login.init
+                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) (Login.init Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Success fakeAuthResponse)
             , test "persist_first: GotAuthResponse Ok hands the credential up on the SAME update (#359)" <|
@@ -164,14 +162,14 @@ suite =
                     -- happens on an occluded window.
                     let
                         ( _, _, outMsg ) =
-                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) Login.init
+                            Login.update (GotAuthResponse (Ok fakeAuthResponse)) (Login.init Login.Fresh)
                     in
                     outMsg |> Expect.equal (Login.LoggedIn fakeAuthResponse)
             , test "GotAuthResponse Err sets Failure" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (GotAuthResponse (Err Http.NetworkError)) Login.init
+                            Login.update (GotAuthResponse (Err Http.NetworkError)) (Login.init Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Failure (SubmitHttpError Http.NetworkError))
             ]
@@ -210,7 +208,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (GotAuthResponse (Err (Http.BadStatus 401))) Login.init
+                            Login.update (GotAuthResponse (Err (Http.BadStatus 401))) (Login.init Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Failure (SubmitHttpError (Http.BadStatus 401)))
             ]
@@ -249,24 +247,24 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (EmailChanged "nope") Login.init
+                            Login.update (EmailChanged "nope") (Login.init Login.Fresh)
                     in
                     model.emailValidation |> Expect.equal (Invalid "Please enter a valid email address")
             , test "submit is disabled when email is Invalid" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (EmailChanged "nope") Login.init
+                            Login.update (EmailChanged "nope") (Login.init Login.Fresh)
                     in
                     Login.isSubmitDisabled model |> Expect.equal True
             , test "submit is disabled when all fields are Pristine" <|
                 \_ ->
-                    Login.isSubmitDisabled Login.init |> Expect.equal True
+                    Login.isSubmitDisabled (Login.init Login.Fresh) |> Expect.equal True
             , test "submit is enabled when email and password are Valid in LoginMode" <|
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (EmailChanged "user@test.com") Login.init
+                            Login.update (EmailChanged "user@test.com") (Login.init Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update (PasswordChanged "longpassword") m1
@@ -276,7 +274,7 @@ suite =
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (ModeSwitched Login.RegisterMode) Login.init
+                            Login.update (ModeSwitched Login.RegisterMode) (Login.init Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update (EmailChanged "user@test.com") m1
@@ -303,7 +301,7 @@ suite =
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (PasswordChanged "longpassword") Login.init
+                            Login.update (PasswordChanged "longpassword") (Login.init Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update (PasswordConfirmChanged "longpassword") m1
@@ -416,14 +414,14 @@ suite =
                 \_ ->
                     let
                         ( m, _, _ ) =
-                            Login.update (ModeSwitched Login.ForgotPasswordMode) Login.init
+                            Login.update (ModeSwitched Login.ForgotPasswordMode) (Login.init Login.Fresh)
                     in
                     m.mode |> Expect.equal Login.ForgotPasswordMode
             , test "ForgotSubmitted with an email moves forgotState to Loading" <|
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (EmailChanged "reader@test.com") Login.init
+                            Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update ForgotSubmitted m1
@@ -433,14 +431,14 @@ suite =
                 \_ ->
                     let
                         ( m, _, _ ) =
-                            Login.update ForgotSubmitted Login.init
+                            Login.update ForgotSubmitted (Login.init Login.Fresh)
                     in
                     m.forgotState |> Expect.equal NotAsked
             , test "a successful forgot response shows Success" <|
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (EmailChanged "reader@test.com") Login.init
+                            Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update ForgotSubmitted m1
@@ -453,7 +451,7 @@ suite =
                 \_ ->
                     let
                         ( m1, _, _ ) =
-                            Login.update (EmailChanged "reader@test.com") Login.init
+                            Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
 
                         ( m2, _, _ ) =
                             Login.update ForgotSubmitted m1

@@ -1,15 +1,13 @@
 module Page.Login exposing
-    ( FieldValidation(..)
+    ( Arrival(..)
+    , FieldValidation(..)
     , Mode(..)
     , Model
     , Msg(..)
     , OutMsg(..)
     , SubmitError(..)
+    , draftWasSaved
     , errorMessage
-    , expiredDraftInit
-    , expiredInit
-    , farewellInit
-    , forgotInit
     , init
     , isSubmitDisabled
     , update
@@ -52,24 +50,76 @@ type alias Model =
     , passwordConfirmValidation : FieldValidation
     , displayNameValidation : FieldValidation
 
-    -- Set by the global session-expiry interceptor (Issue #173) when the user is
-    -- redirected here after their token expired/was revoked. Drives a notice
-    -- distinct from invalid-credentials, and is cleared once they interact.
-    , sessionExpired : Bool
-
-    -- Set when the expiry happened mid-compose of a marketplace listing (Issue
-    -- #182) and the draft was persisted; upgrades the expiry notice copy to
-    -- reassure the user their listing is safe.
-    , draftSaved : Bool
-
-    -- Set after a successful account deletion (Issue #188) when the user is
-    -- redirected here. Drives a warm farewell notice distinct from an expiry.
-    , accountDeleted : Bool
+    -- Why this reader is standing at the door. See `Arrival` — this ONE field
+    -- replaced three independently-settable booleans.
+    , arrival : Arrival
 
     -- Outcome of a forgot-password request (ForgotPasswordMode). The email
     -- reuses the shared `email` field.
     , forgotState : RemoteData Http.Error ()
     }
+
+
+{-| Why the login card is on screen (Issue #360).
+
+⛔ The point of this type is what it makes impossible. This used to be three
+booleans on `Login.Model` (`sessionExpired`, `draftSaved`, `accountDeleted`),
+shadowed by three more on `Main.Model` (`sessionExpiredNotice`,
+`draftSavedNotice`, `accountDeletedNotice`), raised by five separate inits and
+read by two view predicates. The reasons are mutually exclusive in life —
+a reader's session either expired, or they closed their account, or they asked
+to reset a password, or they simply came to sign in — but nothing in that shape
+said so. `{ sessionExpired = True, accountDeleted = True }` type-checked and
+rendered both notices, one under the other; so did a `draftSaved = True` with no
+expiry, which claimed a listing had been saved when none had. The six booleans
+could also disagree with each other across the `Main`/`Login` boundary, because
+they were copied rather than passed.
+
+Now there is one value, `Main` holds it, `Login.init` receives it, and the
+notice view cases over it. Two reasons at once is a compile error, and there is
+no second copy to fall out of step with.
+
+  - `Fresh` — they came to sign in. No notice.
+  - `SessionExpired { draftSaved }` — Issue #173/#182. `draftSaved` lives INSIDE
+    this constructor because it only means anything about an expiry: a saved
+    marketplace draft with no expiry is not a state, and can no longer be built.
+  - `AccountDeleted` — Issue #188. A warm farewell, deliberately distinct from an
+    expiry: this was something they chose.
+  - `ForgotPassword` — the `/forgot-password` deep link. Not a page: the login
+    card opened straight onto its reset mode.
+  - `StoredSessionUnreadable reason` — Issue #360. A stored credential was
+    present at boot and could not be read. Before this existed the app read that
+    as "logged out" and said nothing, which is indistinguishable to the reader
+    from a real sign-out — and is why the private-session auth bug took so long
+    to diagnose. `reason` is the decoder's own account of the failure, carried so
+    it can be shown rather than discarded.
+
+-}
+type Arrival
+    = Fresh
+    | SessionExpired { draftSaved : Bool }
+    | AccountDeleted
+    | ForgotPassword
+    | StoredSessionUnreadable String
+
+
+{-| Whether a marketplace listing draft was saved on the way to this arrival
+(Issue #182). The ONE reader of that flag, so "was a draft saved" cannot be asked
+of an arrival where the question is meaningless — every non-expiry arrival
+answers `False` by construction rather than by a forgotten `&&`.
+
+Exposed because `Main` has to keep the flag STICKY across a second expiry: a
+later plain expiry must not erase a reassurance an earlier draft-expiry raised.
+
+-}
+draftWasSaved : Arrival -> Bool
+draftWasSaved arrival =
+    case arrival of
+        SessionExpired details ->
+            details.draftSaved
+
+        _ ->
+            False
 
 
 type Mode
@@ -112,57 +162,41 @@ type OutMsg
     | RegistrationSucceeded String
 
 
-init : Model
-init =
+{-| Build the login card for the reason the reader is looking at it.
+
+⛔ The ONE way to build this page. There used to be five — `init`, `forgotInit`,
+`expiredInit`, `expiredDraftInit`, `farewellInit` — each a record update setting
+a different subset of the three notice booleans. Adding a sixth reason meant
+adding a sixth init and remembering which flags it must NOT set; `expiredInit`
+and `expiredDraftInit` differed by exactly one field, and nothing stopped a
+future `expiredFarewellInit`. Taking the reason as an argument makes the set of
+buildable cards exactly the set of `Arrival` constructors — no more, no fewer.
+
+The card's initial `mode` is derived here rather than passed separately, so
+`/forgot-password` cannot open a card in login mode while claiming to be a reset.
+
+-}
+init : Arrival -> Model
+init arrival =
     { email = ""
     , password = ""
     , passwordConfirm = ""
     , displayName = ""
-    , mode = LoginMode
+    , mode =
+        case arrival of
+            ForgotPassword ->
+                ForgotPasswordMode
+
+            _ ->
+                LoginMode
     , submitState = NotAsked
     , emailValidation = Pristine
     , passwordValidation = Pristine
     , passwordConfirmValidation = Pristine
     , displayNameValidation = Pristine
-    , sessionExpired = False
-    , draftSaved = False
-    , accountDeleted = False
+    , arrival = arrival
     , forgotState = NotAsked
     }
-
-
-{-| Initial state for the /forgot-password deep link: the login card opened
-straight onto its "reset your password" mode.
--}
-forgotInit : Model
-forgotInit =
-    { init | mode = ForgotPasswordMode }
-
-
-{-| Initial login state to show after a global session-expiry redirect: identical
-to `init` but with the session-expired notice raised. See `Main.sessionExpired`.
--}
-expiredInit : Model
-expiredInit =
-    { init | sessionExpired = True }
-
-
-{-| Like `expiredInit`, but for an expiry that happened while composing a
-marketplace listing (Issue #182): the draft was saved, so the notice reassures
-the user their work is safe.
--}
-expiredDraftInit : Model
-expiredDraftInit =
-    { init | sessionExpired = True, draftSaved = True }
-
-
-{-| Initial login state shown after a successful account deletion (Issue #188):
-identical to `init` but with the farewell notice raised. See
-`Main.handleAccountDeleted`.
--}
-farewellInit : Model
-farewellInit =
-    { init | accountDeleted = True }
 
 
 validateEmail : String -> FieldValidation
@@ -251,9 +285,12 @@ update msg model =
                 , passwordValidation = Pristine
                 , passwordConfirmValidation = Pristine
                 , displayNameValidation = Pristine
-                , sessionExpired = False
-                , draftSaved = False
-                , accountDeleted = False
+
+                -- Switching tabs is the reader moving on from whatever brought
+                -- them here, so the arrival is spent. One assignment now clears
+                -- what used to be three, which is why they can no longer be
+                -- cleared unevenly.
+                , arrival = Fresh
                 , forgotState = NotAsked
               }
             , Cmd.none
@@ -301,7 +338,7 @@ update msg model =
                         ForgotPasswordMode ->
                             Cmd.none
             in
-            ( { model | submitState = Loading, sessionExpired = False, draftSaved = False, accountDeleted = False }, cmd, NoOut )
+            ( { model | submitState = Loading, arrival = Fresh }, cmd, NoOut )
 
         GotAuthResponse (Ok authResponse) ->
             -- ⛔ Persist-first (#359). The credential is handed to the shell on the
@@ -391,8 +428,7 @@ viewFormCard model =
     div [ class "login-card", testId "login-form" ]
         (h1 [ class "login-card__title" ] [ text "The Stacks" ]
             :: p [ class "login-card__subtitle" ] [ text (cardSubtitle model.mode) ]
-            :: viewSessionExpiredNotice model
-            :: viewAccountDeletedNotice model
+            :: viewArrivalNotice model
             :: (case model.mode of
                     ForgotPasswordMode ->
                         [ viewForgotForm model ]
@@ -714,13 +750,23 @@ viewFieldHint validation =
             text ""
 
 
-{-| Notice shown when the user was redirected here by the global session-expiry
-interceptor (Issue #173). Deliberately distinct from the invalid-credentials
-error so an expired session reads differently from a wrong password. Suppressed
-once a submit failure is showing so the more-specific message wins.
+{-| The one notice the arrival is owed, if any (Issue #360).
+
+⛔ This was two functions — `viewSessionExpiredNotice` and
+`viewAccountDeletedNotice` — each re-deriving the same `submitFailed`
+suppression, each independently deciding whether to render, and each blind to
+the other. When both booleans were set they both rendered, stacked. Casing over
+one `Arrival` means at most one notice exists to render, and the suppression
+rule is written once.
+
+Suppressed once a submit failure is showing: the reader has since tried to sign
+in and failed, and that more-specific message must win. The mode check keeps the
+expiry notice out of the register and reset tabs, where it would be answering a
+question nobody asked.
+
 -}
-viewSessionExpiredNotice : Model -> Html Msg
-viewSessionExpiredNotice model =
+viewArrivalNotice : Model -> Html Msg
+viewArrivalNotice model =
     let
         submitFailed =
             case model.submitState of
@@ -730,16 +776,66 @@ viewSessionExpiredNotice model =
                 _ ->
                     False
     in
-    if model.sessionExpired && model.mode == LoginMode && not submitFailed then
-        div
-            [ attribute "role" "status"
-            , class "login-card__notice login-card__notice--session-expired"
-            , testId "session-expired-notice"
-            ]
-            [ text (sessionExpiredNoticeText model.draftSaved) ]
+    if submitFailed then
+        text ""
 
     else
-        text ""
+        case model.arrival of
+            Fresh ->
+                text ""
+
+            ForgotPassword ->
+                text ""
+
+            SessionExpired details ->
+                if model.mode == LoginMode then
+                    notice
+                        [ class "login-card__notice login-card__notice--session-expired"
+                        , testId "session-expired-notice"
+                        ]
+                        (sessionExpiredNoticeText details.draftSaved)
+
+                else
+                    text ""
+
+            AccountDeleted ->
+                notice
+                    [ class "login-card__notice login-card__notice--account-deleted"
+                    , testId "account-deleted-notice"
+                    ]
+                    "Your account deletion has been queued. We're sorry to see you go — thank you for the time you spent in The Stacks."
+
+            StoredSessionUnreadable reason ->
+                -- ⛔ The reader is TOLD. A stored credential that will not decode
+                -- used to be silently treated as "signed out", which is exactly
+                -- what a real sign-out looks like — so nobody could tell a bug
+                -- from a logout, and the app threw away the one thing that would
+                -- have explained it. The decoder's own account of the failure
+                -- rides along in `title` so it is recoverable from the page
+                -- without a debugger, without putting decoder jargon in the copy.
+                notice
+                    [ class "login-card__notice login-card__notice--stored-session-unreadable"
+                    , testId "stored-session-unreadable-notice"
+                    , attribute "title" reason
+                    ]
+                    "A saved sign-in was found here but could not be read, so you have been signed out. Please sign in again."
+
+
+{-| One notice, one shape. Three hand-written notice blocks would be three
+chances for the `role="status"` that makes a notice announce itself to be
+present on only two of them.
+
+⚠️ The class stays at each CALL SITE, spelled as a literal `class "…"`.
+`scripts/check-orphan-classes.sh` finds classes by matching `class "…"` in Elm
+source, so folding them in here as a `className` field — or assembling one from
+a modifier — hides every notice class from the gate (#356), and their styling
+could then be deleted with nothing to say so. Measured: doing exactly that took
+the Elm class count from 802 to 799 while the gate stayed green.
+
+-}
+notice : List (Html.Attribute Msg) -> String -> Html Msg
+notice attrs copy =
+    div (attribute "role" "status" :: attrs) [ text copy ]
 
 
 {-| Copy for the session-expiry notice. When a marketplace listing draft was
@@ -752,33 +848,6 @@ sessionExpiredNoticeText draftSaved =
 
     else
         "The library closed your session for safekeeping — sign in again to return."
-
-
-{-| Warm farewell shown after a successful account deletion (Issue #188). Kept
-distinct from the session-expiry notice so a deliberate goodbye reads differently
-from a forced logout. Suppressed once a submit failure is showing.
--}
-viewAccountDeletedNotice : Model -> Html Msg
-viewAccountDeletedNotice model =
-    let
-        submitFailed =
-            case model.submitState of
-                Failure _ ->
-                    True
-
-                _ ->
-                    False
-    in
-    if model.accountDeleted && not submitFailed then
-        div
-            [ attribute "role" "status"
-            , class "login-card__notice login-card__notice--account-deleted"
-            , testId "account-deleted-notice"
-            ]
-            [ text "Your account deletion has been queued. We're sorry to see you go — thank you for the time you spent in The Stacks." ]
-
-    else
-        text ""
 
 
 viewError : Model -> Html Msg

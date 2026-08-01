@@ -161,15 +161,28 @@ import "../css/main.css";
   };
 })();
 
-// Read stored auth from localStorage (passed as flags to Elm)
+// Read stored auth from localStorage (passed as flags to Elm).
+//
+// ⛔ A failure here is REPORTED, not swallowed (Issue #360). This `catch` used to
+// be empty, so `localStorage` throwing (private browsing, storage disabled by
+// policy) and a blob that will not `JSON.parse` both left `storedAuth = null` —
+// which reaches Elm as flags with no auth fields, i.e. indistinguishable from a
+// reader who simply is not signed in. The app then signed them out in silence
+// and discarded the only artefact that explained why.
+//
+// These two are the failures Elm CANNOT see for itself: it never receives the
+// raw string. A blob that parses but has the wrong SHAPE is caught on the Elm
+// side by `Main.decodeFlags`. Between them the three outcomes of a boot —
+// nothing stored, something unreadable, a valid session — are all distinguished.
 var storedAuth = null;
+var storedAuthUnreadable = null;
 try {
   var raw = localStorage.getItem("stacks-auth");
   if (raw) {
     storedAuth = JSON.parse(raw);
   }
 } catch (e) {
-  // Ignore corrupted localStorage data
+  storedAuthUnreadable = String((e && e.message) || e);
 }
 
 // Mount the Elm application IMMEDIATELY — no network round-trip may block first
@@ -186,6 +199,11 @@ function boot() {
     Object.keys(storedAuth).forEach(function (key) {
       flags[key] = storedAuth[key];
     });
+  }
+  if (storedAuthUnreadable !== null) {
+    // Read by `Main.decodeFlags` → `CorruptStoredAuth`, which surfaces a notice
+    // on the login card instead of leaving the reader to guess (#360).
+    flags.storedAuthUnreadable = storedAuthUnreadable;
   }
   flags.ageGatingEnabled = false;
 
