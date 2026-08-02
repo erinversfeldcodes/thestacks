@@ -8,15 +8,17 @@
 
 **How they accomplish it:**
 1. On the book detail overlay (see ADR-005), the user clicks "Remove from collection" (in a less prominent position -- danger zone).
-2. A confirmation modal appears: "Are you sure you want to remove \"[Title]\" from your collection? This cannot be undone."
+2. A confirmation modal appears: "Are you sure you want to remove \"[Title]\" from your collection? You'll have a few seconds to undo it."
 3. The user confirms.
 4. The book's shelf placement is soft-deleted (`removed_at` set). The book record itself remains in the database.
 5. The history of the book's journey is preserved in `bookshelf_placement_history`.
+6. They land back on the shelf they came from, where a toast offers "Removed \"[Title]\" — Undo" for eight seconds (see §16).
 
 **What they see on the page:**
 - "Remove from collection" button styled as `btn--danger btn--sm`.
 - Confirmation modal with "Keep It" (secondary) and "Remove" (danger) buttons.
 - After removal, the overlay closes and navigates to the previous route.
+- On arriving there, the undo toast (§16).
 
 **Acceptance Criteria:**
 - Soft-delete: `removed_at` timestamp set on the placement.
@@ -36,7 +38,7 @@
 2. User scrolls to the danger zone section at the bottom.
 3. User clicks "Remove from collection" -> `OpenRemoveModal` msg -> `removeModalOpen = True`.
 4. `Components.RemoveBookModal.removeBookModal` renders on top of overlay.
-5. Modal shows: "Are you sure you want to remove \"[Title]\" from your collection? This cannot be undone."
+5. Modal shows: "Are you sure you want to remove \"[Title]\" from your collection? You'll have a few seconds to undo it."
 6. User clicks "Remove" -> `ConfirmRemove` msg.
 7. `Api.removeBook placement.id token RemoveCompleted` fires; `removeModalOpen` -> `False`; `removeState` -> `Loading`.
 8. API call: `DELETE /api/placements/:id`.
@@ -118,13 +120,13 @@
 - **Action**: Updates RSS feeds for the affected bookshelf
 - **Downstream effects**: Feed XML regeneration (book removed from feed)
 
-Note: `placement.removed` is NOT registered with `DbtRefreshHandler` (unlike `placement.created` and `placement.moved`). This means dbt models may not immediately reflect removals.
+Note: this used to say `placement.removed` is NOT registered with `DbtRefreshHandler`. It has been since #116 punch #14b -- `Stacks.Events.Registry` subscribes both `PlacementHandler` and `DbtRefreshHandler`, the latter mapped to `mart_community_read_count` (an incremental table, so a removal that did not trigger a refresh left a stale count). Corrected 2026-08-02 alongside the undo extension (§16).
 
 ---
 
 ## 7. Background Jobs (Oban)
 
-N/A -- `placement.removed` does not trigger `DbtRefreshHandler` in the current registry. Feed handler runs synchronously or via its own mechanism.
+`RegenerateFeedJob` (enqueued by `PlacementHandler`) and `DbtRefreshJob` for `mart_community_read_count` (enqueued by `DbtRefreshHandler`). Both are Oban jobs; see the correction in §6.
 
 ---
 
@@ -149,7 +151,7 @@ N/A -- bookshelf listings are not cached. The removal will be reflected on the n
 ## 11. dbt Model Dependencies
 
 - **Model**: `stg_bookshelf_placements`
-- **Trigger**: NOT triggered by `placement.removed` in the current registry (potential gap)
+- **Trigger**: `placement.removed` -> `DbtRefreshHandler` -> `mart_community_read_count` (the gap this line described was closed by #116 punch #14b)
 - **Materialisation**: view
 - **Consumer**: Placement counts and journey models would reflect removal on next manual or scheduled refresh
 
@@ -175,7 +177,7 @@ Remove state initialises as `removeState = NotAsked` in `Page.BookDetail.init`.
 - `div.modal-overlay` -- backdrop
 - `div.modal` -- centered modal card
   - `h2.modal__title` "Remove Book"
-  - `p.modal__message` "Are you sure you want to remove \"[title]\" from your collection? This cannot be undone."
+  - `p.modal__message` "Are you sure you want to remove \"[title]\" from your collection? You'll have a few seconds to undo it."
   - `div.modal__actions` containing:
     - `button.btn.btn--secondary` "Keep It" (fires `onCancel`)
     - `button.btn.btn--danger` "Remove" (fires `onConfirm`)
@@ -223,5 +225,123 @@ Remove state initialises as `removeState = NotAsked` in `Page.BookDetail.init`.
 |-------------|------|--------------|-------|
 | Fly.io compute (core) | CPU-ms per request | Number of remove operations | Write operation: Ecto.Multi transaction with soft-delete (UPDATE `removed_at`) + event emission. Lighter than move (no history insert). |
 | Neon DB (PostgreSQL) | Compute Units (CU) per transaction | Remove transactions (2x read + update + event) | Controller reads placement with preload (ownership check), then context reads again + UPDATEs `removed_at` + INSERTs event_log. ~4 statements total. |
-| Neon DB (PostgreSQL) | Write IOPS | Soft-delete update + event_log insert | Each removal updates 1 row (set `removed_at`) and inserts 1 row (event_log). Note: `placement.removed` is NOT registered with `DbtRefreshHandler`, so no background dbt job is triggered. |
-| Oban (background) | N/A | N/A | `placement.removed` does not trigger `DbtRefreshHandler` in the current event registry. Only `PlacementHandler` (RSS feed update) processes this event. |
+| Neon DB (PostgreSQL) | Write IOPS | Soft-delete update + event_log insert | Each removal updates 1 row (set `removed_at`) and inserts 1 row (event_log). An undo (§16) is a second UPDATE on the same row plus one more event_log insert -- no new rows either way. |
+| Oban (background) | 2 jobs per removal | Remove operations | `RegenerateFeedJob` (RSS) + `DbtRefreshJob` for `mart_community_read_count`. An undo (§16) enqueues the same pair again. |
+
+---
+
+## 16. Undo Extension (#375, owner-ruled SPEC 2026-07-30)
+
+> **As a** user who has just removed a book, **I want** a few seconds to take it
+> back **so that** a mis-click does not cost me a placement I had annotated.
+
+Written here rather than in a separate `US-1.6.4a` file so the story has **one
+home**: an undo is not a feature of its own, it is the second half of removal,
+and a reader deciding whether to press "Remove" needs both halves in front of
+them. `docs/implementation-mapping.md` is edited in #320's single pass, not here.
+
+### What changes for the reader
+
+| Before | After |
+|--------|-------|
+| Modal warns "This cannot be undone." | Modal says "You'll have a few seconds to undo it." — the old line stopped being true |
+| Removal is terminal (driven, epic #317 pre-check: ❌) | The shelf offers "Removed \"[Title]\" — Undo" for 8s |
+
+### The rule that shapes everything else
+
+**The undo restores the SAME placement row.** `POST /api/placements/:id/restore`
+clears `removed_at` on the row `DELETE` stamped. It does not place the book
+again.
+
+That is not an implementation preference. A fresh placement gets a new UUID, so
+`op.bookshelf_placement_history` no longer describes the placement on screen; a
+fresh `placed_at`, so "on my shelf since March" becomes today; and default
+`formats`, `personal_rating`, `notes`, `visibility`, `reading_status`,
+`current_page`, `started_at`/`finished_at`, `book_edition_id`. An undo that
+silently discards the reader's own annotations is not an undo. The row's
+identity is asserted directly:
+`ShelvingTest` → "restores the SAME row — same id, same placed_at, same annotations".
+
+### The collision case — refused, not reconciled
+
+`bookshelf_placements_book_active_idx` is `UNIQUE (book_id, bookshelf_id) WHERE
+removed_at IS NULL`. If the reader re-added the same book to the same bookshelf
+between the removal and the Undo, clearing `removed_at` would give that pair two
+active rows.
+
+**Decision: refuse with `409 already_shelved`.** The reader already has what undo
+was going to give them — the book is on the shelf. Reconciling means choosing one
+of the two rows to destroy, and every version of that choice deletes annotations
+the reader entered without asking. A refusal costs nothing that is not already
+recovered; the removed row stays exactly where it is, still exported by
+`GDPR.Export` and still erased by `GDPR.Deletion`. The Elm copy says so plainly:
+"That book is already back on your Library." — not an apology, because nothing
+went wrong.
+
+A re-add on a *different* bookshelf is not a collision (a book may legally sit on
+several bookshelves — owner ruling 2026-07-30) and the undo proceeds.
+
+### API
+
+#### `POST /api/placements/:id/restore`
+- **Auth**: Required. **Pipeline**: `:api` -> `:authenticated`
+- **Controller**: `StacksWeb.BookshelfPlacementController.restore/2`
+- **Context**: `Stacks.Shelving.restore_placement/2`
+- **200**: `{placement: {id, book_id, bookshelf_id, position, placed_at, removed_at}}` — `id` is the ORIGINAL placement id
+- **409**: `{error: "already_shelved"}` — the collision above. Distinct from 422 on purpose: the request was well-formed and the caller did nothing wrong
+- **403** `{error: "forbidden"}` · **404** `{error: "not found"}`
+- **Idempotent**: restoring an already-active placement is a `200` no-op that emits nothing
+
+### Events
+
+`placement.restored` (v1, `book_id` + `bookshelf`), subscribed by
+`Stacks.Feeds.Handlers.PlacementHandler` (the RSS feed regains an entry) and
+`Stacks.Workers.DbtRefreshHandler` → `mart_community_read_count` (the read count
+goes back up). Mapped to that one mart, matching `placement.removed` rather than
+`placement.created`: `mart_platform_searchable` derives from
+`int_book_detail_view`, which never references placements, so searchability was
+never affected either way.
+
+### Elm state machine (`Page.Bookshelf`)
+
+`Main` carries the removal across the `Nav.pushUrl` that a removal provokes
+(`Main.pendingUndo`, raised in the `BookDetail.NavigateTo` branches, consumed and
+cleared by the very next `UrlChanged` via `Main.applyPendingUndo`), because the
+shelf that shows the toast does not exist yet at the moment the removal is known.
+
+`Bookshelf.UndoToast` is one type, not a `Maybe` + `Bool` + `Maybe String`:
+
+    ToastHidden | ToastOffered Removal | ToastRestoring Removal | ToastFailed String
+
+- `UndoRemove` acts on `ToastOffered` **and** `mutationToken model == Just token`
+  — the #332 read-only guard, gone THROUGH rather than around. A read-only shelf
+  yields `Nothing`, so the branch is not selectable at all.
+- `ToastExpired` (from an uncancellable `Process.sleep undoToastMillis`, 8000ms)
+  matches `ToastOffered` and nothing else, so a late timer cannot wipe a request
+  in flight or a failure the reader still needs to read.
+- `UndoCompleted (Ok ())` hides the toast and **refetches the bookshelf** rather
+  than repainting the spine locally — `reloadShelves`' reason: the server decides
+  which shelf row the restored placement lands on.
+
+CSS: `.undo-toast`, `.undo-toast--failed`, `.undo-toast__message`,
+`.undo-toast__action` (all present in `frontend/css/main.css`; `check-css.sh`
+green, no orphan classes added).
+
+### Deliberately NOT in scope
+
+- **Reading Pile and Looking for a Home** are separate page modules
+  (`Page.Bookshelf.ReadingPile`, `Page.Bookshelf.LookingForHome`) with their own
+  models, so a removal that returns the reader to one of those shelves offers no
+  toast. `Main.applyPendingUndo` falls through and the removal still stands —
+  nothing is lost but the offer.
+- **The per-placement remove in the multi-shelf notice** (`RemovePlacement`,
+  #333) does not navigate away and is a different affordance — tidying up an
+  extra copy, not leaving the collection. No toast.
+
+### Validation
+
+| Layer | Where |
+|-------|-------|
+| Context | `apps/core/test/stacks/shelving_test.exs` — `describe "restore_placement/2 — undo of a removal (#375)"` (11 tests: same-row identity, listing round-trip, 404/403, idempotence, collision refusal + no-announcement, different-bookshelf non-collision, event, audit, `placed_at` regression ×2) |
+| API | `apps/core/test/stacks_web/bookshelf_placement_controller_test.exs` — `describe "POST /api/placements/:id/restore — restore"` (6 tests incl. the 409 and the same-id assertion) |
+| Elm | `frontend/tests/Page/BookshelfUndoRemoveTest.elm` (13 tests, incl. `read_only_undo_is_inert_SECURITY` + `read_only_synthetic_undo_msg_SECURITY` and their positive control `owner_undo_is_observable`) |

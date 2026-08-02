@@ -89,6 +89,15 @@ defmodule Stacks.Events.Registry do
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
     ],
+    # placement.restored (#375) — the undo of the above, so it needs exactly the
+    # wiring the above needs. The feed regains an entry and
+    # mart_community_read_count regains a read; leaving this unsubscribed would
+    # make "remove then undo" a state the warehouse and the RSS feed never
+    # recover from until the next scheduled dbt run.
+    "placement.restored" => [
+      Stacks.Feeds.Handlers.PlacementHandler,
+      Stacks.Workers.DbtRefreshHandler
+    ],
     "enrichment.prices_scraped" => [
       Stacks.Workers.DbtRefreshHandler
     ],

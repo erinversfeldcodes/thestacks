@@ -420,6 +420,108 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
   end
 
   # ---------------------------------------------------------------------------
+  # POST /api/placements/:id/restore — undo a removal (US-1.6.4 extension, #375)
+  # ---------------------------------------------------------------------------
+
+  describe "POST /api/placements/:id/restore — restore" do
+    setup do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+      %{user: user, bookshelf: bookshelf, book: book, placement: placement}
+    end
+
+    test "200 with the SAME placement id, and the book is browsable again", %{
+      conn: conn,
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      authed = auth_conn(conn, user)
+
+      assert response(delete(authed, "/api/placements/#{placement.id}"), 204)
+      refute book.id in browse_book_ids(user.id, "library")
+
+      restored = post(authed, "/api/placements/#{placement.id}/restore")
+
+      # The id in the response is the assertion that matters: a re-place would
+      # answer 200 with a new UUID and this would go red.
+      assert %{"placement" => %{"id" => id}} = json_response(restored, 200)
+      assert id == placement.id
+
+      assert book.id in browse_book_ids(user.id, "library")
+    end
+
+    test "403 when restoring another reader's placement", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
+      assert response(delete(auth_conn(conn, user), "/api/placements/#{placement.id}"), 204)
+
+      conn =
+        conn
+        |> auth_conn(insert(:user))
+        |> post("/api/placements/#{placement.id}/restore")
+
+      assert %{"error" => "forbidden"} = json_response(conn, 403)
+    end
+
+    test "404 when the placement does not exist", %{conn: conn, user: user} do
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/placements/#{Ecto.UUID.generate()}/restore")
+
+      assert %{"error" => "not found"} = json_response(conn, 404)
+    end
+
+    test "401 when not authenticated", %{conn: conn, placement: placement} do
+      conn = post(conn, "/api/placements/#{placement.id}/restore")
+      assert json_response(conn, 401)
+    end
+
+    test "409 already_shelved when the reader re-added the book before undoing", %{
+      conn: conn,
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      authed = auth_conn(conn, user)
+
+      assert response(delete(authed, "/api/placements/#{placement.id}"), 204)
+
+      readded = post(authed, "/api/bookshelves/library/placements", %{"book_id" => book.id})
+      assert %{"placement" => %{"id" => readded_id}} = json_response(readded, 201)
+
+      # 409, not 422: the request was well-formed and the caller did nothing
+      # wrong — the shelf is simply already in the state undo would produce.
+      conflict = post(authed, "/api/placements/#{placement.id}/restore")
+      assert %{"error" => "already_shelved"} = json_response(conflict, 409)
+
+      # And the refusal changed nothing: one active placement, the re-added one.
+      assert browse_book_ids(user.id, "library") == [book.id]
+      assert Repo.get!(Stacks.Shelving.Placement, placement.id).removed_at != nil
+      assert Repo.get!(Stacks.Shelving.Placement, readded_id).removed_at == nil
+    end
+
+    test "restoring a placement that was never removed is an idempotent 200", %{
+      conn: conn,
+      user: user,
+      placement: placement
+    } do
+      conn =
+        conn
+        |> auth_conn(user)
+        |> post("/api/placements/#{placement.id}/restore")
+
+      assert %{"placement" => %{"id" => id}} = json_response(conn, 200)
+      assert id == placement.id
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # PUT /api/placements/:id/formats
   # ---------------------------------------------------------------------------
 

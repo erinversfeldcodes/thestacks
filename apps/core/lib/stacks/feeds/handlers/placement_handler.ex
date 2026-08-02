@@ -2,8 +2,9 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
   @moduledoc """
   Event handler that enqueues feed regeneration when shelf placements change.
 
-  Listens for `placement.created`, `placement.moved`, and `placement.removed`
-  events and enqueues a `RegenerateFeedJob` for the affected bookshelf.
+  Listens for `placement.created`, `placement.moved`, `placement.removed` and
+  `placement.restored` events and enqueues a `RegenerateFeedJob` for the
+  affected bookshelf.
   """
 
   @behaviour Stacks.Events.Handler
@@ -16,7 +17,7 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
   alias Stacks.Shelving.Placement
   alias Stacks.Workers.RegenerateFeedJob
 
-  @placement_events ~w(placement.created placement.moved placement.removed)
+  @placement_events ~w(placement.created placement.moved placement.removed placement.restored)
 
   @impl true
   def handle_event(%{event_type: event_type, aggregate_id: aggregate_id, payload: payload})
@@ -70,7 +71,15 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
     Map.get(payload, "to_bookshelf") || Map.get(payload, :to_bookshelf)
   end
 
+  # A removal carries no bookshelf name and needs none: whichever feed the book
+  # was in loses it, and `lookup_user_id/1` plus a full regeneration covers that.
   defp extract_bookshelf_name("placement.removed", _payload), do: nil
+
+  # An undo does need one. The book is going back into a specific bookshelf's
+  # feed, and the payload names it (see PayloadContract).
+  defp extract_bookshelf_name("placement.restored", payload) do
+    Map.get(payload, "bookshelf") || Map.get(payload, :bookshelf)
+  end
 
   defp extract_bookshelf_name(_, _), do: nil
 

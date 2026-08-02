@@ -35,7 +35,15 @@ defmodule Stacks.Workers.DbtRefreshHandler do
     # (remove_book bumps updated_at) and recomputes to a read_count = 0 row,
     # which delete+insert uses to replace the stale non-zero row — drop-to-zero
     # no longer requires a --full-refresh.
-    "placement.removed" => ["mart_community_read_count"]
+    "placement.removed" => ["mart_community_read_count"],
+    # #375: undo of a removal. Mapped to the same single mart as `removed` and
+    # `moved`, NOT to `created`'s pair — mart_platform_searchable derives from
+    # int_book_detail_view, which never references placements, so a book's
+    # searchability was unaffected by the removal and is unaffected by the undo.
+    # mart_community_read_count is the one that moved, and it has to move back:
+    # restore_placement/2's update bumps updated_at, so the incremental predicate
+    # picks the row up and the count returns to what it was.
+    "placement.restored" => ["mart_community_read_count"]
   }
 
   @impl true

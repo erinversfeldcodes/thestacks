@@ -12,6 +12,7 @@ port module Main exposing
     , StoredAuth(..)
     , StoredAuthResolution(..)
     , adoptExternalAuth
+    , applyPendingUndo
     , arrivalForBoot
     , completeLogin
     , connectivityFromOnline
@@ -409,6 +410,19 @@ type alias Model =
     , onboardingCompleted : Bool
     , hasAnyPlacements : Bool
 
+    -- A removal the reader may still take back (US-1.6.4 extension, #375).
+    --
+    -- It has to live here, rather than on either page, because it spans the gap
+    -- between them: `Page.BookDetail` records it and immediately asks to
+    -- navigate, and `Nav.pushUrl` re-runs `initPage`, so the shelf that will
+    -- show the toast does not exist yet at the moment the removal is known.
+    -- Raised in the `BookDetail.NavigateTo` branches and consumed by the very
+    -- next `UrlChanged` — the same "survives exactly one navigation" shape as
+    -- `arrival` above, and cleared there for the same reason: an undo offer that
+    -- outlived its navigation would reappear on a shelf the reader browsed to
+    -- minutes later, pointing at a removal they had forgotten making.
+    , pendingUndo : Maybe Bookshelf.Removal
+
     -- Why the reader will be standing at the login door when they next get
     -- there (Issue #360). Raised by whatever ended the session — expiry,
     -- account deletion, an unreadable stored credential — and consumed the
@@ -514,6 +528,7 @@ init flags url key =
       , onboarding = OnboardingOverlay.init
       , onboardingCompleted = False
       , hasAnyPlacements = True
+      , pendingUndo = Nothing
       , arrival = consumeArrival page arrival
       , pendingLogout = Nothing
       , config = config
@@ -961,6 +976,38 @@ isAdminRoute route =
 
         _ ->
             False
+
+
+{-| Hand a just-built page the removal the reader may still take back (#375).
+
+Applied to `initPage`'s result rather than threaded through it: `initPage`
+already carries six arguments and three call sites, and only ONE of those sites
+— the `UrlChanged` that a removal's `Nav.pushUrl` provokes — can ever have an
+undo to hand over. A seventh parameter would have made the other two say
+`Nothing` forever.
+
+A removal always navigates to `BookDetail.previousRoute`, so the page below is
+the shelf the reader was standing on. When that shelf is the Reading Pile or
+Looking for a Home the match falls through and no toast is offered: those two
+are separate page modules with their own `Model`, and #375's scope is
+`Page.Bookshelf` (Library / Antilibrary / Wish List). The removal still
+succeeded — nothing is lost but the offer.
+
+-}
+applyPendingUndo : Maybe Bookshelf.Removal -> ( Page, Cmd Msg ) -> ( Page, Cmd Msg )
+applyPendingUndo maybeRemoval ( page, cmd ) =
+    case ( maybeRemoval, page ) of
+        ( Just _, PageBookshelf bookshelfModel ) ->
+            let
+                ( withToast, toastCmd ) =
+                    Bookshelf.withPendingUndo maybeRemoval ( bookshelfModel, Cmd.none )
+            in
+            ( PageBookshelf withToast
+            , Cmd.batch [ cmd, Cmd.map BookshelfMsg toastCmd ]
+            )
+
+        _ ->
+            ( page, cmd )
 
 
 initBookshelf : Bookshelf.Config -> Maybe Auth -> ( Page, Cmd Msg )
@@ -1824,12 +1871,16 @@ update msg model =
                         (adminTokenFor model)
                         (Just model.route)
                         model.arrival
+                        |> applyPendingUndo model.pendingUndo
             in
             ( { model
                 | url = url
                 , route = newRoute
                 , page = page
                 , previousRoute = Just model.route
+
+                -- Spent. See the field's own note: one navigation, no further.
+                , pendingUndo = Nothing
                 , transition = transition
                 , redirectAfterLogin =
                     redirectAfterNavigation
@@ -2050,7 +2101,7 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         BookDetail.NavigateTo route ->
-                            ( baseModel
+                            ( { baseModel | pendingUndo = newSubModel.undoableRemoval }
                             , Cmd.batch
                                 [ baseCmd
                                 , Nav.pushUrl model.key (Route.toPath route)
@@ -2790,7 +2841,17 @@ update msg model =
                             -- Remove-success path: tear down the overlay, land on
                             -- the previous shelf, and move focus to the main
                             -- landmark so it is not lost to <body> (#295 item b).
-                            ( { model | bookDetailOverlay = Nothing }
+                            --
+                            -- `newDetail.undoableRemoval` rides along so the shelf
+                            -- can offer to put the book back (#375). It is read
+                            -- HERE and not in the `NoOut` branch because this is
+                            -- the branch a completed removal takes — the overlay
+                            -- is about to cease to exist, taking the only record
+                            -- of what was removed with it.
+                            ( { model
+                                | bookDetailOverlay = Nothing
+                                , pendingUndo = newDetail.undoableRemoval
+                              }
                             , Cmd.batch
                                 [ Nav.pushUrl model.key (Route.toPath route)
                                 , focusMainContent

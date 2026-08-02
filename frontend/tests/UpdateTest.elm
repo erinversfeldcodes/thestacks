@@ -33,6 +33,10 @@ libraryInit =
     , organiser = { dragging = Nothing }
     , organiserBusy = False
     , organiserError = Nothing
+
+    -- No pending undo: this fixture is a plain visit, not an arrival off a
+    -- removal. `Bookshelf.withPendingUndo` is the only thing that changes it.
+    , undoToast = Bookshelf.ToastHidden
     }
 
 
@@ -64,6 +68,9 @@ bookDetailInit =
     , progressCard = Nothing
     , progressSaveState = NotAsked
     , finishedReadPrompt = False
+
+    -- Nothing has been removed yet; only `RemoveCompleted (Ok _)` sets this.
+    , undoableRemoval = Nothing
     }
 
 

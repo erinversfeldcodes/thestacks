@@ -57,6 +57,31 @@ defmodule Stacks.GDPRTest do
       assert length(export.placements) == 1
     end
 
+    # ── #375: soft-deleted placements are still the subject's data ──────────
+    #
+    # `remove_book/2` stamps `removed_at` and leaves the row; #375's undo clears
+    # it again. Both states are personal data the subject is entitled to receive,
+    # and a removed row is the one most easily forgotten — it is invisible to
+    # every browse query in the app (`is_nil(removed_at)` filters). Asserted
+    # rather than reasoned from `Export`'s query having no filter, because "the
+    # query looks right" is how the #185 post_comments gap survived seven
+    # reviews.
+    test "includes SOFT-DELETED placements — a removal does not put data beyond export" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book, notes: "a margin note")
+
+      {:ok, _} = Stacks.Shelving.remove_book(placement.id, user.id)
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+      assert [exported] = export.placements
+      assert exported.id == placement.id
+      assert exported.removed_at != nil
+      # The free text on the removed row is exported too, not silently dropped.
+      assert exported.notes == "a margin note"
+    end
+
     test "returns error for unknown user" do
       assert {:error, _} = Export.export_user_data(Ecto.UUID.generate())
     end
@@ -208,6 +233,24 @@ defmodule Stacks.GDPRTest do
 
       assert {:ok, _} = Deletion.delete_user_data(user.id)
       assert nil == Repo.get(User, user.id)
+    end
+
+    # ── #375 ──────────────────────────────────────────────────────────────
+    test "erases SOFT-DELETED placements too — a removal does not hide a row from erasure" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book, notes: "a margin note")
+
+      {:ok, _} = Stacks.Shelving.remove_book(placement.id, user.id)
+      # Pre-condition: the row survived the removal (that is what soft-delete
+      # means), so erasure has something left to erase.
+      assert Repo.get(Stacks.Shelving.Placement, placement.id) != nil
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      # The row — and the free text on it — is gone, not merely author-nulled.
+      assert nil == Repo.get(Stacks.Shelving.Placement, placement.id)
     end
 
     test "removes placement history for user's bookshelves" do

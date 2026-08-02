@@ -59,6 +59,8 @@ suite =
         , ratingDisplayWithoutPlacement
         , moveConfirmHappyUpdatesBookshelf
         , removeConfirmNavigatesToPreviousRoute
+        , removeRecordsTheUndoableRemoval
+        , undoableRemovalIsUnsetBeforeRemoval
         , removeCompletedErrorShowsMessage
         , confirmMoveNoPlacementIsNoOp
         , confirmMoveNoTokenIsNoOp
@@ -900,6 +902,62 @@ removeConfirmNavigatesToPreviousRoute =
                 |> ProgramTest.simulateHttpResponse "DELETE" removeEndpoint removeSuccessResponse
                 |> ProgramTest.expectModel
                     (\model -> Expect.equal (BookDetail.NavigateTo Route.AntiLibrary) model.lastOut)
+
+
+{-| The producer end of the undo wire (#375).
+
+`Main` reads `undoableRemoval` off this model at the instant it acts on the
+`NavigateTo` above — the overlay is about to be torn down, taking the only
+record of what was removed with it. If this field is not set here, the toast on
+the shelf can never appear, and nothing else in the app would notice: the
+removal still works, the navigation still happens, and the offer silently never
+arrives. That is the "built but not wired" shape, so it is pinned at the
+producing end as well as the consuming one
+(`BookshelfUndoRemoveTest.main_hands_the_removal_to_the_shelf`).
+
+-}
+removeRecordsTheUndoableRemoval : Test
+removeRecordsTheUndoableRemoval =
+    test "remove_records_the_undoable_removal: a successful DELETE records the placement id and title for Undo" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.clickButton "Remove from collection"
+                |> ProgramTest.within (Query.find [ Selector.class "modal-overlay" ])
+                    (ProgramTest.clickButton "Remove")
+                |> ProgramTest.simulateHttpResponse "DELETE" removeEndpoint removeSuccessResponse
+                |> ProgramTest.expectModel
+                    (\model ->
+                        Expect.equal
+                            (Just
+                                { placementId = testPlacement.id
+                                , bookTitle = testBook.title
+                                }
+                            )
+                            model.page.undoableRemoval
+                    )
+
+
+{-| The pre-condition for the test above, as its own test because `ProgramTest`
+has no `ensureModel`: a page that merely LOADED a placement offers nothing.
+Without this, "the field equals Just …" would also pass against a page that set
+it at init and never cleared it — the offer would then appear on a shelf after a
+visit that removed nothing.
+-}
+undoableRemovalIsUnsetBeforeRemoval : Test
+undoableRemovalIsUnsetBeforeRemoval =
+    test "undoable_removal_unset_before_removal: loading a book records no undoable removal" <|
+        \() ->
+            ProgramTest.start ()
+                (bookDetailProgramWithOut "book-test-001" (Just "test-token") (Just Route.AntiLibrary))
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-test-001"
+                    (simulateBookDetailResponseWithPlacement "book-test-001" testBook testPlacement)
+                |> ProgramTest.expectModel
+                    (\model -> Expect.equal Nothing model.page.undoableRemoval)
 
 
 {-| #16 remove-sad: `RemoveCompleted (Err _)` renders the remove failure copy.

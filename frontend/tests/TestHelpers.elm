@@ -5,6 +5,7 @@ module TestHelpers exposing
     , bookDetailProgram
     , bookDetailProgramWithOut
     , bookshelfProgram
+    , bookshelfUndoProgram
     , libraryProgram
     , loginEffects
     , loginProgram
@@ -1138,6 +1139,25 @@ libraryEffects msg model =
                 Nothing ->
                     SimulatedEffect.Cmd.none
 
+        -- Undo-remove (#375). Reads `Bookshelf.mutationToken` for the same reason
+        -- the organiser branches do — production's guard, CALLED — and gates on
+        -- `ToastOffered` because that is the only state `UndoRemove` acts on: a
+        -- translator that fired on any toast state would report a request the
+        -- page does not make, and `undo_after_expiry_issues_nothing` would pass
+        -- against a page that had regressed.
+        ( Bookshelf.UndoRemove, Just token, _ ) ->
+            case model.undoToast of
+                Bookshelf.ToastOffered removal ->
+                    restoreEffect removal.placementId token
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        ( Bookshelf.UndoCompleted (Ok ()), _, Just token ) ->
+            -- Mirrors `UndoCompleted (Ok ())`'s `reloadShelves`: the page never
+            -- trusts its local shelves after a restore.
+            bookshelfInitEffects model.config (Just token)
+
         ( Bookshelf.ShelfMutated _, _, Just token ) ->
             -- Both the Ok and Err branches refetch: the page never trusts its
             -- local order after a mutation. Keyed off the *plain* token, matching
@@ -1159,6 +1179,21 @@ shelfCreateEffect bookshelfName token =
         , url = "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
         , body = SimulatedEffect.Http.jsonBody (Encode.object [])
         , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Mirror of `Api.restoreBook` — `POST /api/placements/:id/restore`.
+-}
+restoreEffect : String -> String -> SimulatedEffect Bookshelf.Msg
+restoreEffect placementId token =
+    SimulatedEffect.Http.request
+        { method = "POST"
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "/api/placements/" ++ placementId ++ "/restore"
+        , body = SimulatedEffect.Http.emptyBody
+        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.UndoCompleted
         , timeout = Nothing
         , tracker = Nothing
         }
@@ -1776,6 +1811,47 @@ readingPileInitEffects maybeToken =
 
         Nothing ->
             SimulatedEffect.Cmd.none
+
+
+{-| A bookshelf harness for a reader who has just removed a book and been
+returned to their shelf (US-1.6.4 extension, #375).
+
+Seeds the toast through production's own `Bookshelf.withPendingUndo` — the
+function `Main.applyPendingUndo` calls — rather than hand-building a model with
+`undoToast` set. A harness that constructs the state directly would keep passing
+if `withPendingUndo` stopped producing it.
+
+Takes the `Config`, so the SAME setup drives the owner shelf and the read-only
+profile shelf; `BookshelfUndoRemoveTest` runs both and requires them to differ.
+
+-}
+bookshelfUndoProgram :
+    Bookshelf.Config
+    -> Maybe String
+    -> Bookshelf.Removal
+    -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+bookshelfUndoProgram config maybeToken removal =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        Bookshelf.init config maybeToken "test-user-id"
+
+                    ( seeded, _ ) =
+                        Bookshelf.withPendingUndo (Just removal) ( model, Cmd.none )
+                in
+                ( seeded, bookshelfInitEffects config maybeToken )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, _ ) =
+                        Bookshelf.update msg model
+                in
+                ( newModel, libraryEffects msg model )
+        , view = Bookshelf.view
+        }
+        |> ProgramTest.withSimulatedEffects identity
 
 
 {-| Create a ProgramTest harness for the read-only profile-shelf browse view

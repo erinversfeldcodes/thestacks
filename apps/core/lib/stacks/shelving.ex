@@ -106,10 +106,26 @@ defmodule Stacks.Shelving do
     |> put_moved_at()
   end
 
-  defp put_placed_at(%Ecto.Changeset{changes: changes} = changeset) do
-    case Map.get(changes, :placed_at) do
-      nil -> put_change(changeset, :placed_at, DateTime.utc_now())
-      _ -> changeset
+  # Stamps `placed_at` when a placement does not have one yet — which is to say,
+  # on insert.
+  #
+  # ⛔ **This used to fire on every UPDATE too**, because it only asked whether
+  # the changeset carried a `:placed_at` change and never whether the row already
+  # had a value. `placement_changeset/2` is the changeset for removals, format
+  # edits, visibility edits and progress edits alike, so "on my shelf since March
+  # 2025" silently became today the first time the reader touched any of them.
+  # Found by #375, whose undo promises to bring a placement back AS IT WAS: the
+  # removal it reverses had already moved the date, so the promise could not be
+  # kept without fixing this. Probed before and after — `remove_book/2` on a
+  # placement dated 2025-03-01 rewrote it to the wall clock.
+  #
+  # An explicit `placed_at` in `attrs` still wins (the first clause), which is
+  # what the factory and `reread_book/2` rely on.
+  defp put_placed_at(%Ecto.Changeset{changes: changes, data: data} = changeset) do
+    cond do
+      Map.has_key?(changes, :placed_at) -> changeset
+      is_nil(data.placed_at) -> put_change(changeset, :placed_at, DateTime.utc_now())
+      true -> changeset
     end
   end
 
@@ -620,6 +636,130 @@ defmodule Stacks.Shelving do
         {:error, _, reason, _} -> {:error, reason}
       end
     end
+  end
+
+  @doc """
+  Reverses a removal by clearing `removed_at` on the **same placement row**
+  (US-1.6.4 undo extension, #375).
+
+  ⚠️ **The identity of the row is the whole point.** Re-placing the book with
+  `place_book/3` would look identical on the bookshelf and be a different thing:
+  a new UUID, so `op.bookshelf_placement_history` rows (which name bookshelves,
+  not placements — see `GDPR.Deletion`) no longer describe the placement the
+  reader is looking at; a fresh `placed_at`, so "on my shelf since March" becomes
+  today; and the row's `formats`, `personal_rating`, `notes`, `visibility`,
+  `reading_status`, `current_page`, `started_at`/`finished_at` and
+  `book_edition_id` all reset to defaults. An undo that silently discards the
+  reader's own annotations is not an undo. So this is an UPDATE of one row and
+  nothing else, and `restores_the_same_placement_row` asserts the id is unchanged.
+
+  ## The collision case — refused, not reconciled
+
+  `bookshelf_placements_book_active_idx` is `UNIQUE (book_id, bookshelf_id)
+  WHERE removed_at IS NULL`. If the reader re-added the same book to the same
+  bookshelf between the removal and the undo, clearing `removed_at` would give
+  that pair two active rows and the index would reject the write.
+
+  This refuses with `{:error, :already_shelved}` rather than reconciling the two
+  rows, because **the reader has already got what undo was going to give them** —
+  the book is on the shelf. Reconciling means picking one row to keep and one to
+  destroy, and every version of that choice loses data the reader entered without
+  asking: fold the new row into the old and the new row's rating/notes go; fold
+  the old into the new and the old row's do. A refusal costs nothing that is not
+  already recovered, and the removed row stays exactly where it is — still
+  exported by `GDPR.Export`, still erased by `GDPR.Deletion`.
+
+  The check runs inside the transaction AND the changeset carries the index's
+  `unique_constraint`, so a concurrent re-add loses the race with the same
+  `:already_shelved` answer rather than a 500.
+
+  Returns `{:ok, placement}` when the row was restored — and also when it was
+  never removed, mirroring `remove_book/2`'s documented idempotency: a repeated
+  undo is a no-op, not a 404.
+  """
+  @spec restore_placement(binary(), binary()) ::
+          {:ok, Placement.t()}
+          | {:error, :not_found | :unauthorized | :already_shelved}
+          | {:error, Ecto.Changeset.t()}
+  def restore_placement(placement_id, user_id) do
+    case Repo.get(Placement, placement_id) do
+      nil ->
+        {:error, :not_found}
+
+      placement ->
+        do_restore_placement(Repo.preload(placement, :bookshelf), user_id)
+    end
+  end
+
+  defp do_restore_placement(%Placement{bookshelf: %Bookshelf{user_id: owner_id}}, user_id)
+       when owner_id != user_id do
+    {:error, :unauthorized}
+  end
+
+  defp do_restore_placement(%Placement{removed_at: nil} = placement, _user_id) do
+    # Already active: undo has nothing to undo. Idempotent, like a repeat DELETE.
+    {:ok, placement}
+  end
+
+  defp do_restore_placement(placement, user_id) do
+    Multi.new()
+    |> Multi.run(:no_active_duplicate, fn repo, _changes ->
+      if active_duplicate?(repo, placement) do
+        {:error, :already_shelved}
+      else
+        {:ok, :clear}
+      end
+    end)
+    # Only `removed_at` changes. `placement_changeset/2` already carries the
+    # partial index's `unique_constraint`, so the concurrent-re-add race lands as
+    # a changeset error rather than a raised Postgres exception.
+    |> Multi.update(:placement, placement_changeset(placement, %{removed_at: nil}))
+    |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
+      Events.emit_safe(%{
+        event_type: "placement.restored",
+        aggregate_type: "placement",
+        aggregate_id: p.id,
+        payload: %{book_id: p.book_id, bookshelf: placement.bookshelf.name}
+      })
+
+      {:ok, p}
+    end)
+    |> Multi.run(:audit, fn _repo, %{placement: p} ->
+      Audit.log(user_id, "placement.restored",
+        resource_type: "placement",
+        resource_id: p.id,
+        metadata: %{book_id: p.book_id, bookshelf: placement.bookshelf.name}
+      )
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{placement: p}} -> {:ok, p}
+      {:error, :no_active_duplicate, :already_shelved, _} -> {:error, :already_shelved}
+      {:error, :placement, changeset, _} -> restore_conflict_or_changeset(changeset)
+      {:error, _, reason, _} -> {:error, reason}
+    end
+  end
+
+  # A concurrent re-add that landed between the check and the update trips the
+  # partial unique index; report it as the same refusal the check reports, so the
+  # caller has one case to handle rather than two spellings of one situation.
+  defp restore_conflict_or_changeset(changeset) do
+    conflict? =
+      Enum.any?(changeset.errors, fn {field, _} -> field in [:book_id, :bookshelf_id] end)
+
+    if conflict?, do: {:error, :already_shelved}, else: {:error, changeset}
+  end
+
+  defp active_duplicate?(repo, placement) do
+    Placement
+    |> where(
+      [p],
+      p.book_id == ^placement.book_id and
+        p.bookshelf_id == ^placement.bookshelf_id and
+        p.id != ^placement.id and
+        is_nil(p.removed_at)
+    )
+    |> repo.exists?()
   end
 
   @doc """
