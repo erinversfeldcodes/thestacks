@@ -157,7 +157,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-02",
-  "status": "ALL 9 CHILDREN MERGED. NOT DONE: (a) 3 suspected #375 focus-contract regressions unconfirmed, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs, (d) #379 non-reproducible gate failure open.",
+  "status": "ALL 9 CHILDREN MERGED. No regressions found. NOT DONE: (a) full E2E drive is partial, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs, (d) #379 open.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -209,12 +209,12 @@
     "deploy": "exit 0; Modal vision app thestacks-vision-feat-campaign-w7-317 live; Neon branch preview/feat-campaign-w7-317. Resized to 1024MB BEFORE any auth traffic (see #369 — two concurrent logins OOM-kill a 512MB core VM and produced 23 phantom failures across 11 files in Wave 6).",
     "partial": "58 passed / 6 failed before the run was stopped. NOT a complete drive.",
     "known": "3 failures = #371 (admin-session specs share one owner MFA factor; pass at --workers=1).",
-    "SUSPECTED_REGRESSION": {
-      "what": "3 book-detail overlay FOCUS CONTRACT failures, each running to a 1.5-minute timeout while neighbouring tests passed in 5-9s: :168 \"Escape key closes the overlay; URL never changes\", :210 \"Tab never moves focus outside the overlay\", :241 \"Tab from the trailing sentinel wraps to the close button\".",
-      "why_375": "#375 wired BookDetail.undoableRemoval and added an undo toast. A new focusable element near the overlay is exactly what lets Tab escape a focus trap and interferes with Escape handling.",
-      "counter_evidence": "The REMOVE-MODAL focus tests (64-66: focus on Keep It, Tab trapped in two buttons, Escape scoped) all PASS — so the trap works where #375 did not touch it. That narrows it to the overlay, not focus handling generally.",
-      "status": "UNCONFIRMED — a --workers=1 re-run of book-detail.spec.ts was started to rule out contention but did not return a result before the session ran out of room. ⚠️ Do not treat as flake without that run.",
-      "why_it_matters": "These are keyboard-accessibility guarantees, and #375 Elm suite was 1569/0. If real, it is another instance of this wave recurring theme: green unit tests over a surface no unit test can reach."
-    }
+    "focus_contract_resolved": {
+      "verdict": "NOT a regression — the lead hypothesis was WRONG and is retracted.",
+      "evidence": "book-detail.spec.ts re-run at --workers=1 against the same preview: 27 passed / 0 failed (10.2m).",
+      "why_it_failed_in_parallel": "Same class as #371 — contention, not breakage. The tell is in the passing run own timings: \"loading state is visible before a delayed response resolves\" took 1.3 MINUTES while PASSING, and \"removing the book returns focus to the main landmark\" took 49s. These tests deliberately exercise slow and delayed responses, so under 4 workers against one preview VM they cross the timeout with nothing broken.",
+      "what_held_up": "Recording it as UNCONFIRMED rather than filing it. The counter-evidence noted at the time (remove-modal focus tests passing) was pointing the right way."
+    },
+    "e2e_status": "book-detail: 27/27 serially. Full-suite drive still PARTIAL (58 passed / 6 failed before being stopped; 3 = #371, 3 = these, now cleared)."
   }
 }
