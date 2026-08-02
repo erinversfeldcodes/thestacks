@@ -34,11 +34,29 @@ defmodule Stacks.Accounts do
   # ---------------------------------------------------------------------------
 
   # An email-confirmation link (and therefore an unverified account) lives 24h
-  # after creation. Single source of truth: `Stacks.Email.confirm_email/1` uses
-  # this for the token's `max_age`, and `ExpiredUnverifiedAccountsJob` uses it to
-  # reap accounts whose link has expired. See docs/runbooks/gdpr-erase-user.md
-  # (erasure) and the daily crontab in config/config.exs.
+  # after the link was ISSUED — at registration, or at the most recent resend.
+  # Single source of truth: `Stacks.Email.confirm_email/1` uses this for the
+  # token's `max_age`, `Stacks.Email.send_confirmation_resend/1` re-signs against
+  # it, and `ExpiredUnverifiedAccountsJob` uses it to reap accounts whose link has
+  # expired. See docs/runbooks/gdpr-erase-user.md (erasure) and the daily crontab
+  # in config/config.exs.
   @unverified_account_ttl_seconds 24 * 60 * 60
+
+  # The ceiling on how long resending can keep an unconfirmed account alive
+  # (Issue #373). Each resend buys another @unverified_account_ttl_seconds; past
+  # this age no further link is issued, so the last one expires within a TTL and
+  # the reaper takes the account. Absolute worst case is therefore this plus one
+  # TTL — 8 days — no matter how many times resend is pressed.
+  #
+  # ⛔ This exists because `POST /api/auth/resend-confirmation` is necessarily
+  # UNAUTHENTICATED — the reader cannot sign in, that being the problem. So the
+  # caller is not provably the data subject, and without a ceiling a stranger who
+  # posts someone else's address every 23 hours could prevent that person's
+  # abandoned signup from ever being erased. Storage limitation cannot be left in
+  # the hands of an anonymous caller. The cap is enforced when the link is ISSUED
+  # rather than when the account is reaped, so a link is never issued that would
+  # outlive the account behind it.
+  @unverified_account_max_lifetime_seconds 7 * 24 * 60 * 60
 
   @registration_required_fields [:email, :password]
   # `:age_verified` is intentionally NOT castable from user input (ADR-020):
@@ -344,28 +362,124 @@ defmodule Stacks.Accounts do
 
   @doc """
   Seconds an email-confirmation link (and the unverified account behind it) stays
-  valid after creation. The confirmation token's `max_age` and the
-  expired-account reaper both key off this one value.
+  valid after the link was issued. The confirmation token's `max_age`, the resend
+  path, and the expired-account reaper all key off this one value.
   """
   @spec unverified_account_ttl_seconds() :: pos_integer()
   def unverified_account_ttl_seconds, do: @unverified_account_ttl_seconds
 
   @doc """
-  IDs of accounts whose email-confirmation link has expired: never confirmed and
-  created more than `unverified_account_ttl_seconds/0` ago. Used by
+  IDs of accounts whose email-confirmation link is dead: never confirmed, and
+  holding no confirmation token that still verifies. Used by
   `Stacks.Workers.ExpiredUnverifiedAccountsJob` to reap abandoned signups.
 
-  `now` is injectable for deterministic tests.
+  ⛔ The reaper's clock is the LINK's clock, not `created_at` (Issue #373).
+
+  This used to be `created_at < now - ttl` alone, which was correct only because
+  registration was the sole issuer of a confirmation token — creation time and
+  issue time were the same instant, so one clock could stand in for the other.
+  `POST /api/auth/resend-confirmation` breaks that: a resend mints a freshly
+  signed `Phoenix.Token`, valid for a further `unverified_account_ttl_seconds/0`
+  from the moment it is signed. Against the old rule, a reader who lost their
+  email at hour 23, asked for another, and got a link good until hour 47 would
+  have had the account underneath it erased at hour 24 — a live link pointing at
+  nothing, which is strictly worse than never offering the button. Two clocks
+  that only agreed by accident are now one.
+
+  So the SQL is a cheap PREFILTER (nothing younger than the TTL can possibly hold
+  a dead link) and the decision is `Phoenix.Token.verify/4` — the very same call
+  `Stacks.Email.confirm_email/1` makes when the reader clicks. Whatever the reaper
+  erases, the link was already going to refuse; whatever the link still accepts,
+  the reaper leaves alone. A missing token (`nil`) is a dead link and is reaped,
+  as before.
+
+  Renewal is not unbounded: `confirmation_resendable?/1` stops new links being
+  issued past `unverified_account_max_lifetime_seconds/0`, so this query always
+  catches up with an account within one TTL of that ceiling. The bound is applied
+  at issue time rather than here precisely so that this function never has to
+  erase an account whose link is still live.
+
+  `now` is injectable and governs the prefilter. The token check deliberately runs
+  against wall-clock, because that is the clock the reader's link is judged by —
+  injecting a different one here would let the reaper and the confirmation
+  endpoint disagree, which is the exact defect this shape exists to prevent.
   """
   @spec expired_unverified_ids(DateTime.t()) :: [binary()]
   def expired_unverified_ids(now \\ DateTime.utc_now()) do
     cutoff = DateTime.add(now, -@unverified_account_ttl_seconds, :second)
 
-    Repo.all(
-      from u in User,
-        where: u.email_confirmed == false and u.created_at < ^cutoff,
-        select: u.id
-    )
+    candidates =
+      Repo.all(
+        from u in User,
+          where: u.email_confirmed == false and u.created_at < ^cutoff,
+          select: {u.id, u.email_confirmation_token}
+      )
+
+    for {id, token} <- candidates, not confirmation_link_live?(token), do: id
+  end
+
+  @doc """
+  Verify a confirmation token and return the user id it was signed over.
+
+  The ONE place the `"email_confirm"` salt and its `max_age` are spoken. Both
+  readers of a confirmation link go through here — `Stacks.Email.confirm_email/1`
+  when the reader clicks it, and `confirmation_link_live?/1` when the reaper asks
+  whether that click would still work — so the two cannot drift into disagreeing
+  about which links are alive.
+  """
+  @spec verify_confirmation_token(String.t() | nil) :: {:ok, binary()} | :error
+  def verify_confirmation_token(token) when is_binary(token) do
+    case Phoenix.Token.verify(CoreWeb.Endpoint, "email_confirm", token,
+           max_age: @unverified_account_ttl_seconds
+         ) do
+      {:ok, user_id} -> {:ok, user_id}
+      {:error, _reason} -> :error
+    end
+  end
+
+  def verify_confirmation_token(_token), do: :error
+
+  @doc """
+  Sign a fresh confirmation link for `user_id`, valid for
+  `unverified_account_ttl_seconds/0` from now. Issuing a link is also what keeps
+  the account alive — see `expired_unverified_ids/1`.
+  """
+  @spec sign_confirmation_token(binary()) :: String.t()
+  def sign_confirmation_token(user_id) do
+    Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user_id)
+  end
+
+  @doc """
+  The ceiling on an unconfirmed account's life, however often a link is resent.
+  See `@unverified_account_max_lifetime_seconds`.
+  """
+  @spec unverified_account_max_lifetime_seconds() :: pos_integer()
+  def unverified_account_max_lifetime_seconds, do: @unverified_account_max_lifetime_seconds
+
+  @doc """
+  Whether a fresh confirmation link may still be issued for `user`.
+
+  False once the account has passed `unverified_account_max_lifetime_seconds/0`,
+  which is what stops an anonymous caller renewing a stranger's signup forever.
+  A refusal is invisible from outside — the endpoint's response does not depend
+  on it — so this cannot become an account-age oracle.
+  """
+  @spec confirmation_resendable?(User.t()) :: boolean()
+  def confirmation_resendable?(user), do: confirmation_resendable?(user, DateTime.utc_now())
+
+  @spec confirmation_resendable?(User.t(), DateTime.t()) :: boolean()
+  def confirmation_resendable?(%User{created_at: created_at}, now) do
+    DateTime.diff(now, created_at) < @unverified_account_max_lifetime_seconds
+  end
+
+  @doc """
+  Whether a stored `email_confirmation_token` would still be accepted if the
+  reader clicked it right now. The single predicate behind "may the reaper erase
+  the account behind this link".
+  """
+  @spec confirmation_link_live?(String.t() | nil) :: boolean()
+  def confirmation_link_live?(token) do
+    match?({:ok, _user_id}, verify_confirmation_token(token))
   end
 
   @doc """
@@ -555,14 +669,15 @@ defmodule Stacks.Accounts do
     |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
       # Generate the FINAL, verifiable confirmation token synchronously so it is
-      # stable the moment registration commits. It is a Phoenix.Token signed with
-      # the "email_confirm" salt to match Stacks.Email.confirm_email/1's verify;
-      # the async EmailConfirmationHandler only DELIVERS this token, it never
-      # regenerates it. Previously this stored a raw random token that the handler
-      # later overwrote with a Phoenix.Token — a register↔handler race where a
-      # token read before the handler ran (E2E helper, or a fast client) failed
+      # stable the moment registration commits. Signed through
+      # `sign_confirmation_token/1` so registration, resend, the confirm endpoint
+      # and the reaper all share one definition of a link; the async
+      # EmailConfirmationHandler only DELIVERS this token, it never regenerates
+      # it. Previously this stored a raw random token that the handler later
+      # overwrote with a Phoenix.Token — a register↔handler race where a token
+      # read before the handler ran (E2E helper, or a fast client) failed
       # verification and redirected to /confirm-email/error.
-      token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
+      token = sign_confirmation_token(user.id)
 
       user
       |> email_confirmation_changeset(%{

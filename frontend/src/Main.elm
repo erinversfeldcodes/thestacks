@@ -790,6 +790,14 @@ requiresAuth route =
         ForgotPassword ->
             False
 
+        -- Public by necessity (#373): the reader asking for a new confirmation
+        -- link is unconfirmed, so they CANNOT sign in — gating this route would
+        -- bounce them to the very door they cannot open. Caught by
+        -- `route_is_wired`: the `_ -> True` fallthrough below had quietly made
+        -- this route protected, and the resend form was unreachable.
+        ResendConfirmation ->
+            False
+
         ResetPassword _ ->
             False
 
@@ -1281,6 +1289,12 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
             -- itself an arrival reason, which is why it is a constructor of the
             -- same type and not a fourth boolean (#360).
             ( PageLogin (Login.init Login.ForgotPassword), Cmd.none )
+
+        ResendConfirmation ->
+            -- Where a dead confirmation link sends the reader (#373). Same shape
+            -- as ForgotPassword directly above: a mode of the login card, opened
+            -- by an arrival, not a page of its own.
+            ( PageLogin (Login.init Login.ConfirmationExpired), Cmd.none )
 
         ResetPassword token ->
             ( PageResetPassword (ResetPassword.init token), Cmd.none )
@@ -3456,6 +3470,9 @@ loginCardTitle mode =
         Login.ForgotPasswordMode ->
             "Reset Password"
 
+        Login.ResendConfirmationMode ->
+            "Confirm Your Email"
+
 
 {-| Library, Antilibrary and Wish List all render through one `PageBookshelf`,
 and so does another reader's shelf — so the route was the only thing that could
@@ -3816,10 +3833,21 @@ viewConfirmEmailCard status =
             ]
 
         EmailConfirmFailed ->
+            -- ⛔ This used to end "Please register again to receive a fresh
+            -- confirmation email" (#373). That was advice the app could not
+            -- honour: registering again with the same address fails on the
+            -- unique-email constraint, which is the state every reader who
+            -- reaches this page is in. The instruction sent them into a wall.
+            -- There is now a real way out, so the copy points at it.
             [ h1 [ class "login-card__title" ] [ text "Confirmation failed" ]
             , p [ class "login-card__subtitle" ]
-                [ text "This confirmation link is no longer valid — it may have expired, already been used, or its account may no longer exist. Please register again to receive a fresh confirmation email." ]
-            , a [ class "btn btn--primary", href (Route.toPath Login) ] [ text "Back to sign in" ]
+                [ text "This confirmation link is no longer valid — it may have expired, or already been used. If it has already been used, you can simply sign in." ]
+            , a
+                [ class "btn btn--primary"
+                , href (Route.toPath ResendConfirmation)
+                ]
+                [ text "Send me a new link" ]
+            , a [ class "btn btn--secondary", href (Route.toPath Login) ] [ text "Back to sign in" ]
             ]
 
 

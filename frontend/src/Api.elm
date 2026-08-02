@@ -146,6 +146,7 @@ module Api exposing
     , reorderShelves
     , requestExport
     , requestListingRemoval
+    , resendConfirmation
     , resetPassword
     , resolveProfile
     , resolveWhatever
@@ -513,6 +514,29 @@ forgotPassword email toMsg =
         { method = "POST"
         , headers = []
         , url = baseUrl ++ "/api/auth/forgot-password"
+        , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| Ask for a fresh email-confirmation link (Issue #373, US-14.4.2).
+
+Same shape as `forgotPassword` and for the same reason: the backend answers
+identically for an address awaiting confirmation, an address already confirmed
+and an address with no account at all, so there is nothing here to decode. A
+`Result` with a `()` in it is the honest type — the caller genuinely cannot learn
+which of the three happened, and giving it a richer type would be inventing an
+answer the server deliberately refused to give.
+
+-}
+resendConfirmation : String -> (Result Http.Error () -> msg) -> Cmd msg
+resendConfirmation email toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/resend-confirmation"
         , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
         , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout

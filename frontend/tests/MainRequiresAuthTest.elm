@@ -150,6 +150,12 @@ expectedAuth route =
         ForgotPassword ->
             False
 
+        ResendConfirmation ->
+            -- Public by necessity: a reader who cannot confirm their email
+            -- cannot sign in, so requiring auth here would close the only door
+            -- out of that state.
+            False
+
         ResetPassword _ ->
             False
 
@@ -201,6 +207,7 @@ allRoutes =
     , ( "ProfileShelf", ProfileShelf "handle" "library" )
     , ( "ConfirmEmail", ConfirmEmail EmailConfirmed )
     , ( "ForgotPassword", ForgotPassword )
+    , ( "ResendConfirmation", ResendConfirmation )
     , ( "ResetPassword", ResetPassword "tok" )
     , ( "NotFound", NotFound )
     ]
@@ -274,12 +281,12 @@ suite =
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "18 public routes and 23 protected routes are enumerated" <|
+            [ test "19 public routes and 23 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 18, 23 )
+                        |> Expect.equal ( 19, 23 )
             ]
         , describe "admin routes are gated on an ADMIN token, not the ordinary one (#303)"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|

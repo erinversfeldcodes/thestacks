@@ -176,6 +176,7 @@ formValidationTests =
                         , displayNameValidation = Pristine
                         , arrival = Login.Fresh
                         , forgotState = NotAsked
+                        , resendState = NotAsked
                         }
 
                     html =
@@ -210,6 +211,7 @@ formValidationTests =
                         , displayNameValidation = Pristine
                         , arrival = Login.Fresh
                         , forgotState = NotAsked
+                        , resendState = NotAsked
                         }
 
                     html =

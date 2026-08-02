@@ -159,6 +159,12 @@ defmodule CoreWeb.Router do
     post "/auth/login", AuthController, :login
     post "/auth/forgot-password", AuthController, :forgot_password
     post "/auth/reset-password", AuthController, :reset_password
+    # Same bucket as its siblings on purpose (#373): the `:auth` limiter is
+    # per-IP and is consumed before the action runs, so a caller probing
+    # addresses here is throttled at exactly the rate a reader retrying their
+    # own is. A per-account limit would have re-opened the enumeration channel
+    # the uniform response closes.
+    post "/auth/resend-confirmation", AuthController, :resend_confirmation
   end
 
   scope "/api", StacksWeb do

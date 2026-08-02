@@ -205,6 +205,9 @@ routeLabel route =
         ForgotPassword ->
             "ForgotPassword"
 
+        ResendConfirmation ->
+            "ResendConfirmation"
+
         ResetPassword _ ->
             "ResetPassword"
 
@@ -266,10 +269,18 @@ suite =
                 \_ ->
                     fromPath "/reset-password/tok-abc123"
                         |> Expect.equal (ResetPassword "tok-abc123")
+            , test "ResendConfirmation" <|
+                \_ ->
+                    fromPath "/resend-confirmation"
+                        |> Expect.equal ResendConfirmation
             , test "ForgotPassword toPath round-trips" <|
                 \_ ->
                     Route.toPath ForgotPassword
                         |> Expect.equal "/forgot-password"
+            , test "ResendConfirmation toPath round-trips" <|
+                \_ ->
+                    Route.toPath ResendConfirmation
+                        |> Expect.equal "/resend-confirmation"
             , test "ResetPassword toPath round-trips" <|
                 \_ ->
                     Route.toPath (ResetPassword "tok-abc123")
