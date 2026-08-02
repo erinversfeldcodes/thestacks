@@ -188,6 +188,21 @@ def _build_extract_prompt(excluded_books: list[str] | None) -> str:
     # 300s allows for cold-start (~60s) + queue wait (up to 120s when
     # concurrent jobs are serialised on a single A10G) + inference (~60s
     # for long inputs).
+    #
+    # ⚠️ THIS NUMBER IS THE OWNER OF THE CALLER'S DEADLINE TOO (Issue #350).
+    # `Stacks.AI.Client` derives its Finch `receive_timeout` as this value plus
+    # 30s of transport slack, so that the client never hangs up on a call this
+    # service is still working on. It used to (210s against this 300s), and the
+    # cost was not a lost result but a multiplied one: core abandoned the call,
+    # classified the timeout as transient, and retried — queueing another
+    # cold start behind the same contended GPU while this container carried on
+    # paying for the first.
+    #
+    # Changing this value therefore moves an Elixir constant. `mix test` reads
+    # this decorator (`Stacks.AI.VisionTimeoutTest`) and fails when the two stop
+    # agreeing, so the mirror is checked rather than remembered — update
+    # `@modal_function_timeout_ms` in `apps/core/lib/stacks/ai/client.ex` in the
+    # same change.
     timeout=300,
     # Keep the container alive for 20 minutes after the last request.
     # Warmup runs at deploy time; E2E upload tests run ~15 minutes later (after

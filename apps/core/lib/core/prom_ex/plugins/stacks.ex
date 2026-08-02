@@ -74,16 +74,28 @@ defmodule Core.PromEx.Plugins.Stacks do
     300_000
   ]
 
-  # Buckets for ONE Modal vision HTTP call (Issue #349). Chosen from the two
-  # written claims this histogram exists to test, not from round numbers:
+  # Buckets for ONE Modal vision HTTP call (Issue #349, retuned by #350). Every
+  # edge is a written claim this histogram exists to test, not a round number:
   #
   #   * The ESTIMATE. The `@route_duration_buckets` note above puts upload's
   #     real cost at "~3–8s (two sequential Modal vision calls + R2 upload +
   #     DB writes)". 3_000 and 8_000 are therefore bucket EDGES here, so the
   #     share of calls inside the claimed band is read straight off two bucket
   #     counts with no interpolation — the estimate becomes falsifiable rather
-  #     than smoothed away.
-  #   * The CEILING. `Stacks.AI.Client.receive_timeout_ms/0` is 210_000: the
+  #     than smoothed away. #349's first measurement (n=36) put p50 at 8_437ms,
+  #     just outside it.
+  #   * The MEASURED SHAPE. That same measurement split cleanly by container
+  #     state: warm calls topped out under 30s, cold starts under 60s. 30_000
+  #     and 60_000 are kept as edges because they are now the warm and cold
+  #     ceilings rather than guesses — counts appearing above 60_000 mean
+  #     something other than a cold start is slow.
+  #   * MODAL'S OWN DEADLINE. 300_000 is `timeout=300` in
+  #     `apps/vision/modal_app.py`. Counts in (120_000, 300_000] are the queue
+  #     wait that number was sized for; counts in (300_000, 330_000] mean Modal
+  #     gave up and its error took the transport slack to come back. Separating
+  #     those two is the difference between "the GPU is contended" and "the
+  #     service is failing", which are diagnosed differently.
+  #   * The CEILING. `Stacks.AI.Client.receive_timeout_ms/0` is 330_000: the
   #     point the client hangs up. A slower call never reaches this event at
   #     all (it exits via `[:stacks, :vision, :request, :exception]`), so a top
   #     finite bucket AT the deadline makes `+Inf` structurally unreachable for
@@ -93,8 +105,9 @@ defmodule Core.PromEx.Plugins.Stacks do
   #     false 10_000ms. A 20_000 ceiling here would reproduce that incident.
   #
   # `Core.PromEx.VisionLatencyTest` asserts the top bucket still equals the
-  # client's timeout, so retuning that timeout (Issue #350) cannot silently
-  # leave the histogram short of it.
+  # client's timeout, so retuning that timeout cannot silently leave the
+  # histogram short of it. That guard is what caught this list when #350 moved
+  # the deadline from 210_000 to 330_000; move them together.
   @vision_duration_buckets [
     100,
     250,
@@ -108,7 +121,8 @@ defmodule Core.PromEx.Plugins.Stacks do
     30_000,
     60_000,
     120_000,
-    210_000
+    300_000,
+    330_000
   ]
 
   @impl true
@@ -214,8 +228,12 @@ defmodule Core.PromEx.Plugins.Stacks do
         # there, so this label cannot be widened by user input) and `status` is
         # the HTTP status integer. Both are bounded and neither is derived from
         # an upload: no ISBN, title, filename, image or user id reaches a label
-        # (GDPR: telemetry is warehouse-adjacent). The `:exception` path carries
-        # an unbounded `reason` term and is deliberately NOT registered here.
+        # (GDPR: telemetry is warehouse-adjacent).
+        #
+        # ⚠️ These quantiles are CONDITIONAL ON A RESPONSE ARRIVING. A call that
+        # never gets one leaves via `[:stacks, :vision, :request, :exception]`
+        # and contributes no duration, so this distribution structurally
+        # under-reports its own tail. The counter below is the other half.
         #
         # Exported as
         # `stacks_vision_request_stop_duration_milliseconds_{bucket,sum,count}`.
@@ -228,6 +246,31 @@ defmodule Core.PromEx.Plugins.Stacks do
             "Per-call Modal vision request latency (ms), by endpoint and HTTP status — the distribution timeouts are sized from.",
           tags: [:endpoint, :status],
           reporter_options: [buckets: @vision_duration_buckets]
+        ),
+
+        # ── Vision give-ups (Issue #350) ──────────────────────────────
+        # The half of the picture the distribution above cannot show. A call
+        # that reaches `Stacks.AI.Client.receive_timeout_ms/0` emits
+        # `:exception`, not `:stop`, so it contributes NO duration sample —
+        # which means a timeout is invisible in latency and the deadline that
+        # produced it is unfalsifiable. #350 raised that deadline from 210s to
+        # 330s so the client stops abandoning work Modal is still doing; this
+        # counter is how anyone finds out whether 330s was the right number.
+        # `reason_class="timeout"` going non-zero is the one observation that
+        # says it was not.
+        #
+        # The event's `reason` is an open term (a Mint struct, a Finch struct,
+        # whatever the socket layer surfaces) and MUST NOT become a label. It
+        # does not: `tags` is a whitelist, and the bounded name comes from
+        # `Stacks.AI.Client.reason_class/1`, whose return type is a closed set
+        # of five atoms. Exported as
+        # `stacks_vision_request_exception_count_total`.
+        counter(
+          [:stacks, :vision, :request, :exception, :count, :total],
+          event_name: [:stacks, :vision, :request, :exception],
+          description:
+            "Vision calls that produced no HTTP response, by endpoint and bounded failure class — where a client give-up becomes countable.",
+          tags: [:endpoint, :reason_class]
         ),
 
         # ── Route-dispatch latency by route group ─────────────────────

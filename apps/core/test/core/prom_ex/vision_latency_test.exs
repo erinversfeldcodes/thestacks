@@ -187,10 +187,10 @@ defmodule Core.PromEx.VisionLatencyTest do
     end
 
     test "a slow call lands in a FINITE bucket, not only +Inf (anti-saturation)" do
-      # 60s: far beyond the ~3-8s estimate, far short of the 210s deadline. With
-      # a 20_000ms ceiling (the @route_duration_buckets shape this issue warns
-      # against) this sample would exist ONLY in +Inf and the quantile would be
-      # a fabricated fallback.
+      # 60s: far beyond the ~3-8s estimate, far short of the client's deadline.
+      # With a 20_000ms ceiling (the @route_duration_buckets shape this issue
+      # warns against) this sample would exist ONLY in +Inf and the quantile
+      # would be a fabricated fallback.
       emit(60_000, "analyze", @slow_status)
 
       output = scrape()
@@ -207,7 +207,11 @@ defmodule Core.PromEx.VisionLatencyTest do
                "+Inf the ceiling is too low and the tail this metric exists to measure is " <>
                "invisible; got:\n#{output}"
 
-      assert [{_, top} | _] = series(output, "_bucket", pairs ++ [le: 210_000])
+      # Read the ceiling rather than restating it. Issue #350 moved the client's
+      # deadline (210s → 330s) and this literal was the one place that did not
+      # move with it, which is the same "two copies of a number that must agree"
+      # trap that produced the inversion #350 fixed.
+      assert [{_, top} | _] = series(output, "_bucket", pairs ++ [le: Enum.max(buckets())])
 
       assert String.to_integer(top) >= 1,
              "cumulative buckets: the top finite bucket must also include the 60s sample"
