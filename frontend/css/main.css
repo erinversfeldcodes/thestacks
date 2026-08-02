@@ -4793,6 +4793,66 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
+/* Undo-remove toast (US-1.6.4 extension, #375).
+   Sits at the top of the shelf room rather than floating over a corner: it is
+   read on arrival, and a fixed overlay would land on top of the bookcase the
+   reader has just come back to look at. Auto-dismisses after 8s — see
+   Page.Bookshelf.undoToastMillis. */
+.undo-toast {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    max-width: 1040px;
+    margin: 0 auto 1rem;
+    padding: 0.75rem 1.1rem;
+    background: rgba(26, 18, 8, 0.88);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+
+/* The failure state replaces the offer and does NOT auto-dismiss, so it has to
+   read as a different thing at a glance, not just say different words. */
+.undo-toast--failed {
+    border-left-color: #9b6930;
+    background: rgba(155, 105, 48, 0.18);
+}
+
+.undo-toast__message {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text);
+    margin: 0;
+}
+
+.undo-toast__action {
+    font-family: var(--font-heading);
+    font-size: var(--size-sm);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+.undo-toast__action:hover {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+/* Shown while the restore is in flight. Disabled rather than removed, so the
+   toast does not change width under the cursor mid-click. */
+.undo-toast__action:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .shelf-organiser__list {
     list-style: none;
     margin: 0 0 1rem;

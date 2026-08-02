@@ -232,6 +232,7 @@ defmodule CoreWeb.Router do
     put "/placements/:id/progress", BookshelfPlacementController, :update_progress
     put "/placements/:id/shelf", BookshelfPlacementController, :move_to_shelf
     delete "/placements/:id", BookshelfPlacementController, :delete
+    post "/placements/:id/restore", BookshelfPlacementController, :restore
 
     get "/bookshelves/:bookshelf_name/shelves", ShelfController, :index
     post "/bookshelves/:bookshelf_name/shelves", ShelfController, :create

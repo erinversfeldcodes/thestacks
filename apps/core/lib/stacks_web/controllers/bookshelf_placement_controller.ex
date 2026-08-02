@@ -242,4 +242,45 @@ defmodule StacksWeb.BookshelfPlacementController do
         |> json(%{errors: format_errors(changeset)})
     end
   end
+
+  @doc """
+  POST /api/placements/:id/restore — undo a removal (US-1.6.4 undo extension).
+
+  Clears `removed_at` on the SAME row `delete/2` stamped, so the placement keeps
+  its id, its `placed_at`, its formats/rating/notes and its history. See
+  `Shelving.restore_placement/2` for why a fresh placement would not do.
+
+  409 is the collision answer, and it is deliberately distinct from 422: the
+  request was well-formed and the caller did nothing wrong — the book is simply
+  already back on that bookshelf, because the reader re-added it before pressing
+  Undo. The Elm client matches on the status to say exactly that.
+  """
+  def restore(conn, %{"id" => placement_id}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    case Shelving.restore_placement(placement_id, user.id) do
+      {:ok, placement} ->
+        json(conn, %{placement: ProtoJSON.placement_ref(placement)})
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(404)
+        |> json(%{error: "not found"})
+
+      {:error, :unauthorized} ->
+        conn
+        |> put_status(403)
+        |> json(%{error: "forbidden"})
+
+      {:error, :already_shelved} ->
+        conn
+        |> put_status(409)
+        |> json(%{error: "already_shelved"})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(422)
+        |> json(%{errors: format_errors(changeset)})
+    end
+  end
 end

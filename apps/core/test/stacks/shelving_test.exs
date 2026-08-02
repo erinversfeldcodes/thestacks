@@ -527,6 +527,223 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
+  describe "restore_placement/2 — undo of a removal (#375)" do
+    setup do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+
+      # The annotations an undo must NOT lose. Every one of these is something
+      # the reader typed or chose; a re-place would reset all of them to the
+      # column defaults and look, from the bookcase, exactly the same.
+      placement =
+        insert(:placement,
+          bookshelf: bookshelf,
+          book: book,
+          formats: ["physical", "ebook"],
+          personal_rating: 5,
+          notes: "Margin note about chapter nine",
+          placed_at: ~U[2025-03-01 09:00:00.000000Z]
+        )
+
+      %{user: user, bookshelf: bookshelf, book: book, placement: placement}
+    end
+
+    test "restores the SAME row — same id, same placed_at, same annotations", %{
+      user: user,
+      placement: placement
+    } do
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      assert {:ok, restored} = Shelving.restore_placement(placement.id, user.id)
+
+      # The identity assertion this whole feature turns on. A re-place would
+      # satisfy "a placement exists" and fail here.
+      assert restored.id == placement.id
+      assert restored.removed_at == nil
+
+      # And it is the same row in the database, not just the same struct handed
+      # back: exactly one placement for this book on this bookshelf, ever.
+      rows = Repo.all(from p in Placement, where: p.book_id == ^placement.book_id)
+      assert [row] = rows
+      assert row.id == placement.id
+      assert row.removed_at == nil
+
+      # Everything the reader put on the row survives the round trip.
+      assert row.placed_at == placement.placed_at
+      assert row.formats == ["physical", "ebook"]
+      assert row.personal_rating == 5
+      assert row.notes == "Margin note about chapter nine"
+    end
+
+    test "the restored book is back in the bookshelf listing", %{
+      user: user,
+      placement: placement
+    } do
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+      refute placement.id in listing_ids(user)
+
+      assert {:ok, _} = Shelving.restore_placement(placement.id, user.id)
+      assert placement.id in listing_ids(user)
+    end
+
+    test "returns :not_found for a placement id that does not exist", %{user: user} do
+      assert {:error, :not_found} = Shelving.restore_placement(Ecto.UUID.generate(), user.id)
+    end
+
+    test "returns :unauthorized for someone else's placement", %{
+      user: user,
+      placement: placement
+    } do
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+      other = insert(:user)
+
+      assert {:error, :unauthorized} = Shelving.restore_placement(placement.id, other.id)
+
+      # And the refusal is total: the row stays removed.
+      assert Repo.get!(Placement, placement.id).removed_at != nil
+    end
+
+    test "removing does not move placed_at, so the undo has the real date to give back", %{
+      user: user,
+      placement: placement
+    } do
+      # ⛔ Regression guard for the `put_placed_at/1` defect #375 found. It fired
+      # on every UPDATE, not only inserts, so `remove_book/2` rewrote `placed_at`
+      # to the wall clock — and an undo cannot restore a date the removal already
+      # destroyed. Both halves are asserted because both were broken.
+      {:ok, removed} = Shelving.remove_book(placement.id, user.id)
+      assert removed.placed_at == placement.placed_at
+
+      {:ok, restored} = Shelving.restore_placement(placement.id, user.id)
+      assert restored.placed_at == placement.placed_at
+    end
+
+    test "an unrelated placement edit does not move placed_at either", %{
+      user: user,
+      placement: placement
+    } do
+      # Same defect, a different caller of `placement_changeset/2`. Editing the
+      # formats on a book shelved in 2025 must not claim it arrived today.
+      assert {:ok, updated} =
+               Shelving.update_placement_formats(placement.id, user.id, ["audiobook"])
+
+      assert updated.placed_at == placement.placed_at
+    end
+
+    test "an already-active placement is a no-op success, not an error", %{
+      user: user,
+      placement: placement
+    } do
+      before_events = event_count("placement.restored")
+
+      assert {:ok, restored} = Shelving.restore_placement(placement.id, user.id)
+      assert restored.id == placement.id
+      assert restored.removed_at == nil
+
+      # Nothing happened, so nothing is announced. A repeat undo that emitted an
+      # event would put a phantom restore in the feed and the warehouse.
+      assert event_count("placement.restored") == before_events
+    end
+
+    test "emits placement.restored (and not placement.created)", %{
+      user: user,
+      placement: placement
+    } do
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+
+      restored_before = event_count("placement.restored")
+      created_before = event_count("placement.created")
+
+      assert {:ok, _} = Shelving.restore_placement(placement.id, user.id)
+
+      assert event_count("placement.restored") == restored_before + 1
+      # `created` would be the wrong story: nothing was created.
+      assert event_count("placement.created") == created_before
+    end
+
+    test "writes an audit-log entry naming the placement and the actor", %{
+      user: user,
+      placement: placement
+    } do
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+      before_count = audit_count("placement.restored")
+
+      assert {:ok, _} = Shelving.restore_placement(placement.id, user.id)
+
+      assert audit_count("placement.restored") == before_count + 1
+
+      row = latest_audit_row("placement.restored")
+      assert row.rt == "placement"
+      assert row.rid == Ecto.UUID.dump!(placement.id)
+      assert row.uid == Ecto.UUID.dump!(user.id)
+    end
+
+    # ── The collision case ────────────────────────────────────────────────
+    #
+    # `bookshelf_placements_book_active_idx` is UNIQUE (book_id, bookshelf_id)
+    # WHERE removed_at IS NULL. A reader who re-adds the book before pressing
+    # Undo would give that pair two active rows. The ruling (see
+    # `Shelving.restore_placement/2`) is REFUSE, not reconcile: the shelf already
+    # looks the way undo would have made it look, and every reconciliation
+    # destroys annotations on one of the two rows without asking.
+    test "refuses with :already_shelved when the book was re-added meanwhile", %{
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+      {:ok, readded} = Shelving.place_book(user.id, book.id, "library")
+
+      assert {:error, :already_shelved} = Shelving.restore_placement(placement.id, user.id)
+
+      # A refusal, not a 500 and not a partial write: the removed row is still
+      # removed and the re-added row is untouched.
+      assert Repo.get!(Placement, placement.id).removed_at != nil
+      assert Repo.get!(Placement, readded.id).removed_at == nil
+      assert listing_ids(user) == [readded.id]
+    end
+
+    test "the refusal announces nothing — no event, no audit row", %{
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+      {:ok, _} = Shelving.place_book(user.id, book.id, "library")
+
+      events_before = event_count("placement.restored")
+      audits_before = audit_count("placement.restored")
+
+      assert {:error, :already_shelved} = Shelving.restore_placement(placement.id, user.id)
+
+      assert event_count("placement.restored") == events_before
+      assert audit_count("placement.restored") == audits_before
+    end
+
+    test "a re-add on a DIFFERENT bookshelf does not block the undo", %{
+      user: user,
+      book: book,
+      placement: placement
+    } do
+      # The index is per (book, bookshelf), and a book may legally sit on several
+      # bookshelves at once (owner ruling 2026-07-30, see get_placements_for_book/2).
+      # So this is not a collision and the undo must go through.
+      {:ok, _} = Shelving.remove_book(placement.id, user.id)
+      {:ok, elsewhere} = Shelving.place_book(user.id, book.id, "wishlist")
+
+      assert {:ok, restored} = Shelving.restore_placement(placement.id, user.id)
+      assert restored.id == placement.id
+      assert Repo.get!(Placement, elsewhere.id).removed_at == nil
+    end
+  end
+
+  defp listing_ids(user) do
+    user.id
+    |> Shelving.get_bookshelf_books("library")
+    |> Enum.map(& &1.id)
+  end
+
   describe "reread_book/2" do
     setup do
       user = insert(:user)

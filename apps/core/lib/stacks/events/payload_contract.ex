@@ -69,6 +69,11 @@ defmodule Stacks.Events.PayloadContract do
     "placement.moved" => %{version: 1, keys: ~w(from_bookshelf to_bookshelf)},
     "placement.reread" => %{version: 1, keys: ~w(book_id to_bookshelf)},
     "placement.removed" => %{version: 1, keys: ~w(book_id)},
+    # The undo of a removal (#375). Carries `bookshelf` where `placement.removed`
+    # does not, because the feed handler has to know which bookshelf's Atom feed
+    # gained a book back — a removal only ever takes one away, so it can rebuild
+    # from the placement alone.
+    "placement.restored" => %{version: 1, keys: ~w(book_id bookshelf)},
     "placement.reading_started" => %{version: 1, keys: ~w(book_id)},
     "placement.reading_completed" => %{version: 1, keys: ~w(book_id)},
     # ── accounts / user ───────────────────────────────────────────────────────

@@ -88,6 +88,14 @@ type alias Model =
     , progressCard : Maybe Card.Model
     , progressSaveState : RemoteData Api.ProgressError ()
     , finishedReadPrompt : Bool
+
+    -- The removal the reader could still take back (US-1.6.4 extension, #375).
+    -- Set only by `RemoveCompleted (Ok _)`, and read by `Main` at the moment it
+    -- acts on the accompanying `NavigateTo`: this page navigates away
+    -- immediately, so the toast belongs to the shelf the reader lands on, not
+    -- here. Structurally the same record as `Page.Bookshelf.Removal`, which is
+    -- what lets Main hand it straight over without a shared wrapper module.
+    , undoableRemoval : Maybe { placementId : String, bookTitle : String }
     }
 
 
@@ -175,6 +183,7 @@ init bookId maybeToken maybePreviousRoute =
       , progressCard = Nothing
       , progressSaveState = NotAsked
       , finishedReadPrompt = False
+      , undoableRemoval = Nothing
       }
     , Cmd.batch [ bookCmd, availabilityCmd, pricesCmd ]
     )
@@ -601,7 +610,15 @@ update msg model maybeToken =
         RemoveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | removeState = Success () }
+                    -- Record what was removed BEFORE navigating away, so the shelf
+                    -- the reader lands on can offer to put it back (#375). The
+                    -- placement id is the one just soft-deleted; the undo clears
+                    -- `removed_at` on that same row rather than re-placing the
+                    -- book, which is why the id — not the book id — is carried.
+                    ( { model
+                        | removeState = Success ()
+                        , undoableRemoval = undoableRemovalFor model
+                      }
                     , Cmd.none
                     , NavigateTo (Maybe.withDefault Route.Library model.previousRoute)
                     )
@@ -920,6 +937,26 @@ the remove-confirmation dialog, and where focus returns when it closes.
 removeTriggerId : String
 removeTriggerId =
     "book-detail-remove-trigger"
+
+
+{-| What `Main` needs to offer "Removed — Undo" on the shelf the reader is about
+to land on (#375).
+
+`Nothing` when either half is missing, and both halves are load-bearing rather
+than cosmetic: without the placement id there is no row to restore, and without
+the title the toast would have to say "Removed a book", which is precisely the
+sentence a reader who mis-clicked cannot check. An absent offer is honest; an
+offer that cannot name what it would put back is not.
+
+-}
+undoableRemovalFor : Model -> Maybe { placementId : String, bookTitle : String }
+undoableRemovalFor model =
+    case ( model.placement, model.book ) of
+        ( Just placement, Success book ) ->
+            Just { placementId = placement.id, bookTitle = book.title }
+
+        _ ->
+            Nothing
 
 
 {-| Move DOM focus to the given element id, discarding the (ignorable) result.

@@ -55,10 +55,16 @@ removeBookModal config =
             ]
             [ h2 [ class "modal__title", id titleId ] [ text "Remove Book" ]
             , p [ class "modal__message" ]
+                -- ⚠️ This said "This cannot be undone." until #375, when it stopped
+                -- being true: the shelf the reader lands on offers an Undo for a
+                -- few seconds. Copy that overstates the stakes is not harmlessly
+                -- cautious — it is the sentence that makes someone abandon a
+                -- correction they were entitled to make. The window is named
+                -- rather than promised open-endedly, because it closes.
                 [ text
                     ("Are you sure you want to remove \""
                         ++ config.bookTitle
-                        ++ "\" from your collection? This cannot be undone."
+                        ++ "\" from your collection? You'll have a few seconds to undo it."
                     )
                 ]
             , div [ class "modal__actions" ]

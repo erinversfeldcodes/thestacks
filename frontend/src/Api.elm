@@ -150,6 +150,7 @@ module Api exposing
     , resetPassword
     , resolveProfile
     , resolveWhatever
+    , restoreBook
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
@@ -1308,6 +1309,37 @@ removeBook placementId token toMsg =
         { method = "DELETE"
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/placements/" ++ placementId
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `POST /api/placements/:id/restore` — undo a removal (US-1.6.4 extension).
+
+Takes the id `removeBook` was given, because the undo clears `removed_at` on
+that same row rather than placing the book again; see
+`Stacks.Shelving.restore_placement/2` for what a fresh placement would lose.
+
+The response body is the restored placement, and the caller deliberately does
+not decode it: `Page.Bookshelf` refetches the whole bookshelf afterwards for the
+reason `reloadShelves` documents — the server's answer about where a book sits
+is the only trustworthy one. `expectWhatever` still surfaces the status, which
+is what matters here, because **409 is a real answer**: the reader re-added the
+book before pressing Undo.
+
+-}
+restoreBook :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+restoreBook placementId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/restore"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout

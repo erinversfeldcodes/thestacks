@@ -3,15 +3,19 @@ module Page.Bookshelf exposing
     , Model
     , Msg(..)
     , OutMsg(..)
+    , Removal
+    , UndoToast(..)
     , antiLibraryConfig
     , init
     , libraryConfig
     , mutationToken
     , profileConfig
     , requestKey
+    , undoToastMillis
     , update
     , view
     , wishListConfig
+    , withPendingUndo
     )
 
 import Api
@@ -21,8 +25,9 @@ import Components.RSSLink as RSSLink
 import Components.ShelfOrganiser as ShelfOrganiser
 import Components.Spine exposing (WearLevel(..))
 import Components.ViewModeToggle as ViewModeToggle exposing (ShelfViewMode(..))
-import Html exposing (Html, a, div, h2, p, text)
-import Html.Attributes exposing (attribute, class, href)
+import Html exposing (Html, a, button, div, h2, p, text)
+import Html.Attributes exposing (attribute, class, disabled, href)
+import Html.Events exposing (onClick)
 import Http
 import Navigation.Route exposing (Route(..))
 import Page.Bookshelf.Helpers
@@ -35,6 +40,8 @@ import Page.Bookshelf.Helpers
         , viewShelfLabel
         , viewShelfRowClickable
         )
+import Process
+import Task
 import Types.Book exposing (Book)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Shelf exposing (BookshelfResponse, Shelf)
@@ -163,7 +170,44 @@ type alias Model =
     , organiser : ShelfOrganiser.State
     , organiserBusy : Bool
     , organiserError : Maybe String
+
+    -- Undo-remove (US-1.6.4 extension, #375). Seeded by `withPendingUndo` when the
+    -- reader arrives here straight off a removal; see `UndoToast` below.
+    , undoToast : UndoToast
     }
+
+
+{-| The removal an Undo would reverse.
+
+`placementId` is the id of the row `DELETE /api/placements/:id` soft-deleted —
+not the book's id — because the undo restores **that row**, keeping its
+`placed_at`, formats, rating and notes. Passing a book id here would force the
+server to guess which of a book's placements was meant.
+
+-}
+type alias Removal =
+    { placementId : String
+    , bookTitle : String
+    }
+
+
+{-| The four states the undo affordance can be in, as one type rather than a
+`Maybe Removal` plus a `Bool` plus a `Maybe String` — that trio can spell
+"restoring a removal that isn't there" and "offered and failed at once", and
+neither is a state this page has any answer for.
+
+`ToastOffered` is the only one `UndoRemove` acts on. That matters for the timer:
+`Process.sleep` cannot be cancelled, so the expiry message always arrives, and
+the only thing stopping it from wiping a request already in flight (or the
+failure the reader still needs to read) is that `ToastExpired` matches
+`ToastOffered` and nothing else.
+
+-}
+type UndoToast
+    = ToastHidden
+    | ToastOffered Removal
+    | ToastRestoring Removal
+    | ToastFailed String
 
 
 type OutMsg
@@ -204,6 +248,9 @@ type Msg
     | SortColumnClicked BookList.SortColumn
     | OrganiserMsg ShelfOrganiser.Msg
     | ShelfMutated (Result Http.Error ())
+    | UndoRemove
+    | UndoCompleted (Result Http.Error ())
+    | ToastExpired
 
 
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
@@ -257,9 +304,58 @@ init config maybeToken userId =
       , organiser = ShelfOrganiser.init
       , organiserBusy = False
       , organiserError = Nothing
+
+      -- No toast by default: a plain visit to a bookshelf has nothing to undo.
+      -- `withPendingUndo` is the only way in.
+      , undoToast = ToastHidden
       }
     , apiCmd
     )
+
+
+{-| How long the "Removed — Undo" toast stays offered, in milliseconds.
+
+Exposed so a test can state the number it is asserting about rather than
+re-typing it, and so the number lives next to the thing it governs.
+
+-}
+undoToastMillis : Float
+undoToastMillis =
+    8000
+
+
+{-| Offer an undo on a page that has just been built for a reader arriving
+straight off a removal (US-1.6.4 extension, #375).
+
+Applied by `Main` **after** `init`, deliberately, rather than becoming a seventh
+argument to it: `init` already takes three, ten call sites pass them, and the
+undo is not part of building a bookshelf — it is one extra thing that is
+sometimes true about the moment of arrival. Composing over `( Model, Cmd Msg )`
+means the auto-dismiss timer is issued with the state it dismisses, the same
+discipline `init` states for `Loading`.
+
+⚠️ **No `readOnly` check here, and that is not an oversight.** The guard for
+this feature is `mutationToken`, in `update`, and putting a second one here
+would make `read_only_undo_is_inert_SECURITY` unfalsifiable — it would be
+asserting that a toast which was never seeded cannot mutate. See #332's lesson
+in `mutationToken` below: one enforcement point, reachable by the test.
+
+-}
+withPendingUndo : Maybe Removal -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+withPendingUndo maybeRemoval ( model, cmd ) =
+    case maybeRemoval of
+        Just removal ->
+            ( { model | undoToast = ToastOffered removal }
+            , Cmd.batch [ cmd, expireToastAfterDelay ]
+            )
+
+        Nothing ->
+            ( model, cmd )
+
+
+expireToastAfterDelay : Cmd Msg
+expireToastAfterDelay =
+    Process.sleep undoToastMillis |> Task.perform (\_ -> ToastExpired)
 
 
 
@@ -357,6 +453,61 @@ update msg model =
                 , reloadShelves model
                 , NoOut
                 )
+
+        UndoRemove ->
+            -- ⚠️ Dispatches on `mutationToken`, not `model.token` — an undo is a
+            -- write, so it goes through the read-only guard rather than round it
+            -- (Issue #332). The tuple match is the structure: with `Nothing` for
+            -- the token there is no branch to take and this falls through to the
+            -- silent catch-all, exactly as `handleOrganiser` does.
+            --
+            -- Matching `ToastOffered` and no other state is what makes a second
+            -- click during a slow undo (or after a failure) inert, without a
+            -- separate `busy` flag to keep in step.
+            case ( model.undoToast, mutationToken model ) of
+                ( ToastOffered removal, Just token ) ->
+                    ( { model | undoToast = ToastRestoring removal }
+                    , Api.restoreBook removal.placementId token UndoCompleted
+                    , NoOut
+                    )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        UndoCompleted (Ok ()) ->
+            -- Refetch rather than re-inserting the spine locally, for
+            -- `reloadShelves`' reason: the server decides which shelf row the
+            -- restored placement sits on and in what position, and a client that
+            -- guessed would paint a bookcase the server disagrees with.
+            ( { model | undoToast = ToastHidden }
+            , reloadShelves model
+            , NoOut
+            )
+
+        UndoCompleted (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                -- The failure REPLACES the offer and does not auto-dismiss: a
+                -- toast that says "couldn't undo that" and then vanishes before
+                -- it is read leaves the reader believing the undo worked.
+                ( { model | undoToast = ToastFailed (undoError model.config err) }
+                , Cmd.none
+                , NoOut
+                )
+
+        ToastExpired ->
+            case model.undoToast of
+                ToastOffered _ ->
+                    ( { model | undoToast = ToastHidden }, Cmd.none, NoOut )
+
+                _ ->
+                    -- `Process.sleep` cannot be cancelled, so this message arrives
+                    -- whatever happened in the meantime. Restoring, already
+                    -- hidden, or showing a failure: none of those are the offer
+                    -- this timer was started for, so it has nothing to retract.
+                    ( model, Cmd.none, NoOut )
 
 
 {-| The credential a **mutating** organiser branch requires.
@@ -554,6 +705,38 @@ loadError config err =
             "Could not load your " ++ shelf ++ ". Please try again."
 
 
+{-| A failed undo in the reader's terms (#375).
+
+Split from `mutationError` because every case here says something different.
+The 409 in particular is not an error at all from where the reader is standing —
+they re-added the book themselves, so the shelf already looks the way pressing
+Undo would have made it look, and the message says so instead of apologising.
+
+-}
+undoError : Config -> Http.Error -> String
+undoError config err =
+    case err of
+        Http.BadStatus 409 ->
+            -- `Shelving.restore_placement/2` refuses rather than reconciling two
+            -- rows; the reason it can refuse safely is exactly what this says.
+            "That book is already back on your " ++ config.label ++ "."
+
+        Http.BadStatus 404 ->
+            "That book is no longer in your collection, so there is nothing to put back."
+
+        Http.BadStatus 403 ->
+            "That removal is not yours to undo."
+
+        Http.Timeout ->
+            "Putting that book back is taking too long. The library may be busy — please try again."
+
+        Http.NetworkError ->
+            "The library is unreachable, so that book stayed removed. Check your connection."
+
+        _ ->
+            "Could not put that book back. Please try again."
+
+
 {-| A mutation failure in the reader's terms.
 -}
 mutationError : Http.Error -> String
@@ -587,7 +770,8 @@ view model =
         , div [ class "lighting" ] []
         , div [ class "shelf-room" ]
             (viewReadOnlyAttribution cfg
-                ++ [ div [ class "shelf-room__header" ]
+                ++ [ viewUndoToast model
+                   , div [ class "shelf-room__header" ]
                         (viewShelfLabel cfg.label
                             :: ViewModeToggle.view model.viewMode ViewModeChanged
                             :: (if cfg.readOnly then
@@ -646,6 +830,70 @@ view model =
                    ]
             )
         ]
+
+
+{-| The "Removed — Undo" toast (US-1.6.4 extension, #375).
+
+⚠️ **Hidden under `readOnly`, and that is the _second_ line of defence, not the
+first.** The same split as `viewOrganiser`: a control a viewer cannot use should
+not be drawn, but if this branch were deleted tomorrow the page would look wrong
+rather than act wrong — `mutationToken` in `UndoRemove` is what makes it inert,
+and `read_only_undo_is_inert_SECURITY` asserts that with the view out of the
+picture entirely.
+
+`role="status"` + `aria-live="polite"` because this appears without the reader
+asking and then leaves on a timer: a screen-reader user has to be told the offer
+exists while it still exists. Polite rather than assertive — it must not cut
+across whatever the shelf's own `aria-live` region is saying about the load that
+is running at the same moment.
+
+The failure state keeps the toast on screen with no Undo button: there is
+nothing left to press (the state machine has moved past `ToastOffered`), and a
+button that no longer does anything is worse than none.
+
+-}
+viewUndoToast : Model -> Html Msg
+viewUndoToast model =
+    if model.config.readOnly then
+        text ""
+
+    else
+        case model.undoToast of
+            ToastHidden ->
+                text ""
+
+            ToastOffered removal ->
+                div [ class "undo-toast", testId "undo-toast", attribute "role" "status", attribute "aria-live" "polite" ]
+                    [ p [ class "undo-toast__message" ]
+                        [ text ("Removed “" ++ removal.bookTitle ++ "”.") ]
+                    , button
+                        [ class "undo-toast__action"
+                        , testId "undo-remove"
+                        , onClick UndoRemove
+                        ]
+                        [ text "Undo" ]
+                    ]
+
+            ToastRestoring removal ->
+                div [ class "undo-toast", testId "undo-toast", attribute "role" "status", attribute "aria-live" "polite" ]
+                    [ p [ class "undo-toast__message" ]
+                        [ text ("Putting “" ++ removal.bookTitle ++ "” back…") ]
+                    , button
+                        [ class "undo-toast__action"
+                        , testId "undo-remove"
+                        , disabled True
+                        ]
+                        [ text "Undo" ]
+                    ]
+
+            ToastFailed message ->
+                div
+                    [ class "undo-toast undo-toast--failed"
+                    , testId "undo-toast-error"
+                    , attribute "role" "status"
+                    , attribute "aria-live" "polite"
+                    ]
+                    [ p [ class "undo-toast__message" ] [ text message ] ]
 
 
 viewEmptyBookshelf : Model -> Html Msg
