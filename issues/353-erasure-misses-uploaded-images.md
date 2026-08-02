@@ -146,3 +146,15 @@ distinction is worth keeping straight when reading either issue. And the ~30-day
 this is `Stacks.GDPR.ImageRetention.cleanup_expired_images/0`; it deletes on `expires_at`, which is a
 retention policy, not an erasure guarantee — a reader who asks to be forgotten should not have to wait
 out a TTL.
+
+## Independent corroboration, 2026-08-02 (#351)
+Re-discovered from scratch by the #351 agent's own `gdpr-review` pass, with no knowledge of this
+issue: same table, same missing FK (`20260401074249_add_user_id_to_uploaded_images.exs` adds
+`user_id` as a bare `:binary_id`), same reason the schema-guard stays green, same conclusion that
+`ImageRetention`'s 30-day sweep is *retention* and not *erasure*. Two independent passes reaching
+the same P0 raises confidence this is real rather than a reading error.
+
+⚠️ **#351 also raises the severity.** Its upload inbox (`GET /api/uploads/inbox`) turns these rows
+from an invisible residue into a **listed, first-class reader-facing surface**. It also notes that
+`uploaded_images` is absent from `GDPR.Export.export_user_data/2` as well as from deletion — so the
+export gap should be fixed in the same pass, not treated as separate.

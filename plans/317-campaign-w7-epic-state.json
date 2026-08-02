@@ -109,7 +109,7 @@
       "result": "Extended #340 rather than duplicating: `Targeted` behaviour + `run_targeted/3` handing the plan to the SAME private `apply_plan/4` the parameter-free path uses. Probe 1 proved that is genuinely shared code — breaking the audit reddened BOTH its own test and #340's. Placement disposition decided by EVIDENCE not taste: `place_book/3` always writes `primary_edition_id/1` and `merge_edition/2` hardcodes `is_primary: false`, so NO placement has ever named a merged edition — every alternative rule guesses badly. Filed the root cause as #378. Live-driven locally (owner->MFA->target, dry-run then apply, second apply 422); NOT driven on a preview."
     },
     "351": {
-      "status": "in_progress",
+      "status": "merged",
       "title": "7h Reader never held hostage to the upload page (async identify, sync confirm+place, inbox)",
       "level": 3,
       "depends_on": [
@@ -119,7 +119,11 @@
       "owns": [
         "frontend/src/Page/Upload.elm",
         "IdentifyBookJob"
-      ]
+      ],
+      "result": "Async identify + SYNCHRONOUS confirm-and-place, per the owner ruling. Inbox at GET /api/uploads/inbox (deliberately NOT in the :upload rate-limit bucket — that bucket prices GPU work, and throttling this blanks the badge). Badge is Maybe Int: Nothing at zero AND Nothing when unloaded/failed, because \"we do not know\" is not \"nothing\". Counts AwaitingConfirmation only — a failure has nothing to confirm, so a badge counting it could never be cleared. Rendered inside the Catalogue dropdown only; it declined the reviewer-suggested mark on the closed trigger, citing the owner ruling \"we do not need to render it outside of the drop down\".",
+      "auto_place_prohibition": "Proven three ways: inbox_places_nothing_by_itself (no placement POST, no completion card), inbox_resume_to_a_shelf_is_four_deliberate_steps (the positive half, so \"nothing happened\" cannot pass vacuously), and two Elixir tests asserting the bookshelves are untouched after reading the inbox.",
+      "service_down_honesty": "HIDDEN, not fixed — and it said so plainly. vision_unavailable is still :transient, so IdentifyBookJob still runs the full retry schedule and the frame still takes minutes. What changed is the reader is no longer waiting for it. The <=5s claim still does not hold; making it hold means reclassifying vision_unavailable as terminal, which is a separate decision.",
+      "best_finding": "PROBE 12 REDDENED NOTHING. Removing the inbox refresh on PlacementCompleted would have left the badge showing 1 for a book just shelved, with 1657 tests green. Structural cause: uploadProgram's wrapper discards the third tuple element, so NO program test can observe an OutMsg; and Main.update is a Browser.application with ports and a Nav.Key, so it is not program-testable at all. It closed the gap with direct assertions on Upload.update's return value + two NoOut anti-vacuity companions — then stated the residual honestly: that proves the signal is RAISED, not that Main acts on it. Main.update's RefreshInbox branch is unreachable from any test in this suite."
     }
   },
   "ready_set": [
@@ -153,7 +157,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-02",
-  "status": "8 of 9 merged; #351 (the last child) in flight",
+  "status": "ALL 9 CHILDREN MERGED — wave code-complete; integration gate + live drive outstanding",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -185,5 +189,6 @@
       "summary": "<=5s does not hold for service-down: vision_unavailable is :transient so IdentifyBookJob runs the full Oban retry schedule before the row is rejected. Copy is right and renders instantly; the FRAME takes minutes. Handed to #351 to fix or explicitly hide.",
       "severity": "tracked in #351 scope, not yet its own issue"
     }
-  ]
+  ],
+  "gdpr_corroboration": "#351 independently re-discovered #353 (uploaded_images unreachable by erasure; schema-guard structurally blind to a MISSING FK). Recorded in #353 rather than filed as a duplicate. #351 raises its severity: the inbox turns those rows into a listed reader-facing surface, and export is missing too."
 }
