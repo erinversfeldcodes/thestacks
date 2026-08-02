@@ -22,6 +22,14 @@ defmodule Stacks.DataCorrection.NormaliseEditionIsbn10 do
   is valid. A ten-digit string with a bad check digit is not an ISBN-10 and has
   no derivable correct value; it is left alone and reported rather than guessed
   at.
+
+  ## Reversible
+
+  Uniquely among the corrections here: the ISBN-10 and its ISBN-13 form name the
+  same book, and the conversion runs in both directions, so the old value is
+  recoverable by arithmetic and not only from the audit row. Nothing should
+  actually reverse it — the column has always meant ISBN-13 — but the honest
+  answer to "could we?" is yes.
   """
 
   @behaviour Stacks.DataCorrection
@@ -38,6 +46,13 @@ defmodule Stacks.DataCorrection.NormaliseEditionIsbn10 do
   @impl true
   def scope,
     do: "op.book_editions rows whose isbn is 10 digits with a valid ISBN-10 check digit"
+
+  @impl true
+  def reversibility,
+    do:
+      {:reversible,
+       "the ISBN-10 is recoverable from the ISBN-13 by arithmetic, and the audit row keeps it — " <>
+         "but nothing should reverse it: the column has always meant ISBN-13"}
 
   @impl true
   def plan do

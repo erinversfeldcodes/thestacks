@@ -24,6 +24,9 @@ defmodule Stacks.DataCorrection do
       exactly which rows it claims, and `c:plan/0` must implement that and
       nothing wider. "Fix everything that looks wrong" is how a repair becomes
       the next incident.
+    * **honest about reversal.** `c:reversibility/0` states whether the change
+      can be undone and what an undo could not restore. Most corrections are
+      one-way, and the moment to say so is before the run, not after.
 
   ## Running one
 
@@ -34,18 +37,29 @@ defmodule Stacks.DataCorrection do
       # against a deployed stack (no mix in a release)
       /app/bin/core eval 'Stacks.Release.correct_data()'
 
+      # as the platform owner, against a running stack (#340)
+      GET  /api/admin/data_corrections              # blast radius, writes nothing
+      POST /api/admin/data_corrections/:name/apply  # requires a reason
+
+  `docs/runbooks/data-correction.md` is the operator-facing walkthrough.
+
   ## Writing one
 
-  Implement the four callbacks. Keep `c:plan/0` in raw SQL where the rows being
-  repaired may predate the current Ecto schema — a correction is usually run
-  precisely because reality and the schema disagree.
+  Implement the five callbacks. Reach the rows through
+  `Stacks.DataCorrection.Column` rather than an Ecto schema: a correction is
+  usually run precisely because reality and the schema disagree, and the
+  changeset that normalises the bad value away is how a repair quietly becomes
+  a no-op. Then add the module to `Stacks.DataCorrection.Registry`, which is
+  the only way anything can name it.
 
   ## Deliberately not a framework
 
-  There is no scheduler, no registry, no admin UI, and no generic "edit any
-  row" path. #340 generalises this into the owner-facing capability; until the
-  list of real corrections is longer than two, more machinery than this would
-  be guessing.
+  There is no scheduler and no generic "edit any row" path — not in the mix
+  task, not in the release entry point, and not in the admin API, whose `:name`
+  parameter resolves through the registry and can therefore only ever reach a
+  correction someone wrote down. Adding a correction is a code change that gets
+  reviewed like one; that is the point, and it is why there is no endpoint that
+  takes a table, a column and a value.
   """
 
   alias Core.Repo
@@ -65,9 +79,20 @@ defmodule Stacks.DataCorrection do
           required(:because) => String.t()
         }
 
+  @typedoc """
+  Whether the change can be undone, and the sentence that says what an undo
+  would and would not restore.
+
+  `{:one_way, why}` is the common case and the honest one: the value being
+  replaced was wrong, so nothing should ever put it back. The audit row keeps
+  it if the history is ever needed.
+  """
+  @type reversibility :: {:one_way, String.t()} | {:reversible, String.t()}
+
   @type outcome :: %{
           correction: String.t(),
           scope: String.t(),
+          reversibility: reversibility(),
           mode: :dry_run | :applied,
           changes: [change()],
           count: non_neg_integer(),
@@ -82,6 +107,15 @@ defmodule Stacks.DataCorrection do
 
   @doc "One sentence naming exactly which rows are in scope."
   @callback scope() :: String.t()
+
+  @doc """
+  Whether this correction can be undone, and what an undo could not restore.
+
+  Stated up front and printed in the report, because "can I put it back?" is
+  the question the operator asks *after* running it, and by then the answer has
+  to already be written down.
+  """
+  @callback reversibility() :: Stacks.DataCorrection.reversibility()
 
   @doc """
   The rows that still need correcting, and what they would become.
@@ -107,8 +141,12 @@ defmodule Stacks.DataCorrection do
   ## Options
 
     * `:apply` — write the changes (default `false`, i.e. dry-run)
-    * `:invoked_by` — free text recorded in the audit trail, e.g.
+    * `:invoked_by` — free text naming the entry point, e.g.
       `"mix stacks.data.correct"` (default `"unknown"`)
+    * `:actor_id` — the user id of the human who asked for this, when there is
+      one. `nil` for the deploy path, which no human invokes directly.
+    * `:reason` — the operator's justification for *this* run, distinct from
+      the per-row `:because` the correction itself supplies.
 
   Returns `{:ok, outcome}`, or `{:error, {row_id, reason}}` when a change or
   its audit write failed — in which case nothing was committed.
@@ -118,7 +156,7 @@ defmodule Stacks.DataCorrection do
     plan = correction.plan()
 
     if Keyword.get(opts, :apply, false) do
-      apply_plan(correction, plan, Keyword.get(opts, :invoked_by, "unknown"))
+      apply_plan(correction, plan, opts)
     else
       {:ok, outcome(correction, :dry_run, plan)}
     end
@@ -141,14 +179,14 @@ defmodule Stacks.DataCorrection do
 
   # Nothing to do is the steady state, and it must not open a transaction or
   # start a vault just to discover that.
-  defp apply_plan(correction, [], _invoked_by),
+  defp apply_plan(correction, [], _opts),
     do: {:ok, outcome(correction, :applied, [])}
 
-  defp apply_plan(correction, plan, invoked_by) do
+  defp apply_plan(correction, plan, opts) do
     ensure_vault!()
 
     Repo.transaction(fn ->
-      Enum.each(plan, &apply_and_audit(correction, &1, invoked_by))
+      Enum.each(plan, &apply_and_audit(correction, &1, opts))
     end)
     |> case do
       {:ok, _} -> {:ok, outcome(correction, :applied, plan)}
@@ -157,27 +195,31 @@ defmodule Stacks.DataCorrection do
   end
 
   # The audit write shares the change's transaction on purpose: a correction
-  # that cannot be recorded is rolled back rather than applied silently.
-  defp apply_and_audit(correction, change, invoked_by) do
+  # that cannot be recorded is rolled back rather than applied silently. An
+  # unexplained mutation is worse than an unrepaired row — the row is at least
+  # still describable.
+  defp apply_and_audit(correction, change, opts) do
     with :ok <- correction.apply_change(change),
-         {:ok, _entry} <- audit(correction, change, invoked_by) do
+         {:ok, _entry} <- audit(correction, change, opts) do
       :ok
     else
       {:error, reason} -> Repo.rollback({change.id, reason})
     end
   end
 
-  defp audit(correction, change, invoked_by) do
-    Audit.log(nil, @audit_action,
+  defp audit(correction, change, opts) do
+    Audit.log(Keyword.get(opts, :actor_id), @audit_action,
       resource_type: correction.resource_type(),
       resource_id: change.id,
       metadata: %{
         correction: correction.name(),
         scope: correction.scope(),
+        reversibility: reversibility_text(correction),
         from: change.from,
         to: change.to,
         because: change.because,
-        invoked_by: invoked_by
+        invoked_by: Keyword.get(opts, :invoked_by, "unknown"),
+        reason: Keyword.get(opts, :reason)
       }
     )
   end
@@ -205,11 +247,19 @@ defmodule Stacks.DataCorrection do
     %{
       correction: correction.name(),
       scope: correction.scope(),
+      reversibility: correction.reversibility(),
       mode: mode,
       changes: changes,
       count: length(changes),
       report: report(correction, mode, changes)
     }
+  end
+
+  defp reversibility_text(correction) do
+    case correction.reversibility() do
+      {:one_way, why} -> "one-way: #{why}"
+      {:reversible, how} -> "reversible: #{how}"
+    end
   end
 
   @doc false
@@ -218,6 +268,7 @@ defmodule Stacks.DataCorrection do
     header = [
       "data-correction: #{correction.name()} (#{mode})",
       "  scope: #{correction.scope()}",
+      "  #{reversibility_text(correction)}",
       "  rows:  #{length(changes)}"
     ]
 

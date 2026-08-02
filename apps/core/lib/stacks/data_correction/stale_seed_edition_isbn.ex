@@ -78,6 +78,13 @@ defmodule Stacks.DataCorrection.StaleSeedEditionIsbn do
     do: "the three enumerated seed-fixture editions still holding their pre-#335 ISBN literal"
 
   @impl true
+  def reversibility,
+    do:
+      {:one_way,
+       "the previous value was not a valid ISBN, so nothing should restore it; " <>
+         "the audit row keeps it if the history is ever needed"}
+
+  @impl true
   def plan do
     current = EditionIsbn.by_ids(Enum.map(@fixtures, fn {id, _from, _to} -> id end))
 

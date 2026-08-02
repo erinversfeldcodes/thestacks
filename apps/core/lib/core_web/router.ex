@@ -374,6 +374,16 @@ defmodule CoreWeb.Router do
     post "/gdpr_erase", AdminController, :gdpr_erase
   end
 
+  # Owner-facilitated data correction (#340). `:require_owner` sits on top of
+  # `:admin` deliberately: these two routes rewrite production rows, and an
+  # admin token outlives the role it was minted under, so the role is re-checked
+  # where the write happens rather than only at login.
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
+    get "/data_corrections", DataCorrectionController, :index
+    post "/data_corrections/:name/apply", DataCorrectionController, :apply
+  end
+
   # Internal service-to-service callbacks — HMAC authenticated, no user auth
   scope "/api/internal", StacksWeb do
     pipe_through :api

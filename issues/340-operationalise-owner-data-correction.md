@@ -48,10 +48,10 @@ n/a until scoped — the pre-check is the enumeration in Technical Requirement 1
 | Others | no | n/a until scoped |
 
 ## Definition of Done
-- [ ] Corrections enumerated and scope decision recorded — evidence: the list + what was excluded
-- [ ] Each correction dry-runnable, idempotent, audited — evidence: test names + a dry-run transcript
-- [ ] Owner-only proven by probe — evidence: probe output with the check removed
-- [ ] Runbook written — evidence: file path
+- [x] Corrections enumerated and scope decision recorded — evidence: `Stacks.DataCorrection.Registry` moduledoc (two registered, two surveyed and excluded with reasons)
+- [x] Each correction dry-runnable, idempotent, audited — evidence: `data_correction_test.exs` + `data_correction_controller_test.exs`; probes below
+- [x] Owner-only proven by probe — evidence: removing `:require_owner` from the route let a non-owner apply a correction (200, row rewritten)
+- [x] Runbook written — evidence: `docs/runbooks/data-correction.md`
 - [ ] `staff-review` verdict recorded below
 
 ## Dependencies
@@ -63,5 +63,40 @@ elixir-agent, with a scoping pass first.
 ## Progress Notes
 Filed 2026-07-30 by the lead, consolidating two owner rulings that asked for the same capability. Not scheduled — sequence after #339 and after the owner decides which wave it belongs to.
 
-**Wave assignment (owner-approved 2026-07-31): Wave 7.**
+**Built 2026-08-02 (Wave 7 item 7d).**
+
+*Scope decision — enumerated, not generalised.* Two corrections are registered
+(#339's `NormaliseEditionIsbn10` and `StaleSeedEditionIsbn`); two candidates were
+surveyed and excluded, each for a reason that is a property of the repair rather
+than of the mechanism. **#346's resolver-identifier backfill** needs an Open
+Library round-trip per row, and `plan/0` runs inside `fly deploy` — that would
+put a third-party outage in the path of every deploy and would never converge
+for a permanently unresolvable ISBN; re-enqueuing `EnrichBookJob` is the vehicle.
+**Un-merge (7c)** takes an argument — *which* two works — so it is a targeted
+one-shot rather than a standing repair; a parameter-free `plan/0` cannot express
+it. It reuses this mechanism's write path and audit contract and will need a
+parameterised sibling to `run/2`, not a second mechanism. Both exclusions are
+recorded in `Stacks.DataCorrection.Registry`'s moduledoc and the runbook. No
+generic "edit any row" path was built: the admin endpoint's `:name` resolves
+through `Registry.fetch/1`, so the reachable rows are exactly those a reviewed,
+committed correction module already claims.
+
+*What #340 added over #339's first instance.* `Stacks.DataCorrection.Column`
+lifts the write off `op.book_editions.isbn` so a correction can target any
+`{table, column}` (NULL-safe old-value guard, so a backfill is expressible);
+`c:reversibility/0` makes every correction state up front whether it can be
+undone; the audit row now carries the operator's user id and their reason;
+`Registry.fetch/1` is the only name→module path; and two owner-only endpoints
+(`GET /api/admin/data_corrections`, `POST /api/admin/data_corrections/:name/apply`)
+put the capability on a running stack where there is no shell.
+
+*Wave assignment (owner-approved 2026-07-31): Wave 7.*
 Scheduled as item **7d**, deliberately alongside **7c** (owner-only un-merge process): your two rulings — un-merge as "a form of data correction that we should be building processes for" and the ISBN repair "operationalised … for the future" — describe **one** capability. 7c's un-merge is #340's first consumer; do not build two mechanisms.
+
+**staff-review verdict: LGTM** (2026-08-02, lead, Mode B on the #340 diff).
+
+Praise: (a) **the `RequireRole` docstring explains why the re-check is not redundant** — *"an admin token outlives the role it was minted under: demote the account and the pipeline keeps loading the user for the rest of the session's 30 minutes."* Checking the role where the write happens rather than only where the session began is the insight, and it is written where the next reader will find it. Lead verified the fallback is safe: exactly **one** site in `apps/core/lib/` assigns `:current_user` — `admin_auth_pipeline.ex:31`, after successful admin auth — so `|| conn.assigns[:current_user]` opens no pre-auth path; (b) **probe 6 taught the author something and they reported it against themselves** — `to_regclass` silently swallows the *table* injection forms and returns `[]`, which reads like "nothing to correct", so only the column form ever reaches SQL. They widened the test rather than claiming the original sufficed; (c) **the #370 shape was proved, not asserted** — a real non-`isbn` correction driven dry-run to apply to no-op, with a companion assertion that the CHECK constraint is live and rejects an invented value, so "the constraint accepts it" is not vacuous; (d) **declining to silence Sobelow was right for the stated reason**: `@sobelow_skip` is inert unless `.sobelow-conf`'s `skip: false` flips to `true`, and flipping it would let every future skip annotation pass silently repo-wide. Trading a repo-wide gate for cosmetic quiet is a bad deal, and saying so beats taking it; (e) **scope discipline** — two candidates surveyed and excluded with reasons rather than absorbed.
+
+BLUE/LEGIBILITY (recorded, not actioned): the apply endpoint returns changed row values in its response. Today that is reference data only, reaching only an MFA'd, IP-bound, audited owner (#138's design intent). The author flagged it forward-looking themselves; it matters when un-merge lands, since placements are personal.
+
+Lead spot-checks: the `book_editions_verification_source_check` enumeration verified verbatim against `20260730200000_backfill_and_constrain_edition_verification_source.exs:60`; the `:current_user` assignment sites enumerated; the `@identifier` regex confirmed anchored and lowercase-only.

@@ -1,3 +1,62 @@
+defmodule Stacks.DataCorrectionTest.RelabelVerificationSource do
+  @moduledoc """
+  A correction over a column that is not `isbn` — defined here, deliberately not
+  registered — to prove #340's mechanism generalises past the one column #339
+  needed.
+
+  It is shaped after Issue #370, where 206 of 206 `book_editions` rows carry
+  `verification_source = "barcode_unverified"` and every book detail page
+  therefore tells the reader it cannot show a title, beside the title it is
+  holding. #370's real correction needs a disposition decision that is not a
+  test's to make — blanket-relabelling to `open_library` would assert a
+  verification that never happened — so this stands in for its *shape* and
+  nothing else. It exists to prove three things a `publisher` fixture could not:
+
+    * a target that is not `isbn` reads and writes correctly;
+    * `Column.holding/2` selects rows by an exact value rather than a regex,
+      which is how #370's predicate is expressed;
+    * `op.book_editions_verification_source_check` accepts the write, so the
+      only open question for #370 is *which* of the three enumerated values a
+      given row deserves — which is exactly the decision being left to it.
+  """
+  @behaviour Stacks.DataCorrection
+
+  alias Stacks.DataCorrection.Column
+
+  @target {"op.book_editions", "verification_source"}
+  @from "barcode_unverified"
+  @to "open_library"
+
+  @doc "The `{table, column}` this correction writes. Exposed for tests."
+  def target, do: @target
+
+  @impl true
+  def name, do: "test_relabel_verification_source"
+
+  @impl true
+  def resource_type, do: "book_edition"
+
+  @impl true
+  def scope, do: "op.book_editions rows whose verification_source is #{@from}"
+
+  @impl true
+  def reversibility,
+    do:
+      {:one_way,
+       "a relabel asserts something about how the row was verified; the audit row " <>
+         "keeps the previous claim, but reversing it would assert the opposite"}
+
+  @impl true
+  def plan do
+    for {id, value} <- Column.holding(@target, @from) do
+      %{id: id, from: value, to: @to, because: "stand-in for #370's disposition"}
+    end
+  end
+
+  @impl true
+  def apply_change(%{id: id, from: from, to: to}), do: Column.swap(@target, id, from, to)
+end
+
 defmodule Stacks.DataCorrectionTest do
   @moduledoc """
   Issue #339 — the ISBN repair, and the mechanism it is the first instance of.
@@ -18,8 +77,11 @@ defmodule Stacks.DataCorrectionTest do
   alias Stacks.Books.BookEdition
   alias Stacks.Books.ISBN
   alias Stacks.DataCorrection
+  alias Stacks.DataCorrection.Column
   alias Stacks.DataCorrection.NormaliseEditionIsbn10
+  alias Stacks.DataCorrection.Registry
   alias Stacks.DataCorrection.StaleSeedEditionIsbn
+  alias Stacks.DataCorrectionTest.RelabelVerificationSource
 
   @constraint "book_editions_isbn_ean13_checksum"
 
@@ -250,6 +312,31 @@ defmodule Stacks.DataCorrectionTest do
       assert audit_rows() == []
     end
 
+    test "records the actor and the operator's reason, not just the entry point", ctx do
+      actor = insert(:owner_user)
+
+      DataCorrection.run(NormaliseEditionIsbn10,
+        apply: true,
+        invoked_by: "admin api",
+        actor_id: actor.id,
+        reason: "reader reported the book could not be found by its barcode"
+      )
+
+      %{rows: rows} =
+        Repo.query!(
+          "SELECT user_id FROM audit.audit_log WHERE action = 'data.correction.applied' AND resource_id = $1",
+          [Ecto.UUID.dump!(ctx.ids["0062028510"])]
+        )
+
+      assert [[user_id]] = rows
+      assert Ecto.UUID.load!(user_id) == actor.id
+
+      entry = Map.new(audit_rows())[ctx.ids["0062028510"]]
+      assert entry["invoked_by"] == "admin api"
+      assert entry["reason"] =~ "could not be found by its barcode"
+      assert entry["reversibility"] =~ "reversible"
+    end
+
     test "leaves a ten-digit string that is not an ISBN-10 alone", ctx do
       bad = plant_legacy_edition!("0071615690")
 
@@ -258,6 +345,40 @@ defmodule Stacks.DataCorrectionTest do
       assert outcome.count == 2
       assert isbn_of(bad) == "0071615690"
       refute is_nil(ctx.ids["0071615695"])
+    end
+  end
+
+  # ── The audit shares the change's transaction ─────────────────────────────
+
+  # Every other test here covers the direction where the CHANGE fails. This is
+  # the other one, and it is the one that matters: a change that cannot be
+  # RECORDED must not happen. An unexplained mutation is worse than an
+  # unrepaired row — the unrepaired row can at least still be described.
+  #
+  # One planted row, so the assertion can be exact: the failure must come back
+  # as `{:error, {that row's id, the audit's own error}}`. That shape is the
+  # property. A best-effort audit — one that logs the failure and carries on —
+  # cannot produce it.
+  describe "a correction that cannot be recorded" do
+    setup do
+      definition = constraint_definition()
+      drop_constraint!()
+      %{definition: definition, id: plant_legacy_edition!("0071615695")}
+    end
+
+    test "does not happen", ctx do
+      Repo.query!("ALTER TABLE audit.audit_log RENAME TO audit_log_absent")
+
+      result = DataCorrection.run(NormaliseEditionIsbn10, apply: true, invoked_by: "test")
+
+      Repo.query!("ALTER TABLE audit.audit_log_absent RENAME TO audit_log")
+
+      id = ctx.id
+
+      assert {:error, {^id, %Postgrex.Error{postgres: %{code: :undefined_table}}}} = result
+
+      assert isbn_of(ctx.id) == "0071615695"
+      assert audit_rows() == []
     end
   end
 
@@ -351,6 +472,205 @@ defmodule Stacks.DataCorrectionTest do
 
       assert Enum.all?(outcomes, &(&1.count == 0))
       assert Enum.all?(outcomes, &(&1.mode == :dry_run))
+    end
+  end
+
+  # ── The registry as the security boundary (#340) ──────────────────────────
+
+  describe "Registry.fetch/1" do
+    test "resolves a registered correction by its name" do
+      assert {:ok, NormaliseEditionIsbn10} = Registry.fetch("normalise_edition_isbn10")
+      assert {:ok, StaleSeedEditionIsbn} = Registry.fetch("stale_seed_edition_isbn")
+    end
+
+    test "an unregistered name resolves to nothing rather than to a module" do
+      assert :error = Registry.fetch("delete_everything")
+      assert :error = Registry.fetch("Elixir.Stacks.DataCorrection.NormaliseEditionIsbn10")
+      assert :error = Registry.fetch("")
+    end
+  end
+
+  describe "every registered correction" do
+    test "states whether it can be reversed, and what an undo could not restore" do
+      for correction <- Registry.all() do
+        assert {disposition, why} = correction.reversibility()
+        assert disposition in [:one_way, :reversible]
+
+        assert String.length(why) > 20,
+               "#{correction.name()} must say what reversal would and would not restore"
+      end
+    end
+
+    test "prints its reversibility in the report an operator reads before applying" do
+      {:ok, outcomes} = DataCorrection.run_all(Registry.all())
+
+      for outcome <- outcomes do
+        assert outcome.report =~ ~r/(one-way|reversible):/
+      end
+    end
+  end
+
+  # ── The generalised writer (#340) ─────────────────────────────────────────
+
+  describe "Column" do
+    @isbn_target {"op.book_editions", "isbn"}
+
+    test "writes only when the row still holds the old value" do
+      definition = constraint_definition()
+      drop_constraint!()
+      id = plant_legacy_edition!("0071615695")
+
+      assert {:error, {:row_no_longer_matches, ^id, "something else"}} =
+               Column.swap(@isbn_target, id, "something else", "9780071615693")
+
+      assert isbn_of(id) == "0071615695"
+      assert :ok = Column.swap(@isbn_target, id, "0071615695", "9780071615693")
+      assert isbn_of(id) == "9780071615693"
+
+      add_constraint!(definition)
+    end
+
+    # A backfill's `from` is NULL, and `column = NULL` is never true — so an
+    # `=` guard would silently refuse every row it was written to repair.
+    test "a NULL old value is a value, not a missing one" do
+      book = insert(:book)
+      edition = Repo.insert!(build(:book_edition, book: book, publisher: nil))
+
+      assert Enum.any?(Column.holding({"op.book_editions", "publisher"}, nil), fn {id, value} ->
+               id == edition.id and is_nil(value)
+             end)
+
+      assert :ok = Column.swap({"op.book_editions", "publisher"}, edition.id, nil, "Vintage")
+      assert Repo.reload!(edition).publisher == "Vintage"
+    end
+
+    test "holding/2 selects exactly the rows carrying one value" do
+      book = insert(:book)
+      target = Repo.insert!(build(:book_edition, book: book, verification_source: "open_library"))
+
+      ids =
+        {"op.book_editions", "verification_source"}
+        |> Column.holding("open_library")
+        |> Enum.map(&elem(&1, 0))
+
+      assert target.id in ids
+
+      refute Enum.any?(
+               Column.holding({"op.book_editions", "verification_source"}, "no_such_source"),
+               &(elem(&1, 0) == target.id)
+             )
+    end
+
+    # The message matters as much as the exception: without the guard the table
+    # forms are quietly swallowed by `to_regclass` (returning `[]`, which reads
+    # like "nothing to correct") while the column form reaches SQL. Both are
+    # wrong, and only one of them looks wrong.
+    test "refuses an identifier that is not a plain snake_case name" do
+      for bad <- [
+            {"op.book_editions; DROP TABLE op.users", "isbn"},
+            {"op.book_editions", "isbn = '' OR 1=1"},
+            {"op.book_editions", "\"isbn\""},
+            {"OP.BOOK_EDITIONS", "isbn"}
+          ] do
+        assert_raise ArgumentError, ~r/not a plain snake_case SQL identifier/, fn ->
+          Column.matching(bad, "^x$")
+        end
+
+        assert_raise ArgumentError, ~r/not a plain snake_case SQL identifier/, fn ->
+          Column.swap(bad, Ecto.UUID.generate(), "a", "b")
+        end
+      end
+    end
+
+    test "reads nothing rather than raising on a table that does not exist yet" do
+      refute Column.table_present?("op.no_such_table")
+      assert Column.matching({"op.no_such_table", "isbn"}, "^x$") == []
+      assert Column.by_ids({"op.no_such_table", "isbn"}, [Ecto.UUID.generate()]) == %{}
+    end
+  end
+
+  # ── The next correction, which is not about ISBNs (#340 → #370) ───────────
+
+  describe "a correction over a column that is not isbn" do
+    setup do
+      book = insert(:editionless_book)
+      id = Ecto.UUID.generate()
+
+      Repo.query!(
+        """
+        INSERT INTO op.book_editions
+          (id, book_id, isbn, is_primary, verification_source, created_at, updated_at)
+        VALUES ($1, $2, '9780071615693', true, 'barcode_unverified', now(), now())
+        """,
+        [Ecto.UUID.dump!(id), Ecto.UUID.dump!(book.id)]
+      )
+
+      %{id: id}
+    end
+
+    defp verification_source_of(id) do
+      %{rows: [[source]]} =
+        Repo.query!("SELECT verification_source FROM op.book_editions WHERE id = $1", [
+          Ecto.UUID.dump!(id)
+        ])
+
+      source
+    end
+
+    test "is not registered — the shape exists, the disposition is #370's to decide" do
+      refute RelabelVerificationSource in Registry.all()
+      assert :error = Registry.fetch("test_relabel_verification_source")
+    end
+
+    test "dry-runs, reporting the row without touching it", ctx do
+      assert {:ok, outcome} = DataCorrection.run(RelabelVerificationSource)
+
+      assert outcome.mode == :dry_run
+      assert Enum.any?(outcome.changes, &(&1.id == ctx.id))
+      assert verification_source_of(ctx.id) == "barcode_unverified"
+      assert audit_rows() == []
+    end
+
+    test "applies, audits, and the second run is a no-op", ctx do
+      assert {:ok, %{mode: :applied}} =
+               DataCorrection.run(RelabelVerificationSource, apply: true, invoked_by: "test")
+
+      assert verification_source_of(ctx.id) == "open_library"
+
+      applied = length(audit_rows())
+      assert applied > 0
+
+      assert {:ok, %{count: 0}} =
+               DataCorrection.run(RelabelVerificationSource, apply: true, invoked_by: "test")
+
+      assert length(audit_rows()) == applied
+      assert verification_source_of(ctx.id) == "open_library"
+    end
+
+    test "the write satisfies the column's CHECK constraint", ctx do
+      DataCorrection.run(RelabelVerificationSource, apply: true, invoked_by: "test")
+
+      # Proof the constraint is live and would have rejected a made-up value —
+      # so the previous assertion is about the constraint accepting, not about
+      # there being no constraint to satisfy.
+      assert {:error, %Postgrex.Error{postgres: %{code: :check_violation}}} =
+               Repo.transaction(fn ->
+                 case Repo.query(
+                        "UPDATE op.book_editions SET verification_source = 'invented' WHERE id = $1",
+                        [Ecto.UUID.dump!(ctx.id)]
+                      ) do
+                   {:ok, result} -> result
+                   {:error, error} -> Repo.rollback(error)
+                 end
+               end)
+    end
+  end
+
+  describe "unreachable-table guard" do
+    test "reads nothing rather than raising on a table that does not exist yet" do
+      refute Column.table_present?("op.no_such_table")
+      assert Column.matching({"op.no_such_table", "isbn"}, "^x$") == []
+      assert Column.by_ids({"op.no_such_table", "isbn"}, [Ecto.UUID.generate()]) == %{}
     end
   end
 end
