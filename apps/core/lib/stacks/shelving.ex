@@ -152,6 +152,31 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
+  The subset of `book_ids` this user already has on one of their bookshelves.
+
+  `book_on_any_shelf?/2` answers the same question for one book, and the upload
+  inbox (#351) asks it about every candidate of every unfinished upload at once
+  — one query rather than one per book, because the inbox is rendered on every
+  page load that draws the navigation badge.
+
+  Returns a `MapSet` so the caller's `member?` check is O(1); an empty list
+  short-circuits without touching the database.
+  """
+  @spec shelved_book_ids(binary(), [binary()]) :: MapSet.t(binary())
+  def shelved_book_ids(_user_id, []), do: MapSet.new()
+
+  def shelved_book_ids(user_id, book_ids) when is_list(book_ids) do
+    from(p in Placement,
+      join: s in Bookshelf,
+      on: s.id == p.bookshelf_id,
+      where: s.user_id == ^user_id and p.book_id in ^book_ids and is_nil(p.removed_at),
+      select: p.book_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  @doc """
   Returns the bookshelf struct for the given user and bookshelf name, with the
   user association preloaded. Returns `nil` if the bookshelf does not exist.
   """

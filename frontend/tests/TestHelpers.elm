@@ -36,6 +36,7 @@ module TestHelpers exposing
     , testBook
     , testPlacement
     , uploadProgram
+    , uploadProgramWithInbox
     )
 
 {-| Shared test infrastructure for elm-program-test based program tests.
@@ -875,6 +876,18 @@ uploadEffects msg model maybeToken =
         Upload.UploadAccepted (Ok _) ->
             SimulatedEffect.Cmd.none
 
+        -- Resuming an inbox item is a replay of the frame the reader would have
+        -- received, handed to the SAME `StatusReceived` the live stream calls
+        -- (Issue #351). The harness delegates rather than restating the effect,
+        -- because a second copy here is the one place a divergence between the
+        -- two paths could hide: the tests would keep passing against a resume
+        -- that fetched something the live path did not.
+        Upload.ResumeInboxItem item ->
+            uploadEffects
+                (Upload.StatusReceived (Ok (Upload.replayFrame item)))
+                model
+                maybeToken
+
         Upload.StatusReceived (Ok response) ->
             case response.status of
                 Pending ->
@@ -1643,6 +1656,25 @@ flag-on (age UI present) and flag-off (age UI hidden) states.
 -}
 uploadProgram : Bool -> Maybe String -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
 uploadProgram ageGatingEnabled maybeToken =
+    uploadProgramWithInbox ageGatingEnabled maybeToken Types.RemoteData.NotAsked
+
+
+{-| The upload page with an inbox already loaded (Issue #351).
+
+The inbox lives on `Main`, not on `Page.Upload` — one list feeding both the
+page's listing and the navigation badge, so the two cannot disagree — so it
+arrives as a view argument rather than through this program's `update`. That
+makes it a fixture here, which is exactly right: these tests are about what the
+page does WITH the list, not about fetching it (`MainNavTest` covers the badge's
+own reading of the same value, and `UploadControllerTest` covers the query).
+
+-}
+uploadProgramWithInbox :
+    Bool
+    -> Maybe String
+    -> Types.RemoteData.RemoteData Http.Error (List Api.InboxItem)
+    -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
+uploadProgramWithInbox ageGatingEnabled maybeToken inbox =
     let
         baseModel =
             Upload.init
@@ -1659,7 +1691,7 @@ uploadProgram ageGatingEnabled maybeToken =
                         Upload.update msg model maybeToken
                 in
                 ( newModel, uploadEffects msg model maybeToken )
-        , view = \model -> Upload.view model maybeToken
+        , view = \model -> Upload.view model maybeToken inbox
         }
         |> ProgramTest.withSimulatedEffects identity
 

@@ -51,7 +51,7 @@ import Browser.Navigation as Nav
 import Components.OnboardingOverlay as OnboardingOverlay
 import Components.UserMenu as UserMenu
 import Components.ViewAsBar as ViewAsBar
-import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
+import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, span, text, ul)
 import Html.Attributes exposing (attribute, class, href, id, tabindex)
 import Html.Events
 import Http
@@ -97,8 +97,9 @@ import Page.Settings.Profile as Profile
 import Page.Upload as Upload
 import Process
 import Task
+import Time
 import Types.Placement
-import Types.RemoteData
+import Types.RemoteData exposing (RemoteData(..))
 import Types.User exposing (AuthToken, User)
 import Url exposing (Url)
 import Util.TestId exposing (testId)
@@ -448,6 +449,21 @@ type alias Model =
     -- `connectivityChanged` port; read only by the shell's banner, so no page
     -- has to work this out from its own failed request.
     , connectivity : Connectivity
+
+    -- Uploads this reader started and has not finished with (Issue #351).
+    --
+    -- It lives on the shell, not on `Page.Upload`, because two surfaces read it
+    -- and they must not be able to disagree: the inbox listing on the upload
+    -- page, and the count on the `Add Book` navigation marker — which has to be
+    -- right on every page, including the ones where `Page.Upload` does not
+    -- exist. One value, fetched once, rendered twice.
+    --
+    -- Refetched, never adjusted in place. When a placement or a manual add
+    -- finishes, `Page.Upload` raises `RefreshInbox` and this is asked for
+    -- again: the server owns the "is this still awaiting attention" predicate,
+    -- and a client that decremented a number here would be a second, quieter
+    -- implementation of it.
+    , uploadInbox : RemoteData Http.Error (List Api.InboxItem)
     }
 
 
@@ -538,6 +554,7 @@ init flags url key =
       -- within a tick — whereas booting `Offline` would flash a banner at
       -- every reader whose browser happens to answer a moment late.
       , connectivity = Online
+      , uploadInbox = NotAsked
       }
     , Cmd.batch
         [ cmd
@@ -547,12 +564,29 @@ init flags url key =
                     [ Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
                     , Api.getMyPlacements auth.token GotPlacementCheck
                     , scheduleRenewal
+                    , Api.getUploadInbox auth.token GotUploadInbox
                     ]
 
             Nothing ->
                 Cmd.none
         ]
     )
+
+
+{-| Ask the server what is waiting for this reader (Issue #351).
+
+Called at boot, on sign-in, and whenever `Page.Upload` says something changed.
+Anonymous is a `Cmd.none` rather than a failure: there is no inbox to have.
+
+-}
+fetchUploadInbox : Maybe Auth -> Cmd Msg
+fetchUploadInbox maybeAuth =
+    case maybeAuth of
+        Just auth ->
+            Api.getUploadInbox auth.token GotUploadInbox
+
+        Nothing ->
+            Cmd.none
 
 
 {-| Decoder for a stored-auth JSON object (the exact shape `encodeAuth` writes to
@@ -1836,6 +1870,7 @@ type Msg
     | OnboardingStatusReceived Bool
     | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
+    | GotUploadInbox (Result Http.Error (List Api.InboxItem))
     | RenewToken
     | TokenRefreshed (Result Http.Error Api.AuthResponse)
     | AuthChangedExternally Decode.Value
@@ -2166,6 +2201,14 @@ update msg model =
                             , Cmd.batch
                                 [ baseCmd
                                 , openUploadStream { url = url }
+                                ]
+                            )
+
+                        Upload.RefreshInbox ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , fetchUploadInbox (currentAuth model.auth)
                                 ]
                             )
 
@@ -3068,6 +3111,23 @@ update msg model =
                     else
                         ( model, Cmd.none )
 
+        GotUploadInbox result ->
+            case result of
+                Ok items ->
+                    ( { model | uploadInbox = Success items }, Cmd.none )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        handleSessionExpiry model
+
+                    else
+                        -- The badge renders nothing in this state, and the
+                        -- upload page says it could not check. Neither pretends
+                        -- the inbox is empty: "we don't know" and "nothing is
+                        -- waiting" are different answers, and only one of them
+                        -- is safe to show as a cleared badge.
+                        ( { model | uploadInbox = Failure err }, Cmd.none )
+
         RenewToken ->
             -- Proactive silent renewal tick. Only meaningful while authenticated;
             -- a signed-out session simply drops the tick.
@@ -3264,15 +3324,28 @@ subscriptions model =
             )
         , case model.page of
             PageUpload _ ->
-                uploadStreamEvent
-                    (\raw ->
-                        case Decode.decodeString (Decode.field "type" Decode.string) raw of
-                            Ok "error" ->
-                                UploadMsg Upload.StreamError
+                Sub.batch
+                    [ uploadStreamEvent
+                        (\raw ->
+                            case Decode.decodeString (Decode.field "type" Decode.string) raw of
+                                Ok "error" ->
+                                    UploadMsg Upload.StreamError
 
-                            _ ->
-                                UploadMsg (Upload.StreamEvent raw)
-                    )
+                                _ ->
+                                    UploadMsg (Upload.StreamEvent raw)
+                        )
+
+                    -- The only clock `Page.Upload` has (Issue #351). It drives
+                    -- the "you may leave" copy and the silent-stream watchdog,
+                    -- both of which are elapsed-time facts the client genuinely
+                    -- owns — unlike the retry count it deliberately never
+                    -- claims. The interval MUST match `Upload.tickSeconds`;
+                    -- `WaitTick` is a no-op whenever the page is not waiting, so
+                    -- an idle upload page costs one discarded message every five
+                    -- seconds and nothing else.
+                    , Time.every (toFloat Upload.tickSeconds * 1000)
+                        (\_ -> UploadMsg Upload.WaitTick)
+                    ]
 
             PageMarketplaceCreate _ ->
                 gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)
@@ -3306,7 +3379,7 @@ view model =
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
             , viewConnectivity model.connectivity
-            , viewNav model.route (currentAuth model.auth) model.userMenu
+            , viewNav model.route (currentAuth model.auth) model.userMenu model.uploadInbox
             , main_
                 [ id "main-content"
 
@@ -3565,8 +3638,8 @@ bookDetailTitle detailModel =
             "Book"
 
 
-viewNav : Route -> Maybe Auth -> UserMenu.Model -> Html Msg
-viewNav route maybeAuth userMenu =
+viewNav : Route -> Maybe Auth -> UserMenu.Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+viewNav route maybeAuth userMenu inbox =
     header [ class "app-header" ]
         [ div [ class "app-header__brand app-nav__dropdown" ]
             [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
@@ -3595,23 +3668,33 @@ viewNav route maybeAuth userMenu =
                         , navDropdown route
                             Catalogue
                             "Catalogue"
-                            [ ( Search, "Search" )
-                            , ( Upload, "Add Book" )
+                            [ navLink Search "Search"
+
+                            -- The badge goes here and nowhere else (owner
+                            -- ruling, #351): "we don't need to render it
+                            -- outside of the drop down, it can remain
+                            -- low-but-easy-visibility." No page banner, no
+                            -- global toast, no mark on the closed `Catalogue`
+                            -- trigger — that last one was a reviewer's
+                            -- interpretation, not an instruction, and building
+                            -- it would have been promoting the notification
+                            -- against an explicit "we don't need to".
+                            , navLinkBadged Upload "Add Book" (pendingConfirmationBadge inbox)
                             ]
                         , navDropdown route
                             MarketplaceBrowse
                             "Marketplace"
-                            [ ( MarketplaceCreate, "Create Listing" )
-                            , ( MarketplaceMyListings, "My Listings" )
+                            [ navLink MarketplaceCreate "Create Listing"
+                            , navLink MarketplaceMyListings "My Listings"
                             ]
                         , if auth.user.role == "owner" then
                             navDropdown route
                                 Route.AdminSourceApproval
                                 "Admin"
-                                [ ( Route.AdminSourceApproval, "Sources" )
-                                , ( Route.AdminScraperConfig, "Scrapers" )
-                                , ( Route.AdminBookModeration, "Book Moderation" )
-                                , ( Route.AdminRemovalRequests, "Removal Requests" )
+                                [ navLink Route.AdminSourceApproval "Sources"
+                                , navLink Route.AdminScraperConfig "Scrapers"
+                                , navLink Route.AdminBookModeration "Book Moderation"
+                                , navLink Route.AdminRemovalRequests "Removal Requests"
                                 ]
 
                           else
@@ -3653,12 +3736,71 @@ navItem currentRoute targetRoute label =
         ]
 
 
-navDropdown : Route -> Route -> String -> List ( Route, String ) -> Html Msg
+{-| One entry inside a navigation dropdown, and whether anything is waiting on it.
+
+`badge` is a `Maybe Int` rather than an `Int`, and the distinction is the whole
+requirement: `Nothing` renders no element at all, where `Just 0` would render a
+zero. A badge reading `0` is a notification that there is nothing to notify you
+of — it draws the eye, survives being looked at, and teaches the reader that the
+mark means nothing. See `pendingConfirmationBadge`.
+
+-}
+type alias NavLink =
+    { route : Route
+    , label : String
+    , badge : Maybe Int
+    }
+
+
+navLink : Route -> String -> NavLink
+navLink route label =
+    { route = route, label = label, badge = Nothing }
+
+
+navLinkBadged : Route -> String -> Maybe Int -> NavLink
+navLinkBadged route label badge =
+    { route = route, label = label, badge = badge }
+
+
+{-| The number on the `Add Book` marker (Issue #351).
+
+⛔ Three states, and they are three different things:
+
+  - `Nothing` when the inbox has not loaded, or failed to load. We do not know
+    what is waiting, and a cleared badge is an assertion that nothing is —
+    which we cannot make.
+  - `Nothing` when the count is zero. Requirement 4 of the issue, spelled out:
+    "Zero pending renders no badge, not a `0`."
+  - `Just n` otherwise.
+
+The number comes from `Api.awaitingConfirmationCount` over the very list the
+inbox surface renders — the same value in the same model field, not a second
+query. Failures are in that list and are deliberately not in this number: a
+failed upload has nothing to confirm, so a badge counting it could never be
+cleared by doing what the badge asks.
+
+-}
+pendingConfirmationBadge : RemoteData Http.Error (List Api.InboxItem) -> Maybe Int
+pendingConfirmationBadge inbox =
+    case inbox of
+        Success items ->
+            case Api.awaitingConfirmationCount items of
+                0 ->
+                    Nothing
+
+                count ->
+                    Just count
+
+        _ ->
+            Nothing
+
+
+navDropdown : Route -> Route -> String -> List NavLink -> Html Msg
 navDropdown currentRoute primaryRoute primaryLabel subItems =
     let
         isActive =
             (currentRoute == primaryRoute)
-                || List.any (\( r, _ ) -> currentRoute == r) subItems
+                || List.any (\item -> currentRoute == item.route) subItems
 
         activeClass =
             if isActive then
@@ -3671,15 +3813,32 @@ navDropdown currentRoute primaryRoute primaryLabel subItems =
         [ a [ href (Route.toPath primaryRoute), class "app-nav__link" ]
             [ text primaryLabel ]
         , ul [ class "app-nav__dropdown-menu" ]
-            (List.map
-                (\( route, label ) ->
-                    li []
-                        [ a [ href (Route.toPath route), class "app-nav__dropdown-link" ]
-                            [ text label ]
+            (List.map viewNavDropdownLink subItems)
+        ]
+
+
+viewNavDropdownLink : NavLink -> Html Msg
+viewNavDropdownLink item =
+    li []
+        [ a [ href (Route.toPath item.route), class "app-nav__dropdown-link" ]
+            [ text item.label
+            , case item.badge of
+                Just count ->
+                    span
+                        [ class "app-nav__badge"
+                        , testId "nav-upload-badge"
+
+                        -- The visible number is a glyph; this is what it means.
+                        -- A screen reader hearing "Add Book 2" would be told a
+                        -- quantity of nothing in particular.
+                        , attribute "aria-label"
+                            (String.fromInt count ++ " waiting to be confirmed")
                         ]
-                )
-                subItems
-            )
+                        [ text (String.fromInt count) ]
+
+                Nothing ->
+                    text ""
+            ]
         ]
 
 
@@ -3705,7 +3864,11 @@ viewPage model =
             Html.map BookDetailMsg (BookDetail.view subModel)
 
         PageUpload subModel ->
-            Html.map UploadMsg (Upload.view subModel (Maybe.map .token (currentAuth model.auth)))
+            Html.map UploadMsg
+                (Upload.view subModel
+                    (Maybe.map .token (currentAuth model.auth))
+                    model.uploadInbox
+                )
 
         PageSearch subModel ->
             Html.map SearchMsg (Search.view subModel)

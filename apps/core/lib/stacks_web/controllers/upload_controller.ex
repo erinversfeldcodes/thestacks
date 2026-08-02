@@ -108,6 +108,27 @@ defmodule StacksWeb.UploadController do
   end
 
   @doc """
+  GET /api/uploads/inbox — the uploads this reader has not finished with (#351).
+
+  Read-only, and scoped to the caller by `Stacks.Uploads.list_awaiting_attention/1`'s
+  `user_id` clause — there is no id in the path to tamper with, so the only
+  upload rows this can ever return are the ones belonging to the token holder.
+
+  Returns 200 `{items: [...]}`, newest first. An empty inbox is `{items: []}`,
+  never a 404: "nothing to do" is a successful answer to the question.
+
+  ⚠️ **Nothing here places a book.** The response carries candidate ids; the
+  reader still walks confirm → choose-shelf → place. See the module doc on
+  `Stacks.Uploads.list_awaiting_attention/1`.
+  """
+  @spec inbox(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def inbox(conn, _params) do
+    user = Guardian.Plug.current_resource(conn)
+
+    json(conn, ProtoJSON.upload_inbox(Uploads.list_awaiting_attention(user.id)))
+  end
+
+  @doc """
   POST /api/upload/:image_id/reject-identification — user clicked
   "No, try again" on the model's guess.
 

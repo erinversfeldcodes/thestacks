@@ -195,18 +195,18 @@ suite =
         , describe "upload verify step"
             [ test "renders the provisional notice, naming the ISBN as an ISBN" <|
                 \_ ->
-                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token")
+                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.find [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-provisional-notice") ]
                         |> Query.has [ Selector.text provisionalIsbn ]
             , test "does not print the placeholder title as the book's name" <|
                 \_ ->
-                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token")
+                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.hasNot [ Selector.text ("ISBN " ++ provisionalIsbn) ]
             , test "an identified book gets no notice" <|
                 \_ ->
-                    Upload.view { init_ | step = Verifying identifiedBook } (Just "token")
+                    Upload.view { init_ | step = Verifying identifiedBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.hasNot
                             [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-provisional-notice") ]
@@ -214,7 +214,7 @@ suite =
                 \_ ->
                     -- The whole point of the ruling. A provisional book is one
                     -- the reader may shelve; the notice is a sentence, not a gate.
-                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token")
+                    Upload.view { init_ | step = Verifying provisionalBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.find
@@ -229,25 +229,25 @@ suite =
             [ test "offers every shelf for a provisional book" <|
                 \_ ->
                     -- Five bookshelves, none withheld because the lookup is late.
-                    Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just "token")
+                    Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.findAll [ Selector.class "upload-shelf-picker__shelf" ]
                         |> Query.count (Expect.equal 5)
             , test "the heading does not quote a status as if it were a title" <|
                 \_ ->
-                    Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just "token")
+                    Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Add This book to a shelf" ]
             , test "an identified book still gets its title quoted in the heading" <|
                 \_ ->
-                    Upload.view { init_ | step = ChoosingShelf identifiedBook } (Just "token")
+                    Upload.view { init_ | step = ChoosingShelf identifiedBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Add \"The Great Gatsby\" to a shelf" ]
             ]
         , describe "upload completion card"
             [ test "confirms the placement happened and explains the missing title" <|
                 \_ ->
-                    Upload.view { init_ | step = Complete provisionalBook "library" } (Just "token")
+                    Upload.view { init_ | step = Complete provisionalBook "library" } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "This book added to Library" ]
@@ -257,7 +257,7 @@ suite =
                             ]
             , test "an identified book keeps the quoted-title heading" <|
                 \_ ->
-                    Upload.view { init_ | step = Complete identifiedBook "library" } (Just "token")
+                    Upload.view { init_ | step = Complete identifiedBook "library" } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "\"The Great Gatsby\" added to Library" ]
             ]

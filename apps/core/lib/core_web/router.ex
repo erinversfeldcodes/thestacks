@@ -206,6 +206,13 @@ defmodule CoreWeb.Router do
   scope "/api", StacksWeb do
     pipe_through [:api, :authenticated]
 
+    # The upload inbox (#351) — read-only, and deliberately NOT in the
+    # `:upload` rate-limit bucket its siblings above sit in. That bucket exists
+    # to price GPU work; this is a list query the navigation badge issues on
+    # every page load, and throttling it would blank the badge rather than
+    # protect anything.
+    get "/uploads/inbox", UploadController, :inbox
+
     delete "/auth/logout", AuthController, :logout
     post "/auth/refresh", AuthController, :refresh
     get "/auth/me", AuthController, :me
