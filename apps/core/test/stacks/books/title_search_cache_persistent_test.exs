@@ -64,6 +64,16 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
       assert Repo.all(TitleSearchCacheEntry) == []
     end
 
+    # #352, and this is the tier that makes the defect durable: L1 is per-node
+    # and dies with the machine, but an L2 row is shared across every Fly
+    # machine and survives deploys, so an outage written here is served to
+    # every reader on every node for the full hour.
+    test ":unavailable is not persisted" do
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :unavailable})
+      TitleSearchCache.await_pending_writes()
+      assert Repo.all(TitleSearchCacheEntry) == []
+    end
+
     test "get falls through to Postgres on ETS miss" do
       :ok =
         TitleSearchCache.put(

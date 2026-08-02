@@ -22,7 +22,9 @@ defmodule Stacks.Books.TitleSearchCache do
 
   Cache entry shape (in-memory):
     `{key, result, expires_at_monotonic}` where `result` is either
-    `{:ok, isbn, metadata}` or `{:error, :not_found}`.
+    `{:ok, isbn, metadata}` or `{:error, :not_found}`. Note what is
+    absent from that pair: there is no representation for "we could not
+    look", because that is not something this table is allowed to hold.
 
   Key is a deterministic digest of `(title, author, raw_text)`.
   Normalisation (trim + downcase) collapses whitespace/case variants
@@ -32,8 +34,10 @@ defmodule Stacks.Books.TitleSearchCache do
     * **Positive** (`{:ok, _, _}`): 24 h.
     * **Negative** (`{:error, :not_found}`): 1 h.
 
-  `{:error, :circuit_open}` is **not cached** — the breaker is the
-  signal to retry later, not to memoise.
+  Only an ANSWER is cacheable. `{:error, :unavailable}` (#352) and
+  `{:error, :circuit_open}` are **not cached** — a failed lookup is the
+  signal to retry later, not a fact about the book to memoise. See
+  `put/4` for the full policy and why the asymmetry decides it.
 
   Persistence can be disabled per-env via
   `config :core, :persistent_cache_enabled, false` (test env does this).
@@ -105,9 +109,39 @@ defmodule Stacks.Books.TitleSearchCache do
   end
 
   @doc """
-  Store a title-search resolution. Positive results get 24 h TTL,
-  negative 1 h. Other terms (e.g. `{:error, :circuit_open}`) are not
-  cached.
+  Store a title-search resolution.
+
+  A cache entry records an ANSWER. Two of the values
+  `ISBNResolver.search_by_title/4` can return are answers and get stored:
+
+    * `{:ok, isbn, metadata}` — 24 h. The catalogues told us which book this
+      is, and that does not change on the timescale of a day.
+    * `{:error, :not_found}` — 1 h. Both catalogues answered and neither knew
+      the book. That is still a fact about the book, so it is cacheable; the
+      TTL is an order of magnitude shorter than the positive one because it is
+      the fact most likely to stop being true (Open Library gains records
+      continuously, and a reader who has just been told "we can't identify
+      this" is the person most likely to try again soon).
+
+  Everything else is the ABSENCE of an answer and is deliberately not stored:
+
+    * `{:error, :unavailable}` — a provider outage (#352). This is the
+      dangerous one, and the reason this clause is written out by name instead
+      of being swept up by the catch-all below. Storing it would persist "this
+      book does not exist" for an hour on the strength of a 503 we happened to
+      catch, and serve it to every later reader long after the providers
+      recovered — turning a transient failure into a durable lie about a book
+      that was in the catalogue the whole time. Under-caching an outage costs
+      one extra OL/GB round-trip; caching one costs an hour of false answers,
+      so the asymmetry decides it.
+    * `{:error, :circuit_open}` and any other term — same reasoning: the
+      breaker is the signal to retry later, not something to memoise.
+
+  No backfill was done for entries written before #352. They are indexed by
+  `expires_at` and the negative TTL is one hour, so the last of the outage rows
+  written under the old behaviour ages out within an hour of the fix shipping —
+  a migration to delete them would race that clock rather than beat it. The
+  fix is that no NEW outage can be written; the existing ones expire.
   """
   @spec put(String.t() | nil, String.t() | nil, String.t() | nil, term()) :: :ok
   def put(title, author, raw_text, {:ok, isbn, metadata} = result)
@@ -124,6 +158,12 @@ defmodule Stacks.Books.TitleSearchCache do
     db_put(key, title, author, raw_text, result, @negative_ttl_ms)
     :ok
   end
+
+  # Named rather than left to the catch-all on purpose. `:unavailable` is a
+  # value `search_by_title/4` returns in normal operation, so a reader of this
+  # module should be able to see the decision not to cache it, not infer it
+  # from the absence of a clause.
+  def put(_title, _author, _raw_text, {:error, :unavailable}), do: :ok
 
   def put(_title, _author, _raw_text, _other), do: :ok
 

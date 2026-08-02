@@ -10,7 +10,7 @@ defmodule Stacks.Books.ISBNResolverTest do
 
   import ExUnit.CaptureLog
 
-  alias Stacks.Books.{ISBNResolver, MockHttpClient}
+  alias Stacks.Books.{ISBNResolver, MockHttpClient, TitleSearchCache}
 
   # Reset the resolver's circuit breakers before each test. :fuse state is
   # global (ETS-backed), so a fuse blown by an earlier suite test (e.g. a
@@ -430,6 +430,176 @@ defmodule Stacks.Books.ISBNResolverTest do
       MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [item]}})
 
       assert {:error, :not_found} = ISBNResolver.search_by_title("Gatsby")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # search_by_title/4 — "we looked" vs "we could not look" (#352)
+  # ---------------------------------------------------------------------------
+
+  describe "search_by_title/4 — an outage is not an absence" do
+    test "a transport failure is :unavailable, not :not_found" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :transport_error})
+      MockHttpClient.put_response("googleapis.com", {:error, :transport_error})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    test "a 5xx from both catalogues is :unavailable" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :unexpected_status})
+      MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    # The fuse path never makes an HTTP call at all, so there is no reason
+    # available for the collapse to have discarded — this is the variant where
+    # "we could not look" is the ONLY thing that happened.
+    test "a blown fuse on both catalogues is :unavailable" do
+      # Melt past the standard tolerance (5 in 60s) rather than a fixed count,
+      # so a threshold change retunes this test instead of breaking it.
+      Enum.each(1..10, fn _ ->
+        :fuse.melt(:open_library_fuse)
+        :fuse.melt(:google_books_fuse)
+      end)
+
+      assert :blown = :fuse.ask(:open_library_fuse, :sync)
+      assert :blown = :fuse.ask(:google_books_fuse, :sync)
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    # `determination/1` defines `:not_found` as "BOTH upstreams answered, and
+    # neither knows this ISBN". A clean Google Books miss is therefore not
+    # enough on its own: Open Library — the primary — never answered, so half
+    # the search we intended never ran, and the half that did is not evidence
+    # for the half that did not.
+    test "Open Library down + a clean Google Books miss is still :unavailable" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :timeout})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => []}})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    # The converse, and the reason `worse_of/2` is not just "OL wins": Open
+    # Library answering does NOT rescue a Google Books outage, because the
+    # variant only reaches Google Books when Open Library had nothing.
+    test "a clean Open Library miss + Google Books down is :unavailable" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
+      MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    # Both answered, neither knew the book — the one failure that IS a fact
+    # about the book. This is the negative control for every test above: if
+    # `search_by_title/4` started returning `:unavailable` for everything, the
+    # tests above would still pass and this one would not.
+    test "both catalogues answering with no results is still :not_found" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => []}})
+
+      assert {:error, :not_found} = ISBNResolver.search_by_title("ZZZNoSuchBook", "Nobody")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # search_by_title/4 — request → cache → read (#352)
+  # ---------------------------------------------------------------------------
+  #
+  # The load-bearing test for #352, and it spans all three hops on purpose.
+  # Asserting only that the call returns an error would pass while the cache
+  # still held the lie: correct error handling at the call site is undone if a
+  # poisoned entry answers the next reader before the call site is ever
+  # reached. So this drives the outage, then inspects the cache, then reads
+  # again after recovery.
+  #
+  # The cache is off by default in `config/test.exs`, which is why no existing
+  # test covered this path at all — `search_by_title/4`'s cache branch was
+  # never executed by the suite before #352.
+  describe "search_by_title/4 — an outage is never cached as an absence" do
+    setup do
+      original = Application.get_env(:core, :title_search_cache_enabled)
+      Application.put_env(:core, :title_search_cache_enabled, true)
+      TitleSearchCache.invalidate_all()
+
+      on_exit(fn ->
+        Application.put_env(:core, :title_search_cache_enabled, original)
+        TitleSearchCache.invalidate_all()
+      end)
+
+      :ok
+    end
+
+    test "an outage leaves the cache empty and the next reader gets the real book after recovery" do
+      # ---- REQUEST: both catalogues are unreachable for this lookup. --------
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :transport_error})
+      MockHttpClient.put_response("googleapis.com", {:error, :transport_error})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+
+      # ---- CACHE: nothing was written. --------------------------------------
+      # The damaging half. Before #352 this held `{:ok, {:error, :not_found}}` —
+      # a 503 recorded as "this book does not exist", with an hour to live.
+      assert :miss == TitleSearchCache.get("The Great Gatsby", "Fitzgerald", nil),
+             "the outage was negative-cached: a transient provider failure is " <>
+               "now a durable claim that the book does not exist"
+
+      # ---- READ: the providers (and the fuses the outage melted) recover. ---
+      # Open Library has known this book all along. The reader who arrives one
+      # second after recovery must be told so, not served the outage.
+      :fuse.reset(:open_library_fuse)
+      :fuse.reset(:google_books_fuse)
+      MockHttpClient.clear()
+
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc()]}}
+      )
+
+      assert {:ok, "9780743273565", meta} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+
+      assert meta.source == :open_library
+    end
+
+    # The other side of the policy: a real absence IS an answer and stays
+    # cacheable, so the fix cannot have been implemented by disabling the
+    # negative cache wholesale.
+    test "a genuine :not_found is still cached and served from the cache" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => []}})
+
+      assert {:error, :not_found} = ISBNResolver.search_by_title("ZZZNoSuchBook", "Nobody")
+
+      assert {:ok, {:error, :not_found}} =
+               TitleSearchCache.get("ZZZNoSuchBook", "Nobody", nil)
+
+      # Served from the cache: with every provider now unreachable, a cache
+      # miss would have to come back `:unavailable`.
+      MockHttpClient.clear()
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :transport_error})
+      MockHttpClient.put_response("googleapis.com", {:error, :transport_error})
+
+      assert {:error, :not_found} = ISBNResolver.search_by_title("ZZZNoSuchBook", "Nobody")
+    end
+
+    test "a positive result is still cached" do
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc()]}}
+      )
+
+      assert {:ok, "9780743273565", _} = ISBNResolver.search_by_title("The Great Gatsby", "Fitz")
+
+      assert {:ok, {:ok, "9780743273565", _}} =
+               TitleSearchCache.get("The Great Gatsby", "Fitz", nil)
     end
   end
 
