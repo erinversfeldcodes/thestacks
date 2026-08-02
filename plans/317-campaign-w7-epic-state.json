@@ -157,7 +157,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-02",
-  "status": "ALL 9 CHILDREN MERGED — wave code-complete; integration gate + live drive outstanding",
+  "status": "ALL 9 CHILDREN MERGED. Integration gate: green except one non-reproducible Elixir failure (#379) and a SIGTERMed dockle step. Live drive outstanding; #373 and #376 owe preview drives by their own DoDs.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -188,7 +188,19 @@
       "issue": null,
       "summary": "<=5s does not hold for service-down: vision_unavailable is :transient so IdentifyBookJob runs the full Oban retry schedule before the row is rejected. Copy is right and renders instantly; the FRAME takes minutes. Handed to #351 to fix or explicitly hide.",
       "severity": "tracked in #351 scope, not yet its own issue"
+    },
+    {
+      "issue": 379,
+      "summary": "third-space geocoding test fails in the full suite, passes isolated, does not reproduce at its own seed — non-deterministic, likely an async/sandbox isolation race",
+      "severity": "makes just ci intermittently red; the gate working as intended"
     }
   ],
-  "gdpr_corroboration": "#351 independently re-discovered #353 (uploaded_images unreachable by erasure; schema-guard structurally blind to a MISSING FK). Recorded in #353 rather than filed as a duplicate. #351 raises its severity: the inbox turns those rows into a listed reader-facing surface, and export is missing too."
+  "gdpr_corroboration": "#351 independently re-discovered #353 (uploaded_images unreachable by erasure; schema-guard structurally blind to a MISSING FK). Recorded in #353 rather than filed as a duplicate. #351 raises its severity: the inbox turns those rows into a listed reader-facing surface, and export is missing too.",
+  "integration_gate": {
+    "command": "just run just ci on feat/campaign-w7-317, uncontended tree",
+    "elm": "1660 passed / 0 failed",
+    "dbt": "243/243 PASS + checkpoint",
+    "security": "trufflehog 0 secrets, trivy no vulnerabilities; run SIGTERMed during the dockle Docker build (same slow last step as Wave 6). deploy/Dockerfile.core is untouched by this branch, so dockle subject is unchanged.",
+    "elixir": "3506 tests, 1 failure — DiscoveryThirdSpaceProductionTest geocoding. Isolated: 17/0. Same-seed full re-run (268546080243028): 3506/0. NOT reproducible; filed as #379 with five hypotheses ruled out by execution."
+  }
 }
