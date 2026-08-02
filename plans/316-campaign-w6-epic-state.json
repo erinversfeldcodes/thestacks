@@ -4,7 +4,7 @@
   "integration_branch": "feat/campaign-w6-316",
   "base": "feat/campaign-followups-a",
   "pr_opened": false,
-  "pr_policy": "DEFERRED \u2014 owner ruling 2026-07-30: wave PRs batch until the final wave",
+  "pr_policy": "DEFERRED — owner ruling 2026-07-30: wave PRs batch until the final wave",
   "children": {
     "359": {
       "status": "complete",
@@ -98,7 +98,7 @@
       ],
       "merged": true,
       "blocked_on": null,
-      "note": "Unblocked when #362 merged; the lead marked it in_progress but did not launch it \u2014 corrected 2026-08-01.",
+      "note": "Unblocked when #362 merged; the lead marked it in_progress but did not launch it — corrected 2026-08-01.",
       "commit": "79c6c355",
       "staff_review": "LGTM"
     }
@@ -112,7 +112,7 @@
     362,
     363
   ],
-  "sequencing_rationale": "This wave is almost entirely Elm and three files are contended: Main.elm (6a, 6b), Api.elm (6c, 6d), Bookshelf.elm (6f, 6d). The DAG is shaped by file ownership rather than pure logic \u2014 two agents in one Elm module is a merge conflict by construction (the #343/#344 lesson). 6a goes first because AuthState is the type every later auth change reads.",
+  "sequencing_rationale": "This wave is almost entirely Elm and three files are contended: Main.elm (6a, 6b), Api.elm (6c, 6d), Bookshelf.elm (6f, 6d). The DAG is shaped by file ownership rather than pure logic — two agents in one Elm module is a merge conflict by construction (the #343/#344 lesson). 6a goes first because AuthState is the type every later auth change reads.",
   "discovered_issues": [
     364,
     365,
@@ -120,20 +120,80 @@
   ],
   "kickoff_approved": "2026-07-31",
   "notes": [
-    "Founding defect, root-caused live 2026-07-30: the auth credential is downstream of a browser animation frame. With the window occluded, WAAPI never fires, so three login 200s were silently discarded \u2014 ten frozen 300ms transitions, zero animations, no follow-up XHR.",
-    "The epic's own warning: do NOT write per-page 401 tests before the wrapper lands (6c) \u2014 they would be deleted by it.",
+    "Founding defect, root-caused live 2026-07-30: the auth credential is downstream of a browser animation frame. With the window occluded, WAAPI never fires, so three login 200s were silently discarded — ten frozen 300ms transitions, zero animations, no follow-up XHR.",
+    "The epic's own warning: do NOT write per-page 401 tests before the wrapper lands (6c) — they would be deleted by it.",
     "#332 was assigned to this wave by owner ruling during Wave 3; it is a production mutation guard living in the view instead of the update function."
   ],
-  "updated_at": "2026-08-01",
+  "updated_at": "2026-08-02",
+  "live_drive": {
+    "target": "https://stacks-core-pr-feat-campaign-w6-316.fly.dev",
+    "date": "2026-08-01",
+    "harness_note": "The tab was occluded throughout, so zero requestAnimationFrames fired and Elm never patched the DOM — every document.body.innerText read returned a stale frame. Screenshots force a frame and were the reliable signal. This is #362's own harness finding, confirmed repeatedly; do not trust text reads on this preview.",
+    "results": [
+      {
+        "issue": 359,
+        "claim": "login persists the token before the door animation, so an occluded window cannot discard it",
+        "verdict": "PROVEN",
+        "method": "Instrumented Element.prototype.animate, Storage.prototype.setItem and XMLHttpRequest.prototype.send, then logged in. Result: {animations_started: 0, login_200_at_ms: 198087, token_written_at_ms: 198086, delta_ms: -1, token_present: true, url: '/antilibrary'}. Zero animations EVER started and the token was written anyway — strictly stronger than occlusion, which merely makes animations not fire."
+      },
+      {
+        "issue": 361,
+        "claim": "a mid-form 401 routes to the expiry net instead of rendering 'please try again'",
+        "verdict": "PROVEN",
+        "method": "Filled /settings/password, revoked the session server-side via DELETE /api/auth/logout (204, confirmed 401 on the old token), then submitted. PUT /api/settings/password → 401, redirected to /login, and the card renders 'The library closed your session for safekeeping — sign in again to return.' (screenshot). Signing back in returned to /settings/password, so redirectAfterLogin captured the abandoned page — the #359 finding #361 absorbed."
+      },
+      {
+        "issue": 362,
+        "claim": "connectivity banner appears offline and clears on reconnect; a failed load is not an empty shelf",
+        "verdict": "PROVEN",
+        "method": "Patched XMLHttpRequest.prototype.send to dispatch ProgressEvent('error') (fetch is a no-op for elm/http) and fired 'offline'. Banner rendered; navigating to /library showed 'The library is unreachable. Check your connection, then try again.' and did NOT repaint the bookcase as empty. Restoring transport and firing 'online' cleared the banner — its copy's own promise, kept."
+      },
+      {
+        "issue": 363,
+        "claim": "the consent toggle's save actually reaches the server",
+        "verdict": "PROVEN, and exposed #367 underneath it",
+        "method": "POST /api/gdpr/consent {consent:true} → 200, then {consent:false} → 200, and the preview DB (br-falling-wave-and3e0fr) holds consent_analytics=false. #363's half works. The page then renders 'On' because Main.elm:1041 seeds consent from the stale localStorage auth blob — filed as #367."
+      }
+    ],
+    "issues_found": [
+      {
+        "number": 367,
+        "summary": "consent revocation succeeds server-side, page reads the stale stored credential and shows it as still granted",
+        "severity": "consent surface — belongs before launch"
+      },
+      {
+        "number": 368,
+        "summary": "reconnect clears the banner but never reaches the shelf underneath, which keeps a stale 'try again' with no retry control",
+        "severity": "polish on a shipping surface"
+      }
+    ]
+  },
   "coordination_decisions": [
     {
       "date": "2026-08-01",
       "raised_by": "#361",
-      "issue": "The 3-tuple OutMsg session-expiry convention (~25 sites) requires Main.elm routing blocks, but Main.elm was assigned to #360 at this level. A page cannot reach the expiry net alone \u2014 requestStoredAuth/clearAuth/Nav.pushUrl all live in Main.",
+      "issue": "The 3-tuple OutMsg session-expiry convention (~25 sites) requires Main.elm routing blocks, but Main.elm was assigned to #360 at this level. A page cannot reach the expiry net alone — requestStoredAuth/clearAuth/Nav.pushUrl all live in Main.",
       "decision": "#361 makes the three additive Main.elm blocks, mirroring Consent.SessionExpired exactly, staged last and isolated. It also takes the redirectAfterLogin-on-expiry fix (#359 finding) since forceSessionExpiry is session-expiry logic and #360 has no reason to touch it.",
       "merge_order_changed": "361 now merges BEFORE 360; #360 re-merges the integration branch and reconciles in its own worktree rather than the lead hand-resolving Elm conflicts at the merge point.",
       "why": "The type system forces it: pages returning 3-tuples do not compile against a Main.elm expecting 2-tuples, so no Main-free variant of #361 could build or test itself. The alternative (page-local expiry banner) would invent a 26th convention and bypass the cross-tab re-check net."
     }
   ],
-  "status": "children complete \u2014 gate + live drive outstanding"
+  "status": "COMPLETE — all six children merged, driven live, completion-audit PASS, just ci green",
+  "completion_audit": {
+    "date": "2026-08-01",
+    "verdict": "PASS",
+    "classes_clear": 8,
+    "note": "Two probes run during the audit (reflection gate, saveAuth) plus #332's missing mutation probe. All reverted with Edit; git diff clean; suite 1549/0."
+  },
+  "integration_gate": {
+    "command": "just run just ci",
+    "result": "green on every group",
+    "note": "security initially red on dockle only — a wedged local colima VM, not the branch (deploy/Dockerfile.core is not in the diff). VM restarted; re-run PASS."
+  },
+  "drive_build_currency": {
+    "question": "Was the preview built from a branch containing all six children, or did the drive validate stale code?",
+    "answer": "Current. Last child (#363, 79c6c355/9c7f3a28) merged 2026-08-01T11:58:48Z; the preview machine was created 12:15:04Z — 16 min later. #362 (5859eada) merged 10:47:41Z. All four earlier children merged the previous evening or that morning.",
+    "stronger_evidence": "Timestamp arithmetic is the weaker argument. The drive observed distinct behaviour from EACH child on the deployed build: persist-first (#359), page titles + StoredSessionUnreadable notice (#360), mid-form 401 expiry notice (#361), offline banner + runtime timeoutMs 15000 (#362), consent save reaching the server (#363, which is how #367 was found underneath it), organiser absent read-only vs present as owner (#332). Six behaviours, six children."
+  },
+  "epic_issue_filed": "issues/complete/316-campaign-w6-session-ux-dedup.md (moved 2026-08-02 — it was the only finished-wave epic still outside issues/complete/; #311-#315 were already there)"
 }

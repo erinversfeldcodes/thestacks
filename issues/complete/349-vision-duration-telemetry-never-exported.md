@@ -43,10 +43,27 @@ n/a — no user story. The pre-check is the **zero-series sweep**: confirm no `v
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Metric defined and exported — evidence: diff
-- [ ] Series observed in the store after a real preview upload — evidence: query output
-- [ ] p50/p95/p99 recorded — evidence: the numbers, in Progress Notes
-- [ ] `staff-review` verdict recorded below
+- [x] Metric defined and exported — evidence: commit `30df278f` "export the vision request duration that was measured and dropped", confirmed an ancestor of `feat/campaign-w7-317` (`git merge-base --is-ancestor`). `@vision_duration_buckets` + emitter in `apps/core/lib/core/prom_ex/plugins/stacks.ex`.
+- [x] Series observed in the store after a real preview upload — evidence: verified 2026-08-02 on a fresh full preview from `feat/campaign-w7-317` with vision ENABLED (no `SKIP_VISION`), Modal app `thestacks-vision-feat-ca-v349` live. **36 real vision calls** (6 deploy warmup canaries + 30 driven uploads, all HTTP 202; `stacks_upload_terminal_count_total` → resolved 30 / rejected 6 = 36, matching one `/analyze` per upload):
+      ```
+      stacks_vision_request_stop_duration_milliseconds_count{app="stacks-core-pr-feat-ca-v349"}
+        -> {endpoint="analyze", status="200"}  [1785694560, "36"]
+      sum(stacks_vision_request_stop_duration_milliseconds_sum{...})
+        -> [1785694559, "471241.854461"]   # ms; mean 13.09 s
+      ```
+      Accruing over real wall-clock (`query_range`, step 60s): 18:09→4, 18:10→6, 18:11→8, 18:12→23, 18:13→36.
+      **The final hop proven too** — read back through Grafana's own provisioned datasource (`POST /api/ds/query`, `stacks-grafana-pr-feat-ca-v349.fly.dev`): `histogram_quantile(0.99, ...)` → `57899.99`.
+      ⚠️ **Previews DO push metrics** — `scripts/deploy-stack.sh` deploys an ephemeral per-PR store (`VM_APP`, line 718-720) and sets `STACKS_METRICS_PUSH_URL` (line 919). Access gotcha: `fly proxy <local>:8428 <app>.flycast` — `.internal:8428` is connection-refused, the port is only exposed via fly-proxy.
+      ⚠️ **Absence is not evidence**: `stacks-vm-pr-feat-campaign-w6-316` runs a core containing this fix and has NO vision family — because nothing on that preview ever called vision.
+- [x] p50/p95/p99 recorded — evidence: n=36, all `analyze`/`200`. **p50 8437.5 ms · p95 49500 ms · p99 57900 ms**; `+Inf` saturation check → **0** (buckets fit; no retune needed).
+      ⚠️ **Read p95/p99 as "somewhere in (30 s, 60 s]", not as 49.5/57.9 s** — at n=36 the 34th–36th samples share one bucket, so both are interpolation inside it.
+      **The split #350 actually needs**, because the whole 30–60 s tail is cold starts:
+      | | n | median | p95 | max |
+      |---|---|---|---|---|
+      | Cold (Modal scaling from zero) | 6 | (30 s, 60 s] | — | ≤60 s |
+      | Warm | 30 | **(5 s, 8 s]** | **(15 s, 30 s]** | **≤30 s** |
+      **The `~3–8s` estimate at `plugins/stacks.ex:41` is now falsified**: only 18 of 36 calls (50%) landed at or below 8 s. ⚠️ And that estimate describes the *upload route* — "two sequential Modal vision calls + R2 upload + DB writes" — so a single-call median of 8.4 s makes it worse than half wrong, not better. The comparison is legitimate by design: `3_000`/`8_000` were chosen as bucket **edges** precisely to make that claim falsifiable off two bucket counts without interpolation.
+- [x] `staff-review` verdict recorded below — **LGTM** (2026-08-02, lead). This is a verification leg, not a code change; the review is of the evidence. Praise: it answered *"do previews push at all?"* **before** driving anything, which is what stops "the series is absent" from being read as a defect — and it then found a preview (w6) that contains the fix and legitimately has no vision family. It proved the **last** hop through Grafana's own datasource rather than stopping at the store. And it declined to launder n=36 into a production p99, separating cold from warm instead of reporting one misleading number. Spot-checked by the lead: commit lineage, the `~3–8s` comment, `STACKS_METRICS_PUSH_URL`, and the bucket-vs-timeout guard test — all as reported.
 
 ## Dependencies
 None technical. **Precedes #350** (which needs this data to size the timeout honestly). Needs an owner wave assignment.

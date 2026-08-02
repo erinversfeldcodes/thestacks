@@ -66,7 +66,7 @@ Verdict: GREEN. 0 ❌, 0 ⚠️.
 - [x] Expiry bounce remembers the page it bounced off — evidence: `Main.redirectAfterNavigation` + 5 tests; probe (delete the `sessionExpiring` branch) → exactly 2 red, 3 controls green
 - [x] Suites green — evidence: `npx elm-test` → `1427 passed, 0 failed`; `elm-review src/ tests/` → `I found no errors!`; `elm-format --validate src/ tests/` → `[]`
 - [x] Gates green — evidence: `check-orphan-classes.sh` → `orphans: 88` (baseline 88, zero added); `check-prose-assertions.sh` → `37 checked, 12 allowlisted`, the new negative inspected and `ok`; `check-session-expiry-coverage.sh` → exit 0
-- [ ] Driven live on a preview stack — deferred to the epic's wave drive (this branch has no deployed stack of its own)
+- [x] Driven live on a preview stack — **done in the epic's wave drive, 2026-08-01** against `stacks-core-pr-feat-campaign-w6-316.fly.dev`. Filled `/settings/password`, revoked the session server-side (`DELETE /api/auth/logout` → 204, old token confirmed 401), then submitted: `PUT /api/settings/password` → **401**, routed to `/login` rendering *"The library closed your session for safekeeping — sign in again to return."* — not the pre-#361 "Could not change password. Please try again." Signing back in returned to `/settings/password`. Screenshot captured. `auth.spec.ts:421/:460/:516` also green against the preview.
 
 ## Dependencies
 #359 (`AuthState`, merged). Contends with #360 on `Main.elm` (merge order flipped to 361 → 360) and #362 on `Api.elm`.

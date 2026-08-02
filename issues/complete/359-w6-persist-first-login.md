@@ -51,14 +51,14 @@ Router wiring: none new. User-facing: login works when the window is not in fron
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Persist-first: token saved before any animation effect — evidence: program test + probe transcript
-- [ ] `AuthState` introduced; token loss unrepresentable — evidence: the type + impossible-state test
-- [ ] Sleep-race backstop, with the chosen behaviour stated — evidence: diff + rationale
-- [ ] `transitionState` reset and `redirectAfterLogin` captured at `initPage` — evidence: tests
-- [ ] `pendingAuthResponse` cleared or deleted, with reasoning — evidence: diff
-- [ ] **Occluded login driven live on preview** — evidence: token-in-localStorage timing vs the 200
-- [ ] Suites green under `caffeinate`; `check-orphan-classes.sh` zero new — evidence: counts
-- [ ] `staff-review` verdict recorded below
+- [x] Persist-first: token saved before any animation effect — evidence: `Main.loginEffects` orders `PersistAuth` first and `PlayDoorAnimation` last (⛔ comment on the line); live drive 2026-08-01 measured `token_written_at_ms: 198086` vs `login_200_at_ms: 198087` (`delta_ms: -1`)
+- [x] `AuthState` introduced; token loss unrepresentable — evidence: `Main.AuthState = Anonymous | Arriving Auth | Authenticated Auth`
+- [x] Sleep-race backstop, with the chosen behaviour stated — evidence: diff + rationale in the module comment
+- [x] `transitionState` reset and `redirectAfterLogin` captured at `initPage` — evidence: tests; and confirmed live — a mid-form 401 on `/settings/password` returned the reader to `/settings/password` after re-login (drive, 2026-08-01)
+- [x] `pendingAuthResponse` cleared or deleted, with reasoning — evidence: diff
+- [x] **Occluded login driven live on preview** — evidence: drive 2026-08-01 against `stacks-core-pr-feat-campaign-w6-316.fly.dev`. Instrumented `Element.prototype.animate`, `Storage.prototype.setItem` and `XMLHttpRequest.prototype.send`; result `{"animations_started":0,"login_200_at_ms":198087,"token_written_at_ms":198086,"delta_ms":-1,"token_present":true,"url":"/antilibrary"}`. **Zero animations ever started and the token was persisted anyway** — strictly stronger than occlusion, which only prevents frames. Also covered by `auth.spec.ts:324` and `:377`, both green against the preview.
+- [x] Suites green under `caffeinate`; `check-orphan-classes.sh` zero new — evidence: counts recorded at merge
+- [x] `staff-review` verdict recorded below — **LGTM** (recorded in `plans/316-campaign-w6-epic-state.json`)
 
 ## Dependencies
 Epic #316. **Depends on #313** (Login/Session tests had to be trustworthy before this refactor moved under them). Level 1 — parallel with #332 (fully disjoint file). **Precedes #360, #361, #363.**

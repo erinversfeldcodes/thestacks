@@ -96,7 +96,7 @@ Requirement: `decodeFlags : Decode.Value -> StoredAuth` with `NoStoredAuth | Cor
 - [x] #359's guarantee intact — evidence: `PersistFirstLoginTest.elm` green; removing `PersistAuth` from `loginEffects` still reddens 5 tests including `persist_first_is_first` and `completeLogin cannot produce an authenticated state without the effect that saves it`.
 - [x] Suites green; `check-orphan-classes.sh` zero new; `check-css.sh` clean — evidence: post-#361-reconcile `elm-test` **1467 passed / 0 failed** (1400 baseline → 1437 with #360 → 1464 merged with #361 → 1467 with the seam tests); orphans **88 (0 unstyled)** — unchanged, Elm classes 802→803, CSS selectors 823→824; `check-css.sh` 733 rules, 0 problems; `elm-review` no errors; `elm-format` `[]`; admin-token routing 6/6.
 - [x] **#361's guarantee intact after the reconcile** — evidence: `scripts/check-session-expiry-coverage.sh` exit **0** (24 pages, 68 endpoints); its three additive `Settings/{Password,Profile,Notifications}` handlers and `redirectAfterNavigation` present verbatim. Probe: reverting `Page/Settings/Password.elm`'s `SessionExpired` return leaves the gate **FAIL exit 1** while only 1 of 1464 Elm tests reddens — the gate is doing work the suite cannot.
-- [ ] `staff-review` verdict recorded below
+- [x] `staff-review` verdict recorded below — **LGTM**. Reconciled against #361 in its own worktree after the merge-order change (361 → 360); the OutMsg seam bug that surfaced there was found and closed. Recorded in `plans/316-campaign-w6-epic-state.json`.
 
 ## Dependencies
 Epic #316. **Depends on #359** (which left `Main.elm` clean, with no `Arrival`/`StoredAuth` names taken). Level 2 — parallel with **#361**, which owns `Api.elm` and `Page/Settings/*`.

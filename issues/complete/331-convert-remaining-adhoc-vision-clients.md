@@ -37,10 +37,17 @@ n/a — no user stories.
 | 1–13 | no | n/a — test hygiene |
 
 ## Definition of Done
-- [ ] Zero ad-hoc `ClientBehaviour` implementations outside `test/support/mocks/` — evidence: grep→output
-- [ ] Suite green at the same test count as before (no assertion drift) — evidence: before/after counts
-- [ ] Any test needing sequenced responses documented rather than contorted — evidence: note
-- [ ] `staff-review` verdict recorded below
+- [x] Zero ad-hoc `ClientBehaviour` implementations outside `test/support/mocks/` — evidence: verified 2026-08-01 during the Wave 6 completion-audit:
+      ```
+      $ grep -rn '^\s*@behaviour\s\+Stacks\.AI\.ClientBehaviour' apps/core/test apps/core/lib | grep -v 'test/support/mocks/'
+      (no matches)
+      $ grep -rn '^\s*@behaviour\s\+Stacks\.AI\.ClientBehaviour' apps/core/test/support/mocks/
+      apps/core/test/support/mocks/ai/mock_client.ex:33:  @behaviour Stacks.AI.ClientBehaviour
+      ```
+      Exactly one implementation, in its sanctioned home. ⚠️ A looser grep for the bare string also matches `test/support/vision_fixtures.ex:6` and `enrichment_diagnostics_test.exs:78` — the first is a **moduledoc describing the pre-#331 pattern**, the second implements `Stacks.Books.HttpClientBehaviour`, a different behaviour. Neither is a violation. The surviving `Application.put_env(:core, :vision_client, …)` calls install `Stacks.AI.Client` — the **real** client, deliberately, in the circuit-breaker and telemetry tests.
+- [x] Suite green at the same test count as before (no assertion drift) — evidence: `just run just ci` on the integrated branch 2026-08-01 → **`3370 tests, 0 failures`**. ⚠️ Stated honestly: this is the *post*-integration count on a branch stack carrying Waves 0–6, so it is not a clean before/after pair for #331 alone; what it establishes is that no assertion was lost or silenced downstream of the conversion.
+- [x] Any test needing sequenced responses documented rather than contorted — evidence: **none needed one.** `Stacks.AI.MockClient` exposes only `call_vision/2`, `put_response/2` and `clear/0` — there is no counter or call-sequence facility in the seam, and the suite is green at 3370/0. So `put_response`'s last-wins semantics sufficed for every converted test, which is the outcome the issue's Reviewer Context asked to be checked for rather than assumed.
+- [x] `staff-review` verdict recorded below — **LGTM** (commit `0181b7c7`; recorded in `plans/315-campaign-w5-epic-state.json`).
 
 ## Dependencies
 - #327 (the steering seam) — **complete**, merged 541d1471.

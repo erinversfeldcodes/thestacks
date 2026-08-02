@@ -35,11 +35,22 @@ n/a — hardening an existing built surface.
 | 1–13 | no | n/a — one-module hardening |
 
 ## Definition of Done
-- [ ] `handleOrganiser` cannot mutate in read-only mode — evidence: diff + the new test name
-- [ ] Mutation probe: remove the guard → the new test reddens; output quoted — evidence: transcript
-- [ ] Owner path unchanged — evidence: existing organiser tests still green at cited count
-- [ ] Module docstring matches the implemented guarantee — evidence: diff
-- [ ] `staff-review` verdict recorded below
+- [x] `handleOrganiser` cannot mutate in read-only mode — evidence: `Page/Bookshelf.elm:388` `mutationToken : Model -> Maybe String` returns `Nothing` when `config.readOnly`, and every mutating branch of `handleOrganiser` (`AddShelf`, `RemoveShelf`, `MoveUp`, `MoveDown`) matches only on `Just token`. Drag bookkeeping deliberately matches `_` — a read-only page may hold a drag it can never complete. Test: `read_only_synthetic_organiser_msg_SECURITY` (`frontend/tests/Page/BookshelfReadOnlyTest.elm:448`).
+- [x] Mutation probe: remove the guard → the new test reddens; output quoted — evidence: probe applied 2026-08-01 (`if model.config.readOnly` → `if False`, so the token is handed out regardless of mode):
+      ```
+      ✗ read_only_synthetic_organiser_msg_SECURITY: an OrganiserMsg bypassing the view still issues no POST
+          expectHttpRequests:
+          0
+          ╷
+          │ Expect.equal
+          ╵
+          1
+      TEST RUN FAILED — Passed: 15, Failed: 6
+      ```
+      Reverted with Edit (never `git checkout`); re-run **TEST RUN PASSED, 21 passed / 0 failed**, and `git diff --stat -- frontend/src/Page/Bookshelf.elm` empty.
+- [x] Owner path unchanged — evidence: `owner_mutation_is_observable` (`BookshelfReadOnlyTest.elm:276`) drives the SAME harness in owner mode and asserts a shelf POST *is* issued — the non-vacuity control that makes the security assertions capable of failing. Green in the 21/0 run above.
+- [x] Module docstring matches the implemented guarantee — evidence: the `handleOrganiser` docstring states the drag-branch `_` reasoning explicitly, and `Bookshelf.elm:56` points readers to it.
+- [x] `staff-review` verdict recorded below — **LGTM** (commit `3a1f9d22`; recorded in `plans/316-campaign-w6-epic-state.json`)
 
 ## Dependencies
 - #330 (Wave 3) — supplied the real effect translator and positive control this test needs; **complete**, merged.

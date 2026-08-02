@@ -48,12 +48,32 @@ Punch: 8 items; suites named at spin-out.
 Verdict: baseline ❌ ×8.
 
 ## Definition of Done
-- [ ] Live drives on preview: login with window occluded → authenticated (token stored ≤1s after 200); mid-form 401 on Password → redirect + notice (not "try again"); offline shelf nav → visible failure state; hung request → Loading view, never empty bookcase — evidence: screenshots/recordings + localStorage timing
-- [ ] Reflection-gate probe: adding an authed page without SessionExpired fails the suite — evidence: probe transcript
-- [ ] Mutation probe: skip `saveAuth` → the persist-first test reddens — evidence: transcript
-- [ ] Feature-Completeness rows ✅; validation path per behaviour; suites + `just verify` green
-- [ ] Test audit GREEN; `completion-audit` passed; Completion Bar met (incl. logs clean under drive)
-- [ ] `staff-review` verdict per child in Progress Notes
+- [x] Live drives on preview — all four, 2026-08-01 against `stacks-core-pr-feat-campaign-w6-316.fly.dev`, screenshot-backed:
+  - **occluded login** → `{"animations_started":0,"login_200_at_ms":198087,"token_written_at_ms":198086,"delta_ms":-1,"token_present":true}`. Zero animations *ever started* and the token was persisted anyway — strictly stronger than occlusion, which only stops frames.
+  - **mid-form 401 on Password** → session revoked server-side (`DELETE /api/auth/logout` 204), `PUT /api/settings/password` → 401 → `/login` showing *"The library closed your session for safekeeping — sign in again to return."* Re-login returned to `/settings/password`.
+  - **offline shelf nav** → banner *"You are offline…"*, shelf *"The library is unreachable. Check your connection, then try again."*, bookcase **not** repainted empty; banner cleared on reconnect.
+  - **hung request → Loading view, never empty bookcase** → loading skeleton *"Fetching your Antilibrary…"* with ghost spines, and every shelf request confirmed **armed at `timeoutMs: 15000`** read off the live XHR (`/api/bookshelves/{library,wishlist,reading_pile,antilibrary}`). The **timeout copy itself was observed firing** — not in this drive, but in #362's own, against a stub that accepts the connection and never answers: `send` → `timeout` event at **15.002 s** (10:32:19.664 → 10:32:34.666), failure copy in the DOM at 16 798 ms, and the empty-bookcase state never present. ⚠️ Correction to an earlier note on this box: the lead's re-drive could not reproduce it, but that was a **flawed probe**, not a gap — replacing `send` with a no-op means the request never starts, so the browser never arms the XHR timer `elm/http` relies on. What the re-drive adds independently is that the timer is *armed* at `timeoutMs: 15000` on every live shelf request.
+- [x] Reflection-gate probe — evidence: probe 2026-08-01 routing `SessionExpiryDetected` to `NoOut` in `Page/Settings/Password.elm` (constructor still handed to `onExpired`, routes nothing):
+      ```
+      FAIL: 1 page(s) make a mandatorily-authenticated Api call and drop the 401.
+        frontend/src/Page/Settings/Password.elm
+            authed calls: updatePassword
+            hands `Api.authed` an `onExpired` the page does not route to `SessionExpired`:
+            SessionExpiryDetected. The 401 is detected and then dropped.
+      ```
+      Reverted with Edit; gate exits 0, suite 1549/0, `git diff` empty. ⚠️ Note for honesty: on *this* probe `elm-test` also reddens (`password_401_bubbles`, `NoOut` vs `SessionExpired`), so it does not demonstrate the gate catching what tests cannot. That unit test exists only because someone wrote it for this page; the gate's actual remit is a **newly added** authed page, which would have no such test.
+- [x] Mutation probe: skip `saveAuth` → the persist-first test reddens — evidence: probe 2026-08-01 removing `PersistAuth` from `Main.loginEffects`:
+      ```
+      ✗ persist_first_no_animation_signal: the token is stored with no animation message ever delivered
+          expectModel: Nothing ╷ Expect.equal ╵ Just "jwt-token"
+      ✗ persist_first_before_any_animation: PersistAuth is realised before PlayDoorAnimation
+      ✗ still persists the auth and navigates to the page they asked for
+      TEST RUN FAILED — Passed: 1544, Failed: 5
+      ```
+      Reverted with Edit; 1549/0, `PersistAuth` count 5, `git diff` empty.
+- [x] Feature-Completeness rows ✅; validation path per behaviour; suites green — evidence: `just run just ci` **green on every group** (stronger than `just verify`): elixir, elm 1549, rust, python, proto, dbt 64 + 243 models, squawk, licences, security. E2E against the preview: **282 passed / 9 failed / 12 skipped, zero 502s**; all 9 triaged outside this wave and filed (#370, #371, #372).
+- [x] Test audit GREEN; `completion-audit` passed; Completion Bar met (incl. logs clean under drive) — evidence: `completion-audit` run 2026-08-01, verdict **PASS** on all 8 classes. ⚠️ Logs were read under the drive and were **not** clean — `fly logs` showed a `beam.smp` OOM kill; that is exactly what class 7 exists to catch, and it became **#369** rather than being passed over.
+- [x] `staff-review` verdict per child in Progress Notes — evidence: all six **LGTM** (#359, #360, #361, #362, #363, #332), recorded per issue and in `plans/316-campaign-w6-epic-state.json`.
 
 ## Dependencies
 - #313 — Login/Session tests must be trustworthy before the AuthState refactor moves under them. Reason: guarantees before refactors.

@@ -1,0 +1,164 @@
+{
+  "epic_issue": 317,
+  "campaign": "staff-campaign-2026-07-30",
+  "integration_branch": "feat/campaign-w7-317",
+  "base": "feat/campaign-w6-316",
+  "pr_opened": false,
+  "pr_policy": "DEFERRED — owner ruling 2026-07-30: wave PRs batch until the final wave",
+  "children": {
+    "373": {
+      "status": "built_unmerged",
+      "title": "7a Resend confirmation + 24h-erasure reconciliation",
+      "level": 1,
+      "depends_on": [],
+      "owns": [
+        "apps/core/lib/stacks_web/controllers/auth_controller.ex",
+        "ExpiredUnverifiedAccountsJob",
+        "frontend/src/Page/Login.elm"
+      ],
+      "worktree": ".claude/worktrees/agent-a3bf64b98dc3e2dd6",
+      "blocked_on": "commit permission (staged only) AND its own DoD: no E2E spec, no live drive — agent declined to write an unrun spec, correctly",
+      "note": "Probe 7 found a REAL bug that was the code state: Main.requiresAuth ends in `_ -> True`, so the new PUBLIC route was silently auth-gated — bouncing a logged-out reader to a sign-in they cannot complete, the exact door the feature exists to open."
+    },
+    "375": {
+      "status": "in_progress",
+      "title": "7c Undo-remove toast (same-row reversal)",
+      "level": 1,
+      "depends_on": [],
+      "owns": [
+        "frontend/src/Page/Bookshelf.elm",
+        "Stacks.Shelving"
+      ]
+    },
+    "340": {
+      "status": "built_unmerged",
+      "title": "7d Operationalise owner-facilitated data correction",
+      "level": 1,
+      "depends_on": [],
+      "owns": [
+        "apps/core/lib/stacks/data_correction/*"
+      ],
+      "staff_review": "LGTM",
+      "worktree": ".claude/worktrees/agent-a6a9de231eb04e516",
+      "blocked_on": "commit permission — work is STAGED ONLY; branch tip is still 6fd411e5"
+    },
+    "352": {
+      "status": "built_unmerged",
+      "title": "7f Title search swallows outages into :not_found and negative-caches them",
+      "level": 1,
+      "depends_on": [],
+      "owns": [
+        "title search / BookDetailCache (elixir)"
+      ],
+      "worktree": ".claude/worktrees/agent-a53501123f782eaad",
+      "blocked_on": "commit permission — staged only"
+    },
+    "349": {
+      "status": "complete",
+      "title": "7e VERIFY: real upload on the W7 preview, confirm the vision-latency series lands",
+      "level": 1,
+      "depends_on": [],
+      "owns": [],
+      "note": "Verification, not a code change — no file contention. On the critical path: gates 350, which gates 351. Start it first. Needs Modal (unblocked since 2026-07-26).",
+      "staff_review": "LGTM",
+      "filed": "issues/complete/",
+      "result": "VERDICT YES — wired end to end. 36 real vision calls on a preview with Modal live; series in VictoriaMetrics and read back through Grafana own datasource. p50 8437.5ms / p95 49500ms / p99 57900ms, +Inf=0. Tail is cold starts: warm (n=30) median (5s,8s], p95 (15s,30s], max <=30s; cold (n=6) reaches 60s. Falsified the \"~3-8s\" estimate at plugins/stacks.ex:41 (only 18/36 <= 8s).",
+      "carried_to_350": "NO evidence beyond 60s — all 36 returned 200, so the :exception path contributed zero samples; a call slower than the deadline never emits :stop. The count of 210s give-ups needs an :exception counter that does not exist. Also: VisionLatencyTest:138-146 ties the top finite bucket to receive_timeout_ms/0, so retuning the timeout without moving the bucket reddens it by design (guards the 2026-04-20 incident)."
+    },
+    "374": {
+      "status": "not_started",
+      "title": "7b Failure-copy sweep (upload / 429 / W-10 settings / double-send)",
+      "level": 2,
+      "depends_on": [
+        373
+      ],
+      "owns": [
+        "frontend/src/Page/Upload.elm",
+        "frontend/src/Page/Settings/*",
+        "frontend/src/Page/Login.elm"
+      ]
+    },
+    "350": {
+      "status": "in_progress",
+      "title": "7g Vision client gives up 90s before Modal does",
+      "level": 2,
+      "depends_on": [
+        349
+      ],
+      "owns": [
+        "apps/core/lib/stacks/ai/client.ex"
+      ]
+    },
+    "376": {
+      "status": "not_started",
+      "title": "7c2 Owner-only un-merge + record the two exclusions",
+      "level": 2,
+      "depends_on": [
+        340
+      ],
+      "owns": [
+        "admin un-merge surface",
+        "docs/implementation-mapping.md"
+      ],
+      "note": "#340 preferred-first, not hard-blocking: if #340 lands first this should BE a registered correction rather than a bespoke admin action."
+    },
+    "351": {
+      "status": "not_started",
+      "title": "7h Reader never held hostage to the upload page (async identify, sync confirm+place, inbox)",
+      "level": 3,
+      "depends_on": [
+        350,
+        374
+      ],
+      "owns": [
+        "frontend/src/Page/Upload.elm",
+        "IdentifyBookJob"
+      ]
+    }
+  },
+  "ready_set": [
+    373,
+    375,
+    340,
+    352
+  ],
+  "merge_order": [
+    349,
+    373,
+    375,
+    340,
+    352,
+    374,
+    350,
+    376,
+    351
+  ],
+  "sequencing_rationale": "Two independent orderings. (1) OWNER RULING 2026-07-31 — measure before sizing before redesigning: 349 → 350 → 351. (2) FILE OWNERSHIP, the #343/#344 lesson re-confirmed in Wave 6 — Login.elm is contended by 373 and 374 (373 first); Page/Upload.elm is contended by 374 and 351 (374 first, while the file is still small); Bookshelf.elm belongs to 375 alone. #351 is the tail of both chains, which is why it is level 3.",
+  "critical_path": "349 → 350 → 351 (and 373 → 374 → 351). #349 is a verification with no code, so it can start immediately and should — everything downstream of it idles until it reports a p99.",
+  "owner_rulings": [
+    "2026-07-30: undo-remove SPEC'd (toast); un-merge SPEC'd owner-only; cancel-deletion grace EXCLUDED; public photo-delete EXCLUDED.",
+    "2026-07-31: #349 → #350 → #351 in that order — measure, fix the inversion, re-read retry frequency, then size the reader wait.",
+    "2026-07-31 (#351 shape): async re-attempt + SYNCHRONOUS confirm-and-place; pending confirmations live in an inbox reachable from the upload page; a notification count on the Add-a-book nav marker; not rendered outside the dropdown — low-but-easy visibility."
+  ],
+  "plan_deviation": {
+    "item": "7c",
+    "what": "split into #375 (undo toast) and #376 (un-merge + exclusions)",
+    "why": "The plan's single 7c bundled an MFA-gated admin data-correction surface with a reader-facing toast. They share no code and together break the scope rule (max 3 controllers / 2 endpoints / ~300 LOC). Recorded rather than silently absorbed."
+  },
+  "kickoff_approved": "2026-08-02",
+  "updated_at": "2026-08-02",
+  "status": "level 1 in flight (4 of 5); #349 complete, #350 unblocked and launched",
+  "level_1_launched": "2026-08-02",
+  "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
+  "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
+  "blocked": {
+    "what": "git commit denied twice. #340, #373, #352 are each built, tested and staged INSIDE their worktrees; each branch tip is still 6fd411e5, so nothing downstream can build on them.",
+    "consequence": "Level 2 cannot launch. #374 needs #373 (shares Login.elm); #376 needs #340. Launching either onto the integration branch would put an agent on a base missing the work it depends on.",
+    "options_given_to_owner": [
+      "owner commits each worktree",
+      "owner approves commits for the campaign",
+      "hold all merges to the end and chain worktree bases (stacks uncommitted state — least preferred)"
+    ]
+  },
+  "recurring_finding": "Three of four children independently found a GATE THAT DOES NOT COVER WHAT IT CLAIMS — #373: the sibling forgot-password tests pass the same enumeration mutation, so they cannot detect a leak; #373: MainRequiresAuthTest.allRoutes is hand-maintained and compiler-unchecked while its moduledoc claims the matrix \"cannot silently skip a new constructor\" — which is exactly how the requiresAuth bug got in; #352: the title-search cache path had ZERO coverage because title_search_cache_enabled is false in config/test.exs and nothing overrode it. This is the campaign dominant secondary theme, now at nine instances."
+}
