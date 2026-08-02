@@ -9,8 +9,10 @@ module Page.Login exposing
     , draftWasSaved
     , errorMessage
     , init
+    , isResendDisabled
     , isSessionExpiry
     , isSubmitDisabled
+    , resendTarget
     , update
     , validateDisplayName
     , validateEmail
@@ -59,6 +61,12 @@ type alias Model =
     -- Outcome of a forgot-password request (ForgotPasswordMode). The email
     -- reuses the shared `email` field.
     , forgotState : RemoteData Http.Error ()
+
+    -- Outcome of a resend-confirmation request (Issue #373). Reached from two
+    -- places — the "check your inbox" card and `ResendConfirmationMode` — which
+    -- is precisely why it is ONE field: the reader can only be asking once, and
+    -- a second flag per entry point could disagree about whether they had.
+    , resendState : RemoteData Http.Error ()
     }
 
 
@@ -95,6 +103,11 @@ no second copy to fall out of step with.
     from a real sign-out — and is why the private-session auth bug took so long
     to diagnose. `reason` is the decoder's own account of the failure, carried so
     it can be shown rather than discarded.
+  - `ConfirmationExpired` — Issue #373. They followed a confirmation link that
+    would not confirm. A SIXTH constructor rather than a `linkExpired` boolean,
+    for the reason the type exists at all: a reader cannot simultaneously have
+    had a session expire and a confirmation link expire, and a boolean would let
+    both notices render one under the other again.
 
 -}
 type Arrival
@@ -103,6 +116,7 @@ type Arrival
     | AccountDeleted
     | ForgotPassword
     | StoredSessionUnreadable String
+    | ConfirmationExpired
 
 
 {-| Whether a marketplace listing draft was saved on the way to this arrival
@@ -154,6 +168,7 @@ type Mode
     | RegisterMode
     | RegistrationPending String
     | ForgotPasswordMode
+    | ResendConfirmationMode
 
 
 {-| A failed submission. Login failures are always transport/status errors;
@@ -174,6 +189,8 @@ type Msg
     | FormSubmitted
     | ForgotSubmitted
     | GotForgotResponse (Result Http.Error ())
+    | ResendRequested
+    | GotResendResponse (Result Http.Error ())
     | GotAuthResponse (Result Http.Error AuthResponse)
     | GotRegisterResponse (Result RegisterError ())
 
@@ -214,6 +231,9 @@ init arrival =
             ForgotPassword ->
                 ForgotPasswordMode
 
+            ConfirmationExpired ->
+                ResendConfirmationMode
+
             _ ->
                 LoginMode
     , submitState = NotAsked
@@ -223,7 +243,46 @@ init arrival =
     , displayNameValidation = Pristine
     , arrival = arrival
     , forgotState = NotAsked
+    , resendState = NotAsked
     }
+
+
+{-| The address a resend is about (Issue #373).
+
+⛔ Read from the card the reader is actually looking at, not from
+`model.email` unconditionally. The "check your inbox" card NAMES an address in
+its own copy — that address is carried in `RegistrationPending`'s payload — and
+a "send it again" button underneath a sentence naming an address must send to
+THAT address or it is lying. Everywhere else there is no such claim on screen,
+so the typed field is the only candidate.
+
+One function, so the button and the request can never target different things.
+
+-}
+resendTarget : Model -> String
+resendTarget model =
+    case model.mode of
+        RegistrationPending email ->
+            String.trim email
+
+        _ ->
+            String.trim model.email
+
+
+{-| Whether asking (again) would be a mistake — the one rule behind both the
+disabled attribute and the guard in `update`, so a button that looks pressable
+cannot fire and a button that fires cannot look inert.
+
+Covers the double-send the epic calls out: once a request is in flight, or has
+succeeded, pressing again sends nothing. A FAILED attempt stays pressable, since
+retrying is exactly what the reader should do.
+
+-}
+isResendDisabled : Model -> Bool
+isResendDisabled model =
+    String.isEmpty (resendTarget model)
+        || (model.resendState == Loading)
+        || (model.resendState == Success ())
 
 
 validateEmail : String -> FieldValidation
@@ -319,6 +378,14 @@ update msg model =
                 -- cleared unevenly.
                 , arrival = Fresh
                 , forgotState = NotAsked
+
+                -- Cleared alongside `forgotState` for the same reason: a
+                -- succeeded resend leaves the button disabled and its
+                -- acknowledgement on screen, and carrying either across a
+                -- deliberate mode switch would show the reader a notice about a
+                -- request they have already moved on from — and refuse them a
+                -- second one they may now actually want.
+                , resendState = NotAsked
               }
             , Cmd.none
             , NoOut
@@ -342,6 +409,29 @@ update msg model =
                 Err err ->
                     ( { model | forgotState = Failure err }, Cmd.none, NoOut )
 
+        ResendRequested ->
+            -- Same predicate the button's `disabled` reads. `disabled` is a
+            -- hint, not an enforcement — a keyboard, a screen reader or a
+            -- double-click landing on the same frame can all deliver this
+            -- message anyway — so the rule is applied here too, from one
+            -- definition rather than two that could drift.
+            if isResendDisabled model then
+                ( model, Cmd.none, NoOut )
+
+            else
+                ( { model | resendState = Loading }
+                , Api.resendConfirmation (resendTarget model) GotResendResponse
+                , NoOut
+                )
+
+        GotResendResponse result ->
+            case result of
+                Ok () ->
+                    ( { model | resendState = Success () }, Cmd.none, NoOut )
+
+                Err err ->
+                    ( { model | resendState = Failure err }, Cmd.none, NoOut )
+
         FormSubmitted ->
             let
                 cmd =
@@ -363,6 +453,11 @@ update msg model =
                             Cmd.none
 
                         ForgotPasswordMode ->
+                            Cmd.none
+
+                        ResendConfirmationMode ->
+                            -- Its button sends ResendRequested, never
+                            -- FormSubmitted — there are no credentials here.
                             Cmd.none
             in
             ( { model | submitState = Loading, arrival = Fresh }, cmd, NoOut )
@@ -421,7 +516,7 @@ viewLoginCard : Model -> Html Msg
 viewLoginCard model =
     case model.mode of
         RegistrationPending email ->
-            viewPendingCard email
+            viewPendingCard model email
 
         _ ->
             viewFormCard model
@@ -429,9 +524,15 @@ viewLoginCard model =
 
 {-| The "check your inbox" card shown after a successful registration.
 No JWT is stored and no navigation occurs — the user must confirm via email.
+
+Carries the resend affordance (Issue #373, US-14.4.2). This is the moment the
+reader is most likely to need it — the email either arrives in the next minute or
+it does not — and until now the card was a dead end: the only route out was to
+register again with an address that was already taken.
+
 -}
-viewPendingCard : String -> Html Msg
-viewPendingCard email =
+viewPendingCard : Model -> String -> Html Msg
+viewPendingCard model email =
     div [ class "login-card login-card--pending", testId "registration-pending" ]
         [ h1 [ class "login-card__title" ] [ text "Check your inbox!" ]
         , p [ class "login-card__subtitle" ]
@@ -441,12 +542,111 @@ viewPendingCard email =
                     ++ ". Click the link in the email to confirm your address and activate your account."
                 )
             ]
+        , p [ class "login-card__subtitle" ]
+            [ text "Nothing there? Check your spam folder, or we can send it again." ]
+        , button
+            [ class "login-card__submit"
+            , type_ "button"
+            , testId "resend-confirmation"
+            , onClick ResendRequested
+            , disabled (isResendDisabled model)
+            ]
+            [ case model.resendState of
+                Loading ->
+                    span [ class "spinner spinner--small" ] []
+
+                _ ->
+                    text "Send it again"
+            ]
+        , viewResendOutcome model
         , button
             [ class "login-card__back"
             , testId "back-to-sign-in"
             , onClick (ModeSwitched LoginMode)
             ]
             [ text "Back to Sign In" ]
+        ]
+
+
+{-| What became of the resend request. A `notice` for the same reason the
+forgot-password acknowledgement is one: the reader's inbox is elsewhere, the
+server deliberately says the same thing to everyone, and so this sentence is the
+entire evidence that anything happened. `notice` stamps `role="status"`, so a
+screen-reader user is told too.
+
+The success copy is hedged exactly as the endpoint is. Saying "sent!" would
+promise something the response does not contain — for an address that is already
+confirmed, or has no account, nothing was sent at all — and the SPA must not
+invent the certainty the API refused to give.
+
+-}
+viewResendOutcome : Model -> Html Msg
+viewResendOutcome model =
+    case model.resendState of
+        Success _ ->
+            notice
+                [ class "login-card__notice", testId "resend-success" ]
+                "If that address is waiting to be confirmed, a fresh link is on its way. It replaces any earlier one."
+
+        Failure _ ->
+            notice
+                [ class "login-card__error", testId "resend-error" ]
+                "We couldn't ask for a new link just now. Please try again in a moment."
+
+        _ ->
+            text ""
+
+
+{-| The standalone "send me a new link" form (Issue #373).
+
+Reached by `/resend-confirmation`, which is where a dead confirmation link now
+points. A mode of the login card rather than a page of its own, exactly like
+`viewForgotForm` — same scene, same card, and the reader keeps the sign-in tab
+one click away in case the account turned out to be confirmed already.
+
+-}
+viewResendForm : Model -> Html Msg
+viewResendForm model =
+    div [ class "login-card__forgot-form" ]
+        [ p [ class "login-card__subtitle" ]
+            [ text "That link has expired or has already been used. Enter your email and we'll send a fresh one." ]
+        , div [ class (fieldClass model.emailValidation) ]
+            [ label [ class "login-card__label", for "email" ] [ text "Email" ]
+            , input
+                [ id "email"
+                , class "login-card__input"
+                , testId "resend-email"
+                , type_ "email"
+                , placeholder "you@example.com"
+                , value model.email
+                , onInput EmailChanged
+                , attribute "aria-required" "true"
+                ]
+                []
+            , viewFieldHint model.emailValidation
+            ]
+        , button
+            [ class "login-card__submit"
+            , type_ "button"
+            , testId "resend-confirmation"
+            , onClick ResendRequested
+            , disabled (isResendDisabled model)
+            ]
+            [ case model.resendState of
+                Loading ->
+                    span [ class "spinner spinner--small" ] []
+
+                _ ->
+                    text "Send a new link"
+            ]
+        , viewResendOutcome model
+        , button
+            [ class "login-card__back"
+            , type_ "button"
+            , testId "resend-back"
+            , onClick (ModeSwitched LoginMode)
+            ]
+            [ text "Back to sign in" ]
         ]
 
 
@@ -459,6 +659,9 @@ viewFormCard model =
             :: (case model.mode of
                     ForgotPasswordMode ->
                         [ viewForgotForm model ]
+
+                    ResendConfirmationMode ->
+                        [ viewResendForm model ]
 
                     _ ->
                         viewCredentialsForm model
@@ -474,6 +677,9 @@ cardSubtitle mode =
 
         ForgotPasswordMode ->
             "Reset your password"
+
+        ResendConfirmationMode ->
+            "Confirm your email address"
 
         _ ->
             "Present your credentials to enter"
@@ -830,6 +1036,13 @@ viewArrivalNotice model =
                 text ""
 
             ForgotPassword ->
+                text ""
+
+            ConfirmationExpired ->
+                -- No notice, for the same reason ForgotPassword raises none: the
+                -- mode this arrival opens explains itself in its own first line.
+                -- A notice here would say the same thing twice, one above the
+                -- other.
                 text ""
 
             SessionExpired details ->

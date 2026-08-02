@@ -8,6 +8,7 @@ module TestHelpers exposing
     , libraryProgram
     , loginEffects
     , loginProgram
+    , loginProgramFrom
     , namedPlacement
     , placementWithPages
     , profileShelfProgram
@@ -1926,6 +1927,36 @@ loginEffects msg model =
                 Login.ForgotPasswordMode ->
                     SimulatedEffect.Cmd.none
 
+                Login.ResendConfirmationMode ->
+                    SimulatedEffect.Cmd.none
+
+        Login.ResendRequested ->
+            -- Mirrors `Api.resendConfirmation` (#373), INCLUDING both things the
+            -- real branch decides. `Login.resendTarget` and
+            -- `Login.isResendDisabled` are called rather than re-derived: a
+            -- simulation that read `model.email` would leave the "check your
+            -- inbox" button untested against the address it must send to, and
+            -- one that skipped the guard would fire a request the real app
+            -- suppresses — which is precisely the double-send this is here to
+            -- prove cannot happen.
+            if Login.isResendDisabled model then
+                SimulatedEffect.Cmd.none
+
+            else
+                SimulatedEffect.Http.request
+                    { method = "POST"
+                    , headers = []
+                    , url = "/api/auth/resend-confirmation"
+                    , body =
+                        SimulatedEffect.Http.jsonBody
+                            (Encode.object
+                                [ ( "email", Encode.string (Login.resendTarget model) ) ]
+                            )
+                    , expect = SimulatedEffect.Http.expectWhatever Login.GotResendResponse
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+
         _ ->
             SimulatedEffect.Cmd.none
 
@@ -1934,8 +1965,21 @@ loginEffects msg model =
 -}
 loginProgram : ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginProgram =
+    loginProgramFrom Login.Fresh
+
+
+{-| The same harness, for a reader who arrived for a REASON (#360, #373).
+
+`loginProgram` is this with `Fresh`. Deep-linked arrivals — `/forgot-password`,
+`/resend-confirmation` — open the card on a mode an ordinary visitor cannot click
+their way to, so driving those journeys means starting the program the way `Main`
+starts it, from the arrival.
+
+-}
+loginProgramFrom : Login.Arrival -> ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
+loginProgramFrom arrival =
     ProgramTest.createElement
-        { init = \() -> ( Login.init Login.Fresh, SimulatedEffect.Cmd.none )
+        { init = \() -> ( Login.init arrival, SimulatedEffect.Cmd.none )
         , update =
             \msg model ->
                 let

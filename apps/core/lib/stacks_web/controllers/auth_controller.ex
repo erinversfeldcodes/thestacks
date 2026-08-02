@@ -206,6 +206,48 @@ defmodule StacksWeb.AuthController do
     |> json(%{error: "email is required"})
   end
 
+  @doc """
+  POST /api/auth/resend-confirmation — issue a fresh confirmation link (US-14.4.2).
+
+  ⛔ This action must be a mirror: the reply may not depend on the email at all.
+
+  An unconfirmed address, an already-confirmed address, an unconfirmed address
+  past the resend cap, and an address with no account behind it all get the SAME
+  status, the SAME body and the SAME headers. That is not politeness — it is the
+  whole security property of the endpoint. An unauthenticated caller can post any
+  address here, so any observable difference turns this into an account-existence
+  oracle over the entire user base, and "does this person have an account on The
+  Stacks" is precisely the fact a reader with an `owner`-visibility profile is
+  trusting us not to publish.
+
+  Which is why `Email.send_confirmation_resend/1` returns a bare `:ok` and this
+  function does not case on it. There is no branch here to get wrong later,
+  because there is nothing to branch on: the response is a literal.
+
+  The 422 for a missing `email` key is not a leak — it is decided by the SHAPE of
+  the request, before any lookup, and answers identically for every address.
+
+  Abuse is bounded by the `:auth` rate-limit bucket, which is keyed per-IP in the
+  plug and consumed BEFORE this action runs, so a caller is throttled at exactly
+  the same rate whether they are guessing addresses or retrying their own — the
+  limiter cannot become the oracle the body refuses to be. Mail volume is bounded
+  separately by `Stacks.Email`'s per-user hourly cap, which lives behind the
+  uniform response and is therefore invisible from outside.
+  """
+  def resend_confirmation(conn, %{"email" => email}) do
+    Email.send_confirmation_resend(email)
+
+    json(conn, %{
+      message: "If that address needs confirming, a fresh link is on its way"
+    })
+  end
+
+  def resend_confirmation(conn, _params) do
+    conn
+    |> put_status(422)
+    |> json(%{error: "email is required"})
+  end
+
   @doc "POST /api/auth/reset-password — reset password using a signed token."
   def reset_password(conn, %{"token" => token, "password" => password}) do
     case Email.reset_password(token, password) do

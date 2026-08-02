@@ -67,18 +67,51 @@ defmodule Stacks.Email do
   """
   @spec confirm_email(String.t()) :: {:ok, User.t()} | {:error, :invalid}
   def confirm_email(token) do
-    # 24h link lifetime — kept in lock-step with the expired-unverified reaper
-    # (single source of truth in Accounts).
-    max_age = Accounts.unverified_account_ttl_seconds()
-
-    case Phoenix.Token.verify(CoreWeb.Endpoint, "email_confirm", token, max_age: max_age) do
+    # Salt and 24h lifetime live in Accounts — the same call the reaper asks
+    # before erasing the account behind a link, so a link this accepts is never
+    # one the reaper has already reaped out from under the reader.
+    case Accounts.verify_confirmation_token(token) do
       {:ok, user_id} ->
         user = Repo.get_by(User, id: user_id, email_confirmation_token: token)
         do_confirm_email(user)
 
-      {:error, _reason} ->
+      :error ->
         {:error, :invalid}
     end
+  end
+
+  @doc """
+  Issues a FRESH confirmation link for `email` and enqueues the confirmation
+  email. Always returns `:ok` — see `StacksWeb.AuthController.resend_confirmation/2`
+  for why the caller may learn nothing from it.
+
+  Four cases, one return value:
+
+    * no account with that email — nothing happens
+    * the account is already confirmed — nothing happens (there is no link to
+      send; the reader can simply sign in)
+    * the account is unconfirmed but past
+      `Accounts.unverified_account_max_lifetime_seconds/0` — nothing happens; see
+      `Accounts.confirmation_resendable?/1` for why the renewal has a ceiling
+    * the account is unconfirmed and within the cap — a new token is signed,
+      stored, and delivered
+
+  Re-signing (rather than re-sending the stored token) is deliberate and is what
+  makes the affordance safe to offer: the new token carries a new `signed_at`, so
+  the link is good for another `Accounts.unverified_account_ttl_seconds/0` AND —
+  because `Accounts.expired_unverified_ids/1` keys the reaper off exactly that
+  token — the account behind it survives just as long. Asking for a new email is
+  the reader's signal that the signup was not abandoned, and it is honoured by
+  both clocks at once because there is only one. The previous link stops working,
+  which is the ordinary and safer behaviour for a re-issued credential.
+  """
+  @spec send_confirmation_resend(String.t()) :: :ok
+  def send_confirmation_resend(email) do
+    email
+    |> Accounts.get_user_by_email()
+    |> do_send_confirmation_resend()
+
+    :ok
   end
 
   @doc """
@@ -123,6 +156,49 @@ defmodule Stacks.Email do
 
         EmailDeliveryJob.new(%{
           "template" => "password_reset",
+          "user_id" => user.id,
+          "params" => %{"token" => token}
+        })
+        |> Oban.insert!()
+      end)
+    end
+
+    :ok
+  end
+
+  defp do_send_confirmation_resend(nil), do: :ok
+
+  defp do_send_confirmation_resend(%User{email_confirmed: true}), do: :ok
+
+  # Past the absolute lifetime cap no further link is issued, so an anonymous
+  # caller cannot renew a stranger's abandoned signup indefinitely. The account
+  # is now within one TTL of the reaper and will be erased; the reader can
+  # register cleanly afterwards.
+  defp do_send_confirmation_resend(%User{} = user) do
+    if Accounts.confirmation_resendable?(user) do
+      issue_confirmation_link(user)
+    end
+
+    :ok
+  end
+
+  defp issue_confirmation_link(%User{} = user) do
+    # Same shape as do_send_password_reset/1: rate limit before any DB write,
+    # then token write + job enqueue atomically, so a failed enqueue never leaves
+    # the reader holding a token no email will ever carry.
+    with :ok <- check_rate_limit(user.id) do
+      token = Accounts.sign_confirmation_token(user.id)
+
+      Repo.transaction(fn ->
+        user
+        |> Accounts.email_confirmation_changeset(%{
+          email_confirmed: false,
+          email_confirmation_token: token
+        })
+        |> Repo.update!()
+
+        EmailDeliveryJob.new(%{
+          "template" => "registration_confirmation",
           "user_id" => user.id,
           "params" => %{"token" => token}
         })

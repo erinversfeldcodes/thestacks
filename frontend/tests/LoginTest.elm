@@ -124,6 +124,7 @@ suite =
                             , displayNameValidation = Pristine
                             , arrival = Login.Fresh
                             , forgotState = NotAsked
+                            , resendState = NotAsked
                             }
 
                         ( model, _, _ ) =

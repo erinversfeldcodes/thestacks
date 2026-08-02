@@ -1,6 +1,7 @@
 defmodule StacksWeb.AuthControllerTest do
   use CoreWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
   import Stacks.Factory
 
   alias Core.Repo
@@ -26,6 +27,33 @@ defmodule StacksWeb.AuthControllerTest do
       )
 
     Enum.zip(cols, row) |> Enum.into(%{})
+  end
+
+  # The complete observable answer to one resend request, recorded at the byte
+  # level (Issue #373).
+  #
+  # ⛔ Deliberately NOT `json_response/2`. Decoding to a map is what makes an
+  # enumeration test unable to see an enumeration leak: `%{"message" => "sent"}`
+  # and `%{"message" => "sent "}` compare equal as far as a `assert %{"message"
+  # => _}` pattern is concerned, key order is discarded though it is plainly
+  # visible on the wire, and the status/headers are never looked at at all. A
+  # caller probing this endpoint sees bytes, so the test compares bytes.
+  #
+  # `x-request-id` is dropped for the only acceptable reason: Plug.RequestId
+  # mints it from a random 128-bit value per request with no reference to the
+  # request's content, so it differs between two *identical* calls and cannot
+  # carry account state. Every other header is compared as-is.
+  defp resend_response(email) do
+    conn = post(build_conn(), "/api/auth/resend-confirmation", %{email: email})
+
+    %{
+      status: conn.status,
+      body: conn.resp_body,
+      headers:
+        conn.resp_headers
+        |> Enum.reject(fn {name, _value} -> name == "x-request-id" end)
+        |> Enum.sort()
+    }
   end
 
   describe "POST /api/auth/register" do
@@ -988,6 +1016,165 @@ defmodule StacksWeb.AuthControllerTest do
       conn = post(conn, "/api/auth/forgot-password", %{})
 
       assert json_response(conn, 422)
+    end
+  end
+
+  describe "POST /api/auth/resend-confirmation" do
+    # ⛔ THE test for this endpoint (Issue #373, US-14.4.2).
+    #
+    # The cases are asserted equal TO EACH OTHER, not each equal to some expected
+    # shape. "Returns 200 for a real email" — which is how the forgot-password
+    # tests directly above are written — cannot fail on a leak: it is satisfied
+    # by an endpoint that answers 200/"sent" for a registered address and
+    # 200/"no such account" for an unregistered one. Only comparing the answers
+    # against one another can see the difference between them.
+    test "no_enumeration: unconfirmed, confirmed, capped and unknown addresses get one identical answer" do
+      insert(:unconfirmed_user, email: "waiting@example.com")
+      insert(:user, email: "already-in@example.com", email_confirmed: true)
+
+      # The fourth case, and the one where the server does LEAST work: an
+      # unconfirmed account past the resend cap, for which no link is issued at
+      # all. It must still be indistinguishable from the other three.
+      too_old = insert(:unconfirmed_user, email: "long-abandoned@example.com")
+
+      {1, _} =
+        Repo.update_all(from(u in Accounts.User, where: u.id == ^too_old.id),
+          set: [
+            created_at:
+              DateTime.add(
+                DateTime.utc_now(),
+                -(Accounts.unverified_account_max_lifetime_seconds() + 60),
+                :second
+              )
+          ]
+        )
+
+      unconfirmed = resend_response("waiting@example.com")
+      confirmed = resend_response("already-in@example.com")
+      unknown = resend_response("nobody-at-all@example.com")
+      capped = resend_response("long-abandoned@example.com")
+
+      assert unconfirmed == confirmed,
+             """
+             An unconfirmed address and a confirmed address answered differently.
+             unconfirmed: #{inspect(unconfirmed)}
+             confirmed:   #{inspect(confirmed)}
+             """
+
+      assert confirmed == unknown,
+             """
+             A real address and an address with no account answered differently.
+             confirmed: #{inspect(confirmed)}
+             unknown:   #{inspect(unknown)}
+             """
+
+      assert unknown == capped,
+             """
+             An account past the resend cap answered differently from an unknown address.
+             unknown: #{inspect(unknown)}
+             capped:  #{inspect(capped)}
+             """
+
+      # Pins the shared answer, so the four cannot converge by all becoming a
+      # 500 (or all becoming nothing) and still pass the equalities above — and
+      # proves the headers arm of the comparison is carrying real content rather
+      # than comparing two empty lists.
+      assert unconfirmed.status == 200
+      assert unconfirmed.body =~ "fresh link"
+
+      assert {"content-type", "application/json; charset=utf-8"} in unconfirmed.headers
+    end
+
+    # The positive control for the equality test. Without it, an endpoint that
+    # ignored its input entirely — and sent nobody anything — would satisfy
+    # no_enumeration perfectly.
+    test "an unconfirmed account is issued a NEW link, and the old one stops working" do
+      user = insert(:unconfirmed_user, email: "waiting@example.com")
+      old_token = user.email_confirmation_token
+      assert Accounts.confirmation_link_live?(old_token), "fixture must start with a live link"
+
+      assert %{status: 200} = resend_response("waiting@example.com")
+
+      new_token = Repo.reload!(user).email_confirmation_token
+      refute new_token == old_token, "resend must re-sign, not re-send the same token"
+
+      assert [%Oban.Job{args: %{"template" => "registration_confirmation"} = args}] =
+               Repo.all(Oban.Job)
+
+      assert args["params"]["token"] == new_token,
+             "the email must carry the token that was just stored"
+
+      # The reissued link works and the superseded one does not — a re-issued
+      # credential retires its predecessor.
+      assert {:error, :invalid} = Stacks.Email.confirm_email(old_token)
+      assert {:ok, confirmed} = Stacks.Email.confirm_email(new_token)
+      assert confirmed.email_confirmed
+    end
+
+    test "an already-confirmed account is sent nothing, and stays confirmed" do
+      user = insert(:user, email: "already-in@example.com", email_confirmed: true)
+
+      assert %{status: 200} = resend_response("already-in@example.com")
+
+      assert Repo.all(Oban.Job) == [], "a confirmed reader has no link to be sent"
+      assert Repo.reload!(user).email_confirmed, "a resend must never un-confirm an account"
+    end
+
+    test "an unknown address is sent nothing" do
+      assert %{status: 200} = resend_response("nobody-at-all@example.com")
+      assert Repo.all(Oban.Job) == []
+    end
+
+    # Shape, not existence — answers the same for every address, so it is not a
+    # leak. Mirrors forgot-password.
+    test "returns 422 when the email param is missing", %{conn: conn} do
+      conn = post(conn, "/api/auth/resend-confirmation", %{})
+
+      assert json_response(conn, 422)
+    end
+
+    # ⛔ The second half of no-enumeration. A body that refuses to answer the
+    # question is worthless if the *limiter* answers it — "you were throttled on
+    # request 4 instead of request 9" is the same fact, told by timing instead of
+    # by text. The `:auth` bucket is keyed per-IP and consumed in the plug before
+    # the action runs, so this must hold by construction; the test is what keeps
+    # a later "cheaper limit for addresses we don't recognise" from being added.
+    test "rate limiting is not an oracle: a real and an unknown address are throttled identically" do
+      insert(:unconfirmed_user, email: "waiting@example.com")
+
+      original = Application.get_env(:core, :rate_limiting_enabled)
+      original_limit = Application.get_env(:core, :rate_limit_auth)
+      Application.put_env(:core, :rate_limiting_enabled, true)
+      Application.put_env(:core, :rate_limit_auth, 5)
+
+      on_exit(fn ->
+        Application.put_env(:core, :rate_limiting_enabled, original)
+
+        if original_limit,
+          do: Application.put_env(:core, :rate_limit_auth, original_limit),
+          else: Application.delete_env(:core, :rate_limit_auth)
+
+        :ets.delete_all_objects(:rate_limiter)
+      end)
+
+      statuses = fn email ->
+        :ets.delete_all_objects(:rate_limiter)
+        Enum.map(1..8, fn _ -> resend_response(email).status end)
+      end
+
+      real = statuses.("waiting@example.com")
+      unknown = statuses.("nobody-at-all@example.com")
+
+      assert real == unknown,
+             """
+             The limiter throttled a real address on a different request than an unknown one.
+             real:    #{inspect(real)}
+             unknown: #{inspect(unknown)}
+             """
+
+      # Positive control: the limiter is actually engaged, so `real == unknown`
+      # is not the trivial truth of two all-200 lists.
+      assert 429 in real, "expected the :auth bucket to reject once the limit was passed"
     end
   end
 

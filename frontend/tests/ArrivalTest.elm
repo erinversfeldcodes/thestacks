@@ -67,6 +67,7 @@ suite =
             , unreadableTellsTheReader
             , unreadableCarriesTheReason
             , forgotOpensTheResetForm
+            , confirmationExpiredOpensTheResendForm
             ]
         , describe "an arrival is spent, never accumulated"
             [ modeSwitchSpendsTheArrival
@@ -212,6 +213,21 @@ forgotOpensTheResetForm =
                 (cardFor Login.ForgotPassword)
 
 
+{-| The sixth arrival (#373), held to the same rule as the other five: it opens
+its own mode and raises none of the other notices.
+-}
+confirmationExpiredOpensTheResendForm : Test
+confirmationExpiredOpensTheResendForm =
+    test "confirmation_expired_opens_the_resend_form: a dead confirmation link opens the card on its resend mode" <|
+        \() ->
+            Expect.all
+                [ \card -> Query.has [ Selector.attribute (Html.Attributes.attribute "data-testid" "resend-email") ] card
+                , \card -> Query.hasNot [ Selector.text expiryCopy ] card
+                , \card -> Query.hasNot [ Selector.text farewellCopy ] card
+                ]
+                (cardFor Login.ConfirmationExpired)
+
+
 
 -- SPENDING THE ARRIVAL
 
@@ -337,11 +353,12 @@ draftFlagIsOnlyMeaningfulForAnExpiry =
             , Login.AccountDeleted
             , Login.ForgotPassword
             , Login.StoredSessionUnreadable "boom"
+            , Login.ConfirmationExpired
             , Login.SessionExpired { draftSaved = False }
             , Login.SessionExpired { draftSaved = True }
             ]
                 |> List.map Login.draftWasSaved
-                |> Expect.equalLists [ False, False, False, False, False, True ]
+                |> Expect.equalLists [ False, False, False, False, False, False, True ]
 
 
 
@@ -368,11 +385,12 @@ onlyAnExpiryIsAnExpiry =
             , Login.AccountDeleted
             , Login.ForgotPassword
             , Login.StoredSessionUnreadable "boom"
+            , Login.ConfirmationExpired
             , Login.SessionExpired { draftSaved = False }
             , Login.SessionExpired { draftSaved = True }
             ]
                 |> List.map Login.isSessionExpiry
-                |> Expect.equalLists [ False, False, False, False, True, True ]
+                |> Expect.equalLists [ False, False, False, False, False, True, True ]
 
 
 {-| The seam, joined: the arrival `Main.forceSessionExpiry` raises, fed through
@@ -406,6 +424,7 @@ everyOtherArrivalLeavesTheCaptureAlone =
             , Login.AccountDeleted
             , Login.ForgotPassword
             , Login.StoredSessionUnreadable "boom"
+            , Login.ConfirmationExpired
             ]
                 |> List.map
                     (\arrival ->
@@ -416,4 +435,4 @@ everyOtherArrivalLeavesTheCaptureAlone =
                             , auth = Nothing
                             }
                     )
-                |> Expect.equalLists [ Nothing, Nothing, Nothing, Nothing ]
+                |> Expect.equalLists [ Nothing, Nothing, Nothing, Nothing, Nothing ]
