@@ -297,7 +297,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Vision call latency p50 / p95 / p99",
-      "description": "WHAT: wall-clock time for ONE Modal vision HTTP call (classify / extract / analyze / associate), at the 50th, 95th and 99th percentile. HOW: histogram_quantile over the rate of stacks_vision_request_stop_duration_milliseconds_bucket, emitted by Stacks.AI.Client on every call that got an HTTP response — success or not. MEANS: the value is milliseconds per call, and an upload makes up to two of these back to back, so the upload's own latency floor is roughly twice p50; the long-standing '~3–8s per upload' figure was an estimate in a comment and this panel is what checks it. WATCH: a p99 climbing toward the 210s bucket edge means calls are approaching the client's own give-up deadline and will start converting into timeouts (retried, so slow becomes slow three times) — size the timeout from this panel, not from a guess; a p50 that jumps while p99 is flat is a cold-start / GPU-contention shift on the Modal side, and both quantiles rising together with the upload-terminal timeout count is the vision backend degrading.",
+      "description": "WHAT: wall-clock time for ONE Modal vision HTTP call (classify / extract / analyze / associate), at the 50th, 95th and 99th percentile. HOW: histogram_quantile over the rate of stacks_vision_request_stop_duration_milliseconds_bucket, emitted by Stacks.AI.Client on every call that got an HTTP response — success or not. MEANS: the value is milliseconds per call, and an upload makes up to two of these back to back, so the upload's own latency floor is roughly twice p50; the long-standing '~3–8s per upload' figure was an estimate in a comment, and the first real measurement (#349) put p50 at 8.4s with warm calls under 30s and cold starts under 60s. READ IT WITH THE PANEL BESIDE IT: these quantiles only count calls that got a response, so a call that hits the client's 330s deadline is absent from this panel entirely and appears only as a vision give-up. WATCH: p99 climbing past the 60s (cold-start) edge means something other than a cold start is slow — most likely uploads queuing on a single A10G, the term Modal's own 300s timeout was sized for; a p50 that jumps while p99 is flat is a container-warmth shift, and both quantiles rising together with the upload-terminal timeout count is the vision backend degrading.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
       "fieldConfig": {
@@ -326,6 +326,30 @@
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(stacks_vision_request_stop_duration_milliseconds_bucket{app=\"$app\"}[$__rate_interval])))",
           "legendFormat": "vision p99"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Vision give-ups by failure class",
+      "description": "WHAT: rate of Modal vision calls that produced no HTTP response at all, split by the bounded reason the socket layer gave. HOW: rate() over stacks_vision_request_exception_count_total, emitted by Stacks.AI.Client whenever Finch returns an error instead of a response. MEANS: these calls are INVISIBLE on the latency panel beside this one — a call that never answers emits no duration — so this is the only place the client's own deadline shows up, and the GPU work behind a give-up keeps running and keeps billing while nobody reads the result. WATCH: reason_class=timeout going non-zero is the important one: the client waits 330s and Modal's own function timeout is 300s, so a timeout here means Modal exceeded its own deadline and the derived Stacks.AI.Client.receive_timeout_ms/0 needs revisiting (Issue #350) — note these are classified transient and therefore RETRIED, so each one costs three cold starts on a contended GPU. reason_class=pool_timeout is the opposite problem and is local: Finch ran out of connections and never reached Modal. unreachable/closed point at the sidecar being down or redeploying — cross-check the fuse-state panel for a blown vision breaker.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (reason_class) (rate(stacks_vision_request_exception_count_total{app=\"$app\"}[$__rate_interval]))",
+          "legendFormat": "{{reason_class}}"
         }
       ]
     }

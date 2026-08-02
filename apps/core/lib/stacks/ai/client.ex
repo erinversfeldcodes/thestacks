@@ -60,17 +60,106 @@ defmodule Stacks.AI.Client do
   @fuse_name :vision_fuse
   @default_modal_cost_per_call_cents 1
 
-  # 210s gives the Modal service headroom beyond its own 300s inference timeout.
-  @receive_timeout_ms 210_000
+  # ── The one deadline both sides are sized from ────────────────────────────
+  #
+  # Modal owns it. `apps/vision/modal_app.py` sets `timeout=300` on the
+  # `@app.cls` serving every endpoint reached from here, and justifies it there
+  # from the A10G's own cost structure: cold start ~60s, plus queue wait up to
+  # ~120s when concurrent jobs serialise on a single GPU, plus inference ~60s.
+  #
+  # This constant is a MIRROR of that number, not a second opinion about it.
+  # `Stacks.AI.VisionTimeoutTest` reads the decorator out of `modal_app.py` and
+  # fails when the two stop agreeing, so the mirror is checked rather than
+  # asserted in a comment — which is how the previous inversion survived.
+  @modal_function_timeout_ms 300_000
+
+  # Time for a response to make it back AFTER Modal's own deadline has fired.
+  #
+  # Modal's 300s bounds the handler's execution, not the HTTP round trip: once
+  # the function times out, the platform still has to serialise an error and
+  # return it through its proxy, on top of TLS setup and transit. 30s is 10% of
+  # the server budget and more than three times the whole-call p50 measured in
+  # #349 (8.4s), so a slow error response cannot re-invert the relationship.
+  # Deliberately coarse — a slack of a few seconds would leave us one unlucky
+  # round trip from the bug this constant exists to prevent.
+  @transport_slack_ms 30_000
+
+  @receive_timeout_ms @modal_function_timeout_ms + @transport_slack_ms
+
+  @doc """
+  Modal's own per-call deadline, in milliseconds — mirrored from
+  `apps/vision/modal_app.py`'s `@app.cls(timeout: …)`.
+
+  Exposed so the invariant `receive_timeout_ms() >= modal_function_timeout_ms()`
+  is a statement about two named quantities that a test can make, rather than
+  about two literals in different languages that a reader has to compare by eye.
+  """
+  @spec modal_function_timeout_ms() :: pos_integer()
+  def modal_function_timeout_ms, do: @modal_function_timeout_ms
 
   @doc """
   The ceiling on a single vision HTTP call, in milliseconds.
 
-  Exposed because two other modules need to bound themselves by it and had each
-  written `210_000` in a comment saying "same as the client": `Stacks.Moderation`
-  bounds its per-candidate tasks, and `Stacks.Workers.IdentifyBookJob` bounds a
-  whole attempt (and derives the reader's SSE deadline from that bound). Three
-  copies of a number that must agree is three chances for it to stop agreeing.
+  ## Why this is derived from the server's deadline, not from a percentile
+
+  Until Issue #350 this was `210_000`, under a comment claiming it "gives the
+  Modal service headroom beyond its own 300s inference timeout". 210 is less
+  than 300: it gave the service *less* time, and the client hung up on calls
+  Modal was still working on. The consequences compound rather than cancel — the
+  GPU work continues and is billed, `Stacks.AI.VisionError.from_transport/1`
+  classifies the give-up `:transient` (correctly; a lost answer says nothing
+  about the image), so `Stacks.Workers.IdentifyBookJob` retries, and the retry
+  queues a fresh cold start behind the same contended GPU. The inversion turned
+  "slow" into "slow, three times, at triple the cost" — under exactly the load
+  Modal's 300s was sized for.
+
+  So this is not a latency budget. There is nothing useful this client can do by
+  giving up while the server is still working, and only two worlds when the
+  timer fires:
+
+    * **before Modal's deadline** — an answer may still be coming. Abandoning it
+      buys nothing and costs a retry.
+    * **after Modal's deadline** — Modal has already given up, so no answer is
+      coming and the socket is genuinely dead. Retrying is right.
+
+  Only the second is worth acting on, which makes this a *transport liveness
+  backstop* — `modal_function_timeout_ms/0` plus slack — and not a quantile of
+  the latency distribution.
+
+  ## What #349's measurement did and did not settle
+
+  The first real distribution (n=36, one preview, ~7 minutes) put p50 at 8.4s,
+  warm calls entirely under 30s and cold starts under 60s: an order of magnitude
+  inside either timeout. It is tempting to read that as "both numbers are far
+  too large" and cut them. Two reasons not to:
+
+    * **every one of those samples is a call that finished.** A call that reaches
+      this deadline emits `[:stacks, :vision, :request, :exception]`, never
+      `:stop`, so it contributes no duration at all. That histogram is
+      conditional on having received a response and structurally cannot show
+      this tail — which is why the exception path is now *counted*, by
+      `reason_class/1` below.
+    * **the term that dominates Modal's budget was never exercised.** Most of its
+      300s is queue wait, up to ~120s when concurrent uploads serialise on one
+      A10G. 36 calls over 7 minutes against `max_containers: 10` never queued.
+      Cutting a timeout on evidence that is silent about the condition it was
+      sized for is removing a margin nobody measured.
+
+  Raise the client to meet the server; leave the server's own number to a
+  measurement that actually loads it.
+
+  ## Who else is bound by this
+
+  Two modules bind themselves by this function rather than restating it, after
+  each had written `210_000` into a comment saying "same as the client":
+  `Stacks.Moderation` bounds its per-candidate tasks, and
+  `Stacks.Workers.IdentifyBookJob` bounds a whole attempt and derives the
+  reader's SSE deadline from that bound. Three copies of a number that must
+  agree is three chances for it to stop agreeing — so raising this moves the SSE
+  ceiling with it, from a worst case of ~23 minutes to ~35. That ceiling is far
+  too long for a reader either way, and shortening *this* number is not the fix:
+  it buys a shorter wait by doing more GPU work, three times over. Issue #351
+  decouples the reader's wait from the job's lifetime.
   """
   @spec receive_timeout_ms() :: pos_integer()
   def receive_timeout_ms, do: @receive_timeout_ms
@@ -222,7 +311,7 @@ defmodule Stacks.AI.Client do
         :telemetry.execute(
           [:stacks, :vision, :request, :exception],
           %{duration: duration},
-          %{endpoint: endpoint, kind: :error, reason: reason}
+          %{endpoint: endpoint, kind: :error, reason: reason, reason_class: reason_class(reason)}
         )
 
         error = VisionError.from_transport(reason)
@@ -230,6 +319,51 @@ defmodule Stacks.AI.Client do
         {:error, error}
     end
   end
+
+  @typedoc """
+  The bounded vocabulary for "no answer arrived", so a transport failure can be
+  counted by kind on `[:stacks, :vision, :request, :exception]`.
+  """
+  @type reason_class :: :timeout | :closed | :unreachable | :protocol | :other
+
+  @doc false
+  # A bounded NAME for a transport failure, because the failure itself cannot be
+  # one. `reason` is an open term — a Finch struct wrapping a Mint struct, or
+  # whatever else the socket layer surfaces — and must never reach a metrics
+  # sink; the counter's `:tags` whitelist is what stops it, and this is what
+  # gives the whitelist something worth selecting.
+  #
+  # The distinction that earns its keep is `:timeout` against everything else.
+  # This client only reaches its own deadline once Modal has already blown past
+  # its own (see `receive_timeout_ms/0`), so a non-zero `:timeout` rate is the
+  # single observation that says the deadline is set wrong — and without it
+  # nobody can tell whether raising it to #{@receive_timeout_ms}ms was right,
+  # because a give-up emits no duration and is otherwise invisible.
+  #
+  # Both struct families are matched because Finch wraps Mint's errors
+  # (`Finch.Error.wrap/1`) on the paths we use but not necessarily on every path
+  # a future version might take; matching only the wrapper is how this would
+  # quietly degrade to `:other` after a dependency bump.
+  #
+  # Note there is deliberately no `:pool_timeout` class. Finch's pool checkout
+  # timeout RAISES rather than returning `{:error, reason}`, so it never reaches
+  # this function — a clause for it would be unreachable code claiming to draw a
+  # distinction it cannot draw.
+  @spec reason_class(term()) :: reason_class()
+  def reason_class(%Finch.TransportError{reason: reason}), do: transport_class(reason)
+  def reason_class(%Mint.TransportError{reason: reason}), do: transport_class(reason)
+  def reason_class(%Finch.HTTPError{}), do: :protocol
+  def reason_class(%Mint.HTTPError{}), do: :protocol
+  def reason_class(_other), do: :other
+
+  defp transport_class(:timeout), do: :timeout
+  defp transport_class(:closed), do: :closed
+
+  defp transport_class(reason)
+       when reason in [:econnrefused, :nxdomain, :ehostunreach, :enetunreach, :ehostdown],
+       do: :unreachable
+
+  defp transport_class(_other), do: :other
 
   # A 200 we cannot parse is not a success. It is also not a determination about
   # the image — the service never told us anything — so it is reported as the

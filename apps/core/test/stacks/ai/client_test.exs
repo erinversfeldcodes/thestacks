@@ -190,7 +190,7 @@ defmodule Stacks.AI.ClientTest do
     end
   end
 
-  describe "make_vision_request/2 — BudgetTracker cost recording" do
+  describe "make_vision_request/2 — the real transport path" do
     # The real client path is exercised here (not the mock dispatch) because
     # the cost-recording call site is inside `make_vision_request/2`. We
     # point the client at an unreachable port so Finch returns a transport
@@ -201,7 +201,8 @@ defmodule Stacks.AI.ClientTest do
       original_state = :sys.get_state(BudgetTracker)
 
       # Port 1 has no listener on any sane host; Finch returns a transport
-      # error in milliseconds. Avoids a 210s wait on a real timeout path.
+      # error in milliseconds. Avoids a `receive_timeout_ms/0` wait (330s) on
+      # a real timeout path.
       Application.put_env(:core, :vision_service_url, "http://127.0.0.1:1")
       # Ensure dispatch lands in the real client, not the mock.
       Application.put_env(:core, :vision_client, Stacks.AI.Client)
@@ -238,6 +239,48 @@ defmodule Stacks.AI.ClientTest do
       assert state.daily_total_cents == cost_per_call
       assert state.monthly_total_cents == cost_per_call
       assert state.providers["modal"] == cost_per_call
+    end
+
+    # Issue #350. The give-up counter registered in `Core.PromEx.Plugins.Stacks`
+    # is tagged `[:endpoint, :reason_class]`, and `Telemetry.Metrics` fills a tag
+    # from metadata or not at all. So a counter wired to a key the EMITTER never
+    # sends would still register, still export, and report every failure under a
+    # single empty class forever — a metric that exists and says nothing, which
+    # is the defect class this whole wave is chasing. Drive the real Finch path
+    # and assert the key is on the event as emitted.
+    test "the :exception event carries a bounded reason_class, not just the raw reason" do
+      handler = {__MODULE__, :exception_metadata, self()}
+
+      :telemetry.attach(
+        handler,
+        [:stacks, :vision, :request, :exception],
+        fn _event, measurements, metadata, pid ->
+          send(pid, {:vision_exception, measurements, metadata})
+        end,
+        self()
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      assert {:error, _} = Client.call_vision("analyze", %{image: "test"})
+
+      assert_receive {:vision_exception, _measurements, metadata}, 5_000
+
+      assert Map.has_key?(metadata, :reason_class),
+             "the :exception emit site must carry :reason_class — the counter tags on it, and " <>
+               "a missing tag exports as an empty label rather than failing. Metadata: " <>
+               inspect(Map.keys(metadata))
+
+      assert metadata.reason_class in [:timeout, :closed, :unreachable, :protocol, :other],
+             "reason_class must stay inside the closed set that makes it safe as a metric " <>
+               "label; got #{inspect(metadata.reason_class)}"
+
+      # A refused connection is the failure this port produces. Asserting the
+      # specific class (rather than "some atom") proves the classifier ran on
+      # the real term Finch returned, not that a constant was passed through.
+      assert metadata.reason_class == :unreachable,
+             "port 1 refuses, so Finch surfaces econnrefused and the classifier should say " <>
+               ":unreachable; got #{inspect(metadata.reason_class)} from #{inspect(metadata.reason)}"
     end
   end
 end

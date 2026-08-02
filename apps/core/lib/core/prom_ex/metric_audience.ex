@@ -93,7 +93,12 @@ defmodule Core.PromEx.MetricAudience do
     # Issue #349 — vision call latency. Aggregate wall-time keyed only on the
     # fixed endpoint set and the HTTP status; nothing about the uploaded image
     # or its uploader is in the label set, so it is not de-anonymisable.
-    "stacks_vision_request_stop_duration_milliseconds" => :public
+    "stacks_vision_request_stop_duration_milliseconds" => :public,
+    # Issue #350 — vision calls that produced no response. Keyed on the same
+    # fixed endpoint set plus `Stacks.AI.Client.reason_class/1`, a closed set of
+    # five atoms naming the socket failure; the open `reason` term the event
+    # also carries is not a tag and never reaches the sink.
+    "stacks_vision_request_exception_count_total" => :public
   }
 
   @type audience :: :public | :own | :break_glass
