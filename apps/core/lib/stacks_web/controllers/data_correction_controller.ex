@@ -8,13 +8,28 @@ defmodule StacksWeb.DataCorrectionController do
   the owner can actually reach on a running stack, where there is no shell and
   no `mix`.
 
-  It is deliberately two verbs and no more:
+  It is deliberately three verbs and no more:
 
     * `index` shows every registered correction with its scope, its
       reversibility, and — the point of the whole thing — the rows it *would*
       change right now. It writes nothing. Dry-run is not a mode you opt into
       here; it is what a GET means.
     * `apply` runs one named correction, and requires a `reason`.
+    * `target` runs one named *targeted* correction (#376) against the rows the
+      operator names, and requires a `reason` too. It is a POST even to dry-run,
+      because a correction that takes an argument has nothing to say without a
+      body — so unlike `index`, dry-run here is `apply: false`, which is also
+      `Stacks.DataCorrection.run_targeted/3`'s default. The blast radius is in
+      the response either way, and seeing it before writing is still the point.
+
+  `target` resolves through `Registry.fetch_targeted/1` and never through
+  `fetch/1`: the two lists take different arguments, and a name that crossed
+  between them would apply something other than what the operator asked for.
+  The argument is cast by the *correction*, not by this controller — a targeted
+  correction declares the keys it accepts, so no request params map reaches a
+  write path. `Stacks.Books.merge_edition/2` keeps its narrow caller-supplied
+  field set for exactly that reason, and the inverse of an operation must not be
+  looser than the operation.
 
   ## What this surface cannot do
 
@@ -77,6 +92,64 @@ defmodule StacksWeb.DataCorrectionController do
       :error ->
         conn |> put_status(404) |> json(%{error: "unknown_correction"})
     end
+  end
+
+  @doc """
+  POST /api/admin/data_corrections/:name/target
+
+  Runs one targeted correction (#376) against the rows named in `argument`.
+  `reason` is required. `apply` defaults to `false` — a dry-run that reports the
+  blast radius and writes nothing.
+  """
+  @spec target(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def target(conn, %{"name" => name} = params) do
+    reason = params |> Map.get("reason", "") |> to_string() |> String.trim()
+    argument_params = params |> Map.get("argument") |> argument_map()
+
+    with {:reason, true} <- {:reason, reason != ""},
+         {:registry, {:ok, correction}} <- {:registry, Registry.fetch_targeted(name)},
+         {:argument, {:ok, argument}} <- {:argument, correction.cast_argument(argument_params)} do
+      run_targeted(conn, correction, argument, reason, params["apply"] == true)
+    else
+      {:reason, false} ->
+        conn |> put_status(422) |> json(%{error: "reason_required"})
+
+      {:registry, :error} ->
+        conn |> put_status(404) |> json(%{error: "unknown_correction"})
+
+      {:argument, {:error, detail}} ->
+        conn |> put_status(422) |> json(%{error: "invalid_argument", detail: inspect(detail)})
+    end
+  end
+
+  defp argument_map(argument) when is_map(argument), do: argument
+  defp argument_map(_), do: %{}
+
+  defp run_targeted(conn, correction, argument, reason, apply?) do
+    correction
+    |> DataCorrection.run_targeted(argument,
+      apply: apply?,
+      invoked_by: "admin api",
+      actor_id: conn.assigns.current_user.id,
+      reason: reason
+    )
+    |> respond(conn, apply?)
+  end
+
+  # A dry-run wrote nothing, so it audits nothing — `:audit_row_count` is what
+  # the admin-audit plug reports, and claiming rows for a GET-shaped read would
+  # make the count meaningless for the writes it exists to track.
+  defp respond({:ok, outcome}, conn, apply?) do
+    conn
+    |> assign(:audit_row_count, if(apply?, do: outcome.count, else: 0))
+    |> json(%{correction: render_outcome(outcome)})
+  end
+
+  defp respond({:error, reason}, conn, _apply?) do
+    conn
+    |> assign(:audit_row_count, 0)
+    |> put_status(422)
+    |> json(%{error: "correction_failed", detail: inspect(reason)})
   end
 
   defp run(conn, correction, reason) do
