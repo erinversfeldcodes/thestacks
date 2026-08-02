@@ -106,9 +106,12 @@ test.describe("Settings — Privacy & Consent", () => {
     await page.getByTestId("analytics-consent-toggle").click();
     await saveBtn.click();
 
-    // Consent.elm:118-121 renders this exact copy on Failure.
+    // #374: the failure copy names its cause. This route mocks a 500, which is
+    // a status the app cannot interpret — so it says so rather than issuing the
+    // one "Could not save preferences. Please try again." it used to give a 422,
+    // a dropped connection and a timeout alike.
     await expect(page.locator(".error")).toContainText(
-      "Could not save preferences. Please try again."
+      "We could not save your consent preferences, and we cannot say why."
     );
   });
 

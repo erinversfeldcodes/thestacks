@@ -168,7 +168,18 @@ suite =
                     { init0 | savingShelf = Failure (Http.BadStatus 500) }
                         |> Privacy.view
                         |> Query.fromHtml
-                        |> Query.has [ Selector.text "Could not save. Please try again." ]
+                        |> Query.has [ Selector.text "and we cannot say why" ]
+            , -- ⛔ #374. The 422 here is the ceiling rule this module documents
+              -- in `shelfOptionExceedsCeiling` — the ONE failure on this form a
+              -- reader can act on — and it was reported with the same six words
+              -- as a dropped connection ("Could not save. Please try again."),
+              -- which for this cause is advice that can never work.
+              test "a 422 names the ceiling rule rather than saying 'try again'" <|
+                \_ ->
+                    { init0 | savingShelf = Failure (Http.BadStatus 422) }
+                        |> Privacy.view
+                        |> Query.fromHtml
+                        |> Query.has [ Selector.text "A shelf cannot be more visible than your profile." ]
             ]
         , describe "search-engine privacy (US-10.4.1, build b)"
             [ test "renders the informational search-engine text" <|

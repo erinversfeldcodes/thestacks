@@ -109,9 +109,17 @@ successCopy =
     "If that address is waiting to be confirmed, a fresh link is on its way. It replaces any earlier one."
 
 
+{-| The copy for a DROPPED CONNECTION specifically (#374).
+
+It used to be one sentence for every failure — including a 429, where "please try
+again in a moment" is the instruction guaranteed to fail. The constant is named
+for the case the tests below actually drive (`Http.NetworkError_`) so that a
+future test simulating a different failure cannot silently reuse it.
+
+-}
 failureCopy : String
 failureCopy =
-    "We couldn't ask for a new link just now. Please try again in a moment."
+    "The library is unreachable. Check your connection, then try again."
 
 
 resendEndpoint : String

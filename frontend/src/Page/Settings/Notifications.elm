@@ -13,6 +13,7 @@ import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.FailureCopy as FailureCopy
 
 
 {-| The preferences hydrate from the server (`GET /api/settings/notifications`)
@@ -179,12 +180,24 @@ viewPreferences prefs =
                 [ text "Loading your preferences…" ]
 
 
+{-| ⛔ The save feedback says WHICH failure (Issue #374).
+
+"Could not save notification preferences. Please try again." was shown for a
+422 the reader cannot fix by repeating it, a dropped connection they can fix but
+not here, and a timeout after which the change may well have been saved — the
+one case where trying again is actively the wrong advice, because it invites a
+second write to settle a question a reload answers.
+
+The 401 leg is not here and must not be added: `Api.Authed` routes an expired
+session to `SessionExpired` before this state can be reached (#361).
+
+-}
 viewSaveFeedback : RemoteData Http.Error () -> Html Msg
 viewSaveFeedback saving =
     case saving of
-        Failure _ ->
+        Failure err ->
             p [ class "error" ]
-                [ text "Could not save notification preferences. Please try again." ]
+                [ text (FailureCopy.saveFailure "your notification preferences" err) ]
 
         Success _ ->
             p [ class "success" ]

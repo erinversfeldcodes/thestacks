@@ -76,6 +76,11 @@ simulateStreamEvent status maybeBookId isDuplicate =
                 Rejected ->
                     "rejected"
 
+                TimedOut ->
+                    -- The SSE loop's synthetic status, spelled exactly as
+                    -- `UploadController.sse_receive_loop/4` spells it.
+                    "timeout"
+
         ( bookId, bookIds ) =
             case maybeBookId of
                 Just bid ->
@@ -92,6 +97,30 @@ simulateStreamEvent status maybeBookId isDuplicate =
             , ( "book_ids", Encode.list Encode.string bookIds )
             , ( "rejection_reason", Encode.null )
             , ( "is_duplicate", Encode.bool isDuplicate )
+            ]
+        )
+
+
+{-| A rejection frame carrying the reason the server actually attached (#374).
+
+`simulateStreamEvent` hardcodes `rejection_reason: null`, which is a frame the
+server emits only on the resolved/timeout branches — so every rejection test
+written through it was exercising the "no reason given" path while claiming to
+cover the reasoned ones. The tokens accepted here are exactly those
+`Stacks.AI.VisionError.reason_token/1` and `Stacks.Workers.IdentifyBookJob` can
+write.
+
+-}
+simulateRejection : String -> String
+simulateRejection reason =
+    Encode.encode 0
+        (Encode.object
+            [ ( "image_id", Encode.string "img-test-001" )
+            , ( "status", Encode.string "rejected" )
+            , ( "book_id", Encode.null )
+            , ( "book_ids", Encode.list Encode.string [] )
+            , ( "rejection_reason", Encode.string reason )
+            , ( "is_duplicate", Encode.bool False )
             ]
         )
 
@@ -208,6 +237,9 @@ suite =
     describe "Page.Upload (ProgramTest)"
         [ uploadHappyPath
         , uploadIsbnRejection
+        , uploadFailureCauses
+        , uploadUnknownCauseAdmitsIt
+        , uploadSendFailures
         , uploadNotABook
         , uploadPollTimeout
         , uploadPollTimeoutViaLimit
@@ -538,15 +570,250 @@ uploadHappyPath =
 
 uploadIsbnRejection : Test
 uploadIsbnRejection =
-    test "upload_isbn_rejection: stream returns Rejected -> shows failure message and retry button" <|
+    test "upload_isbn_rejection: stream returns isbn_not_found -> shows failure message and retry button" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
-                |> ProgramTest.update (StreamEvent (simulateStreamEvent Rejected Nothing False))
+                |> ProgramTest.update (StreamEvent (simulateRejection "isbn_not_found"))
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Could Not Identify Book" ]
+                    [ Selector.text "Could Not Read the ISBN" ]
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Try Another Photo" ]
+
+
+{-| Four causes, four messages — the whole of Issue #374's first requirement.
+
+Each leg drives the REAL path end to end: a server-shaped SSE frame through
+`Api.streamEventDecoder`, through `Page.Upload.update`, into the rendered view.
+Nothing is stubbed between the wire and the words.
+
+⛔ Each leg also asserts that the message does **not** contain the sentence the
+other causes would have produced. Without that half, this file would pass on a
+`viewIdentificationFailed` that ignored its argument entirely — which is exactly
+the state the page was in before this issue, and exactly what the four green
+tests it already had failed to notice.
+
+-}
+uploadFailureCauses : Test
+uploadFailureCauses =
+    describe "each terminal cause says what happened (#374)"
+        [ test "undecodable_image blames the file, not the photograph's clarity" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateRejection "undecodable_image"))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "That Photo Could Not Be Opened" ]
+                    |> onlyFailureCause "image-unreadable"
+        , test "image_too_large is an unreadable file, not an unreadable ISBN" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateRejection "image_too_large"))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "That Photo Could Not Be Opened" ]
+                    |> onlyFailureCause "image-unreadable"
+        , test "isbn_not_found keeps the message that was always about it" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateRejection "isbn_not_found"))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "We found a book but could not make out its ISBN." ]
+                    |> onlyFailureCause "isbn-unreadable"
+        , test "not_a_book keeps its own card" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateRejection "not_a_book"))
+                    |> ProgramTest.expectViewHas
+                        [ Selector.text "That Doesn't Look Like a Book" ]
+        , test "vision_unavailable tells the reader their photo is fine" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateRejection "vision_unavailable"))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "The Cataloguing Desk Is Closed" ]
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "There is nothing wrong with your photo." ]
+                    |> onlyFailureCause "service-unavailable"
+        , test "vision_budget_exceeded is the same outage from the reader's side" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateRejection "vision_budget_exceeded"))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "The Cataloguing Desk Is Closed" ]
+                    |> onlyFailureCause "service-unavailable"
+        , test "the SSE timeout frame reports no verdict, not a bad photo" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateStreamEvent TimedOut Nothing False))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "No Answer Came Back" ]
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "Nothing has been added to your shelves." ]
+                    |> onlyFailureCause "timed-out"
+        ]
+
+
+{-| The cause on screen is the one named, and none of the others (#374).
+
+⛔ Anchored on the `data-failure-cause` attribute rather than on absent prose,
+which is what `scripts/check-prose-assertions.sh` exists to insist on:
+`Selector.text` matches a SUBSTRING, so "could not make out its ISBN" would be
+satisfied — or not — by accidents of wording rather than by which card rendered.
+An attribute value is exact.
+
+It asserts against the WHOLE roster, not just against one wrong answer, so a
+`viewIdentificationFailed` that ignored its argument fails here for every cause
+but the one it happens to be stuck on. (Measured: pinning the view to
+`IsbnUnreadable` reddens eleven tests.)
+
+-}
+onlyFailureCause :
+    String
+    -> ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
+    -> Expect.Expectation
+onlyFailureCause expected program =
+    let
+        allCauses =
+            [ "image-unreadable"
+            , "isbn-unreadable"
+            , "service-unavailable"
+            , "timed-out"
+            , "connection-lost"
+            , "unknown"
+            , "not-a-book"
+            , "not-sent"
+            ]
+
+        card cause =
+            Selector.attribute (Html.Attributes.attribute "data-failure-cause" cause)
+    in
+    allCauses
+        |> List.filter (\cause -> cause /= expected)
+        |> List.foldl (\cause acc -> ProgramTest.ensureViewHasNot [ card cause ] acc)
+            (ProgramTest.ensureViewHas [ card expected ] program)
+        |> ProgramTest.done
+
+
+{-| ⛔ The requirement this whole issue exists for (#374 requirement 2, #369
+requirement 5).
+
+An unrecognised rejection token is what a server that grew a new one after this
+client shipped looks like. The page must answer that with an admission, not with
+one of the five explanations it happens to know — and `processing_failed` is the
+same case wearing the server's own "I don't know" label.
+
+-}
+uploadUnknownCauseAdmitsIt : Test
+uploadUnknownCauseAdmitsIt =
+    describe "an unknown cause is reported as unknown (#374)"
+        [ test "a token this client has never seen claims nothing" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateRejection "shelf_gremlins"))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "we cannot say why" ]
+                    |> onlyFailureCause "unknown"
+        , test "processing_failed, the server's own shrug, is passed on as one" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateRejection "processing_failed"))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "It may be nothing to do with the photo." ]
+                    |> onlyFailureCause "unknown"
+        , test "a rejection with no reason attached claims nothing either" <|
+            \() ->
+                startUpload
+                    |> simulateUploadAccepted
+                    |> ProgramTest.update (StreamEvent (simulateStreamEvent Rejected Nothing False))
+                    |> ProgramTest.ensureViewHas
+                        [ Selector.text "we cannot say why" ]
+                    |> onlyFailureCause "unknown"
+        ]
+
+
+{-| The pre-identification failures: the photo never reached the library (#374).
+
+`uploadState` used to be overwritten with a literal `Http.NetworkError` at both
+of these call sites, so a 429 and a 413 both rendered as "Upload failed. Please
+try again." — advice that cannot work for either.
+
+-}
+uploadSendFailures : Test
+uploadSendFailures =
+    describe "a photo that never got sent says why (#374)"
+        [ test "a 429 on the presign says wait, not retry" <|
+            \() ->
+                startUpload
+                    |> ProgramTest.update (UploadAccepted (Err (Http.BadStatus 429)))
+                    |> ProgramTest.expectViewHas
+                        [ Selector.attribute (Html.Attributes.attribute "data-failure-cause" "not-sent")
+                        , Selector.text "Too many attempts from here just now. Please wait a little while before trying again."
+                        ]
+        , test "a 413 says the file is too large" <|
+            \() ->
+                startUpload
+                    |> ProgramTest.update (UploadAccepted (Err (Http.BadStatus 413)))
+                    |> ProgramTest.expectViewHas
+                        [ Selector.text "That photo is too large to send. A smaller one — or your phone's own resized copy — will go through." ]
+        , test "an unrecognised status admits it is unrecognised" <|
+            \() ->
+                startUpload
+                    |> ProgramTest.update (UploadAccepted (Err (Http.BadStatus 418)))
+                    |> ProgramTest.expectViewHas
+                        [ Selector.text "Your photo could not be sent, and we cannot say why. Please try again in a moment." ]
+        , test "⛔ the three do not share a sentence" <|
+            \() ->
+                -- Without this, a `sendError` that ignored its argument would
+                -- satisfy at most one of the three above and fail the rest —
+                -- but a `sendError` returning ONE new sentence for everything
+                -- would fail them all in a way that reads as three copy edits.
+                -- This states the invariant directly.
+                [ Http.BadStatus 429, Http.BadStatus 413, Http.BadStatus 418 ]
+                    |> List.map (\err -> Upload.sendError err)
+                    |> distinctCount
+                    |> Expect.equal 3
+        , -- ⛔ Added because a probe found nothing (#374).
+          --
+          -- Overwriting the error at the *commit* step is caught by the three
+          -- cases above, but the R2 PUT step had the same defect — a literal
+          -- `Failure Http.NetworkError` in place of the error it was handed —
+          -- and reintroducing it there left all 1637 tests green, because no
+          -- test drove `R2PutCompleted`'s failure leg at all. It does now.
+          --
+          -- ⚠️ `UploadInitialised`'s failure leg carries the identical one-line
+          -- fix and is NOT covered here: its constructor takes a `File`, which
+          -- is opaque and cannot be built in pure Elm, so the message cannot be
+          -- delivered from a test. The pattern is proved here; that site is
+          -- proved by reading.
+          test "a 429 on the R2 PUT keeps its status instead of becoming a network error" <|
+            \() ->
+                startUpload
+                    |> ProgramTest.update (Upload.R2PutCompleted "img-test-001" "test-token" (Err (Http.BadStatus 429)))
+                    |> ProgramTest.expectViewHas
+                        [ Selector.text "Too many attempts from here just now. Please wait a little while before trying again." ]
+        ]
+
+
+distinctCount : List String -> Int
+distinctCount =
+    List.foldl
+        (\item seen ->
+            if List.member item seen then
+                seen
+
+            else
+                item :: seen
+        )
+        []
+        >> List.length
 
 
 uploadNotABook : Test
@@ -562,13 +829,13 @@ uploadNotABook =
 
 uploadPollTimeout : Test
 uploadPollTimeout =
-    test "upload_poll_timeout: stream error -> shows identification failed" <|
+    test "upload_poll_timeout: stream error -> reports the lost connection" <|
         \() ->
             startUpload
                 |> simulateUploadAccepted
                 |> ProgramTest.update StreamError
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Could Not Identify Book" ]
+                    [ Selector.text "The Library Is Unreachable" ]
 
 
 uploadPollTimeoutViaLimit : Test
@@ -579,7 +846,7 @@ uploadPollTimeoutViaLimit =
                 |> simulateUploadAccepted
                 |> ProgramTest.update (Upload.StatusReceived (Err Http.NetworkError))
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Could Not Identify Book" ]
+                    [ Selector.text "The Library Is Unreachable" ]
 
 
 uploadDuplicateDetected : Test
@@ -747,7 +1014,7 @@ uploadReset =
                 |> simulateUploadAccepted
                 |> ProgramTest.update StreamError
                 |> ProgramTest.ensureViewHas
-                    [ Selector.text "Could Not Identify Book" ]
+                    [ Selector.text "The Library Is Unreachable" ]
                 -- Click the reset button
                 |> ProgramTest.clickButton "Try Another Photo"
                 -- Assert we're back at the upload area

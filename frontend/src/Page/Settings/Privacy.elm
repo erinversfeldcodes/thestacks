@@ -16,6 +16,7 @@ import Html.Events exposing (onClick, onInput)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility as Visibility
+import Util.FailureCopy as FailureCopy
 import Util.TestId exposing (testId)
 
 
@@ -738,14 +739,29 @@ viewShelfRow profileVisibility sv =
         ]
 
 
+{-| ⛔ "Could not save. Please try again." was the answer to every failure here,
+including the one this page documents four functions above (Issue #374).
+
+`shelfOptionExceedsCeiling` explains that the server answers **422** when a shelf
+is set more exposed than the profile ceiling — a rule the reader can satisfy, and
+the only failure on this form they can do anything about. It was being reported
+with the same six words as a dropped connection, and "please try again" is the
+one instruction guaranteed not to work: the same request fails the same way
+forever until the ceiling moves.
+
+-}
 viewFeedback : RemoteData Http.Error () -> Html Msg
 viewFeedback saving =
     case saving of
         Success _ ->
             p [ class "success" ] [ text "Visibility updated." ]
 
-        Failure _ ->
-            p [ class "error" ] [ text "Could not save. Please try again." ]
+        Failure (Http.BadStatus 422) ->
+            p [ class "error" ]
+                [ text "A shelf cannot be more visible than your profile. Raise your profile's visibility first, or choose a narrower setting for the shelf." ]
+
+        Failure err ->
+            p [ class "error" ] [ text (FailureCopy.saveFailure "that visibility setting" err) ]
 
         _ ->
             text ""

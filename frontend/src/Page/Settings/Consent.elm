@@ -15,6 +15,7 @@ import Html.Attributes exposing (attribute, class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.FailureCopy as FailureCopy
 
 
 type alias Model =
@@ -208,10 +209,13 @@ view model =
             ]
         , div [ class "settings-actions" ]
             [ SaveButton.primary model.saving SaveConsent "Save Preferences" ]
-        , case model.saving of
-            Failure _ ->
+        , -- Distinguished by cause since #374 — see
+          -- `Page.Settings.Notifications.viewSaveFeedback` for why one sentence
+          -- for every failure was worse than no sentence for some of them.
+          case model.saving of
+            Failure err ->
                 p [ class "error" ]
-                    [ text "Could not save preferences. Please try again." ]
+                    [ text (FailureCopy.saveFailure "your consent preferences" err) ]
 
             _ ->
                 text ""

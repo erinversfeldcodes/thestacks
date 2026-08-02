@@ -150,3 +150,84 @@ test.describe("Unconfirmed-email login", () => {
     expect(stored).toBeFalsy();
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// Issue #374 — a failure the app cannot explain must not explain it anyway.
+//
+// ⛔ `Page/Login.elm` mapped EVERY unlisted status onto "The door remains shut.
+// Invalid email or password." A 502 from a node restarting mid-deploy therefore
+// told a reader their credentials were wrong; they retyped details that were
+// already correct, failed again, and had every reason to conclude the account
+// was gone. The message did not merely fail to help — it aimed them at the one
+// thing that was working.
+//
+// Route-mocked rather than driven against a real outage, because the whole
+// point is a status the server is not supposed to produce. The `:auth` bucket's
+// real 429 saturation test lives in `rate-limit.spec.ts`, which runs alone.
+// ───────────────────────────────────────────────────────────────────────────
+test.describe("Sign-in failures name only what the server said", () => {
+  const CREDENTIAL_LIE = "Invalid email or password";
+
+  async function attemptSignIn(page, status: number, headers = {}) {
+    await page.route("**/api/auth/login", (route) =>
+      route.fulfill({
+        status,
+        headers,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "mocked" }),
+      })
+    );
+
+    await page.goto("/login");
+    await page.fill('input[id="email"]', DEV_EMAIL);
+    await page.fill('input[id="password"]', DEV_PASSWORD);
+    await page.getByTestId("login-submit").click();
+
+    const error = page.getByTestId("login-error");
+    await expect(error).toBeVisible({ timeout: 5_000 });
+    return error;
+  }
+
+  test("a 502 does not claim the credentials were wrong", async ({ page }) => {
+    const error = await attemptSignIn(page, 502);
+    await expect(error).not.toContainText(CREDENTIAL_LIE);
+    await expect(error).toContainText("Nothing is wrong with what you entered");
+  });
+
+  test("a status nobody anticipated admits it is not understood", async ({
+    page,
+  }) => {
+    const error = await attemptSignIn(page, 418);
+    await expect(error).not.toContainText(CREDENTIAL_LIE);
+    await expect(error).toContainText("we cannot say why");
+  });
+
+  test("a 429 names the wait the server sent", async ({ page }) => {
+    const error = await attemptSignIn(page, 429, { "retry-after": "60" });
+    await expect(error).not.toContainText(CREDENTIAL_LIE);
+    await expect(error).toContainText(
+      "Too many attempts from here just now. Please wait a minute before trying again."
+    );
+  });
+
+  test("a 429 without a retry-after names no interval at all", async ({
+    page,
+  }) => {
+    // ⛔ The interval must come from the response or not be said. A hard-coded
+    // 60 would keep claiming 60 long after `RateLimiter` was retuned.
+    const error = await attemptSignIn(page, 429);
+    await expect(error).toContainText(
+      "Please wait a little while before trying again."
+    );
+    await expect(error).not.toContainText("60 seconds");
+  });
+
+  test("positive control — a 401 still says the credentials are wrong", async ({
+    page,
+  }) => {
+    // Without this, every assertion above would pass against a page that
+    // answered "we cannot say why" to a genuinely wrong password too.
+    const error = await attemptSignIn(page, 401);
+    await expect(error).toContainText("Invalid credentials");
+  });
+});

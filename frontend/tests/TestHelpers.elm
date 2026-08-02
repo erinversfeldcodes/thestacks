@@ -45,7 +45,7 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (PollStatus(..), RegisterError(..), streamEventDecoder)
+import Api exposing (PollStatus(..), streamEventDecoder)
 import Components.ISBNInput
 import Components.ShelfOrganiser as ShelfOrganiser
 import Dict
@@ -936,6 +936,11 @@ uploadEffects msg model maybeToken =
                             SimulatedEffect.Cmd.none
 
                 Rejected ->
+                    SimulatedEffect.Cmd.none
+
+                TimedOut ->
+                    -- Terminal, and it fetches nothing: there is no book id to
+                    -- ask about, which is precisely what makes it a timeout.
                     SimulatedEffect.Cmd.none
 
         Upload.SubmitManualIsbn ->
@@ -1902,43 +1907,6 @@ searchProgram maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-{-| Mirror `Api.expectRegister`: decode the 422 `{"errors": ...}` body so program
-tests exercise the same field-error surfacing as production rather than losing
-the body the way `expectJson` would.
--}
-registerResponseResult : Http.Response String -> Result RegisterError ()
-registerResponseResult response =
-    case response of
-        Http.BadUrl_ url ->
-            Err (RegisterRequestFailed (Http.BadUrl url))
-
-        Http.Timeout_ ->
-            Err (RegisterRequestFailed Http.Timeout)
-
-        Http.NetworkError_ ->
-            Err (RegisterRequestFailed Http.NetworkError)
-
-        Http.BadStatus_ metadata bodyText ->
-            if metadata.statusCode == 422 then
-                case Decode.decodeString (Decode.field "errors" (Decode.keyValuePairs (Decode.list Decode.string))) bodyText of
-                    Ok errors ->
-                        Err (RegisterValidationFailed errors)
-
-                    Err _ ->
-                        Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
-
-            else
-                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
-
-        Http.GoodStatus_ _ bodyText ->
-            case Decode.decodeString Api.registrationResponseDecoder bodyText of
-                Ok value ->
-                    Ok value
-
-                Err err ->
-                    Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
-
-
 {-| Translate Login page Cmds into SimulatedEffects.
 -}
 loginEffects : Login.Msg -> Login.Model -> SimulatedEffect Login.Msg
@@ -1948,17 +1916,30 @@ loginEffects msg model =
             -- Mirrors `Api.forgotPassword`. The backend always answers 200 (no
             -- user enumeration), so a test drives the acknowledgement by
             -- responding 200 and reading what the card then says.
-            SimulatedEffect.Http.request
-                { method = "POST"
-                , headers = []
-                , url = "/api/auth/forgot-password"
-                , body =
-                    SimulatedEffect.Http.jsonBody
-                        (Encode.object [ ( "email", Encode.string model.email ) ])
-                , expect = SimulatedEffect.Http.expectWhatever Login.GotForgotResponse
-                , timeout = Nothing
-                , tracker = Nothing
-                }
+            --
+            -- ⛔ The guard is applied here for the same reason `ResendRequested`
+            -- below applies its own: a simulation that fires the request
+            -- unconditionally cannot notice a double-send the real app
+            -- suppresses, and the double-send is exactly what #374 added this
+            -- branch to prove impossible. `Login.isForgotDisabled` is the real
+            -- predicate — re-deriving it here would let the harness and the page
+            -- disagree, which is the only way this test could pass while the app
+            -- was broken.
+            if Login.isForgotDisabled model then
+                SimulatedEffect.Cmd.none
+
+            else
+                SimulatedEffect.Http.request
+                    { method = "POST"
+                    , headers = []
+                    , url = "/api/auth/forgot-password"
+                    , body =
+                        SimulatedEffect.Http.jsonBody
+                            (Encode.object [ ( "email", Encode.string model.email ) ])
+                    , expect = SimulatedEffect.Http.expectStringResponse Login.GotForgotResponse Api.resolveNoContent
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
 
         Login.FormSubmitted ->
             case model.mode of
@@ -1974,7 +1955,7 @@ loginEffects msg model =
                                     , ( "password", Encode.string model.password )
                                     ]
                                 )
-                        , expect = SimulatedEffect.Http.expectJson Login.GotAuthResponse Api.authResponseDecoder
+                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotAuthResponse Api.resolveAuthResponse
                         , timeout = Nothing
                         , tracker = Nothing
                         }
@@ -1992,7 +1973,7 @@ loginEffects msg model =
                                     , ( "display_name", Encode.string model.displayName )
                                     ]
                                 )
-                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotRegisterResponse registerResponseResult
+                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotRegisterResponse Api.resolveRegister
                         , timeout = Nothing
                         , tracker = Nothing
                         }
@@ -2028,7 +2009,7 @@ loginEffects msg model =
                             (Encode.object
                                 [ ( "email", Encode.string (Login.resendTarget model) ) ]
                             )
-                    , expect = SimulatedEffect.Http.expectWhatever Login.GotResendResponse
+                    , expect = SimulatedEffect.Http.expectStringResponse Login.GotResendResponse Api.resolveNoContent
                     , timeout = Nothing
                     , tracker = Nothing
                     }

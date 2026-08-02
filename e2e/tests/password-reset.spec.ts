@@ -50,6 +50,17 @@ test.describe("Password reset", () => {
     await expect(ack).toHaveClass(/login-card__notice/);
     await expect(ack).not.toHaveClass(/login-card__subtitle/);
 
+    // ⛔ ...and the send control is now spent (#374). It used to re-arm the
+    // instant the 200 arrived, still reading "Send reset link", so a reader who
+    // pressed twice queued a SECOND reset mail — which invalidates the link in
+    // the first. Asserted on the DOM here because `disabled` is what a real
+    // browser actually honours; the model-level rule (and the fact that it holds
+    // for an unregistered address too, so it cannot become an existence oracle)
+    // is `Page/ForgotPasswordNoticeTest.elm`.
+    const submit = page.getByTestId("forgot-submit");
+    await expect(submit).toBeDisabled();
+    await expect(submit).toHaveText("Reset link sent");
+
     // ...and a reset email is actually sent. (Skipped when the mailbox isn't
     // the delivery target — e.g. a preview using a real Resend provider.)
     const emails = await fetchSentEmails(request, email);
