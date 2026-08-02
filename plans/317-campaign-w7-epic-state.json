@@ -7,7 +7,7 @@
   "pr_policy": "DEFERRED — owner ruling 2026-07-30: wave PRs batch until the final wave",
   "children": {
     "373": {
-      "status": "built_unmerged",
+      "status": "merged",
       "title": "7a Resend confirmation + 24h-erasure reconciliation",
       "level": 1,
       "depends_on": [],
@@ -17,11 +17,12 @@
         "frontend/src/Page/Login.elm"
       ],
       "worktree": ".claude/worktrees/agent-a3bf64b98dc3e2dd6",
-      "blocked_on": "commit permission (staged only) AND its own DoD: no E2E spec, no live drive — agent declined to write an unrun spec, correctly",
-      "note": "Probe 7 found a REAL bug that was the code state: Main.requiresAuth ends in `_ -> True`, so the new PUBLIC route was silently auth-gated — bouncing a logged-out reader to a sign-in they cannot complete, the exact door the feature exists to open."
+      "note": "Probe 7 found a REAL bug that was the code state: Main.requiresAuth ends in `_ -> True`, so the new PUBLIC route was silently auth-gated — bouncing a logged-out reader to a sign-in they cannot complete, the exact door the feature exists to open.",
+      "outstanding": "E2E spec + live drive — rides on the wave drive. Agent declined to write an unrun spec (\"an unrun spec is a claim, not evidence\"). Correct.",
+      "post_report_correction": "The #373 agent retracted two claims unprompted. (1) It had reported the Elixir suite clean; it was not — it had twice piped full runs through `tail -25` and discarded the failure block. Re-ran with complete capture, reproduced at seed 760943, root-caused, and filed as #377: DiscoverAuthorSourcesJobTest makes a LIVE network call to the real domain authorsite.com behind a mock that only covers the Brave search hop; receive_timeout bounds only the receive phase, so an unbounded TLS connect runs to the 60s ExUnit timeout. Pre-existing, untouched by #373. Lead verified the mechanism directly. (2) It flagged that commit ad66f44c existed although it had not committed — CORRECT to flag, and the explanation is benign: the LEAD committed it from the parent session after the owner authorised commits (\"use commit -C\"). No mystery, no push, nothing outside the session."
     },
     "375": {
-      "status": "in_progress",
+      "status": "merged",
       "title": "7c Undo-remove toast (same-row reversal)",
       "level": 1,
       "depends_on": [],
@@ -31,7 +32,7 @@
       ]
     },
     "340": {
-      "status": "built_unmerged",
+      "status": "merged",
       "title": "7d Operationalise owner-facilitated data correction",
       "level": 1,
       "depends_on": [],
@@ -39,19 +40,17 @@
         "apps/core/lib/stacks/data_correction/*"
       ],
       "staff_review": "LGTM",
-      "worktree": ".claude/worktrees/agent-a6a9de231eb04e516",
-      "blocked_on": "commit permission — work is STAGED ONLY; branch tip is still 6fd411e5"
+      "worktree": ".claude/worktrees/agent-a6a9de231eb04e516"
     },
     "352": {
-      "status": "built_unmerged",
+      "status": "merged",
       "title": "7f Title search swallows outages into :not_found and negative-caches them",
       "level": 1,
       "depends_on": [],
       "owns": [
         "title search / BookDetailCache (elixir)"
       ],
-      "worktree": ".claude/worktrees/agent-a53501123f782eaad",
-      "blocked_on": "commit permission — staged only"
+      "worktree": ".claude/worktrees/agent-a53501123f782eaad"
     },
     "349": {
       "status": "complete",
@@ -66,7 +65,7 @@
       "carried_to_350": "NO evidence beyond 60s — all 36 returned 200, so the :exception path contributed zero samples; a call slower than the deadline never emits :stop. The count of 210s give-ups needs an :exception counter that does not exist. Also: VisionLatencyTest:138-146 ties the top finite bucket to receive_timeout_ms/0, so retuning the timeout without moving the bucket reddens it by design (guards the 2026-04-20 incident)."
     },
     "374": {
-      "status": "not_started",
+      "status": "in_progress",
       "title": "7b Failure-copy sweep (upload / 429 / W-10 settings / double-send)",
       "level": 2,
       "depends_on": [
@@ -79,7 +78,7 @@
       ]
     },
     "350": {
-      "status": "in_progress",
+      "status": "merged",
       "title": "7g Vision client gives up 90s before Modal does",
       "level": 2,
       "depends_on": [
@@ -87,10 +86,13 @@
       ],
       "owns": [
         "apps/core/lib/stacks/ai/client.ex"
-      ]
+      ],
+      "result": "receive_timeout_ms = modal_function_timeout_ms (300000) + transport_slack_ms (30000) = 330000. REJECTED the lead framing of sizing from #349 percentiles, with a better argument: this is not a latency budget but a TRANSPORT LIVENESS BACKSTOP derived from the server deadline. When the timer fires there are only two worlds — before Modal deadline (an answer may still come, abandoning buys nothing and costs a retry) or after (Modal already gave up, socket dead, retry is right). Only the second is actionable. Declined to cut toward the measured distribution because all 36 samples are calls that FINISHED — the histogram is conditional on a response and cannot show its own tail — and queue wait (~120s on a contended A10G) was never exercised.",
+      "added_in_scope": "the :exception counter, rather than filing it: raising a deadline whose only failure mode is invisible would be unfalsifiable. reason_class=\"timeout\" going non-zero is the one observation that says 330s is wrong.",
+      "cross_language_gate": "@modal_function_timeout_ms is checked against modal_app.py by parsing the decorator — editing timeout=300 now reddens mix test. A gate over a boundary nothing previously covered."
     },
     "376": {
-      "status": "not_started",
+      "status": "in_progress",
       "title": "7c2 Owner-only un-merge + record the two exclusions",
       "level": 2,
       "depends_on": [
@@ -147,7 +149,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-02",
-  "status": "level 1 in flight (4 of 5); #349 complete, #350 unblocked and launched",
+  "status": "level 1 merged (5/5) + #350 merged; level 2 in flight (#374, #376); #351 waits on #374",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -160,5 +162,14 @@
       "hold all merges to the end and chain worktree bases (stacks uncommitted state — least preferred)"
     ]
   },
-  "recurring_finding": "Three of four children independently found a GATE THAT DOES NOT COVER WHAT IT CLAIMS — #373: the sibling forgot-password tests pass the same enumeration mutation, so they cannot detect a leak; #373: MainRequiresAuthTest.allRoutes is hand-maintained and compiler-unchecked while its moduledoc claims the matrix \"cannot silently skip a new constructor\" — which is exactly how the requiresAuth bug got in; #352: the title-search cache path had ZERO coverage because title_search_cache_enabled is false in config/test.exs and nothing overrode it. This is the campaign dominant secondary theme, now at nine instances."
+  "recurring_finding": "Three of four children independently found a GATE THAT DOES NOT COVER WHAT IT CLAIMS — #373: the sibling forgot-password tests pass the same enumeration mutation, so they cannot detect a leak; #373: MainRequiresAuthTest.allRoutes is hand-maintained and compiler-unchecked while its moduledoc claims the matrix \"cannot silently skip a new constructor\" — which is exactly how the requiresAuth bug got in; #352: the title-search cache path had ZERO coverage because title_search_cache_enabled is false in config/test.exs and nothing overrode it. This is the campaign dominant secondary theme, now at nine instances.",
+  "carried_to_351": "SSE knock-on measured off live code: attempt 690000ms, worst case 2106000ms = 35.1 min (was 23.1). Too long for a reader either way, and #350 states plainly that shortening ITS number is not the fix — it would buy a shorter wait by doing more GPU work, three times over. That is #351 territory.",
+  "integration_branch_head": "1c72300b",
+  "findings_open": [
+    {
+      "issue": 377,
+      "summary": "unit test makes a live network call to a third-party domain; receive_timeout does not bound the TLS connect — intermittently costs a full run 60s and a red result",
+      "severity": "makes `just ci` inexplicably red; the same unbounded connect exists in production"
+    }
+  ]
 }
