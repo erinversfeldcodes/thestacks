@@ -215,7 +215,7 @@ navigateToUpload =
                     fromPath "/upload"
 
                 view =
-                    Upload.view Upload.init (Just "test-token")
+                    Upload.view Upload.init (Just "test-token") Types.RemoteData.NotAsked
             in
             Expect.all
                 [ \_ -> route |> Expect.equal Upload

@@ -6,7 +6,9 @@ module Page.Upload exposing
     , UploadResult(..)
     , UploadStep(..)
     , init
+    , replayFrame
     , sendError
+    , tickSeconds
     , update
     , view
     )
@@ -16,7 +18,7 @@ import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Html, a, button, div, h1, h2, img, input, label, li, p, span, text, ul)
-import Html.Attributes exposing (alt, attribute, checked, class, href, src, type_)
+import Html.Attributes exposing (alt, attribute, checked, class, disabled, href, src, type_)
 import Html.Events exposing (onCheck, onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
@@ -204,6 +206,23 @@ type alias Model =
     -- The server uses this list to exclude already-rejected books from the
     -- vision pipeline's next pass.
     , rejectedBookIds : List String
+
+    -- How long this reader has been watching a spinner, and how long the SSE
+    -- stream has been silent, both in seconds and both advanced by `WaitTick`
+    -- (Issue #351).
+    --
+    -- ⛔ These are the ONLY two numbers the waiting copy is allowed to speak
+    -- from, because they are the only two the client actually knows. There is
+    -- no attempt counter on the wire — the row stays `pending` across retries,
+    -- so no frame is broadcast between them — and "retrying now" or "attempt 2
+    -- of 3" invented here would be reassurance with nothing behind it.
+    --
+    -- `silentSeconds` is reset by ANY stream frame, heartbeats included: a
+    -- heartbeat fails `streamEventDecoder` on purpose and is ignored as a
+    -- status, but its arrival is still proof the stream is alive. That is what
+    -- makes it a watchdog rather than a second timeout.
+    , waitedSeconds : Int
+    , silentSeconds : Int
     }
 
 
@@ -212,6 +231,11 @@ type OutMsg
     | NavigateTo Route.Route
     | OpenStream String
     | SessionExpired
+      -- Something happened that changes what is waiting for this reader — a
+      -- book was placed, or added by hand. The inbox and its navigation badge
+      -- live in `Main`, so this asks for a refetch rather than mutating a copy
+      -- (Issue #351). One list, one owner, no second count to drift.
+    | RefreshInbox
 
 
 type Msg
@@ -245,6 +269,8 @@ type Msg
     | ConfirmCompleted (Result Api.ConfirmError Api.ConfirmResponse)
     | GotSameWorkBook (Result Http.Error BookDetailResponse)
     | GoToShelf String
+    | WaitTick
+    | ResumeInboxItem Api.InboxItem
 
 
 init : Model
@@ -274,6 +300,8 @@ init =
     , mergeFormatLabel = ""
     , sseTerminalReceived = False
     , rejectedBookIds = []
+    , waitedSeconds = 0
+    , silentSeconds = 0
     }
 
 
@@ -347,6 +375,98 @@ failureFromHttpError err =
 
         _ ->
             CauseUnknown
+
+
+{-| How many seconds one `WaitTick` stands for.
+
+`Main` drives the tick, so this constant and that subscription's interval are
+one fact in two places; a 1000ms subscription against a 5 here would make the
+page claim a minute had passed after twelve seconds. Both are named, and the
+thresholds below are coarse enough (20s, 45s) that the pairing is checkable by
+reading rather than by stopwatch.
+
+-}
+tickSeconds : Int
+tickSeconds =
+    5
+
+
+{-| After this long, the page stops implying the answer is imminent and offers
+the reader the door (Issue #351).
+
+20 seconds is not a guess about the pipeline; it is a guess about patience, and
+deliberately so. #349 measured warm vision calls at a median of 5–8s and a p95
+of 15–30s, with cold starts reaching 60s — so at 20 seconds the common case has
+already answered, and a reader still watching is in the tail this issue exists
+to release them from.
+
+-}
+leaveAffordanceAfterSeconds : Int
+leaveAffordanceAfterSeconds =
+    20
+
+
+{-| After this long with NO frame of any kind, the stream is treated as silent.
+
+`UploadController.sse_receive_loop/4` chunks a heartbeat at least every 15
+seconds for the whole life of the stream, so three missed heartbeats is the
+threshold. This is the watchdog #374 left for this issue: an `EventSource` that
+opens and then emits neither message nor error used to leave the spinner
+turning until the server's own deadline — up to 23 minutes — with the client
+having no way to tell a working slow pipeline from a dead socket.
+
+⛔ Crossing it does **not** produce a failure. The job is very probably still
+running, and #342's derivation exists precisely because declaring a timeout
+while work is in flight is a lie. What it produces is an honest statement about
+the connection, and a pointer at the inbox — which is where the answer will
+land whether this socket recovers or not.
+
+-}
+streamSilentAfterSeconds : Int
+streamSilentAfterSeconds =
+    45
+
+
+{-| Is this page waiting on an identification right now?
+
+`Success imageId` means the upload was accepted and a stream was opened;
+`NoResult` with `step == Uploading` means nothing has come back yet. Anything
+else — a result, a verify step, a shelf picker — is the reader's turn, and the
+clocks must not run during it.
+
+-}
+isWaiting : Model -> Bool
+isWaiting model =
+    case ( model.uploadState, model.result, model.step ) of
+        ( Success _, NoResult, Uploading ) ->
+            True
+
+        _ ->
+            False
+
+
+{-| The SSE frame an inbox item would have arrived as, had the reader stayed.
+
+This is the whole of the inbox's "resume" logic, and it is a data conversion
+rather than a flow: every screen it can lead to already exists, reached by the
+function the live stream reaches it by.
+
+-}
+replayFrame : Api.InboxItem -> PollResponse
+replayFrame item =
+    { imageId = item.imageId
+    , status =
+        case item.kind of
+            Api.AwaitingConfirmation ->
+                Resolved
+
+            Api.Failed ->
+                Rejected
+    , bookId = List.head item.bookIds
+    , bookIds = item.bookIds
+    , rejectionReason = item.rejectionReason
+    , isDuplicate = False
+    }
 
 
 {-| Settle on a terminal result and clear the in-flight bookkeeping with it.
@@ -442,9 +562,12 @@ update msg model maybeToken =
             case result of
                 Ok imageId ->
                     -- Upload accepted; open SSE stream for identification result.
+                    -- The two clocks start here and not at `GotFile`: the wait
+                    -- this page is honest about is the wait for identification,
+                    -- not the seconds spent sending the bytes.
                     case maybeToken of
                         Just token ->
-                            ( { model | uploadState = Success imageId }
+                            ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
                             , Cmd.none
                             , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
                             )
@@ -534,13 +657,24 @@ update msg model maybeToken =
                     ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
 
         StreamEvent rawJson ->
+            -- ⛔ The reset happens for EVERY frame, before the decode is even
+            -- attempted. A heartbeat is not a status — it deliberately fails
+            -- `streamEventDecoder` — but it is proof the stream is alive, and
+            -- that proof is the whole content of the watchdog. Moving this
+            -- reset inside the `Ok` branch would leave `silentSeconds` climbing
+            -- through a perfectly healthy stream and declare a working
+            -- connection dead 45 seconds in.
+            let
+                heard =
+                    { model | silentSeconds = 0 }
+            in
             case Decode.decodeString Api.streamEventDecoder rawJson of
                 Ok pollResponse ->
-                    update (StatusReceived (Ok pollResponse)) model maybeToken
+                    update (StatusReceived (Ok pollResponse)) heard maybeToken
 
                 Err _ ->
                     -- Malformed event (e.g. heartbeat) — ignore, stay in current state.
-                    ( model, Cmd.none, NoOut )
+                    ( heard, Cmd.none, NoOut )
 
         StreamError ->
             -- Ignore the error if we already received a terminal SSE event.
@@ -725,7 +859,10 @@ update msg model maybeToken =
                 , existingShelves = otherShelves model.selectedShelf response.placements
               }
             , Cmd.none
-            , NoOut
+              -- Adding by hand is exactly the "the reader got the book another
+              -- way" case the inbox predicate has to notice — a photo of this
+              -- same book may be sitting in it, and is now finished business.
+            , RefreshInbox
             )
 
         ConfirmCompleted (Err (Api.ConfirmMergeRequired workId)) ->
@@ -932,7 +1069,12 @@ update msg model maybeToken =
                         , rejectedBookIds = []
                       }
                     , Cmd.none
-                    , NoOut
+                      -- The book is now on a bookshelf, so whatever upload
+                      -- produced it has stopped awaiting attention. Ask for the
+                      -- inbox again rather than decrementing a local number: the
+                      -- server owns the predicate, and a client that subtracts
+                      -- one is a second implementation of it.
+                    , RefreshInbox
                     )
 
                 ( Err Api.PlaceReadingPileFull, _ ) ->
@@ -950,6 +1092,50 @@ update msg model maybeToken =
 
         GoToShelf shelfName ->
             ( model, Cmd.none, NavigateTo (shelfRoute shelfName) )
+
+        WaitTick ->
+            if isWaiting model then
+                ( { model
+                    | waitedSeconds = model.waitedSeconds + tickSeconds
+                    , silentSeconds = model.silentSeconds + tickSeconds
+                  }
+                , Cmd.none
+                , NoOut
+                )
+
+            else
+                -- Not waiting on anything. Zeroing rather than freezing means a
+                -- second upload in the same session starts from nothing said
+                -- rather than inheriting the last one's elapsed time.
+                ( { model | waitedSeconds = 0, silentSeconds = 0 }, Cmd.none, NoOut )
+
+        ResumeInboxItem item ->
+            -- ⛔ The inbox does NOT have a confirm flow. It has an entrance to
+            -- the one that already exists.
+            --
+            -- Everything below rebuilds the SSE frame the reader would have
+            -- received had they stayed on the page, and hands it to
+            -- `StatusReceived` — the same function the live stream calls. From
+            -- there the reader is in `Verifying`, then `ChoosingShelf`, then
+            -- `ConfirmPlacement`, with "No, try again" and its cumulative
+            -- exclusion list intact (which is why `uploadState` must be
+            -- `Success item.imageId`: `RejectIdentification` reads the image id
+            -- from there). A second implementation is what #343 had to delete.
+            --
+            -- `isDuplicate = False` is not a guess. The server drops candidates
+            -- the reader has already shelved before the item is ever listed, so
+            -- an item that reached this client has, by construction, nothing on
+            -- a shelf to be a duplicate of. If the reader shelved it in another
+            -- tab in the meantime, `GotIdentifiedBook` still reads the book's
+            -- real placements and shows the "already yours" notice (#333) —
+            -- informing, never blocking.
+            update
+                (StatusReceived (Ok (replayFrame item)))
+                { init
+                    | ageGatingEnabled = model.ageGatingEnabled
+                    , uploadState = Success item.imageId
+                }
+                maybeToken
 
 
 {-| Minimal placement stub — only used to track success state.
@@ -973,8 +1159,8 @@ placementStub =
     }
 
 
-view : Model -> Maybe String -> Html Msg
-view model maybeToken =
+view : Model -> Maybe String -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+view model maybeToken inbox =
     div [ class "page page--upload" ]
         [ h1 [ class "page__title" ] [ text "Add a Book" ]
         , div [ attribute "aria-live" "polite", class "upload-status-region" ]
@@ -1019,6 +1205,19 @@ view model maybeToken =
                                 EditionMerged merged ->
                                     viewEditionMerged merged
             ]
+
+        -- The inbox lives on the upload page and nowhere else (owner ruling,
+        -- #351) — this is the page a reader comes to when they want to add a
+        -- book, so it is the page where unfinished attempts belong. It renders
+        -- outside the aria-live region on purpose: it is standing content, not
+        -- an announcement, and having a screen reader read the whole list out
+        -- every time the upload status changed would be the opposite of help.
+        , case maybeToken of
+            Nothing ->
+                text ""
+
+            Just _ ->
+                viewInbox model inbox
         ]
 
 
@@ -1067,14 +1266,11 @@ viewUploadArea model =
                 Loading ->
                     div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
                         [ span [ class "spinner" ] []
-                        , p [] [ text "Processing image..." ]
+                        , p [] [ text "Sending your photo..." ]
                         ]
 
                 Success _ ->
-                    div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
-                        [ span [ class "spinner" ] []
-                        , p [] [ text "Processing image..." ]
-                        ]
+                    viewWaiting model
 
                 Failure err ->
                     div
@@ -1098,6 +1294,196 @@ viewUploadArea model =
                 [ text "Enter ISBN manually instead" ]
             ]
         ]
+
+
+{-| The waiting screen, which stops promising imminence (Issue #351).
+
+This screen used to be a spinner and the words `Processing image...`, forever,
+and that was the hostage-taking: it implied the answer was seconds away for as
+long as 35 minutes (#350's measured worst case), and a reader who believed it
+and stayed was the only reader who ever saw the result. Leaving lost the work
+entirely — the job finished, the row went `resolved`, and no surface could
+reach it again until the 30-day sweep deleted it.
+
+Three things are said here and nothing else is:
+
+  - what is happening, in the present tense and without a deadline;
+  - after `leaveAffordanceAfterSeconds`, that the reader may leave, and where
+    the answer will be when they come back. This is the sentence the issue is
+    for. It is offered on elapsed time because elapsed time is a fact the
+    client owns;
+  - after `streamSilentAfterSeconds`, that this page has stopped hearing from
+    the server — the watchdog.
+
+⛔ What is NOT said: any claim about retries. `IdentifyBookJob` may be on its
+second or third attempt, and the reader would no doubt like to know, but the
+row stays `pending` across attempts so **no frame is broadcast between them**
+and this client cannot tell. "Retrying..." here would be a sentence with
+nothing behind it, and reassurance that is not backed by knowledge is the thing
+this whole issue is replacing.
+
+-}
+viewWaiting : Model -> Html Msg
+viewWaiting model =
+    div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
+        [ span [ class "spinner" ] []
+        , p [] [ text "Reading your photo..." ]
+        , if model.silentSeconds >= streamSilentAfterSeconds then
+            p
+                [ class "upload-waiting__stream-silent"
+                , testId "upload-stream-silent"
+                ]
+                [ text "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return." ]
+
+          else if model.waitedSeconds >= leaveAffordanceAfterSeconds then
+            p
+                [ class "upload-waiting__leave-note"
+                , testId "upload-leave-note"
+                ]
+                [ text "This one is taking a while. You don't have to wait — you can close this page and carry on. We'll keep going, and the result will be waiting for you under Add a Book." ]
+
+          else
+            text ""
+        ]
+
+
+{-| The inbox: uploads this reader started and has not finished with (#351).
+
+The owner's ruling in two halves. Identification is asynchronous, so this list
+is how work done in the reader's absence is reached again. Confirmation is
+synchronous, so **every item here is a link into the existing confirm flow and
+nothing more** — there is no "add all", no "accept", no control on this surface
+that puts a book on a bookshelf. Selecting an item shows the reader what we
+think their photo was and asks.
+
+Failures sit in the same list with different copy and no confirmation to make,
+because a rejection the reader never saw is lost work too. They are visibly a
+different kind of thing, and they are not counted on the navigation badge —
+`Api.awaitingConfirmationCount` is the only definition of that number.
+
+⚠️ An item stays here until it is finished or until the 30-day image-retention
+sweep deletes the row underneath it. For an awaiting-confirmation item that is
+right: it disappears the moment the book reaches a bookshelf by any route. For
+a failure there is no such moment — nothing the reader can do marks it read,
+because dismissal would need a write route and #351 is scoped to a read-only
+one. It is therefore a list that can accumulate stale failures for up to a
+month. Recorded rather than hidden; see the report.
+
+-}
+viewInbox : Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+viewInbox model inbox =
+    case inbox of
+        Success [] ->
+            text ""
+
+        Success items ->
+            div [ class "upload-inbox", testId "upload-inbox" ]
+                [ h2 [ class "upload-inbox__heading" ] [ text "Waiting for you" ]
+                , p [ class "upload-inbox__intro" ]
+                    [ text "Photos you sent earlier that we finished without you." ]
+                , ul [ class "upload-inbox__list" ] (List.map (viewInboxItem model) items)
+                ]
+
+        Failure _ ->
+            -- Silence here would be the worse failure: a reader with three
+            -- books waiting would be shown an empty page and told nothing.
+            -- Note that the navigation badge renders nothing in this state, and
+            -- that is correct — it cannot count a list it does not have.
+            p [ class "upload-inbox__error", testId "upload-inbox-error" ]
+                [ text "We couldn't check whether anything is waiting for you. Reload the page to try again." ]
+
+        _ ->
+            text ""
+
+
+viewInboxItem : Model -> Api.InboxItem -> Html Msg
+viewInboxItem model item =
+    let
+        ( itemClass, copy, action ) =
+            case item.kind of
+                Api.AwaitingConfirmation ->
+                    ( "upload-inbox__item"
+                    , "We found a book in this photo. Have a look and tell us if we got it right."
+                    , "Check this one"
+                    )
+
+                Api.Failed ->
+                    ( "upload-inbox__item upload-inbox__item--failed"
+                    , inboxFailureSummary item
+                    , "See what happened"
+                    )
+    in
+    li
+        [ class itemClass
+        , testId "upload-inbox-item"
+        , attribute "data-inbox-kind" (inboxKindToken item.kind)
+        ]
+        [ p [ class "upload-inbox__item-text" ] [ text copy ]
+        , button
+            [ class "btn btn--secondary"
+            , testId "upload-inbox-resume"
+            , onClick (ResumeInboxItem item)
+
+            -- Selecting an item replaces whatever is on the upload surface
+            -- above, so it is disabled once the reader is mid-flow rather than
+            -- silently throwing away a half-finished confirmation.
+            , disabled (not (canResume model))
+            ]
+            [ text action ]
+        ]
+
+
+{-| Whether picking up an inbox item now would destroy work in progress.
+
+The reader is free to resume from the drop prompt or from a finished result;
+they are not free to do it from the middle of a verify or shelf-picker step,
+where the click would silently discard the book they were in the act of filing.
+
+-}
+canResume : Model -> Bool
+canResume model =
+    case model.step of
+        Uploading ->
+            not (isWaiting model)
+
+        _ ->
+            False
+
+
+{-| A failed inbox item's summary, through the SAME tables the live path uses.
+
+`failureFromRejection` is the one mapping from a server token to a cause, and
+`failureBody` the one mapping from a cause to a sentence. A second table here
+would drift the day a token was added — and the reader would then be told two
+different stories about one rejection depending on whether they happened to be
+looking at the time.
+
+`not_a_book` is the one token the live path handles a level up, where it becomes
+its own screen rather than one of the six causes. It gets that screen's own
+sentence here rather than a seventh `UploadFailure` constructor: #374's six are
+the causes the failure CARD distinguishes, and widening that type to serve a
+list summary would have made every one of its case expressions answer a
+question it was not asked.
+
+-}
+inboxFailureSummary : Api.InboxItem -> String
+inboxFailureSummary item =
+    case item.rejectionReason of
+        Just "not_a_book" ->
+            notABookBody
+
+        reason ->
+            failureBody (failureFromRejection reason)
+
+
+inboxKindToken : Api.InboxKind -> String
+inboxKindToken kind =
+    case kind of
+        Api.AwaitingConfirmation ->
+            "awaiting-confirmation"
+
+        Api.Failed ->
+            "failed"
 
 
 {-| Why the photo never reached the library at all (Issue #374).
@@ -1331,6 +1717,15 @@ failureBody cause =
             "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in."
 
 
+{-| The one sentence for `not_a_book`, shared by the card and the inbox summary
+(#351). Named rather than duplicated so the two surfaces cannot come to disagree
+about what happened to the same photo.
+-}
+notABookBody : String
+notABookBody =
+    "We couldn't detect a book in that image. Please try a photo of a book cover."
+
+
 viewNotABook : Html Msg
 viewNotABook =
     div
@@ -1339,10 +1734,7 @@ viewNotABook =
         , attribute "data-failure-cause" "not-a-book"
         ]
         [ h2 [] [ text "That Doesn't Look Like a Book" ]
-        , p []
-            [ text
-                "We couldn't detect a book in that image. Please try a photo of a book cover."
-            ]
+        , p [] [ text notABookBody ]
         , button [ class "btn btn--primary", onClick Reset ] [ text "Try Again" ]
         , button [ class "btn btn--secondary", onClick EnterManualMode ]
             [ text "Enter ISBN Manually" ]

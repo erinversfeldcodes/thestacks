@@ -68,6 +68,50 @@ message PollResponse {
   bool is_duplicate = 6 [json_name = "is_duplicate"];
 }
 
+// UploadInboxItem is one upload the reader started and has not finished with
+// (GET /api/uploads/inbox, Issue #351).
+//
+// Identification is asynchronous: the reader may close the tab the moment the
+// photo is accepted, and IdentifyBookJob still runs to a terminal row. This is
+// how that finished work is reached again afterwards. Nothing here places a
+// book — an item carries candidates, and the reader still walks the existing
+// "we think it's this book → yes → which shelf" flow.
+message UploadInboxItem {
+  // UUID of the uploaded image. The reader resumes by replaying this id
+  // through the existing confirm flow, so it is also the id the retry
+  // ("No, try again") endpoint is called with.
+  string image_id = 1 [json_name = "image_id"];
+
+  // What the reader has to do with it — "awaiting_confirmation" (candidates
+  // are ready and unconfirmed) or "failed" (identification ended badly and the
+  // reader was never told). Deliberately two different things: a failure is
+  // NOT a pending confirmation and must never be counted as one.
+  string kind = 2 [json_name = "kind"];
+
+  // Candidate books awaiting confirmation, already filtered to those the
+  // reader has NOT shelved by some other route. Empty for a failed item.
+  repeated string book_ids = 3 [json_name = "book_ids"];
+
+  // Why identification failed, using the same token vocabulary the SSE frame
+  // carries, so the client renders one failure copy for both paths.
+  string rejection_reason = 4 [json_name = "rejection_reason"];
+
+  // When the reader submitted the photo. Ordering only — the client never
+  // computes a deadline from it.
+  google.protobuf.Timestamp uploaded_at = 5 [json_name = "uploaded_at"];
+}
+
+// UploadInbox is the whole of GET /api/uploads/inbox.
+//
+// There is deliberately NO count field. The badge on the Add Book navigation
+// marker counts the "awaiting_confirmation" items in this list; shipping a
+// separately-computed number alongside them is exactly how a badge comes to
+// disagree with the surface it points at.
+message UploadInbox {
+  // Newest first.
+  repeated UploadInboxItem items = 1 [json_name = "items"];
+}
+
 // UploadedImage represents a user-uploaded image stored in the system.
 // Maps to op.uploaded_images table.
 message UploadedImage {

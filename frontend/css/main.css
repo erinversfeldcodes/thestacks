@@ -294,6 +294,29 @@ h4 {
     text-decoration: none;
 }
 
+/* The count of uploads waiting to be confirmed, on the `Add Book` entry
+   (#351). "Low-but-easy-visibility" was the owner's phrase and this is the
+   whole of the design: it sits INSIDE the Catalogue dropdown, so a reader who
+   is not looking for it is never interrupted by it, and a reader who opens the
+   menu cannot miss it. Nothing is rendered at zero, so the mark's presence is
+   itself the signal. */
+
+.app-nav__badge {
+    display: inline-block;
+    min-width: 1.35em;
+    margin-left: 0.5rem;
+    padding: 0.05em 0.4em;
+    border-radius: 999px;
+    background: var(--accent, #8b6f47);
+    color: var(--parchment, #f4ecd8);
+    font-family: var(--font-body);
+    font-size: var(--size-xs, 0.75rem);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+    text-align: center;
+    vertical-align: baseline;
+}
+
 /* ===== Footer ===== */
 
 .app-footer {
@@ -745,6 +768,105 @@ h4 {
 .upload-manual-link {
     text-align: center;
     margin-top: 0.5rem;
+}
+
+/* The two things the waiting screen may say once time has passed (#351).
+   Muted and italic on purpose: neither is an error, and neither is an
+   instruction. One offers the reader the door; the other admits this page has
+   stopped hearing from the server. Both sit under a spinner that is still
+   spinning, because the work genuinely is still happening. */
+
+.upload-waiting__leave-note,
+.upload-waiting__stream-silent {
+    max-width: 34rem;
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    font-style: italic;
+    line-height: 1.55;
+    text-align: center;
+    color: var(--parchment-muted, var(--text-muted, #a09070));
+}
+
+/* ===== Upload inbox (#351) ===== */
+
+/* Uploads the reader started and has not finished with. It lives below the
+   drop zone rather than above it: the page's first job is still "add a book",
+   and this is a shelf of things set aside, not a queue demanding attention.
+   Nothing here places anything — every row is a way back into the confirm
+   flow. */
+
+.upload-inbox {
+    max-width: 480px;
+    margin: 2rem auto 0;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.upload-inbox__heading {
+    margin: 0 0 0.25rem;
+    font-family: var(--font-display, var(--font-body));
+    font-size: var(--size-lg);
+    color: var(--text);
+}
+
+.upload-inbox__intro {
+    margin: 0 0 1rem;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--parchment-muted, var(--text-muted, #a09070));
+}
+
+.upload-inbox__list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.upload-inbox__item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent, #8b6f47);
+    border-radius: var(--radius-md);
+}
+
+/* A failure is a different KIND of row, not a worse one — the reader has
+   nothing to confirm and nothing to fix. The left edge goes quiet rather than
+   red: this is news they were never given, not an alarm. */
+
+.upload-inbox__item--failed {
+    border-left-color: var(--border);
+}
+
+.upload-inbox__item-text {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    line-height: 1.55;
+    color: var(--text);
+}
+
+.upload-inbox__item--failed .upload-inbox__item-text {
+    color: var(--parchment-muted, var(--text-muted, #a09070));
+    font-style: italic;
+}
+
+.upload-inbox__error {
+    max-width: 480px;
+    margin: 2rem auto 0;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--parchment-muted, var(--text-muted, #a09070));
 }
 
 .upload-result {

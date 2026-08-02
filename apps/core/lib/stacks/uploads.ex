@@ -318,6 +318,115 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
+  The uploads this reader started and has not finished with (#351).
+
+  ## The predicate, stated
+
+  An upload is *awaiting attention* when all of the following hold:
+
+    * it belongs to this reader;
+    * it has reached a terminal status — `resolved` or `rejected`. An
+      in-flight row is not awaiting the reader, it is awaiting the pipeline,
+      and `IdentifyBookJob`'s terminal guarantee (#342) says it will get there;
+    * the 30-day retention sweep has not already claimed it
+      (`expires_at > now`). A row past its expiry is about to be deleted;
+      listing it would offer the reader work that is going to vanish;
+    * **and** there is still something for a human to do with it:
+        * `resolved` with at least one candidate the reader has NOT shelved by
+          some other route → `:awaiting_confirmation`, carrying exactly those
+          unshelved candidates;
+        * `resolved` with every candidate already shelved → **dropped**. The
+          reader typed the ISBN in, or photographed it again, or confirmed it
+          in another tab. The work is done; an inbox that keeps asking is a
+          nag, not a reminder;
+        * `resolved` with no candidates at all, or `rejected` → `:failed`.
+
+  ## Why failures are here but are not confirmations
+
+  A `rejected` upload the reader never witnessed is lost work too — today they
+  simply never learn, because the only place a rejection was ever rendered was
+  a page they had already left. So it is surfaced. It is a *different kind*,
+  and the caller must keep it that way: a failure has nothing to confirm and
+  nothing to place, and counting it as a pending confirmation would put a
+  number on the navigation badge that no action can ever clear.
+
+  ⚠️ **This function places nothing and can place nothing.** It reads
+  `uploaded_images` and `bookshelf_placements` and returns maps. Every route
+  from an inbox item to a shelf runs through the reader's existing
+  confirm → choose-shelf → place flow.
+
+  Newest first. Two queries regardless of how many items there are.
+  """
+  @spec list_awaiting_attention(binary()) :: [map()]
+  def list_awaiting_attention(user_id) when is_binary(user_id) do
+    rows =
+      from(i in UploadedImage,
+        where: i.user_id == ^user_id,
+        where: i.status in ["resolved", "rejected"],
+        where: i.expires_at > ^DateTime.utc_now(),
+        order_by: [desc: i.uploaded_at, desc: i.id]
+      )
+      |> Repo.all()
+
+    shelved =
+      rows
+      |> Enum.flat_map(&candidate_ids/1)
+      |> Enum.uniq()
+      |> then(&Stacks.Shelving.shelved_book_ids(user_id, &1))
+
+    rows
+    |> Enum.map(&inbox_item(&1, shelved))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # `book_ids` is the multi-candidate array; `book_id` is the single-match
+  # column the pipeline wrote before the array existed. The SSE stream prefers
+  # the array and falls back to the singleton, and so must this — otherwise an
+  # older resolved row is an inbox item with nothing in it.
+  defp candidate_ids(%UploadedImage{book_ids: ids}) when is_list(ids) and ids != [], do: ids
+  defp candidate_ids(%UploadedImage{book_id: nil}), do: []
+  defp candidate_ids(%UploadedImage{book_id: id}), do: [id]
+
+  defp inbox_item(%UploadedImage{status: "rejected"} = image, _shelved) do
+    failed_item(image)
+  end
+
+  defp inbox_item(%UploadedImage{status: "resolved"} = image, shelved) do
+    case Enum.reject(candidate_ids(image), &MapSet.member?(shelved, &1)) do
+      [] ->
+        if candidate_ids(image) == [] do
+          # Resolved with nothing identified. The reader is owed the news, and
+          # the client's `CauseUnknown` copy is the honest one: we cannot say
+          # why, and a nil token asks for exactly that sentence.
+          failed_item(image)
+        else
+          # Every candidate is already on a bookshelf — finished, by whatever
+          # route. This is the branch that stops the inbox nagging.
+          nil
+        end
+
+      unshelved ->
+        %{
+          image_id: image.id,
+          kind: "awaiting_confirmation",
+          book_ids: unshelved,
+          rejection_reason: nil,
+          uploaded_at: image.uploaded_at
+        }
+    end
+  end
+
+  defp failed_item(%UploadedImage{} = image) do
+    %{
+      image_id: image.id,
+      kind: "failed",
+      book_ids: [],
+      rejection_reason: image.rejection_reason,
+      uploaded_at: image.uploaded_at
+    }
+  end
+
+  @doc """
   Enqueues a vision-model identification job for an uploaded image.
 
   The `storage_key` is included in the job args so the worker can fetch a

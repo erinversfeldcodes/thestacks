@@ -22,6 +22,8 @@ module Api exposing
     , ConfirmOutcome(..)
     , ConfirmResponse
     , Deanonymisation
+    , InboxItem
+    , InboxKind(..)
     , InterestProfile
     , ListingParams
     , LiveSignals(..)
@@ -68,6 +70,7 @@ module Api exposing
     , auditLogResponseDecoder
     , authResponseDecoder
     , authed
+    , awaitingConfirmationCount
     , blockUser
     , bookDetailResponseDecoder
     , catalogueResponseDecoder
@@ -113,6 +116,7 @@ module Api exposing
     , getRemovalRequests
     , getSourceHealth
     , getTransparencyMetrics
+    , getUploadInbox
     , getUserPlacements
     , honourRemovalRequest
     , initUpload
@@ -413,6 +417,113 @@ streamEventDecoder =
         (Decode.field "book_ids" (Decode.list Decode.string))
         (Decode.field "rejection_reason" (Decode.nullable Decode.string))
         (Decode.field "is_duplicate" Decode.bool)
+
+
+{-| What an upload in the inbox is waiting for (Issue #351).
+
+⛔ These two are **not** a scale from good to bad, and must never be summed.
+`AwaitingConfirmation` is a job for the reader that the reader can finish;
+`Failed` is news they were never given, because the only place a rejection was
+ever rendered was a page they had already closed. The navigation badge counts
+the first kind and nothing else — a badge showing a number no action can clear
+is a worse defect than no badge, and it is the one a single `List.length` would
+produce.
+
+`KindUnknown` is deliberately absent: the server owns this vocabulary, and a
+token this client does not recognise is a wire break, not a third kind of
+waiting. The decoder fails on it rather than inventing a screen for it.
+
+-}
+type InboxKind
+    = AwaitingConfirmation
+    | Failed
+
+
+{-| One unfinished upload — `stacks.common.v1.UploadInboxItem`.
+
+`bookIds` are the candidates the reader has NOT already shelved by some other
+route; the server does that filtering, because it is the only party that can
+see the reader's bookshelves and the upload row at the same moment. Empty for a
+`Failed` item, which has nothing to confirm.
+
+`rejectionReason` is the same token vocabulary the SSE frame carries, so
+`Page.Upload.failureFromRejection` maps it with no second table. That is the
+whole reason the field is a token and not a sentence.
+
+-}
+type alias InboxItem =
+    { imageId : String
+    , kind : InboxKind
+    , bookIds : List String
+    , rejectionReason : Maybe String
+    }
+
+
+{-| The badge number, derived from the inbox itself.
+
+⛔ This function is the ONLY definition of the count, and the list it is given
+is the same list the inbox surface renders. The server deliberately ships no
+count field alongside the items (see `stacks.common.v1.UploadInbox`): two
+separately-derived numbers are two things that can disagree, and a badge that
+disagrees with the page it points at teaches the reader to ignore it.
+
+-}
+awaitingConfirmationCount : List InboxItem -> Int
+awaitingConfirmationCount items =
+    List.length (List.filter (\item -> item.kind == AwaitingConfirmation) items)
+
+
+inboxKindDecoder : Decoder InboxKind
+inboxKindDecoder =
+    Decode.string
+        |> Decode.andThen
+            (\raw ->
+                case raw of
+                    "awaiting_confirmation" ->
+                        Decode.succeed AwaitingConfirmation
+
+                    "failed" ->
+                        Decode.succeed Failed
+
+                    other ->
+                        Decode.fail ("Unknown upload inbox kind: " ++ other)
+            )
+
+
+inboxItemDecoder : Decoder InboxItem
+inboxItemDecoder =
+    Decode.map4 InboxItem
+        (Decode.field "image_id" Decode.string)
+        (Decode.field "kind" inboxKindDecoder)
+        (Decode.field "book_ids" (Decode.list Decode.string))
+        (Decode.field "rejection_reason" (Decode.nullable Decode.string))
+
+
+{-| `GET /api/uploads/inbox` — every upload this reader has not finished with.
+
+Every field is required, for the same reason `streamEventDecoder`'s are
+(Issue #328): `StacksWeb.ProtoJSON.upload_inbox_item/1` emits all four on every
+branch, `book_ids` defaulting to `[]` and `rejection_reason` arriving as JSON
+`null`. A `Decode.succeed` fallback here would mean a wire rename could never
+redden a test.
+
+-}
+uploadInboxDecoder : Decoder (List InboxItem)
+uploadInboxDecoder =
+    Decode.field "items" (Decode.list inboxItemDecoder)
+
+
+getUploadInbox : String -> (Result Http.Error (List InboxItem) -> msg) -> Cmd msg
+getUploadInbox token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/uploads/inbox"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg uploadInboxDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
 
 
 {-| A request failure the rate limiter may have caused, carrying the wait the

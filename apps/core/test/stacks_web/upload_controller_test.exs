@@ -502,4 +502,75 @@ defmodule StacksWeb.UploadControllerTest do
       assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
     end
   end
+
+  describe "GET /api/uploads/inbox" do
+    test "returns this reader's unfinished uploads, newest first", %{conn: conn, user: user} do
+      book = insert(:book)
+
+      insert(:uploaded_image,
+        user_id: user.id,
+        status: "resolved",
+        book_ids: [book.id],
+        uploaded_at: ~U[2026-01-01 00:00:00.000000Z]
+      )
+
+      failed =
+        insert(:uploaded_image,
+          user_id: user.id,
+          status: "rejected",
+          rejection_reason: "vision_unavailable",
+          uploaded_at: ~U[2026-06-01 00:00:00.000000Z]
+        )
+
+      assert %{"items" => [first, second]} = json_response(get(conn, "/api/uploads/inbox"), 200)
+
+      assert first["image_id"] == failed.id
+      assert first["kind"] == "failed"
+      assert first["rejection_reason"] == "vision_unavailable"
+      assert first["book_ids"] == []
+
+      assert second["kind"] == "awaiting_confirmation"
+      assert second["book_ids"] == [book.id]
+      assert second["rejection_reason"] == nil
+    end
+
+    # ⛔ The authorisation test, not a shape test. The route takes no id, so the
+    # only way it can leak is if the query forgets its `user_id` clause — and a
+    # forgotten clause looks exactly like a working endpoint to its owner.
+    test "never returns another reader's uploads", %{conn: conn} do
+      stranger = insert(:user)
+      book = insert(:book)
+
+      insert(:uploaded_image, user_id: stranger.id, status: "resolved", book_ids: [book.id])
+
+      insert(:uploaded_image,
+        user_id: stranger.id,
+        status: "rejected",
+        rejection_reason: "not_a_book"
+      )
+
+      assert %{"items" => []} = json_response(get(conn, "/api/uploads/inbox"), 200)
+    end
+
+    test "an empty inbox is 200 with an empty list, not a 404", %{conn: conn} do
+      assert %{"items" => []} = json_response(get(conn, "/api/uploads/inbox"), 200)
+    end
+
+    test "returns 401 without auth token" do
+      assert build_conn() |> get("/api/uploads/inbox") |> json_response(401)
+    end
+
+    # The other half of the owner's ruling, asserted at the boundary the SPA
+    # actually calls: reading the inbox must not file anything. A reader who
+    # loads a page for the badge count has not asked for a book to be shelved.
+    test "reading the inbox places nothing on a bookshelf", %{conn: conn, user: user} do
+      book = insert(:book)
+      insert(:uploaded_image, user_id: user.id, status: "resolved", book_ids: [book.id])
+
+      assert %{"items" => [%{"kind" => "awaiting_confirmation"}]} =
+               json_response(get(conn, "/api/uploads/inbox"), 200)
+
+      refute Stacks.Shelving.book_on_any_shelf?(user.id, book.id)
+    end
+  end
 end

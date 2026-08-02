@@ -17,6 +17,7 @@ import Json.Encode as Encode
 import Page.Upload as Upload exposing (Msg(..))
 import ProgramTest
 import Test exposing (Test, describe, test)
+import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 import TestHelpers
     exposing
@@ -26,8 +27,11 @@ import TestHelpers
         , simulateConfirmResponse
         , simulateMergeFormatResponse
         , testBook
+        , testPlacement
         , uploadProgram
+        , uploadProgramWithInbox
         )
+import Types.RemoteData
 
 
 {-| Helper to start an upload program with an auth token and age-gating ON
@@ -263,7 +267,451 @@ suite =
         , manualIsbnAlreadyOnThatShelfSaysSo
         , manualIsbnHonoursTheChosenShelf
         , photoPathDuplicateNoticeInformsWithoutBlocking
+        , inboxListsWhatIsWaiting
+        , inboxRendersNothingWhenEmpty
+        , inboxNamesTheFailureCause
+        , inboxResumesTheExistingConfirmFlow
+        , inboxPlacesNothingByItself
+        , inboxResumeToAShelfIsFourDeliberateSteps
+        , inboxResumeKeepsNoTryAgain
+        , waitingCopyOffersTheDoorAfterTwentySeconds
+        , waitingCopySaysNothingAboutRetries
+        , waitingWatchdogNoticesASilentStream
+        , waitingWatchdogIsResetByAHeartbeat
+        , shelvingABookAsksForTheInboxAgain
         ]
+
+
+{-| Placing or adding a book must tell the shell the inbox has changed (#351).
+
+⛔ **Found by a probe that reddened nothing.** Replacing this `RefreshInbox`
+with `NoOut` left all 1657 tests green — the badge would have gone on showing
+`1` for a book the reader had just shelved, and no test anywhere would have
+noticed. The reason is structural: `uploadProgram`'s update wrapper discards the
+third element of `Upload.update`'s tuple (`( newModel, _, _ )`), so no
+program test can see an `OutMsg` at all, and `Main.update` is a
+`Browser.application` with ports and a `Nav.Key` and cannot be program-tested
+either.
+
+So this is a direct assertion on the return value, which is the only place the
+signal is visible. ⚠️ It proves the signal is RAISED. It does not prove `Main`
+acts on it — `Main.update`'s `Upload.RefreshInbox` branch remains unreachable
+from any test in this suite, and that gap is recorded rather than papered over.
+
+The `NoOut` companion is the anti-vacuity half: without it, "returns
+`RefreshInbox`" would pass just as well against an update that returned it from
+every branch, which would refetch the inbox on every keystroke of an ISBN.
+
+-}
+shelvingABookAsksForTheInboxAgain : Test
+shelvingABookAsksForTheInboxAgain =
+    describe "shelving_a_book_asks_for_the_inbox_again"
+        [ test "a completed placement raises RefreshInbox" <|
+            \() ->
+                outMsgOf
+                    (PlacementCompleted (Ok testPlacement))
+                    { emptyUpload | step = Upload.ChoosingShelf testBook }
+                    |> Expect.equal Upload.RefreshInbox
+        , test "a failed placement does not — nothing left the inbox" <|
+            \() ->
+                outMsgOf
+                    (PlacementCompleted (Err Api.PlaceReadingPileFull))
+                    { emptyUpload | step = Upload.ChoosingShelf testBook }
+                    |> Expect.equal Upload.NoOut
+        , test "choosing a shelf does not — the book is not filed yet" <|
+            \() ->
+                outMsgOf (ShelfSelected "library")
+                    { emptyUpload | step = Upload.ChoosingShelf testBook }
+                    |> Expect.equal Upload.NoOut
+        ]
+
+
+emptyUpload : Upload.Model
+emptyUpload =
+    Upload.init
+
+
+outMsgOf : Upload.Msg -> Upload.Model -> Upload.OutMsg
+outMsgOf msg model =
+    let
+        ( _, _, out ) =
+            Upload.update msg model (Just "test-token")
+    in
+    out
+
+
+{-| An inbox item as `GET /api/uploads/inbox` delivers it (Issue #351).
+-}
+awaitingItem : String -> String -> Api.InboxItem
+awaitingItem imageId bookId =
+    { imageId = imageId
+    , kind = Api.AwaitingConfirmation
+    , bookIds = [ bookId ]
+    , rejectionReason = Nothing
+    }
+
+
+failedItem : String -> Maybe String -> Api.InboxItem
+failedItem imageId reason =
+    { imageId = imageId
+    , kind = Api.Failed
+    , bookIds = []
+    , rejectionReason = reason
+    }
+
+
+startWithInbox :
+    List Api.InboxItem
+    -> ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
+startWithInbox items =
+    ProgramTest.start ()
+        (uploadProgramWithInbox True (Just "test-token") (Types.RemoteData.Success items))
+
+
+testIdSelector : String -> Selector.Selector
+testIdSelector value =
+    Selector.attribute (Html.Attributes.attribute "data-testid" value)
+
+
+{-| A 201 from `POST /api/bookshelves/:name/placements`, in the shape
+`Api.placeResponseToResult` actually parses — the placement nested under a
+`placement` key. A bare `{}` decodes to a `BadBody` and renders the "Failed to
+add book" branch, which would have made the four-step test pass its "no
+placement happened" sibling for the wrong reason.
+-}
+simulatePlacementCreated : String -> String -> Http.Response String
+simulatePlacementCreated shelfName bookId =
+    let
+        url =
+            "/api/bookshelves/" ++ shelfName ++ "/placements"
+    in
+    Http.GoodStatus_
+        { url = url
+        , statusCode = 201
+        , statusText = "Created"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "placement"
+                  , Encode.object
+                        [ ( "id", Encode.string "placement-1" )
+                        , ( "book_id", Encode.string bookId )
+                        , ( "bookshelf_name", Encode.string shelfName )
+                        , ( "formats", Encode.list Encode.string [] )
+                        , ( "visibility", Encode.null )
+                        , ( "bookshelf_visibility", Encode.null )
+                        ]
+                  )
+                ]
+            )
+        )
+
+
+{-| #351 — the inbox exists and says what is in it.
+-}
+inboxListsWhatIsWaiting : Test
+inboxListsWhatIsWaiting =
+    test "inbox_lists_what_is_waiting: unfinished uploads are reachable from the upload page" <|
+        \() ->
+            startWithInbox [ awaitingItem "img-1" "book-1", failedItem "img-2" (Just "isbn_not_found") ]
+                |> ProgramTest.ensureViewHas [ testIdSelector "upload-inbox" ]
+                |> ProgramTest.expectView
+                    (Query.findAll [ testIdSelector "upload-inbox-item" ]
+                        >> Query.count (Expect.equal 2)
+                    )
+
+
+{-| An empty inbox is not an empty box with a heading on it — it is nothing.
+
+The anti-vacuity companion is `inboxListsWhatIsWaiting` above: without it,
+"renders nothing" would pass just as happily against an inbox that never
+rendered at all.
+
+-}
+inboxRendersNothingWhenEmpty : Test
+inboxRendersNothingWhenEmpty =
+    test "inbox_renders_nothing_when_empty: no heading, no list, no empty state" <|
+        \() ->
+            startWithInbox []
+                |> ProgramTest.expectViewHasNot [ testIdSelector "upload-inbox" ]
+
+
+{-| #374's causes must survive the trip through the inbox.
+
+A rejection the reader never witnessed is the ONLY way they will ever learn
+what happened to that photo, so the sentence has to be the specific one — not
+the generic "we couldn't identify this one" the issue's own summary line used
+as shorthand. Both items below are failures; they must not say the same thing.
+
+-}
+inboxNamesTheFailureCause : Test
+inboxNamesTheFailureCause =
+    test "inbox_names_the_failure_cause: each failure keeps the cause #374 gave it" <|
+        \() ->
+            startWithInbox
+                [ failedItem "img-1" (Just "vision_unavailable")
+                , failedItem "img-2" (Just "isbn_not_found")
+                , failedItem "img-3" (Just "not_a_book")
+                , failedItem "img-4" Nothing
+                ]
+                |> ProgramTest.expectView
+                    (Expect.all
+                        [ Query.has [ Selector.text "The service that reads book covers is not answering. There is nothing wrong with your photo. Type the ISBN in to add the book now, or try the photo again later." ]
+                        , Query.has [ Selector.text "We found a book but could not make out its ISBN. A closer photo of the barcode or the copyright page will usually do it — or type the number in." ]
+                        , Query.has [ Selector.text "We couldn't detect a book in that image. Please try a photo of a book cover." ]
+                        , Query.has [ Selector.text "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in." ]
+                        ]
+                    )
+
+
+{-| The acceptance test for "resumes the EXISTING flow" (#351 DoD item 3).
+
+Selecting an inbox item must land on the same "We think this is…" verify step a
+live stream produces, having issued the same `GET /api/books/:id` — not a new
+screen, not a shortcut. The request assertion is what makes this more than a
+rendering check: `simulateHttpResponse` fails outright if the program never
+made the request, so a resume that skipped the fetch cannot pass.
+
+-}
+inboxResumesTheExistingConfirmFlow : Test
+inboxResumesTheExistingConfirmFlow =
+    test "inbox_resumes_the_existing_confirm_flow: selecting an item enters the verify step" <|
+        \() ->
+            startWithInbox [ awaitingItem "img-1" "book-1" ]
+                |> ProgramTest.clickButton "Check this one"
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookResponse "book-1" "Piranesi" "Susanna Clarke")
+                |> ProgramTest.expectView
+                    (Expect.all
+                        [ Query.has [ testIdSelector "upload-verify" ]
+                        , Query.has [ Selector.text "We think this is…" ]
+                        , Query.has [ Selector.text "Piranesi" ]
+                        , Query.has [ Selector.text "Yes, that's it" ]
+                        , Query.has [ Selector.text "No, try again" ]
+                        ]
+                    )
+
+
+{-| ⛔ THE INVARIANT. The owner's ruling, half two:
+
+> "incorrect classifications should never end up on shelves they are not
+> intended for"
+
+Identification is asynchronous and finishes without the reader; **placement
+must not**. This asserts the absence directly rather than trusting that no code
+does it — resume an inbox item, let its book load, and then check that no
+placement request has been dispatched and that the completion card is nowhere
+on screen. An inbox that auto-placed would redden on both counts.
+
+The `expectHttpRequests` assertion is the load-bearing one: a shortcut that
+placed the book and jumped to the shelf would fail the POST check even if
+someone also arranged for the verify step to render.
+
+-}
+inboxPlacesNothingByItself : Test
+inboxPlacesNothingByItself =
+    test "inbox_places_nothing_by_itself: resuming an item files no book on any shelf" <|
+        \() ->
+            startWithInbox [ awaitingItem "img-1" "book-1" ]
+                |> ProgramTest.clickButton "Check this one"
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookResponse "book-1" "Piranesi" "Susanna Clarke")
+                |> ProgramTest.ensureHttpRequests "POST"
+                    "/api/bookshelves/library/placements"
+                    (Expect.equal [])
+                |> ProgramTest.ensureHttpRequests "POST"
+                    "/api/bookshelves/wishlist/placements"
+                    (Expect.equal [])
+                |> ProgramTest.expectViewHasNot [ testIdSelector "upload-complete" ]
+
+
+{-| The whole journey, counted: an inbox item reaches a bookshelf only by way of
+a human answering two questions and pressing a third button.
+
+This is the positive half of `inboxPlacesNothingByItself`, and it exists so
+that "no placement happened" cannot be satisfied by a resume that does nothing
+at all. Each step is named; remove any one of them and the placement never
+happens.
+
+-}
+inboxResumeToAShelfIsFourDeliberateSteps : Test
+inboxResumeToAShelfIsFourDeliberateSteps =
+    test "inbox_resume_to_a_shelf_is_four_deliberate_steps: pick, confirm, choose, place" <|
+        \() ->
+            startWithInbox [ awaitingItem "img-1" "book-1" ]
+                -- 1. The reader picks the item out of the inbox.
+                |> ProgramTest.clickButton "Check this one"
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookResponse "book-1" "Piranesi" "Susanna Clarke")
+                -- 2. The reader agrees it is the right book.
+                |> ProgramTest.clickButton "Yes, that's it"
+                |> ProgramTest.ensureViewHas [ testIdSelector "upload-shelf-picker" ]
+                -- 3. The reader chooses which of their bookshelves.
+                |> ProgramTest.clickButton "Library"
+                -- 4. And only now is anything filed.
+                |> ProgramTest.clickButton "Add to Library"
+                |> ProgramTest.simulateHttpResponse "POST"
+                    "/api/bookshelves/library/placements"
+                    (simulatePlacementCreated "library" "book-1")
+                |> ProgramTest.expectViewHas [ testIdSelector "upload-complete" ]
+
+
+{-| "No, try again" must still work on a resumed item.
+
+It is the affordance that needs the image id, and the image id is the reason
+resuming sets `uploadState` to `Success item.imageId` rather than simply
+rendering a book. A resume that only set the step would leave the reader looking
+at a wrong guess with the correction button wired to a full reset — dropping
+them back at the drop zone with the cumulative exclusion list thrown away.
+
+-}
+inboxResumeKeepsNoTryAgain : Test
+inboxResumeKeepsNoTryAgain =
+    test "inbox_resume_keeps_no_try_again: rejecting a resumed guess re-runs identification for that image" <|
+        \() ->
+            startWithInbox [ awaitingItem "img-from-inbox" "book-1" ]
+                |> ProgramTest.clickButton "Check this one"
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/books/book-1"
+                    (simulateBookResponse "book-1" "Wrong Book" "Wrong Author")
+                |> ProgramTest.clickButton "No, try again"
+                -- Against the ORIGINAL image, with the rejected book excluded.
+                |> ProgramTest.expectHttpRequest "POST"
+                    "/api/upload/img-from-inbox/reject-identification"
+                    (.body >> Expect.equal "{\"rejected_book_ids\":[\"book-1\"]}")
+
+
+{-| #351 requirement 5 — offer the exit honestly, on elapsed time.
+
+Before the threshold the page says nothing about leaving; after it, it does.
+Asserting both directions is what stops this passing against copy that was
+always on screen (which would be a page telling every reader their upload is
+slow, five seconds in).
+
+-}
+waitingCopyOffersTheDoorAfterTwentySeconds : Test
+waitingCopyOffersTheDoorAfterTwentySeconds =
+    test "waiting_copy_offers_the_door_after_twenty_seconds: elapsed time, not imminence" <|
+        \() ->
+            startUpload
+                |> simulateUploadAccepted
+                |> ProgramTest.ensureViewHasNot [ testIdSelector "upload-leave-note" ]
+                -- Three ticks — 15 seconds — is still inside the p95 #349
+                -- measured. Nothing is said.
+                |> ProgramTest.update WaitTick
+                |> ProgramTest.update WaitTick
+                |> ProgramTest.update WaitTick
+                |> ProgramTest.ensureViewHasNot [ testIdSelector "upload-leave-note" ]
+                |> ProgramTest.update WaitTick
+                |> ProgramTest.expectViewHas
+                    [ testIdSelector "upload-leave-note"
+                    , Selector.text "This one is taking a while. You don't have to wait — you can close this page and carry on. We'll keep going, and the result will be waiting for you under Add a Book."
+                    ]
+
+
+{-| ⛔ #351 requirement 5's warning, as a test.
+
+> Do **not** claim "retrying" or "attempt 2 of 3": no attempt data exists on
+> the wire, and inventing it client-side would be a lie dressed as reassurance.
+
+The row stays `pending` across `IdentifyBookJob`'s retries, so no frame is
+broadcast between them and this client cannot know which attempt is running.
+Any future edit that adds a comforting "retrying…" to the waiting screen has to
+delete this test to do it.
+
+⛔ Written as an EXHAUSTIVE assertion, not as a list of `hasNot`s for words like
+"Attempt" and "of 3". A negative prose assertion for copy the app has never
+contained can never fail — it is a comment wearing a test's clothes, and
+`scripts/check-prose-assertions.sh` exists to say so. Pinning the paragraph
+count and every sentence in it is the version that actually reddens: a new line
+of reassurance, whatever it says, makes this two-into-three.
+
+-}
+waitingCopySaysNothingAboutRetries : Test
+waitingCopySaysNothingAboutRetries =
+    test "waiting_copy_says_nothing_about_retries: the waiting screen says exactly two things, ever" <|
+        \() ->
+            List.range 1 24
+                |> List.foldl (\_ program -> ProgramTest.update WaitTick program)
+                    (simulateUploadAccepted startUpload)
+                |> ProgramTest.expectView
+                    (Query.find [ testIdSelector "upload-loading" ]
+                        >> Expect.all
+                            [ Query.findAll [ Selector.tag "p" ]
+                                >> Query.count (Expect.equal 2)
+                            , Query.has [ Selector.text "Reading your photo..." ]
+                            , Query.has [ Selector.text "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return." ]
+                            ]
+                    )
+
+
+{-| The watchdog #374 left for this issue.
+
+An `EventSource` that opens and then emits neither a message nor an error used
+to leave the spinner turning until the server's own deadline — as long as 23
+minutes — because the client had no way to tell a slow pipeline from a dead
+socket. It still cannot tell what the JOB is doing, and does not claim to: the
+copy is about the connection, and points at the inbox.
+
+-}
+waitingWatchdogNoticesASilentStream : Test
+waitingWatchdogNoticesASilentStream =
+    test "waiting_watchdog_notices_a_silent_stream: nine ticks of silence is reported as silence" <|
+        \() ->
+            List.range 1 9
+                |> List.foldl (\_ program -> ProgramTest.update WaitTick program)
+                    (simulateUploadAccepted startUpload)
+                |> ProgramTest.expectView
+                    (Expect.all
+                        [ Query.has
+                            [ testIdSelector "upload-stream-silent"
+                            , Selector.text "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return."
+                            ]
+
+                        -- ⛔ And it is NOT reported as a failure. The job is
+                        -- very probably still running; #342's derivation exists
+                        -- precisely because calling that a timeout is a lie.
+                        , Query.hasNot [ testIdSelector "upload-error" ]
+                        ]
+                    )
+
+
+{-| The reset is on EVERY frame, including the heartbeats that fail to decode.
+
+`streamEventDecoder` rejects `{"type":"heartbeat"}` on purpose, and
+`Page.Upload` drops it as a status — but its arrival is proof the stream is
+alive, and that proof is the entire content of the watchdog. Resetting inside
+the decoder's `Ok` branch instead would declare a perfectly healthy connection
+dead after 45 seconds of a slow-but-working pipeline.
+
+-}
+waitingWatchdogIsResetByAHeartbeat : Test
+waitingWatchdogIsResetByAHeartbeat =
+    test "waiting_watchdog_is_reset_by_a_heartbeat: an undecodable keepalive still counts as contact" <|
+        \() ->
+            List.range 1 8
+                |> List.foldl (\_ program -> ProgramTest.update WaitTick program)
+                    (simulateUploadAccepted startUpload)
+                |> ProgramTest.update (StreamEvent "{\"type\":\"heartbeat\"}")
+                |> ProgramTest.update WaitTick
+                |> ProgramTest.update WaitTick
+                |> ProgramTest.expectView
+                    (Expect.all
+                        -- The stream is demonstrably alive, so nothing is said
+                        -- about silence...
+                        [ Query.hasNot [ testIdSelector "upload-stream-silent" ]
+
+                        -- ...but 50 seconds HAVE passed, and the leave note is
+                        -- driven by total elapsed time rather than by contact.
+                        -- Without this, "no silence warning" would also pass
+                        -- against a heartbeat that reset the wrong clock.
+                        , Query.has [ testIdSelector "upload-leave-note" ]
+                        ]
+                    )
 
 
 {-| #343 — the wave's headline, and the acceptance test for it.
@@ -1146,10 +1594,15 @@ uploadRejectIdentificationRetries =
                         }
                         ""
                     )
-                -- Model is back in the Uploading step, processing spinner is showing
+                -- Model is back in the Uploading step, waiting spinner is showing
                 -- while we wait for the re-run vision pipeline to emit SSE events.
+                -- (The copy is "Reading your photo..." since #351 — the old
+                -- "Processing image..." was the sentence that implied imminence
+                -- for as long as 35 minutes.)
                 |> ProgramTest.expectViewHas
-                    [ Selector.text "Processing image..." ]
+                    [ testIdSelector "upload-loading"
+                    , Selector.text "Reading your photo..."
+                    ]
 
 
 {-| #118 — user "adults only" opt-in. On the shelf picker the checkbox is

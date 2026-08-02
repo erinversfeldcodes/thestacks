@@ -550,6 +550,33 @@ defmodule StacksWeb.ProtoJSON do
     }
   end
 
+  @doc """
+  Builds the upload-inbox response — `stacks.common.v1.UploadInbox` (#351).
+
+  There is no count field, and that is the point: the navigation badge counts
+  the `awaiting_confirmation` entries of this same list, so the number and the
+  surface it points at cannot drift apart. A second, separately-derived count
+  on the wire would be one more thing that can be wrong.
+  """
+  @spec upload_inbox([map()]) :: map()
+  def upload_inbox(items) when is_list(items) do
+    %{items: Enum.map(items, &upload_inbox_item/1)}
+  end
+
+  @doc """
+  Serializes one `stacks.common.v1.UploadInboxItem`.
+  """
+  @spec upload_inbox_item(map()) :: map()
+  def upload_inbox_item(item) do
+    %{
+      image_id: get_field(item, :image_id),
+      kind: get_field(item, :kind),
+      book_ids: get_field(item, :book_ids, []),
+      rejection_reason: get_field(item, :rejection_reason),
+      uploaded_at: get_field(item, :uploaded_at)
+    }
+  end
+
   # ---------------------------------------------------------------------------
   # Listing (marketplace)
   # ---------------------------------------------------------------------------
