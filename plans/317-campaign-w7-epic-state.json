@@ -65,7 +65,7 @@
       "carried_to_350": "NO evidence beyond 60s — all 36 returned 200, so the :exception path contributed zero samples; a call slower than the deadline never emits :stop. The count of 210s give-ups needs an :exception counter that does not exist. Also: VisionLatencyTest:138-146 ties the top finite bucket to receive_timeout_ms/0, so retuning the timeout without moving the bucket reddens it by design (guards the 2026-04-20 incident)."
     },
     "374": {
-      "status": "in_progress",
+      "status": "merged",
       "title": "7b Failure-copy sweep (upload / 429 / W-10 settings / double-send)",
       "level": 2,
       "depends_on": [
@@ -75,7 +75,10 @@
         "frontend/src/Page/Upload.elm",
         "frontend/src/Page/Settings/*",
         "frontend/src/Page/Login.elm"
-      ]
+      ],
+      "result": "Built Util/FailureCopy.elm and gave six upload causes their own copy. Fixed TWO upstream defects that made the copy unreachable: (a) Api.PollStatus decoded SSE \"timeout\" to Rejected with a null reason, so a reader the pipeline never answered for was told their photo was unreadable; (b) UploadInitialised/R2PutCompleted error legs stored a LITERAL Failure Http.NetworkError, so a 429, a 413 and a dropped connection were the same value. Also fixed #369 req 5 (the \"Invalid email or password\" catch-all for any status). For 429: elm/http collapses non-2xx to BadStatus Int — the status survives but HEADERS DO NOT — so it moved four :auth endpoints onto expectStringResponse to read retry-after. waitPhrase rounds UP (61s -> \"2 minutes\") because being sent back early produces a second 429; HTTP-date retry-after deliberately returns Nothing rather than a guess.",
+      "best_finding": "PROBE 9 REDDENED NOTHING, and that was the point. Reintroducing the exact UploadInitialised defect left all 1637 tests green — because UploadInitialised takes an opaque `File` that no Elm test can construct, so nothing CAN drive that leg. It added coverage on the sibling R2PutCompleted leg (9b reddens) and wrote the limitation into the test rather than claiming coverage it lacks.",
+      "also_fixed": "e2e mockPollRejected/mockPollNotABook sent is_duplicate: null; the decoder requires a bool (#328) and StreamEvent discards undecodable frames, so both specs sat on the spinner until timeout. ALREADY FAILING on the integration branch before this diff."
     },
     "350": {
       "status": "merged",
@@ -106,7 +109,7 @@
       "result": "Extended #340 rather than duplicating: `Targeted` behaviour + `run_targeted/3` handing the plan to the SAME private `apply_plan/4` the parameter-free path uses. Probe 1 proved that is genuinely shared code — breaking the audit reddened BOTH its own test and #340's. Placement disposition decided by EVIDENCE not taste: `place_book/3` always writes `primary_edition_id/1` and `merge_edition/2` hardcodes `is_primary: false`, so NO placement has ever named a merged edition — every alternative rule guesses badly. Filed the root cause as #378. Live-driven locally (owner->MFA->target, dry-run then apply, second apply 422); NOT driven on a preview."
     },
     "351": {
-      "status": "not_started",
+      "status": "in_progress",
       "title": "7h Reader never held hostage to the upload page (async identify, sync confirm+place, inbox)",
       "level": 3,
       "depends_on": [
@@ -150,7 +153,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-02",
-  "status": "level 1 + #350 + #376 merged (7/9); #374 in flight; #351 waits on #374",
+  "status": "8 of 9 merged; #351 (the last child) in flight",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -176,6 +179,11 @@
       "issue": 378,
       "summary": "the edition a reader actually scanned is never recorded — place_book always writes the work primary, so a non-primary ISBN is silently stored as the primary",
       "severity": "degrades the ISBN hard gate user-visible promise; also blocks a correct un-merge later"
+    },
+    {
+      "issue": null,
+      "summary": "<=5s does not hold for service-down: vision_unavailable is :transient so IdentifyBookJob runs the full Oban retry schedule before the row is rejected. Copy is right and renders instantly; the FRAME takes minutes. Handed to #351 to fix or explicitly hide.",
+      "severity": "tracked in #351 scope, not yet its own issue"
     }
   ]
 }
