@@ -92,7 +92,7 @@
       "cross_language_gate": "@modal_function_timeout_ms is checked against modal_app.py by parsing the decorator — editing timeout=300 now reddens mix test. A gate over a boundary nothing previously covered."
     },
     "376": {
-      "status": "in_progress",
+      "status": "merged",
       "title": "7c2 Owner-only un-merge + record the two exclusions",
       "level": 2,
       "depends_on": [
@@ -102,7 +102,8 @@
         "admin un-merge surface",
         "docs/implementation-mapping.md"
       ],
-      "note": "#340 preferred-first, not hard-blocking: if #340 lands first this should BE a registered correction rather than a bespoke admin action."
+      "note": "#340 preferred-first, not hard-blocking: if #340 lands first this should BE a registered correction rather than a bespoke admin action.",
+      "result": "Extended #340 rather than duplicating: `Targeted` behaviour + `run_targeted/3` handing the plan to the SAME private `apply_plan/4` the parameter-free path uses. Probe 1 proved that is genuinely shared code — breaking the audit reddened BOTH its own test and #340's. Placement disposition decided by EVIDENCE not taste: `place_book/3` always writes `primary_edition_id/1` and `merge_edition/2` hardcodes `is_primary: false`, so NO placement has ever named a merged edition — every alternative rule guesses badly. Filed the root cause as #378. Live-driven locally (owner->MFA->target, dry-run then apply, second apply 422); NOT driven on a preview."
     },
     "351": {
       "status": "not_started",
@@ -149,7 +150,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-02",
-  "status": "level 1 merged (5/5) + #350 merged; level 2 in flight (#374, #376); #351 waits on #374",
+  "status": "level 1 + #350 + #376 merged (7/9); #374 in flight; #351 waits on #374",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -170,6 +171,11 @@
       "issue": 377,
       "summary": "unit test makes a live network call to a third-party domain; receive_timeout does not bound the TLS connect — intermittently costs a full run 60s and a red result",
       "severity": "makes `just ci` inexplicably red; the same unbounded connect exists in production"
+    },
+    {
+      "issue": 378,
+      "summary": "the edition a reader actually scanned is never recorded — place_book always writes the work primary, so a non-primary ISBN is silently stored as the primary",
+      "severity": "degrades the ISBN hard gate user-visible promise; also blocks a correct un-merge later"
     }
   ]
 }
