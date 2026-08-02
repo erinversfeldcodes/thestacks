@@ -2,9 +2,11 @@ module Page.Upload exposing
     ( Model
     , Msg(..)
     , OutMsg(..)
+    , UploadFailure(..)
     , UploadResult(..)
     , UploadStep(..)
     , init
+    , sendError
     , update
     , view
     )
@@ -22,13 +24,62 @@ import Navigation.Route as Route
 import Types.Book exposing (Book, Edition, VisibilityTier(..), authorName, bookCoverImageUrl, bookIsbn, displayTitle, isProvisional)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.FailureCopy as FailureCopy
 import Util.TestId exposing (testId)
+
+
+{-| Why a photo did not become a book (Issue #374).
+
+⛔ **Every one of these used to be the same sentence.** `IdentificationFailed`
+was a nullary constructor rendering "We couldn't read the ISBN from this photo.
+Try a clearer image or enter the ISBN manually." — and `Page.Upload` routed
+_everything_ into it: a vision service that was down, an SSE stream that timed
+out, a connection that dropped, an image the service could not decode at all,
+and a genuine could-not-read-the-ISBN. Four of those five had nothing to do with
+the photo's clarity, so the advice was wrong four times out of five, and the
+reader's move — retake the photo, more carefully — could not possibly work.
+
+The information was there the whole time. `Stacks.Uploads.reject_image/2` writes
+a `rejection_reason` token, `IdentifyBookJob` chooses it from
+`Stacks.AI.VisionError.reason_token/1`, and the SSE frame carries it in
+`rejection_reason`. This page received it and discarded it.
+
+`CauseUnknown` is not a gap in this list — it is a member of it. A token this
+client has never seen (the server grew one after we shipped) must produce a
+message that says so, because the alternative is the defect above wearing a
+smaller hat.
+
+  - `ImageUnreadable` — `undecodable_image`, `image_too_large`,
+    `image_too_small`, `image_unreachable`, `no_image_supplied`,
+    `malformed_request`. The service looked at the bytes and could not use them.
+    Nothing to do with whether a book is in shot.
+  - `IsbnUnreadable` — `isbn_not_found`. A book was found, its ISBN was not. The
+    one cause the old message actually described.
+  - `ServiceUnavailable` — `vision_unavailable`, `vision_budget_exceeded`. The
+    identification service never answered. The photo is fine.
+  - `TookTooLong` — the SSE stream's own `"timeout"` frame: the pipeline's
+    deadline passed with no verdict. Distinct from every rejection, because no
+    determination was ever made.
+  - `ConnectionLost` — the stream errored, or a request on this flow failed at
+    the transport. The reader's connection, not the library's opinion of their
+    photo.
+  - `CauseUnknown` — a token we do not recognise, a status we do not handle, a
+    rejection with no reason attached.
+
+-}
+type UploadFailure
+    = ImageUnreadable
+    | IsbnUnreadable
+    | ServiceUnavailable
+    | TookTooLong
+    | ConnectionLost
+    | CauseUnknown
 
 
 type UploadResult
     = NoResult
     | Identified (List Book)
-    | IdentificationFailed
+    | IdentificationFailed UploadFailure
     | NotABook
     | ManualISBNEntry
     | DuplicateDetected Book
@@ -226,6 +277,96 @@ init =
     }
 
 
+{-| The server's `rejection_reason` token as a cause the reader can act on
+(Issue #374).
+
+The tokens are the union of `Stacks.AI.VisionError.reason_token/1` and the two
+the pipeline writes directly (`Stacks.Workers.IdentifyBookJob`'s `not_a_book` /
+`isbn_not_found` / `processing_failed` and `Stacks.Uploads.commit_image/2`'s
+`image_too_small`). `not_a_book` never reaches here — it is matched one level up,
+where it becomes its own `UploadResult`.
+
+⛔ **The catch-all must stay `CauseUnknown`.** It covers three things that look
+different and are the same: a token added server-side after this client shipped,
+`processing_failed` (which is itself the server saying it does not know), and a
+`Rejected` frame with no reason at all. Mapping any of them onto a specific
+cause would be inventing one — and this function is exactly where that invention
+would be cheap and invisible.
+
+-}
+failureFromRejection : Maybe String -> UploadFailure
+failureFromRejection reason =
+    case reason of
+        Just "undecodable_image" ->
+            ImageUnreadable
+
+        Just "image_too_large" ->
+            ImageUnreadable
+
+        Just "image_too_small" ->
+            ImageUnreadable
+
+        Just "image_unreachable" ->
+            ImageUnreadable
+
+        Just "no_image_supplied" ->
+            ImageUnreadable
+
+        Just "malformed_request" ->
+            ImageUnreadable
+
+        Just "isbn_not_found" ->
+            IsbnUnreadable
+
+        Just "vision_unavailable" ->
+            ServiceUnavailable
+
+        Just "vision_budget_exceeded" ->
+            ServiceUnavailable
+
+        _ ->
+            CauseUnknown
+
+
+{-| A transport failure on the upload flow as a cause (Issue #374).
+
+Only the two `Http.Error` constructors that describe themselves get their own
+cause. A `BadStatus` is a number, and a number is not a reason a reader can act
+on — 500, 502 and 503 all mean "not now, and not because of you", which is what
+`CauseUnknown` says.
+
+-}
+failureFromHttpError : Http.Error -> UploadFailure
+failureFromHttpError err =
+    case err of
+        Http.Timeout ->
+            TookTooLong
+
+        Http.NetworkError ->
+            ConnectionLost
+
+        _ ->
+            CauseUnknown
+
+
+{-| Settle on a terminal result and clear the in-flight bookkeeping with it.
+
+Four call sites were writing the same six-field update by hand, and the fields
+are not optional: leaving `pendingBookIds` populated behind a terminal result
+lets a late `GotIdentifiedBook` overwrite the message the reader is reading.
+
+-}
+terminal : Model -> UploadResult -> Model
+terminal model result =
+    { model
+        | result = result
+        , pendingBookIds = []
+        , collectedBooks = []
+        , failedBookIds = []
+        , sseTerminalReceived = True
+    }
+
+
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
@@ -262,7 +403,13 @@ update msg model maybeToken =
                 ( model, Cmd.none, SessionExpired )
 
             else
-                ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+                -- ⛔ This used to store `Failure Http.NetworkError` and throw
+                -- `err` away — so a 429 from the `:upload` rate-limit bucket, a
+                -- 413, and a genuinely dropped connection were all recorded as
+                -- the same thing. The view could not have told them apart if it
+                -- wanted to: the distinction was destroyed one layer earlier
+                -- (Issue #374).
+                ( { model | uploadState = Failure err }, Cmd.none, NoOut )
 
         UploadInitialised file token (Ok init_) ->
             ( model
@@ -270,8 +417,11 @@ update msg model maybeToken =
             , NoOut
             )
 
-        R2PutCompleted _ _ (Err _) ->
-            ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+        R2PutCompleted _ _ (Err err) ->
+            -- The bytes going to R2 directly, so this is the one failure that
+            -- really is usually the connection — but it is not always, and the
+            -- error already says which.
+            ( { model | uploadState = Failure err }, Cmd.none, NoOut )
 
         R2PutCompleted imageId token (Ok ()) ->
             ( model
@@ -366,16 +516,22 @@ update msg model maybeToken =
                         Rejected ->
                             case response.rejectionReason of
                                 Just "not_a_book" ->
-                                    ( { model | result = NotABook, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( terminal model NotABook, Cmd.none, NoOut )
 
-                                _ ->
-                                    ( { model | result = IdentificationFailed, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
+                                reason ->
+                                    ( terminal model (IdentificationFailed (failureFromRejection reason)), Cmd.none, NoOut )
+
+                        TimedOut ->
+                            -- The stream's deadline is derived from the job's own
+                            -- worst-case lifetime, so reaching it means no verdict
+                            -- is still coming — not that one arrived and was bad.
+                            ( terminal model (IdentificationFailed TookTooLong), Cmd.none, NoOut )
 
                         Pending ->
                             ( model, Cmd.none, NoOut )
 
-                Err _ ->
-                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                Err err ->
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
 
         StreamEvent rawJson ->
             case Decode.decodeString Api.streamEventDecoder rawJson of
@@ -396,7 +552,11 @@ update msg model maybeToken =
                 ( model, Cmd.none, NoOut )
 
             else
-                ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                -- An `EventSource` error before any terminal frame. The browser
+                -- reports these without a status, so the honest reading is "the
+                -- stream broke" — never "your photo was unreadable", which is
+                -- what this branch used to say.
+                ( { model | result = IdentificationFailed ConnectionLost }, Cmd.none, NoOut )
 
         GotIdentifiedBook bookId result ->
             case result of
@@ -460,7 +620,7 @@ update msg model maybeToken =
                         , NoOut
                         )
 
-                Err _ ->
+                Err err ->
                     -- One book fetch failed — remove from pending and remember
                     -- the failed ID so the multi-book identified view can render
                     -- a "Could not identify" placeholder for it. Show what we
@@ -475,7 +635,10 @@ update msg model maybeToken =
                     if List.isEmpty remaining then
                         case model.collectedBooks of
                             [] ->
-                                ( { model | result = IdentificationFailed, failedBookIds = newFailed }, Cmd.none, NoOut )
+                                -- The pipeline DID identify books; fetching them
+                                -- failed. Nothing was learned about the photo, so
+                                -- the failure is the fetch's, not the photo's.
+                                ( { model | result = IdentificationFailed (failureFromHttpError err), failedBookIds = newFailed }, Cmd.none, NoOut )
 
                             books ->
                                 ( { model
@@ -514,8 +677,10 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                Err _ ->
-                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                Err err ->
+                    -- The duplicate's own record would not load. The photo was
+                    -- identified; this is a fetch failure downstream of that.
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
 
         ManualIsbnChanged isbn ->
             ( { model | manualIsbn = isbn, showIsbnError = False }, Cmd.none, NoOut )
@@ -704,11 +869,13 @@ update msg model maybeToken =
                     -- is the real signal source for the re-run vision pipeline.
                     ( model, Cmd.none, NoOut )
 
-                Err _ ->
-                    -- The server didn't accept the rejection. Surface the
-                    -- failure on the same screen the user would see on a
-                    -- pipeline failure rather than wedging in the spinner.
-                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                Err err ->
+                    -- The server didn't accept the "that's not my book" request.
+                    -- Surface the failure on the same screen the reader would see
+                    -- on a pipeline failure rather than wedging in the spinner —
+                    -- but as the transport failure it is, not as a verdict on a
+                    -- photo the pipeline was never re-asked about.
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
 
         ShelfSelected shelf ->
             ( { model | selectedShelf = shelf }, Cmd.none, NoOut )
@@ -834,8 +1001,8 @@ view model maybeToken =
                                 Identified books ->
                                     viewIdentified books model.failedBookIds
 
-                                IdentificationFailed ->
-                                    viewIdentificationFailed
+                                IdentificationFailed cause ->
+                                    viewIdentificationFailed cause
 
                                 NotABook ->
                                     viewNotABook
@@ -909,9 +1076,13 @@ viewUploadArea model =
                         , p [] [ text "Processing image..." ]
                         ]
 
-                Failure _ ->
-                    div [ class "upload-area__error", testId "upload-error" ]
-                        [ p [] [ text "Upload failed. Please try again." ]
+                Failure err ->
+                    div
+                        [ class "upload-area__error"
+                        , testId "upload-error"
+                        , attribute "data-failure-cause" "not-sent"
+                        ]
+                        [ p [] [ text (sendError err) ]
                         , button [ class "btn btn--primary", onClick Reset ]
                             [ text "Try Again" ]
                         ]
@@ -927,6 +1098,47 @@ viewUploadArea model =
                 [ text "Enter ISBN manually instead" ]
             ]
         ]
+
+
+{-| Why the photo never reached the library at all (Issue #374).
+
+This is the failure BEFORE identification: the presign, the R2 PUT or the commit
+did not go through. It read "Upload failed. Please try again." for every one of
+them, including a 429 — where trying again immediately is precisely the thing
+that will fail — and a 413, where trying the same file again cannot ever work.
+
+The 429 arrives here as a bare `Http.BadStatus 429`: these endpoints are
+authenticated and go through `Api.authedExpect`, which has already discarded the
+headers by the time a caller sees the error, so `retry-after` is unavailable and
+the copy names no interval. See `Api.RequestError` for why that is a deliberate
+silence rather than a gap.
+
+-}
+sendError : Http.Error -> String
+sendError err =
+    case err of
+        Http.BadStatus 413 ->
+            "That photo is too large to send. A smaller one — or your phone's own resized copy — will go through."
+
+        Http.BadStatus 415 ->
+            "That file is not an image we can read. A JPEG or PNG photo of the cover will work."
+
+        Http.BadStatus 429 ->
+            FailureCopy.rateLimited Nothing
+
+        Http.BadStatus 503 ->
+            "The library is briefly overloaded. Please try again in a few seconds."
+
+        Http.NetworkError ->
+            "The library is unreachable, so your photo was never sent. Check your connection, then try again."
+
+        Http.Timeout ->
+            "Sending your photo took too long and we stopped waiting. A stronger connection, or a smaller photo, usually gets it there."
+
+        _ ->
+            -- Same rule as `CauseUnknown`: no status number is a reason, and
+            -- guessing one at the reader is how "Upload failed" got here.
+            "Your photo could not be sent, and we cannot say why. Please try again in a moment."
 
 
 viewDropPrompt : Html Msg
@@ -998,23 +1210,134 @@ viewUnidentifiedPlaceholder _ =
         ]
 
 
-viewIdentificationFailed : Html Msg
-viewIdentificationFailed =
-    div [ class "upload-result upload-result--failed", testId "upload-error" ]
-        [ h2 [] [ text "Could Not Identify Book" ]
-        , p []
-            [ text
-                "We couldn't read the ISBN from this photo. Try a clearer image or enter the ISBN manually."
-            ]
+{-| The failure card, saying which failure it is (Issue #374).
+
+Both affordances stay on every cause, because both remain genuinely available
+and a reader who wants the other one should not have to guess. What changes is
+the sentence, and the sentence names the button worth reaching for.
+
+⛔ That last part is not decoration. `Page.Bookshelf`'s `loadError` shipped a
+message ending "then try again" onto a page with no retry control anywhere
+(#368) — copy the reader cannot act on is a second failure stacked on the first.
+Every string below ends on something the two buttons underneath it can actually
+do, and `ConnectionLost` is the one that does **not** say "type the ISBN in",
+because manual entry needs the same connection that just failed.
+
+⛔ **The test id stays `upload-error` for every cause, and the cause rides
+alongside it in `data-failure-cause`.** Nine Playwright assertions use
+`getByTestId("upload-error")` as the "did the pipeline fail" sentinel — several
+of them as an escape hatch that fails the test fast rather than hanging for five
+minutes. Splitting the id per cause would have left each of those watching for
+one particular failure and timing out silently on the other five, which is the
+same defect this issue is about, moved into the test suite.
+
+The class stays `upload-result--failed` too: these are one card with six things
+to say, not six cards.
+
+-}
+viewIdentificationFailed : UploadFailure -> Html Msg
+viewIdentificationFailed cause =
+    div
+        [ class "upload-result upload-result--failed"
+        , testId "upload-error"
+        , attribute "data-failure-cause" (failureCause cause)
+        ]
+        [ h2 [] [ text (failureHeading cause) ]
+        , p [] [ text (failureBody cause) ]
         , button [ class "btn btn--primary", onClick Reset ] [ text "Try Another Photo" ]
         , button [ class "btn btn--secondary", onClick EnterManualMode ]
             [ text "Enter ISBN Manually" ]
         ]
 
 
+{-| The cause as a stable machine-readable token, for tests and for a live drive.
+
+Deliberately not the server's own `rejection_reason`: several tokens map to one
+cause, and a card is identified by what it SAYS, not by which of the synonyms
+produced it.
+
+-}
+failureCause : UploadFailure -> String
+failureCause cause =
+    case cause of
+        ImageUnreadable ->
+            "image-unreadable"
+
+        IsbnUnreadable ->
+            "isbn-unreadable"
+
+        ServiceUnavailable ->
+            "service-unavailable"
+
+        TookTooLong ->
+            "timed-out"
+
+        ConnectionLost ->
+            "connection-lost"
+
+        CauseUnknown ->
+            "unknown"
+
+
+failureHeading : UploadFailure -> String
+failureHeading cause =
+    case cause of
+        ImageUnreadable ->
+            "That Photo Could Not Be Opened"
+
+        IsbnUnreadable ->
+            "Could Not Read the ISBN"
+
+        ServiceUnavailable ->
+            "The Cataloguing Desk Is Closed"
+
+        TookTooLong ->
+            "No Answer Came Back"
+
+        ConnectionLost ->
+            "The Library Is Unreachable"
+
+        CauseUnknown ->
+            "Something Went Wrong"
+
+
+failureBody : UploadFailure -> String
+failureBody cause =
+    case cause of
+        ImageUnreadable ->
+            -- The service rejected the FILE, not its contents, so "try a clearer
+            -- image" would be advice about the wrong thing entirely.
+            "The image itself could not be read — it may be damaged, or too large, or in a format we cannot open. A photo taken afresh usually works; so does typing the ISBN in."
+
+        IsbnUnreadable ->
+            "We found a book but could not make out its ISBN. A closer photo of the barcode or the copyright page will usually do it — or type the number in."
+
+        ServiceUnavailable ->
+            -- Naming the photo as blameless is the point: without it a reader
+            -- retakes a perfectly good picture against a service that is down.
+            "The service that reads book covers is not answering. There is nothing wrong with your photo. Type the ISBN in to add the book now, or try the photo again later."
+
+        TookTooLong ->
+            "Your photo was accepted, but no verdict ever came back for it. Nothing has been added to your shelves. Try the photo again, or type the ISBN in."
+
+        ConnectionLost ->
+            "We lost the connection before hearing how your photo went. Check your connection, then try again."
+
+        CauseUnknown ->
+            -- ⛔ The whole reason this constructor exists. Every other branch
+            -- above is a claim; this one refuses to make one, and says why it is
+            -- refusing, so the reader does not go looking for a mistake in a
+            -- photo that may be perfectly good.
+            "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in."
+
+
 viewNotABook : Html Msg
 viewNotABook =
-    div [ class "upload-result upload-result--not-book", testId "upload-error" ]
+    div
+        [ class "upload-result upload-result--not-book"
+        , testId "upload-error"
+        , attribute "data-failure-cause" "not-a-book"
+        ]
         [ h2 [] [ text "That Doesn't Look Like a Book" ]
         , p []
             [ text

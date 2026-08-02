@@ -9,6 +9,7 @@ module Page.Login exposing
     , draftWasSaved
     , errorMessage
     , init
+    , isForgotDisabled
     , isResendDisabled
     , isSessionExpiry
     , isSubmitDisabled
@@ -21,13 +22,14 @@ module Page.Login exposing
     , view
     )
 
-import Api exposing (AuthResponse, RegisterError(..))
+import Api exposing (AuthResponse, RegisterError(..), RequestError(..))
 import Html exposing (Html, button, div, h1, input, label, p, span, text)
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Types.PasswordRule as PasswordRule
 import Types.RemoteData exposing (RemoteData(..))
+import Util.FailureCopy as FailureCopy
 import Util.TestId exposing (testId)
 
 
@@ -60,13 +62,13 @@ type alias Model =
 
     -- Outcome of a forgot-password request (ForgotPasswordMode). The email
     -- reuses the shared `email` field.
-    , forgotState : RemoteData Http.Error ()
+    , forgotState : RemoteData RequestError ()
 
     -- Outcome of a resend-confirmation request (Issue #373). Reached from two
     -- places — the "check your inbox" card and `ResendConfirmationMode` — which
     -- is precisely why it is ONE field: the reader can only be asking once, and
     -- a second flag per entry point could disagree about whether they had.
-    , resendState : RemoteData Http.Error ()
+    , resendState : RemoteData RequestError ()
     }
 
 
@@ -171,13 +173,16 @@ type Mode
     | ResendConfirmationMode
 
 
-{-| A failed submission. Login failures are always transport/status errors;
-registration can additionally fail with structured per-field validation errors
-(a 422 body), which we keep so the message reflects the real cause.
+{-| A failed submission. Registration can fail with structured per-field
+validation errors (a 422 body), which we keep so the message reflects the real
+cause; either mode can be turned away by the rate limiter, which is its own
+constructor because it is the one failure that carries a number (Issue #374) and
+because it is emphatically **not** a bad credential.
 -}
 type SubmitError
     = SubmitHttpError Http.Error
     | SubmitValidationError (List ( String, List String ))
+    | SubmitRateLimited (Maybe Int)
 
 
 type Msg
@@ -188,10 +193,10 @@ type Msg
     | ModeSwitched Mode
     | FormSubmitted
     | ForgotSubmitted
-    | GotForgotResponse (Result Http.Error ())
+    | GotForgotResponse (Result RequestError ())
     | ResendRequested
-    | GotResendResponse (Result Http.Error ())
-    | GotAuthResponse (Result Http.Error AuthResponse)
+    | GotResendResponse (Result RequestError ())
+    | GotAuthResponse (Result RequestError AuthResponse)
     | GotRegisterResponse (Result RegisterError ())
 
 
@@ -283,6 +288,34 @@ isResendDisabled model =
     String.isEmpty (resendTarget model)
         || (model.resendState == Loading)
         || (model.resendState == Success ())
+
+
+{-| The same rule for the forgot-password send (Issue #374).
+
+⛔ **This predicate must not read the email address for anything except
+emptiness.** `/api/auth/forgot-password` answers 200 to every well-formed
+request whether or not the address is registered — that uniformity is the whole
+of its no-enumeration property, and the SPA is the other half of it. A disabled
+state that differed by address (a different label, a different delay, a control
+that stayed live for an unknown address) would rebuild the account-existence
+oracle in the browser out of an API that refused to be one. The only inputs here
+are the request's own lifecycle and whether the reader typed anything, neither
+of which the server's answer can influence.
+
+It was previously `forgotState == Loading` alone, spelled inline in the
+`disabled` attribute and nowhere else. So the moment the 200 arrived the button
+became a live, full-contrast "Send reset link" again — and a reader who pressed
+it twice (the ordinary response to a control that looks untouched) queued a
+second reset mail, invalidating the link in the first. `update` now consults the
+same function, because `disabled` is a hint: a keyboard, a screen reader, or two
+clicks landing in one frame all deliver the message regardless.
+
+-}
+isForgotDisabled : Model -> Bool
+isForgotDisabled model =
+    String.isEmpty (String.trim model.email)
+        || (model.forgotState == Loading)
+        || (model.forgotState == Success ())
 
 
 validateEmail : String -> FieldValidation
@@ -392,7 +425,10 @@ update msg model =
             )
 
         ForgotSubmitted ->
-            if String.isEmpty (String.trim model.email) then
+            -- Same predicate the button's `disabled` reads, for the same reason
+            -- `ResendRequested` below applies `isResendDisabled` here: one
+            -- definition, so the control and the effect cannot drift.
+            if isForgotDisabled model then
                 ( model, Cmd.none, NoOut )
 
             else
@@ -482,7 +518,7 @@ update msg model =
             )
 
         GotAuthResponse (Err err) ->
-            ( { model | submitState = Failure (SubmitHttpError err) }, Cmd.none, NoOut )
+            ( { model | submitState = Failure (fromRequestError err) }, Cmd.none, NoOut )
 
         GotRegisterResponse (Ok ()) ->
             -- Registration succeeded: the backend has sent a confirmation email.
@@ -588,13 +624,42 @@ viewResendOutcome model =
                 [ class "login-card__notice", testId "resend-success" ]
                 "If that address is waiting to be confirmed, a fresh link is on its way. It replaces any earlier one."
 
-        Failure _ ->
+        Failure err ->
             notice
                 [ class "login-card__error", testId "resend-error" ]
-                "We couldn't ask for a new link just now. Please try again in a moment."
+                (mailRequestError err)
 
         _ ->
             text ""
+
+
+{-| Why one of the two "we will email you" requests did not go through (#374).
+
+Both endpoints answer identically for every address, so this function may not
+branch on anything address-shaped — and it cannot, because a `RequestError`
+carries nothing of the sort. What it does carry is worth saying: a throttle is a
+different instruction from a dropped connection, and neither is "something went
+wrong", which is what both of these used to read.
+
+The timeout branch is the careful one. A request that timed out may still have
+been served, so it must not claim the mail was not sent; the honest report is
+that we stopped waiting.
+
+-}
+mailRequestError : RequestError -> String
+mailRequestError err =
+    case err of
+        RateLimited retryAfter ->
+            FailureCopy.rateLimited retryAfter
+
+        RequestFailed Http.NetworkError ->
+            "The library is unreachable. Check your connection, then try again."
+
+        RequestFailed Http.Timeout ->
+            "The library took too long to answer, so we cannot say whether the message was sent. Wait a moment before asking again."
+
+        RequestFailed _ ->
+            "Something went wrong at our end, and we cannot say what. Please try again in a moment."
 
 
 {-| The standalone "send me a new link" form (Issue #373).
@@ -713,11 +778,22 @@ viewForgotForm model =
             [ class "login-card__submit"
             , testId "forgot-submit"
             , onClick ForgotSubmitted
-            , disabled (model.forgotState == Loading || String.isEmpty (String.trim model.email))
+            , disabled (isForgotDisabled model)
             ]
             [ case model.forgotState of
                 Loading ->
                     span [ class "spinner spinner--small" ] []
+
+                Success _ ->
+                    -- Past tense, and inert. The label is the second half of the
+                    -- double-send fix: a button that reads "Send reset link"
+                    -- after a send has happened invites the second press even
+                    -- while `disabled` refuses it, and a reader who cannot tell
+                    -- the press registered has been told nothing.
+                    --
+                    -- Says "Reset link sent" for every address, because the
+                    -- server said 200 for every address — see `isForgotDisabled`.
+                    text "Reset link sent"
 
                 _ ->
                     text "Send reset link"
@@ -744,10 +820,10 @@ viewForgotForm model =
                     [ class "login-card__notice", testId "forgot-success" ]
                     "If that email is registered, a reset link is on its way. Check your inbox."
 
-            Failure _ ->
+            Failure err ->
                 notice
                     [ class "login-card__error", testId "forgot-error" ]
-                    "Something went wrong. Please try again."
+                    (mailRequestError err)
 
             _ ->
                 text ""
@@ -1131,7 +1207,27 @@ fromRegisterError registerError =
         RegisterValidationFailed errors ->
             SubmitValidationError errors
 
+        RegisterRateLimited retryAfter ->
+            SubmitRateLimited retryAfter
+
         RegisterRequestFailed err ->
+            SubmitHttpError err
+
+
+{-| A sign-in failure as a `SubmitError` (Issue #374).
+
+The 429 is lifted out of `Http.Error` here rather than mapped in
+`httpErrorMessage` because by the time a failure is an `Http.Error` its
+`retry-after` is gone — that is the whole reason `Api.RequestError` exists.
+
+-}
+fromRequestError : RequestError -> SubmitError
+fromRequestError requestError =
+    case requestError of
+        RateLimited retryAfter ->
+            SubmitRateLimited retryAfter
+
+        RequestFailed err ->
             SubmitHttpError err
 
 
@@ -1140,6 +1236,9 @@ errorMessage mode submitError =
     case submitError of
         SubmitValidationError errors ->
             registerValidationMessage errors
+
+        SubmitRateLimited retryAfter ->
+            FailureCopy.rateLimited retryAfter
 
         SubmitHttpError err ->
             httpErrorMessage mode err
@@ -1175,6 +1274,26 @@ registerValidationMessage errors =
         "Registration could not be completed. Please check the details you entered."
 
 
+{-| A sign-in or registration failure, named only as precisely as the response
+allows (Issue #374, #369 requirement 5).
+
+⛔ **The catch-all used to be `"The door remains shut. Invalid email or
+password."`** — for _any_ status this function does not list. A 500 from a
+failed query, a 502 from a node restarting mid-deploy, a 504 from a proxy: all
+three told the reader their credentials were wrong. They are not. The reader's
+response to that sentence is to retype details that were already correct, watch
+them fail again, and conclude their account is gone — so the message did not
+merely fail to help, it aimed the reader at the one thing that was working.
+
+Only a **401** means "these credentials are wrong", because that is the only
+status `AuthController.login/2` returns when it has checked them and they are.
+Everything unlisted now says that we do not know, which is true, and points at
+waiting rather than at retyping. The 5xx branch is named separately from the
+truly-unrecognised one for the same reason the two are different facts: a 5xx is
+the library's own fault and will pass, and telling the reader so stops them
+hunting for a mistake they did not make.
+
+-}
 httpErrorMessage : Mode -> Http.Error -> String
 httpErrorMessage mode err =
     case err of
@@ -1198,6 +1317,12 @@ httpErrorMessage mode err =
         Http.BadStatus 423 ->
             "This account is temporarily locked after too many failed attempts. Please try again in a little while."
 
+        Http.BadStatus 429 ->
+            -- Reachable only if a 429 arrives somewhere `Api.RequestError` does
+            -- not classify it. Same sentence, minus the interval we then do not
+            -- have — never a different explanation.
+            FailureCopy.rateLimited Nothing
+
         Http.BadStatus 503 ->
             "The library is briefly overloaded. Please try again in a few seconds."
 
@@ -1207,10 +1332,29 @@ httpErrorMessage mode err =
         Http.Timeout ->
             "The library took too long to respond."
 
-        _ ->
-            case mode of
-                RegisterMode ->
-                    "Registration could not be completed. The email may already be in use."
+        Http.BadStatus status ->
+            if status >= 500 then
+                "The library is having trouble at its own end. Nothing is wrong with what you entered — please try again in a moment."
 
-                _ ->
-                    "The door remains shut. Invalid email or password."
+            else
+                unknownFailureMessage mode
+
+        _ ->
+            unknownFailureMessage mode
+
+
+{-| What to say when the app genuinely does not know what happened.
+
+Named, rather than inlined into the two branches that need it, so that a future
+branch cannot quietly get a _different_ unknown message — and so that this
+sentence's one job is visible: to be helpful without asserting anything.
+
+-}
+unknownFailureMessage : Mode -> String
+unknownFailureMessage mode =
+    case mode of
+        RegisterMode ->
+            "Registration could not be completed, and we cannot say why. Please try again in a moment."
+
+        _ ->
+            "The door would not open, and we cannot say why. Your details may be perfectly correct. Please try again in a moment."

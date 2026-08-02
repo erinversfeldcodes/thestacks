@@ -3,9 +3,10 @@ module UploadTest exposing (suite)
 import Api exposing (PollResponse, PollStatus(..))
 import Expect
 import Http
+import Json.Decode as Decode
 import Json.Encode as Encode
 import Navigation.Route
-import Page.Upload as Upload exposing (Msg(..), OutMsg(..), UploadResult(..), UploadStep(..))
+import Page.Upload as Upload exposing (Msg(..), OutMsg(..), UploadFailure(..), UploadResult(..), UploadStep(..))
 import Test exposing (Test, describe, test)
 import Types.Book exposing (Book, Edition, VisibilityTier(..))
 import Types.Placement exposing (Placement)
@@ -60,15 +61,30 @@ dummyBook =
     }
 
 
+{-| The SSE loop's synthetic timeout frame.
+
+⛔ Was hand-built with `status = Rejected` and never went near the decoder, so
+the test named "timeout status…" was in fact exercising a rejection with no
+reason attached — a different branch, which happened to land in the same place
+back when every failure landed in the same place. It is decoded from a real
+frame now, so "timeout" has to survive `Api.streamEventDecoder` to reach the
+page (#374; the same mirror hazard as #328).
+
+-}
 timeoutPoll : PollResponse
 timeoutPoll =
-    { imageId = "img-1"
-    , status = Rejected
-    , bookId = Nothing
-    , bookIds = []
-    , rejectionReason = Nothing
-    , isDuplicate = False
-    }
+    case Decode.decodeString Api.streamEventDecoder (serverFrame "timeout" Nothing [] Nothing) of
+        Ok frame ->
+            frame
+
+        Err _ ->
+            { imageId = "img-1"
+            , status = Pending
+            , bookId = Nothing
+            , bookIds = []
+            , rejectionReason = Nothing
+            , isDuplicate = False
+            }
 
 
 dummyEdition : Edition
@@ -229,7 +245,7 @@ suite =
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
-                    model.result |> Expect.equal IdentificationFailed
+                    model.result |> Expect.equal (IdentificationFailed IsbnUnreadable)
             , -- US-1.1.2 | Suite 10: Elm (#160 SSE)
               -- Regression guard: pending IDs and collected books must be cleared on
               -- rejection so that a retry starts from a clean slate rather than
@@ -254,7 +270,7 @@ suite =
                             Upload.update (StreamEvent rawJson) modelInFlight (Just "tok")
                     in
                     Expect.all
-                        [ \m -> m.result |> Expect.equal IdentificationFailed
+                        [ \m -> m.result |> Expect.equal (IdentificationFailed IsbnUnreadable)
                         , \m -> m.pendingBookIds |> Expect.equal []
                         , \m -> m.collectedBooks |> Expect.equal []
                         ]
@@ -262,13 +278,13 @@ suite =
             ]
         , describe "StreamError"
             [ -- US-1.1.1 | Suite 10: Elm (#160 SSE)
-              test "StreamError sets result to IdentificationFailed" <|
+              test "StreamError sets result to IdentificationFailed ConnectionLost" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update StreamError modelWithImage (Just "tok")
                     in
-                    model.result |> Expect.equal IdentificationFailed
+                    model.result |> Expect.equal (IdentificationFailed ConnectionLost)
             , -- US-1.1.1 | Suite 10: Elm (#160 SSE)
               test "StreamError leaves uploadState unchanged" <|
                 \_ ->
@@ -281,13 +297,13 @@ suite =
             ]
         , describe "StatusReceived (response-parsing logic, carried over from polling)"
             [ -- US-1.1.2 | Suite 10: Elm
-              test "timeout status sets result to IdentificationFailed" <|
+              test "timeout status sets result to IdentificationFailed TookTooLong" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
                             Upload.update (StatusReceived (Ok timeoutPoll)) modelWithImage (Just "tok")
                     in
-                    model.result |> Expect.equal IdentificationFailed
+                    model.result |> Expect.equal (IdentificationFailed TookTooLong)
             ]
         , describe "GotIdentifiedBook"
             [ -- US-1.1.1 | Suite 10: Elm
@@ -338,7 +354,7 @@ suite =
                         ( model, _, _ ) =
                             Upload.update (GotIdentifiedBook "book-1" (Err Http.NetworkError)) modelPending Nothing
                     in
-                    model.result |> Expect.equal IdentificationFailed
+                    model.result |> Expect.equal (IdentificationFailed ConnectionLost)
             ]
         , describe "GotDuplicateBook"
             [ -- US-1.1.6 | Suite 10: Elm
@@ -356,7 +372,7 @@ suite =
                         ( model, _, _ ) =
                             Upload.update (GotDuplicateBook (Err Http.NetworkError)) Upload.init Nothing
                     in
-                    model.result |> Expect.equal IdentificationFailed
+                    model.result |> Expect.equal (IdentificationFailed ConnectionLost)
             ]
         , describe "Verification step"
             [ -- US-1.1.1 | Suite 10: Elm

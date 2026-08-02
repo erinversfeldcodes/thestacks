@@ -1,6 +1,6 @@
 module LoginTest exposing (suite)
 
-import Api exposing (AuthResponse, RegisterError(..))
+import Api exposing (AuthResponse, RegisterError(..), RequestError(..))
 import Expect
 import Http
 import Page.Login as Login exposing (FieldValidation(..), Msg(..), SubmitError(..))
@@ -171,7 +171,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (GotAuthResponse (Err Http.NetworkError)) (Login.init Login.Fresh)
+                            Login.update (GotAuthResponse (Err (RequestFailed Http.NetworkError))) (Login.init Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Failure (SubmitHttpError Http.NetworkError))
             ]
@@ -210,7 +210,7 @@ suite =
                 \_ ->
                     let
                         ( model, _, _ ) =
-                            Login.update (GotAuthResponse (Err (Http.BadStatus 401))) (Login.init Login.Fresh)
+                            Login.update (GotAuthResponse (Err (RequestFailed (Http.BadStatus 401)))) (Login.init Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Failure (SubmitHttpError (Http.BadStatus 401)))
             ]
@@ -411,56 +411,145 @@ suite =
                     Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 503))
                         |> Expect.equal "The library is briefly overloaded. Please try again in a few seconds."
             ]
-        , describe "forgot-password mode (in the login card)"
-            [ test "switching to ForgotPasswordMode sets the mode" <|
-                \_ ->
-                    let
-                        ( m, _, _ ) =
-                            Login.update (ModeSwitched Login.ForgotPasswordMode) (Login.init Login.Fresh)
-                    in
-                    m.mode |> Expect.equal Login.ForgotPasswordMode
-            , test "ForgotSubmitted with an email moves forgotState to Loading" <|
-                \_ ->
-                    let
-                        ( m1, _, _ ) =
-                            Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
+        , unknownStatusClaimsNothing
+        , throttledSignInSuite
+        , forgotPasswordModeSuite
+        ]
 
-                        ( m2, _, _ ) =
-                            Login.update ForgotSubmitted m1
-                    in
-                    m2.forgotState |> Expect.equal Loading
-            , test "ForgotSubmitted with a blank email is a no-op" <|
-                \_ ->
-                    let
-                        ( m, _, _ ) =
-                            Login.update ForgotSubmitted (Login.init Login.Fresh)
-                    in
-                    m.forgotState |> Expect.equal NotAsked
-            , test "a successful forgot response shows Success" <|
-                \_ ->
-                    let
-                        ( m1, _, _ ) =
-                            Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
 
-                        ( m2, _, _ ) =
-                            Login.update ForgotSubmitted m1
+{-| ⛔ Issue #374 requirement 2 / #369 requirement 5, as tests.
 
-                        ( m3, _, _ ) =
-                            Login.update (GotForgotResponse (Ok ())) m2
-                    in
-                    m3.forgotState |> Expect.equal (Success ())
-            , test "a failed forgot response shows Failure" <|
-                \_ ->
-                    let
-                        ( m1, _, _ ) =
-                            Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
+The catch-all was `"The door remains shut. Invalid email or password."` for every
+status this function does not list — so a 502 from a node restarting mid-deploy
+told the reader their credentials were wrong. The reader's move is then to retype
+details that are already correct, fail again, and conclude the account is gone.
 
-                        ( m2, _, _ ) =
-                            Login.update ForgotSubmitted m1
+The assertions are written as inequalities against that exact sentence rather
+than as equalities against the new one, because the requirement is a prohibition:
+"never claim a credential problem the server did not report". Copy may be reworded
+later; the prohibition may not be relaxed, and an equality test would go green
+against a reworded lie.
 
-                        ( m3, _, _ ) =
-                            Login.update (GotForgotResponse (Err Http.NetworkError)) m2
-                    in
-                    m3.forgotState |> Expect.equal (Failure Http.NetworkError)
-            ]
+The 401 case below is the positive control. Without it, `httpErrorMessage` could
+answer "we cannot say why" to EVERYTHING and every inequality above would pass
+while the one status that really does mean "wrong password" stopped saying so.
+
+-}
+unknownStatusClaimsNothing : Test
+unknownStatusClaimsNothing =
+    describe "an unknown failure never claims a known cause (#374)"
+        [ test "a 502 does not tell the reader their credentials are wrong" <|
+            \_ ->
+                Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 502))
+                    |> Expect.notEqual "The door remains shut. Invalid email or password."
+        , test "a 502 says so is the library's fault, not the reader's" <|
+            \_ ->
+                Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 502))
+                    |> Expect.equal "The library is having trouble at its own end. Nothing is wrong with what you entered — please try again in a moment."
+        , test "a status nobody anticipated admits it is not understood" <|
+            \_ ->
+                Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 418))
+                    |> String.contains "we cannot say why"
+                    |> Expect.equal True
+        , test "a status nobody anticipated is not reported as a bad credential" <|
+            \_ ->
+                Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 418))
+                    |> Expect.notEqual "The door remains shut. Invalid email or password."
+        , test "registration does not guess 'the email may already be in use' either" <|
+            \_ ->
+                Login.errorMessage Login.RegisterMode (SubmitHttpError (Http.BadStatus 418))
+                    |> Expect.notEqual "Registration could not be completed. The email may already be in use."
+        , test "positive control — a 401 still says the credentials are wrong" <|
+            \_ ->
+                Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 401))
+                    |> Expect.equal "The door remains shut. Invalid credentials."
+        ]
+
+
+{-| The 429, with the wait the server named (#374 requirement 3).
+
+Consistency with the 423 lockout copy asserted directly: both end in an
+instruction to wait, and neither invents an interval it was not given.
+
+-}
+throttledSignInSuite : Test
+throttledSignInSuite =
+    describe "a throttled sign-in (#374)"
+        [ test "a 429 with retry-after names the wait" <|
+            \_ ->
+                Login.errorMessage Login.LoginMode (SubmitRateLimited (Just 60))
+                    |> Expect.equal "Too many attempts from here just now. Please wait a minute before trying again."
+        , test "a 429 without one names no wait at all" <|
+            \_ ->
+                Login.errorMessage Login.LoginMode (SubmitRateLimited Nothing)
+                    |> Expect.equal "Too many attempts from here just now. Please wait a little while before trying again."
+        , test "a throttle is never reported as a bad credential" <|
+            \_ ->
+                Login.errorMessage Login.LoginMode (SubmitRateLimited Nothing)
+                    |> Expect.notEqual "The door remains shut. Invalid email or password."
+        , test "a 429 response is classified as a throttle, carrying its retry-after" <|
+            \_ ->
+                let
+                    ( model, _, _ ) =
+                        Login.update
+                            (GotAuthResponse (Err (RateLimited (Just 90))))
+                            (Login.init Login.Fresh)
+                in
+                model.submitState |> Expect.equal (Failure (SubmitRateLimited (Just 90)))
+        ]
+
+
+forgotPasswordModeSuite : Test
+forgotPasswordModeSuite =
+    describe "forgot-password mode (in the login card)"
+        [ test "switching to ForgotPasswordMode sets the mode" <|
+            \_ ->
+                let
+                    ( m, _, _ ) =
+                        Login.update (ModeSwitched Login.ForgotPasswordMode) (Login.init Login.Fresh)
+                in
+                m.mode |> Expect.equal Login.ForgotPasswordMode
+        , test "ForgotSubmitted with an email moves forgotState to Loading" <|
+            \_ ->
+                let
+                    ( m1, _, _ ) =
+                        Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
+
+                    ( m2, _, _ ) =
+                        Login.update ForgotSubmitted m1
+                in
+                m2.forgotState |> Expect.equal Loading
+        , test "ForgotSubmitted with a blank email is a no-op" <|
+            \_ ->
+                let
+                    ( m, _, _ ) =
+                        Login.update ForgotSubmitted (Login.init Login.Fresh)
+                in
+                m.forgotState |> Expect.equal NotAsked
+        , test "a successful forgot response shows Success" <|
+            \_ ->
+                let
+                    ( m1, _, _ ) =
+                        Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
+
+                    ( m2, _, _ ) =
+                        Login.update ForgotSubmitted m1
+
+                    ( m3, _, _ ) =
+                        Login.update (GotForgotResponse (Ok ())) m2
+                in
+                m3.forgotState |> Expect.equal (Success ())
+        , test "a failed forgot response shows Failure" <|
+            \_ ->
+                let
+                    ( m1, _, _ ) =
+                        Login.update (EmailChanged "reader@test.com") (Login.init Login.Fresh)
+
+                    ( m2, _, _ ) =
+                        Login.update ForgotSubmitted m1
+
+                    ( m3, _, _ ) =
+                        Login.update (GotForgotResponse (Err (RequestFailed Http.NetworkError))) m2
+                in
+                m3.forgotState |> Expect.equal (Failure (RequestFailed Http.NetworkError))
         ]

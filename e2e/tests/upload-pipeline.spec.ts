@@ -133,9 +133,11 @@ async function mockUploadAccept(page: Page) {
 }
 
 /**
- * Fail the upload at the init step. The page renders the generic
- * "Upload failed. Please try again." error UI — keeping the failure on
- * the very first step is the simplest path for the sad-path retry test.
+ * Fail the upload at the init step, with a 500. Since #374 the page names the
+ * failure it was given rather than rendering one "Upload failed. Please try
+ * again." for everything — a 500 is unrecognised, so the card says so.
+ * Keeping the failure on the very first step is the simplest path for the
+ * sad-path retry test.
  */
 async function mockUploadFailure(page: Page) {
   await page.route("**/api/upload/init", (route) => {
@@ -227,7 +229,20 @@ async function mockPollPending(page: Page) {
   await injectEventSourceMock(page, { type: "pending" });
 }
 
-/** Mock GET /api/upload/:id/stream with rejected (ISBN not found) SSE. */
+/**
+ * Mock GET /api/upload/:id/stream with rejected (ISBN not found) SSE.
+ *
+ * ⛔ `is_duplicate` must be a BOOLEAN, not `null`. `Api.streamEventDecoder`
+ * requires it (`Decode.field "is_duplicate" Decode.bool`) because
+ * `ProtoJSON.poll_response/1` always emits one — and a frame that fails to
+ * decode is DISCARDED by `Page.Upload.StreamEvent`, which treats a decode error
+ * as "ignore, stay put" so heartbeats do not disturb the page.
+ *
+ * This mock sent `null`, so the frame never arrived: the page sat on its
+ * spinner and the test waited out its timeout. Found while driving #374 against
+ * a local stack; it is the same wire-contract drift #328 removed from the Elm
+ * fixtures, surviving here in the Playwright ones.
+ */
 async function mockPollRejected(page: Page) {
   await injectEventSourceMock(page, {
     payload: {
@@ -236,7 +251,7 @@ async function mockPollRejected(page: Page) {
       book_id: null,
       book_ids: [],
       rejection_reason: "isbn_not_found",
-      is_duplicate: null,
+      is_duplicate: false,
     },
   });
 }
@@ -261,7 +276,10 @@ async function mockGetBookServerError(page: Page, bookId: string) {
   });
 }
 
-/** Mock GET /api/upload/:id/stream with resolved but no book IDs (not a book) SSE. */
+/**
+ * Mock GET /api/upload/:id/stream with resolved but no book IDs (not a book).
+ * `is_duplicate` is a boolean for the reason spelled out on `mockPollRejected`.
+ */
 async function mockPollNotABook(page: Page) {
   await injectEventSourceMock(page, {
     payload: {
@@ -270,7 +288,7 @@ async function mockPollNotABook(page: Page) {
       book_id: null,
       book_ids: [],
       rejection_reason: null,
-      is_duplicate: null,
+      is_duplicate: false,
     },
   });
 }
@@ -631,8 +649,16 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 10_000,
     });
+    // #374: a 500 on init is a status the app cannot interpret, so the copy
+    // says exactly that rather than claiming a cause. `data-failure-cause`
+    // pins WHICH card this is, so a copy edit cannot silently re-point the
+    // assertion at a different failure.
+    await expect(page.getByTestId("upload-error")).toHaveAttribute(
+      "data-failure-cause",
+      "not-sent"
+    );
     await expect(page.getByTestId("upload-error")).toContainText(
-      "Upload failed"
+      "we cannot say why"
     );
 
     // "Try Again" button should be present
@@ -654,7 +680,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
   });
 
   // US-1.1.1 | Suite 1: Playwright
-  test("poll timeout -> Could Not Identify -> manual ISBN / retry", { tag: ["@US-1.1.1"] }, async ({
+  test("stream error -> the lost connection is named -> manual ISBN / retry", { tag: ["@US-1.1.1"] }, async ({
     page,
   }) => {
     // This test would take too long if we waited for 150 polls at 2s each.
@@ -670,12 +696,18 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Should show "Could Not Identify Book"
+    // #374: an EventSource error is the STREAM breaking. It used to render
+    // "We couldn't read the ISBN from this photo. Try a clearer image" — advice
+    // about a photograph the pipeline had not looked at yet.
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 15_000,
     });
+    await expect(page.getByTestId("upload-error")).toHaveAttribute(
+      "data-failure-cause",
+      "connection-lost"
+    );
     await expect(page.getByTestId("upload-error")).toContainText(
-      "Could Not Identify"
+      "The Library Is Unreachable"
     );
 
     // "Enter ISBN Manually" button should be present
@@ -699,12 +731,17 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Should show identification failed view
+    // `mockPollRejected` sends `rejection_reason: "isbn_not_found"` — the ONE
+    // cause the old single message actually described (#374).
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 10_000,
     });
+    await expect(page.getByTestId("upload-error")).toHaveAttribute(
+      "data-failure-cause",
+      "isbn-unreadable"
+    );
     await expect(page.getByTestId("upload-error")).toContainText(
-      "Could Not Identify"
+      "Could Not Read the ISBN"
     );
 
     // Both options available
@@ -793,12 +830,15 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Error view should appear with identification failure text
+    // `mockPollServerError` breaks the EventSource, so this is the same
+    // connection-lost card as the stream-error test above (#374) — not a verdict
+    // on the photo, which the pipeline never reported one for.
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 15_000,
     });
-    await expect(page.getByTestId("upload-error")).toContainText(
-      "Could Not Identify"
+    await expect(page.getByTestId("upload-error")).toHaveAttribute(
+      "data-failure-cause",
+      "connection-lost"
     );
 
     // Retry options should be available
@@ -1205,3 +1245,165 @@ test.describe("ARIA and accessibility", { tag: ["@US-1.1.1"] }, () => {
     await expect(chooseBtn).toBeFocused();
   });
 });
+
+// ===========================================================================
+// FAILURE COPY (Issue #374)
+//
+// Four causes the pipeline can terminate on, four things to say, and a budget
+// on how long the reader waits to be told.
+//
+// ⛔ THE BUDGET IS PART OF THE REQUIREMENT. Before #374 a reader whose upload
+// went wrong watched a spinner and was then told the wrong thing. A correct
+// message that arrives six minutes late is not a fix, so each assertion below
+// is bounded at 5 s from the file being handed over.
+//
+// These use the injected `EventSource` mock, so the terminal frame is delivered
+// on the client — which means the elapsed time measures exactly what this issue
+// owns: the SPA's own latency between "the server said" and "the reader can
+// read it". WHEN the server sends that frame is governed by #315's derived
+// deadline (`IdentifyBookJob.worst_case_lifetime_ms/0`) and is not re-litigated
+// here.
+// ===========================================================================
+
+/** Mock the SSE stream with a rejection carrying a specific reason token. */
+async function mockPollRejectedWith(page: Page, reason: string) {
+  await injectEventSourceMock(page, {
+    payload: {
+      image_id: FAKE_IMAGE_ID,
+      status: "rejected",
+      book_id: null,
+      book_ids: [],
+      rejection_reason: reason,
+      is_duplicate: false,
+    },
+  });
+}
+
+/** Mock the SSE stream with the loop's synthetic timeout frame. */
+async function mockPollTimedOut(page: Page) {
+  await injectEventSourceMock(page, {
+    payload: {
+      image_id: FAKE_IMAGE_ID,
+      status: "timeout",
+      book_id: null,
+      book_ids: [],
+      rejection_reason: null,
+      is_duplicate: false,
+    },
+  });
+}
+
+const FAILURE_BUDGET_MS = 5_000;
+
+test.describe(
+  "Failure copy names its cause, quickly",
+  { tag: ["@US-16.2.1", "@US-1.1.2"] },
+  () => {
+    const cases = [
+      {
+        name: "an image the service could not decode",
+        reason: "undecodable_image",
+        cause: "image-unreadable",
+        says: "That Photo Could Not Be Opened",
+        doesNotSay: "could not make out its ISBN",
+      },
+      {
+        name: "a photo with no book in it",
+        reason: "not_a_book",
+        cause: "not-a-book",
+        says: "That Doesn't Look Like a Book",
+        doesNotSay: "could not make out its ISBN",
+      },
+      {
+        name: "the vision service being down",
+        reason: "vision_unavailable",
+        cause: "service-unavailable",
+        says: "There is nothing wrong with your photo.",
+        doesNotSay: "Try a clearer image",
+      },
+      {
+        name: "a token this client has never seen",
+        reason: "shelf_gremlins",
+        cause: "unknown",
+        says: "we cannot say why",
+        doesNotSay: "could not make out its ISBN",
+      },
+    ];
+
+    for (const c of cases) {
+      test(`${c.name} says so, within ${FAILURE_BUDGET_MS / 1000}s`, async ({
+        page,
+      }) => {
+        await mockUploadAccept(page);
+        await mockPollRejectedWith(page, c.reason);
+
+        await page.goto("/upload");
+        const startedAt = Date.now();
+        await triggerFileUpload(page);
+
+        const error = page.getByTestId("upload-error");
+        await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
+        // Separate from the locator's own timeout on purpose: the locator budget
+        // asks "did it ever appear", this asks "and not on the slow path".
+        expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
+
+        await expect(error).toHaveAttribute("data-failure-cause", c.cause);
+        await expect(error).toContainText(c.says);
+        // ⛔ The half that makes this able to fail. Without it, a card that
+        // ignored its cause and always rendered the ISBN message would still
+        // pass whichever leg happened to match.
+        await expect(error).not.toContainText(c.doesNotSay);
+      });
+    }
+
+    test(`a stream that times out reports no verdict, within ${
+      FAILURE_BUDGET_MS / 1000
+    }s`, async ({ page }) => {
+      await mockUploadAccept(page);
+      await mockPollTimedOut(page);
+
+      await page.goto("/upload");
+      const startedAt = Date.now();
+      await triggerFileUpload(page);
+
+      const error = page.getByTestId("upload-error");
+      await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
+      expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
+
+      await expect(error).toHaveAttribute("data-failure-cause", "timed-out");
+      await expect(error).toContainText("No Answer Came Back");
+      await expect(error).toContainText(
+        "Nothing has been added to your shelves."
+      );
+      await expect(error).not.toContainText("could not make out its ISBN");
+    });
+
+    test("a 429 on the upload names the wait rather than urging a retry", async ({
+      page,
+    }) => {
+      // The `:upload` rate-limit bucket. The old copy — "Upload failed. Please
+      // try again." — was the exact wrong instruction: an immediate retry lands
+      // in the same bucket and fails identically.
+      await page.route("**/api/upload/init", (route) =>
+        route.fulfill({
+          status: 429,
+          headers: { "retry-after": "60" },
+          contentType: "application/json",
+          body: JSON.stringify({ error: "rate_limit_exceeded" }),
+        })
+      );
+
+      await page.goto("/upload");
+      const startedAt = Date.now();
+      await triggerFileUpload(page);
+
+      const error = page.getByTestId("upload-error");
+      await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
+      expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
+
+      await expect(error).toHaveAttribute("data-failure-cause", "not-sent");
+      await expect(error).toContainText("Too many attempts from here just now.");
+      await expect(error).not.toContainText("Upload failed. Please try again.");
+    });
+  }
+);

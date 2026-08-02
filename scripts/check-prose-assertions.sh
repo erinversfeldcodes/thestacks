@@ -71,6 +71,7 @@ Page/SettingsHubTest.elm|Notifications|renders the settings hub; "Notifications 
 AdminRemovalRequestsTest.elm|Approve|renders the queue ALONE; "Approved" is SourceApproval's filter tab
 SessionExpiryTest.elm|closed your session|supersets are ALL expiry-banner variants; matching any is the intent
 Page/BookshelfReadOnlyTest.elm|Could not load your|supersets are ALL owner-error variants; matching any is intended
+Page/ForgotPasswordNoticeTest.elm|60 seconds|#374: the superset "wait 60 seconds" is EXACTLY the copy being guarded against — a retry-after the response did not carry
 LIST
 )
 

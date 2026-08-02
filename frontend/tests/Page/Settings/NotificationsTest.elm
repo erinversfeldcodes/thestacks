@@ -180,11 +180,36 @@ suite =
                     |> Notifications.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "Preferences saved." ]
-        , test "a failed save shows the save-error copy" <|
+        , test "a dropped connection says the connection dropped" <|
             \_ ->
                 Notifications.update (SaveCompleted (Err Http.NetworkError)) (loadedWith allOff) (Just "test-token")
                     |> modelOf
                     |> Notifications.view
                     |> Query.fromHtml
-                    |> Query.has [ Selector.text "Could not save notification preferences. Please try again." ]
+                    |> Query.has [ Selector.text "The library is unreachable, so your notification preferences were not saved." ]
+        , -- ⛔ #374. All three of these were "Could not save notification
+          -- preferences. Please try again." A 422 cannot be fixed by repeating
+          -- the request, and a timeout may already have SAVED — so "try again"
+          -- was, for two of the three, advice that made things worse.
+          test "a 422 sends the reader to a reload, not to a repeat" <|
+            \_ ->
+                Notifications.update (SaveCompleted (Err (Http.BadStatus 422))) (loadedWith allOff) (Just "test-token")
+                    |> modelOf
+                    |> Notifications.view
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "The library would not accept that change to your notification preferences. Reload the page and try again." ]
+        , test "a timeout does not claim the change was lost" <|
+            \_ ->
+                Notifications.update (SaveCompleted (Err Http.Timeout)) (loadedWith allOff) (Just "test-token")
+                    |> modelOf
+                    |> Notifications.view
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "we cannot say whether your notification preferences were saved" ]
+        , test "an unrecognised status admits it is unrecognised" <|
+            \_ ->
+                Notifications.update (SaveCompleted (Err (Http.BadStatus 502))) (loadedWith allOff) (Just "test-token")
+                    |> modelOf
+                    |> Notifications.view
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "and we cannot say why" ]
         ]

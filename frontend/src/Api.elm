@@ -45,6 +45,7 @@ module Api exposing
     , RegisterError(..)
     , RemovalOutcome(..)
     , RemovalRequest
+    , RequestError(..)
     , RiskInference
     , SearchSections
     , ShelfVisibilitySetting
@@ -139,7 +140,6 @@ module Api exposing
     , putFileToR2
     , refresh
     , register
-    , registrationResponseDecoder
     , rejectIdentification
     , rejectSource
     , removeBook
@@ -148,9 +148,13 @@ module Api exposing
     , requestListingRemoval
     , resendConfirmation
     , resetPassword
+    , resolveAuthResponse
+    , resolveNoContent
     , resolveProfile
+    , resolveRegister
     , resolveWhatever
     , restoreBook
+    , retryAfterSeconds
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
@@ -193,6 +197,7 @@ exposure together with its consumer, never on its own.
 
 -}
 
+import Dict
 import File exposing (File)
 import Http
 import Json.Decode as Decode exposing (Decoder)
@@ -323,11 +328,21 @@ The wire carries a status string from the DB (`"pending"`, `"resolved"`,
 status the server grew after this client shipped, and is read as still-in-flight
 (`Pending`) rather than as a terminal outcome we would guess wrong.
 
+⛔ **`"timeout"` is not a rejection** (Issue #374). It used to decode to
+`Rejected` with a `null` rejection\_reason, and `Page.Upload` reads a
+`Rejected`-with-no-reason as "we could not read the ISBN" — so a reader whose
+photo the pipeline never answered for was told their photo was unreadable. The
+server knows the difference (`UploadController.sse_receive_loop/4` emits the two
+statuses from two different branches) and said so on the wire; it was this
+decoder that threw the distinction away. Keeping `TimedOut` separate is what
+lets the page say the one true thing it knows: no answer came back.
+
 -}
 type PollStatus
     = Pending
     | Resolved
     | Rejected
+    | TimedOut
 
 
 {-| The SSE frame from `GET /api/upload/:image_id/stream`.
@@ -382,7 +397,7 @@ streamEventDecoder =
                         Rejected
 
                     "timeout" ->
-                        Rejected
+                        TimedOut
 
                     _ ->
                         Pending
@@ -400,16 +415,130 @@ streamEventDecoder =
         (Decode.field "is_duplicate" Decode.bool)
 
 
+{-| A request failure the rate limiter may have caused, carrying the wait the
+server named (Issue #374).
+
+⛔ **This type exists because `Http.Error` structurally cannot carry it.**
+`Http.expectJson` and `Http.expectWhatever` collapse every non-2xx response into
+`Http.BadStatus Int`: the status number survives and the **headers do not**. But
+`retry-after` is a header — `StacksWeb.Plugs.RateLimiter` sets it beside the 429
+— so a caller holding an `Http.Error` has no way to learn how long to wait, and
+its copy must either say nothing or invent a number. Inventing one is the exact
+untruth this issue exists to remove: it would still read "wait 60 seconds" the
+day the plug changes to 30, and no test could notice.
+
+Endpoints in the `:auth` rate-limit bucket resolve through
+`expectStringResponse` and return this instead. The rest of the app keeps
+`Http.Error` and gets the unnumbered wait copy, which is what the 423 lockout
+message already says — a message with no interval in it is honest at any limit.
+
+-}
+type RequestError
+    = RateLimited (Maybe Int)
+    | RequestFailed Http.Error
+
+
+{-| The wait a 429 named, in seconds — `Nothing` when it named none, or named
+something that is not a positive whole number of seconds (Issue #374).
+
+RFC 9110 permits `retry-after` to be an HTTP-date as well as a delay in seconds,
+and this deliberately does **not** parse the date form. Turning a date into a
+delay needs the current time, which is not available where a response is
+resolved, and guessing is worse than not knowing: the copy that falls back to
+`Nothing` is true, and a wrong number is not. `StacksWeb.Plugs.RateLimiter`
+sends the delay form.
+
+`Http.Metadata.headers` is keyed by lower-cased header name, so this looks up
+one spelling and there is no second one to get wrong.
+
+-}
+retryAfterSeconds : Http.Metadata -> Maybe Int
+retryAfterSeconds metadata =
+    Dict.get "retry-after" metadata.headers
+        |> Maybe.map String.trim
+        |> Maybe.andThen String.toInt
+        |> Maybe.andThen
+            (\seconds ->
+                if seconds > 0 then
+                    Just seconds
+
+                else
+                    Nothing
+            )
+
+
+{-| Classify a `Http.BadStatus_` as either the rate limiter or something else.
+
+One place decides what "throttled" means, so every `:auth` endpoint agrees.
+
+-}
+badStatusToRequestError : Http.Metadata -> RequestError
+badStatusToRequestError metadata =
+    if metadata.statusCode == 429 then
+        RateLimited (retryAfterSeconds metadata)
+
+    else
+        RequestFailed (Http.BadStatus metadata.statusCode)
+
+
+{-| The `Http.Response` → `Result RequestError a` translation, given a decoder
+for the 2xx body.
+
+Exported (via `resolveAuthResponse` / `resolveNoContent`) so `TestHelpers`'
+simulated effects run the **real** resolver rather than a hand-written mirror of
+it. `registerResponseResult` used to be such a mirror, and #328 is the record of
+what mirrors cost: the copy and the fixtures agree with each other while both
+disagree with the server, and the suite stays green through a wire rename.
+
+-}
+resolveRequest : (String -> Result String a) -> Http.Response String -> Result RequestError a
+resolveRequest decode response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (RequestFailed (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (RequestFailed Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (RequestFailed Http.NetworkError)
+
+        Http.BadStatus_ metadata _ ->
+            Err (badStatusToRequestError metadata)
+
+        Http.GoodStatus_ _ bodyText ->
+            decode bodyText |> Result.mapError (Http.BadBody >> RequestFailed)
+
+
+{-| Resolver for a sign-in response. Shared with the program-test harness.
+-}
+resolveAuthResponse : Http.Response String -> Result RequestError AuthResponse
+resolveAuthResponse =
+    resolveRequest
+        (Decode.decodeString authResponseDecoder >> Result.mapError Decode.errorToString)
+
+
+{-| Resolver for an endpoint whose success body carries nothing the caller may
+act on — `forgot-password` and `resend-confirmation`, both of which answer
+identically for every address on purpose. Shared with the program-test harness.
+-}
+resolveNoContent : Http.Response String -> Result RequestError ()
+resolveNoContent =
+    resolveRequest (\_ -> Ok ())
+
+
 {-| A registration failure.
 
 A 422 carries per-field validation errors (keyed by field name — `email`,
 `password`, `display_name`) so the UI can explain the _actual_ problem rather
-than guessing. Every other failure (network, timeout, unexpected status, or a
-422 whose body we could not parse) is a `RegisterRequestFailed`.
+than guessing. A 429 carries the rate limiter's wait (Issue #374). Every other
+failure (network, timeout, unexpected status, or a 422 whose body we could not
+parse) is a `RegisterRequestFailed`.
 
 -}
 type RegisterError
     = RegisterValidationFailed (List ( String, List String ))
+    | RegisterRateLimited (Maybe Int)
     | RegisterRequestFailed Http.Error
 
 
@@ -447,46 +576,65 @@ register body toMsg =
 {-| `Http.expectJson` discards the response body on a non-2xx status, which
 would throw away the structured `{"errors": ...}` payload a 422 carries. This
 custom expect keeps those field errors so the caller can surface the real
-reason a registration was rejected.
+reason a registration was rejected — and, since #374, the 429's `retry-after`
+for the same reason: it is the only place the number is still readable.
+
+The resolver is a named top-level function rather than a lambda so the
+program-test harness can run **this** function instead of the hand-written
+mirror of it that `TestHelpers` used to carry.
+
 -}
 expectRegister : (Result RegisterError () -> msg) -> Http.Expect msg
 expectRegister toMsg =
-    Http.expectStringResponse toMsg <|
-        \response ->
-            case response of
-                Http.BadUrl_ url ->
-                    Err (RegisterRequestFailed (Http.BadUrl url))
+    Http.expectStringResponse toMsg resolveRegister
 
-                Http.Timeout_ ->
-                    Err (RegisterRequestFailed Http.Timeout)
 
-                Http.NetworkError_ ->
-                    Err (RegisterRequestFailed Http.NetworkError)
+{-| Resolver for a registration response. Shared with the program-test harness.
+-}
+resolveRegister : Http.Response String -> Result RegisterError ()
+resolveRegister response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (RegisterRequestFailed (Http.BadUrl url))
 
-                Http.BadStatus_ metadata bodyText ->
-                    if metadata.statusCode == 422 then
-                        case Decode.decodeString registerErrorsDecoder bodyText of
-                            Ok errors ->
-                                Err (RegisterValidationFailed errors)
+        Http.Timeout_ ->
+            Err (RegisterRequestFailed Http.Timeout)
 
-                            Err _ ->
-                                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+        Http.NetworkError_ ->
+            Err (RegisterRequestFailed Http.NetworkError)
 
-                    else
+        Http.BadStatus_ metadata bodyText ->
+            if metadata.statusCode == 422 then
+                case Decode.decodeString registerErrorsDecoder bodyText of
+                    Ok errors ->
+                        Err (RegisterValidationFailed errors)
+
+                    Err _ ->
                         Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
 
-                Http.GoodStatus_ _ bodyText ->
-                    case Decode.decodeString registrationResponseDecoder bodyText of
-                        Ok value ->
-                            Ok value
+            else if metadata.statusCode == 429 then
+                Err (RegisterRateLimited (retryAfterSeconds metadata))
 
-                        Err err ->
-                            Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
+            else
+                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString registrationResponseDecoder bodyText of
+                Ok value ->
+                    Ok value
+
+                Err err ->
+                    Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
 
 
+{-| POST /api/auth/login. Answers with `RequestError` rather than `Http.Error`
+so a 429 arrives with the wait the server named (Issue #374); this endpoint is
+in the `:auth` rate-limit bucket, which is the tightest one in the app, and a
+mistyped password is the commonest way a reader reaches it.
+-}
 login :
     { email : String, password : String }
-    -> (Result Http.Error AuthResponse -> msg)
+    -> (Result RequestError AuthResponse -> msg)
     -> Cmd msg
 login body toMsg =
     Http.request
@@ -500,23 +648,24 @@ login body toMsg =
                     , password = body.password
                     }
                 )
-        , expect = Http.expectJson toMsg authResponseDecoder
+        , expect = Http.expectStringResponse toMsg resolveAuthResponse
         , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
 {-| Request a password-reset email. The backend always responds 200 (no user
-enumeration), so the caller only distinguishes success from a transport error.
+enumeration), so the caller only distinguishes a throttle from any other
+transport error — never one address from another.
 -}
-forgotPassword : String -> (Result Http.Error () -> msg) -> Cmd msg
+forgotPassword : String -> (Result RequestError () -> msg) -> Cmd msg
 forgotPassword email toMsg =
     Http.request
         { method = "POST"
         , headers = []
         , url = baseUrl ++ "/api/auth/forgot-password"
         , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
-        , expect = Http.expectWhatever toMsg
+        , expect = Http.expectStringResponse toMsg resolveNoContent
         , timeout = standardTimeout
         , tracker = Nothing
         }
@@ -532,14 +681,14 @@ which of the three happened, and giving it a richer type would be inventing an
 answer the server deliberately refused to give.
 
 -}
-resendConfirmation : String -> (Result Http.Error () -> msg) -> Cmd msg
+resendConfirmation : String -> (Result RequestError () -> msg) -> Cmd msg
 resendConfirmation email toMsg =
     Http.request
         { method = "POST"
         , headers = []
         , url = baseUrl ++ "/api/auth/resend-confirmation"
         , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
-        , expect = Http.expectWhatever toMsg
+        , expect = Http.expectStringResponse toMsg resolveNoContent
         , timeout = standardTimeout
         , tracker = Nothing
         }
