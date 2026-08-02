@@ -41,6 +41,32 @@ defmodule Stacks.Books.TitleSearchCacheTest do
       assert :miss = TitleSearchCache.get("X", "Y", nil)
     end
 
+    # #352. A cache entry records an ANSWER; `:unavailable` is the absence of
+    # one. Storing it would keep answering "this book does not exist" for an
+    # hour on the strength of a provider outage that has since ended.
+    test "an :unavailable outage is NOT cached" do
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :unavailable})
+      assert :miss = TitleSearchCache.get("Dune", "Herbert", nil)
+    end
+
+    # The policy is "do not cache an outage", not "do not cache a failure".
+    # A genuine absence is still an answer and must survive, or the fix would
+    # have been implemented by throwing the negative cache away.
+    test "an :unavailable does not overwrite an existing genuine :not_found" do
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :not_found})
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :unavailable})
+
+      assert {:ok, {:error, :not_found}} = TitleSearchCache.get("Dune", "Herbert", nil)
+    end
+
+    # ...nor a positive one. An outage must not evict a book we already know.
+    test "an :unavailable does not overwrite an existing positive result" do
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:ok, "9780441172719", %{}})
+      :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :unavailable})
+
+      assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
+    end
+
     test "whitespace and case variations collapse to the same cache entry" do
       :ok =
         TitleSearchCache.put(

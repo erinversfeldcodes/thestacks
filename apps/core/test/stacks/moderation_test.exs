@@ -699,36 +699,78 @@ defmodule Stacks.ModerationTest do
     end
   end
 
-  describe "title_fallback/5's missing catch-all (#344)" do
-    # The issue asked whether the two-clause `case` in `title_fallback/5` is a
-    # live crash or defence-in-depth. It is DEFENSIVE: `search_by_title/4` has
-    # exactly two exit shapes and not merely by `@spec` — `do_search_by_title/5`
-    # ends in `Enum.find_value(candidates, {:error, :not_found}, ...)` and
-    # `try_candidate/4` returns `{:ok, isbn, metadata}` or `nil`.
+  describe "title_fallback/5's closed failure set (#344, #352)" do
+    # #344 asked whether the two-clause `case` in `title_fallback/5` was a live
+    # crash or defence-in-depth, and answered "defensive": `search_by_title/4`
+    # returned only `:not_found`. #352 is the change that made that answer stop
+    # being true — this test is what said so, which is what it was written for.
     #
-    # This test records that as a property of the resolver rather than asserting
-    # it where it cannot be driven, and it is the assertion that would break if a
-    # future change made the gap reachable — at which point the decision has to
-    # be made deliberately instead of arriving as a CaseClauseError in
-    # production.
-    test "search_by_title/4 returns only :not_found on every reachable failure" do
-      for failure <- [
-            {:error, :unexpected_status},
-            {:error, :malformed_response},
-            {:error, :transport_error},
-            {:error, :timeout},
-            {:ok, %{}},
-            {:ok, %{"docs" => []}}
-          ] do
+    # It is now the closed-set canary over THREE shapes. Each reachable upstream
+    # failure is mapped to the determination it deserves, and `title_fallback/5`
+    # has a clause for each. A fourth shape breaks this test rather than arriving
+    # as a CaseClauseError in production.
+    test "every reachable failure maps to :not_found or :unavailable, and nothing else" do
+      # A statement about US — the lookup did not happen.
+      unavailable = [
+        {:error, :unexpected_status},
+        {:error, :malformed_response},
+        {:error, :transport_error},
+        {:error, :timeout}
+      ]
+
+      # A statement about the BOOK — both catalogues answered and neither knew
+      # it. `{:ok, %{}}` is Google Books' genuine zero-results body (no `items`
+      # key) and MockHttpClient's unregistered-URL default; `{:ok, %{"docs" =>
+      # []}}` is Open Library's.
+      not_found = [
+        {:ok, %{}},
+        {:ok, %{"docs" => []}}
+      ]
+
+      for {failure, expected} <-
+            Enum.map(unavailable, &{&1, :unavailable}) ++
+              Enum.map(not_found, &{&1, :not_found}) do
+        :fuse.reset(:open_library_fuse)
+        :fuse.reset(:google_books_fuse)
         MockHttpClient.clear()
         MockHttpClient.put_response("openlibrary.org", failure)
         MockHttpClient.put_response("googleapis.com", failure)
 
-        assert {:error, :not_found} =
-                 ISBNResolver.search_by_title("A Title", "An Author", nil),
-               "search_by_title/4 grew a third return shape for #{inspect(failure)} — " <>
-                 "Moderation.title_fallback/5 has no clause for it"
+        assert {:error, ^expected} = ISBNResolver.search_by_title("A Title", "An Author", nil),
+               "search_by_title/4 no longer maps #{inspect(failure)} to #{inspect(expected)} — " <>
+                 "check Moderation.title_fallback/5 still has a clause for what it returns now"
       end
+    end
+  end
+
+  describe "run_pipeline/1 — a title-search outage is not the book's fault (#352)" do
+    # The end-to-end consequence, and the reason this is worth a pipeline test
+    # rather than only a resolver one: `:isbn_not_found` is TERMINAL
+    # (`no_resolution_reason/1` — IdentifyBookJob rejects the upload outright),
+    # while `:resolver_unavailable` is retryable. Collapsing the outage meant a
+    # brief OL/GB blip permanently rejected a reader's upload of a book that was
+    # in the catalogue the whole time.
+    test "both catalogues unreachable rejects as :resolver_unavailable, not :isbn_not_found" do
+      MockHttpClient.put_response("openlibrary.org", {:error, :transport_error})
+      MockHttpClient.put_response("googleapis.com", {:error, :transport_error})
+
+      with_vision(null_author(), fn ->
+        assert {:error, :resolver_unavailable} =
+                 Moderation.run_pipeline(%{image_b64: @test_image_b64})
+      end)
+    end
+
+    # Negative control: the same candidate, the same code path, both catalogues
+    # ANSWERING with no results. That is a fact about the book, and it must
+    # still be recorded as one — otherwise the fix would just be "never blame
+    # the book", which is a different untruth.
+    test "both catalogues answering with no results still rejects as :isbn_not_found" do
+      MockHttpClient.put_response("openlibrary.org", {:ok, %{"docs" => []}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => []}})
+
+      with_vision(null_author(), fn ->
+        assert {:error, :isbn_not_found} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
+      end)
     end
   end
 

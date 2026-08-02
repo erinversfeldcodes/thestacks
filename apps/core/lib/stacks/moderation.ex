@@ -492,23 +492,24 @@ defmodule Stacks.Moderation do
   defp title_fallback("", _author, _raw_text, _excluded_isbns, _excluded_descriptors),
     do: {:error, :isbn_not_found}
 
-  # There is no catch-all clause below, and that is the answer rather than an
-  # oversight (#344 asked which it was).
+  # There is still no catch-all clause below, and that is the answer rather than
+  # an oversight (#344 asked which it was; #352 added the third shape).
   #
-  # `ISBNResolver.search_by_title/4` has exactly two exit shapes, and not merely
-  # by `@spec`: `do_search_by_title/5` ends in
-  # `Enum.find_value(candidates, {:error, :not_found}, &try_candidate/4)`, and
-  # `try_candidate/4` returns `{:ok, isbn, metadata}` or `nil`. The cache branch
-  # replays a value `do_search_by_title/5` produced. So the missing clause is
-  # unreachable today — defence-in-depth, not a live crash, and
-  # `moderation_test.exs` records that as a property of the resolver rather than
-  # asserting it here where it cannot be driven.
+  # `ISBNResolver.search_by_title/4` has exactly three exit shapes, and not
+  # merely by `@spec`: `do_search_by_title/5` folds `try_candidate/4` over the
+  # query variants and ends in `{:ok, _, _}`, `{:error, :not_found}` or
+  # `{:error, :unavailable}`; `try_candidate/4` itself returns `{:ok, isbn,
+  # metadata}`, `:not_found` or `:unavailable`. The cache branch replays a value
+  # `do_search_by_title/5` produced, and the cache is not allowed to hold an
+  # `:unavailable` at all. `moderation_test.exs` records the closed set as a
+  # property of the resolver, so a fourth shape breaks a test rather than
+  # arriving as a `CaseClauseError` in production.
   #
-  # It stays absent deliberately. A catch-all could only guess, and the only
-  # guess available is `{:error, :isbn_not_found}` — which is precisely the
-  # untruth this issue exists to remove: an unrecognised failure written down as
-  # a property of the book. A `CaseClauseError` is loud, is retried by Oban, and
-  # names the offending shape in the log; a silent `:isbn_not_found` is neither.
+  # The catch-all stays absent deliberately. It could only guess, and the only
+  # guess available is `{:error, :isbn_not_found}` — precisely the untruth these
+  # issues exist to remove: an unrecognised failure written down as a property
+  # of the book. A `CaseClauseError` is loud, is retried by Oban, and names the
+  # offending shape in the log; a silent `:isbn_not_found` is neither.
   defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors) do
     case ISBNResolver.search_by_title(title, author, raw_text,
            excluded_isbns: excluded_isbns,
@@ -521,6 +522,20 @@ defmodule Stacks.Moderation do
       {:error, :not_found} ->
         Logger.warning("Moderation: title search found no results for '#{title}'")
         {:error, :isbn_not_found}
+
+      # Open Library and/or Google Books never answered, so we do not know that
+      # this title is unknown — only that we could not ask. `:resolver_unavailable`
+      # is the reason #344 introduced for exactly this: it keeps the outage off
+      # the operator's rejection funnel as a book-shaped failure, and it is
+      # retryable where `:isbn_not_found` is terminal
+      # (see `no_resolution_reason/1`).
+      {:error, :unavailable} ->
+        Logger.warning(
+          "Moderation: title search for '#{title}' could not be completed — " <>
+            "OL/GB unavailable, not recording an absence"
+        )
+
+        {:error, :resolver_unavailable}
     end
   end
 

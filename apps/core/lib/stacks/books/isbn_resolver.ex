@@ -242,13 +242,28 @@ defmodule Stacks.Books.ISBNResolver do
     5. Full title only (no author)
     6. Trimmed title only
 
-  Returns `{:ok, isbn, metadata}` on success, `{:error, :not_found}` otherwise.
+  Returns `{:ok, isbn, metadata}` on success. On failure it answers the
+  question `determination/1` asks of the direct-lookup path, because the title
+  path has exactly the same two things to say (#352):
+
+    * `{:error, :not_found}` — every query variant was answered by both
+      catalogues, and none of them knew this book. A fact about the book.
+    * `{:error, :unavailable}` — at least one lookup never happened: a blown
+      fuse, a 5xx, an undecodable body, a dead socket, a timeout. A fact about
+      us. Nothing has been learned about the book, and retrying may well
+      produce a different answer.
+
+  Until #352 both arrived as `{:error, :not_found}`, so a provider outage was
+  reported to the reader as "there is no such book" — and then, being
+  indistinguishable from a real miss, was written into the negative cache and
+  repeated for an hour after the providers came back.
 
   Results are cached in `TitleSearchCache` keyed by `(title, author,
   raw_text)` with 24h positive / 1h negative TTL. Repeat lookups for
   the same extracted title (common on probe workloads and real users
   uploading the same book cover or text post multiple times) skip
-  OL/GB entirely.
+  OL/GB entirely. **`:unavailable` is never cached** — see the cache
+  policy note on `TitleSearchCache.put/4`.
 
   ## Options
 
@@ -270,7 +285,7 @@ defmodule Stacks.Books.ISBNResolver do
   the cache key space.
   """
   @spec search_by_title(String.t(), String.t() | nil, String.t() | nil, keyword()) ::
-          {:ok, String.t(), map()} | {:error, :not_found}
+          {:ok, String.t(), map()} | {:error, :not_found | :unavailable}
   def search_by_title(title, author \\ nil, raw_text \\ nil, opts \\ []) do
     excluded_isbns = Keyword.get(opts, :excluded_isbns, [])
     excluded_descriptors = Keyword.get(opts, :excluded_book_descriptors, [])
@@ -367,10 +382,28 @@ defmodule Stacks.Books.ISBNResolver do
       |> Enum.uniq()
       |> Enum.reject(fn {t, _} -> is_nil(t) or String.trim(t) == "" end)
 
-    Enum.find_value(candidates, {:error, :not_found}, fn candidate ->
-      try_candidate(candidate, signals, excluded_isbns, excluded_descriptors)
+    candidates
+    |> Enum.reduce_while(:not_found, fn candidate, determination ->
+      case try_candidate(candidate, signals, excluded_isbns, excluded_descriptors) do
+        {:ok, _isbn, _metadata} = hit -> {:halt, hit}
+        :not_found -> {:cont, determination}
+        :unavailable -> {:cont, :unavailable}
+      end
     end)
+    |> search_result()
   end
+
+  defp search_result({:ok, _isbn, _metadata} = hit), do: hit
+
+  # Every variant we tried was answered, and none of them knew this book. That
+  # is a fact about the book, and the only failure here worth caching.
+  defp search_result(:not_found), do: {:error, :not_found}
+
+  # At least one variant never got an answer, so the search we set out to run
+  # did not finish. We have not learned that the book is absent — we have
+  # learned that we could not look — and saying otherwise is the untruth this
+  # whole path existed to tell.
+  defp search_result(:unavailable), do: {:error, :unavailable}
 
   # Sequential OL-first per candidate query, Google Books ONLY when OL
   # misses that variant. This used to race OL + GB (`await_first_success`)
@@ -411,28 +444,58 @@ defmodule Stacks.Books.ISBNResolver do
   # scoring (see `pick_best_candidate/3`) applies WITHIN each provider's
   # result list. Under the old race this cross-provider pick was merely
   # non-deterministic (faster provider won); now it is deterministic.
+  #
+  # Returns `{:ok, isbn, metadata}` for a hit, or — since #352 — which KIND of
+  # non-hit this variant was: `:not_found` when both catalogues answered and
+  # neither knew the book, `:unavailable` when at least one of them never
+  # answered at all. It used to return `nil` for every non-hit alike, which is
+  # where the two facts were first flattened into one.
+  #
+  # `:not_found` requires BOTH providers to have answered, which is the
+  # definition `determination/1` already documents ("both upstreams answered,
+  # and neither knows this ISBN"). An Open Library timeout followed by a clean
+  # Google Books miss is therefore `:unavailable`: half the search we intended
+  # never ran, and the half that did is not evidence for the half that did not.
   defp try_candidate({t, a}, signals, excluded_isbns, excluded_descriptors) do
-    result =
-      case open_library_title_search(t, a, signals, excluded_isbns, excluded_descriptors) do
-        {:ok, _isbn, _metadata} = ok ->
-          ok
-
-        _ol_miss_or_error ->
-          google_books_search(t, a, signals, excluded_isbns, excluded_descriptors)
-      end
-
-    case result do
+    case open_library_title_search(t, a, signals, excluded_isbns, excluded_descriptors) do
       {:ok, isbn, metadata} ->
-        cond do
-          excluded_isbn?(isbn, excluded_isbns) -> nil
-          excluded_descriptor?(metadata, excluded_descriptors) -> nil
-          true -> {:ok, isbn, metadata}
-        end
+        # Open Library answered with a book. Whether we keep it depends only on
+        # the caller's exclusions; Google Books is never consulted.
+        accept_or_exclude(isbn, metadata, excluded_isbns, excluded_descriptors, :not_found)
 
-      _ ->
-        nil
+      {:error, ol_reason} ->
+        case google_books_search(t, a, signals, excluded_isbns, excluded_descriptors) do
+          {:ok, isbn, metadata} ->
+            accept_or_exclude(
+              isbn,
+              metadata,
+              excluded_isbns,
+              excluded_descriptors,
+              determination(ol_reason)
+            )
+
+          {:error, gb_reason} ->
+            worse_of(determination(ol_reason), determination(gb_reason))
+        end
     end
   end
+
+  # A hit the caller asked us to skip is still an answer: the catalogue told us
+  # about a book, we simply already knew the reader had rejected it. So an
+  # exclusion falls back to whatever the variant would otherwise have concluded
+  # — `:not_found` normally, `:unavailable` if the other provider was the one
+  # that never answered — and the search moves on to the next, broader variant.
+  defp accept_or_exclude(isbn, metadata, excluded_isbns, excluded_descriptors, on_excluded) do
+    cond do
+      excluded_isbn?(isbn, excluded_isbns) -> on_excluded
+      excluded_descriptor?(metadata, excluded_descriptors) -> on_excluded
+      true -> {:ok, isbn, metadata}
+    end
+  end
+
+  defp worse_of(:unavailable, _other), do: :unavailable
+  defp worse_of(_one, :unavailable), do: :unavailable
+  defp worse_of(:not_found, :not_found), do: :not_found
 
   # Form-insensitive ISBN membership check. The upstream stores rejected
   # ISBNs as `book.primary_edition.isbn` (always a clean ISBN-13, see
@@ -607,10 +670,22 @@ defmodule Stacks.Books.ISBNResolver do
         |> Enum.reject(&is_nil/1)
         |> pick_best_candidate(:open_library, signals)
 
-      {:error, _} ->
+      # `make_request/1` already knows WHY the lookup failed — a 5xx, a body
+      # that would not decode, a dead socket, a timeout. Collapsing that to
+      # `:not_found` here is the whole of #352: it is the point at which "Open
+      # Library has no such book" and "we never got an answer out of Open
+      # Library" become the same value, and everything downstream — including
+      # an hour of negative cache — inherits the confusion. Pass the reason up;
+      # `determination/1` is what decides whether it is a fact about the book.
+      {:error, reason} ->
         Stacks.CircuitBreakers.melt(@open_library_fuse)
-        {:error, :not_found}
+        {:error, reason}
 
+      # A 200 carrying valid JSON with no `docs` list. Deliberately still
+      # `:not_found`: by the time a body reaches this clause the provider has
+      # answered us (`HttpClient.get/1` turns a non-200 into
+      # `:unexpected_status` and an undecodable body into `:malformed_response`
+      # before we ever see it), so the only thing missing is results.
       _ ->
         {:error, :not_found}
     end
@@ -673,10 +748,17 @@ defmodule Stacks.Books.ISBNResolver do
         |> Enum.reject(&is_nil/1)
         |> pick_best_candidate(:google_books, signals)
 
-      {:error, _} ->
+      # Same reasoning as the Open Library branch above (#352): the reason is
+      # the only thing that distinguishes a Google Books 503 from a Google
+      # Books miss, and it was being thrown away here.
+      {:error, reason} ->
         Stacks.CircuitBreakers.melt(@google_books_fuse)
-        {:error, :not_found}
+        {:error, reason}
 
+      # A 200 with no `items` key. This is not a degraded response — it is
+      # exactly what the Google Books API returns for a query that matched
+      # nothing (`{"kind": "books#volumes", "totalItems": 0}`), so `:not_found`
+      # is the truthful reading and must stay one.
       _ ->
         {:error, :not_found}
     end
