@@ -130,8 +130,16 @@ defmodule Stacks.DataCorrection do
 
   Must be conditional on the row still holding `:from`, so a row that moved
   between planning and applying is refused rather than overwritten.
+
+  `{:ok, detail}` is for a correction that *learns* something by applying —
+  #376's un-merge mints the work the edition moves onto, so the destination id
+  does not exist at planning time. `detail` is merged into the audit row beside
+  the planned change, which is the only way the trail can say where the row
+  actually went. A plain `:ok` means "exactly what the plan said", and every
+  #339/#340 correction returns that.
   """
-  @callback apply_change(Stacks.DataCorrection.change()) :: :ok | {:error, term()}
+  @callback apply_change(Stacks.DataCorrection.change()) ::
+              :ok | {:ok, map()} | {:error, term()}
 
   @audit_action "data.correction.applied"
 
@@ -156,9 +164,38 @@ defmodule Stacks.DataCorrection do
     plan = correction.plan()
 
     if Keyword.get(opts, :apply, false) do
-      apply_plan(correction, plan, opts)
+      apply_plan(correction, correction.scope(), plan, opts)
     else
-      {:ok, outcome(correction, :dry_run, plan)}
+      {:ok, outcome(correction, correction.scope(), :dry_run, plan)}
+    end
+  end
+
+  @doc """
+  `run/2` for a `Stacks.DataCorrection.Targeted` — a correction that repairs the
+  rows the operator *names* rather than every row a standing predicate matches.
+
+  The parameterised sibling `Stacks.DataCorrection.Registry` said un-merge would
+  need. Everything after planning is the parameter-free path, verbatim: the same
+  transaction, the same audit row, the same rollback when the audit cannot be
+  written. Only the planning differs, because only the planning takes an
+  argument.
+
+  Dry-run is still the default. Returns `{:error, reason}` without opening a
+  transaction when `c:Stacks.DataCorrection.Targeted.plan/1` refuses the
+  argument.
+
+  Takes the same options as `run/2`.
+  """
+  @spec run_targeted(module(), term(), keyword()) :: {:ok, outcome()} | {:error, term()}
+  def run_targeted(correction, argument, opts \\ []) do
+    with {:ok, plan} <- correction.plan(argument) do
+      scope = correction.scope(argument)
+
+      if Keyword.get(opts, :apply, false) do
+        apply_plan(correction, scope, plan, opts)
+      else
+        {:ok, outcome(correction, scope, :dry_run, plan)}
+      end
     end
   end
 
@@ -179,17 +216,17 @@ defmodule Stacks.DataCorrection do
 
   # Nothing to do is the steady state, and it must not open a transaction or
   # start a vault just to discover that.
-  defp apply_plan(correction, [], _opts),
-    do: {:ok, outcome(correction, :applied, [])}
+  defp apply_plan(correction, scope, [], _opts),
+    do: {:ok, outcome(correction, scope, :applied, [])}
 
-  defp apply_plan(correction, plan, opts) do
+  defp apply_plan(correction, scope, plan, opts) do
     ensure_vault!()
 
     Repo.transaction(fn ->
-      Enum.each(plan, &apply_and_audit(correction, &1, opts))
+      Enum.each(plan, &apply_and_audit(correction, scope, &1, opts))
     end)
     |> case do
-      {:ok, _} -> {:ok, outcome(correction, :applied, plan)}
+      {:ok, _} -> {:ok, outcome(correction, scope, :applied, plan)}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -198,29 +235,37 @@ defmodule Stacks.DataCorrection do
   # that cannot be recorded is rolled back rather than applied silently. An
   # unexplained mutation is worse than an unrepaired row — the row is at least
   # still describable.
-  defp apply_and_audit(correction, change, opts) do
-    with :ok <- correction.apply_change(change),
-         {:ok, _entry} <- audit(correction, change, opts) do
+  defp apply_and_audit(correction, scope, change, opts) do
+    with {:ok, detail} <- applied_detail(correction.apply_change(change)),
+         {:ok, _entry} <- audit(correction, scope, change, detail, opts) do
       :ok
     else
       {:error, reason} -> Repo.rollback({change.id, reason})
     end
   end
 
-  defp audit(correction, change, opts) do
+  # A correction that learned nothing by applying says `:ok`; one that minted a
+  # row or counted something says `{:ok, detail}`. Normalising here keeps the
+  # audit write a single shape and leaves every existing correction untouched.
+  defp applied_detail(:ok), do: {:ok, %{}}
+  defp applied_detail({:ok, detail}) when is_map(detail), do: {:ok, detail}
+  defp applied_detail({:error, reason}), do: {:error, reason}
+
+  defp audit(correction, scope, change, detail, opts) do
     Audit.log(Keyword.get(opts, :actor_id), @audit_action,
       resource_type: correction.resource_type(),
       resource_id: change.id,
-      metadata: %{
-        correction: correction.name(),
-        scope: correction.scope(),
-        reversibility: reversibility_text(correction),
-        from: change.from,
-        to: change.to,
-        because: change.because,
-        invoked_by: Keyword.get(opts, :invoked_by, "unknown"),
-        reason: Keyword.get(opts, :reason)
-      }
+      metadata:
+        Map.merge(detail, %{
+          correction: correction.name(),
+          scope: scope,
+          reversibility: reversibility_text(correction),
+          from: change.from,
+          to: change.to,
+          because: change.because,
+          invoked_by: Keyword.get(opts, :invoked_by, "unknown"),
+          reason: Keyword.get(opts, :reason)
+        })
     )
   end
 
@@ -243,15 +288,15 @@ defmodule Stacks.DataCorrection do
     end
   end
 
-  defp outcome(correction, mode, changes) do
+  defp outcome(correction, scope, mode, changes) do
     %{
       correction: correction.name(),
-      scope: correction.scope(),
+      scope: scope,
       reversibility: correction.reversibility(),
       mode: mode,
       changes: changes,
       count: length(changes),
-      report: report(correction, mode, changes)
+      report: report(correction, scope, mode, changes)
     }
   end
 
@@ -263,11 +308,11 @@ defmodule Stacks.DataCorrection do
   end
 
   @doc false
-  @spec report(module(), :dry_run | :applied, [change()]) :: String.t()
-  def report(correction, mode, changes) do
+  @spec report(module(), String.t(), :dry_run | :applied, [change()]) :: String.t()
+  def report(correction, scope, mode, changes) do
     header = [
       "data-correction: #{correction.name()} (#{mode})",
-      "  scope: #{correction.scope()}",
+      "  scope: #{scope}",
       "  #{reversibility_text(correction)}",
       "  rows:  #{length(changes)}"
     ]

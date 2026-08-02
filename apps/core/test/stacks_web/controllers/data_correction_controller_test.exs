@@ -314,4 +314,193 @@ defmodule StacksWeb.DataCorrectionControllerTest do
       assert correction_audit_rows() == []
     end
   end
+
+  # ── Targeted corrections (#376) ───────────────────────────────────────────
+
+  # The same four properties, over the verb that takes an argument. The one
+  # genuinely new property is the last describe: the two registries are separate
+  # lists, and a name may not cross between them — they take different arguments
+  # and mean different things.
+  describe "POST /api/admin/data_corrections/:name/target" do
+    setup do
+      work = insert(:book)
+      merged = Repo.insert!(build(:book_edition, book: work, is_primary: false))
+      insert(:placement, book: work)
+
+      %{work: work, merged: merged}
+    end
+
+    defp unmerge_body(edition_id, extra \\ %{}) do
+      Map.merge(
+        %{
+          "argument" => %{"edition_id" => edition_id, "title" => "Dune Messiah"},
+          "reason" => "reader reported this ISBN is a different novel entirely"
+        },
+        extra
+      )
+    end
+
+    defp work_id_of(edition_id),
+      do: Repo.one(from(e in BookEdition, where: e.id == ^edition_id, select: e.book_id))
+
+    test "is 401 without an admin token", %{conn: conn, merged: merged, work: work} do
+      conn =
+        post(conn, "/api/admin/data_corrections/unmerge_edition/target", unmerge_body(merged.id))
+
+      assert json_response(conn, 401)
+      assert work_id_of(merged.id) == work.id
+    end
+
+    test "is 403 for a non-owner, and changes nothing", %{conn: conn, merged: merged, work: work} do
+      {conn, _session} = admin_session(conn, insert(:user))
+
+      conn =
+        post(
+          conn,
+          "/api/admin/data_corrections/unmerge_edition/target",
+          unmerge_body(merged.id, %{"apply" => true})
+        )
+
+      assert json_response(conn, 403)
+      assert work_id_of(merged.id) == work.id
+      assert correction_audit_rows() == []
+    end
+
+    test "dry-runs by default — the blast radius, and nothing written", %{
+      conn: conn,
+      merged: merged,
+      work: work
+    } do
+      {conn, _owner} = as_owner(conn)
+
+      conn =
+        post(conn, "/api/admin/data_corrections/unmerge_edition/target", unmerge_body(merged.id))
+
+      assert %{"correction" => correction} = json_response(conn, 200)
+      assert correction["mode"] == "dry_run"
+      assert correction["count"] == 1
+      assert correction["reversibility"] == "reversible"
+      assert correction["scope"] =~ merged.id
+
+      assert [%{"because" => because}] = correction["changes"]
+      assert because =~ "1 placement(s) stay on"
+
+      assert work_id_of(merged.id) == work.id
+      assert correction_audit_rows() == []
+    end
+
+    test "applies when asked, and audits where the row actually went", %{
+      conn: conn,
+      merged: merged,
+      work: work
+    } do
+      {conn, owner} = as_owner(conn)
+
+      conn =
+        post(
+          conn,
+          "/api/admin/data_corrections/unmerge_edition/target",
+          unmerge_body(merged.id, %{"apply" => true})
+        )
+
+      assert %{"correction" => %{"mode" => "applied", "count" => 1}} = json_response(conn, 200)
+
+      new_work_id = work_id_of(merged.id)
+      refute new_work_id == work.id
+
+      merged_id = merged.id
+      assert [{^merged_id, actor_id, metadata}] = correction_audit_rows()
+      assert actor_id == owner.id
+      assert metadata["correction"] == "unmerge_edition"
+      assert metadata["invoked_by"] == "admin api"
+      assert metadata["reason"] =~ "a different novel entirely"
+      assert metadata["new_work_id"] == new_work_id
+    end
+
+    test "refuses without a reason, and changes nothing", %{
+      conn: conn,
+      merged: merged,
+      work: work
+    } do
+      {conn, _owner} = as_owner(conn)
+
+      applied = unmerge_body(merged.id, %{"apply" => true})
+
+      for body <- [Map.delete(applied, "reason"), %{applied | "reason" => "   "}] do
+        response =
+          post(conn, "/api/admin/data_corrections/unmerge_edition/target", body)
+
+        assert %{"error" => "reason_required"} = json_response(response, 422)
+      end
+
+      assert work_id_of(merged.id) == work.id
+      assert correction_audit_rows() == []
+    end
+
+    test "refuses an argument the correction does not accept", %{conn: conn, work: work} do
+      {conn, _owner} = as_owner(conn)
+
+      conn =
+        post(conn, "/api/admin/data_corrections/unmerge_edition/target", %{
+          "argument" => %{"edition_id" => "not-a-uuid", "title" => "x"},
+          "reason" => "trying it on",
+          "apply" => true
+        })
+
+      assert %{"error" => "invalid_argument", "detail" => detail} = json_response(conn, 422)
+      assert detail =~ "edition_id_required"
+      assert Repo.get!(Stacks.Books.Book, work.id).title == work.title
+    end
+
+    test "an unregistered name reaches nothing", %{conn: conn, merged: merged, work: work} do
+      {conn, _owner} = as_owner(conn)
+
+      conn =
+        post(
+          conn,
+          "/api/admin/data_corrections/rewrite_every_book_id/target",
+          unmerge_body(merged.id)
+        )
+
+      assert %{"error" => "unknown_correction"} = json_response(conn, 404)
+      assert work_id_of(merged.id) == work.id
+    end
+
+    # The two registries are separate lists, not one union. A standing
+    # correction reached through the targeted verb would be handed an argument
+    # it has no callback for; a targeted one reached through `apply` would be
+    # run with no argument at all. Both are 404, in both directions.
+    test "a standing correction is not reachable through the targeted verb", %{
+      conn: conn,
+      id: id
+    } do
+      {conn, _owner} = as_owner(conn)
+
+      conn =
+        post(conn, "/api/admin/data_corrections/normalise_edition_isbn10/target", %{
+          "argument" => %{"edition_id" => Ecto.UUID.generate(), "title" => "x"},
+          "reason" => "crossing the lists",
+          "apply" => true
+        })
+
+      assert %{"error" => "unknown_correction"} = json_response(conn, 404)
+      assert isbn_of(id) == @isbn10
+    end
+
+    test "a targeted correction is not reachable through the standing verb", %{
+      conn: conn,
+      merged: merged,
+      work: work
+    } do
+      {conn, _owner} = as_owner(conn)
+
+      conn =
+        post(conn, "/api/admin/data_corrections/unmerge_edition/apply", %{
+          reason: "crossing the lists the other way"
+        })
+
+      assert %{"error" => "unknown_correction"} = json_response(conn, 404)
+      assert work_id_of(merged.id) == work.id
+    end
+  end
 end

@@ -389,6 +389,9 @@ defmodule CoreWeb.Router do
     pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
     get "/data_corrections", DataCorrectionController, :index
     post "/data_corrections/:name/apply", DataCorrectionController, :apply
+    # Targeted corrections (#376) — a POST even to dry-run, because a correction
+    # that takes an argument has nothing to report without a body.
+    post "/data_corrections/:name/target", DataCorrectionController, :target
   end
 
   # Internal service-to-service callbacks — HMAC authenticated, no user auth

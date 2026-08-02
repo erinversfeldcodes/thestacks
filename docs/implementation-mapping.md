@@ -104,6 +104,20 @@ native iOS/Android, anchored on the camera capture loop); reusable SDKs; and con
 **correctness / deterministic-simulation testing** of the risky lifecycles (auth, events,
 deploy). Detail: `notes/product-ideas.md`.
 
+### Deliberate exclusions — features we decided NOT to build
+
+Absence in a roadmap reads as oversight unless someone writes down that it was a
+choice. These are choices. Each names the ruling that made it, so a future reader
+can reopen the decision rather than rediscover the gap.
+
+| Not built | Ruling | Why, and what stands instead |
+|---|---|---|
+| **Cancel-deletion grace period** — a window after "delete my account" in which the user can change their mind | Owner, 2026-07-30 (Wave 7 of `plans/staff-campaign-2026-07-30.md`; recorded by #376) | **Immediate erasure stays.** A grace period means the data still exists after the person asked for it to be gone, which is the opposite of what they asked for, and it turns a one-shot operation into a scheduled state that has to be defended against every other write path for the length of the window. The confirmation flow is where doubt belongs: `Page.Settings.DeleteAccount` already requires a typed confirmation phrase, and `ConfirmDeletionJob` sends a verification email before anything executes. Two deliberate gates in front, none behind. See US-8.1.2. |
+| **User-facing "delete this photo"** — a public control for removing an uploaded image before its retention window expires | Owner, 2026-07-30 (same ruling) | **Excluded publicly**, not excluded outright. Automatic deletion at 30 days (US-8.1.4, `ImageRetentionJob`) is the guarantee we make, and a manual button is a second, weaker path to the same outcome that would need its own authorisation, its own audit, and its own R2 reconciliation. What the ruling *does* require is a follow-up that **verifies the automatic path actually works** — an unverified auto-delete is worse than no button, because it is a promise. That verification is folded into the deferred GDPR revisit; until it is done, US-8.1.4's guarantee is asserted rather than proven. See US-8.1.4. |
+
+Wave 7's other two recovery legs were **not** excluded and are built: undo-remove
+(#375, a "Removed — Undo" toast) and un-merge (#376, owner-side — see US-1.1.8).
+
 ---
 
 ## Service Interaction Matrix
@@ -540,7 +554,7 @@ US-1.1.1 (Upload + Verify + Shelve — two-step: identify then confirm)
 | Layer | Components |
 |-------|------------|
 | **Frontend (Elm)** | `Components.FormatMerge` — side-by-side view of existing and new edition covers. "You own [Title] as a [format]. Add the [new format] edition?" with merge/decline buttons. Reuses warm blue state from duplicate detection. |
-| **Backend (Phoenix)** | `Stacks.Books.merge_edition/2` — creates a new `book_editions` row under the existing `books` work. Links the new ISBN. Sets `is_primary = false` (existing edition remains primary). No new shelf placement created. `StacksWeb.BookController.merge_format/2` (`POST /api/books/:id/merge-format`). |
+| **Backend (Phoenix)** | `Stacks.Books.merge_edition/2` — creates a new `book_editions` row under the existing `books` work. Links the new ISBN. Sets `is_primary = false` (existing edition remains primary). No new shelf placement created. `StacksWeb.BookController.merge_format/2` (`POST /api/books/:id/merge-format`). **Un-merge (#376)** is owner-side, not public UI (owner ruling 2026-07-30): `Stacks.DataCorrection.UnmergeEdition`, a `Stacks.DataCorrection.Targeted` correction reached by `POST /api/admin/data_corrections/unmerge_edition/target` behind `[:api, :admin, :require_owner, :rate_limit_admin]`. Splits the edition onto a newly minted work, promotes it to that work's primary, and inherits `visibility_tier` so a repair cannot un-gate content. **Placements are deliberately not moved** — `Shelving.place_book/3` always points a placement at its work's *primary* edition and a merged edition is never primary, so no placement has ever named the split-out edition and which readers acquired it is unrecorded; the plan reports the retained count instead of guessing. See [`runbooks/data-correction.md`](runbooks/data-correction.md). |
 | **Database** | **Write:** `op.book_editions` (new edition row). **Read:** `op.books` (existing work), `op.book_editions` (existing editions). |
 | **Jobs (Oban)** | `EnrichBookJob` — fetch edition-specific metadata (page count, cover) for the new edition. `TriggerPriceScrapeJob` — scrape prices for the new ISBN. |
 | **External Services** | Open Library, Google Books (edition-specific metadata). |
@@ -1246,6 +1260,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **dbt Models** | `mart_gdpr_deletions` (tracking). |
 | **Infrastructure** | None additional. |
 | **Dependencies** | US-8.1.3 (consent), US-8.1.5 (audit log records deletion event). |
+| **Deliberately excluded** | **A cancel-deletion grace period** (owner ruling 2026-07-30, recorded by #376). Immediate erasure stays: a grace window means the data still exists after the person asked for it to be gone, and it turns a one-shot operation into a scheduled state every other write path must then respect. Doubt belongs in front of the operation — the typed confirmation phrase and `ConfirmDeletionJob`'s verification email — not behind it. See [Deliberate exclusions](#deliberate-exclusions--features-we-decided-not-to-build). |
 
 ---
 
@@ -1286,6 +1301,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 | **dbt Models** | `mart_image_retention_stats`. |
 | **Infrastructure** | Object storage lifecycle policies as backup. |
 | **Dependencies** | US-1.1.1 (images must be uploaded). |
+| **Deliberately excluded** | **A user-facing "delete this photo" control** (owner ruling 2026-07-30, recorded by #376). Excluded *publicly*, not outright: the automatic 30-day deletion above is the guarantee, and a manual button is a second, weaker path to it needing its own authorisation, audit and R2 reconciliation. ⚠️ The same ruling requires a follow-up **verifying the automatic path actually works** — folded into the deferred GDPR revisit. Until that lands, this row's guarantee is asserted rather than proven. See [Deliberate exclusions](#deliberate-exclusions--features-we-decided-not-to-build). |
 
 ---
 

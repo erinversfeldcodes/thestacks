@@ -39,19 +39,52 @@ defmodule Stacks.DataCorrection.Registry do
       it lands it will need a parameterised sibling to `run/2`, not a second
       mechanism.
 
+  #376 built that sibling rather than a second mechanism, so the second
+  exclusion is now a second list — see below. The first stands: the
+  resolver-identifier backfill is still `EnrichBookJob`'s job.
+
   The mechanism carries no generic "edit any row" path, by design.
+
+  ## The targeted list (#376)
+
+  `Stacks.DataCorrection.Targeted` corrections repair the rows an operator
+  *names*. They are listed separately from `all/0` because they must never run
+  unattended: `mix stacks.data.correct` and `Stacks.Release.correct_data/1`
+  sweep `all/0` on every deploy, and a repair that goes where it is pointed has
+  no business being pointed by a deploy.
+
+  | Targeted correction | Argument |
+  |---|---|
+  | `UnmergeEdition` | the edition to split out, and the title of the work it becomes |
+
+  `fetch_targeted/1` is the same security boundary `fetch/1` is, and for a
+  sharper reason: a targeted correction writes where it is aimed, so being more
+  powerful than a standing one is exactly why it may not also be more reachable.
   """
 
-  alias Stacks.DataCorrection.{NormaliseEditionIsbn10, StaleSeedEditionIsbn}
+  alias Stacks.DataCorrection.{NormaliseEditionIsbn10, StaleSeedEditionIsbn, UnmergeEdition}
 
   @corrections [
     NormaliseEditionIsbn10,
     StaleSeedEditionIsbn
   ]
 
+  @targeted [
+    UnmergeEdition
+  ]
+
   @doc "Every registered correction, in run order."
   @spec all() :: [module()]
   def all, do: @corrections
+
+  @doc """
+  Every registered `Stacks.DataCorrection.Targeted` correction.
+
+  Deliberately not folded into `all/0`: the deploy path and the mix task sweep
+  `all/0`, and a correction that needs an argument has none to sweep with.
+  """
+  @spec all_targeted() :: [module()]
+  def all_targeted, do: @targeted
 
   @doc """
   The correction registered under `name`, or `:error`.
@@ -63,6 +96,23 @@ defmodule Stacks.DataCorrection.Registry do
   @spec fetch(String.t()) :: {:ok, module()} | :error
   def fetch(name) when is_binary(name) do
     case Enum.find(@corrections, &(&1.name() == name)) do
+      nil -> :error
+      correction -> {:ok, correction}
+    end
+  end
+
+  @doc """
+  The targeted correction registered under `name`, or `:error`.
+
+  Separate from `fetch/1` rather than a union of the two lists, so a name
+  belonging to a standing correction cannot be run through the targeted verb
+  (or the reverse) — the two take different arguments and mean different things,
+  and a lookup that quietly crosses between them is how an operator ends up
+  applying something other than what they named.
+  """
+  @spec fetch_targeted(String.t()) :: {:ok, module()} | :error
+  def fetch_targeted(name) when is_binary(name) do
+    case Enum.find(@targeted, &(&1.name() == name)) do
       nil -> :error
       correction -> {:ok, correction}
     end
