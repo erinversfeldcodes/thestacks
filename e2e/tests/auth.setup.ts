@@ -5,6 +5,8 @@ import {
   DEV_PASSWORD,
   E2E_PASSWORD,
   E2E_SUITES,
+  enrolOwnerMfa,
+  saveOwnerMfaSecret,
   suiteAuthFile,
   suiteEmail,
 } from "./helpers";
@@ -59,6 +61,21 @@ async function authenticateUser(
  */
 setup("authenticate as owner", async ({ request, page }) => {
   await authenticateUser(request, page, DEV_EMAIL, DEV_PASSWORD, OWNER_AUTH_FILE);
+});
+
+/**
+ * Enrol the owner's admin second factor ONCE per run (Issue #371).
+ *
+ * The owner has exactly one TOTP factor and every admin spec shares that one
+ * account, so enrolment is a MUTATION of state four parallel specs depend on.
+ * Done per-test — as `admin-session.spec.ts` used to — the specs replace each
+ * other's secret and their codes are rejected, which surfaces as a gate that
+ * never opens: the same symptom as the four real #303 defects that file exists
+ * to catch. Doing it here, before the parallel phase any project runs in, makes
+ * the factor immutable for the rest of the run; the specs only read it.
+ */
+setup("enrol the owner's admin MFA factor", async ({ request }) => {
+  saveOwnerMfaSecret(await enrolOwnerMfa(request));
 });
 
 /**

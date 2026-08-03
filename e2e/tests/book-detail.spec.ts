@@ -347,21 +347,48 @@ test.describe("Book Detail overlay — load and error states (punch #14)", () =>
   test("loading state is visible before a delayed response resolves", async ({
     page,
   }) => {
-    // Hold the response open long enough to observe the Loading branch, then
-    // let it succeed so the overlay does not error.
+    // ⚠️ The response is held open until the Loading branch has been OBSERVED —
+    // not for a fixed 1.5 s (Issue #380).
+    //
+    // A fixed sleep makes this assertion a wall-clock race. `.loading` exists only
+    // while the fetch is in flight, so seeing it depended on the browser reaching
+    // the check inside the injected delay; the margin between them, not the 90 s
+    // test timeout, was the spec's real budget, and it is spent by whatever else
+    // is contending for the one preview VM. The same spec was measured at 1.3
+    // minutes WHILE PASSING on a loaded backend — a spec with that little headroom
+    // is what tips the rest of the file over. Deriving the delay from what the
+    // spec actually needs (hold until asserted, then release) makes the
+    // observation impossible to miss at any machine speed, and costs milliseconds
+    // instead of seconds — so the default timeout is now the right budget rather
+    // than a raised one.
+    //
+    // Nothing is weakened: the Loading branch is still asserted by its exact copy,
+    // the response is still released, and it still resolves to real content.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Registered AFTER the shelf is ready and immediately before the click, so the
+    // only request this can ever hold is the book fetch the click triggers.
+    const spineButton = await gotoLibrarySpine(page);
     await page.route("**/api/books/*", async (route) => {
-      await new Promise((r) => setTimeout(r, 1500));
+      await held;
       await route.continue();
     });
-    const spineButton = await gotoLibrarySpine(page);
     await spineButton.click();
     const overlay = page.getByTestId("book-overlay");
     await expect(overlay).toBeVisible({ timeout: 5000 });
-    // The Loading branch renders `.loading` "Loading book..." while the fetch
-    // is in flight.
-    await expect(overlay.locator(".loading")).toHaveText("Loading book...", {
-      timeout: 2000,
-    });
+    try {
+      // The Loading branch renders `.loading` "Loading book..." while the fetch is
+      // in flight — and it cannot stop being in flight until this assertion has run.
+      await expect(overlay.locator(".loading")).toHaveText("Loading book...", {
+        timeout: 5000,
+      });
+    } finally {
+      // Release unconditionally: a failed assertion must fail on its own message,
+      // not hang the held request until the test timeout and report as a timeout.
+      release();
+    }
     // And once the (continued) real response lands, it resolves to content.
     await expect(overlay.locator(".book-detail")).toBeVisible({
       timeout: 10000,

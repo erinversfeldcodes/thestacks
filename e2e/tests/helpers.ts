@@ -1,4 +1,6 @@
+import fs from "fs";
 import path from "path";
+import { createHmac } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 
@@ -487,4 +489,127 @@ export async function provisionBookOnShelf(
   expect(place.status(), `place book on ${shelf}`).toBe(201);
   await injectSession(page, session);
   return { session, bookId: book.id };
+}
+
+// ── The owner's admin MFA factor (Issue #371) ──────────────────────────────
+
+/**
+ * Where the run's single owner TOTP secret lives. `.auth/` is gitignored and is
+ * already the home of every other cross-project auth artefact this suite mints.
+ */
+export const ADMIN_MFA_FILE = path.join(AUTH_DIR, "admin-mfa.json");
+
+/** Base32 → bytes. The `otpauth://` provisioning URI carries the secret this way (RFC 4648). */
+export function base32Decode(input: string): Buffer {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0;
+  let value = 0;
+  const out: number[] = [];
+  for (const char of input.replace(/=+$/, "").toUpperCase()) {
+    const idx = alphabet.indexOf(char);
+    if (idx < 0) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(out);
+}
+
+/** RFC 6238 TOTP, SHA-1, 6 digits, 30s step — what an authenticator app would show. */
+export function totp(secretBase32: string): string {
+  const counter = Math.floor(Date.now() / 1000 / 30);
+  const buf = Buffer.alloc(8);
+  buf.writeUInt32BE(counter, 4);
+  const mac = createHmac("sha1", base32Decode(secretBase32)).update(buf).digest();
+  const offset = mac[mac.length - 1] & 0x0f;
+  const bin =
+    ((mac[offset] & 0x7f) << 24) |
+    (mac[offset + 1] << 16) |
+    (mac[offset + 2] << 8) |
+    mac[offset + 3];
+  return String(bin % 1_000_000).padStart(6, "0");
+}
+
+/**
+ * Enrol a second factor for the seeded owner and return the base32 secret.
+ *
+ * ⚠️ **Call this from `auth.setup.ts` ONLY — never from a test.** `op.user_mfa`
+ * holds exactly ONE row per user (`conflict_target: :user_id` in
+ * `Stacks.MFA.confirm_enrollment/4`), and the owner is a single shared account, so
+ * enrolling REPLACES whatever factor was there. Called per-test at the shipped
+ * worker count (`workers: CI ? 2 : 4`), spec A enrols S₁, spec B replaces it with
+ * S₂, and A's `totp(S₁)` is then rejected — surfacing as a gate that never opens,
+ * which is indistinguishable from the four real #303 defects `admin-session.spec.ts`
+ * exists to catch (Issue #371). Doing it once, in the `setup` project every other
+ * project depends on, leaves the factor immutable for the whole parallel phase: the
+ * tests only ever READ it.
+ *
+ * ⚠️ Enrolment cannot be done once and kept — a preview redeploy recreates the Neon
+ * branch — so it must be re-done per run, which is exactly what the setup project is
+ * for. Verification has no replay protection (`Stacks.MFA.verify_totp/2` is a bare
+ * `NimbleTOTP.valid?`), so parallel specs presenting the same code in the same 30 s
+ * step is fine; only REPLACING the factor is not.
+ *
+ * ⚠️ The `secret` is sent **exactly as the URI carries it** — base32. The endpoint
+ * used to demand base64 of the raw bytes, which no client could produce, and getting
+ * it wrong returns `422 invalid_code`, reading as clock skew. Do not "helpfully"
+ * convert it.
+ */
+export async function enrolOwnerMfa(request: APIRequestContext): Promise<string> {
+  const login = await request.post("/api/auth/login", {
+    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
+  });
+  expect(login.status(), "owner login for MFA enrolment").toBe(200);
+  const ownerToken = (await login.json()).token as string;
+  const auth = { Authorization: `Bearer ${ownerToken}` };
+
+  const setup = await request.post("/api/admin/auth/mfa/setup", {
+    headers: auth,
+    data: {},
+  });
+  expect(setup.status(), "mfa setup").toBe(200);
+  const { provisioning_uri, recovery_codes } = await setup.json();
+
+  const secret = new URL(
+    String(provisioning_uri).replace("otpauth://", "https://"),
+  ).searchParams.get("secret");
+  expect(secret, "the provisioning URI must carry a base32 secret").toBeTruthy();
+
+  const confirm = await request.post("/api/admin/auth/mfa/confirm", {
+    headers: auth,
+    data: { totp_code: totp(secret!), secret: secret!, recovery_codes },
+  });
+  expect(
+    confirm.status(),
+    "mfa confirm — a 422 here usually means the secret encoding regressed, not a bad code",
+  ).toBe(200);
+
+  return secret!;
+}
+
+/** Persist the run's single owner TOTP secret for the parallel phase to read. */
+export function saveOwnerMfaSecret(secret: string): void {
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+  fs.writeFileSync(ADMIN_MFA_FILE, JSON.stringify({ secret }), "utf8");
+}
+
+/**
+ * Read the owner TOTP secret enrolled by `auth.setup.ts`. Throws — loudly, and
+ * naming the cause — rather than letting a missing file degrade into a gate that
+ * silently never opens.
+ */
+export function readOwnerMfaSecret(): string {
+  if (!fs.existsSync(ADMIN_MFA_FILE)) {
+    throw new Error(
+      `No owner MFA secret at ${ADMIN_MFA_FILE}. It is enrolled ONCE by the ` +
+        `"enrol the owner's admin MFA factor" step in auth.setup.ts, which every ` +
+        `project depends on — run with the setup project (do not pass --no-deps).`,
+    );
+  }
+  const { secret } = JSON.parse(fs.readFileSync(ADMIN_MFA_FILE, "utf8"));
+  expect(secret, `${ADMIN_MFA_FILE} carries no secret`).toBeTruthy();
+  return secret as string;
 }

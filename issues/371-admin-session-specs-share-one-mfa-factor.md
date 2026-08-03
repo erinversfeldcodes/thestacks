@@ -70,10 +70,12 @@ One spec file. Single concern.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Each enrolling spec isolated (or serialised with a stated reason) — evidence: diff
-- [ ] Passes at `--workers=4` — evidence: the run
-- [ ] Still traverses the real MFA gate — evidence: diff
-- [ ] Before/after counterfactual quoted — evidence: both transcripts
+- [x] Each enrolling spec isolated (or serialised with a stated reason) — evidence: diff — no spec
+      enrols at all now; the single mutation moved to `auth.setup.ts`, so the specs stay parallel
+- [x] Passes at `--workers=4` — evidence: 3 acceptance runs + 1 full-suite run, all green
+- [x] Still traverses the real MFA gate — evidence: diff — `passTheGate` is unchanged in its UI path
+      (fills `admin-email`/`admin-password`/`admin-code`, clicks `admin-verify`); no injected token
+- [x] Before/after counterfactual quoted — evidence: both transcripts, in Progress Notes
 - [ ] `staff-review` verdict recorded below
 
 ## Dependencies
@@ -87,3 +89,28 @@ qa / e2e.
 Filed 2026-08-01 by the lead. The parallel/serial contrast is from two runs against the same
 preview at the same commit: `--project=chromium` (3 failures) and `--workers=1` over the same file
 (0 failures). The `enrolOwnerMfa` docstring's own "replaces the stored factor" is the mechanism.
+
+**Fixed 2026-08-03 (qa/e2e).** Isolation was preferred and achieved, but not by minting a user: the
+admin routes need `role: "owner"` (`:require_owner` on `/api/admin/auth/mfa/*`, and
+`AdminAuthController.login` re-checks it), and `POST /api/test/session` mints an ordinary user with
+no way to grant that. Minting *owners* on a flag-on public preview would be a privilege escalation,
+not a test helper. So the isolation is of the **mutation**, not the account: `enrolOwnerMfa` moved to
+`auth.setup.ts` as a third setup step, which every project depends on, and the specs now only READ
+the secret via `readOwnerMfaSecret()`. The factor is immutable for the whole parallel phase, so all
+four specs stay fully parallel and the file can no longer race itself. Safe because
+`Stacks.MFA.verify_totp/2` is a bare `NimbleTOTP.valid?` with no replay protection — parallel specs
+presenting the same code in the same 30 s step is fine; only *replacing* the factor was not.
+
+Counterfactual, both at the shipped worker count against `stacks-core-pr-feat-campaign-w7-317`:
+
+- **Before** — `--project=chromium tests/admin-session.spec.ts tests/book-detail.spec.ts`:
+  `3 failed / 29 passed (1.2m)`; :142 `expect(admin-gate).toBeHidden() … Received: visible`, :155 and
+  :167 `getByTestId('source-approve').first() … element(s) not found`, each burning 19 s.
+- **After** — same command, 3 consecutive runs: `33 passed (54.9s)`, `33 passed (1.4m)`,
+  `33 passed (56.1s)`. Plus a full-suite `--project=chromium`: the 3 admin specs green.
+
+The isolation guard was probed, not just asserted: re-adding a competing `enrolOwnerMfa(request)`
+inside :142 makes it fail in **4.7 s** with
+`Received: "That code was not accepted. Codes expire every 30 seconds — try the current one."` and the
+`gateAdvances` message naming #371 — instead of the old 19 s ambiguous "gate still visible". Probe
+reverted with Edit; `grep -rn PROBE e2e/tests/` clean.
