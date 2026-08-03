@@ -88,10 +88,10 @@ production-path race rather than a test-isolation one, re-scope and say so.
 | Sweep | yes | ❌ count of sibling tests sharing the cause reported |
 
 ## Definition of Done
-- [ ] Deterministic repro — evidence: the command and its failing output
-- [ ] Space identity asserted; isolation-vs-geocoding answered — evidence: the finding
-- [ ] Fixed, with the mechanism named — evidence: diff + the repro now passing
-- [ ] Sibling sweep count — evidence: the number
+- [x] Deterministic repro — evidence: the command and its failing output
+- [x] Space identity asserted; isolation-vs-geocoding answered — evidence: the finding
+- [x] Fixed, with the mechanism named — evidence: diff + the repro now passing
+- [x] Sibling sweep count — evidence: the number
 - [ ] `staff-review` verdict recorded below
 
 ## Dependencies
@@ -143,3 +143,61 @@ no overlap and would sink this theory. **Verify the actual interleaving before b
 3. **Only then fix.** ⚠️ Still do not add `MockGeocoder.clear()` or scope the query as *the fix* before
    a deterministic repro exists — with a one-in-N failure you cannot distinguish a fix from a race
    that did not fire.
+
+## 2026-08-03 — RESOLVED. It was a live network call, not a sandbox leak.
+
+**The leading theory was wrong, and the caveat about it was right.** Ecto shared-mode never came
+into it, and the named suspect (`geocode_bookstores_job_test.exs`, `async: false`) is innocent — it
+runs in the sync phase and cannot overlap. The actual partner is **`discovery_removal_review_test.exs`,
+an `async: true` file the investigation never named.**
+
+### Mechanism
+`:core, :geocoder` was **unset in `apps/core/config/test.exs`** — the only outbound seam missing from a
+list that already mocks `:vision_client`, `:isbn_http_client`, `:scraper_client`, `:brave_client`,
+`:searxng_client`, `:together_client`, `:rss_fetcher`, `:storage`, `:dbt_runner` and
+`:transparency_prometheus_client`. So `Geocoding.provider/0` fell back to **`Stacks.Geocoding.Nominatim`
+— a live Finch request to the public `nominatim.openstreetmap.org`**.
+
+Four test files supplied the key themselves and restored it asymmetrically:
+
+```elixir
+if original, do: Application.put_env(...), else: Application.delete_env(:core, :geocoder)
+```
+
+Whichever async module's `setup` ran first saw `original == nil`, so **its `on_exit` deleted the key**
+— globally — while the *other* `async: true` module's test was mid-flight. That test's `approve_source`
+then geocoded against the real internet, which returned real coordinates for "The Reading Room"
+(51.4333326, -1.4528617 — a real reading room in Berkshire, UK), and `assert is_nil(space.latitude)`
+failed. Same class as **#377**.
+
+### Reproduction (both deterministic)
+1. **Mechanism, 1/1:** a probe that deletes the key mid-test — exactly what the sibling's `on_exit`
+   does — printed `Geocoding.geocode/1 -> {:ok, %{latitude: 51.4333326, longitude: -1.4528617}}` and
+   failed on the issue's exact assertion.
+2. **The real race, 1-in-10:** the two `async: true` files run together with a 800 ms window widening
+   the gap between `setup` and the geocode call reproduced the issue's **verbatim** failure, with the
+   smoking gun on the same line: `env at geocode time = nil`.
+
+### Fix
+One line, at the seam, in the place the project already establishes as the pattern:
+`config :core, :geocoder, Stacks.Geocoding.Mock` in `apps/core/config/test.exs`. This makes the mock
+the floor, so no test can reach the live service by omission — and it kills the race **by
+construction**, not by coincidence: `original` is now always truthy, so the `delete_env` branch is
+unreachable. Same repro: 10/10 green, env never `nil` again.
+
+Also: `spaces/0` is now `spaces/1`, scoped by `website_url` (the key production's `space_exists?/1`
+uses as business identity). This answered isolation-vs-geocoding immediately — **the row was always
+this test's own**; nothing leaked. And a regression gate in `geocoding_test.exs` fails if the config
+line is ever removed.
+
+### Sibling sweep
+Over all 48 test files that mutate a global `:core` app-env key: on the criterion that actually made
+#379 reachable — *no config default + two or more concurrently-running `async: true` mutators* —
+`:geocoder` was the **only** key in the suite. Count now **0**.
+On the looser structural criterion (*no config default + ≥2 mutators + ≥1 async + `delete_env`
+restore*) **1** remains: **`:public_shelf_cap`** (`profile_controller_test.exs` `async: true` +
+`discovery_telemetry_test.exs` `async: false`). Not reachable today for the same reason the original
+suspect was innocent — only one of the two is async — but it becomes live the moment someone flips
+that file to `async: true`. Left unfixed under scope lock; worth its own one-line issue.
+Corroboration: `:isbn_http_client` has **2** async mutators and would be the identical bug — it is
+safe only because it *is* configured. The geocoder was simply missed.
