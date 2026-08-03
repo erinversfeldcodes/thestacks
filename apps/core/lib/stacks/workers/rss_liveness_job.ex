@@ -67,6 +67,11 @@ defmodule Stacks.Workers.RSSLivenessJob do
   defp head_request(url) do
     req = Finch.build(:head, url)
 
+    # ⚠️ `receive_timeout` bounds each CHUNK, not the request — see the note in
+    # `Core.Application`. This is an un-seamed Finch call in a worker, the same
+    # shape as the one #377 fixed in DiscoverAuthorSourcesJob; it is survivable
+    # today only because `rss_liveness_job_test.exs` uses `.invalid` hosts,
+    # which cannot resolve. Tracked as a follow-up, not fixed here.
     case Finch.request(req, Stacks.Finch, receive_timeout: @head_timeout) do
       {:ok, %Finch.Response{status: status}} ->
         {:ok, status}

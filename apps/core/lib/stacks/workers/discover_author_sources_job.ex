@@ -117,37 +117,25 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
     Enum.any?(@social_domains, fn domain -> String.contains?(host, domain) end)
   end
 
-  defp discover_rss_feed(website_url) do
-    # Try common RSS feed paths
-    feed_paths = ["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/blog/feed"]
+  # ⚠️ Fans out over SIX candidate paths sequentially, so every per-request
+  # bound in the fetcher is multiplied by six in the worst case. Measured
+  # against a black-holed host (2026-08-03): 6 × 5s connect = 30_071ms for a
+  # single author. Keep the path list short and the fetcher's bounds tight.
+  @feed_paths ["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/blog/feed"]
 
+  defp discover_rss_feed(website_url) do
     uri = URI.parse(website_url)
     base = "#{uri.scheme}://#{uri.host}"
+    fetcher = rss_fetcher()
 
-    Enum.find_value(feed_paths, fn path ->
+    Enum.find_value(@feed_paths, fn path ->
       feed_url = base <> path
 
-      case try_fetch_feed(feed_url) do
+      case fetcher.probe(feed_url) do
         {:ok, _} -> feed_url
         _ -> nil
       end
     end)
-  end
-
-  defp try_fetch_feed(url) do
-    req = Finch.build(:head, url)
-
-    case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
-      {:ok, %Finch.Response{status: status}} when status in 200..299 ->
-        {:ok, url}
-
-      _ ->
-        {:error, :not_found}
-    end
-  rescue
-    e ->
-      Logger.warning("DiscoverAuthorSourcesJob: RSS feed check failed: #{Exception.message(e)}")
-      {:error, :request_failed}
   end
 
   defp maybe_put(attrs, key, value, existing) do
@@ -160,5 +148,11 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
 
   defp brave_client do
     Application.get_env(:core, :brave_client, Stacks.Discovery.BraveClient)
+  end
+
+  # Same swappable seam RSS polling uses (419da150). Without it this job's
+  # tests issue live HEAD requests to whatever host the mocked search returns.
+  defp rss_fetcher do
+    Application.get_env(:core, :rss_fetcher, Stacks.Enrichment.RssFetcher)
   end
 end

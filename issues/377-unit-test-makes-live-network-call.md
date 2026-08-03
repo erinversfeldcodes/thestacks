@@ -105,3 +105,31 @@ seed 760943, and retracted the earlier claim unprompted. Lead verified the mecha
 `try_fetch_feed` at `discover_author_sources_job.ex:137-140` calls `Finch.request` with
 `receive_timeout: 5_000` only, and the test at `discover_author_sources_job_test.exs:19` feeds it the
 real domain `https://authorsite.com` while mocking solely the Brave search hop.
+
+## ⚠️ 2026-08-03 — the root cause stated above is WRONG. Corrected here.
+The lead wrote *"`receive_timeout` bounds only the receive phase. The TLS **connect** is unbounded."*
+**That is false**, and it was disproved by measurement, not argument:
+
+| Probe | Result |
+|---|---|
+| HEAD to black-holed `10.255.255.1` | `5004ms` → `{:error, %Finch.TransportError{reason: :timeout}}` |
+| Peer accepts TCP, never speaks TLS (**the exact `ssl_gen_statem.handshake/2` frame from the bug report**) | `5115ms` → same error |
+
+Finch injects `transport_opts[:timeout] = 5_000` when a pool omits one (`deps/finch/lib/finch.ex:537`),
+and it reaches `:ssl.connect/4`. **The connect was already bounded all along.**
+
+**The genuinely unbounded phase is the RECEIVE.** `receive_timeout` is per-*chunk*, not per-request;
+`request_timeout` bounds the whole response and defaults to **`:infinity`**:
+
+| Probe | Result |
+|---|---|
+| Peer dribbles a 17-byte response, `receive_timeout: 5_000` only | **`35017ms`** |
+| Same peer, `+ request_timeout: 8_000` | **`8028ms`** |
+
+And a multiplier nobody had noticed: `discover_rss_feed` fans out over **six** paths sequentially —
+measured **`30071ms`** for one author against a black hole. Six paths × an unbounded receive is how it
+reached ExUnit's 60s.
+
+**Lesson for the next reader:** the stack trace pointed at `ssl.connect` and everyone (the lead
+included) concluded the connect was unbounded. It was where the process *happened to be waiting*, not
+where the missing bound was.

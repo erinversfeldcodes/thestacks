@@ -96,6 +96,27 @@ defmodule Core.Application do
   # `%Mint.TransportError{reason: :nxdomain}` even though SearXNG was
   # healthy and DNS resolved fine from a shell (`getent hosts` worked
   # but Erlang's IPv4-only resolver didn't).
+  #
+  # `transport_opts[:timeout]` bounds the TCP connect *and* the TLS handshake
+  # (it becomes the Timeout argument of `:ssl.connect/4` via
+  # `Mint.Core.Transport.SSL.connect/4`). Finch already injects 5_000 when a
+  # pool omits it; #377 pins it explicitly so the bound is a decision of ours
+  # rather than an inherited library default that a dep bump could move.
+  # Measured 2026-08-03: a HEAD to a black-holed host returned in 5_004ms, and
+  # a peer that accepts TCP then never speaks TLS returned in 5_115ms — the
+  # exact `:ssl_gen_statem.handshake/2` frame from the #377 report.
+  # ⚠️ For the inet6 pools the worst case is 2× this: `SSL.connect/4` tries
+  # inet6 and then falls back to inet4, each with the full timeout.
+  #
+  # ⚠️ This bounds CONNECT only. The other half of the trap, which applies to
+  # every `Finch.request/3` in this app: `receive_timeout` is per CHUNK, not
+  # per request, so a peer that dribbles bytes is never cut off by it.
+  # `:request_timeout` is the one that bounds a whole response and it defaults
+  # to `:infinity`. A call site passing only `receive_timeout: 5_000` reads as
+  # if it were capped at 5s and is not. See `Stacks.Enrichment.RssFetcher` for
+  # the measurements.
+  @connect_timeout_ms 5_000
+
   defp finch_spec do
     vision_url = Application.get_env(:core, :vision_service_url, "http://localhost:8000")
     scraper_url = Application.get_env(:core, :scraper_service_url, "http://localhost:8080")
@@ -107,12 +128,13 @@ defmodule Core.Application do
     metrics_push_url = Application.get_env(:core, :metrics_push_url)
     metrics_query_url = Application.get_env(:core, :metrics_query_url)
 
-    inet6_pool = [conn_opts: [transport_opts: [inet6: true]]]
+    inet6_pool = [conn_opts: [transport_opts: [inet6: true, timeout: @connect_timeout_ms]]]
 
     pools =
       [vision_url, scraper_url, searxng_url, metrics_push_url, metrics_query_url]
       |> Enum.filter(&sixpn_url?/1)
       |> Map.new(&{pool_key(&1), inet6_pool})
+      |> Map.put(:default, conn_opts: [transport_opts: [timeout: @connect_timeout_ms]])
 
     {Finch, name: Stacks.Finch, pools: pools}
   end
