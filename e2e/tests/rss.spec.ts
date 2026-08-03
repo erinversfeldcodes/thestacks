@@ -94,6 +94,24 @@ async function setVisibility(
   ).toBe(200);
 }
 
+/**
+ * The suite user's bearer token, for API calls that must be made AS the reader.
+ *
+ * A `platform` bookshelf is "any signed-in platform user, NOT logged-out" on the Audience
+ * ladder, so its feed requires a viewer (`Stacks.Feeds.feed_requires_auth?/1`, owner
+ * decision 2026-07-29). The `request` fixture carries no Authorization header — auth lives
+ * in localStorage, not a cookie — so a platform feed read through it is ANONYMOUS and 404s
+ * by design. Tests that mean "as a signed-in reader" must say so.
+ */
+async function authHeader(page: Page): Promise<{ Authorization: string }> {
+  const token = await page.evaluate(() => {
+    const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
+    return auth.token as string;
+  });
+  expect(token, "suite user has a token in localStorage").toBeTruthy();
+  return { Authorization: `Bearer ${token}` };
+}
+
 async function currentUserId(page: Page): Promise<string> {
   const userId = await page.evaluate(() => {
     const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
@@ -194,9 +212,11 @@ test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name (US-6.1 §3)
     await setVisibility(page, "library", "platform");
     const userId = await currentUserId(page);
     const feedUrl = `/api/feeds/${userId}/library`;
+    const asReader = await authHeader(page);
 
-    // The feed endpoint is PUBLIC — no auth header required.
-    const resp = await request.get(feedUrl);
+    // The feed route is optional-auth, not unauthenticated: a `platform` shelf is
+    // signed-in-only on the Audience ladder, so its feed is read AS A READER.
+    const resp = await request.get(feedUrl, { headers: asReader });
     expect(resp.status()).toBe(200);
     expect(resp.headers()["content-type"]).toContain("application/atom+xml");
 
@@ -215,9 +235,28 @@ test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name (US-6.1 §3)
 
     // 304 Not Modified when the client echoes the ETag back.
     const notModified = await request.get(feedUrl, {
-      headers: { "If-None-Match": etag },
+      headers: { ...asReader, "If-None-Match": etag },
     });
     expect(notModified.status()).toBe(304);
+  });
+
+  // The other half of the same rule, previously unasserted at this layer: the
+  // ladder says a `platform` resource is INVISIBLE to a logged-out visitor, and a
+  // 403 would leak that the shelf exists — so an anonymous read is 404, matching
+  // GET /api/u/:handle for a Members profile (#225).
+  test("404 — not 403 — for an ANONYMOUS read of a platform shelf's feed", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/library");
+    await setVisibility(page, "library", "platform");
+    const userId = await currentUserId(page);
+
+    const anon = await request.get(`/api/feeds/${userId}/library`);
+    expect(
+      anon.status(),
+      "a platform feed must be indistinguishable from absent to a logged-out client",
+    ).toBe(404);
   });
 
   test("404 for a non-existent user/bookshelf", async ({ request }) => {
