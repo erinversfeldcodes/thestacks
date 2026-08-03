@@ -107,3 +107,39 @@ Filed 2026-08-02 by the lead. Every rule-out in the table above was executed, no
 uncontended full run (1 failure), the isolated file run (17/0), the same-seed full re-run
 (3506/0, seed `268546080243028`), and reads of `test/support/mocks/geocoding/mock.ex` and
 `lib/stacks/discovery.ex:464`.
+
+## 2026-08-03 — mechanism located, repro still needed
+The lead carried the investigation further. Three concrete facts, each read from source:
+
+1. **`Core.DataCase` puts the repo into SHARED sandbox mode for every non-async test**
+   (`apps/core/test/support/data_case.ex:31`):
+   ```elixir
+   pid = Sandbox.start_owner!(Core.Repo, shared: not tags[:async])
+   ```
+   Ecto documents shared mode as unsafe alongside async tests: the shared connection serves any
+   process without its own checkout. ⚠️ This is suite-wide, not specific to this test.
+2. **`spaces/0` is unscoped** — `Repo.all(ThirdSpace)` over the whole table
+   (`discovery_third_space_production_test.exs:51`). It cannot tell its own row from anyone else's,
+   which is why the failure surfaced as "wrong latitude" rather than "wrong space".
+3. **Every test in the file uses the same name.** `pending_source/1` defaults to
+   `name: "The Reading Room"` (`:41`), and sibling tests register exactly that string with
+   `MockGeocoder.put_point("The Reading Room", …)`. The mock matches by `String.contains?`, so ANY
+   leaked registration or row for that name positions this test's space.
+
+**Named suspect:** `geocode_bookstores_job_test.exs` is the only `async: false` file among those
+touching third spaces / the geocoder — so it is the one that runs in shared mode.
+
+⚠️ **Caveat on that suspect, stated so the next person does not waste a day:** ExUnit normally runs
+`async: true` modules concurrently and `async: false` modules serially *afterwards*, which would mean
+no overlap and would sink this theory. **Verify the actual interleaving before building on it** —
+`--trace` or a timestamped `setup` hook will show whether the two ever overlap in practice.
+
+### The concrete path to closing this
+1. **Make `spaces/0` assert identity, not shape** — scope it to the source/name under test, or assert
+   the returned row's id. Do this first: it converts an unexplained latitude into a named row, which
+   answers isolation-vs-geocoding immediately and is worth doing on its own merits.
+2. **Log the interleaving** — a `setup` that records module + timestamp, then run the full suite until
+   it fails and read whether a shared-mode module was live at that moment.
+3. **Only then fix.** ⚠️ Still do not add `MockGeocoder.clear()` or scope the query as *the fix* before
+   a deterministic repro exists — with a one-in-N failure you cannot distinguish a fix from a race
+   that did not fire.
