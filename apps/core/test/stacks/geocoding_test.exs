@@ -33,6 +33,25 @@ defmodule Stacks.GeocodingTest do
     end
   end
 
+  describe "the test environment's provider floor" do
+    test "no test can reach the live geocoder by omission" do
+      # ⚠️ #379. `provider/0` falls back to Nominatim — a live request to the public
+      # nominatim.openstreetmap.org — whenever `:core, :geocoder` is unset, and it was the
+      # only outbound seam absent from `config/test.exs`. Four test files supplied it
+      # themselves and restored it with `delete_env`; two of them are `async: true`, so one
+      # module's restore deleted the key mid-flight in another, whose geocode call then went
+      # to the real internet and came back with real coordinates for "The Reading Room".
+      # That is one failure in 3506, unreproducible on demand. The config is the floor; this
+      # asserts the floor is still there, so removing it fails here instead of surfacing as
+      # an intermittently red integration gate.
+      provider = Application.get_env(:core, :geocoder)
+
+      refute provider in [nil, Nominatim],
+             "the :test geocoder is #{inspect(provider)} — tests would hit the live " <>
+               "Nominatim service. See apps/core/config/test.exs."
+    end
+  end
+
   describe "geocode/1 — the provider seam" do
     setup do
       original = Application.get_env(:core, :geocoder)

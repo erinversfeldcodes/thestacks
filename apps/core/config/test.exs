@@ -89,6 +89,17 @@ config :core, :storage, Stacks.Storage.Mock
 config :core, :dbt_runner, Stacks.Workers.MockDbtRunner
 config :core, :transparency_prometheus_client, Stacks.Transparency.MockPrometheusClient
 
+# ⚠️ The geocoder seam must be mocked HERE, not only inside the tests that use it (#379).
+# `Stacks.Geocoding.provider/0` falls back to `Stacks.Geocoding.Nominatim` — a live request
+# to the public nominatim.openstreetmap.org — whenever this key is absent. It was the only
+# outbound seam missing from this list. Four test files supplied it themselves with
+# `Application.put_env` and, having found it unset, restored it with `delete_env`; the key
+# is global and two of those modules are `async: true`, so one module's restore deleted the
+# key out from under another module's in-flight test, which then geocoded against the real
+# internet and got real coordinates back. Configuring it here makes the mock the floor, so
+# no test can reach the live service by omission.
+config :core, :geocoder, Stacks.Geocoding.Mock
+
 config :core, Stacks.Vault,
   ciphers: [
     default: {

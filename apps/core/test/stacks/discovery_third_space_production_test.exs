@@ -48,7 +48,13 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     insert(:discovered_source, Keyword.merge(defaults, attrs))
   end
 
-  defp spaces, do: Repo.all(ThirdSpace)
+  # Scoped to the source under test rather than `Repo.all(ThirdSpace)`. An unscoped helper
+  # cannot tell its own row from anyone else's, so when something does go wrong it reports
+  # the wrong thing: #379 surfaced as a baffling assertion about a latitude instead of a
+  # legible one about identity, and the first day of that investigation was spent chasing a
+  # sandbox leak that had never happened. `website_url` is the same key production's
+  # `space_exists?/1` treats as the business's identity.
+  defp spaces(source), do: Repo.all(from s in ThirdSpace, where: s.website_url == ^source.url)
 
   describe "approval creates the third space" do
     test "a space-like source becomes a third space" do
@@ -57,7 +63,7 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
       assert {:ok, _} = Discovery.approve_source(source.id)
 
-      assert [space] = spaces()
+      assert [space] = spaces(source)
       assert space.name == "The Reading Room"
       assert space.website_url == "https://readingroom.test"
       assert space.latitude == -33.9249
@@ -69,14 +75,14 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       source = pending_source()
 
       assert {:ok, _} = Discovery.approve_source(source.id)
-      assert [%{verified: false}] = spaces()
+      assert [%{verified: false}] = spaces(source)
     end
 
     test "rejection creates nothing" do
       source = pending_source()
 
       assert {:ok, _} = Discovery.reject_source(source.id)
-      assert spaces() == []
+      assert spaces(source) == []
     end
 
     test "a bookshop source creates no third space" do
@@ -86,7 +92,7 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       source = pending_source(type: "bookshop", url: "https://ashop.test")
 
       assert {:ok, _} = Discovery.approve_source(source.id)
-      assert spaces() == []
+      assert spaces(source) == []
     end
 
     test "re-approval does not create a second listing for the same business" do
@@ -97,7 +103,7 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       # Approval is idempotent from the owner's side; the producer must be too.
       Discovery.create_third_space(Discovery.get_source(source.id))
 
-      assert length(spaces()) == 1
+      assert length(spaces(source)) == 1
     end
   end
 
@@ -112,7 +118,7 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
       assert {:ok, _} = Discovery.approve_source(source.id)
 
-      assert [space] = spaces()
+      assert [space] = spaces(source)
       assert space.nearest_bookshop_km, "the pairing distance was never computed"
 
       assert space.nearest_bookshop_km < 0.5,
@@ -126,7 +132,7 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       source = pending_source()
 
       assert {:ok, _} = Discovery.approve_source(source.id)
-      assert [%{nearest_bookshop_km: nil}] = spaces()
+      assert [%{nearest_bookshop_km: nil}] = spaces(source)
     end
 
     test "a space that cannot be geocoded is still created, unpositioned" do
@@ -136,7 +142,7 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
       assert {:ok, _} = Discovery.approve_source(source.id)
 
-      assert [space] = spaces()
+      assert [space] = spaces(source)
       assert is_nil(space.latitude)
       assert is_nil(space.longitude)
     end
@@ -168,8 +174,8 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
   describe "nothing else produces third spaces" do
     test "creating a source does not create a space" do
       # Discovery finds candidates; only a human approving one may list a business.
-      pending_source()
-      assert spaces() == []
+      source = pending_source()
+      assert spaces(source) == []
     end
 
     test "the table has no other writer in the codebase" do
@@ -200,13 +206,13 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
       source = pending_source()
       assert {:ok, _} = Discovery.approve_source(source.id)
-      assert [%{opted_out: false}] = spaces()
+      assert [%{opted_out: false}] = spaces(source)
 
       # A contact address on the listing's own domain — the verified path.
       assert {:ok, :excluded, _} =
                Discovery.opt_out("https://readingroom.test", %{email: "owner@readingroom.test"})
 
-      assert [space] = spaces()
+      assert [space] = spaces(source)
       assert space.opted_out, "the third space is still listed after a verified removal"
       assert space.opted_out_at
     end
@@ -222,12 +228,12 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       assert {:ok, :excluded, _} =
                Discovery.opt_out("https://readingroom.test", %{email: "owner@readingroom.test"})
 
-      assert length(spaces()) == 1, "the space row was deleted rather than delisted"
+      assert length(spaces(source)) == 1, "the space row was deleted rather than delisted"
 
       # And re-approval cannot resurrect it.
       Discovery.create_third_space(Discovery.get_source(source.id))
 
-      assert [%{opted_out: true}] = spaces(),
+      assert [%{opted_out: true}] = spaces(source),
              "re-approval brought a delisted business back onto the map"
     end
 
@@ -241,7 +247,7 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       assert {:ok, :pending_review, _} =
                Discovery.opt_out("https://readingroom.test", %{email: "someone@gmail.test"})
 
-      assert [%{opted_out: false}] = spaces(),
+      assert [%{opted_out: false}] = spaces(source),
              "an unverified request delisted the business anyway"
     end
 
@@ -266,13 +272,13 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       source = pending_source()
       assert {:ok, _} = Discovery.approve_source(source.id)
 
-      [space] = spaces()
+      [space] = spaces(source)
       Repo.update_all(from(s in ThirdSpace, where: s.id == ^space.id), set: [opted_out: true])
 
       Discovery.create_third_space(Discovery.get_source(source.id))
 
-      assert length(spaces()) == 1, "a second listing was created for an opted-out business"
-      assert [%{opted_out: true}] = spaces()
+      assert length(spaces(source)) == 1, "a second listing was created for an opted-out business"
+      assert [%{opted_out: true}] = spaces(source)
     end
   end
 end
