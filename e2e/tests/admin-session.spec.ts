@@ -1,6 +1,10 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
-import { createHmac } from "node:crypto";
-import { DEV_EMAIL, DEV_PASSWORD } from "./helpers";
+import {
+  DEV_EMAIL,
+  DEV_PASSWORD,
+  readOwnerMfaSecret,
+  totp,
+} from "./helpers";
 
 /**
  * The admin sign-in gate (#303) — the spec that makes an entire defect class regression-proof.
@@ -19,78 +23,23 @@ import { DEV_EMAIL, DEV_PASSWORD } from "./helpers";
  * action 401'd. The assertions below are chosen to catch all four.
  */
 
-/** Base32 → bytes. The `otpauth://` provisioning URI carries the secret this way (RFC 4648). */
-function base32Decode(input: string): Buffer {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  let bits = 0;
-  let value = 0;
-  const out: number[] = [];
-  for (const char of input.replace(/=+$/, "").toUpperCase()) {
-    const idx = alphabet.indexOf(char);
-    if (idx < 0) continue;
-    value = (value << 5) | idx;
-    bits += 5;
-    if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return Buffer.from(out);
-}
-
-/** RFC 6238 TOTP, SHA-1, 6 digits, 30s step — what an authenticator app would show. */
-function totp(secretBase32: string): string {
-  const counter = Math.floor(Date.now() / 1000 / 30);
-  const buf = Buffer.alloc(8);
-  buf.writeUInt32BE(counter, 4);
-  const mac = createHmac("sha1", base32Decode(secretBase32)).update(buf).digest();
-  const offset = mac[mac.length - 1] & 0x0f;
-  const bin =
-    ((mac[offset] & 0x7f) << 24) |
-    (mac[offset + 1] << 16) |
-    (mac[offset + 2] << 8) |
-    mac[offset + 3];
-  return String(bin % 1_000_000).padStart(6, "0");
-}
-
 /**
- * Enrols a second factor for the seeded owner and returns the base32 secret.
+ * ⚠️ **Nothing in this file may enrol a second factor.** (Issue #371.)
  *
- * ⚠️ Runs on **every** test rather than once, because a preview redeploy deletes and recreates the
- * Neon branch, so enrolment never survives. Re-enrolling is idempotent from the client's side: it
- * replaces the stored factor.
+ * The owner is one shared account with exactly ONE stored TOTP factor
+ * (`op.user_mfa` is upserted on `user_id`), so enrolling is a mutation of state
+ * every spec below depends on. This file used to enrol per-test; at the worker
+ * count the suite ships with (`workers: CI ? 2 : 4`) that meant spec A enrolled
+ * S₁, spec B replaced it with S₂, and A's code was then rejected — visible only
+ * as a gate that never opens, i.e. **the same symptom as the four real defects
+ * this file exists to catch.** A false failure that mimics the true one teaches
+ * people to disbelieve the spec.
  *
- * ⚠️ The `secret` is sent **exactly as the URI carries it** — base32. The endpoint used to demand
- * base64 of the raw bytes, which no client could produce, and getting it wrong returns
- * `422 invalid_code`, reading as clock skew. Do not "helpfully" convert it.
+ * The factor is now enrolled once by the `setup` project (`auth.setup.ts`),
+ * before any test runs, and the specs only READ it — `totp()` derives a fresh
+ * code from the shared secret each time, and verification has no replay
+ * protection, so parallel specs presenting the same code are fine.
  */
-async function enrolOwnerMfa(request: APIRequestContext): Promise<string> {
-  const login = await request.post("/api/auth/login", {
-    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
-  });
-  expect(login.status(), "owner login for MFA enrolment").toBe(200);
-  const ownerToken = (await login.json()).token as string;
-  const auth = { Authorization: `Bearer ${ownerToken}` };
-
-  const setup = await request.post("/api/admin/auth/mfa/setup", { headers: auth, data: {} });
-  expect(setup.status(), "mfa setup").toBe(200);
-  const { provisioning_uri, recovery_codes } = await setup.json();
-
-  const secret = new URL(String(provisioning_uri).replace("otpauth://", "https://"))
-    .searchParams.get("secret");
-  expect(secret, "the provisioning URI must carry a base32 secret").toBeTruthy();
-
-  const confirm = await request.post("/api/admin/auth/mfa/confirm", {
-    headers: auth,
-    data: { totp_code: totp(secret!), secret: secret!, recovery_codes },
-  });
-  expect(
-    confirm.status(),
-    "mfa confirm — a 422 here usually means the secret encoding regressed, not a bad code",
-  ).toBe(200);
-
-  return secret!;
-}
 
 /** Stores an ordinary session so the SPA is signed in. Must be a FLAT blob. */
 async function signInOrdinary(page: Page, request: APIRequestContext) {
@@ -112,7 +61,17 @@ async function signInOrdinary(page: Page, request: APIRequestContext) {
   });
 }
 
-/** Signs in through the gate's own form — the path a person takes. */
+/**
+ * Signs in through the gate's own form — the path a person takes.
+ *
+ * ⚠️ The gate's own error banner is asserted between the two steps, so a REJECTED
+ * credential or code fails here, named, in about a second. Without it the only
+ * signal is a gate that is still visible 15 s later, which is exactly what a
+ * broken admin token, a wrong status literal or a half-wired `initPage` also look
+ * like — and what a replaced MFA factor (#371) used to look like. A comment is not
+ * a guard: this is the assertion that keeps the shared factor from ever again
+ * degrading into an ambiguous timeout.
+ */
 async function passTheGate(page: Page, secret: string) {
   await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
   await page.getByTestId("admin-email").fill(DEV_EMAIL);
@@ -120,9 +79,49 @@ async function passTheGate(page: Page, secret: string) {
   await page.getByTestId("admin-continue").click();
 
   // Presence first, then act: the code field only exists once the session id is in hand.
-  await expect(page.getByTestId("admin-code")).toBeVisible({ timeout: 15000 });
+  await gateAdvances(
+    page,
+    page.getByTestId("admin-code").waitFor({ state: "visible", timeout: 15000 }),
+    "the gate never offered the code field",
+  );
   await page.getByTestId("admin-code").fill(totp(secret));
   await page.getByTestId("admin-verify").click();
+  await gateAdvances(
+    page,
+    page.getByTestId("admin-gate").waitFor({ state: "hidden", timeout: 15000 }),
+    "the gate never opened after the code was submitted",
+  );
+}
+
+/**
+ * Wait for the gate to advance — but let its own error banner win the race.
+ *
+ * ⚠️ Both sides wait for something to APPEAR. A "no error is showing" check would
+ * be satisfied by the instant before the banner renders and fail open, which is
+ * the failure mode this guard exists to remove, not reproduce.
+ *
+ * Losing to the banner turns a rejection into an immediate failure that quotes the
+ * message the operator would have read, instead of 15 s of "element still visible"
+ * with no cause attached — the ambiguity that made a replaced MFA factor (#371)
+ * indistinguishable from the four real #303 defects.
+ */
+async function gateAdvances(page: Page, advanced: Promise<unknown>, what: string) {
+  const banner = page.getByTestId("admin-gate-error");
+  const neither = `${what}, and it showed no error either`;
+  const outcome = await Promise.race([
+    advanced.then(() => "advanced").catch(() => neither),
+    banner
+      .waitFor({ state: "visible", timeout: 15000 })
+      .then(() => banner.innerText())
+      .catch(() => neither),
+  ]);
+  expect(
+    outcome,
+    `${what}. ⚠️ If the value above is the gate's message about a CODE, the owner's ` +
+      `single shared MFA factor was replaced mid-run and this run's secret is stale ` +
+      `(#371) — enrolment belongs in auth.setup.ts and nowhere else. If the gate ` +
+      `offered ENROLMENT instead, the setup step's factor never landed.`,
+  ).toBe("advanced");
 }
 
 test.describe("Admin session gate (#303)", () => {
@@ -140,7 +139,7 @@ test.describe("Admin session gate (#303)", () => {
   });
 
   test("signing in through the gate loads the real page with rows", async ({ page, request }) => {
-    const secret = await enrolOwnerMfa(request);
+    const secret = readOwnerMfaSecret();
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
@@ -155,7 +154,7 @@ test.describe("Admin session gate (#303)", () => {
   test("a pending source offers Approve and Reject", async ({ page, request }) => {
     // ⛔ It did not. `status == "pending"` vs the server's `"pending_review"` meant the Actions column
     // was permanently empty — invisible while the page 401'd, so two defects stacked.
-    const secret = await enrolOwnerMfa(request);
+    const secret = readOwnerMfaSecret();
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
@@ -168,7 +167,7 @@ test.describe("Admin session gate (#303)", () => {
     // ⛔ The half-wiring bug: `initPage` was repointed to the admin token and the `update` handlers
     // were not, so the list loaded (200) and every action 401'd. A page that loads and cannot act
     // passes any "does it render" assertion, which is why this one asserts a STATE CHANGE.
-    const secret = await enrolOwnerMfa(request);
+    const secret = readOwnerMfaSecret();
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
@@ -194,7 +193,7 @@ test.describe("Admin session gate (#303)", () => {
     //
     // Simulated by corrupting only the admin call: `elm/http` speaks XMLHttpRequest, so `fetch`
     // patching would be a no-op here.
-    const secret = await enrolOwnerMfa(request);
+    const secret = readOwnerMfaSecret();
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");
     await passTheGate(page, secret);
