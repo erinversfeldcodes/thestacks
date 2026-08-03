@@ -198,8 +198,20 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
     // user's default "owner" profile to platform first so this is within ceiling.
     expect(await setShelfCeiling(page, SHELF, "platform")).toBe(200);
     const overlay = await openFirstBookOverlay(page, SHELF);
-    const title = (await overlay.getByTestId("book-title").textContent())?.trim();
-    expect(title, "book-detail overlay should expose a title").toBeTruthy();
+
+    // Identify the book by the SPINE's own title, read from the shelf behind the
+    // overlay — NOT by the overlay's heading.
+    //
+    // ⚠️ They are deliberately different strings. `Page.BookDetail` renders
+    // `Types.Book.displayTitle`, which reads "Not yet identified" whenever the primary
+    // edition is `barcode_unverified`; `Components.Spine` labels the spine with the raw
+    // `book.title`. 99 of the 100 catalogue books on a seeded stack are
+    // `barcode_unverified`, so using the overlay heading as an identity token compared
+    // two different contracts and failed on essentially every book.
+    const spineTitle = (
+      await page.getByTestId("book-spine").first().locator(".book__title").textContent()
+    )?.trim();
+    expect(spineTitle, "the shelf spine exposes a title").toBeTruthy();
 
     const select = overlay.getByTestId("placement-visibility-select");
     await select.selectOption("owner");
@@ -217,22 +229,23 @@ test.describe("Placement visibility — book-detail overlay (live browser)", () 
 
     // The owner-only book now renders as a faint outline (opacity 0.35 via the
     // `book--hidden` class) and its aria-label carries the private-book hint.
+    //
+    // The count assertion is what makes the single read below sound: this fresh user
+    // owns exactly ONE placement, so exactly one spine may be hidden. Asserting on
+    // `.first()` of a class that can legitimately match several elements would prove
+    // nothing about WHICH spine got hidden — it would pass while the wrong book was
+    // suppressed and the intended one left visible.
     const hiddenSpine = page.locator('[data-testid="book-spine"].book--hidden');
-    await expect(hiddenSpine.first()).toBeAttached({ timeout: 10000 });
-    // Assert the aria-label CONTAINS the hint (and, if known, the title). Read the
-    // attribute and use toContain rather than a dynamically-built RegExp (avoids
-    // the non-literal-RegExp scan finding and any ReDoS surface). The spine is
-    // already attached above, so its label is stable for a single read.
-    const hiddenLabel = await hiddenSpine.first().getAttribute("aria-label");
+    await expect(hiddenSpine).toHaveCount(1, { timeout: 10000 });
+    // Assert the aria-label CONTAINS the hint and the title. Read the attribute and
+    // use toContain rather than a dynamically-built RegExp (avoids the
+    // non-literal-RegExp scan finding and any ReDoS surface).
+    const hiddenLabel = await hiddenSpine.getAttribute("aria-label");
     expect(hiddenLabel).toContain(HIDDEN_ARIA_HINT);
-    if (title) {
-      expect(hiddenLabel).toContain(title);
-    }
+    expect(hiddenLabel).toContain(spineTitle as string);
 
     // Restore the placement to Members so the seeded user is left as found.
-    await hiddenSpine
-      .first()
-      .evaluate((el) => (el as HTMLElement).click());
+    await hiddenSpine.evaluate((el) => (el as HTMLElement).click());
     const reopened = page.getByTestId("book-overlay");
     await expect(reopened).toBeVisible({ timeout: 5000 });
     await reopened.getByTestId("placement-visibility-select").selectOption("platform");

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext, APIResponse, Page } from "@playwright/test";
 import {
   uniqueEmail,
   mintOrSkip,
@@ -50,6 +50,27 @@ import {
 // "whatever per_page=1 returns first".
 const VISIBLE_ISBN = "9780061120084"; // "The Left Hand of Darkness" — public
 const AGE_GATED_ISBN = "9780140449242"; // "Demons" — age_gated
+
+/**
+ * A shelf row on the profile hub, identified by its own BROWSE LINK.
+ *
+ * ⚠️ Not by the row's text. A `.profile__shelf` row is an `<li>` that holds the browse
+ * anchor AND — when the shelf advertises an Atom feed — a sibling "Feed" anchor
+ * (`Page.Profile.viewFeedLink`). Playwright matches a RegExp `hasText` against the
+ * element's whole `textContent`, so the row reads `"LibraryFeed"` and the anchored
+ * `/^Library$/` this spec used to pass matched NOTHING once the subscribe link shipped.
+ * The row was rendering correctly the whole time; the locator described a DOM that had
+ * stopped existing.
+ *
+ * `exact: true` keeps this at least as tight as the anchored regex was meant to be — the
+ * row must carry the "Library" link, never a "Library of Babel" one — while staying
+ * immune to further additive siblings inside the row.
+ */
+function shelfRow(page: Page, label: string) {
+  return page
+    .locator(".profile__shelf")
+    .filter({ has: page.getByRole("link", { name: label, exact: true }) });
+}
 
 test.describe("Public profiles — view, browse & discover (live browser journey)", () => {
   test("a discoverable reader's profile shows visible shelves only, browses read-only, and is discoverable by search", async ({
@@ -146,12 +167,15 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await expect(page.locator(".profile__handle")).toHaveText(`@${ownerHandle}`);
 
     // The platform "library" is browsable; the owner-only "wishlist" is not.
-    const shelfLinks = page.locator(".profile__shelf");
-    await expect(shelfLinks.filter({ hasText: /^Library$/ })).toHaveCount(1);
-    await expect(shelfLinks.filter({ hasText: "Wish List" })).toHaveCount(0);
+    await expect(shelfRow(page, "Library")).toHaveCount(1);
+    await expect(shelfRow(page, "Wish List")).toHaveCount(0);
 
     // ── US-10.5.3 — browse the shelf read-only ────────────────────────────
-    await shelfLinks.filter({ hasText: /^Library$/ }).getByRole("link").click();
+    // Name the browse link explicitly: a feed-bearing row holds TWO anchors, so a
+    // bare getByRole("link") inside it is a strict-mode violation.
+    await shelfRow(page, "Library")
+      .getByRole("link", { name: "Library", exact: true })
+      .click();
     await expect(page).toHaveURL((url) => url.pathname === `/u/${ownerHandle}/library`);
     await expect(page.getByTestId("bookshelf-page")).toBeVisible({ timeout: 10000 });
     // At least one visible spine renders…
@@ -327,11 +351,12 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       // Public profile renders identity + the public shelf link…
       await page.goto(`/u/${pubHandle}`);
       await expect(page.locator(".profile__name")).toHaveText(publicName, { timeout: 10000 });
-      const shelfLinks = page.locator(".profile__shelf");
-      await expect(shelfLinks.filter({ hasText: /^Library$/ })).toHaveCount(1);
+      await expect(shelfRow(page, "Library")).toHaveCount(1);
 
       // …and the public shelf browses read-only with a visible spine, no controls.
-      await shelfLinks.filter({ hasText: /^Library$/ }).getByRole("link").click();
+      await shelfRow(page, "Library")
+        .getByRole("link", { name: "Library", exact: true })
+        .click();
       await expect(page).toHaveURL((url) => url.pathname === `/u/${pubHandle}/library`);
       await expect(page.getByTestId("bookshelf-page")).toBeVisible({ timeout: 10000 });
       await expect(page.getByTestId("book-spine").first()).toBeVisible();
