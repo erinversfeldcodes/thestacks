@@ -30,7 +30,7 @@ import Http
 import Json.Decode as Decode
 import Navigation.Route as Route exposing (Route)
 import Task
-import Types.Book exposing (Book, Edition, authorName, bookIsbn, displayTitle, isProvisional)
+import Types.Book exposing (Book, Edition, authorName, bookIsbn, displayTitle, isUnidentified)
 import Types.Placement exposing (Format, Placement, ReadingStatus(..), readingStatusToString)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility as Visibility exposing (Visibility)
@@ -1144,10 +1144,17 @@ of the page: everything below it — shelving, rating, notes, writing — stays
 available, because a provisional book is a book the reader legitimately owns and
 the ISBN gate legitimately passed. Only the lookup is outstanding.
 
+Keyed off `isUnidentified`, not `isProvisional` (#370). This sentence says the
+page cannot show a title, so it may only appear on a page that is not showing
+one — which is the same predicate `displayTitle` withholds the title on. One
+predicate for both is what makes the contradiction unreachable rather than
+merely absent: there is no state in which the heading prints `book.title` and
+this paragraph denies it.
+
 -}
 viewProvisionalNotice : Book -> Html Msg
 viewProvisionalNotice book =
-    if isProvisional book then
+    if isUnidentified book then
         p
             [ class "book-detail__provisional"
             , testId "book-provisional-notice"

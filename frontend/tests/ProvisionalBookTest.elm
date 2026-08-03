@@ -19,13 +19,14 @@ Two things are under test, and the second matters as much as the first:
 -}
 
 import Expect
+import Fuzz exposing (Fuzzer)
 import Html.Attributes
 import Page.BookDetail as BookDetail
 import Page.Upload as Upload exposing (UploadStep(..))
-import Test exposing (Test, describe, test)
+import Test exposing (Test, describe, fuzz2, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
-import Types.Book exposing (Book, Edition, VisibilityTier(..), displayTitle, isProvisional)
+import Types.Book exposing (Book, Edition, VisibilityTier(..), displayTitle, isProvisional, isUnidentified)
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -137,6 +138,235 @@ bookDetailModelFor book =
             BookDetail.init book.id Nothing Nothing
     in
     { base | book = Success book }
+
+
+
+-- #370 — THE INVARIANT ------------------------------------------------------
+--
+-- The row the lead read off the preview, verbatim: a real title, a real
+-- author, a real year and page count, and `barcode_unverified` — which was
+-- ACCURATE, nothing had verified it. The page nonetheless printed "Not yet
+-- identified" over the top of "1Q84" and a paragraph saying it could not show
+-- a title, two lines above the author it was showing. 206 of 206 editions.
+--
+-- Nothing below needs a fixture from the database: the contradiction is
+-- between two things the page renders from the SAME record, so a record is all
+-- it takes to expose it. That is why this would have caught it on day one.
+
+
+reportedRow : Book
+reportedRow =
+    let
+        ed =
+            { provisionalEdition
+                | id = "edition-1q84"
+                , isbn = "9780099448792"
+            }
+    in
+    { provisionalBook
+        | id = "book-1q84"
+        , title = "1Q84"
+        , editions = [ ed ]
+        , primaryEdition = Just ed
+    }
+
+
+{-| A book carrying `title` and `verificationSource`, everything else held
+constant, so the two axes of the invariant vary alone.
+-}
+bookWith : String -> String -> Book
+bookWith title verificationSource =
+    let
+        ed =
+            { provisionalEdition | verificationSource = verificationSource }
+    in
+    { provisionalBook
+        | title = title
+        , editions = [ ed ]
+        , primaryEdition = Just ed
+    }
+
+
+{-| The stand-ins the SERVER mints when nothing told it what the book is called
+— `Moderation.derive_title/3`'s `"ISBN <isbn>"` and
+`Books.attrs_from_resolved/2`'s `"Unknown Title"`, plus an absent title.
+
+Restated here rather than imported from `Types.Book`. Asking the production
+predicate would prove only that the view calls whatever the predicate says;
+naming the strings independently means widening the predicate — teaching it to
+call some other title a non-title — reddens this instead of silently agreeing
+with itself.
+
+-}
+isServerStandIn : String -> Bool
+isServerStandIn title =
+    (String.trim title == "")
+        || (title == "ISBN " ++ provisionalIsbn)
+        || (title == "Unknown Title")
+
+
+{-| Titles that are names. Deliberately includes the shapes a prefix heuristic
+gets wrong in both directions (#344), and arbitrary strings besides.
+-}
+realTitleFuzzer : Fuzzer String
+realTitleFuzzer =
+    Fuzz.filter (not << isServerStandIn)
+        (Fuzz.oneOf
+            [ Fuzz.map String.trim (Fuzz.stringOfLengthBetween 1 40)
+            , Fuzz.oneOfValues
+                [ "1Q84"
+                , "ISBN 9780262561754 and Other Numbers"
+                , "ISBN"
+                , "ISBN 9780000000000"
+                , "Unknown Titles"
+                , "The Great Gatsby"
+                , "Not yet"
+                ]
+            ]
+        )
+
+
+{-| Every value the CHECK constraint on `op.book_editions.verification_source`
+allows. The invariant must hold across all three — a title is a title whoever
+did or did not confirm the ISBN beside it.
+-}
+verificationSourceFuzzer : Fuzzer String
+verificationSourceFuzzer =
+    Fuzz.oneOfValues [ "open_library", "google_books", "barcode_unverified" ]
+
+
+standInTitleFuzzer : Fuzzer String
+standInTitleFuzzer =
+    Fuzz.oneOfValues
+        [ ""
+        , "   "
+        , "ISBN " ++ provisionalIsbn
+        , "Unknown Title"
+        ]
+
+
+noticeSelector : Selector.Selector
+noticeSelector =
+    Selector.attribute (Html.Attributes.attribute "data-testid" "book-provisional-notice")
+
+
+titleSelector : Selector.Selector
+titleSelector =
+    Selector.attribute (Html.Attributes.attribute "data-testid" "book-title")
+
+
+uploadNoticeSelector : Selector.Selector
+uploadNoticeSelector =
+    Selector.attribute (Html.Attributes.attribute "data-testid" "upload-provisional-notice")
+
+
+{-| The upload flow reaches the same population and had the same defect.
+
+Found by probe: pointing `Page.Upload`'s two call sites back at `isProvisional`
+reddened NOTHING, because every Upload fixture in this file pairs
+`barcode_unverified` with a stand-in title. `Books.confirm/2` returns a book
+whose resolver supplied a title but no Open Library or Google Books id — the
+206-of-206 shape — and on that book the completion card said "This book added to
+Library" while holding its name, and printed "the title and cover will fill in
+shortly" beside the title it had.
+
+-}
+uploadInvariantSuite : Test
+uploadInvariantSuite =
+    describe "#370 — the upload flow may not wait for a title it already has"
+        [ test "the verify step names the book and does not promise a title it is showing" <|
+            \_ ->
+                Upload.view { init_ | step = Verifying reportedRow } (Just "token") Types.RemoteData.NotAsked
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.has [ Selector.text "1Q84" ]
+                        , Query.hasNot [ uploadNoticeSelector ]
+                        ]
+        , test "the shelf picker quotes the title rather than saying 'This book'" <|
+            \_ ->
+                Upload.view { init_ | step = ChoosingShelf reportedRow } (Just "token") Types.RemoteData.NotAsked
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.text "Add \"1Q84\" to a shelf" ]
+        , test "the completion card quotes the title rather than saying 'This book'" <|
+            \_ ->
+                Upload.view { init_ | step = Complete reportedRow "library" } (Just "token") Types.RemoteData.NotAsked
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.has [ Selector.text "\"1Q84\" added to Library" ]
+                        , Query.hasNot [ uploadNoticeSelector ]
+                        ]
+        ]
+
+
+invariantSuite : Test
+invariantSuite =
+    describe "#370 — the page may never deny a title it is holding"
+        [ test "the row from the preview: 1Q84, barcode_unverified, real title" <|
+            \_ ->
+                -- The whole defect in one assertion. Before the predicate
+                -- split this rendered "Not yet identified" and the notice.
+                BookDetail.view (bookDetailModelFor reportedRow)
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.find [ titleSelector ] >> Query.has [ Selector.exactText "1Q84" ]
+                        , Query.hasNot [ noticeSelector ]
+                        ]
+        , test "a real book named 'ISBN …' is still safe once provenance no longer decides alone" <|
+            \_ ->
+                -- #344's false-positive case, now with the provenance the fix
+                -- stopped keying off. `String.startsWith "ISBN "` would call
+                -- this book nameless; equality against its own ISBN cannot.
+                BookDetail.view (bookDetailModelFor (bookWith "ISBN 9780262561754 and Other Numbers" "barcode_unverified"))
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.find [ titleSelector ]
+                            >> Query.has [ Selector.exactText "ISBN 9780262561754 and Other Numbers" ]
+                        , Query.hasNot [ noticeSelector ]
+                        ]
+        , fuzz2 realTitleFuzzer verificationSourceFuzzer "a book whose title is a name shows it, and the page never says it cannot" <|
+            \title verificationSource ->
+                BookDetail.view (bookDetailModelFor (bookWith title verificationSource))
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.find [ titleSelector ] >> Query.has [ Selector.exactText title ]
+                        , Query.hasNot [ noticeSelector ]
+                        ]
+        , fuzz2 standInTitleFuzzer (Fuzz.constant "barcode_unverified") "a book with no name still says so, whatever stand-in the server wrote (#344 holds)" <|
+            \title verificationSource ->
+                BookDetail.view (bookDetailModelFor (bookWith title verificationSource))
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.find [ titleSelector ] >> Query.has [ Selector.exactText "Not yet identified" ]
+                        , Query.find [ noticeSelector ] >> Query.has [ Selector.text provisionalIsbn ]
+                        ]
+        , test "a catalogue that answered without a title is not accused of never answering" <|
+            -- Found by probe: dropping the `isProvisional` conjunct from
+            -- `isUnidentified` reddened NOTHING, because no test held a
+            -- stand-in title beside a verified source. Production reaches
+            -- it directly — `Books.attrs_from_resolved/2` writes
+            -- "Unknown Title" and `verification_source_from/1` writes
+            -- "open_library" from the SAME resolver answer, so an Open
+            -- Library record carrying an id but no title lands here.
+            --
+            -- The notice says "we have this book's barcode but haven't
+            -- matched it to a catalogue record yet". We DID match it. It
+            -- may not appear, and this is the only thing saying so.
+            \_ ->
+                BookDetail.view (bookDetailModelFor (bookWith "Unknown Title" "open_library"))
+                    |> Query.fromHtml
+                    |> Query.hasNot [ noticeSelector ]
+        , fuzz2 realTitleFuzzer verificationSourceFuzzer "the two claims stay separable: provenance is still readable on its own" <|
+            \title verificationSource ->
+                -- `isProvisional` keeps its meaning. It is the conflation that
+                -- was the bug, not the fact — and a titled unverified edition
+                -- is exactly the pair the old single predicate could not
+                -- express.
+                Expect.all
+                    [ \b -> isProvisional b |> Expect.equal (verificationSource == "barcode_unverified")
+                    , \b -> isUnidentified b |> Expect.equal False
+                    ]
+                    (bookWith title verificationSource)
+        ]
 
 
 suite : Test
@@ -288,6 +518,8 @@ suite =
                                 [ Selector.attribute (Html.Attributes.attribute "data-testid" "book-provisional-notice") ]
                             ]
             ]
+        , invariantSuite
+        , uploadInvariantSuite
         ]
 
 

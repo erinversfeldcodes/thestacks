@@ -23,7 +23,7 @@ import Html.Events exposing (onCheck, onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
-import Types.Book exposing (Book, Edition, VisibilityTier(..), authorName, bookCoverImageUrl, bookIsbn, displayTitle, isProvisional)
+import Types.Book exposing (Book, Edition, VisibilityTier(..), authorName, bookCoverImageUrl, bookIsbn, displayTitle, isUnidentified)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.FailureCopy as FailureCopy
@@ -1826,10 +1826,15 @@ Two rules this notice keeps, both deliberate:
   - It informs and stops. No button below it is disabled and no step is skipped
     — the standing owner ruling, and the same shape as the duplicate notices.
 
+Keyed off `isUnidentified`, not `isProvisional` (#370): the sentence promises a
+title will "fill in shortly", so it may only be shown where none is shown yet.
+The same predicate drives `displayTitle` above it, so the card cannot print a
+name and then say it is waiting for one.
+
 -}
 viewProvisionalNoticeIfNeeded : Book -> Html Msg
 viewProvisionalNoticeIfNeeded book =
-    if isProvisional book then
+    if isUnidentified book then
         p
             [ class "upload-provisional-notice"
             , testId "upload-provisional-notice"
@@ -1962,14 +1967,18 @@ mergeCompletionFor edition result =
 {-| How a heading names the book it is about.
 
 A quoted title is how you refer to a book by name, so it is only used when the
-book has one. A provisional book does not — quoting `Not yet identified` would
+book has one. An unidentified book does not — quoting `Not yet identified` would
 present a status as if it were the title, which is the same untruth as quoting
 the ISBN. `this book` is what a person would say.
+
+Asks `isUnidentified`, not `isProvisional` (#370): "does this book have a name"
+is exactly the question a quoted heading needs answered, and whether a provider
+confirmed its ISBN is not that question.
 
 -}
 headingSubject : Book -> String
 headingSubject book =
-    if isProvisional book then
+    if isUnidentified book then
         "This book"
 
     else
