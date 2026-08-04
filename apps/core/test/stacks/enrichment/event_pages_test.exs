@@ -166,6 +166,24 @@ defmodule Stacks.Enrichment.EventPagesTest do
       assert event.url == @the_one_event
     end
 
+    test "the unique index treats NULLs as equal — the structural pin" do
+      # ⚠️ A rollback probe of the 20260804200000 migration proved NOTHING here, and that is worth
+      # recording: `mix test`'s alias re-migrates before running, so the rolled-back index was back
+      # before the first assertion executed. The behavioural dedupe test below can therefore never
+      # see the old index locally. This structural pin is what fails on a fresh database if the
+      # migration is lost — it asserts the property itself, straight from pg_index.
+      %{rows: [[nulls_not_distinct]]} =
+        Repo.query!("""
+        SELECT i.indnullsnotdistinct
+        FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+        WHERE c.relname = 'bookstore_events_store_id_title_event_date_index'
+        """)
+
+      assert nulls_not_distinct,
+             "the bookstore_events unique index treats NULLs as distinct — every scrape run will " <>
+               "insert a fresh duplicate of each dateless event and ON CONFLICT will never fire"
+    end
+
     test "a dateless event is upserted, not duplicated, on the second run" do
       # ⚠️ The trap Option A walked into: Postgres treats NULLs as distinct in a unique index, so
       # without NULLS NOT DISTINCT every scrape run would insert a fresh copy of the same page and
