@@ -159,11 +159,20 @@ defmodule Stacks.Shelving do
   — one query rather than one per book, because the inbox is rendered on every
   page load that draws the navigation badge.
 
-  Returns a `MapSet` so the caller's `member?` check is O(1); an empty list
-  short-circuits without touching the database.
+  Returns a **list**, de-duplicated by the query. An empty input short-circuits without touching the
+  database.
+
+  ⚠️ It used to return a `MapSet` "so the caller's `member?` check is O(1)", and that is why
+  `just verify` went red under OTP 28: `MapSet.t/1` is an **opaque** type, and dialyzer's success
+  typing sees through this function's body to the structural `%MapSet{map: ...}`. Handing that across
+  a module boundary to `MapSet.member?/2` is `call_without_opaque` — the same class as b76fa3f3, and
+  the same fix: do not let an opaque value cross the boundary. The caller builds its own set from this
+  list, so `MapSet.new/1` and `MapSet.member?/2` sit in one module and the opacity never travels.
+
+  The O(1) lookup is unaffected — it moved, it did not go away.
   """
-  @spec shelved_book_ids(binary(), [binary()]) :: MapSet.t(binary())
-  def shelved_book_ids(_user_id, []), do: MapSet.new()
+  @spec shelved_book_ids(binary(), [binary()]) :: [binary()]
+  def shelved_book_ids(_user_id, []), do: []
 
   def shelved_book_ids(user_id, book_ids) when is_list(book_ids) do
     from(p in Placement,
@@ -173,7 +182,6 @@ defmodule Stacks.Shelving do
       select: p.book_id
     )
     |> Repo.all()
-    |> MapSet.new()
   end
 
   @doc """

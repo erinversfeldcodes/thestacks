@@ -368,11 +368,17 @@ defmodule Stacks.Uploads do
       )
       |> Repo.all()
 
+    # ⚠️ `MapSet.new/1` is called HERE, not in `Shelving`, and that placement is the fix for an OTP 28
+    # dialyzer failure rather than a style choice. `MapSet.t/1` is opaque; dialyzer's success typing
+    # sees through the producing function to a structural `%MapSet{map: ...}`, and passing that across
+    # a module boundary into `MapSet.member?/2` is `call_without_opaque`. Building the set in the same
+    # module that queries it keeps the opacity from ever travelling. Same class as b76fa3f3.
+    candidate_ids = rows |> Enum.flat_map(&candidate_ids/1) |> Enum.uniq()
+
     shelved =
-      rows
-      |> Enum.flat_map(&candidate_ids/1)
-      |> Enum.uniq()
-      |> then(&Stacks.Shelving.shelved_book_ids(user_id, &1))
+      user_id
+      |> Stacks.Shelving.shelved_book_ids(candidate_ids)
+      |> MapSet.new()
 
     rows
     |> Enum.map(&inbox_item(&1, shelved))
