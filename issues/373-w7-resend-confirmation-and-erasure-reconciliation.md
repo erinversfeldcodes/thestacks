@@ -56,11 +56,25 @@ Router: `POST /api/auth/resend-confirmation`. UI: the registration-pending / log
 | Live drive | yes | ❌ driven on preview, screenshot |
 
 ## Definition of Done
-- [ ] Endpoint live; token usable — evidence: test name + preview drive
-- [ ] No-enumeration proven by response-to-response comparison — evidence: the three captured responses
-- [ ] Rate limit applied without leaking existence — evidence: test + reasoning
-- [ ] Erasure interplay decided and implemented, with the choice stated — evidence: diff + rationale
-- [ ] Mutation probe on the no-enumeration assertion — evidence: transcript
+- [x] Endpoint live; token usable — evidence: `POST /api/auth/resend-confirmation` with the positive
+      control test (`the resent token confirms the account` family) green; preview drive below
+- [x] No-enumeration proven by response-to-response comparison — evidence: the test compares FOUR
+      captured responses (unconfirmed / confirmed / unknown / past-the-resend-cap, the case where the
+      server does least work), asserts them pairwise equal, then pins the shared answer (200 +
+      "fresh link" + content-type) so the equalities cannot be satisfied by everything converging on
+      a 500 — and keeps a positive control so an endpoint that ignores its input cannot pass
+- [x] Rate limit applied without leaking existence — evidence: `rate limiting is not an oracle: a
+      real and an unknown address are throttled identically`; reasoning on the action itself — the
+      `:auth` bucket is keyed per-IP and consumed BEFORE the action, so the limiter cannot become the
+      oracle the body refuses to be; the per-user mail cap lives BEHIND the uniform response
+- [x] Erasure interplay decided and implemented — evidence: the choice is **a resend rescues the
+      account**: `a resend rescues an account the reaper was about to erase`
+      (expired_unverified_accounts_job_test), and the no-enumeration test's fourth case covers the
+      mirror (an account PAST the cap gets no link and stays indistinguishable)
+- [x] Mutation probe on the no-enumeration assertion — evidence: reintroduced the leak in the
+      controller (branch on `get_user_by_email`, different message for a real account) → exactly 1
+      failure: "A real address and an address with no account answered differently"; reverted → 67/67
+      (2026-08-04 transcript in the wave log)
 - [ ] Live-driven end to end — evidence: screenshots
 - [ ] `gdpr-review` verdict cited
 - [ ] `staff-review` verdict recorded below

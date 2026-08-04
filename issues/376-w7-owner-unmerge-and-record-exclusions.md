@@ -54,12 +54,28 @@ One admin surface + one doc pass. ⚠️ The doc pass rides along because it is 
 | Live drive | yes | ❌ **acceptance**: driven on preview by an owner-role account, before/after editions query |
 
 ## Definition of Done
-- [ ] Un-merge splits a merged edition — evidence: before/after query
-- [ ] Placement disposition decided, implemented, and stated — evidence: the reasoning + the test
-- [ ] MFA-gated; audit row in the same transaction — evidence: tests
-- [ ] Whether this is a #340 correction or a bespoke action, decided with reasons — evidence: the decision
-- [ ] Both exclusions recorded in mapping — evidence: diff
-- [ ] Mutation probe on the audit-row assertion — evidence: transcript
+- [x] Un-merge splits a merged edition — evidence: `moves the edition onto a work of its own`,
+      `makes the split-out edition the primary of its new work`, and the repair itself: `the ISBN now
+      resolves to the new work` — plus `refuses a second run` (the edition is now its own work's
+      primary), which is idempotency stated as a refusal rather than a silent no-op
+- [x] Placement disposition decided — evidence: placements STAY (readers' shelvings are theirs; an
+      owner repair must not move a reader's book): `reports the destination, the work being left, and
+      the placements that stay`, asserting the dry-run report says "N placement(s) stay on" — the
+      disposition is in the operator-facing report, not only in code
+- [x] MFA-gated; audit row in the same transaction — evidence: routes live under
+      `[:api, :admin, :require_owner, :rate_limit_admin]` (verified under #340's review — the real
+      MFA admin session, with the role re-checked after the pipeline); audit rows asserted in
+      unmerge_edition_test at three sites including `audit_rows() == []` for refusals
+- [x] #340-correction vs bespoke: it IS a registered correction — evidence:
+      `Stacks.DataCorrection.Targeted` (the parameterised sibling #340's design anticipated) +
+      `UnmergeEdition` as its first consumer, exactly the owner-ruled preference recorded in this
+      issue's own note ("if #340 lands first this should BE a registered correction")
+- [x] Both exclusions recorded in mapping — evidence: `docs/implementation-mapping.md` in the child
+      diff (0767e17d)
+- [x] Mutation probe on the audit-row assertion — evidence: removed the audit write from
+      `apply_and_audit/4` (apply without recording) → **8 failures** across unmerge_edition_test and
+      data_correction_test; reverted → 41/41. The audit write shares the change's transaction, so a
+      correction that cannot be recorded rolls back rather than applying silently (2026-08-04)
 - [ ] Live-driven on preview as owner — evidence: screenshots + query
 - [ ] `gdpr-review` verdict cited
 - [ ] `staff-review` verdict recorded below

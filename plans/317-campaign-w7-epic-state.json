@@ -248,5 +248,8 @@
   },
   "bookkeeping": [
     "2026-08-04: ISSUE NUMBER COLLISION, mine. I filed two issues as #311 and #312, both already taken by this campaign's wave epics (issues/complete/311-campaign-w0-quick-fixes.md, 312-campaign-w2-deletions.md). Invisible until `just wave-status` resolved Wave 0 and Wave 2 items to my files and reported their unchecked boxes against those waves. Renumbered to #382 and #383. Root cause: I took the next number by looking at issues/ only. issues/complete/ holds the rest, and `next_issue_number()` reads both."
+  ],
+  "platform_findings": [
+    "2026-08-04: Open Library fully unreachable (curl timeout at 20s, confirmed independently of the preflight's 3 attempts). Preflight correctly aborted the first preview deploy. Routed around with STACKS_SKIP_RESOLVER_PREFLIGHT=1 — #373/#376 drives and the chromium E2E project do not touch ISBN resolution. #351's upload drive DOES (the ISBN hard gate verifies against OL), so it is sequenced last with OL retried before it; if OL stays down it will be recorded as blocked-by-outage, not skipped."
   ]
 }
