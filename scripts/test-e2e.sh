@@ -19,7 +19,12 @@
 #   DATABASE_URL       Override DB connection for Phoenix
 #
 # Prerequisites: Node (playwright installed in e2e/), Elixir/Mix, Python venv,
-#               npx serve, PostgreSQL running.
+#               PostgreSQL running.
+#
+# NOT `npx serve` — this line used to say so and was wrong. Phoenix serves the built assets
+# (`mix phx.server` + the esbuild bundle); nothing here has ever invoked `serve`. The stale mention
+# was the only trace of an unused `serve` devDependency that was carrying **four high-severity
+# advisories** and failing `npm audit` in `lint-elm`. Removed 2026-08-04; the audit is now clean.
 
 set -euo pipefail
 
