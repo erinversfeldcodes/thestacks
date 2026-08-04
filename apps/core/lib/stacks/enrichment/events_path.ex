@@ -184,17 +184,23 @@ defmodule Stacks.Enrichment.EventsPath do
         # No candidate AND an incomplete walk. The two together are not evidence of absence: the
         # events page may well have been in the part we never read.
         unresolved(store, "no candidate in a truncated walk — budget ran out, retry later")
-        {:error, :no_candidate}
+        {:error, {:no_candidate, urls}}
 
       nil ->
         # A real, resolved negative: we read the shop's page list and it contains no events page.
         # Recorded with a checked_at so it is re-checkable, not permanent.
+        #
+        # ⚠️ The harvested URLs travel WITH the negative. #382's live run proved these shops publish
+        # events as individual pages, so "no listing page" is where per-page classification starts —
+        # and the classifier reusing this walk's harvest is what keeps its cost at zero extra
+        # requests to the shop. Returning a bare atom here would force a second walk for the same
+        # answer.
         Logger.info(
           "EventsPath: #{store_name} lists #{length(urls)} page(s), none an events page"
         )
 
         unresolved(store, "no candidate matched among #{length(urls)} listed page(s)")
-        {:error, :no_candidate}
+        {:error, {:no_candidate, urls}}
 
       candidate ->
         verify(store, store_name, candidate)

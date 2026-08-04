@@ -177,7 +177,7 @@ defmodule Stacks.Enrichment.EventsPathTest do
       s = insert(:bookstore, scraper_module: "za/test_store", events_path_checked_at: nil)
       MockScraperClient.put_sitemap("za/test_store", harvest([]))
 
-      assert {:error, :no_candidate} = EventsPath.resolve(s)
+      assert {:error, {:no_candidate, _urls}} = EventsPath.resolve(s)
       assert MockScraperClient.sitemap_calls() == ["za/test_store"]
     end
 
@@ -241,7 +241,7 @@ defmodule Stacks.Enrichment.EventsPathTest do
         harvest(["https://shop.test/pages/about", "https://shop.test/pages/shipping"])
       )
 
-      assert {:error, :no_candidate} = EventsPath.resolve(s)
+      assert {:error, {:no_candidate, _urls}} = EventsPath.resolve(s)
 
       reloaded = reload(s)
       refute reloaded.events_path
@@ -260,7 +260,7 @@ defmodule Stacks.Enrichment.EventsPathTest do
       s = store()
       MockScraperClient.put_sitemap("za/test_store", harvest(["https://shop.test/pages/about"]))
 
-      assert {:error, :no_candidate} = EventsPath.resolve(s)
+      assert {:error, {:no_candidate, _urls}} = EventsPath.resolve(s)
       assert MockScraperClient.fetches() == []
     end
   end
@@ -317,7 +317,7 @@ defmodule Stacks.Enrichment.EventsPathTest do
         harvest(["https://shop.test/pages/about"], truncated: true)
       )
 
-      assert {:error, :no_candidate} = EventsPath.resolve(s)
+      assert {:error, {:no_candidate, _urls}} = EventsPath.resolve(s)
 
       reason = reload(s).events_unresolved_reason
       assert reason =~ "truncated", "an incomplete walk was recorded as a complete answer"

@@ -121,8 +121,16 @@ defmodule Stacks.Enrichment do
 
   # ── BookstoreEvent ─────────────────────────────────────────────────────────
 
-  @bookstore_event_required_fields [:store_id, :title, :event_date, :scraped_at]
-  @bookstore_event_optional_fields [:description, :location, :url, :author_id]
+  # ⚠️ `event_date` is deliberately OPTIONAL (#382, owner ruling 2026-08-04). The one real event
+  # either scrapeable shop publishes is a standalone page with no date anywhere on it (measured:
+  # wordsworth's book-signing page, 250,873 bytes, zero dates in any common format), and the
+  # extraction rule this pipeline lives by is "never invent a date". An event without a date is
+  # still real information — the shop's own page carries the details — but it must NOT be counted
+  # as "upcoming": `Events.upcoming_events/1` stays date-only, and `Events.listed_events/1` is the
+  # query that includes dateless rows. Idempotency for dateless upserts is held by the
+  # NULLS NOT DISTINCT unique index (see the 20260804200000 migration).
+  @bookstore_event_required_fields [:store_id, :title, :scraped_at]
+  @bookstore_event_optional_fields [:event_date, :description, :location, :url, :author_id]
 
   @doc "Changeset for creating or updating a bookstore event."
   @spec bookstore_event_changeset(BookstoreEvent.t(), map()) :: Ecto.Changeset.t()

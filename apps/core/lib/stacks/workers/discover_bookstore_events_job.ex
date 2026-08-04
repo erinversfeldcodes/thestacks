@@ -34,7 +34,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   require Logger
 
   alias Stacks.Books.Author
-  alias Stacks.Enrichment.{Events, EventsPath, Prices, ScraperClient}
+  alias Stacks.Enrichment.{EventPages, Events, EventsPath, Prices, ScraperClient}
   alias Stacks.Monitoring
 
   @impl true
@@ -158,6 +158,12 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
       # refused, and recording it here as well would either duplicate the write or invent a path.
       {:error, {:robots_blocked, _rule}} ->
         {:ok, :blocked}
+
+      # No listing page — which, for the shops we actually scrape, is the NORMAL answer (#382): they
+      # publish events as individual pages. The walk's harvest rides along with the negative, so
+      # classifying it costs the shop nothing beyond the fetches a real candidate earns.
+      {:error, {:no_candidate, urls}} ->
+        EventPages.discover_and_store(urls, store)
 
       {:error, reason} ->
         Logger.info(

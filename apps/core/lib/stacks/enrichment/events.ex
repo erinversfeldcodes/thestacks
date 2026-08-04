@@ -48,6 +48,26 @@ defmodule Stacks.Enrichment.Events do
     |> Repo.all()
   end
 
+  @doc """
+  Every listed event for a store — dated (soonest first) and dateless.
+
+  Distinct from `upcoming_events/1` on purpose. "Upcoming" is a claim about time, and a dateless
+  event cannot honestly make it — counting one as upcoming would be a structurally valid payload
+  asserting something we do not know. Dateless events sort last: a reader scanning for the next
+  date should not trip over entries that have none, but the entries are real (the shop's own page
+  carries the details) and belong in the list.
+  """
+  @spec listed_events(String.t()) :: [BookstoreEvent.t()]
+  def listed_events(store_id) do
+    now = DateTime.utc_now()
+
+    BookstoreEvent
+    |> where([e], e.store_id == ^store_id)
+    |> where([e], is_nil(e.event_date) or e.event_date >= ^now)
+    |> order_by([e], asc_nulls_last: e.event_date)
+    |> Repo.all()
+  end
+
   # ── Third Space Events ──────────────────────────────────────────────────────
 
   @doc """
