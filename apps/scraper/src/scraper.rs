@@ -1533,9 +1533,18 @@ requests_per_minute = 60
             "a declared Crawl-delay was not honoured as spacing between documents"
         );
 
-        // No declared delay: our own courtesy floor, never zero.
+        // No declared delay: the spacing implied by our own rate, never below the courtesy floor.
+        // 60/min is one second apart, which already exceeds the 500 ms floor — so the floor only binds
+        // for rates above 120/min, which no store config sets.
         let silent = crate::robots::RobotsPolicy::unrestricted();
-        assert_eq!(document_spacing(&silent, 60), sitemap::INTER_DOCUMENT_DELAY);
+        assert_eq!(
+            document_spacing(&silent, 60),
+            std::time::Duration::from_secs(1)
+        );
+        assert!(
+            document_spacing(&silent, 600) >= sitemap::INTER_DOCUMENT_DELAY,
+            "a high configured rate must not drop the spacing below our own floor"
+        );
 
         // A very low rate implies wide spacing even with no Crawl-delay line — 1/min is 60s apart.
         assert_eq!(
