@@ -52,7 +52,7 @@ n/a until scoped — the pre-check is the enumeration in Technical Requirement 1
 - [x] Each correction dry-runnable, idempotent, audited — evidence: `data_correction_test.exs` + `data_correction_controller_test.exs`; probes below
 - [x] Owner-only proven by probe — evidence: removing `:require_owner` from the route let a non-owner apply a correction (200, row rewritten)
 - [x] Runbook written — evidence: `docs/runbooks/data-correction.md`
-- [ ] `staff-review` verdict recorded below
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 **Depends on #339** (builds the first instance of the pattern; generalising before that is speculative). Related to **#138** (break-glass production data access — read before designing). Carries the un-merge recovery leg from the campaign's owner rulings.
@@ -100,3 +100,17 @@ Praise: (a) **the `RequireRole` docstring explains why the re-check is not redun
 BLUE/LEGIBILITY (recorded, not actioned): the apply endpoint returns changed row values in its response. Today that is reference data only, reaching only an MFA'd, IP-bound, audited owner (#138's design intent). The author flagged it forward-looking themselves; it matters when un-merge lands, since placements are personal.
 
 Lead spot-checks: the `book_editions_verification_source_check` enumeration verified verbatim against `20260730200000_backfill_and_constrain_edition_verification_source.exs:60`; the `:current_user` assignment sites enumerated; the `@identifier` regex confirmed anchored and lowercase-only.
+
+## Progress Notes (review)
+- 2026-08-04: **staff-review: LGTM.** Read the full diff plus the surrounding plug and router. The two
+  design decisions that matter are both right and both defended in the code: (1) `run/2` **dry-runs by
+  default** — applying takes an explicit `apply: true` — probed by flipping the default, which fails
+  exactly the 4 tests written for that guarantee; (2) `require_role` re-checks the role *after* the
+  admin pipeline rather than trusting the token, because an admin token outlives the role it was minted
+  under — demote the account and the token still authenticates, so the plug is the thing that notices.
+  Route sits behind `[:api, :admin, :require_owner, :rate_limit_admin]`, i.e. the real MFA-verified
+  admin session (#303's lesson held). Audit rollback semantics ("nothing was committed if the audit
+  write failed") are stated on the function and covered by `records what changed, from what, to what,
+  why and who`. One 🟦, recorded not actioned: `run_targeted/3` repeats `run/2`'s apply/dry-run branch
+  verbatim; the comment says why, and extracting it would hide the symmetry the comment is teaching.
+

@@ -32,7 +32,7 @@
       ]
     },
     "340": {
-      "status": "merged",
+      "status": "complete",
       "title": "7d Operationalise owner-facilitated data correction",
       "level": 1,
       "depends_on": [],
@@ -188,22 +188,16 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-04",
-  "status": "9 original children merged. OWNER ADDED #310 + #382 to this wave 2026-08-04, so the wave is no longer closeable on drives alone. OUTSTANDING: (a) full E2E drive is partial, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs, (d) #379 open, (e) #310 not started, (f) #382 not started.",
+  "status": "9 original children merged. OWNER ADDED #310 + #382 to this wave 2026-08-04, so the wave is no longer closeable on drives alone. OUTSTANDING: (a) full E2E drive is partial, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs, (e) #310 not started, (f) #382 not started.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
   "blocked": {
-    "what": "git commit denied twice. #340, #373, #352 are each built, tested and staged INSIDE their worktrees; each branch tip is still 6fd411e5, so nothing downstream can build on them.",
-    "consequence": "Level 2 cannot launch. #374 needs #373 (shares Login.elm); #376 needs #340. Launching either onto the integration branch would put an agent on a base missing the work it depends on.",
-    "options_given_to_owner": [
-      "owner commits each worktree",
-      "owner approves commits for the campaign",
-      "hold all merges to the end and chain worktree bases (stacks uncommitted state — least preferred)"
-    ]
+    "resolved": "2026-08-04: stale. The 'staged inside worktrees, tip still 6fd411e5' state was real when written but every child has since merged (15c17bda, 9c3fc0c1, a5e9a78e, 48d56ce9, 1c72300b, 0767e17d, 033a5a3b all ancestors of HEAD). Verified by merge log, not memory."
   },
   "recurring_finding": "Three of four children independently found a GATE THAT DOES NOT COVER WHAT IT CLAIMS — #373: the sibling forgot-password tests pass the same enumeration mutation, so they cannot detect a leak; #373: MainRequiresAuthTest.allRoutes is hand-maintained and compiler-unchecked while its moduledoc claims the matrix \"cannot silently skip a new constructor\" — which is exactly how the requiresAuth bug got in; #352: the title-search cache path had ZERO coverage because title_search_cache_enabled is false in config/test.exs and nothing overrode it. This is the campaign dominant secondary theme, now at nine instances.",
   "carried_to_351": "SSE knock-on measured off live code: attempt 690000ms, worst case 2106000ms = 35.1 min (was 23.1). Too long for a reader either way, and #350 states plainly that shortening ITS number is not the fix — it would buy a shorter wait by doing more GPU work, three times over. That is #351 territory.",
-  "integration_branch_head": "1c72300b",
+  "integration_branch_head": "69d5d42f",
   "findings_open": [
     {
       "issue": 377,

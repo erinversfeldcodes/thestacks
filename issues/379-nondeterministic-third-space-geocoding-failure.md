@@ -92,7 +92,7 @@ production-path race rather than a test-isolation one, re-scope and say so.
 - [x] Space identity asserted; isolation-vs-geocoding answered — evidence: the finding
 - [x] Fixed, with the mechanism named — evidence: diff + the repro now passing
 - [x] Sibling sweep count — evidence: the number
-- [ ] `staff-review` verdict recorded below
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 Found by the Wave 7 integration gate. Independent of Wave 7's changes — nothing in #340/#349/#350/
@@ -201,3 +201,14 @@ suspect was innocent — only one of the two is async — but it becomes live th
 that file to `async: true`. Left unfixed under scope lock; worth its own one-line issue.
 Corroboration: `:isbn_http_client` has **2** async mutators and would be the identical bug — it is
 safe only because it *is* configured. The geocoder was simply missed.
+
+## Progress Notes (review)
+- 2026-08-04: **staff-review: LGTM.** The fix is the right *kind*: a config floor in `test.exs` rather
+  than repairing the four `put_env`/`delete_env` dances — the race was global state shared by
+  `async: true` modules, and any per-test fix leaves the next module free to reintroduce it. The floor
+  makes the mock the default no test can fall below by omission, and the guard test asserts the floor
+  itself, so removing it fails loudly ("the :test geocoder is nil — tests would hit the live Nominatim
+  service") instead of resurfacing as a once-a-week geocoding flake. Probed: deleting the config line →
+  exactly 1 failure with that message; restored → 12/12. The diff also converts the four self-supplying
+  test files to rely on the floor, which is what actually removes the race rather than papering it.
+
