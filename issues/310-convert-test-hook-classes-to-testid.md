@@ -63,7 +63,52 @@ Depends on **#306** (done — it established and verified the list of 89).
 ## Agent Assignment
 `elm-agent`.
 
+## Measurement (2026-08-04) — what the work actually is
+
+Sized before starting, because "89 conversions" was not an accurate description:
+
+| | |
+|---|---|
+| Claimed hooks | 88 |
+| **Bogus exemptions** — name merely *mentioned* in a test, never a selector | **14 → FIXED, see below** |
+| Genuinely used as a selector | 74 |
+| ...of those, already styled → keep the class, **add** a testid | 31 |
+| ...pure hooks → convert | 43 |
+| Test files touched | 63 |
+| Sites in **negative** assertions (vacuity risk) | 12, of which 1 was itself a false positive |
+
+**The 12 negative-assertion sites are the actual engineering; the ~96 positive occurrences are safe by
+construction** — a positive assertion that stops matching fails loudly, so the suite is the evidence.
+That split is what makes the remainder mechanical, and it is why this issue should still be one PR per
+test file.
+
+### ⛔ Found while sizing it: 14 exemptions were bogus, and one was user-visible
+
+`check-orphan-classes.sh` exempted a class if its name appeared **anywhere** in a test source — a bare
+substring match. So:
+
+- **`.success` had no CSS rule and five call sites** across Settings (Privacy ×3, Password,
+  Notifications). "Password changed successfully" was rendering as unstyled default text. It was exempt
+  because the string `success` sits inside the identifier `successCopy` in a test.
+- `app-nav`, `comment`, `profile`, `blog-post`, `block-user`, `removal-queue`, `writing-assistant` and
+  five more were exempt for the same reason — substrings of longer names, or of ordinary prose.
+
+Fixed in two parts: the check now requires the class to appear in a real selector
+(`Selector.class "x"`, `getByTestId("x")`, `[data-testid="x"]`, or `.x` inside a quoted selector
+string), and all 14 are now styled. Probed: a class named `reader` — mentioned in test sources, never a
+selector — is now correctly refused (exit 1), where before it would have been waved through.
+
+⚠️ The generalisable lesson, and the reason this is recorded rather than quietly patched: **an
+exemption is only as strong as the thing it verifies.** I described this exemption as "verified rather
+than asserted" in #306, and it was — it verified that the name appeared in a test file, which turns out
+to verify almost nothing.
+
 ## Progress Notes
 - 2026-07-29: Split from #306. The exemption #306 left behind is *verified* (a class only counts as a
   hook if it really appears in a test source), so nothing is being waved through meanwhile — but a
   verified exemption is still an exemption, and this is how it ends.
+- 2026-08-04: Sized and de-risked, not yet converted. The measurement above is the deliverable of this
+  pass: it turns an undifferentiated 88 into 12 sites needing judgement and ~96 that are mechanical,
+  and it found 14 bogus exemptions including a user-visible unstyled success message. The conversion
+  itself remains, one PR per test file, with the 12 negative-assertion sites probed individually.
+
