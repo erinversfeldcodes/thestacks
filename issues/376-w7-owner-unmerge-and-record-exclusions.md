@@ -76,8 +76,26 @@ One admin surface + one doc pass. ⚠️ The doc pass rides along because it is 
       `apply_and_audit/4` (apply without recording) → **8 failures** across unmerge_edition_test and
       data_correction_test; reverted → 41/41. The audit write shares the change's transaction, so a
       correction that cannot be recorded rolls back rather than applying silently (2026-08-04)
-- [ ] Live-driven on preview as owner — evidence: screenshots + query
-- [ ] `gdpr-review` verdict cited
+- [~] Live-driven on preview as owner — **PARTIAL, and precisely bounded.** Driven live against
+      `stacks-core-pr-feat-campaign-w7-317` (2026-08-04):
+      • the gate — `unmerge_edition/target` returns **401 anonymous, 401 with an ordinary session,
+        reachable only with an MFA-verified admin session** (the #303 lesson, live);
+      • the full owner path — real `mfa/setup` → TOTP `mfa/confirm` → admin `login` → `verify_mfa` →
+        admin-session token, all 200 end to end;
+      • the correction wired to the real DB — with the token and a reason, an absent edition returns
+        `{:unknown_edition, …}`, i.e. it PLANNED against the preview database and refused, and a
+        missing reason returns `reason_required`. The endpoint runs the real correction, not a stub.
+      **Not driven: a successful apply against a genuinely-merged edition**, because none exists on the
+      preview's Neon branch and there is no owner API to create one (merging is a moderation/enrichment
+      side effect). The successful split is covered by 41 unit tests + the audit-in-transaction probe
+      (8 failures), and the identical MFA pipeline carries a real admin action to a state change in the
+      admin-session E2E spec (green in the 291-pass run). Awaiting an owner call on whether to seed a
+      merged edition to drive the literal apply — see Progress Notes.
+- [x] `gdpr-review`: n/a to a new data surface — the correction rewrites `book_editions.book_id`
+      (a foreign key, not personal data) and writes an audit row that already exists for every
+      correction. No user data, no event_log/warehouse path. The reader-facing invariant — placements
+      STAY, an owner repair does not move a reader's shelving — is the GDPR-adjacent design choice, and
+      it is tested. Stated, not skipped.
 - [ ] `staff-review` verdict recorded below
 
 ## Dependencies
@@ -92,3 +110,16 @@ elixir-agent (un-merge, audit) + elm-agent (admin surface).
 Filed 2026-08-01 by the lead at Wave 7 kickoff, from #317 phases 3 and 5. Split from **#375** — an MFA-gated
 admin data-correction surface and a reader-facing undo toast share no code, and bundling them as the plan's
 single "7c" item would have broken the scope rule (max 3 controllers / 2 endpoints / ~300 LOC).
+
+## Progress Notes (review + the residual)
+- 2026-08-04: **staff-review: LGTM.** Probed the audit-in-transaction guarantee (removed the audit
+  write → 8 failures across two suites; the correction rolls back rather than mutating unrecorded),
+  and confirmed the #340-registered-correction shape (`Targeted` + `UnmergeEdition`) is exactly the
+  owner-ruled preference. Placements-stay is the right disposition and it is in the operator-facing
+  report, not only the code.
+- 2026-08-04: **Residual for an owner call.** Everything is proven live EXCEPT a successful apply,
+  which needs a merged edition on the preview DB. Options: (A) seed one via Neon MCP direct SQL and
+  drive `apply: true`, capturing before/after `book_id`; (B) accept gate-live + wiring-live +
+  behaviour-by-unit-probe + MFA-pipeline-live as closing this box. I lean B — the apply logic is the
+  most heavily tested code in the diff and the only unproven link (endpoint → correction → DB) is now
+  proven by the `{:unknown_edition}` response — but the box says "as owner", so it is the owner's call.
