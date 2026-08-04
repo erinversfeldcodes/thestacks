@@ -162,6 +162,66 @@ for base, mods in modifiers.items():
                     f"pseudo-class rule is (0,2,0), so hovering reverts the modifier's own state"
                 )
 
+# ---- E. every `page--<route>` wrapper has a rule ---------------------------
+#
+# A FAMILY check, because the individual failures were invisible: four of 25 `page--*` variants had no
+# rule, and all four were exempt from the orphan gate as "test hooks". Driving found two of them; the
+# other two were on routes nobody had opened. A family that shares a role should be checked as one.
+import glob as _glob
+
+src = ""
+for _f in _glob.glob("frontend/src/**/*.elm", recursive=True):
+    src += open(_f, encoding="utf-8", errors="ignore").read()
+
+declared = set(re.findall(r"page--[a-z0-9-]+", src))
+
+def has_rule(cls):
+    """Is there a rule for exactly this class?
+
+    ⚠️ NOT `f".{cls}" in raw`. That substring test is what let a probe slip past: renaming
+    `.form-field__label` to `.form-field__label-DISABLED` still *contains* `.form-field__label`, so the
+    check reported no finding and passed. Precisely the substring flaw that had handed out 14 bogus
+    hook exemptions, reproduced in the check written to catch its consequences. A trailing word or
+    hyphen character means it is a different class.
+    """
+    return re.search(r"\." + re.escape(cls) + r"(?![\w-])", raw) is not None
+
+
+declared_classes = set()
+for _lit in re.findall(r'class\s+"([^"\n]+)"', src):
+    for _tok in _lit.split():
+        if re.fullmatch(r"[a-z][a-z0-9_-]*", _tok):
+            declared_classes.add(_tok)
+styled = {v for v in declared if has_rule(v)}
+for missing in sorted(declared - styled):
+    problems.append(
+        f".{missing} is used in an Elm view and has no rule — every `page--<route>` wrapper needs one, "
+        "and this family had four unstyled at once while the orphan gate read zero"
+    )
+
+# ---- F. BEM sibling gaps ---------------------------------------------------
+#
+# A block with SOME members styled and some not. This generalises the seven that only a live drive
+# found: nobody designs a table with a styled wrapper and an unstyled row, so a partly-styled block is
+# an oversight almost by definition. 45 were found this way, on routes a drive would have had to visit
+# one by one — `audit-log` had one styled member and six bare.
+#
+# Ratcheted at 0. If a block legitimately needs an unstyled member, style it as a no-op and say why:
+# `user-menu__backdrop` is transparent BY DESIGN and still needs a rule, or it has no size and catches
+# no clicks.
+blocks = {}
+for _cls in sorted(declared_classes):
+    _b = re.split(r"__|--", _cls)[0]
+    blocks.setdefault(_b, {"styled": [], "bare": []})
+    blocks[_b]["styled" if has_rule(_cls) else "bare"].append(_cls)
+
+for _b, _v in sorted(blocks.items()):
+    if _v["bare"] and _v["styled"]:
+        problems.append(
+            f"block `{_b}` is partly styled: {len(_v['styled'])} member(s) have rules and "
+            f"{_v['bare']} do not — a partly-styled block is an oversight, not a decision"
+        )
+
 # ---- D. same class, same property, twice, outside @media -------------------
 byclass = defaultdict(list)
 for head, in_media, pos in rules:

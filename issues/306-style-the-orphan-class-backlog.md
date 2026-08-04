@@ -244,4 +244,37 @@ Punch list:
   **Remaining visual pass**, now much smaller: `marketplace-detail`, `blog-post`, `upload-verify`,
   `profile` and the tail were not opened. The gate holds them at 0 unstyled, and the method above
   (rebuild → verify hash → navigate for real → `getComputedStyle` → screenshot) is the recipe.
+- 2026-08-04 (systemic pass): **orphans 69 → 2**, and the important part is *how* the remaining 67 were
+  found — not by driving every route, which would have missed the ones on pages nobody opens.
+
+  Three family sweeps, each now enforced by `check-css.sh`:
+  1. **`page--<route>` wrappers** — 4 of 25 had no rule. Driving found `page--upload` and
+     `page--search`; enumerating the family found `page--marketplace-create` and
+     `page--marketplace-mine` on routes never visited. Checked as a family now.
+  2. **BEM sibling gaps** — a block with SOME members styled and some not. 45 classes across 21
+     blocks. `audit-log` had **one** styled member and six bare; `profile__name` and `profile__handle`
+     were bare beside thirteen styled `profile__*`. A partly-styled block is an oversight almost by
+     definition — nobody designs a table with a styled wrapper and an unstyled row.
+  3. **Bare blocks whose own children were styled** — 20 more, including `.marketplace__card`, bare
+     while its own `__card-title` and `__card-author` had rules.
+
+  ⛔ **Group 3 was hidden by a substring bug in the check I wrote to catch group 2.** `has_rule` used
+  `f".{cls}" in raw`, so `.marketplace__card` counted as styled because `.marketplace__card-title`
+  contains it — and my probe of that check passed when it should have failed, because
+  `.form-field__label-DISABLED` also contains `.form-field__label`. Fixing it to match to a word
+  boundary turned "0 remaining" into **20 real findings**.
+
+  That is the **third** appearance of this one flaw in this issue: 14 bogus hook exemptions, a probe
+  that passed when it should have failed, and 20 hidden gaps. The lesson is narrow and worth stating
+  plainly: **`"." + name in css` is never the right test for "this class has a rule"** — use
+  `\.name(?![\w-])`.
+
+  Live re-drive after the fixes: `/upload`, `/blog`, `/groups`, `/library`, `/reading-pile`, `/search`,
+  `/about`, `/costs`, `/listing-removal`, `/marketplace`, `/marketplace/mine`, `/marketplace/create`,
+  `/settings/{notifications,consent,audit-log,privacy}`, `/blog/new`, `/catalogue`, `/u/<handle>`,
+  `/me/insights`, `/books/<id>` — **0 unstyled rendering on every one**.
+
+  ⚠️ And a false signal worth recording: an early batch reported `bad: []` for `/blog`, `/upload` and
+  `/groups` — but their titles were "Sign In". The minted session had expired and I was measuring the
+  **login page**. The probe now asserts it is not on a login page before reporting.
 

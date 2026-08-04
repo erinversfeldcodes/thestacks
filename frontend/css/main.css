@@ -6652,3 +6652,368 @@ h4 {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
 }
+
+/* The remaining `page--<route>` wrappers.
+ *
+ * ⚠️ Found as a FAMILY, not one at a time. Driving turned up `page--upload` and `page--search`
+ * individually; enumerating every `page--*` in the Elm source against this file found two more
+ * (`page--marketplace-create`, `page--marketplace-mine`) on routes nobody had opened yet. Four of 25
+ * variants had no rule.
+ *
+ * They were all exempt from the orphan gate as "test hooks", which is how a whole family of page
+ * wrappers went unstyled while the gate read 0. Fixing the family is the fix; fixing them one drive at
+ * a time would have left the two unvisited routes broken. */
+.page--marketplace-create,
+.page--marketplace-mine,
+.page--search,
+.page--upload {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+}
+
+/* ============================================================================
+ * Sibling gaps: a BEM block with SOME members styled and some not
+ * ============================================================================
+ *
+ * 41 classes across 21 blocks. Each sits beside siblings that *are* styled — `audit-log` had one
+ * styled member and six unstyled; `profile__name` and `profile__handle` were bare next to thirteen
+ * styled `profile__*`. A partly-styled block is an oversight almost by definition: nobody designs a
+ * table with a styled wrapper and an unstyled row.
+ *
+ * This is the generalisation of the seven the drive found. Driving is what proved the hook exemption
+ * unsound, but driving every route to find the rest would have missed the ones on pages nobody opens.
+ * The sibling-gap test finds them without a browser, and `check-css.sh` now enforces it.
+ * ============================================================================ */
+
+/* Tables and rows */
+.audit-log__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+}
+
+.audit-log__row,
+.privacy__shelf-row {
+    border-bottom: 1px solid var(--border);
+}
+
+.audit-log__row > td,
+.audit-log__row > th {
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+}
+
+/* Metadata register — small caps, tracked, muted */
+.audit-log__action,
+.audit-log__resource,
+.audit-log__timestamp,
+.marketplace__card-author,
+.profile__handle {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+/* Titles */
+.marketplace__card-title,
+.upload-verify__title,
+.blog-post__title,
+.profile__name {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: var(--text);
+    margin: 0 0 0.35rem;
+}
+
+/* Empty states */
+.audit-log__empty,
+.marketplace__empty,
+.groups-detail__feed-empty {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    font-style: italic;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 2rem 1rem;
+}
+
+/* Buttons and quiet actions. `--back` and `--load-more` are navigational rather than primary, so they
+ * stay quiet — a "Back" link styled like a call to action competes with the thing it returns from. */
+.block-user__confirm,
+.block-user__trigger,
+.marketplace-detail__contact,
+.rss-link__button {
+    display: inline-block;
+    padding: 0.4rem 0.8rem;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.marketplace-detail__back,
+.groups-detail__load-more,
+.privacy__blocked-load-more,
+.blog-post__author-link,
+.home__link--about,
+.home__link--marketplace {
+    color: var(--accent);
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--font-body);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    cursor: pointer;
+}
+
+.marketplace-detail__back:hover,
+.groups-detail__load-more:hover,
+.privacy__blocked-load-more:hover,
+.blog-post__author-link:hover,
+.home__link--about:hover,
+.home__link--marketplace:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent-hover);
+}
+
+/* The RSS popover: floats above the page, so it needs a surface of its own rather than a translucent
+ * wash — content behind it would otherwise read through. */
+.rss-link__popover {
+    position: absolute;
+    z-index: 20;
+    min-width: 18rem;
+    padding: 0.9rem 1rem;
+    background: #241a10;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+
+.rss-link__url {
+    display: block;
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    word-break: break-all;
+}
+
+.rss-link__help,
+.book-detail__visibility-help {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+}
+
+/* Form parts. `__label` above its control, `__select` matching the house input well. */
+.form-field__label {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+}
+
+.form-field__select {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.blog-editor__form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    margin-top: 1rem;
+}
+
+/* Grids */
+.marketplace__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: 1rem;
+    margin: 1.25rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* An "(author)" marker beside a comment name. */
+.comment__author-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.4rem;
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+}
+
+/* Section modifiers on the search page — the two result groups read as one list otherwise. */
+.search-section--collection,
+.search-section--platform {
+    margin-bottom: 2rem;
+}
+
+/* The list-view variant of a bookshelf: rows rather than a 3D bookcase. */
+.bookshelf--list-view {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* The last four sibling gaps. */
+
+/* A detail panel, and the card inside the book overlay — both floating surfaces, so both need an
+ * opaque background rather than the translucent wash used for inline panels. */
+.third-spaces__detail,
+.book-overlay__card {
+    padding: 1.25rem 1.5rem;
+    background: #241a10;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+
+/* The click-away layer behind the user menu. Transparent on purpose — it exists to catch a click, not
+ * to be seen — but it still needs a rule, or it has no size and catches nothing. */
+.user-menu__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: transparent;
+}
+
+/* "Unblock" — a quiet action. Undoing a block should not be styled as a warning; the reader already
+ * decided. */
+.blocked-user__unblock {
+    color: var(--accent);
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    cursor: pointer;
+}
+
+/* ============================================================================
+ * Bare block classes whose own children were styled
+ * ============================================================================
+ *
+ * ⚠️ These 20 were hidden by a substring bug **in the check written to find them**. `has_rule` used
+ * `f".{cls}" in raw`, so `.marketplace__card` counted as styled because `.marketplace__card-title`
+ * contains it. The block was bare while its own children had rules — `.marketplace__card` is the card.
+ *
+ * That is the third time this exact substring flaw has appeared (14 bogus hook exemptions, a probe that
+ * passed when it should have failed, and now this). The fix is always the same: match to a word
+ * boundary, `\.cls(?![\w-])`.
+ * ============================================================================ */
+
+/* Component wrappers: spacing only. Deliberately undecorated — their children carry the surface, and a
+ * wrapper that paints its own border would double every frame on the page. */
+.blocked-user,
+.form-field,
+.reader-card,
+.upload-adults-only,
+.upload-complete,
+.upload-shelf-picker,
+.upload-verify,
+.marketplace-detail,
+.settings-hub,
+.shelf-organiser,
+.rss-link {
+    margin-bottom: 1.25rem;
+}
+
+/* `rss-link` and `user-menu` contain absolutely-positioned children (`__popover`, `__dropdown`), so
+ * they must establish a positioning context or those children escape to the viewport. */
+.rss-link,
+.user-menu {
+    position: relative;
+    display: inline-block;
+}
+
+/* The age gate and the book overlay are full-surface interruptions. */
+.age-gate {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 2.5rem 1.5rem;
+    text-align: center;
+}
+
+/* A persistent banner while viewing as someone else — it must not look like page content. */
+.view-as-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text);
+    background: rgba(155, 105, 48, 0.2);
+    border-bottom: 1px solid #9b6930;
+}
+
+/* Bookshelf and reading-pile containers. The 3D bookcase geometry lives in the children; these only
+ * need to not collapse. */
+.bookshelf,
+.pile-view {
+    position: relative;
+    margin-bottom: 1.5rem;
+}
+
+/* Sections within a book page and a profile. */
+.book-detail__prices,
+.book-detail__writing,
+.profile__shelf {
+    margin-bottom: 1.75rem;
+}
+
+/* The marketplace card itself — its title and author were styled and the card was not. */
+.marketplace__card {
+    display: block;
+    padding: 1rem 1.25rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+}
+
+.marketplace__price {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    color: var(--accent);
+}
+
+/* "Merge" on the duplicate-upload prompt: the affirmative action. */
+.upload-duplicate__merge {
+    display: inline-block;
+    padding: 0.4rem 0.8rem;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: #fff;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
