@@ -34,15 +34,39 @@ defmodule Stacks.Enrichment.RssFetcher do
   @fetch_receive_timeout 15_000
   @fetch_request_timeout 20_000
 
+  @doc """
+  The transport bounds each operation ships with, as passed to `Finch.request/3`.
+
+  Public, and the call sites below read it rather than restating the values — that is what lets a
+  test assert the bounds **structurally**. The tests used to prove them with a stopwatch instead
+  ("a stalled peer returns within 20s"), which charged scheduler starvation to this module: observed
+  at 28,569ms and 33,041ms under a loaded machine, then 3/3 green idle (#383). A wall clock cannot
+  tell a missing bound from a busy box. Now the structural test pins these defaults, and the
+  behavioural tests inject tiny bounds through the `opts` seam so their own stopwatches get 10×
+  headroom instead of 1.5×.
+  """
+  @spec request_opts(:probe | :fetch) :: keyword()
+  def request_opts(:probe),
+    do: [receive_timeout: @probe_receive_timeout, request_timeout: @probe_request_timeout]
+
+  def request_opts(:fetch),
+    do: [receive_timeout: @fetch_receive_timeout, request_timeout: @fetch_request_timeout]
+
   @spec fetch_and_parse(String.t()) :: {:ok, map()} | {:error, term()}
   @impl true
-  def fetch_and_parse(feed_url) do
+  def fetch_and_parse(feed_url), do: fetch_and_parse(feed_url, [])
+
+  @doc """
+  As `fetch_and_parse/1`, with transport-bound overrides merged over `request_opts(:fetch)`.
+
+  The seam exists for the transport-bound tests, which need real bounds at unreal sizes; production
+  callers use the 1-arity behaviour callback and never pass options.
+  """
+  @spec fetch_and_parse(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def fetch_and_parse(feed_url, opts) do
     req = Finch.build(:get, feed_url)
 
-    case Finch.request(req, Stacks.Finch,
-           receive_timeout: @fetch_receive_timeout,
-           request_timeout: @fetch_request_timeout
-         ) do
+    case Finch.request(req, Stacks.Finch, Keyword.merge(request_opts(:fetch), opts)) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         parse_feed(body)
 
@@ -65,13 +89,14 @@ defmodule Stacks.Enrichment.RssFetcher do
   """
   @spec probe(String.t()) :: {:ok, String.t()} | {:error, term()}
   @impl true
-  def probe(url) do
+  def probe(url), do: probe(url, [])
+
+  @doc "As `probe/1`, with transport-bound overrides — see `fetch_and_parse/2`."
+  @spec probe(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def probe(url, opts) do
     req = Finch.build(:head, url)
 
-    case Finch.request(req, Stacks.Finch,
-           receive_timeout: @probe_receive_timeout,
-           request_timeout: @probe_request_timeout
-         ) do
+    case Finch.request(req, Stacks.Finch, Keyword.merge(request_opts(:probe), opts)) do
       {:ok, %Finch.Response{status: status}} when status in 200..299 ->
         {:ok, url}
 

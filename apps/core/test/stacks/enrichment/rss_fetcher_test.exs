@@ -12,16 +12,19 @@ defmodule Stacks.Enrichment.RssFetcherTest do
 
   alias Stacks.Enrichment.RssFetcher
 
-  # Generous enough that a slow CI box will not flake, tight enough that
-  # removing the bound under test blows it: without `request_timeout` the
-  # probe's trickle case ran 35_017ms, and ExUnit's own limit is 60_000ms.
-  @must_return_within_ms 20_000
-
-  # `fetch_and_parse/1` is allowed a longer whole-request budget than the probe
-  # (20s vs 5s) because it downloads a document rather than just asking whether
-  # one is there. Unbounded, the trickle case runs ~49s (34s of dribble plus a
-  # final 15s `receive_timeout`), so this still reddens if the bound is dropped.
-  @fetch_must_return_within_ms 30_000
+  # ⚠️ These stopwatches assert against INJECTED bounds, not production ones (#383).
+  #
+  # The old shape asserted "returns within 20s" against the real 5s bounds — 1.5–4× headroom, which a
+  # loaded machine ate twice (28,569ms and 33,041ms observed, both 3/3 green idle). A wall clock at
+  # that ratio charges scheduler starvation to the fetcher. Now each behavioural test passes tiny
+  # bounds through the `opts` seam (500ms-scale) and asserts at 10–20× headroom, so the test fails
+  # when a bound is genuinely absent and shrugs at a busy box. The PRODUCTION values are pinned by the
+  # structural test below — deleting a bound from `request_opts/1` fails that, not a stopwatch.
+  #
+  # Mutation coverage is preserved: break the seam so opts never reach `Finch.request/3` and the
+  # trickle case runs to its ExUnit timeout instead of ~1s.
+  @tiny_bounds [receive_timeout: 500, request_timeout: 1_000]
+  @must_return_within_ms 10_000
 
   # Accepts the TCP connection, then never speaks TLS. This is the exact shape
   # of the #377 stacktrace: the hang was inside `:ssl_gen_statem.handshake/2`,
@@ -72,31 +75,52 @@ defmodule Stacks.Enrichment.RssFetcherTest do
     {div(micros, 1000), result}
   end
 
+  describe "the production bounds themselves" do
+    test "every operation ships both timeouts, at the values the module documents" do
+      # The structural half of #383: the behavioural tests above run with INJECTED bounds, so this is
+      # the only assertion pinning what production actually sends to `Finch.request/3`. The call
+      # sites read `request_opts/1` rather than restating values, so this cannot drift from reality.
+      for op <- [:probe, :fetch] do
+        opts = RssFetcher.request_opts(op)
+
+        assert is_integer(opts[:receive_timeout]) and opts[:receive_timeout] > 0,
+               "#{op} has no receive_timeout — each chunk is unbounded"
+
+        assert is_integer(opts[:request_timeout]) and opts[:request_timeout] > 0,
+               "#{op} has no request_timeout — a dribbling peer parks an Oban worker " <>
+                 "(measured: 35_017ms under receive_timeout alone)"
+      end
+    end
+  end
+
   describe "probe/1 transport bounds" do
     test "returns rather than hanging when the peer stalls the TLS handshake" do
       port = start_handshake_staller()
 
-      {elapsed_ms, result} = time(fn -> RssFetcher.probe("https://127.0.0.1:#{port}/feed") end)
+      {elapsed_ms, result} =
+        time(fn -> RssFetcher.probe("https://127.0.0.1:#{port}/feed", @tiny_bounds) end)
 
       assert {:error, _} = result
 
       assert elapsed_ms < @must_return_within_ms,
-             "connect phase was not bounded: took #{elapsed_ms}ms"
+             "connect phase ignored a 1s request_timeout: took #{elapsed_ms}ms"
     end
 
     test "returns rather than hanging when the peer dribbles the response forever" do
       port = start_trickler()
 
-      {elapsed_ms, result} = time(fn -> RssFetcher.probe("http://127.0.0.1:#{port}/feed") end)
+      {elapsed_ms, result} =
+        time(fn -> RssFetcher.probe("http://127.0.0.1:#{port}/feed", @tiny_bounds) end)
 
       assert {:error, _} = result
 
       # ⚠️ This is the assertion that `receive_timeout` alone cannot satisfy.
       # `receive_timeout` bounds each CHUNK; only `request_timeout` bounds the
-      # whole response. Drop `request_timeout` from RssFetcher.probe/1 and this
-      # goes from ~5s to ~35s.
+      # whole response. The dribbler feeds a byte every 2s — over the injected
+      # 500ms receive_timeout — so an intact bound errors in about a second,
+      # while a dropped one dribbles to the ExUnit timeout.
       assert elapsed_ms < @must_return_within_ms,
-             "receive phase was not bounded: took #{elapsed_ms}ms"
+             "receive phase ignored a 1s request_timeout: took #{elapsed_ms}ms"
     end
 
     test "returns an error, not a 2xx, for a peer that never answers" do
@@ -111,12 +135,14 @@ defmodule Stacks.Enrichment.RssFetcherTest do
       port = start_trickler()
 
       {elapsed_ms, result} =
-        time(fn -> RssFetcher.fetch_and_parse("http://127.0.0.1:#{port}/feed.xml") end)
+        time(fn ->
+          RssFetcher.fetch_and_parse("http://127.0.0.1:#{port}/feed.xml", @tiny_bounds)
+        end)
 
       assert {:error, _} = result
 
-      assert elapsed_ms < @fetch_must_return_within_ms,
-             "receive phase was not bounded: took #{elapsed_ms}ms"
+      assert elapsed_ms < @must_return_within_ms,
+             "receive phase ignored a 1s request_timeout: took #{elapsed_ms}ms"
     end
   end
 end

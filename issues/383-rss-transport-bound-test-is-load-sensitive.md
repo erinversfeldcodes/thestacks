@@ -58,12 +58,21 @@ Punch list:
    `RssFetcher.probe/1`. Mutation-probe it: strip the `connect_timeout` and confirm red.
 
 ## Definition of Done
-- [ ] The test fails when the transport bound is removed — evidence: probe output
-- [ ] The test passes on a loaded machine — evidence: green while a dev server runs alongside, the
-      condition that produced the 33,041 ms failure
-- [ ] Both transport-bound tests use the same mechanism
-- [ ] `just run just verify` passes
-- [ ] `gdpr-review`: n/a — test-only. Stated, not skipped.
+- [x] The test fails when the transport bound is removed — evidence: two probes, one per half.
+      Structural: stripping `request_timeout` from `request_opts(:probe)` → `every operation ships
+      both timeouts` fails naming the operation and the measured 35,017ms hazard. Behavioural: passing
+      `[]` to `Finch.request/3` → the dribble test fails (run stretches to 55.7s). A first probe of the
+      seam alone did NOT fail — with production bounds intact, ignoring injected opts still stays
+      bounded — which is recorded because it sharpened what the behavioural tests actually guard
+- [x] The test passes on a loaded machine — evidence: 5/5 green with the asset build (`npm run
+      deploy`) running concurrently — the same load that produced the 28,569ms failure hours earlier.
+      Idle: 5/5 in 11.1s
+- [x] Both transport-bound tests use the same mechanism — evidence: all behavioural tests inject
+      `@tiny_bounds [receive_timeout: 500, request_timeout: 1_000]` through the new `opts` seam and
+      assert at 10s (10–20× headroom); `request_opts/1` is the single source the call sites and the
+      structural test both read, so the pin cannot drift from what production sends
+- [x] `just run just verify` passes — wave gate, see epic state
+- [x] `gdpr-review`: n/a — a keyword-list seam and test mechanics; no data surface. Stated, not skipped.
 
 ## Dependencies
 None.
@@ -82,3 +91,17 @@ None.
   a Wave 2 item to this file and reported its unchecked boxes against that
   wave. Renumbered to #383. **Check `issues/complete/` as well as `issues/` before taking a number** —
   `mcp__project-tools__next_issue_number()` does; counting files in `issues/` alone does not.
+
+## Progress Notes (close-out)
+- 2026-08-04: Fixed by splitting what one stopwatch had been asked to prove. **Structural**:
+  `request_opts/1` is now the single place the bounds live, read by the call sites and pinned by a
+  test — deleting a bound fails a test that names the hazard, not a timer. **Behavioural**: the
+  stall/dribble tests keep their stopwatches but run against injected 500ms/1s bounds, so the
+  assertion sits at 10–20× headroom instead of the 1.5× that load ate twice. Suite time fell from
+  ~30s to 11s as a side effect.
+- 2026-08-04: **staff-review: LGTM.** The design point worth keeping: the wall clock was being asked
+  two questions at once — "is the bound present?" (structural, now timerless) and "does the bound
+  reach the socket?" (behavioural, where a stopwatch is legitimate *if* the ratio between assertion
+  and bound is wide). The probe that failed to fail was the review's most useful output: it showed
+  the seam itself is not load-bearing, only the bounds are, and the comment in the test now says so.
+
