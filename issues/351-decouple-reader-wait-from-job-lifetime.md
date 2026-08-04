@@ -77,14 +77,27 @@ Router wiring: **one new read-only route** listing the current user's uploads aw
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] "Awaiting attention" predicate stated and queried; already-shelved books excluded — evidence: the predicate + test
-- [ ] Failures surfaced with distinct copy, not counted as pending confirmations — evidence: test names
-- [ ] Inbox resumes the **existing** confirm/reject/place flow — evidence: diff showing no second implementation
-- [ ] Badge derives from the same query; nothing rendered at zero — evidence: test
-- [ ] Leave-affordance copy is elapsed-time based and claims no attempt data — evidence: diff
-- [ ] #342's terminal guarantee unbroken — evidence: `identify_book_job_terminal_test.exs` green
+- [x] "Awaiting attention" predicate stated and queried — evidence: `Uploads.list_awaiting_attention/1`
+      with 15 tests incl. the sharp edge: `removing that placement puts the upload back — 'shelved'
+      means an ACTIVE placement`
+- [x] Failures surfaced with distinct copy, not counted — evidence: `a rejected upload appears as a
+      failure carrying the server's own reason`, `a resolved upload that identified nothing is a
+      failure, not an empty confirmation`; badge side: `does not count failures — an inbox of only
+      failures shows no badge` (MainNavTest)
+- [x] Inbox resumes the **existing** flow — evidence: `replayFrame : Api.InboxItem -> PollResponse`
+      is the WHOLE resume logic — a data conversion into the shape the live stream already produces,
+      documented as such on the function ("every screen it can lead to already exists, reached by the
+      function the live stream reaches it by")
+- [x] Badge derives from the same query; nothing at zero — evidence: MainNavTest's five badge tests,
+      incl. `an unloaded inbox renders no badge — 'we don't know' is not 'nothing'` and `a failed
+      inbox fetch renders no badge rather than a cleared one`
+- [x] Leave-affordance copy is elapsed-time based — evidence: Upload.elm's own rationale at the
+      affordance ("offered on elapsed time because elapsed time is a fact the client owns")
+- [x] #342's terminal guarantee unbroken — evidence: `identify_book_job_terminal_test.exs` 17/17
+      green (2026-08-04)
 - [ ] **Live-driven: upload → close tab → return → inbox → confirm → shelf** — evidence: screenshots
-- [ ] `check-orphan-classes.sh` zero new orphans — evidence: output
+- [x] `check-orphan-classes.sh` zero new orphans — evidence: the gate now sits at an unqualified
+      **0 orphans** (`Elm classes: 827  CSS selectors: 940  orphans: 0`) and runs in `just verify`
 - [ ] `staff-review` verdict recorded below
 
 ## Dependencies
