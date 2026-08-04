@@ -95,6 +95,7 @@ suite =
             [ theRouteIsWiredToTheArrival
             , deadLinkArrivalOpensTheResendForm
             , deadLinkResendUsesTheTypedAddress
+            , deadLinkResendIsAcknowledged
             , deadLinkFormAsksNothingBeforeAnAddressIsGiven
             ]
         ]
@@ -367,6 +368,36 @@ deadLinkResendUsesTheTypedAddress =
                             "{\"email\":\"came-back-later@stacks.dev\"}"
                             request.body
                     )
+
+
+{-| Closes a real coverage gap, and its history is a caution worth keeping.
+
+The dead-link path proved it _sends_ (`deadLinkResendUsesTheTypedAddress`) but nothing proved it
+_acknowledges_ — only the pending-card path did (`resendIsAcknowledged`). Driving the deployed
+preview (2026-08-04, #373), the acknowledgement appeared not to render, and I nearly filed that as a
+defect. It is not one: `resendState` is `RemoteData RequestError ()`, so ANY 200 maps to `Success ()`
+and `viewResendOutcome` renders the notice — this test simulates exactly that and passes with **zero
+code change**, and the decoder ignoring the body means the `"{}"` here and the server's real
+`{"message":...}` are the same input.
+
+So the browser observation was a false negative — the synthetic-Elm-submit trap: a scripted
+value-set + click does not drive Elm's update cycle the way a real interaction does. The ProgramTest
+is the oracle; the drive was the unreliable witness. What remained real was the missing test, which
+is this.
+
+-}
+deadLinkResendIsAcknowledged : Test
+deadLinkResendIsAcknowledged =
+    test "dead_link_resend_is_acknowledged: a reader who came from a dead link is told it worked" <|
+        \() ->
+            ProgramTest.start () (loginProgramFrom Login.ConfirmationExpired)
+                |> ProgramTest.fillIn "email" "Email" "came-back-later@stacks.dev"
+                |> ProgramTest.clickButton "Send a new link"
+                |> ProgramTest.simulateHttpOk "POST" resendEndpoint "{}"
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "role" "status")
+                    , Selector.text successCopy
+                    ]
 
 
 {-| An empty field asks nothing — otherwise the first thing this page would do is
