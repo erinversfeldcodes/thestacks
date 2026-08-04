@@ -141,6 +141,20 @@ defmodule Stacks.Enrichment.EventsPath do
 
   defp walk(store, store_name) do
     case client().sitemap_urls(store.scraper_module) do
+      # ⛔ `documents_fetched == 0` means we never successfully READ a sitemap — the shop declared one
+      # and it did not serve. Found by the first live run (2026-08-04): exclusivebooks.co.za declares
+      # `Sitemap:` three times and that sitemap answers **HTTP 500 with 0 bytes**. The harvest comes
+      # back `HARVESTED` with an empty `urls` and the failure in `skipped`, so without this clause the
+      # store was recorded as "no candidate matched among 0 listed page(s)" — i.e. as a shop with no
+      # events page, on the strength of a document we could not open.
+      #
+      # That is the exact conflation this module exists to prevent, and it survived every unit test
+      # because no fixture had a declared-but-unreadable sitemap. Only the live run had one.
+      {:ok, %{documents_fetched: 0} = harvest} ->
+        detail = harvest |> Map.get(:skipped, []) |> Enum.take(1) |> Enum.join("; ")
+        unresolved(store, "could not read the shop's sitemap — could not look (#{detail})")
+        {:error, :sitemap_unreadable}
+
       {:ok, %{urls: urls, truncated: truncated}} ->
         resolve_from(store, store_name, urls, truncated)
 

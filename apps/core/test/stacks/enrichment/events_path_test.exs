@@ -25,9 +25,9 @@ defmodule Stacks.Enrichment.EventsPathTest do
     {:ok,
      %{
        urls: urls,
-       skipped: [],
+       skipped: Keyword.get(opts, :skipped, []),
        truncated: Keyword.get(opts, :truncated, false),
-       documents_fetched: 2,
+       documents_fetched: Keyword.get(opts, :documents_fetched, 2),
        bytes_read: 10_334
      }}
   end
@@ -280,6 +280,32 @@ defmodule Stacks.Enrichment.EventsPathTest do
 
       refute reason =~ "no candidate",
              "an inability to look was recorded as the shop listing no events page"
+    end
+
+    test "a declared-but-unreadable sitemap is could-not-look, not absence" do
+      # ⛔ **Found by the first live run, not by review.** exclusivebooks.co.za declares `Sitemap:`
+      # three times and that sitemap answers HTTP 500 with 0 bytes. The harvest returns HARVESTED with
+      # an empty `urls` and the failure in `skipped`, so the store was being recorded as "no candidate
+      # matched among 0 listed page(s)" — a shop written off on the strength of a document we could not
+      # open. No fixture had this shape, which is why every unit test passed.
+      s = store()
+
+      MockScraperClient.put_sitemap(
+        "za/test_store",
+        harvest([],
+          documents_fetched: 0,
+          skipped: ["https://shop.test/sitemap.xml (HTTP 500)"]
+        )
+      )
+
+      assert {:error, :sitemap_unreadable} = EventsPath.resolve(s)
+
+      reason = reload(s).events_unresolved_reason
+      assert reason =~ "could not look"
+      assert reason =~ "HTTP 500", "the reason does not say what actually failed"
+
+      refute reason =~ "no candidate",
+             "an unreadable sitemap was recorded as the shop listing no events page"
     end
 
     test "a truncated walk with no candidate is could-not-look, not absence" do
