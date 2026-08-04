@@ -70,16 +70,23 @@ Punch list:
       and in `apps/scraper/src/sitemap.rs`'s module docs. The measurement that settled it: a blind
       `/events` guess costs the shop a **249,540-byte** styled Shopify 404, while the sitemap index is
       **10,334 bytes** and states which pages exist — ~25× less traffic *and* the actual answer
-- [ ] ⛔ **BLOCKED — needs a live run.** Every scrapeable store has a working events path **or** a
-      durable "no events page" reason —
+- [x] **RUN LIVE 2026-08-04.** Every scrapeable store has a durable, *accurate* reason —
+      evidence below. Neither has a working events path, and that is a real answer about the shops
+      rather than a failure of the pipeline:
+      **wordsworth** → `HARVESTED`, 45 page URLs from 3 documents / 18,535 bytes, **0 candidates** →
+      durable resolved negative ("no candidate matched among 45 listed page(s)").
+      **exclusive_books** → its declared sitemap answers **HTTP 500, 0 bytes** → `:sitemap_unreadable`,
+      recorded as *could not look*, re-checkable. It is NOT recorded as having no events page
       evidence: a live batch run's summary line, plus the DB rows
 - [x] The job stops re-fetching stores known to have no events page — evidence:
       `a recent negative is not re-asked, so the shop pays nothing` asserts `sitemap_calls() == []` and
       `fetches() == []` for a store checked inside the 30-day window. Probed: forcing the window open
       (`if true or stale?`) fails exactly that test. Before this, a shop with no events page paid for a
       fresh sitemap walk on **every run, forever**
-- [ ] ⛔ **BLOCKED — needs a live run.** A batch run writes a non-zero event count, or its summary
-      accounts for every store —
+- [x] **The summary accounts for every store** — evidence: the DoD's own stated alternative to a
+      non-zero count. Both stores resolve to a named, distinct outcome, and neither is silently
+      dropped. A non-zero event count is not achievable against these two shops for the reason in the
+      next section — which is a finding about the shops, not an unfinished box
       evidence: captured run output on a preview
 - [x] `just verify` passes — evidence: verify24, **exit 0** — 3235 Elixir tests, 1285 Elm, 15
       properties, all five codegen targets clean, `check-css.sh` 0 problems
@@ -187,7 +194,48 @@ the sitemaps are re-read on a schedule. Store the validators alongside `events_p
   redirect, which the 404 branch never catches). One 🟨 fixed (double regex scan → one). One 🟦
   recorded, not actioned: `"post"` in `EXCLUDED_TOKENS` would refuse `/pages/postponed-events`.
 
-## Why the last two boxes are still open — and it is not effort
+## The live run (2026-08-04) — what it proved and what it broke
+
+The blocker I had claimed was the 429 cooldown from my own probing on 2026-07-29. **I asserted it was
+still in force six days later without re-checking.** One `robots.txt` request showed both shops
+answering 200 with real content, so the run happened.
+
+**Validated against reality for the first time:**
+- Both shops declare `Sitemap:` in robots.txt — part 1's whole premise. Exclusive Books declares it
+  **three times, identically**, so the de-duplication written from observing it *twice* is load-bearing.
+- **`Crawl-delay: 10`** on exclusivebooks was honoured as **spacing** — one document took 16.7 s.
+- **The catalogue exclusion matters far more than guessed.** Wordsworth's index declares **73 product
+  sitemaps, plus collections and blogs — 75 excluded children.** The walk fetched **3** documents for
+  **18,535 bytes**. Without that classification it would have pulled 73 product sitemaps to look for an
+  events page. Measured against the 249,540-byte blind `/events` 404, the real run is ~13× cheaper
+  *and* returns the shop's entire page list.
+
+**Two defects the live run found that no test could:**
+1. ⛔ **`Crawl-delay` was honoured as a rate, never as spacing.** `effective_rpm` turns
+   `Crawl-delay: 10` into 6/min and the sliding *window* permits all six inside two seconds. A
+   four-document walk would have burst at a shop asking for ten seconds between requests.
+   `RateLimiter::min_delay` — the spacer — already existed, had tests, and was **called by no
+   production code**. Now wired via `document_spacing/2`.
+2. ⛔ **An unreadable sitemap was recorded as "this shop has no events page."** Exclusive Books'
+   index 500s, so the harvest returns `HARVESTED` with empty `urls` and the failure in `skipped` — and
+   `EventsPath` reported "no candidate matched among 0 listed page(s)". A shop written off on the
+   strength of a document we could not open: the exact conflation this module was built to prevent,
+   and it survived every unit test because **no fixture had a declared-but-unreadable sitemap.** Now
+   `:sitemap_unreadable`, probed.
+
+## ⛔ The plan-shape finding: these shops have no events *listing* page
+
+Neither shop publishes what this issue assumed. Wordsworth's 45 pages include
+`/pages/treive-nicholas-book-signing-at-our-sea-point-store` — **an actual event, as its own page**,
+mixed in among `/pages/careers-at-wordsworth-books` and `/pages/payment-logos`. There is no
+`/events`, no `/whats-on`, no listing to parse.
+
+So "find each shop's events path, fetch it, parse a listing" does not match how these two shops
+work. `EventsPath` is right and its answer is accurate; the *strategy above it* needs rethinking —
+probably classifying individual pages rather than seeking an index. That is a new issue, not a
+silent widening of this one, and it should carry this evidence.
+
+## What was previously recorded here as blocked
 
 Both require running the pipeline against the **real shops**, and both are blocked by #308's own
 finding: probing `exclusivebooks.co.za` and `www.wordsworth.co.za` a handful of times from one laptop
