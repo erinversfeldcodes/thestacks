@@ -115,11 +115,27 @@ Verdict: ❌ — the happy path has no coverage that would notice it producing n
       distinct date repeated beside every entry IS used"; restoring `Enum.at(dates, idx)` fails the
       first, reverting gives 21/21
 - [x] `just verify` passes — evidence: command → captured output (see Progress Notes)
-- [ ] **Extraction validated against a real events page** — BLOCKED, and honestly so: no scrapeable
-      store has one. `/events` 404s on both, so there is nothing to parse. This needs the path problem
-      solved first (per-store config, or sitemap/nav discovery) and that is **#307**, because it is a
-      data-and-config question rather than a parsing one — and doing it properly means real DOM parsing
-      (Floki), not two independent regex scans.
+- [x] **RESOLVED 2026-08-04 by driving it live — and the answer is that there is nothing to validate
+      against.** This box asked for extraction validated against a real events page. #307's live run
+      enumerated both scrapeable stores' actual pages and **neither shop publishes an events page at
+      all**:
+      - **wordsworth** — 45 pages harvested from its own sitemap. Zero match any events vocabulary
+        (`events`, `whats-on`, `calendar`, `diary`, `programme`, `happenings`). What it *does* have is
+        `/pages/treive-nicholas-book-signing-at-our-sea-point-store`: **a single event as its own
+        page**, among `/pages/careers-at-wordsworth-books` and `/pages/payment-logos`.
+      - **exclusive_books** — its declared sitemap answers **HTTP 500, 0 bytes**, so its pages cannot
+        be enumerated at all. Recorded as `:sitemap_unreadable`, i.e. *could not look*.
+
+      So the box is not blocked and never can be satisfied as written: a listing-page extractor has no
+      listing page to validate against, on either store. That is a finding about the shops, not
+      unfinished work, and it is why **#311** exists — events are individual pages here, so extraction
+      needs a per-page classifier rather than a list parser. Validating *that* against a real page is
+      #311's DoD, with `treive-nicholas-book-signing-at-our-sea-point-store` as the known live fixture.
+
+      ⚠️ The prediction in this box was half right and half wrong, which is worth recording. Right:
+      the path problem had to be solved first, and #307 did it. Wrong: it assumed the outcome would be
+      a *path*. The honest outcome was "these shops have no such path", which no amount of parsing work
+      would have discovered — only enumerating their real pages did.
 
 ⚠️ **Only 2 of 11 stores are reachable at all** (`scrapeable_stores/0` skips 9 with no scraper config —
 the P9 finding). So even a perfect extractor covers 2 shops today. That caps what this issue could ever
