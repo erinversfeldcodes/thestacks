@@ -126,7 +126,7 @@
       "best_finding": "PROBE 12 REDDENED NOTHING. Removing the inbox refresh on PlacementCompleted would have left the badge showing 1 for a book just shelved, with 1657 tests green. Structural cause: uploadProgram's wrapper discards the third tuple element, so NO program test can observe an OutMsg; and Main.update is a Browser.application with ports and a Nav.Key, so it is not program-testable at all. It closed the gap with direct assertions on Upload.update's return value + two NoOut anti-vacuity companions — then stated the residual honestly: that proves the signal is RAISED, not that Main acts on it. Main.update's RefreshInbox branch is unreachable from any test in this suite."
     },
     "310": {
-      "status": "not_started",
+      "status": "complete",
       "title": "Convert the 89 test-hook classes to data-testid",
       "level": 2,
       "depends_on": [
@@ -141,7 +141,7 @@
       "note": "Added to W7 by owner ruling 2026-08-04, having been sized as 'too large for this wave'. Scope is measured, not guessed: 88 claimed hooks -> 74 genuinely used as selectors, of which 31 are already styled (keep the class, ADD a testid) and 43 are pure. 63 test files. 12 sites sit in NEGATIVE assertions and are the only ones needing judgement; the ~96 positive occurrences are safe by construction, because a positive assertion that stops matching fails loudly. ISSUE'S OWN DoD MANDATES ONE PR PER TEST FILE — honour that inside the wave rather than one sweeping diff, and mutation-probe each of the 12."
     },
     "382": {
-      "status": "not_started",
+      "status": "complete",
       "title": "Events are individual pages, not a listing",
       "level": 2,
       "depends_on": [
@@ -188,7 +188,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-04",
-  "status": "9 original children merged. OWNER ADDED #310 + #382 to this wave 2026-08-04, so the wave is no longer closeable on drives alone. OUTSTANDING: (a) full E2E drive is partial, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs, (e) #310 not started, (f) #382 not started.",
+  "status": "9 original children merged; #310 and #382 complete (2026-08-04). OUTSTANDING: (a) full E2E drive is partial, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -218,6 +218,10 @@
       "issue": 379,
       "summary": "third-space geocoding test fails in the full suite, passes isolated, does not reproduce at its own seed — non-deterministic, likely an async/sandbox isolation race",
       "severity": "makes just ci intermittently red; the gate working as intended"
+    },
+    {
+      "summary": "bookstore events have NO SPA consumer: AuthorCard renders upcomingEventsCount but no server code produces it — built-not-wired, pre-existing. The first real event row now exists (#382 live run); the surface that should show it is events-story (US-3.1.x) work.",
+      "found": "2026-08-04"
     }
   ],
   "gdpr_corroboration": "#351 independently re-discovered #353 (uploaded_images unreachable by erasure; schema-guard structurally blind to a MISSING FK). Recorded in #353 rather than filed as a duplicate. #351 raises its severity: the inbox turns those rows into a listed reader-facing surface, and export is missing too.",

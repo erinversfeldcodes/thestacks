@@ -14,16 +14,21 @@
 #
 # WHAT COUNTS AS AN ORPHAN
 #
-# A class used in `frontend/src/**/*.elm` with no matching selector in main.css. **Not every orphan is
-# a defect** — a wrapper that exists only as a JS or test hook needs no rule (though `data-testid` is
-# the project's convention for that, and is preferred). So this reports a BUDGET, not a bug count: the
-# baseline is recorded below and the check fails when it RISES. That turns a 398-item backlog into a
-# ratchet nobody has to finish before it starts protecting them.
+# A class used in `frontend/src/**/*.elm` with no matching selector in main.css. EVERY orphan is a
+# defect now, and the budget sits at its floor of 0.
+#
+# ⚠️ There is NO test-hook exemption any more (#310), and its history is the argument for its absence.
+# The gate once exempted a class "verified" as a test selector. That verification was a substring
+# match and handed out 14 bogus exemptions (`.success` was exempt because `successCopy` appears in a
+# test — while rendering unstyled in five Settings surfaces). Tightened to real selector syntax, it
+# STILL protected seven visual classes a live drive found unstyled (the masthead, an author card, the
+# settings navigation) — because "findable by a test" never implied "invisible to a reader". Even its
+# final two members turned out to select on a `data-testid` sitting beside the class, not the class.
+# Hooks belong in `data-testid`, which needs no rule because it is not a class.
 #
 # Usage:
 #   scripts/check-orphan-classes.sh            # fail if the orphan count exceeds the budget
 #   scripts/check-orphan-classes.sh --list     # every orphan, grouped by component prefix
-#   scripts/check-orphan-classes.sh --hooks    # the classes exempt as verified test selectors
 #   scripts/check-orphan-classes.sh --update   # print the line to paste when the budget legitimately drops
 set -uo pipefail
 
@@ -31,16 +36,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 cd "$REPO_ROOT" || exit 1
 MODE="${1:-check}"
 
-# The ratchet, now at its floor. Never raise it.
+# The floor, with nothing exempt from it. Never raise it.
 #
-# 2026-07-29 (#306): all 309 orphans that needed a CSS rule were given one, so the budget for
-# *unstyled* classes is **0**. The 89 that remain are test/E2E selectors — a class used only as a
-# hook needs no rule — and they are exempt as a CATEGORY rather than as a list.
-#
-# ⚠️ The exemption is VERIFIED, not asserted: a class only counts as a hook if it actually appears as
-# a selector in `frontend/tests/` or `e2e/tests/`. So the escape hatch cannot be used to wave through
-# an unstyled component by calling it a hook — the check goes and looks. That is the difference
-# between an allowlist and an excuse.
+# 2026-07-29 (#306): all 309 orphans needing a rule got one. 2026-08-04 (#310): the last two "hooks"
+# were styled and the exemption deleted — see the header for why it could never be made sound.
 ORPHAN_BUDGET=0
 
 python3 - "$MODE" "$ORPHAN_BUDGET" <<'PY'
@@ -66,52 +65,10 @@ for name in re.findall(r"\.([a-zA-Z][a-zA-Z0-9_-]*)", css):
 
 orphans = sorted(used - defined)
 
-# A class used as a selector by a unit test or an E2E spec is a HOOK: it exists to be found, not to be
-# seen, so it legitimately needs no rule. `data-testid` is the project's preferred form for this and
-# converting them is tracked separately — until then they are exempt, and the exemption is checked
-# against the test sources rather than taken on trust.
-hook_sources = ""
-for pattern in ("frontend/tests/**/*.elm", "e2e/tests/*.ts", "e2e/tests/**/*.ts"):
-    for f in glob.glob(pattern, recursive=True):
-        hook_sources += open(f, encoding="utf-8", errors="ignore").read()
-
-
-def used_as_selector(cls):
-    """True only when the class is used in a SELECTOR, not merely mentioned.
-
-    ⚠️ This used to be `cls in hook_sources` — a bare substring match — and it handed out **14 bogus
-    exemptions**. `success` was exempt because the string appears inside `successCopy`; `app-nav`,
-    `comment`, `profile` and `blog-post` because they are substrings of longer names and of ordinary
-    prose in test files. Every one of those was a genuinely unstyled class hiding behind the exemption,
-    and `.success` renders a success message to a reader in **five** places across Settings.
-
-    The lesson generalises past this file: an exemption is only as strong as the thing it verifies, and
-    "the name appears somewhere in a test" verifies almost nothing.
-    """
-    patterns = [
-        r'Selector\.class\s+"' + re.escape(cls) + r'"',
-        r'getByTestId\(\s*["\']' + re.escape(cls) + r'["\']',
-        r'data-testid"\s+"' + re.escape(cls) + r'"',
-        r'\[data-testid=["\']' + re.escape(cls) + r'["\']\]',
-        # `.cls` inside a quoted selector string, not followed by more name characters.
-        r'["\'`][^"\'`]*\.' + re.escape(cls) + r'(?![\w-])',
-    ]
-    return any(re.search(pat, hook_sources) for pat in patterns)
-
-
-hooks = [c for c in orphans if used_as_selector(c)]
-unstyled = [c for c in orphans if not used_as_selector(c)]
-
-if mode == "--hooks":
-    print(f"{len(hooks)} class(es) exempt as verified test/E2E selectors:\n")
-    for c in hooks:
-        print(f"  {c}")
-    print(f"\n{len(unstyled)} unstyled class(es) remain.")
-    sys.exit(0)
 
 if mode == "--list":
     groups = defaultdict(list)
-    for cls in unstyled or orphans:
+    for cls in orphans:
         groups[re.split(r"__|--", cls)[0]].append(cls)
     print(f"{len(orphans)} orphan class(es) across {len(groups)} component group(s):\n")
     for prefix, members in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
@@ -121,32 +78,28 @@ if mode == "--list":
     sys.exit(0)
 
 if mode == "--update":
-    print(f"ORPHAN_BUDGET={len(unstyled)}")
+    print(f"ORPHAN_BUDGET={len(orphans)}")
     sys.exit(0)
 
-print(
-    f"Elm classes: {len(used)}   CSS selectors: {len(defined)}   "
-    f"orphans: {len(orphans)} ({len(unstyled)} unstyled, {len(hooks)} verified test hooks)"
-)
+print(f"Elm classes: {len(used)}   CSS selectors: {len(defined)}   orphans: {len(orphans)}")
 
-# The gate is on UNSTYLED classes only. Hooks are exempt because they were checked, above.
-if len(unstyled) > budget:
-    added = len(unstyled) - budget
+if len(orphans) > budget:
+    added = len(orphans) - budget
     print(f"\n{added} NEW orphan class(es) — markup naming a style that does not exist.")
     print("No test can catch this: the class IS in the DOM, so every `Selector.class` assertion passes.")
     print("Either add the rule, or use `data-testid` if it is only a hook.\n")
     print("Most likely culprits (unstyled classes in the groups you probably just touched):")
     groups = defaultdict(list)
-    for cls in unstyled:
+    for cls in orphans:
         groups[re.split(r"__|--", cls)[0]].append(cls)
     for prefix, members in sorted(groups.items(), key=lambda kv: -len(kv[1]))[:6]:
         print(f"  {prefix}: {', '.join(members[:6])}{' …' if len(members) > 6 else ''}")
     print("\nRun --list to see all of them.")
     sys.exit(1)
 
-if len(unstyled) < budget:
-    print(f"\nUnstyled count is {budget - len(unstyled)} BELOW the budget of {budget}. Lower the ratchet:")
-    print(f"  scripts/check-orphan-classes.sh --update   → ORPHAN_BUDGET={len(unstyled)}")
+if len(orphans) < budget:
+    print(f"\nOrphan count is {budget - len(orphans)} BELOW the budget of {budget}. Lower the ratchet:")
+    print(f"  scripts/check-orphan-classes.sh --update   → ORPHAN_BUDGET={len(orphans)}")
 
 sys.exit(0)
 PY

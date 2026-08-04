@@ -7017,3 +7017,33 @@ h4 {
     border-radius: var(--radius-sm);
     cursor: pointer;
 }
+
+/* The last two classes with no rule (#310).
+ *
+ * Both were "verified test hooks" — and both selectors turn out to be the `data-testid` sitting
+ * beside them, not the class. The detector matched the class NAME inside the testid string, so the
+ * exemption was wrong about its own last two members. Both are user-visible states. With these, every
+ * class in the Elm source has a rule, and the hook exemption is deleted from the gate. */
+
+/* A visitor followed a link to a shelf that is private or whose reader does not exist. A dead end,
+ * not an error the visitor caused — quiet, centred, matching the profile's not-found state. */
+.shelf-unavailable {
+    font-family: var(--font-body);
+    font-style: italic;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 3rem 1rem;
+}
+
+/* The signed-out upload page: an invitation to sign in, not a wall. Centred with the button below
+ * the sentence, so the one action is the obvious one. */
+.upload-auth-required {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 3rem 1.5rem;
+    text-align: center;
+    font-family: var(--font-body);
+    color: var(--text);
+}

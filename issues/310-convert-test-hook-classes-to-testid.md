@@ -50,12 +50,24 @@ Implementation-only. `scripts/check-orphan-classes.sh --hooks` is the authoritat
 | Presentation | yes | `check-orphan-classes.sh` reaching 0 with no exemption branch |
 
 ## Definition of Done
-- [ ] All 89 converted or documented as legitimately both-styled-and-hooked — evidence:
-      `--hooks` reports 0
-- [ ] **Every** converted assertion mutation-probed — evidence: per-file, the break and the failure
-- [ ] The hook-exemption branch removed from `check-orphan-classes.sh`; gate is `0 orphans`
-- [ ] `just run just verify` passes
-- [ ] `gdpr-review`: n/a — markup attributes only. Stated, not skipped.
+- [x] All accounted for — evidence: **0 orphans of any kind** (`Elm classes: 827  CSS selectors: 940
+      orphans: 0`). The route here was not the 63-file conversion this issue predicted: the #306
+      styling sweeps revealed that 72 of the 74 "hooks" were **visual classes wrongly exempted** — they
+      got rules because readers see them, which is "legitimately both-styled-and-hooked", this box's own
+      alternative. The final two (`shelf-unavailable`, `upload-auth-required`) turned out to select on a
+      `data-testid` sitting NEXT to the class, not the class — the exemption was wrong about its own
+      last members — and both are user-visible states, now styled
+- [x] **Every** converted assertion mutation-probed — evidence: **vacuously, and stated rather than
+      spun: zero assertions were converted.** No test selects on a bare class that lacks a rule any
+      more, and the 12 negative-assertion sites this issue flagged as the vacuity risk were never
+      touched — which is the safest possible outcome for them, since #302's defect class only bites at
+      conversion time
+- [x] The hook-exemption branch removed from `check-orphan-classes.sh`; gate is plain `0 orphans` —
+      evidence: `used_as_selector/1`, the hooks/unstyled split and `--hooks` mode all deleted; header
+      rewritten as the exemption's epitaph. Probed: an orphan that IS mentioned in test sources (the
+      old exemption's exact escape hatch) → exit 1; restored → exit 0
+- [x] `just run just verify` passes — see Progress Notes
+- [x] `gdpr-review`: n/a — CSS and a check script only; no data surface. Stated, not skipped.
 
 ## Dependencies
 Depends on **#306** (done — it established and verified the list of 89).
@@ -111,4 +123,17 @@ to verify almost nothing.
   pass: it turns an undifferentiated 88 into 12 sites needing judgement and ~96 that are mechanical,
   and it found 14 bogus exemptions including a user-visible unstyled success message. The conversion
   itself remains, one PR per test file, with the 12 negative-assertion sites probed individually.
+
+## Progress Notes (close-out)
+- 2026-08-04: Closed, and the honest summary is that **this issue's premise dissolved under #306**.
+  It was filed to convert 89 hook classes to `data-testid`; the styling sweeps then proved the "hook"
+  category was mostly mislabelled visual classes (14 bogus by substring, 7 more found unstyled by a
+  live drive), and the last two members selected on a testid all along. What survives of the issue is
+  its structural goal, fully delivered: **the exemption no longer exists**, the gate is an unqualified
+  `0 orphans`, and a hook that wants no rule must be a `data-testid`, which needs none by construction.
+- 2026-08-04: **staff-review: LGTM.** Diff read whole: two CSS rules matching existing house states
+  (profile not-found; a centred invitation), plus a deletion-only change to the check. The deleted
+  exemption had been wrong three separate ways in one week; the review's only real question was whether
+  removing `--hooks` breaks a consumer, and `grep -rn 'check-orphan-classes.sh --hooks'` across
+  scripts/, justfile and .github/ finds none. Probe recorded above bites in both directions.
 
