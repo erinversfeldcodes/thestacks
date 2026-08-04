@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-30",
   "plan": "plans/staff-campaign-2026-07-30.md",
   "created_at": "2026-07-30T00:00:00Z",
-  "updated_at": "2026-08-01",
+  "updated_at": "2026-08-04",
   "status": "approved_filed",
   "current_wave": 7,
   "_why": [
@@ -280,6 +280,16 @@
           "title": "Owner-only un-merge process + record the two owner-ruled exclusions in implementation-mapping (split out of 7c: an MFA-gated admin correction surface and a reader-facing toast share no code and broke the scope rule together)",
           "status": "not_started",
           "issue": 376
+        },
+        "7i": {
+          "title": "Convert the 89 test-hook classes to data-testid — closes the unsound hook exemption in the orphan gate",
+          "status": "not_started",
+          "issue": 310
+        },
+        "7j": {
+          "title": "Events are individual pages, not a listing — per-page classifier after #307's live run disproved the listing premise",
+          "status": "not_started",
+          "issue": 382
         }
       }
     },
@@ -497,5 +507,9 @@
   ],
   "_owner_rulings_wave6_2026_08_01": [
     "Full issue audit 2026-08-01: 29 completed issues moved to issues/complete/; #315 (W5 epic) DoD closed out; every remaining open issue assigned to a numbered wave. Two flagged as launch-blocking: #353 (GDPR erasure gap) and #357 (age-gate cache bypass), both scheduled before 11d prod-deploy execution."
+  ],
+  "notes": [
+    "2026-08-04: owner added #310 (7i) and #382 (7j) to Wave 7, and #304/#306/#307 moved to issues/complete/ (all three had zero open DoD boxes while still sitting in issues/ — the artifact disagreeing with reality). I had sized #310 and #311 as too large for this wave; the owner ruled them in, which means Wave 7 can no longer be closed by finishing drives alone. Both carry measured scope in the epic state rather than an estimate: #310 is 74 real selector-hooks across 63 test files with 12 negative-assertion sites needing judgement; #382 needs a per-page classifier whose negative cases (a promotion, a job ad) matter more than its positives.",
+    "2026-08-04: numbering correction — two issues I filed as #311/#312 collided with this campaign's own Wave 0 and Wave 2 epics and are now #382/#383. `wave-status` caught it by resolving a wave item to the wrong file; nothing else would have."
   ]
 }

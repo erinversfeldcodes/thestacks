@@ -124,6 +124,34 @@
       "auto_place_prohibition": "Proven three ways: inbox_places_nothing_by_itself (no placement POST, no completion card), inbox_resume_to_a_shelf_is_four_deliberate_steps (the positive half, so \"nothing happened\" cannot pass vacuously), and two Elixir tests asserting the bookshelves are untouched after reading the inbox.",
       "service_down_honesty": "HIDDEN, not fixed — and it said so plainly. vision_unavailable is still :transient, so IdentifyBookJob still runs the full retry schedule and the frame still takes minutes. What changed is the reader is no longer waiting for it. The <=5s claim still does not hold; making it hold means reclassifying vision_unavailable as terminal, which is a separate decision.",
       "best_finding": "PROBE 12 REDDENED NOTHING. Removing the inbox refresh on PlacementCompleted would have left the badge showing 1 for a book just shelved, with 1657 tests green. Structural cause: uploadProgram's wrapper discards the third tuple element, so NO program test can observe an OutMsg; and Main.update is a Browser.application with ports and a Nav.Key, so it is not program-testable at all. It closed the gap with direct assertions on Upload.update's return value + two NoOut anti-vacuity companions — then stated the residual honestly: that proves the signal is RAISED, not that Main acts on it. Main.update's RefreshInbox branch is unreachable from any test in this suite."
+    },
+    "310": {
+      "status": "not_started",
+      "title": "Convert the 89 test-hook classes to data-testid",
+      "level": 2,
+      "depends_on": [
+        306
+      ],
+      "owns": [
+        "frontend/src/**/*.elm (class -> testId)",
+        "frontend/tests/**/*.elm",
+        "e2e/tests/*.ts",
+        "scripts/check-orphan-classes.sh (remove the hook-exemption branch when the last one lands)"
+      ],
+      "note": "Added to W7 by owner ruling 2026-08-04, having been sized as 'too large for this wave'. Scope is measured, not guessed: 88 claimed hooks -> 74 genuinely used as selectors, of which 31 are already styled (keep the class, ADD a testid) and 43 are pure. 63 test files. 12 sites sit in NEGATIVE assertions and are the only ones needing judgement; the ~96 positive occurrences are safe by construction, because a positive assertion that stops matching fails loudly. ISSUE'S OWN DoD MANDATES ONE PR PER TEST FILE — honour that inside the wave rather than one sweeping diff, and mutation-probe each of the 12."
+    },
+    "382": {
+      "status": "not_started",
+      "title": "Events are individual pages, not a listing",
+      "level": 2,
+      "depends_on": [
+        307
+      ],
+      "owns": [
+        "apps/core/lib/stacks/enrichment/events_path.ex",
+        "apps/core/lib/stacks/workers/discover_bookstore_events_job.ex"
+      ],
+      "note": "Added to W7 by owner ruling 2026-08-04. #307's live run (2026-08-04) proved the premise wrong: neither scrapeable shop has an events LISTING page. Wordsworth lists 45 pages, one of which is /pages/treive-nicholas-book-signing-at-our-sea-point-store — a single event as its own page. Exclusive Books' sitemap answers HTTP 500. So this needs a per-page classifier, and its NEGATIVE cases matter more than its positives: /pages/summer-sale-up-to-50-off is a promotion and /pages/careers-at-wordsworth-books is a job ad. A pipeline that invents events is worse than one that produces none. DO NOT widen EventsPath.candidate_tokens/0 — that would make a single event page masquerade as a listing."
     }
   },
   "ready_set": [
@@ -141,14 +169,17 @@
     374,
     350,
     376,
-    351
+    351,
+    310,
+    382
   ],
   "sequencing_rationale": "Two independent orderings. (1) OWNER RULING 2026-07-31 — measure before sizing before redesigning: 349 → 350 → 351. (2) FILE OWNERSHIP, the #343/#344 lesson re-confirmed in Wave 6 — Login.elm is contended by 373 and 374 (373 first); Page/Upload.elm is contended by 374 and 351 (374 first, while the file is still small); Bookshelf.elm belongs to 375 alone. #351 is the tail of both chains, which is why it is level 3.",
   "critical_path": "349 → 350 → 351 (and 373 → 374 → 351). #349 is a verification with no code, so it can start immediately and should — everything downstream of it idles until it reports a p99.",
   "owner_rulings": [
     "2026-07-30: undo-remove SPEC'd (toast); un-merge SPEC'd owner-only; cancel-deletion grace EXCLUDED; public photo-delete EXCLUDED.",
     "2026-07-31: #349 → #350 → #351 in that order — measure, fix the inversion, re-read retry frequency, then size the reader wait.",
-    "2026-07-31 (#351 shape): async re-attempt + SYNCHRONOUS confirm-and-place; pending confirmations live in an inbox reachable from the upload page; a notification count on the Add-a-book nav marker; not rendered outside the dropdown — low-but-easy visibility."
+    "2026-07-31 (#351 shape): async re-attempt + SYNCHRONOUS confirm-and-place; pending confirmations live in an inbox reachable from the upload page; a notification count on the Add-a-book nav marker; not rendered outside the dropdown — low-but-easy visibility.",
+    "2026-08-04: add #310 and #382 to Wave 7. I had assessed both as too large for the wave — #310 is 63 test files and #382 needs a new classifier plus a live drive. Owner decided otherwise, so they are in scope. Recorded because it changes what closing this wave means: it can no longer be finished by completing drives. (#382 was filed as #311, which collided with this campaign's own Wave 0 epic; see the renumbering note below.)"
   ],
   "plan_deviation": {
     "item": "7c",
@@ -156,8 +187,8 @@
     "why": "The plan's single 7c bundled an MFA-gated admin data-correction surface with a reader-facing toast. They share no code and together break the scope rule (max 3 controllers / 2 endpoints / ~300 LOC). Recorded rather than silently absorbed."
   },
   "kickoff_approved": "2026-08-02",
-  "updated_at": "2026-08-02",
-  "status": "ALL 9 CHILDREN MERGED. No regressions found. NOT DONE: (a) full E2E drive is partial, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs, (d) #379 open.",
+  "updated_at": "2026-08-04",
+  "status": "9 original children merged. OWNER ADDED #310 + #382 to this wave 2026-08-04, so the wave is no longer closeable on drives alone. OUTSTANDING: (a) full E2E drive is partial, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs, (d) #379 open, (e) #310 not started, (f) #382 not started.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -216,5 +247,8 @@
       "what_held_up": "Recording it as UNCONFIRMED rather than filing it. The counter-evidence noted at the time (remove-modal focus tests passing) was pointing the right way."
     },
     "e2e_status": "book-detail: 27/27 serially. Full-suite drive still PARTIAL (58 passed / 6 failed before being stopped; 3 = #371, 3 = these, now cleared)."
-  }
+  },
+  "bookkeeping": [
+    "2026-08-04: ISSUE NUMBER COLLISION, mine. I filed two issues as #311 and #312, both already taken by this campaign's wave epics (issues/complete/311-campaign-w0-quick-fixes.md, 312-campaign-w2-deletions.md). Invisible until `just wave-status` resolved Wave 0 and Wave 2 items to my files and reported their unchecked boxes against those waves. Renumbered to #382 and #383. Root cause: I took the next number by looking at issues/ only. issues/complete/ holds the rest, and `next_issue_number()` reads both."
+  ]
 }
