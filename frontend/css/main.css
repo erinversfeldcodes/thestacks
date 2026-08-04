@@ -6488,3 +6488,71 @@ h4 {
 .shelf-organiser__row--dragging:hover {
     box-shadow: inset 0 0 0 1px var(--accent);
 }
+
+/* ============================================================================
+ * Classes that hid behind a bogus "test hook" exemption (#306 follow-up)
+ * ============================================================================
+ *
+ * `check-orphan-classes.sh` exempted a class from needing a rule if its name appeared anywhere in a
+ * test source. That is a substring match, and it handed out **14 exemptions to classes no test ever
+ * selects on**: `success` because the string sits inside `successCopy`; `app-nav`, `comment`,
+ * `profile`, `blog-post` because they are substrings of longer names and of ordinary prose.
+ *
+ * `.success` was the one that mattered — **five** call sites across Settings (Privacy ×3, Password,
+ * Notifications) rendering a confirmation to a reader with no rule behind it. "Password changed
+ * successfully" was appearing as unstyled default text.
+ *
+ * The check now requires the class to appear in an actual selector. The lesson generalises: an
+ * exemption is only as strong as what it verifies, and "the name appears in a test" verifies nothing.
+ * ============================================================================ */
+
+/* The generic success message, matching `.marketplace-create__success` and mirroring
+ * `.admin__error` — same shape as its failure counterpart so the two read as one family. */
+.success {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--accent);
+    background: rgba(74, 124, 89, 0.15);
+    border-left: 2px solid var(--accent);
+    padding: 0.6rem 0.85rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
+}
+
+/* Page and component blocks: a centred measure, as with the other top-level blocks. */
+.app-nav,
+.block-user,
+.blog-post,
+.comment,
+.profile,
+.removal-queue,
+.writing-assistant {
+    max-width: 60rem;
+    margin: 0 auto;
+}
+
+/* Metadata-register elements — small caps, tracked, muted, as elsewhere. */
+.book-detail__status,
+.book-detail__visibility,
+.settings-section__note {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+/* Author attribution on a post — body face, muted, not a heading. */
+.blog-post__author {
+    font-family: var(--font-body);
+    color: var(--text-muted);
+}
+
+/* Sub-navigation and a grouped feed: horizontal, wrapping, with room between items. */
+.settings-hub__nav,
+.groups-detail__feed {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}

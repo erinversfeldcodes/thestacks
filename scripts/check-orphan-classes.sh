@@ -75,8 +75,32 @@ for pattern in ("frontend/tests/**/*.elm", "e2e/tests/*.ts", "e2e/tests/**/*.ts"
     for f in glob.glob(pattern, recursive=True):
         hook_sources += open(f, encoding="utf-8", errors="ignore").read()
 
-hooks = [c for c in orphans if c in hook_sources]
-unstyled = [c for c in orphans if c not in hook_sources]
+
+def used_as_selector(cls):
+    """True only when the class is used in a SELECTOR, not merely mentioned.
+
+    ⚠️ This used to be `cls in hook_sources` — a bare substring match — and it handed out **14 bogus
+    exemptions**. `success` was exempt because the string appears inside `successCopy`; `app-nav`,
+    `comment`, `profile` and `blog-post` because they are substrings of longer names and of ordinary
+    prose in test files. Every one of those was a genuinely unstyled class hiding behind the exemption,
+    and `.success` renders a success message to a reader in **five** places across Settings.
+
+    The lesson generalises past this file: an exemption is only as strong as the thing it verifies, and
+    "the name appears somewhere in a test" verifies almost nothing.
+    """
+    patterns = [
+        r'Selector\.class\s+"' + re.escape(cls) + r'"',
+        r'getByTestId\(\s*["\']' + re.escape(cls) + r'["\']',
+        r'data-testid"\s+"' + re.escape(cls) + r'"',
+        r'\[data-testid=["\']' + re.escape(cls) + r'["\']\]',
+        # `.cls` inside a quoted selector string, not followed by more name characters.
+        r'["\'`][^"\'`]*\.' + re.escape(cls) + r'(?![\w-])',
+    ]
+    return any(re.search(pat, hook_sources) for pat in patterns)
+
+
+hooks = [c for c in orphans if used_as_selector(c)]
+unstyled = [c for c in orphans if not used_as_selector(c)]
 
 if mode == "--hooks":
     print(f"{len(hooks)} class(es) exempt as verified test/E2E selectors:\n")
