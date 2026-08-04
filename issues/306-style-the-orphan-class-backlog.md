@@ -115,11 +115,13 @@ Punch list:
       *gate*: any new unstyled class fails the build. Probed: renaming `about__lede` to an unstyled
       name → `1 unstyled`, **exit 1**; reverted → exit 0
 - [x] `just verify` passes — evidence: verify22, exit 0, 3235 Elixir tests, 1285 Elm, 15 properties
-- [ ] ⚠️ **Per-group screenshots NOT taken.** This is the one item outstanding and it is stated rather
-      than quietly dropped: the rules are derived from BEM role semantics and the house token
-      vocabulary, which guarantees no surface renders as unstyled browser default, but it cannot know
-      that a particular `__title` sits inside a card and wants to be smaller. Needs a preview drive
-      per group; see the queue in the Progress Notes
+- [x] **DRIVEN 2026-08-04 on a local stack, with screenshots** — `docs/evidence/306-styling-drive-2026-08-04/`.
+      Assets rebuilt first and verified **by hash** (`dd094ac6` → `2952313b` → `d089d632`), because
+      Phoenix serves a pre-built bundle and driving a stale one would have proved nothing. Verified per
+      surface with `getComputedStyle`, not by eye: `book-detail` **36 classes rendering, 0 unstyled**;
+      `/me/insights` **35 rendering, 0 unstyled**, with `__stat-value` in the display face at
+      `--size-3xl` against small-caps `__meta` labels. The drive found **7 unstyled classes no static
+      check could see** — see below
 
 ## Progress Notes
 - 2026-07-29: Split out of #301 after the triage showed 309 classes across 63 groups — far past one
@@ -216,4 +218,30 @@ Punch list:
   duplicates outside `@media`. All four rules probed. Two bugs in the check itself were found by
   probing it — 24 false positives on multi-line `radial-gradient` declarations, and it flagged the
   *repair* for `btn--link` as a defect — both fixed before wiring it in.
+- 2026-08-04: **Driven live, and it found 7 defects the static gate structurally could not.**
+
+  Every one was exempt as a "verified test hook", and every one was rendering unstyled on a real page:
+  `book-detail__author-card` (an author card, on the largest group's page),
+  `app-header__brand` (the masthead, on **every** page), `page--marketplace-browse`, and the four
+  `settings-hub__nav-*` classes — a settings navigation rendering as a bare bulleted list on the
+  wallpaper, on `/me/insights` and every settings page.
+
+  ⛔ **So the hook exemption is unsound in principle, and the drive is the proof.** The exemption
+  reasons that a class used as a test selector needs no rule. But a class can be *both*: an author
+  card, a masthead and a nav link are all findable by a test **and** seen by a reader. "Is used as a
+  selector" was never evidence of "needs no style". The exemption's justification only disappears when
+  the hooks become `data-testid` attributes, which is **#310** — until then it stays, narrowed by these
+  seven now having rules, and the count fell 74 → 69.
+
+  ⚠️ **Two false signals nearly produced a wrong report, and both are worth recording.**
+  1. I first "drove" seven routes with `history.pushState` + a synthetic `popstate`. Elm never
+     re-rendered: all seven returned the same title and the same 35 classes. I would have reported
+     seven surfaces driven having driven one. Only the *identical* output gave it away.
+  2. My first probe on `/books/:id` reported 2 `book-detail` classes because it ran before the page
+     finished loading and behind an onboarding overlay. The screenshot is what showed the page was
+     actually fine. A probe that runs too early reads exactly like an unstyled page.
+
+  **Remaining visual pass**, now much smaller: `marketplace-detail`, `blog-post`, `upload-verify`,
+  `profile` and the tail were not opened. The gate holds them at 0 unstyled, and the method above
+  (rebuild → verify hash → navigate for real → `getComputedStyle` → screenshot) is the recipe.
 

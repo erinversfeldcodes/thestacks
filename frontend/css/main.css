@@ -6556,3 +6556,99 @@ h4 {
     gap: 0.75rem;
     margin-bottom: 1.5rem;
 }
+
+/* ============================================================================
+ * Found by DRIVING the pages — not by any static check (#306)
+ * ============================================================================
+ *
+ * These seven were exempt from the orphan gate as "verified test hooks", and every one of them was
+ * rendering unstyled on a real page. Opening the app is what found them.
+ *
+ * ⛔ **The exemption is unsound in principle, and this is the proof.** `check-orphan-classes.sh`
+ * exempts a class that is used as a test selector, on the reasoning that a hook needs no rule. But a
+ * class can be *both*: `book-detail__author-card` is an author card, `app-header__brand` is the
+ * masthead, `settings-hub__nav-link` is a navigation link. Being findable by a test says nothing about
+ * whether a reader sees it.
+ *
+ * The exemption's real justification disappears once the hooks become `data-testid` attributes, which
+ * is #310. Until then it stays, narrowed, with these seven removed from it by having actual rules.
+ * ============================================================================ */
+
+/* The author card on a book page — a panel, like every other card in the app. */
+.book-detail__author-card {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1rem 1.25rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+/* The masthead wordmark. Sits in the header alongside `app-nav__dropdown`, so it needs to be a
+ * flex row rather than inheriting whatever the dropdown imposes. */
+.app-header__brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    color: var(--text);
+}
+
+/* A per-route page wrapper. The other `page--*` variants were styled in the first sweep; this one was
+ * exempt as a hook and so was missed — visible only by loading /marketplace. */
+.page--marketplace-browse {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+}
+
+/* The settings sub-navigation. All four render on /me/insights and every settings page, and all four
+ * were unstyled — a nav rendering as a bare bulleted list on top of the wallpaper. */
+.settings-hub__nav-item {
+    list-style: none;
+}
+
+.settings-hub__nav-link {
+    display: block;
+    padding: 0.4rem 0.7rem;
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    text-decoration: none;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.2s ease-in;
+}
+
+.settings-hub__nav-link:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+}
+
+/* "You are here". Its own `:hover` restating its colour, because `.settings-hub__nav-link:hover`
+ * would otherwise outrank it and erase the active state under the cursor — the specificity trap
+ * `check-css.sh` now gates. */
+.settings-hub__nav-item--active .settings-hub__nav-link,
+.settings-hub__nav-item--active {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-sm);
+}
+
+.settings-hub__nav-item--active .settings-hub__nav-link:hover {
+    color: var(--text);
+}
+
+/* The mobile equivalent of that nav: a select, hidden on wide viewports by the existing layout. */
+.settings-hub__mobile-select {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
