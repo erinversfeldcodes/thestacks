@@ -68,6 +68,35 @@ fn effective_rpm(policy: &crate::robots::RobotsPolicy, configured: u32) -> u32 {
     }
 }
 
+/// How long to wait between the documents of one walk.
+///
+/// ⚠️ **`Crawl-delay` is a SPACING, not a rate, and we were honouring only the rate.**
+/// `effective_rpm` turns `Crawl-delay: 10` into 6 requests/minute, and `check_and_record` enforces
+/// that with a sliding *window* — which happily permits all six inside two seconds and then nothing
+/// for the rest of the minute. That passes the limiter while doing precisely what the shop asked us
+/// not to: exclusivebooks.co.za declares `Crawl-delay: 10`, and a four-document walk at the old fixed
+/// 500 ms spacing would have burst all four at it in under two seconds.
+///
+/// `RateLimiter::min_delay` — the spacer this needs — already existed, had tests, and was **called by
+/// no production code at all**. Another built-and-not-wired instance; this is the call site it was
+/// waiting for.
+///
+/// Takes whichever is longer: our own courtesy floor, or what the shop asked for. Never shorter than
+/// the shop's request, because that is the whole point.
+fn document_spacing(
+    policy: &crate::robots::RobotsPolicy,
+    effective_rpm: u32,
+) -> std::time::Duration {
+    let declared = policy
+        .crawl_delay_secs
+        .map(|s| std::time::Duration::from_secs(s as u64))
+        .unwrap_or_default();
+
+    declared
+        .max(RateLimiter::min_delay(effective_rpm))
+        .max(sitemap::INTER_DOCUMENT_DELAY)
+}
+
 /// Cache validators from a previous fetch of the same path, sent so the shop can answer "unchanged".
 ///
 /// Empty strings mean "we have none", which is the normal state for a first fetch and for any page
@@ -1056,7 +1085,9 @@ impl Engine {
             Spend::Exhausted => return HarvestStep::Stop,
         };
 
-        match self.policy_for(domain, path, config).await {
+        // The match YIELDS the spacing rather than assigning into a pre-declared binding: every other
+        // arm returns, so an initial value would be dead code.
+        let spacing = match self.policy_for(domain, path, config).await {
             Ok(policy) if !policy.allowed => {
                 return HarvestStep::Skipped(format!(
                     "{url} ({})",
@@ -1072,15 +1103,15 @@ impl Engine {
                     tracing::info!("sitemap walk stopping at {}: {}", url, e);
                     return HarvestStep::Stop;
                 }
+                document_spacing(&policy, rpm)
             }
             Err(e) => {
                 tracing::info!("sitemap walk stopping at {}: {}", url, e);
                 return HarvestStep::Stop;
             }
-        }
+        };
 
-        // Courtesy pause between documents of one burst — see `INTER_DOCUMENT_DELAY`.
-        tokio::time::sleep(sitemap::INTER_DOCUMENT_DELAY).await;
+        tokio::time::sleep(spacing).await;
 
         match self.fetch_capped(url, byte_limit).await {
             Ok(read) => {
@@ -1482,6 +1513,46 @@ requests_per_minute = 60
         <url><loc>https://shop.test/pages/events</loc></url>
         <url><loc>https://shop.test/pages/about</loc></url>
       </urlset>"#;
+
+    #[test]
+    fn a_declared_crawl_delay_spaces_the_walk_rather_than_only_rate_limiting_it() {
+        // ⛔ `Crawl-delay` is a SPACING and we honoured only the rate. `effective_rpm` turns
+        // `Crawl-delay: 10` into 6/min, and `check_and_record`'s sliding *window* permits all six
+        // inside two seconds — which passes the limiter while doing exactly what the shop asked us not
+        // to. Measured against the real file: exclusivebooks.co.za declares `Crawl-delay: 10`, and a
+        // four-document walk at the old fixed 500 ms would have burst all four at it in under 2s.
+        //
+        // `RateLimiter::min_delay` already existed with tests and was called by NO production code.
+        let asks_for_ten = crate::robots::RobotsPolicy {
+            crawl_delay_secs: Some(10),
+            ..crate::robots::RobotsPolicy::unrestricted()
+        };
+        assert_eq!(
+            document_spacing(&asks_for_ten, 6),
+            std::time::Duration::from_secs(10),
+            "a declared Crawl-delay was not honoured as spacing between documents"
+        );
+
+        // No declared delay: our own courtesy floor, never zero.
+        let silent = crate::robots::RobotsPolicy::unrestricted();
+        assert_eq!(document_spacing(&silent, 60), sitemap::INTER_DOCUMENT_DELAY);
+
+        // A very low rate implies wide spacing even with no Crawl-delay line — 1/min is 60s apart.
+        assert_eq!(
+            document_spacing(&silent, 1),
+            std::time::Duration::from_secs(60)
+        );
+
+        // Never SHORTER than what the shop asked for, whatever our own numbers say.
+        let asks_for_thirty = crate::robots::RobotsPolicy {
+            crawl_delay_secs: Some(30),
+            ..crate::robots::RobotsPolicy::unrestricted()
+        };
+        assert!(
+            document_spacing(&asks_for_thirty, 600) >= std::time::Duration::from_secs(30),
+            "our configured rate was allowed to talk the shop down from its declared delay"
+        );
+    }
 
     #[tokio::test]
     async fn the_walk_follows_an_index_to_its_page_child_and_refuses_the_catalogue() {
