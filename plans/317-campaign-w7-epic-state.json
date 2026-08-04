@@ -7,7 +7,7 @@
   "pr_policy": "DEFERRED — owner ruling 2026-07-30: wave PRs batch until the final wave",
   "children": {
     "373": {
-      "status": "merged",
+      "status": "complete",
       "title": "7a Resend confirmation + 24h-erasure reconciliation",
       "level": 1,
       "depends_on": [],
@@ -188,7 +188,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-04",
-  "status": "9 original children merged; #310 and #382 complete (2026-08-04). OUTSTANDING: (a) full E2E drive is partial, (b) #351 auto-place prohibition not hand-driven, (c) #373 + #376 still owe preview drives per their own DoDs.",
+  "status": "9 original children merged; #310, #382, #373 complete; full E2E green (291 passed). OUTSTANDING: (b) #351 auto-place prohibition hand-drive (needs Open Library, currently 503), (c) #376 owner unmerge drive.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -244,7 +244,8 @@
       "why_it_failed_in_parallel": "Same class as #371 — contention, not breakage. The tell is in the passing run own timings: \"loading state is visible before a delayed response resolves\" took 1.3 MINUTES while PASSING, and \"removing the book returns focus to the main landmark\" took 49s. These tests deliberately exercise slow and delayed responses, so under 4 workers against one preview VM they cross the timeout with nothing broken.",
       "what_held_up": "Recording it as UNCONFIRMED rather than filing it. The counter-evidence noted at the time (remove-modal focus tests passing) was pointing the right way."
     },
-    "e2e_status": "book-detail: 27/27 serially. Full-suite drive still PARTIAL (58 passed / 6 failed before being stopped; 3 = #371, 3 = these, now cleared)."
+    "e2e_status": "book-detail: 27/27 serially. Full-suite drive still PARTIAL (58 passed / 6 failed before being stopped; 3 = #371, 3 = these, now cleared).",
+    "full_e2e": "2026-08-04: chromium project against stacks-core-pr-feat-campaign-w7-317 — 291 passed, 10 skipped (Modal-excluded upload/rate-limit + local-detected), 0 failed. Resolves outstanding (a)."
   },
   "bookkeeping": [
     "2026-08-04: ISSUE NUMBER COLLISION, mine. I filed two issues as #311 and #312, both already taken by this campaign's wave epics (issues/complete/311-campaign-w0-quick-fixes.md, 312-campaign-w2-deletions.md). Invisible until `just wave-status` resolved Wave 0 and Wave 2 items to my files and reported their unchecked boxes against those waves. Renumbered to #382 and #383. Root cause: I took the next number by looking at issues/ only. issues/complete/ holds the rest, and `next_issue_number()` reads both."
