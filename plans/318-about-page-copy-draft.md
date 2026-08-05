@@ -13,7 +13,7 @@
 
 ## Hero / one-liner
 
-**A quiet place for the books you own, the books you've read, and the books you're still
+**A quiet place for the books you own, the pieces you've read, and the knowledge you're still
 circling.**
 
 The Stacks is a self-hosted home for your library — the read and the unread alike — built for
@@ -23,12 +23,12 @@ people who believe a bookshelf is a kind of autobiography.
 
 ## What The Stacks is
 
-The Stacks is an open-source book-management and discovery platform you run yourself. It keeps
+The Stacks is an open-source reading-management and book-discovery platform. It keeps
 your collection on your own terms: no ads, no selling your reading habits, no algorithm deciding
-what you should want next. Just your books, arranged the way a good shelf is — with room for the
-ones you haven't got to yet.
+what you should want next. Just your books and the things you've read, arranged the way a good shelf is — with room for the
+ones you haven't gotten around to yet.
 
-It's built around a simple conviction: the books you *haven't* read matter as much as the ones
+It's built around a simple conviction: things you haven't read matter as much as the ones
 you have. Umberto Eco called that unread portion an **antilibrary** — a private promise of
 everything still ahead of you. The Stacks gives it a shelf of its own.
 
@@ -44,8 +44,7 @@ Every book you add finds a home on one of five shelves:
 - **Wishlist** — not yet yours, but wanted.
 - **Looking for a home** — read, and ready to pass on.
 
-Move a book between them as your relationship with it changes. The Stacks remembers the journey —
-when it arrived, when you finished it, when you let it go.
+Move a book between them as your relationship with it changes.
 
 ---
 
@@ -60,31 +59,31 @@ when it arrived, when you finished it, when you let it go.
   individual book.
 - **Take your library with you.** Export everything you've stored, whenever you like — it's yours.
 
+Coming soon: adding other pieces of writing: blogs, scientific articles and musings.
+
 ---
 
 ## Built to be yours
 
-The Stacks is **open source** and **self-hosted**. You run it on your own hardware or your own
-corner of the cloud; your catalogue lives in your database, not ours. There is no "our servers" —
-there is only yours.
+The Stacks is open source and privately hosted, though you are also welcome to self-host.
 
 Privacy isn't a setting here, it's the default. Your data is classified, minimised, and erasable:
 ask to be forgotten and you are, completely. Reading is a private act, and The Stacks treats it
-that way.
+that way, allowing you to invite a close circle to share your reflections with but by default encouraging depth and range rather than shallow performance.
 
 ---
 
-## The wider shelf *(optional — include only if the partner features are live at launch)*
+## The wider shelf
 
 Bookshops, reading groups, and cafés can share what they're up to — a signing, a new arrival, a
 Thursday-evening meeting — and it surfaces alongside the books it's about. They send to the
-platform; they never see you. The flow runs one way, on purpose.
+platform; they never see you.
 
 ---
 
 ## Closing line
 
-Pull up a chair. The Stacks is quieter than the internet, and it's on your side.
+Pull up a chair. The Stacks is quieter than the internet, and it's here to give you the space to think.
 
 ---
 
