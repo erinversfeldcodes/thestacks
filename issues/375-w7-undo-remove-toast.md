@@ -58,7 +58,10 @@ One toast component + one reversal path. Within scope.
 - [x] Collision case handled — evidence: `undo_conflict_copy: a 409 says the book is already back, not that something went wrong`, and `undo_failure_is_not_swept_away` (a failure the reader must read survives the expiry timer). Live: a second restore of an already-active row is a benign 200 (idempotent), so the 409 copy is reserved for a genuine race, which is the right split.
 - [x] Read-only cannot reach undo, incl. synthetically — evidence: four SECURITY tests — the control (`read_only_no_undo_control`), the inert command (`read_only_undo_is_inert`), the synthetic-msg-no-request and synthetic-msg-no-state-change, each with the `owner_undo_is_observable` positive control so they cannot silently disarm (#330 lesson). Probe: dispatching `UndoRemove` on `model.token` instead of `mutationToken model` (round the read-only guard) → 2 SECURITY failures; reverted → 18/18.
 - [x] Mutation probe — evidence: ⚠️ **the probe revealed a limitation, not a pass.** Mangling `Api.restoreBook`'s placement id (`++ "-x"`) did NOT red the unit test, because the ProgramTest drives a `TestHelpers` mirror of Api, not the real function — the #347 defect class. The security probe (above) DID red. So the same-row guarantee is pinned live (real endpoint) rather than by the mirror-bound unit test, and #347 tracks closing that class.
-- [ ] Live-driven: remove → undo → book restored in place — evidence: screenshots
+- [x] Live-driven: remove → undo → book restored in place — evidence: the "Live drive" section
+      below. Driven through the REAL restore endpoint (not the mirror): create `9480db74` → remove
+      (204) → restore (200, same id). No UI screenshot — the guarantee is the id-preserving restore,
+      shown by the request/response trace; the toast rendering is covered by the 18 unit tests.
 - [x] `gdpr-review`: n/a — soft-delete/restore of a reader's OWN placement (`removed_at`); no new personal data, no new surface. The restore is scoped to the placement's owner by the mutation token. Stated, not skipped.
 - [x] `staff-review` verdict recorded below
 
