@@ -34,24 +34,30 @@ test.describe("First-run onboarding overlay", () => {
     await expect(overlay).toBeVisible({ timeout: 15000 });
     await expect(overlay).toContainText("Welcome to The Stacks");
 
-    // Progress dots: three steps (profile → privacy → complete; the age step
-    // was removed in ADR-020), first one active.
+    // Progress dots: the D2 sequence is four steps (Welcome → Upload your first
+    // book → Consent → Done, US-14.1.2 / #318 TR-2), first one active. The dot
+    // COUNT deriving from the step list is the data-driven-steps contract.
     const dots = overlay.locator(".onboarding-overlay__dot");
-    await expect(dots).toHaveCount(3);
+    await expect(dots).toHaveCount(4);
     await expect(
       overlay.locator(".onboarding-overlay__dot--active")
     ).toHaveCount(1);
     await expect(dots.nth(0)).toHaveClass(/onboarding-overlay__dot--active/);
 
-    // Advancing moves the active dot forward and swaps the step content.
+    // Advancing off Welcome moves the active dot to the embedded upload step.
     await overlay.getByTestId("onboarding-continue-btn").click();
     await expect(dots.nth(1)).toHaveClass(/onboarding-overlay__dot--active/);
     await expect(dots.nth(0)).not.toHaveClass(
       /onboarding-overlay__dot--active/
     );
+    // The real US-1.1.1 surface is embedded inline, not a prompt screen.
+    await expect(overlay.getByTestId("onboarding-upload-embed")).toBeVisible();
 
-    // The Skip link dismisses the overlay entirely.
-    await overlay.getByRole("button", { name: "Skip" }).click();
+    // The Skip affordance dismisses the overlay entirely (persists identically
+    // to advancing, so it never re-triggers). Stepping through the Upload and
+    // Consent steps to a real placement / consent write is a coherence-sweep
+    // drive item (needs the live stack + Modal).
+    await overlay.getByTestId("onboarding-skip-btn").click();
     await expect(page.getByTestId("onboarding-overlay")).toHaveCount(0);
   });
 });

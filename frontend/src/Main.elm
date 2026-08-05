@@ -3004,100 +3004,54 @@ update msg model =
             ( { model | openNavMenu = Nothing }, Cmd.none )
 
         EscapePressed ->
-            case model.bookDetailOverlay of
-                Just overlay ->
-                    let
-                        maybeToken =
-                            Maybe.map .token (currentAuth model.auth)
+            if onboardingShowing model then
+                -- The onboarding overlay is the topmost surface; Escape dismisses
+                -- it via the same finish path as Skip (US-14.1.2 §2 sad path).
+                update (OnboardingMsg OnboardingOverlay.EscapePressed) model
 
-                        -- Give the overlay first dibs on Escape: it dismisses a
-                        -- nested surface (remove modal / progress-edit form) if
-                        -- one is open, else returns RequestCloseOverlay.
-                        ( newDetail, subCmd, outMsg ) =
-                            BookDetail.update BookDetail.EscapePressed overlay.detail maybeToken
-
-                        returnFocusCmd =
-                            case overlay.triggerSpineId of
-                                Just spineId ->
-                                    Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
-
-                                Nothing ->
-                                    Cmd.none
-                    in
-                    case outMsg of
-                        BookDetail.RequestCloseOverlay ->
-                            -- No nested surface consumed it: close the overlay and
-                            -- return focus to the triggering spine.
-                            ( { model | bookDetailOverlay = Nothing }, returnFocusCmd )
-
-                        _ ->
-                            -- The overlay closed a nested surface and stays open;
-                            -- run its (focus-return) command.
-                            ( { model | bookDetailOverlay = Just { overlay | detail = newDetail } }
-                            , Cmd.map OverlayBookDetailMsg subCmd
-                            )
-
-                Nothing ->
-                    -- No overlay is open. On the full-page BookDetail route,
-                    -- give the page first dibs on Escape so its nested surfaces
-                    -- (remove modal / progress-edit form) dismiss too (#295 item
-                    -- e) — the same consumed/not-consumed pattern as the overlay.
-                    case model.page of
-                        PageBookDetail subModel ->
-                            let
-                                maybeToken =
-                                    Maybe.map .token (currentAuth model.auth)
-
-                                ( newSubModel, subCmd, outMsg ) =
-                                    BookDetail.update BookDetail.EscapePressed subModel maybeToken
-                            in
-                            case outMsg of
-                                BookDetail.RequestCloseOverlay ->
-                                    -- No nested surface consumed it; there is no
-                                    -- overlay to close on the page route, so fall
-                                    -- back to the default (close the user menu).
-                                    closeUserMenuOnEscape model
-
-                                _ ->
-                                    -- The page dismissed a nested surface and
-                                    -- stays put; run its (focus-return) command.
-                                    ( { model | page = PageBookDetail newSubModel }
-                                    , Cmd.map BookDetailMsg subCmd
-                                    )
-
-                        _ ->
-                            closeUserMenuOnEscape model
+            else
+                escapeForPage model
 
         OnboardingMsg subMsg ->
             let
+                maybeToken =
+                    Maybe.map .token (currentAuth model.auth)
+
                 ( newOnboarding, subCmd, outMsg ) =
-                    OnboardingOverlay.update subMsg model.onboarding
+                    OnboardingOverlay.update maybeToken subMsg model.onboarding
 
-                -- When the user clicks Next, record the completed step via the API
-                apiCmd =
-                    case ( subMsg, currentAuth model.auth ) of
-                        ( OnboardingOverlay.NextStep, Just auth ) ->
-                            Cmd.map OnboardingMsg
-                                (OnboardingOverlay.completeStep auth.token model.onboarding.step)
+                baseModel =
+                    { model | onboarding = newOnboarding }
 
-                        _ ->
-                            Cmd.none
+                baseCmd =
+                    Cmd.map OnboardingMsg subCmd
             in
             case outMsg of
-                OnboardingOverlay.SkipCompleted ->
-                    ( { model | onboarding = newOnboarding, onboardingCompleted = True }
-                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, saveOnboardingCompleted () ]
+                -- Skip, Escape, and advancing off the last step share ONE finish
+                -- path (US-14.1.2 §12): flip the client-side re-trigger guard and
+                -- mirror it to localStorage. The overlay's own Cmd has already
+                -- recorded the server step being left (#149).
+                OnboardingOverlay.OnboardingFinished ->
+                    ( { baseModel | onboardingCompleted = True }
+                    , Cmd.batch [ baseCmd, saveOnboardingCompleted () ]
                     )
 
-                OnboardingOverlay.FinishCompleted ->
-                    ( { model | onboarding = newOnboarding, onboardingCompleted = True }
-                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, saveOnboardingCompleted () ]
-                    )
+                -- The embedded US-1.1.1 upload flow's effects, relayed to the
+                -- shell exactly as the standalone upload page wires them.
+                OnboardingOverlay.UploadOpenStream url ->
+                    ( baseModel, Cmd.batch [ baseCmd, openUploadStream { url = url } ] )
+
+                OnboardingOverlay.UploadRefreshInbox ->
+                    ( baseModel, Cmd.batch [ baseCmd, fetchUploadInbox (currentAuth model.auth) ] )
+
+                OnboardingOverlay.UploadNavigate route ->
+                    ( baseModel, Cmd.batch [ baseCmd, Nav.pushUrl model.key (Route.toPath route) ] )
+
+                OnboardingOverlay.SessionExpired ->
+                    handleSessionExpiry model
 
                 OnboardingOverlay.NoOut ->
-                    ( { model | onboarding = newOnboarding }
-                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, apiCmd ]
-                    )
+                    ( baseModel, baseCmd )
 
         OnboardingStatusReceived completed ->
             ( { model | onboardingCompleted = completed }, Cmd.none )
@@ -3290,6 +3244,87 @@ closeUserMenuOnEscape model =
     ( { model | userMenu = newUserMenu, openNavMenu = Nothing }, Cmd.none )
 
 
+{-| Whether the onboarding overlay is the topmost, interactive surface: the
+view-gate (`shouldShowOnboarding`) is satisfied AND the overlay still wants to
+render. Used so Escape reaches onboarding before any page-level handler.
+-}
+onboardingShowing : Model -> Bool
+onboardingShowing model =
+    shouldShowOnboarding (currentAuth model.auth) model.onboardingCompleted model.hasAnyPlacements
+        && OnboardingOverlay.isVisible model.onboarding
+
+
+{-| The Escape handling for whatever page/overlay is showing when onboarding is
+NOT up. Extracted from `update` so the onboarding-first-dibs branch stays a
+one-liner (the body is unchanged from before #318 8b).
+-}
+escapeForPage : Model -> ( Model, Cmd Msg )
+escapeForPage model =
+    case model.bookDetailOverlay of
+        Just overlay ->
+            let
+                maybeToken =
+                    Maybe.map .token (currentAuth model.auth)
+
+                -- Give the overlay first dibs on Escape: it dismisses a
+                -- nested surface (remove modal / progress-edit form) if
+                -- one is open, else returns RequestCloseOverlay.
+                ( newDetail, subCmd, outMsg ) =
+                    BookDetail.update BookDetail.EscapePressed overlay.detail maybeToken
+
+                returnFocusCmd =
+                    case overlay.triggerSpineId of
+                        Just spineId ->
+                            Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
+
+                        Nothing ->
+                            Cmd.none
+            in
+            case outMsg of
+                BookDetail.RequestCloseOverlay ->
+                    -- No nested surface consumed it: close the overlay and
+                    -- return focus to the triggering spine.
+                    ( { model | bookDetailOverlay = Nothing }, returnFocusCmd )
+
+                _ ->
+                    -- The overlay closed a nested surface and stays open;
+                    -- run its (focus-return) command.
+                    ( { model | bookDetailOverlay = Just { overlay | detail = newDetail } }
+                    , Cmd.map OverlayBookDetailMsg subCmd
+                    )
+
+        Nothing ->
+            -- No overlay is open. On the full-page BookDetail route,
+            -- give the page first dibs on Escape so its nested surfaces
+            -- (remove modal / progress-edit form) dismiss too (#295 item
+            -- e) — the same consumed/not-consumed pattern as the overlay.
+            case model.page of
+                PageBookDetail subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            BookDetail.update BookDetail.EscapePressed subModel maybeToken
+                    in
+                    case outMsg of
+                        BookDetail.RequestCloseOverlay ->
+                            -- No nested surface consumed it; there is no
+                            -- overlay to close on the page route, so fall
+                            -- back to the default (close the user menu).
+                            closeUserMenuOnEscape model
+
+                        _ ->
+                            -- The page dismissed a nested surface and
+                            -- stays put; run its (focus-return) command.
+                            ( { model | page = PageBookDetail newSubModel }
+                            , Cmd.map BookDetailMsg subCmd
+                            )
+
+                _ ->
+                    closeUserMenuOnEscape model
+
+
 {-| Open the book detail overlay, returning focus to an explicit trigger
 element id on close. Shelf pages trigger from a `spine-<bookId>` element
 (`openOverlay`); the search results list triggers from its own
@@ -3349,36 +3384,53 @@ subscriptions model =
                             Decode.fail "not handled"
                     )
             )
-        , case model.page of
-            PageUpload _ ->
-                Sub.batch
-                    [ uploadStreamEvent
-                        (\raw ->
-                            case Decode.decodeString (Decode.field "type" Decode.string) raw of
-                                Ok "error" ->
-                                    UploadMsg Upload.StreamError
+        , if onboardingShowing model && OnboardingOverlay.isOnUploadStep model.onboarding then
+            -- The onboarding Upload step embeds the real US-1.1.1 flow, so the
+            -- SSE stream and wait-clock must reach the overlay's upload sub-model
+            -- (routed through `OnboardingMsg`) rather than a `PageUpload` that is
+            -- not the current page. Same two subscriptions, one hop deeper.
+            uploadSubscriptions (OnboardingMsg << OnboardingOverlay.UploadMsg)
 
-                                _ ->
-                                    UploadMsg (Upload.StreamEvent raw)
-                        )
+          else
+            case model.page of
+                PageUpload _ ->
+                    uploadSubscriptions UploadMsg
 
-                    -- The only clock `Page.Upload` has (Issue #351). It drives
-                    -- the "you may leave" copy and the silent-stream watchdog,
-                    -- both of which are elapsed-time facts the client genuinely
-                    -- owns — unlike the retry count it deliberately never
-                    -- claims. The interval MUST match `Upload.tickSeconds`;
-                    -- `WaitTick` is a no-op whenever the page is not waiting, so
-                    -- an idle upload page costs one discarded message every five
-                    -- seconds and nothing else.
-                    , Time.every (toFloat Upload.tickSeconds * 1000)
-                        (\_ -> UploadMsg Upload.WaitTick)
-                    ]
+                PageMarketplaceCreate _ ->
+                    gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)
 
-            PageMarketplaceCreate _ ->
-                gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)
+                _ ->
+                    Sub.none
+        ]
 
-            _ ->
-                Sub.none
+
+{-| The two subscriptions the US-1.1.1 upload flow needs, parameterised by how
+its messages are tagged so they can drive either the standalone upload page
+(`UploadMsg`) or the embedded onboarding-step flow
+(`OnboardingMsg << OnboardingOverlay.UploadMsg`).
+-}
+uploadSubscriptions : (Upload.Msg -> Msg) -> Sub Msg
+uploadSubscriptions tag =
+    Sub.batch
+        [ uploadStreamEvent
+            (\raw ->
+                case Decode.decodeString (Decode.field "type" Decode.string) raw of
+                    Ok "error" ->
+                        tag Upload.StreamError
+
+                    _ ->
+                        tag (Upload.StreamEvent raw)
+            )
+
+        -- The only clock `Page.Upload` has (Issue #351). It drives the "you may
+        -- leave" copy and the silent-stream watchdog, both of which are
+        -- elapsed-time facts the client genuinely owns — unlike the retry count
+        -- it deliberately never claims. The interval MUST match
+        -- `Upload.tickSeconds`; `WaitTick` is a no-op whenever the flow is not
+        -- waiting, so an idle upload surface costs one discarded message every
+        -- five seconds and nothing else.
+        , Time.every (toFloat Upload.tickSeconds * 1000)
+            (\_ -> tag Upload.WaitTick)
         ]
 
 
@@ -4219,7 +4271,10 @@ who haven't completed onboarding yet.
 viewOnboarding : Model -> Html Msg
 viewOnboarding model =
     if shouldShowOnboarding (currentAuth model.auth) model.onboardingCompleted model.hasAnyPlacements then
-        Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
+        Html.map OnboardingMsg
+            (OnboardingOverlay.view model.onboarding
+                (Maybe.map .token (currentAuth model.auth))
+            )
 
     else
         text ""

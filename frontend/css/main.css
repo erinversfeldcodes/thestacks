@@ -4336,9 +4336,32 @@ h4 {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(10, 8, 6, 0.85);
+    /* Scrim held at ~0.55 with a blur so the bookcase the account is about to
+       fill reads faintly through (US-14.1.2 §1 / #318 TR-2). */
+    background: rgba(10, 8, 6, 0.55);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
+}
+
+/* Off-screen focus guard (Components.OnboardingOverlay): a tabbable sentinel
+   after the card whose focus handler pulls focus back into the dialog, so Tab
+   off the last control does not escape to the page behind the modal. Zero-box
+   and aria-hidden so it is invisible to sighted and AT users alike. */
+.onboarding-overlay__focus-guard {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Wrapper for a real product surface embedded inside an onboarding step (the
+   US-1.1.1 upload flow, the Settings consent controls). The card is centred for
+   the Welcome/Done copy; embedded forms read left-aligned and full width. */
+.onboarding-overlay__embed {
+    width: 100%;
+    text-align: left;
+    margin-top: 1rem;
 }
 
 .onboarding-overlay__card {
@@ -4398,7 +4421,8 @@ h4 {
     height: 8px;
     border-radius: 50%;
     background: rgba(232, 220, 200, 0.2);
-    transition: background 0.3s ease;
+    /* No transition: a progress indicator must snap between states, not tween
+       (the #316/#319 indicator rule). */
 }
 
 .onboarding-overlay__dot--active {
