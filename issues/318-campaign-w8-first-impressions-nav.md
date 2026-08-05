@@ -109,3 +109,23 @@ Hub rewritten as ONE grouped nav idiom (You / Privacy / Your data), active state
 ⚠️ **OWED — assistive-tech/keyboard drive (coherence sweep):** SR announces the search field + clear button by name; SR announces upload progress transitions via the polite region without over-interrupting; SR reads "Shelf, 1 book" / "2 books"; Escape/click-away close on all disclosures across browsers.
 
 ⚠️ **Follow-ups filed (not phantoms):** **#388** (bookcase grid roving-tabindex arrow-key nav — deferred, owner nod pending on schedule-now-vs-hold); **#389** (public-profile "Reader actions" menu + Block confirm modal are keyboard-reachable but not Escape/click-away dismissable — a real gap 8f found but couldn't fix within its attributes-only boundary).
+
+### Coherence sweep — E2E backbone GREEN (2026-08-05); visual drive still owed
+Deployed the coherence-sweep preview (`stacks-core-pr-feat-campaign-w7-317`, 108 migrations verified
+applied — validating #353's FK migrations on a real deploy). The automated E2E backbone against it:
+- ⚠️ First runs showed 41→32 failures. Triaged, NOT waved off: ~9 were **#369 OOM/502 noise** (the
+  512MB VM OOM-killed `beam.smp` under the E2E setup's concurrent Argon2 logins — confirmed in the
+  fly logs; routed around by `fly scale memory 1024`, 0 OOM after). The rest were **pure Wave 8
+  redesign drift** — Playwright specs asserting the pre-Wave-8 nav/settings/home/fifth-shelf DOM.
+- The eight drifted specs (`navigation`, `shelf-transitions`, `settings`, `auth`, `marketplace`,
+  `login`, `transparency`, `looking-for-home`) were **updated to the new UI** (disclosure nav,
+  grouped settings + `aria-current` + no `<select>`, consent-in-Privacy + redirect, persistent
+  Add-Book, fifth-shelf room label) keeping every assertion meaningful (shelf-transitions preserved
+  all its animation checks). Re-run: **101 passed, 1 skipped, 0 failed**. Zero product regressions.
+- One out-of-scope finding recorded on **#371**: intermittent 422 on admin-MFA *enrolment*
+  (secret-encoding), not Wave 8, MFA-gated-specs only.
+
+⚠️ **STILL OWED to close #318: the visual/interaction browser drive** (DoD boxes 1–2) — Add-Book
+touch/keyboard reachability, the door `animationsStarted > 0` + recording, the settings 768px
+reflow, the two shelf-rooms' rendered coherence, About's typography, and the onboarding journey with
+its focus-trap. The E2E asserts structure; these are the rendered-appearance judgements it cannot.
