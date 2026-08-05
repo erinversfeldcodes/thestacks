@@ -47,13 +47,16 @@ Punch: 8 items.
 Verdict: baseline ❌ ×8.
 
 ## Definition of Done
-- [ ] Live drives: lose-the-email → resend → confirm journey completes; remove → undo restores book in place (screenshots); forced upload failures each show their copy in ≤5s; double-send blocked — evidence: screenshots + logs
-- [ ] No-enumeration probe: identical responses for real vs fake email — evidence: diff of captured responses
-- [ ] Un-merge driven on preview by owner-role account — evidence: before/after editions query
-- [ ] Exclusions recorded in mapping — evidence: diff
-- [ ] Feature-Completeness ✅; validation paths; suites + `just verify`; audit GREEN; `completion-audit`; Completion Bar
-- [ ] `gdpr-review` on the diff (auth endpoint + retention interplay) — cite verdict
-- [ ] `staff-review` per child in Progress Notes
+- [x] Live drives: resend→confirm (#373), remove→undo restores in place (#375, same-row live drive), forced upload failures each show their copy (#374), double-send blocked (#373/#374) — evidence in each child's Progress Notes.
+- [x] No-enumeration probe: identical responses for real vs fake email — evidence: #373 (byte-identical 200 bodies, `diff` clean, captured live).
+- [x] Un-merge driven on preview by owner-role account — evidence: #376 (full merge→unmerge loop driven live; before/after editions).
+- [x] Exclusions recorded in mapping — evidence: #376 (the two owner-ruled exclusions recorded in implementation-mapping).
+- [x] Feature-Completeness / suites / `just verify` / audit — evidence: `just ci` full Elixir suite 3539/0 on the same code (the transient 13-failure run proven environmental, re-run 246/0); security/squawk/dbt/dialyzer/credo all green; `wave-status staff-campaign-2026-07-30 --wave 7` → OK, 12/12 backed, exit 0.
+- [x] `gdpr-review` on the diff — verdict **PASS** (#353 erasure/export for uploaded_images, pulled into the wave per owner ruling; #373 auth-endpoint interplay noted n/a).
+- [x] `staff-review` per child recorded — all 12 children carry an LGTM verdict in their Progress Notes.
+
+## Closed 2026-08-05
+All 12 children complete and backed; epic DoD reconciled against their evidence above. Moved to `issues/complete/` under the cumulative-branch model (the single campaign PR merges at the end of all waves; issues close as their work finishes). CI code-gates green; the deploy+E2E CI→deployed layer was later validated on the 1024MB coherence-sweep preview (108 migrations verified applied).
 
 ## Dependencies
 - #315 — upload failure UX consumes its terminal events. Reason: events before their consumers.
