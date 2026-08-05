@@ -66,3 +66,10 @@ Orchestrator; elm-agent (primary), ux-reviewer per child, elixir-agent (onboardi
 
 ## Progress Notes
 Filed 2026-07-30 by staff-campaign Stage 7.
+
+### 8a Nav IA — built 2026-08-05 (drive owed at the coherence sweep)
+Elm-owned disclosure landed: `Model.openNavMenu : Maybe NavMenu`, real `<button aria-haspopup aria-expanded>` triggers, at-most-one-open invariant, backdrop for outside-click, Escape closes on every page; the `:hover`/`:focus-within`-only reveal (`main.css:245-246`) is DELETED. Add-Book is now a persistent `btn btn--primary` (not a hover-menu link); Search is top-level; the five bookshelves are grouped under one disclosure; the account menu exposes the full settings family (was 2 of 8). Active-route highlight extended to child routes.
+
+**Verified (short of the browser drive):** Elm suite `1688 passed / 0 failed`; `MainNavTest` disclosure oracle **mutation-probed** 2026-08-05 — breaking the `if config.isOpen` menu-gate reds exactly "closed: contents NOT in the DOM" + "closed: no backdrop" (reverted with Edit, re-confirmed 49/0); `check-orphan-classes.sh` orphans: 0; `lint-elm.sh` clean; no new hex/px literals (tokens only); caret animates transform-only under a reduced-motion guard.
+
+⚠️ **OWED — live drive:** the program tests prove DOM *presence*, not touch/keyboard *reachability* — the specific 8a guarantee ("Add Book unreachable on touch today"). Add-Book keyboard-only + touch-emulation reachability, Escape/outside-click close, and child-route active-state are to be driven in the epic's one-sitting coherence sweep (DoD box 1/2), not claimed from the code read. Consent-fold deferred to 8d (TR-4) as scoped; account menu links the existing `/settings/consent` for now.

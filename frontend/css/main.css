@@ -254,8 +254,12 @@ h4 {
     position: relative;
 }
 
+/* Elm owns open/closed now (#318 TR-1): the menu is in the DOM only while its
+   disclosure is open, so it is `display: block` unconditionally. The old
+   `:hover`/`:focus-within` reveal was deleted with this change — it kept the
+   menu in the DOM always and was unreachable by touch. */
 .app-nav__dropdown-menu {
-    display: none;
+    display: block;
     position: absolute;
     top: 100%;
     right: 0;
@@ -269,9 +273,56 @@ h4 {
     z-index: 200;
 }
 
-.app-nav__dropdown:hover .app-nav__dropdown-menu,
-.app-nav__dropdown:focus-within .app-nav__dropdown-menu {
-    display: block;
+/* The disclosure trigger: a real <button> carrying aria-haspopup/aria-expanded
+   (#318 TR-1). It sits in the nav row alongside the anchor links, so it must
+   shed the browser button chrome and match `.app-nav__link`. */
+.app-nav__disclosure {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font-body);
+}
+
+/* The disclosure caret. A caret is a directional affordance, not a state
+   indicator, so it may rotate on open (the #316/#319 rule forbids a
+   `transition` on indicators, not on affordances) — and even that is disabled
+   under reduced-motion below. */
+.app-nav__caret {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-left: 0.3em solid transparent;
+    border-right: 0.3em solid transparent;
+    border-top: 0.3em solid currentColor;
+    transition: transform 0.15s ease;
+}
+
+.app-nav__disclosure[aria-expanded="true"] .app-nav__caret {
+    transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-nav__caret {
+        transition: none;
+    }
+}
+
+/* The transparent click-away layer behind an open nav disclosure — the same
+   shape as `.user-menu__backdrop`. It exists to catch an outside click, not to
+   be seen, but it still needs a rule or it has no size and catches nothing. */
+.app-nav__backdrop {
+    position: fixed;
+    inset: 0;
+    background: transparent;
+}
+
+/* The persistent "Add Book" primary action (#318 TR-1). Styled as a
+   `btn btn--primary`; this only positions the badge that may ride on it. */
+.app-nav__add-book {
+    position: relative;
 }
 
 .app-nav__dropdown-link {
@@ -6584,17 +6635,6 @@ h4 {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-}
-
-/* The masthead wordmark. Sits in the header alongside `app-nav__dropdown`, so it needs to be a
- * flex row rather than inheriting whatever the dropdown imposes. */
-.app-header__brand {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-family: var(--font-heading);
-    font-size: var(--size-xl);
-    color: var(--text);
 }
 
 /* A per-route page wrapper. The other `page--*` variants were styled in the first sweep; this one was

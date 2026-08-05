@@ -7,6 +7,7 @@ port module Main exposing
     , ExternalAuthOutcome(..)
     , LoginEffect(..)
     , Msg(..)
+    , NavMenu(..)
     , Page(..)
     , PendingLogout
     , StoredAuth(..)
@@ -35,6 +36,7 @@ port module Main exposing
     , settleArrival
     , shouldShowOnboarding
     , storedSession
+    , toggleNavMenu
     , viewConnectivity
     , viewFooter
     , viewHome
@@ -51,8 +53,8 @@ import Browser.Navigation as Nav
 import Components.OnboardingOverlay as OnboardingOverlay
 import Components.UserMenu as UserMenu
 import Components.ViewAsBar as ViewAsBar
-import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, span, text, ul)
-import Html.Attributes exposing (attribute, class, href, id, tabindex)
+import Html exposing (Html, a, button, div, footer, h1, header, li, main_, nav, p, span, text, ul)
+import Html.Attributes exposing (attribute, class, href, id, style, tabindex)
 import Html.Events
 import Http
 import Json.Decode as Decode
@@ -407,6 +409,14 @@ type alias Model =
     , redirectAfterLogin : Maybe Route
     , bookDetailOverlay : Maybe BookDetailOverlay
     , userMenu : UserMenu.Model
+
+    -- Which top-level nav disclosure (Bookshelves / Marketplace / Admin) is
+    -- currently open, if any (#318 TR-1). At most one is open at a time —
+    -- opening a second closes the first — so a single `Maybe` is the whole of
+    -- the state. The account menu keeps its own `open` flag in `userMenu`; the
+    -- two are held mutually exclusive in `update`. This field is what replaced
+    -- the CSS `:hover`/`:focus-within` reveal, which was unreachable on touch.
+    , openNavMenu : Maybe NavMenu
     , onboarding : OnboardingOverlay.Model
     , onboardingCompleted : Bool
     , hasAnyPlacements : Bool
@@ -541,6 +551,7 @@ init flags url key =
       , redirectAfterLogin = loginRedirectFor route maybeAuth
       , bookDetailOverlay = Nothing
       , userMenu = UserMenu.init
+      , openNavMenu = Nothing
       , onboarding = OnboardingOverlay.init
       , onboardingCompleted = False
       , hasAnyPlacements = True
@@ -1465,6 +1476,7 @@ forceSessionExpiry draftSaved model =
             Login.SessionExpired
                 { draftSaved = draftSaved || Login.draftWasSaved model.arrival }
         , userMenu = UserMenu.init
+        , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
         , pendingLogout = Nothing
       }
@@ -1492,6 +1504,7 @@ handleAccountDeleted model =
         , adminAuth = Nothing
         , arrival = Login.AccountDeleted
         , userMenu = UserMenu.init
+        , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
         , pendingLogout = Nothing
       }
@@ -1819,6 +1832,31 @@ loginCompletionCmd key redirect arrival baseCmd =
 -- UPDATE
 
 
+{-| The top-level navigation disclosures whose open/closed state Elm owns
+(#318 TR-1). Each corresponds to a `<button aria-haspopup aria-expanded>` in the
+nav; `Model.openNavMenu` holds the one that is open. Compared with `==`, so it
+must stay a plain, argument-free custom type.
+-}
+type NavMenu
+    = BookshelvesMenu
+    | MarketplaceMenu
+    | AdminMenu
+
+
+{-| Toggle a nav disclosure: opening the one that is closed, closing the one
+that is open, and switching directly from any other. This is the pure core that
+both the trigger button (`ToggleNavMenu`) and the keyboard path run through, so
+it is the unit-test oracle for "keyboard/click toggles the menu".
+-}
+toggleNavMenu : NavMenu -> Maybe NavMenu -> Maybe NavMenu
+toggleNavMenu menu current =
+    if current == Just menu then
+        Nothing
+
+    else
+        Just menu
+
+
 type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
@@ -1861,6 +1899,8 @@ type Msg
     | GroupsDetailMsg GroupsDetail.Msg
     | PublicProfileMsg ProfilePage.Msg
     | UserMenuMsg UserMenu.Msg
+    | ToggleNavMenu NavMenu
+    | CloseNavMenu
     | SettingsMobileNavChanged String
     | SwipeReceived String
     | SwipeIgnored
@@ -2933,11 +2973,13 @@ update msg model =
             in
             case outMsg of
                 UserMenu.NoOut ->
-                    ( { model | userMenu = newUserMenu }, Cmd.none )
+                    -- Opening the account menu closes any open nav disclosure:
+                    -- at most one menu is ever open (#318 TR-1).
+                    ( { model | userMenu = newUserMenu, openNavMenu = Nothing }, Cmd.none )
 
-                UserMenu.NavigateToSettings ->
-                    ( { model | userMenu = newUserMenu }
-                    , Nav.pushUrl model.key (Route.toPath SettingsProfile)
+                UserMenu.NavigateTo path ->
+                    ( { model | userMenu = newUserMenu, openNavMenu = Nothing }
+                    , Nav.pushUrl model.key path
                     )
 
                 UserMenu.SignOut ->
@@ -2973,6 +3015,19 @@ update msg model =
                         , Nav.pushUrl model.key (Route.toPath Login)
                         ]
                     )
+
+        ToggleNavMenu menu ->
+            -- Opening a nav disclosure closes the account menu, keeping the
+            -- "at most one open" invariant (#318 TR-1).
+            ( { model
+                | openNavMenu = toggleNavMenu menu model.openNavMenu
+                , userMenu = UserMenu.init
+              }
+            , Cmd.none
+            )
+
+        CloseNavMenu ->
+            ( { model | openNavMenu = Nothing }, Cmd.none )
 
         SettingsMobileNavChanged path ->
             ( model, Nav.pushUrl model.key path )
@@ -3252,7 +3307,8 @@ focusMainContent =
 
 
 {-| The default top-level Escape behaviour when no book overlay is open and the
-current page has nothing nested to dismiss: close the user menu.
+current page has nothing nested to dismiss: close whichever menu is open — the
+account menu and every nav disclosure (#318 TR-1).
 -}
 closeUserMenuOnEscape : Model -> ( Model, Cmd Msg )
 closeUserMenuOnEscape model =
@@ -3260,7 +3316,7 @@ closeUserMenuOnEscape model =
         ( newUserMenu, _ ) =
             UserMenu.update UserMenu.Close model.userMenu
     in
-    ( { model | userMenu = newUserMenu }, Cmd.none )
+    ( { model | userMenu = newUserMenu, openNavMenu = Nothing }, Cmd.none )
 
 
 {-| Open the book detail overlay, returning focus to an explicit trigger
@@ -3379,7 +3435,7 @@ view model =
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
             , viewConnectivity model.connectivity
-            , viewNav model.route (currentAuth model.auth) model.userMenu model.uploadInbox
+            , viewNav model.route (currentAuth model.auth) model.openNavMenu model.userMenu model.uploadInbox
             , main_
                 [ id "main-content"
 
@@ -3638,64 +3694,75 @@ bookDetailTitle detailModel =
             "Book"
 
 
-viewNav : Route -> Maybe Auth -> UserMenu.Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
-viewNav route maybeAuth userMenu inbox =
+viewNav : Route -> Maybe Auth -> Maybe NavMenu -> UserMenu.Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+viewNav route maybeAuth openNavMenu userMenu inbox =
     header [ class "app-header" ]
-        [ div [ class "app-header__brand app-nav__dropdown" ]
-            [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
-            , ul [ class "app-nav__dropdown-menu" ]
-                [ li []
-                    [ a [ href (Route.toPath About), class "app-nav__dropdown-link" ]
-                        [ text "About" ]
-                    ]
-                ]
-            ]
+        [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
         , nav [ class "app-nav", attribute "aria-label" "Main navigation" ]
             [ ul [ class "app-nav__list" ]
                 (case maybeAuth of
                     Nothing ->
                         [ navItem route Catalogue "Catalogue"
+                        , navItem route Search "Search"
                         , navItem route MarketplaceBrowse "Marketplace"
+                        , navItem route About "About"
                         , navItem route Login "Sign In"
                         ]
 
                     Just auth ->
-                        [ navItem route Library "Library"
-                        , navItem route AntiLibrary "Antilibrary"
-                        , navItem route WishList "Wish List"
-                        , navItem route ReadingPile "Reading Pile"
-                        , navItem route LookingForHome "Looking for a Home"
-                        , navDropdown route
-                            Catalogue
-                            "Catalogue"
-                            [ navLink Search "Search"
+                        [ -- The five bookshelves, grouped under one disclosure
+                          -- (#318 TR-1). A book-detail is a child of the shelves,
+                          -- so `isBookshelfRoute` keeps this item active there too.
+                          navDisclosure
+                            { menu = BookshelvesMenu
+                            , label = "Bookshelves"
+                            , isActive = isBookshelfRoute route
+                            , isOpen = openNavMenu == Just BookshelvesMenu
+                            , items =
+                                List.map viewNavDropdownLink
+                                    [ navLink Library "Library"
+                                    , navLink AntiLibrary "Antilibrary"
+                                    , navLink WishList "Wish List"
+                                    , navLink ReadingPile "Reading Pile"
+                                    , navLink LookingForHome "Looking for a Home"
+                                    ]
+                            }
 
-                            -- The badge goes here and nowhere else (owner
-                            -- ruling, #351): "we don't need to render it
-                            -- outside of the drop down, it can remain
-                            -- low-but-easy-visibility." No page banner, no
-                            -- global toast, no mark on the closed `Catalogue`
-                            -- trigger — that last one was a reviewer's
-                            -- interpretation, not an instruction, and building
-                            -- it would have been promoting the notification
-                            -- against an explicit "we don't need to".
-                            , navLinkBadged Upload "Add Book" (pendingConfirmationBadge inbox)
-                            ]
-                        , navDropdown route
-                            MarketplaceBrowse
-                            "Marketplace"
-                            [ navLink MarketplaceCreate "Create Listing"
-                            , navLink MarketplaceMyListings "My Listings"
-                            ]
+                        -- Search is a top-level destination, not buried in a
+                        -- menu (#318 TR-1).
+                        , navItem route Search "Search"
+
+                        -- Add Book is a PERSISTENT primary action: always in the
+                        -- DOM, reachable on touch, never behind a hover reveal
+                        -- (#318 TR-1). The #351 pending badge rides on it.
+                        , viewAddBook route (pendingConfirmationBadge inbox)
+                        , navDisclosure
+                            { menu = MarketplaceMenu
+                            , label = "Marketplace"
+                            , isActive = isMarketplaceRoute route
+                            , isOpen = openNavMenu == Just MarketplaceMenu
+                            , items =
+                                List.map viewNavDropdownLink
+                                    [ navLink MarketplaceBrowse "Browse"
+                                    , navLink MarketplaceCreate "Create Listing"
+                                    , navLink MarketplaceMyListings "My Listings"
+                                    ]
+                            }
+                        , navItem route About "About"
                         , if auth.user.role == "owner" then
-                            navDropdown route
-                                Route.AdminSourceApproval
-                                "Admin"
-                                [ navLink Route.AdminSourceApproval "Sources"
-                                , navLink Route.AdminScraperConfig "Scrapers"
-                                , navLink Route.AdminBookModeration "Book Moderation"
-                                , navLink Route.AdminRemovalRequests "Removal Requests"
-                                ]
+                            navDisclosure
+                                { menu = AdminMenu
+                                , label = "Admin"
+                                , isActive = isAdminRoute route
+                                , isOpen = openNavMenu == Just AdminMenu
+                                , items =
+                                    List.map viewNavDropdownLink
+                                        [ navLink Route.AdminSourceApproval "Sources"
+                                        , navLink Route.AdminScraperConfig "Scrapers"
+                                        , navLink Route.AdminBookModeration "Book Moderation"
+                                        , navLink Route.AdminRemovalRequests "Removal Requests"
+                                        ]
+                                }
 
                           else
                             text ""
@@ -3709,12 +3776,192 @@ viewNav route maybeAuth userMenu inbox =
                                 )
                             ]
                             [ Html.map UserMenuMsg
-                                (UserMenu.view auth.user userMenu)
+                                (UserMenu.view auth.user settingsLinks userMenu)
                             ]
                         ]
                 )
             ]
         ]
+
+
+{-| The settings family exposed by the account menu (#318 TR-1). Before this,
+only the profile page was reachable from nav; the rest of the settings routes
+had no nav affordance at all. Paths come from `Route.toPath` so there is one
+source of truth for where each item goes.
+-}
+settingsLinks : List UserMenu.SettingsLink
+settingsLinks =
+    [ { label = "Profile", path = Route.toPath SettingsProfile }
+    , { label = "Privacy", path = Route.toPath SettingsPrivacy }
+    , { label = "Notifications", path = Route.toPath SettingsNotifications }
+    , { label = "Password", path = Route.toPath SettingsPassword }
+    , { label = "Consent", path = Route.toPath SettingsConsent }
+    , { label = "Activity Log", path = Route.toPath SettingsAuditLog }
+    , { label = "Reading Insights", path = Route.toPath Insights }
+    ]
+
+
+{-| `True` for the five bookshelf routes AND for a book-detail, which is a child
+of the shelves. This is what keeps the Bookshelves nav item highlighted while
+you are reading a book you reached from a shelf (#318 TR-1, child-route
+highlight).
+-}
+isBookshelfRoute : Route -> Bool
+isBookshelfRoute route =
+    case route of
+        Library ->
+            True
+
+        AntiLibrary ->
+            True
+
+        WishList ->
+            True
+
+        ReadingPile ->
+            True
+
+        LookingForHome ->
+            True
+
+        BookDetail _ ->
+            True
+
+        _ ->
+            False
+
+
+isMarketplaceRoute : Route -> Bool
+isMarketplaceRoute route =
+    case route of
+        MarketplaceBrowse ->
+            True
+
+        MarketplaceCreate ->
+            True
+
+        MarketplaceMyListings ->
+            True
+
+        MarketplaceDetail _ ->
+            True
+
+        _ ->
+            False
+
+
+{-| A top-level nav disclosure: a real `<button aria-haspopup aria-expanded>`
+whose menu is in the DOM ONLY when open (#318 TR-1). This replaced the CSS
+`:hover`/`:focus-within` reveal, which put the menu in the DOM always and was
+unreachable by touch or keyboard. Open/close is owned by `Model.openNavMenu`;
+the backdrop catches an outside click, and Escape is handled in `update`.
+-}
+navDisclosure :
+    { menu : NavMenu
+    , label : String
+    , isActive : Bool
+    , isOpen : Bool
+    , items : List (Html Msg)
+    }
+    -> Html Msg
+navDisclosure config =
+    li
+        [ class
+            (if config.isActive then
+                "app-nav__item app-nav__item--active app-nav__dropdown"
+
+             else
+                "app-nav__item app-nav__dropdown"
+            )
+        ]
+        [ button
+            [ class "app-nav__link app-nav__disclosure"
+            , Html.Events.onClick (ToggleNavMenu config.menu)
+            , attribute "aria-haspopup" "true"
+            , attribute "aria-expanded" (boolAttr config.isOpen)
+            ]
+            [ text config.label
+            , span [ class "app-nav__caret", attribute "aria-hidden" "true" ] []
+            ]
+        , if config.isOpen then
+            div []
+                [ -- Transparent full-screen layer that turns an outside click
+                  -- into `CloseNavMenu` — the same click-away shape as the
+                  -- account menu's backdrop.
+                  div
+                    [ class "app-nav__backdrop"
+                    , style "position" "fixed"
+                    , style "top" "0"
+                    , style "left" "0"
+                    , style "width" "100vw"
+                    , style "height" "100vh"
+                    , style "z-index" "999"
+                    , Html.Events.onClick CloseNavMenu
+                    ]
+                    []
+                , ul
+                    [ class "app-nav__dropdown-menu"
+                    , style "z-index" "1000"
+                    ]
+                    config.items
+                ]
+
+          else
+            text ""
+        ]
+
+
+{-| The persistent "Add Book" primary action (#318 TR-1). An always-present
+`btn btn--primary` link — no hover menu in front of it — so it is reachable on
+touch and by keyboard. The #351 pending-confirmation badge rides here now that
+the Catalogue dropdown it used to live in is gone.
+-}
+viewAddBook : Route -> Maybe Int -> Html Msg
+viewAddBook route badge =
+    li
+        [ class
+            (if route == Upload then
+                "app-nav__item app-nav__item--active"
+
+             else
+                "app-nav__item"
+            )
+        ]
+        [ a
+            [ href (Route.toPath Upload)
+            , class "btn btn--primary btn--sm app-nav__add-book"
+            ]
+            (text "Add Book"
+                :: (case badge of
+                        Just count ->
+                            [ span
+                                [ class "app-nav__badge"
+                                , testId "nav-upload-badge"
+
+                                -- The visible number is a glyph; this is what it
+                                -- means. A screen reader hearing "Add Book 2"
+                                -- would be told a quantity of nothing in
+                                -- particular.
+                                , attribute "aria-label"
+                                    (String.fromInt count ++ " waiting to be confirmed")
+                                ]
+                                [ text (String.fromInt count) ]
+                            ]
+
+                        Nothing ->
+                            []
+                   )
+            )
+        ]
+
+
+boolAttr : Bool -> String
+boolAttr b =
+    if b then
+        "true"
+
+    else
+        "false"
 
 
 navItem : Route -> Route -> String -> Html Msg
@@ -3736,30 +3983,17 @@ navItem currentRoute targetRoute label =
         ]
 
 
-{-| One entry inside a navigation dropdown, and whether anything is waiting on it.
-
-`badge` is a `Maybe Int` rather than an `Int`, and the distinction is the whole
-requirement: `Nothing` renders no element at all, where `Just 0` would render a
-zero. A badge reading `0` is a notification that there is nothing to notify you
-of — it draws the eye, survives being looked at, and teaches the reader that the
-mark means nothing. See `pendingConfirmationBadge`.
-
+{-| One entry inside a navigation disclosure menu.
 -}
 type alias NavLink =
     { route : Route
     , label : String
-    , badge : Maybe Int
     }
 
 
 navLink : Route -> String -> NavLink
 navLink route label =
-    { route = route, label = label, badge = Nothing }
-
-
-navLinkBadged : Route -> String -> Maybe Int -> NavLink
-navLinkBadged route label badge =
-    { route = route, label = label, badge = badge }
+    { route = route, label = label }
 
 
 {-| The number on the `Add Book` marker (Issue #351).
@@ -3795,50 +4029,11 @@ pendingConfirmationBadge inbox =
             Nothing
 
 
-navDropdown : Route -> Route -> String -> List NavLink -> Html Msg
-navDropdown currentRoute primaryRoute primaryLabel subItems =
-    let
-        isActive =
-            (currentRoute == primaryRoute)
-                || List.any (\item -> currentRoute == item.route) subItems
-
-        activeClass =
-            if isActive then
-                "app-nav__item app-nav__item--active app-nav__dropdown"
-
-            else
-                "app-nav__item app-nav__dropdown"
-    in
-    li [ class activeClass ]
-        [ a [ href (Route.toPath primaryRoute), class "app-nav__link" ]
-            [ text primaryLabel ]
-        , ul [ class "app-nav__dropdown-menu" ]
-            (List.map viewNavDropdownLink subItems)
-        ]
-
-
 viewNavDropdownLink : NavLink -> Html Msg
 viewNavDropdownLink item =
     li []
         [ a [ href (Route.toPath item.route), class "app-nav__dropdown-link" ]
-            [ text item.label
-            , case item.badge of
-                Just count ->
-                    span
-                        [ class "app-nav__badge"
-                        , testId "nav-upload-badge"
-
-                        -- The visible number is a glyph; this is what it means.
-                        -- A screen reader hearing "Add Book 2" would be told a
-                        -- quantity of nothing in particular.
-                        , attribute "aria-label"
-                            (String.fromInt count ++ " waiting to be confirmed")
-                        ]
-                        [ text (String.fromInt count) ]
-
-                Nothing ->
-                    text ""
-            ]
+            [ text item.label ]
         ]
 
 

@@ -7,9 +7,12 @@ the full update loop cannot be program-tested. Following the pattern in
 NavigationProgramTest, we test the pure surfaces directly:
 
 1.  `viewNav` renders the correct nav for authenticated vs unauthenticated state
-2.  `decodeFlags` restores a `StoredAuth` from localStorage-shaped flags (the
+2.  the Elm-owned disclosures (#318 TR-1): a menu's contents are in the DOM only
+    when its `NavMenu` is open, `aria-expanded` reflects that, "Add Book" is a
+    persistent primary action, and the active highlight follows child routes
+3.  `decodeFlags` restores a `StoredAuth` from localStorage-shaped flags (the
     corrupt and unreadable outcomes have their own suite, `StoredAuthTest`)
-3.  `shouldShowOnboarding` encodes the onboarding display condition
+4.  `shouldShowOnboarding` encodes the onboarding display condition
 
 -}
 
@@ -19,7 +22,7 @@ import Expect
 import Html.Attributes as Attr
 import Http
 import Json.Encode as Encode
-import Main
+import Main exposing (NavMenu(..))
 import Navigation.Route exposing (Route(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -55,6 +58,14 @@ badge =
     Selector.attribute (Attr.attribute "data-testid" "nav-upload-badge")
 
 
+{-| The persistent Add Book primary action (#318 TR-1) — a `btn btn--primary`
+link, NOT a dropdown entry.
+-}
+addBook : List Selector.Selector
+addBook =
+    [ Selector.class "app-nav__add-book", Selector.attribute (Attr.href "/upload") ]
+
+
 awaitingItem : String -> Api.InboxItem
 awaitingItem imageId =
     { imageId = imageId
@@ -73,9 +84,27 @@ failedItem imageId reason =
     }
 
 
+{-| Authed nav with a given inbox and every disclosure CLOSED.
+-}
 navWithInbox : Types.RemoteData.RemoteData Http.Error (List Api.InboxItem) -> Query.Single Main.Msg
 navWithInbox inbox =
-    Main.viewNav Library (Just readerAuth) UserMenu.init inbox
+    Main.viewNav Library (Just readerAuth) Nothing UserMenu.init inbox
+        |> Query.fromHtml
+
+
+{-| Authed nav with all disclosures closed.
+-}
+navClosed : Query.Single Main.Msg
+navClosed =
+    Main.viewNav Library (Just readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+        |> Query.fromHtml
+
+
+{-| Authed nav with one disclosure open.
+-}
+navOpen : NavMenu -> Query.Single Main.Msg
+navOpen menu =
+    Main.viewNav Library (Just readerAuth) (Just menu) UserMenu.init Types.RemoteData.NotAsked
         |> Query.fromHtml
 
 
@@ -96,12 +125,12 @@ suite =
         [ describe "viewNav Nothing (unauthenticated)"
             [ test "shows the Sign In link" <|
                 \() ->
-                    Main.viewNav Catalogue Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Nothing Nothing UserMenu.init Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Sign In" ]
             , test "shows Catalogue and Marketplace" <|
                 \() ->
-                    Main.viewNav Catalogue Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Nothing Nothing UserMenu.init Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "Catalogue" ]
@@ -109,7 +138,7 @@ suite =
                             ]
             , test "shows a single About entry linking to /about" <|
                 \() ->
-                    Main.viewNav Catalogue Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Nothing Nothing UserMenu.init Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.has [ Selector.text "About" ]
@@ -118,7 +147,7 @@ suite =
                             ]
             , test "does not show authenticated-only bookshelves" <|
                 \() ->
-                    Main.viewNav Catalogue Nothing UserMenu.init Types.RemoteData.NotAsked
+                    Main.viewNav Catalogue Nothing Nothing UserMenu.init Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
                             [ Query.hasNot [ Selector.text "Antilibrary" ]
@@ -128,39 +157,140 @@ suite =
         , describe "viewNav (Just auth) (authenticated)"
             [ test "shows the user's display name" <|
                 \() ->
-                    Main.viewNav Library (Just readerAuth) UserMenu.init Types.RemoteData.NotAsked
-                        |> Query.fromHtml
+                    navClosed
                         |> Query.has [ Selector.text "A Reader" ]
-            , test "shows the full nav item set" <|
+            , test "groups the five bookshelves under a Bookshelves disclosure" <|
                 \() ->
-                    Main.viewNav Library (Just readerAuth) UserMenu.init Types.RemoteData.NotAsked
+                    navClosed
+                        |> Query.has [ Selector.text "Bookshelves" ]
+            , test "promotes Search to a top-level nav item" <|
+                \() ->
+                    navClosed
+                        |> Query.has
+                            [ Selector.class "app-nav__link"
+                            , Selector.attribute (Attr.href "/search")
+                            ]
+            , test "does not show a Sign In link" <|
+                \() ->
+                    navClosed
+                        |> Query.hasNot [ Selector.text "Sign In" ]
+            , test "marks the current route's nav item active" <|
+                \() ->
+                    navClosed
+                        |> Query.has [ Selector.class "app-nav__item--active" ]
+            , test "owner sees the Admin disclosure" <|
+                \() ->
+                    Main.viewNav Library (Just ownerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
                         |> Query.fromHtml
+                        |> Query.has [ Selector.text "Admin" ]
+            , test "non-owner does not see the Admin disclosure" <|
+                \() ->
+                    navClosed
+                        |> Query.hasNot [ Selector.text "Admin" ]
+            ]
+        , describe "Elm-owned disclosure (#318 TR-1)"
+            [ -- ⛔ THE assertion that fails on the OLD hover-only nav. There the
+              -- five bookshelves were top-level `navItem`s, in the DOM always
+              -- (the CSS `:hover` reveal only changed `display`), so this
+              -- `hasNot` would have FAILED — "Reading Pile" was present with the
+              -- menu closed. It passes now only because the menu's contents are
+              -- absent from the DOM until `openNavMenu == Just BookshelvesMenu`.
+              test "closed: the Bookshelves menu contents are NOT in the DOM" <|
+                \() ->
+                    navClosed
+                        |> Query.hasNot [ Selector.text "Reading Pile" ]
+            , test "open: the Bookshelves menu contents appear" <|
+                \() ->
+                    navOpen BookshelvesMenu
                         |> Expect.all
                             [ Query.has [ Selector.text "Library" ]
                             , Query.has [ Selector.text "Antilibrary" ]
                             , Query.has [ Selector.text "Wish List" ]
                             , Query.has [ Selector.text "Reading Pile" ]
+                            , Query.has [ Selector.text "Looking for a Home" ]
                             ]
-            , test "does not show a Sign In link" <|
+            , test "closed: no disclosure reports aria-expanded=true" <|
                 \() ->
-                    Main.viewNav Library (Just readerAuth) UserMenu.init Types.RemoteData.NotAsked
-                        |> Query.fromHtml
-                        |> Query.hasNot [ Selector.text "Sign In" ]
-            , test "marks the current route's nav item active" <|
+                    navClosed
+                        |> Query.hasNot
+                            [ Selector.attribute (Attr.attribute "aria-expanded" "true") ]
+            , test "open: the open disclosure reports aria-expanded=true" <|
                 \() ->
-                    Main.viewNav Library (Just readerAuth) UserMenu.init Types.RemoteData.NotAsked
-                        |> Query.fromHtml
-                        |> Query.has [ Selector.class "app-nav__item--active" ]
-            , test "owner sees the Admin dropdown" <|
+                    navOpen BookshelvesMenu
+                        |> Query.has
+                            [ Selector.attribute (Attr.attribute "aria-expanded" "true") ]
+            , test "the disclosure trigger is a real button with aria-haspopup" <|
                 \() ->
-                    Main.viewNav Library (Just ownerAuth) UserMenu.init Types.RemoteData.NotAsked
-                        |> Query.fromHtml
-                        |> Query.has [ Selector.text "Admin" ]
-            , test "non-owner does not see the Admin dropdown" <|
+                    navClosed
+                        |> Query.has
+                            [ Selector.tag "button"
+                            , Selector.class "app-nav__disclosure"
+                            , Selector.attribute (Attr.attribute "aria-haspopup" "true")
+                            ]
+            , test "closed: no click-outside backdrop is rendered" <|
                 \() ->
-                    Main.viewNav Library (Just readerAuth) UserMenu.init Types.RemoteData.NotAsked
+                    navClosed
+                        |> Query.hasNot [ Selector.class "app-nav__backdrop" ]
+            , test "open: a click-outside backdrop is rendered" <|
+                \() ->
+                    navOpen MarketplaceMenu
+                        |> Query.has [ Selector.class "app-nav__backdrop" ]
+            , test "opening one disclosure does not open another" <|
+                \() ->
+                    -- Marketplace open ⇒ its items show, Bookshelves items stay hidden.
+                    navOpen MarketplaceMenu
+                        |> Expect.all
+                            [ Query.has [ Selector.text "Create Listing" ]
+                            , Query.hasNot [ Selector.text "Reading Pile" ]
+                            ]
+            ]
+        , describe "toggleNavMenu (the click/keyboard toggle oracle)"
+            [ test "opens a closed menu" <|
+                \() ->
+                    Main.toggleNavMenu BookshelvesMenu Nothing
+                        |> Expect.equal (Just BookshelvesMenu)
+            , test "closes the menu that is already open" <|
+                \() ->
+                    Main.toggleNavMenu BookshelvesMenu (Just BookshelvesMenu)
+                        |> Expect.equal Nothing
+            , test "switches directly from one open menu to another" <|
+                \() ->
+                    Main.toggleNavMenu MarketplaceMenu (Just BookshelvesMenu)
+                        |> Expect.equal (Just MarketplaceMenu)
+            ]
+        , describe "Add Book — persistent primary action (#318 TR-1)"
+            [ -- Reachable on touch and keyboard because it is ALWAYS rendered and
+              -- never behind a disclosure. Present with every menu closed:
+              test "is present with all menus closed (no hover/open needed)" <|
+                \() ->
+                    navClosed
+                        |> Query.has addBook
+            , test "is present while a different menu is open" <|
+                \() ->
+                    navOpen MarketplaceMenu
+                        |> Query.has addBook
+            , -- ⛔ The old Add Book was an `app-nav__dropdown-link` INSIDE the
+              -- Catalogue hover menu; the new one is a `btn btn--primary`. This
+              -- would fail on the old nav.
+              test "is styled as the primary action, not a dropdown link" <|
+                \() ->
+                    navClosed
+                        |> Query.find addBook
+                        |> Query.has [ Selector.class "btn", Selector.class "btn--primary" ]
+            ]
+        , describe "active-route highlight on child routes (#318 TR-1)"
+            [ test "a book-detail keeps the Bookshelves item active" <|
+                \() ->
+                    Main.viewNav (BookDetail "b1") (Just readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
                         |> Query.fromHtml
-                        |> Query.hasNot [ Selector.text "Admin" ]
+                        |> Query.find [ Selector.class "app-nav__item--active" ]
+                        |> Query.has [ Selector.text "Bookshelves" ]
+            , test "a marketplace listing detail keeps Marketplace active" <|
+                \() ->
+                    Main.viewNav (MarketplaceDetail "l1") (Just readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
+                        |> Query.fromHtml
+                        |> Query.find [ Selector.class "app-nav__item--active" ]
+                        |> Query.has [ Selector.text "Marketplace" ]
             ]
         , describe "the Add Book badge (Issue #351)"
             [ test "counts the uploads awaiting confirmation" <|
@@ -219,24 +349,21 @@ suite =
                     navWithInbox (Types.RemoteData.Failure Http.NetworkError)
                         |> Query.hasNot [ badge ]
 
-            -- The owner ruled the badge stays inside the Catalogue dropdown:
-            -- "we don't need to render it outside of the drop down, it can
-            -- remain low-but-easy-visibility." The dropdown menu is the only
-            -- place it may appear.
-            , test "the badge lives inside the Catalogue dropdown menu" <|
+            -- #318 TR-1 moved the badge OUT of the (now-deleted) Catalogue hover
+            -- dropdown and onto the persistent Add Book action, where it is
+            -- reachable without opening anything. This supersedes the #351
+            -- "badge lives inside the Catalogue dropdown" placement.
+            , test "the badge rides on the persistent Add Book action" <|
+                \() ->
+                    navWithInbox (Types.RemoteData.Success [ awaitingItem "img-1" ])
+                        |> Query.find addBook
+                        |> Query.has [ badge ]
+            , test "the badge is not rendered inside any disclosure menu" <|
                 \() ->
                     navWithInbox (Types.RemoteData.Success [ awaitingItem "img-1" ])
                         |> Query.findAll [ Selector.class "app-nav__dropdown-menu" ]
                         |> Query.keep badge
-                        |> Query.count (Expect.equal 1)
-            , test "the badge is on the Add Book entry, not on Search" <|
-                \() ->
-                    navWithInbox (Types.RemoteData.Success [ awaitingItem "img-1" ])
-                        |> Query.find
-                            [ Selector.class "app-nav__dropdown-link"
-                            , Selector.attribute (Attr.href "/upload")
-                            ]
-                        |> Query.has [ badge ]
+                        |> Query.count (Expect.equal 0)
             ]
         , describe "decodeFlags"
             [ test "restores an Auth from valid flags" <|
