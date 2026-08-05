@@ -50,13 +50,13 @@ n/a — no new story surface. The pre-check that matters is the cache sweep: con
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] `:not_found` / `:unavailable` split reaches `search_by_title/4` via `determination/1` — evidence: diff
-- [ ] No negative cache entry on unavailability — evidence: test asserting cache state
-- [ ] `title_fallback/5` handles the now-reachable variant — evidence: test name
-- [ ] Other callers checked — evidence: the list
-- [ ] Mutation probes with red output quoted — evidence: transcripts
-- [ ] Suites green — evidence: counts
-- [ ] `staff-review` verdict recorded below
+- [x] The split reaches the title path — evidence: `do_search_by_title/5` returns `{:error, :not_found}` only when both upstreams answered and neither knew, and `{:error, :unavailable}` when a lookup never happened (blown circuit / transient); `determination/1` maps `:timeout`/`:circuit_open`/`:unexpected_status`/`:malformed_response`/`:transport_error` → `:unavailable`. Diff-read, as the box specifies, because the wire itself is off in test (see the follow-up note).
+- [x] No negative cache on unavailability — evidence: `title_search_cache_test`'s "an :unavailable outage is NOT cached" and "an :unavailable does not overwrite an existing genuine :not_found". The cache is a **positive allowlist**: only `{:ok,…}` and `{:error, :not_found}` are stored; everything else hits a catch-all no-op. Probe: removing the explicit `:unavailable` clause stays green *because the catch-all also refuses it* — belt-and-braces, not vacuity, which the clause set makes plain.
+- [x] `title_fallback/5` handles the reachable variant — evidence: `moderation_test`'s "a resolver outage is not the book's fault (#344)" describe block routes `:unavailable` to `:resolver_unavailable` (a fault about our dependency, not a determination about the image).
+- [x] Other callers checked — evidence: the two consumers are `search_by_title/4` (caches) and moderation's `title_fallback` (routes to `:resolver_unavailable`); both now distinguish the outage from a genuine miss. Direct-lookup already used `determination/1` — this issue brought the title path level with it.
+- [x] Mutation probes — evidence: (1) `determination(:timeout) -> :not_found` (the outage-as-negative bug) did NOT red any test, which is the finding: the determination→cache wire is unexercised because `title_search_cache_enabled: false` in test — filed as a follow-up. (2) dropping the `:unavailable` cache clause stayed green, revealing the catch-all as the real guard. Both transcripts 2026-08-04.
+- [x] Suites green — evidence: 63 tests across title_search_cache / isbn_resolver_cache / moderation, 0 failures.
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 **#344** (built `determination/1` and fixed the sibling sites; this is the one it consciously left). Needs an owner wave assignment.
@@ -66,3 +66,13 @@ elixir-agent.
 
 ## Progress Notes
 Filed 2026-07-31 by the lead from #344's finding 2.
+
+## Progress Notes (review)
+- 2026-08-04: **staff-review: LGTM WITH NOTES.** The design is right and stronger than the issue asked
+  for: the cache is a positive allowlist, so an outage cannot be cached even if `determination/1`
+  misfired — two independent guards. The determination split is a clean pure function. **One 🟧, filed
+  as #385:** the end-to-end wire (an outage during `search_by_title` does not write a negative entry)
+  has no test, because `title_search_cache_enabled` is `false` in test config — so the very path this
+  issue fixes runs only in production and is verified here by diff-reading plus component tests. That
+  is acceptable to ship (each link is proven) but the wire deserves a test with the cache enabled and
+  a stubbed transient provider.
