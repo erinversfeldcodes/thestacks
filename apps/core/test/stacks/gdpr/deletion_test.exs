@@ -36,6 +36,7 @@ defmodule Stacks.GDPR.DeletionTest do
   alias Stacks.AdminSession
   alias Stacks.Audit
   alias Stacks.Blog.PostComment
+  alias Stacks.Books.UploadedImage
   alias Stacks.Events.EventLog
   alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.GDPR.Deletion
@@ -443,6 +444,104 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
+  describe "delete_user_data/1 uploaded image erasure (#353)" do
+    test "erasing a user removes their uploaded_images rows immediately" do
+      # op.uploaded_images.user_id carried NO FK to op.users before #353, so
+      # repo.delete(user) left the row (user_id + storage key) behind and the
+      # schema-guard stayed green. This is the load-bearing evidence: it FAILS
+      # on the pre-#353 schema+code (row survives) and PASSES after.
+      user = insert(:user)
+
+      # RAW insert — a struct insert, deliberately NOT through the upload code
+      # path — mirroring the #353 probe. Reproduces the residue directly.
+      {:ok, image} =
+        Repo.insert(%UploadedImage{
+          user_id: user.id,
+          storage_path: "uploads/probe-#{user.id}",
+          status: "pending",
+          uploaded_at: DateTime.utc_now(),
+          expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+        })
+
+      assert Repo.aggregate(from(i in UploadedImage, where: i.user_id == ^user.id), :count) == 1
+
+      assert {:ok, result} = Deletion.delete_user_data(user.id)
+
+      # Assert IMMEDIATELY (this is the leak the fix closes — it is what fails
+      # on pre-#353 code). The 30-day TTL sweep (ImageRetention) would make a
+      # check written days later pass for the wrong reason — that is retention,
+      # not the right to erasure.
+      assert Repo.aggregate(from(i in UploadedImage, where: i.user_id == ^user.id), :count) == 0
+      refute Repo.get(UploadedImage, image.id)
+      assert Map.has_key?(result, :delete_uploaded_images)
+    end
+
+    test "does not touch another user's uploaded_images rows" do
+      user = insert(:user)
+      other = insert(:user)
+
+      Repo.insert!(%UploadedImage{
+        user_id: user.id,
+        storage_path: "uploads/mine",
+        status: "pending",
+        uploaded_at: DateTime.utc_now(),
+        expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+      })
+
+      other_image =
+        Repo.insert!(%UploadedImage{
+          user_id: other.id,
+          storage_path: "uploads/theirs",
+          status: "pending",
+          uploaded_at: DateTime.utc_now(),
+          expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+        })
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      assert Repo.get(UploadedImage, other_image.id)
+    end
+  end
+
+  describe "delete_user_data/1 uploaded image storage deletion (#353)" do
+    # Swaps the global :storage backend, so async: false (the module already is)
+    # and Stacks.Storage.Mock is restored on exit.
+    setup do
+      Application.put_env(:core, :storage, Stacks.GDPR.DeletionTest.RecordingStorage)
+      on_exit(fn -> Application.put_env(:core, :storage, Stacks.Storage.Mock) end)
+      :ok
+    end
+
+    test "deletes the R2 object for each of the user's images" do
+      user = insert(:user)
+
+      Repo.insert!(%UploadedImage{
+        user_id: user.id,
+        storage_path: "uploads/obj-a",
+        status: "resolved",
+        uploaded_at: DateTime.utc_now(),
+        expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+      })
+
+      Repo.insert!(%UploadedImage{
+        user_id: user.id,
+        storage_path: "uploads/obj-b",
+        status: "pending",
+        uploaded_at: DateTime.utc_now(),
+        expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+      })
+
+      assert {:ok, _} = Deletion.delete_user_data(user.id)
+
+      # The recording backend forwards each delete/1 to the test process. The
+      # storage deletion runs synchronously inside the erasure transaction, so
+      # self() here is that process.
+      assert_received {:storage_delete, "uploads/obj-a"}
+      assert_received {:storage_delete, "uploads/obj-b"}
+      refute_received {:storage_delete, _other}
+    end
+  end
+
   describe "erasure completeness — schema-level guard (#185)" do
     # ------------------------------------------------------------------------
     # SET NULL allowlist. CASCADE ('c') is ALWAYS safe for erasure — the user's
@@ -511,5 +610,81 @@ defmodule Stacks.GDPR.DeletionTest do
                "@nilify_user_fk_allowlist WITH a justification AND ensure any user free-text " <>
                "on it is erased by a delete_user_data/1 step."
     end
+
+    # ------------------------------------------------------------------------
+    # Third category (#353): a column that LOOKS like it identifies a user but
+    # has NO foreign key to op.users at all. The test above audits the FK edges
+    # that EXIST — it is structurally blind to a *missing* edge. That blindness
+    # is exactly what hid the op.uploaded_images leak: `user_id` was a bare
+    # :binary_id, so `repo.delete(user)` never cascaded and the row (user_id +
+    # storage key) survived erasure while the guard stayed green. This closes
+    # the class: any op.* column named `user_id` / `*_user_id` MUST carry an FK
+    # to op.users (which the CASCADE audit above then holds to CASCADE), so a
+    # future table repeating the shape reddens here instead of leaking silently.
+    test "every op.* user_id / *_user_id column has a foreign key to op.users" do
+      {:ok, %{rows: rows}} =
+        Repo.query("""
+        SELECT c.relname, a.attname
+        FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'op'
+          AND c.relkind = 'r'
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+          AND (a.attname = 'user_id' OR a.attname LIKE '%\\_user\\_id')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM pg_constraint con
+            JOIN pg_class rc ON rc.oid = con.confrelid
+            JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+            WHERE con.contype = 'f'
+              AND con.conrelid = c.oid
+              AND a.attnum = ANY(con.conkey)
+              AND rn.nspname = 'op'
+              AND rc.relname = 'users'
+          )
+        ORDER BY c.relname, a.attname
+        """)
+
+      offenders = for [table, col] <- rows, do: "#{table}.#{col}"
+
+      assert offenders == [],
+             "op.* columns named user_id / *_user_id with NO foreign key to op.users. " <>
+               "Erasure reaches personal data via repo.delete(user) + FK CASCADE; a " <>
+               "user-scoping column with no FK is invisible to that path and to the CASCADE " <>
+               "audit above, so the user's rows survive erasure silently (the #353 " <>
+               "uploaded_images leak). Offenders: #{inspect(offenders)}. Add a CASCADE FK to " <>
+               "op.users (see migration 20260805100000)."
+    end
+  end
+end
+
+defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
+  @moduledoc """
+  Test-local storage backend that records every `delete/1` call by sending
+  `{:storage_delete, key}` to the process that ran the deletion. `delete/1`
+  runs synchronously inside `delete_user_data/1`'s erasure transaction, so
+  `self()` is the test process and the message lands in its mailbox.
+  """
+
+  @behaviour Stacks.Storage.StorageBehaviour
+
+  @impl true
+  def put(key, _data, _opts \\ []), do: {:ok, key}
+
+  @impl true
+  def presigned_url(key, _ttl_seconds \\ 900), do: {:ok, key}
+
+  @impl true
+  def presigned_put_url(key, _ttl_seconds \\ 900, _opts \\ []), do: {:ok, key}
+
+  @impl true
+  def head(_key), do: {:error, :not_found}
+
+  @impl true
+  def delete(key) do
+    send(self(), {:storage_delete, key})
+    :ok
   end
 end

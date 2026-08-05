@@ -13,6 +13,14 @@ defmodule Stacks.GDPR.Deletion do
   safety net. `op.event_log` has no append-only trigger (unlike
   `audit.audit_log`), so the scrub is a plain UPDATE needing no GUC.
 
+  Uploaded images (`op.uploaded_images`) are erased both ways: the R2 storage
+  objects are deleted via `Stacks.GDPR.ImageRetention.delete_storage_objects/1`
+  (before the rows go — the rows are the only pointer to the storage keys),
+  then the rows themselves, backed by an ON DELETE CASCADE FK to `op.users`
+  (Issue #353, migration `20260805100000`). Before #353 the `user_id` column
+  carried no FK, so `repo.delete(user)` left the rows and their storage keys
+  behind and the schema-guard stayed blind to it.
+
   Auth session state (`op.auth_token_families`, `op.guardian_tokens`) is erased
   by the DATABASE, not by this module: both now carry an ON DELETE CASCADE
   foreign key to `op.users` (Issue #335 D3, migration `20260730200200`), so
@@ -34,8 +42,10 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Accounts.User
   alias Stacks.Audit
   alias Stacks.Blog.PostComment
+  alias Stacks.Books.UploadedImage
   alias Stacks.Events.EventLog
   alias Stacks.Feeds.FeedCacheEntry
+  alias Stacks.GDPR.ImageRetention
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
@@ -67,6 +77,7 @@ defmodule Stacks.GDPR.Deletion do
                  where: h.from_bookshelf in ^bookshelf_ids or h.to_bookshelf in ^bookshelf_ids
              ),
            feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
+           uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
            comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
            event_log_rows_scrubbed: count(user_event_log_query(user_id)),
            sessions_revoked: session_row_count(Repo, user_id)
@@ -187,6 +198,40 @@ defmodule Stacks.GDPR.Deletion do
           set: [body: "[deleted]", author_id: nil]
         )
 
+      {:ok, count}
+    end)
+    |> Multi.run(:uploaded_image_rows, fn repo, _ ->
+      # GDPR erasure: op.uploaded_images carries the user's user_id AND the R2
+      # storage key to their uploaded image bytes. Collect id + storage_path
+      # for the user's rows NOW, while the rows still exist — they are the only
+      # pointer to the storage keys, so once the FK cascade (added in
+      # 20260805100000) removes them the objects would leak unreachable. Scoped
+      # strictly to the erased user's rows.
+      rows =
+        repo.all(
+          from i in UploadedImage,
+            where: i.user_id == ^user_id,
+            select: %{id: i.id, storage_path: i.storage_path}
+        )
+
+      {:ok, rows}
+    end)
+    |> Multi.run(:delete_image_objects, fn _repo, %{uploaded_image_rows: rows} ->
+      # Delete the R2 objects BEFORE the rows go. Reuses ImageRetention's
+      # storage-deletion path (the same code the 30-day sweep uses) rather than
+      # a second copy; a storage-layer failure is logged there and never blocks
+      # the erasure. Must run before :delete_uploaded_images / :delete_user.
+      ImageRetention.delete_storage_objects(rows)
+      {:ok, length(rows)}
+    end)
+    |> Multi.run(:delete_uploaded_images, fn repo, %{uploaded_image_rows: rows} ->
+      # Belt to the FK cascade's braces: the ON DELETE CASCADE FK would take
+      # these rows when :delete_user runs, but deleting them explicitly here
+      # (after their objects are gone) makes the erasure independent of cascade
+      # timing and keeps the guarantee even if the FK is ever weakened —
+      # mirroring :delete_feed_cache above. Scoped to the collected ids.
+      ids = Enum.map(rows, & &1.id)
+      {count, _} = repo.delete_all(from i in UploadedImage, where: i.id in ^ids)
       {:ok, count}
     end)
     |> Multi.run(:sessions_to_revoke, fn repo, _ ->

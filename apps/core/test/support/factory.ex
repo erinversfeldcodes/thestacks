@@ -344,11 +344,19 @@ defmodule Stacks.Factory do
   end
 
   def uploaded_image_factory do
+    # user_id carries a real ON DELETE CASCADE FK to op.users since #353, so it
+    # can no longer default to a throwaway random UUID (which references no user
+    # and now violates the constraint). It defaults to nil — the column is
+    # nullable, and the retention/telemetry/dbt tests that use a bare
+    # `insert(:uploaded_image)` do not care who owns the image. Tests that need
+    # a real owner pass `user_id: user.id` (a `user: build(:user)` default is
+    # not used here because ExMachina rejects mixing it with a `user_id:`
+    # override, which many call sites rely on).
     %UploadedImage{
       status: "pending",
       uploaded_at: DateTime.utc_now(),
       expires_at: DateTime.add(DateTime.utc_now(), 30, :day),
-      user_id: Ecto.UUID.generate()
+      user_id: nil
     }
   end
 

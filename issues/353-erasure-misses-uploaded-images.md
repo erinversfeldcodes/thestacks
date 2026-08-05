@@ -105,12 +105,13 @@ time-based sweep is not the right to erasure.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] `uploaded_images.user_id` is a CASCADE FK to `op.users` — evidence: migration + `pg_constraint` query
-- [ ] Storage objects deleted before the cascade — evidence: test asserting the storage mock saw the deletes
-- [ ] Erasure test fails on the pre-fix code and passes after — evidence: both runs
-- [ ] Schema-guard extended to the no-FK case, and fails on today's schema — evidence: the red run
-- [ ] Export decision recorded and asserted — evidence: the test
-- [ ] `just run just verify` green — evidence: output
+- [x] `uploaded_images.user_id` is a CASCADE FK to `op.users` — evidence: migration `20260805100000` (`ADD CONSTRAINT … ON DELETE CASCADE NOT VALID`, orphans pre-deleted) + `20260805100100` (`VALIDATE CONSTRAINT`, `@disable_ddl_transaction`, squawk-safe two-step). The FK's existence is proven at the pg layer by the schema-guard test below (green ⇒ the anti-join finds the FK); squawk gate exit 0.
+- [x] Storage objects deleted before the cascade — evidence: `deletion_test.exs` "deletes the R2 object for each of the user's images" via a `RecordingStorage` backend; `delete_user_data/1` collects `storage_path` first, calls `ImageRetention.delete_storage_objects/1` (reused, not copied) before the `:delete_uploaded_images` step. Mutation-probed 2026-08-05: neutering the delete call reddens the test (`assert_received {:storage_delete, "uploads/obj-a"}` → empty mailbox); reverted → green.
+- [x] Erasure test fails on the pre-fix code and passes after — evidence: RED against the pre-#353 schema (migrations moved out, `deletion.ex` stashed to HEAD, test DB re-migrated) — `deletion_test.exs:474` `assert … :count == 0` failed `left: 1 / right: 0` (row survived); GREEN after fix (39/0).
+- [x] Schema-guard extended to the no-FK case, and fails on today's schema — evidence: RED against today's schema before the FK migration — `Offenders: ["uploaded_images.user_id"]` (verified the only offender; the other 11 `op.* user_id`/`*_user_id` columns already carry FKs); GREEN after migration.
+- [x] Export decision recorded and asserted — evidence: `export.ex:66-79` includes `uploaded_images` as `id + uploaded_at + status` only (decision documented: never bytes/`storage_path`/URL); `gdpr_test.exs` asserts exactly those 3 keys, cross-user isolation, and that the encoded JSON contains neither `secret-key` nor `uploads/`.
+- [x] `gdpr-review` verdict: **PASS** — 2026-08-05, recorded in Progress Notes; closes the pre-existing P0 (erasure) + P1 (export). One out-of-scope P2 (warehouse `storage_path` in `stg_uploaded_images`) filed as **#386**.
+- [ ] `just run just verify` green — evidence: output (pending — folded into Wave 7's `just ci` integration re-run, in flight)
 
 ## Dependencies
 None. Independent of #345, which only moved the upload functions between modules and
@@ -158,3 +159,22 @@ the same P0 raises confidence this is real rather than a reading error.
 from an invisible residue into a **listed, first-class reader-facing surface**. It also notes that
 `uploaded_images` is absent from `GDPR.Export.export_user_data/2` as well as from deletion — so the
 export gap should be fixed in the same pass, not treated as separate.
+
+## Pulled into Wave 7 and resolved (2026-08-05)
+Owner ruling: the Mode B `staff-review` of the Wave 7 cumulative diff surfaced this as the wave's one
+⛔ DESIGN CONCERN — #351 shipped the reader-facing inbox over `op.uploaded_images` while erasure and
+export could not reach it — and the owner chose to fix it inside the Wave 7 PR rather than defer to
+Wave 11. Implemented as specified: CASCADE FK (two-step squawk-safe migration, orphans pre-deleted),
+R2 object deletion before the row cascade (reusing `ImageRetention.delete_storage_objects/1`), export
+metadata (`id`/`uploaded_at`/`status` only, no bytes/key), and the class-closing schema-guard.
+
+**`gdpr-review` verdict: PASS** (2026-08-05) — closes the pre-existing P0 (erasure) and P1 (export);
+event_log/audit carry counts + UUIDs only; the endpoint is the already-gated `POST /api/gdpr/export`.
+One out-of-scope observation — `stg_uploaded_images` projects the raw `storage_path` into the `wh`
+staging layer — is pre-existing and filed as **#386** (P2), not folded in (scope-lock).
+
+**`staff-review` verdict: LGTM** (Mode B, 2026-08-05). Every load-bearing assertion was mutation-probed
+non-vacuous: the storage-deletion test reds when the delete is neutered (my probe), and both the
+erasure test (`left: 1 / right: 0`, row survives) and the schema-guard (`Offenders:
+["uploaded_images.user_id"]`) were captured RED against the genuine pre-#353 schema and GREEN after.
+The fix resolves the DESIGN CONCERN raised against the wave; no residue is claimed erased that is not.

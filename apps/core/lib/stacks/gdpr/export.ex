@@ -8,6 +8,7 @@ defmodule Stacks.GDPR.Export do
 
   alias Core.Repo
   alias Stacks.Accounts
+  alias Stacks.Books.UploadedImage
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
   alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
 
@@ -62,6 +63,20 @@ defmodule Stacks.GDPR.Export do
       })
       |> Repo.all()
 
+    # DECISION (#353): the user's uploaded images ARE included in the export
+    # (right to data portability — the reader can see which uploads the system
+    # holds for them and their status). We export ONLY id + uploaded_at + status.
+    # We deliberately export NEITHER the image bytes NOR the storage_path / a
+    # presigned URL: the bytes are not portable structured data, and emitting a
+    # usable storage key/URL from a plain export endpoint would leak a fetchable
+    # pointer to the raw image. The bytes are erased on request via
+    # delete_user_data/1 and by the 30-day retention sweep.
+    uploaded_images =
+      UploadedImage
+      |> where([i], i.user_id == ^user_id)
+      |> select([i], %{id: i.id, uploaded_at: i.uploaded_at, status: i.status})
+      |> Repo.all()
+
     export = %{
       exported_at: DateTime.utc_now(),
       # Every personal / user-provided column on op.users is exported here.
@@ -105,7 +120,8 @@ defmodule Stacks.GDPR.Export do
       placement_history: Enum.map(histories, &history_to_map/1),
       writing_assistant_sessions: Enum.map(sessions, &session_to_map/1),
       writing_assistant_feedback: Enum.map(feedback, &feedback_to_map/1),
-      embeddings_summary: embeddings_summary
+      embeddings_summary: embeddings_summary,
+      uploaded_images: uploaded_images
     }
 
     {:ok, export}

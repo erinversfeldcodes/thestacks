@@ -162,7 +162,19 @@ defmodule Stacks.GDPR.ImageRetention do
     Enum.map(orphaned, & &1.id)
   end
 
-  defp delete_storage_objects(rows) do
+  @doc """
+  Deletes the storage object for each row that carries a non-empty
+  `storage_path`. A storage-layer failure is logged and swallowed — it must
+  never block the DB-side removal (a leaked object is recoverable; a surviving
+  DB row that still points a user at their image is the erasure leak).
+
+  Shared by the retention sweeps AND by `Stacks.GDPR.Deletion.delete_user_data/1`,
+  which calls it while erasing a user so the R2 objects go BEFORE the FK cascade
+  removes the rows (the rows are the only pointer to the storage keys). Takes a
+  list of `%{storage_path: String.t() | nil}` maps.
+  """
+  @spec delete_storage_objects([%{optional(any) => any}]) :: :ok
+  def delete_storage_objects(rows) do
     Enum.each(rows, fn
       %{storage_path: path} when is_binary(path) and path != "" ->
         case Storage.delete_image(path) do

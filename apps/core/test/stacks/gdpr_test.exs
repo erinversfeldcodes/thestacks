@@ -86,7 +86,7 @@ defmodule Stacks.GDPRTest do
       assert {:error, _} = Export.export_user_data(Ecto.UUID.generate())
     end
 
-    test "payload contains all 8 documented keys" do
+    test "payload contains all 9 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -99,8 +99,59 @@ defmodule Stacks.GDPRTest do
                  :placement_history,
                  :writing_assistant_sessions,
                  :writing_assistant_feedback,
-                 :embeddings_summary
+                 :embeddings_summary,
+                 :uploaded_images
                ])
+    end
+
+    # ── #353: uploaded images are exportable metadata, never the bytes/URL ──
+    #
+    # Decision (recorded in Export.export_user_data/2): the user's uploaded
+    # images ARE listed — id + uploaded_at + status only — so the subject can
+    # see which uploads the system holds. The image bytes and the storage key /
+    # any presigned URL are deliberately EXCLUDED: bytes are not portable
+    # structured data, and emitting a fetchable pointer would leak the raw
+    # image. Asserted here so a regression that starts dumping storage_path or
+    # bytes reddens.
+    test "includes the user's uploaded images as metadata only — never storage_path or a URL" do
+      user = insert(:user)
+
+      image =
+        Repo.insert!(%Stacks.Books.UploadedImage{
+          user_id: user.id,
+          storage_path: "uploads/secret-key-#{user.id}",
+          status: "resolved",
+          uploaded_at: ~U[2026-01-02 03:04:05.000000Z],
+          expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+        })
+
+      # Another user's image must NOT leak in.
+      other = insert(:user)
+
+      Repo.insert!(%Stacks.Books.UploadedImage{
+        user_id: other.id,
+        storage_path: "uploads/theirs",
+        status: "pending",
+        uploaded_at: DateTime.utc_now(),
+        expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+      })
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+      assert [entry] = export.uploaded_images
+
+      # Exactly the three documented fields — nothing else.
+      assert MapSet.new(Map.keys(entry)) == MapSet.new([:id, :uploaded_at, :status])
+      assert entry.id == image.id
+      assert entry.status == "resolved"
+      assert entry.uploaded_at == ~U[2026-01-02 03:04:05.000000Z]
+
+      # The storage key must not appear under any key…
+      refute Map.has_key?(entry, :storage_path)
+
+      # …nor anywhere in the JSON the user downloads (no bytes, no fetchable key).
+      assert {:ok, json} = Jason.encode(export)
+      refute json =~ "secret-key"
+      refute json =~ "uploads/"
     end
 
     test "includes only the user's writing-assistant sessions and feedback" do
