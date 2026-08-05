@@ -306,13 +306,15 @@
       "items": {
         "8a": {
           "title": "Nav IA rebuild: Elm-owned disclosure; Add Book primary; user menu",
-          "status": "not_started",
-          "issue": 318
+          "status": "in_progress",
+          "issue": 318,
+          "last_action": "Built + mutation-probed + committed on feat/campaign-w7-317; live drive owed at the #318 coherence sweep."
         },
         "8b": {
           "title": "Onboarding rebuild per D2 + modality honoured",
-          "status": "not_started",
-          "issue": 318
+          "status": "in_progress",
+          "issue": 318,
+          "last_action": "Built (data-driven D2 steps, 1706/0); awaiting mutation-probe + gdpr-review + commit."
         },
         "8c": {
           "title": "Authed home; settings hub style + IA fold; Looking-for-a-Home room; About copy",
@@ -321,17 +323,19 @@
         },
         "8d": {
           "title": "Side-by-side verify; empty-state CTAs; widget styling; a11y follow-through",
-          "status": "not_started",
-          "issue": 318
+          "status": "in_progress",
+          "issue": 318,
+          "last_action": "Built + mutation-probed + committed on feat/campaign-w7-317; live drive owed at the #318 coherence sweep."
         },
         "8e": {
           "title": "Restore the login door dolly-shot over the arrival, driven from AuthState.Arriving \u2014 the disclosed cost of #359",
-          "status": "not_started",
-          "issue": 364
+          "status": "in_progress",
+          "issue": 364,
+          "last_action": "Built + mutation-probed + committed on feat/campaign-w7-317; live drive owed at the #318 coherence sweep."
         },
         "8pre": {
           "issue": 387,
-          "status": "not_started",
+          "status": "complete",
           "title": "Story specs pulled forward from #320: amend US-14.1.2 (D2 onboarding, adaptable steps), US-15.1.1 (home drift), US-18.1.1 (fifth shelf). Spec-before-build prerequisite for 8b/8c-homes (owner decision 2026-08-05).",
           "blocks": [
             "8b",
