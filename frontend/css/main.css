@@ -2086,6 +2086,62 @@ h4 {
     justify-content: center;
 }
 
+/* -- Authenticated home: the doorway into the collection (Wave 8 #318, 8c) -- */
+
+.page--home-collection {
+    justify-content: flex-start;
+    padding-top: 2rem;
+}
+
+.home-collection {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    width: 100%;
+    max-width: 1060px;
+}
+
+/* The shelf glimpse reuses the shelf-room family (wallpaper + lighting layers,
+ * absolutely positioned), so it needs to be the positioning context. */
+.home-collection__room {
+    position: relative;
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    box-shadow: var(--shadow-md);
+    text-decoration: none;
+    color: inherit;
+}
+
+.home-collection__glimpse {
+    position: relative;
+    z-index: 1;
+}
+
+.home-collection__status {
+    color: var(--text-muted, #a09070);
+    font-style: italic;
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    text-align: center;
+}
+
+.home-collection__actions {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.home-collection__add,
+.home-collection__continue {
+    min-width: 12rem;
+}
+
 /* ===== Not Found ===== */
 
 .page--not-found {
@@ -4783,6 +4839,53 @@ h4 {
     border-color: rgba(255, 255, 255, 0.15);
     box-shadow: var(--shadow-sm);
     transform: translateY(-1px);
+}
+
+/* -- Owner narrative sections (Wave 8 #318, 8c). One block per drafted section;
+ *    each maps to a `section.about__section` so a copy edit stays local. -- */
+
+.about__section {
+    margin-bottom: 2.5rem;
+    max-width: 640px;
+}
+
+.about__shelves,
+.about__do-list {
+    list-style: none;
+    margin: 0 0 1.25rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.about__shelf,
+.about__do-item {
+    font-size: var(--size-base);
+    color: var(--text-muted, #a09070);
+    line-height: 1.7;
+}
+
+.about__shelf-name,
+.about__do-title {
+    color: var(--text);
+    font-family: var(--font-heading);
+}
+
+.about__coming-soon {
+    font-size: var(--size-sm);
+    color: var(--text-muted, #a09070);
+    font-style: italic;
+    line-height: 1.6;
+}
+
+.about__closing {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    font-style: italic;
+    color: var(--text);
+    line-height: 1.7;
+    max-width: 640px;
 }
 
 /* -- Responsive -- */

@@ -40,7 +40,6 @@ port module Main exposing
     , viewArrivalDoor
     , viewConnectivity
     , viewFooter
-    , viewHome
     , viewNav
     , viewNotFound
     )
@@ -79,6 +78,7 @@ import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
+import Page.Home as Home
 import Page.Insights as Insights
 import Page.ListingRemoval as ListingRemoval
 import Page.Login as Login
@@ -217,7 +217,7 @@ main =
 
 
 type Page
-    = PageHome
+    = PageHome Home.Model
     | PageLogin Login.Model
     | PageBookshelf Bookshelf.Model
     | PageReadingPile ReadingPile.Model
@@ -1085,7 +1085,11 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
     in
     case route of
         Home ->
-            ( PageHome, Cmd.none )
+            let
+                ( subModel, subCmd ) =
+                    Home.init maybeToken
+            in
+            ( PageHome subModel, Cmd.map HomeMsg subCmd )
 
         Login ->
             ( PageLogin (Login.init arrival), Cmd.none )
@@ -1864,6 +1868,7 @@ type Msg
       -- The door ornament finished, or the backstop timer gave up waiting for it.
       -- Both mean the same thing and neither touches the credential (#359).
     | ArrivalSettled
+    | HomeMsg Home.Msg
     | BookshelfMsg Bookshelf.Msg
     | ReadingPileMsg ReadingPile.Msg
     | LookingForHomeMsg LookingForHome.Msg
@@ -2132,6 +2137,29 @@ update msg model =
                                 , Nav.pushUrl model.key (Route.toPath route)
                                 ]
                             )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        HomeMsg subMsg ->
+            case model.page of
+                PageHome subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            Home.update subMsg subModel
+
+                        baseModel =
+                            { model | page = PageHome newSubModel }
+
+                        baseCmd =
+                            Cmd.map HomeMsg subCmd
+                    in
+                    case outMsg of
+                        Home.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        Home.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -3576,7 +3604,7 @@ which is the defect being fixed.
 pageTitle : Page -> String
 pageTitle page =
     case page of
-        PageHome ->
+        PageHome _ ->
             "The Stacks"
 
         PageLogin loginModel ->
@@ -4112,8 +4140,8 @@ viewNavDropdownLink item =
 viewPage : Model -> Html Msg
 viewPage model =
     case model.page of
-        PageHome ->
-            viewHome
+        PageHome subModel ->
+            Html.map HomeMsg (Home.view subModel)
 
         PageLogin subModel ->
             Html.map LoginMsg (Login.view subModel)
@@ -4278,21 +4306,6 @@ viewOnboarding model =
 
     else
         text ""
-
-
-viewHome : Html Msg
-viewHome =
-    div [ class "page page--home" ]
-        [ h1 [ class "home__title" ] [ text "The Stacks" ]
-        , p [ class "home__subtitle" ]
-            [ text "Your personal collection, beautifully organised." ]
-        , div [ class "home__actions" ]
-            [ a [ href (Route.toPath About), class "btn btn--primary home__link--about" ]
-                [ text "About The Stacks" ]
-            , a [ href (Route.toPath MarketplaceBrowse), class "btn btn--secondary home__link--marketplace" ]
-                [ text "Browse the Marketplace" ]
-            ]
-        ]
 
 
 viewConfirmEmail : ConfirmStatus -> Html Msg

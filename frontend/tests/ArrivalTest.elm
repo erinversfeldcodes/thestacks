@@ -49,6 +49,7 @@ import Html.Attributes
 import Http
 import Main
 import Navigation.Route
+import Page.Home as Home
 import Page.Login as Login
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
@@ -337,7 +338,7 @@ keptWhileTheReaderIsElsewhere : Test
 keptWhileTheReaderIsElsewhere =
     test "kept_elsewhere: an arrival survives navigation until a card actually shows it" <|
         \() ->
-            Main.consumeArrival Main.PageHome Login.AccountDeleted
+            Main.consumeArrival (Main.PageHome Home.Landing) Login.AccountDeleted
                 |> Expect.equal Login.AccountDeleted
 
 

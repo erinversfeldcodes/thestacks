@@ -30,6 +30,7 @@ import Html.Attributes
 import Http
 import Main
 import Page.Bookshelf as Bookshelf
+import Page.Home as Home
 import ProgramTest
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
@@ -174,9 +175,9 @@ mainDropsTheOfferOnANonBookshelfPage =
             -- `PageReadingPile`, a different module with its own model. The
             -- removal still succeeded; only the offer is lost. Asserted so the
             -- limitation is a decision on record rather than a surprise.
-            Main.applyPendingUndo (Just removal) ( Main.PageHome, Cmd.none )
+            Main.applyPendingUndo (Just removal) ( Main.PageHome Home.Landing, Cmd.none )
                 |> Tuple.first
-                |> Expect.equal Main.PageHome
+                |> Expect.equal (Main.PageHome Home.Landing)
 
 
 

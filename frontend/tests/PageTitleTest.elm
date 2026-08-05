@@ -45,6 +45,7 @@ import Page.Admin.Session as AdminSession
 import Page.Blog.Editor as BlogEditor
 import Page.BookDetail as BookDetail
 import Page.Bookshelf as Bookshelf
+import Page.Home as Home
 import Page.Login as Login
 import Page.Profile as ProfilePage
 import Test exposing (Test, describe, test)
@@ -414,7 +415,7 @@ homeIsJustTheProductName : Test
 homeIsJustTheProductName =
     test "home_title: the home page is the product, not a page within it" <|
         \() ->
-            pageTitleOf PageHome |> Expect.equal "The Stacks"
+            pageTitleOf (PageHome Home.Landing) |> Expect.equal "The Stacks"
 
 
 
