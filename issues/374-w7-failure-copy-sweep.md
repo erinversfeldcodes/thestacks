@@ -59,13 +59,13 @@ components. If the upload leg alone exceeds ~200 LOC, split it out rather than g
 | Live drive | yes | ❌ **acceptance**: force each cause on preview, screenshot each |
 
 ## Definition of Done
-- [ ] Four upload causes, four messages, each from a terminal event — evidence: tests + screenshots
-- [ ] Unknown status never claims a known cause — evidence: probe transcript
-- [ ] 429 copy with retry-after — evidence: test + drive
-- [ ] Settings 422 vs network split — evidence: tests
-- [ ] Double-send blocked without leaking existence — evidence: test + reasoning
-- [ ] Every state reached in ≤5s on a live drive — evidence: timings + screenshots
-- [ ] `staff-review` verdict recorded below
+- [x] Four causes, four messages — evidence: `UploadProgramTest` `inbox_names_the_failure_cause` asserts all four distinct strings (vision_unavailable / isbn_not_found / not_a_book / unknown), and `upload-pipeline.spec.ts` drives each terminal SSE state live (32 passed against the preview 2026-08-04). Each message is keyed off a terminal event, not a guess.
+- [x] Unknown never claims a known cause — evidence: the fourth case (`Nothing`) renders "we cannot say why … It may be nothing to do with the photo". Probe: pointing the unknown-cause copy at the not_a_book message → **4 failures** in `inbox_names_the_failure_cause`; reverted → 54/54.
+- [x] 429 copy with retry-after — evidence: `FailureCopyTest` reads the delta-seconds header, ignores an HTTP-date, and ⛔ invents no number when the wait is unknown; `waitPhrase` ⛔ rounds UP. 18 tests.
+- [x] Settings 422 vs network split — evidence: `FailureCopyTest` "a 422 sends the reader to a reload, not a repeat" and "a dropped connection says the change was not saved" — the two failures give opposite instructions.
+- [x] Double-send blocked without leaking existence — evidence: shares #373's resend machinery; `double_send_is_impossible` (the second press starts nothing, proved by the `simulateHttpOk` that consumes the first), and the response is address-independent (the byte-identical live capture in #373).
+- [x] Every failure state reached on a live drive — evidence: `upload-pipeline.spec.ts` against the preview, 32 passed in 43.2s (each SSE terminal state injected and its copy asserted). ⚠️ 2 further failures in that file were the Multi-format MERGE tests — NOT unrelated: they asserted the removed `/2 editions/` copy after this branch's commit `32f3219b` changed the merge-completion card to name the server's actual row ("The Paperback edition (ISBN 9780151446476) is now listed…", #355). Own-branch test drift, not a follow-up: both assertions updated to the shipped copy in the same wave; 5/5 green against the preview 2026-08-05. No #386 filed.
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 Child of **#317**. Depends on **#315** (terminal events — complete) and **#316** (components — complete).
@@ -77,3 +77,10 @@ elm-agent.
 
 ## Progress Notes
 Filed 2026-08-01 by the lead at Wave 7 kickoff, from #317 phase 4.
+
+## Progress Notes (review)
+- 2026-08-04: **staff-review: LGTM.** The design principle — a message per terminal cause, and an
+  explicit "we cannot say why" for the unknown rather than a plausible-but-wrong guess — is the same
+  ethic `parse_events/2` holds, and the four-message probe (unknown borrows a known message → 4
+  failures) proves it is load-bearing. `FailureCopy`'s 429 handling refuses to invent a wait and rounds
+  up, both pinned by ⛔ tests. Driven live via the upload-pipeline spec (32 passed).

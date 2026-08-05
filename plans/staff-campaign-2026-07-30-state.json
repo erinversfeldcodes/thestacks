@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-30",
   "plan": "plans/staff-campaign-2026-07-30.md",
   "created_at": "2026-07-30T00:00:00Z",
-  "updated_at": "2026-08-04",
+  "updated_at": "2026-08-05",
   "status": "approved_filed",
   "current_wave": 7,
   "_why": [
@@ -20,14 +20,14 @@
   ],
   "human_decisions_pending": [],
   "_owner_rulings_wave7_2026_07_30": [
-    "undo-remove: SPEC — 'Removed — Undo' toast in UI",
-    "un-merge: SPEC owner-only — platform-owner data-correction process, not public UI",
-    "cancel-deletion grace: EXCLUDE — immediate erasure stays",
+    "undo-remove: SPEC \u2014 'Removed \u2014 Undo' toast in UI",
+    "un-merge: SPEC owner-only \u2014 platform-owner data-correction process, not public UI",
+    "cancel-deletion grace: EXCLUDE \u2014 immediate erasure stays",
     "photo delete: EXCLUDE publicly; follow-up verifies the auto-deletion path (with deferred GDPR revisit)"
   ],
   "_owner_rulings_2026_07_30": [
-    "Wave 1 (GDPR completion) STRUCK — revisit R6 findings after implementation. All other waves and order approved.",
-    "DiscoverBookstoreEventsJob: WIRE, do not delete → Wave 11e (cron + structured extractor + read path).",
+    "Wave 1 (GDPR completion) STRUCK \u2014 revisit R6 findings after implementation. All other waves and order approved.",
+    "DiscoverBookstoreEventsJob: WIRE, do not delete \u2192 Wave 11e (cron + structured extractor + read path).",
     "Placement model: multi-shelf placement of one ISBN is legal; same-ISBN-same-shelf stays forbidden (existing index); book detail must highlight presence on 2+ of Library/Antilibrary/Reading Pile/Wish List with remove affordances. Wave 4a rewritten accordingly; no user-level unique constraint; no data repair needed."
   ],
   "waves": {
@@ -78,14 +78,14 @@
       }
     },
     "1": {
-      "title": "GDPR completion — STRUCK by owner 2026-07-30 (revisit R6 findings post-implementation) — bucket now holds #338",
+      "title": "GDPR completion \u2014 STRUCK by owner 2026-07-30 (revisit R6 findings post-implementation) \u2014 bucket now holds #338",
       "status": "complete",
       "items": {
         "1x": {
           "title": "Wave struck by owner ruling; R6 findings recorded in plan for later revisit",
           "status": "complete",
           "issue": null,
-          "note": "informal — struck at Stage 6 by owner, no work performed or required",
+          "note": "informal \u2014 struck at Stage 6 by owner, no work performed or required",
           "informal": true
         }
       },
@@ -234,64 +234,65 @@
     },
     "7": {
       "title": "Recovery and unhappy paths",
-      "status": "in_progress",
+      "status": "complete",
       "items": {
         "7a": {
           "title": "Resend-confirmation (US-14.4.2) + 24h-erasure reconciliation",
-          "status": "not_started",
+          "status": "complete",
           "issue": 373
         },
         "7b": {
           "title": "Upload failure UX; 429 UX; W-10 distinct copy; double-send dedup",
-          "status": "not_started",
+          "status": "complete",
           "issue": 374
         },
         "7c": {
-          "title": "Undo-remove toast (owner-ruled SPEC) — split from un-merge; see 7c2",
-          "status": "not_started",
+          "title": "Undo-remove toast (owner-ruled SPEC) \u2014 split from un-merge; see 7c2",
+          "status": "complete",
           "issue": 375
         },
         "7d": {
-          "title": "Operationalise owner-facilitated data correction (dry-run, idempotent, audited) — generalises the pattern #339 built; 7c's un-merge process is its first consumer",
-          "status": "not_started",
+          "title": "Operationalise owner-facilitated data correction (dry-run, idempotent, audited) \u2014 generalises the pattern #339 built; 7c's un-merge process is its first consumer",
+          "status": "complete",
           "issue": 340
         },
         "7e": {
           "title": "VERIFY #349: drive a real upload on the Wave 7 preview, then confirm the vision-latency series ARRIVES in VictoriaMetrics and record p50/p95/p99 (the input to #350). Rides on 7b, which drives the vision path anyway.",
-          "status": "not_started",
+          "status": "complete",
           "issue": 349
         },
         "7f": {
-          "title": "Title search swallows outages into :not_found AND negative-caches them for an hour — an unhappy path in the resolver contract",
-          "status": "not_started",
+          "title": "Title search swallows outages into :not_found AND negative-caches them for an hour \u2014 an unhappy path in the resolver contract",
+          "status": "complete",
           "issue": 352
         },
         "7g": {
-          "title": "Vision client gives up 90s before Modal does, amplifying retries — sized from 7e's p99",
-          "status": "not_started",
+          "title": "Vision client gives up 90s before Modal does, amplifying retries \u2014 sized from 7e's p99",
+          "status": "complete",
           "issue": 350
         },
         "7h": {
           "title": "Reader is never held hostage to the upload page: async identify, synchronous confirm+place, inbox on the upload page, count on the Add Book nav marker (owner design 2026-07-31)",
-          "status": "not_started",
+          "status": "complete",
           "issue": 351
         },
         "7c2": {
           "title": "Owner-only un-merge process + record the two owner-ruled exclusions in implementation-mapping (split out of 7c: an MFA-gated admin correction surface and a reader-facing toast share no code and broke the scope rule together)",
-          "status": "not_started",
+          "status": "complete",
           "issue": 376
         },
         "7i": {
-          "title": "Convert the 89 test-hook classes to data-testid — closes the unsound hook exemption in the orphan gate",
-          "status": "not_started",
+          "title": "Convert the 89 test-hook classes to data-testid \u2014 closes the unsound hook exemption in the orphan gate",
+          "status": "complete",
           "issue": 310
         },
         "7j": {
-          "title": "Events are individual pages, not a listing — per-page classifier after #307's live run disproved the listing premise",
-          "status": "not_started",
+          "title": "Events are individual pages, not a listing \u2014 per-page classifier after #307's live run disproved the listing premise",
+          "status": "complete",
           "issue": 382
         }
-      }
+      },
+      "last_action": "Mirrored from 317 epic-state: all 11 children complete/merged, full E2E green (291 passed). Merge-test drift (upload-pipeline.spec.ts /2 editions/) fixed 2026-08-05 \u2014 own-branch, not #386."
     },
     "8": {
       "title": "First impressions and navigation",
@@ -318,7 +319,7 @@
           "issue": 318
         },
         "8e": {
-          "title": "Restore the login door dolly-shot over the arrival, driven from AuthState.Arriving — the disclosed cost of #359",
+          "title": "Restore the login door dolly-shot over the arrival, driven from AuthState.Arriving \u2014 the disclosed cost of #359",
           "status": "not_started",
           "issue": 364
         }
@@ -344,7 +345,7 @@
           "issue": 319
         },
         "9d": {
-          "title": "Orphan-class gate is blind to computed `class (if …)` forms — 42 sites",
+          "title": "Orphan-class gate is blind to computed `class (if \u2026)` forms \u2014 42 sites",
           "status": "not_started",
           "issue": 356
         },
@@ -421,7 +422,7 @@
           "issue": 336
         },
         "11g": {
-          "title": "Fix the squawk gate (vacuous for uncommitted migrations; SQUAWK_TARGET_DIR scans all history) — MUST land BEFORE 11d prod-deploy execution",
+          "title": "Fix the squawk gate (vacuous for uncommitted migrations; SQUAWK_TARGET_DIR scans all history) \u2014 MUST land BEFORE 11d prod-deploy execution",
           "status": "not_started",
           "issue": 337
         },
@@ -431,37 +432,37 @@
           "issue": 347
         },
         "11i": {
-          "title": "No gate ties an Elm port name to the app.js that answers it — a typo fails silently",
+          "title": "No gate ties an Elm port name to the app.js that answers it \u2014 a typo fails silently",
           "status": "not_started",
           "issue": 366
         },
         "11j": {
-          "title": "e2e_warmup_guard_test.sh never terminates (two stub defects) — blocks a full run_all.sh",
+          "title": "e2e_warmup_guard_test.sh never terminates (two stub defects) \u2014 blocks a full run_all.sh",
           "status": "not_started",
           "issue": 358
         },
         "11k": {
-          "title": "Bookstore-events extraction validated against a real events page — BLOCKED, pairs with 11e",
+          "title": "Bookstore-events extraction validated against a real events page \u2014 BLOCKED, pairs with 11e",
           "status": "not_started",
           "issue": 304
         },
         "11l": {
-          "title": "Resolve each store events page — BLOCKED on a live run, pairs with 11e",
+          "title": "Resolve each store events page \u2014 BLOCKED on a live run, pairs with 11e",
           "status": "not_started",
           "issue": 307
         },
         "11m": {
-          "title": "⚠️ P1: erasure leaves uploaded_images rows carrying user_id; the schema guard is structurally blind to a MISSING FK. MUST land before 11d (prod deploy).",
+          "title": "\u26a0\ufe0f P1: erasure leaves uploaded_images rows carrying user_id; the schema guard is structurally blind to a MISSING FK. MUST land before 11d (prod deploy).",
           "status": "not_started",
           "issue": 353
         },
         "11n": {
-          "title": "⚠️ Age-gate raise is not enforced for the 5-minute BookDetailCache TTL. MUST land before AGE_GATING_ENABLED is ever turned on.",
+          "title": "\u26a0\ufe0f Age-gate raise is not enforced for the 5-minute BookDetailCache TTL. MUST land before AGE_GATING_ENABLED is ever turned on.",
           "status": "not_started",
           "issue": 357
         },
         "11p": {
-          "title": "Consent revocation succeeds server-side but the page reads the stale stored credential and shows consent still granted (Wave 6 drive). Consent surface — MUST land before 11d.",
+          "title": "Consent revocation succeeds server-side but the page reads the stale stored credential and shows consent still granted (Wave 6 drive). Consent surface \u2014 MUST land before 11d.",
           "status": "not_started",
           "issue": 367
         },
@@ -471,12 +472,12 @@
           "issue": 368
         },
         "11r": {
-          "title": "⚠️ P1: two concurrent logins OOM-kill the 512MB core VM (Argon2 ~64MB/hash); the #269 --vm-memory 1024 preview mitigation never reaches the machine, and prod shares the 512MB toml. MUST land before 11d (prod deploy).",
+          "title": "\u26a0\ufe0f P1: two concurrent logins OOM-kill the 512MB core VM (Argon2 ~64MB/hash); the #269 --vm-memory 1024 preview mitigation never reaches the machine, and prod shares the 512MB toml. MUST land before 11d (prod deploy).",
           "status": "not_started",
           "issue": 369
         },
         "11s": {
-          "title": "⚠️ P1: EVERY edition (206/206) is barcode_unverified, so every book detail overlay says \"we can't show its title\" beside the title it holds. Answers #346's open question — 100% of rows, not 40. Needs a registered data correction AND the isProvisional predicate split. Before launch.",
+          "title": "\u26a0\ufe0f P1: EVERY edition (206/206) is barcode_unverified, so every book detail overlay says \"we can't show its title\" beside the title it holds. Answers #346's open question \u2014 100% of rows, not 40. Needs a registered data correction AND the isProvisional predicate split. Before launch.",
           "status": "not_started",
           "issue": 370
         },
@@ -486,7 +487,7 @@
           "issue": 371
         },
         "11u": {
-          "title": "Four deterministic E2E failures (public-profile x2, rss, privacy-placement) — not OOM, not concurrency, not missing data, not Wave 6. Unattributed; needs investigation then splitting.",
+          "title": "Four deterministic E2E failures (public-profile x2, rss, privacy-placement) \u2014 not OOM, not concurrency, not missing data, not Wave 6. Unattributed; needs investigation then splitting.",
           "status": "not_started",
           "issue": 372
         }
@@ -494,22 +495,22 @@
     }
   },
   "_owner_rulings_wave4_2026_07_30": [
-    "ISBN bad-data repair: repair-then-validate, built as a REUSABLE operationalised capability (dry-run, idempotent, audited, explicitly scoped) — not a bespoke migration. Verbatim: \"we should do this in a way that informs how we handle the repair of bad data in the future, ideally operationalising this kind of repair.\"",
+    "ISBN bad-data repair: repair-then-validate, built as a REUSABLE operationalised capability (dry-run, idempotent, audited, explicitly scoped) \u2014 not a bespoke migration. Verbatim: \"we should do this in a way that informs how we handle the repair of bad data in the future, ideally operationalising this kind of repair.\"",
     "ISBN hard-gate hole: trace it now inside #339. Verbatim: \"bear in mind this may be as a result of bad seed data. if it is then we need to correct the seed data and also tighten the seed process to not allow this.\"",
-    "Discovery assignments approved 2026-07-31: #340→Wave 7 (7d, merged with 7c un-merge); #336→Wave 11 (11f); #337→Wave 11 (11g), sequenced BEFORE 11d prod-deploy execution; #338→struck GDPR revisit bucket."
+    "Discovery assignments approved 2026-07-31: #340\u2192Wave 7 (7d, merged with 7c un-merge); #336\u2192Wave 11 (11f); #337\u2192Wave 11 (11g), sequenced BEFORE 11d prod-deploy execution; #338\u2192struck GDPR revisit bucket."
   ],
   "_owner_rulings_wave5_2026_07_31": [
-    "Manual-ISBN preview: ACCEPT the loss of the \"We think this is…\" step on the manual path (no resolve-without-create endpoint exists). Ship as built; cover a wrong add with the Wave 7 undo affordance rather than adding GET /api/books/resolve. Consistent with inform-never-block: act, then make it trivially reversible.",
-    "#351 policy SETTLED: option (b) — the reader is never held hostage to the upload page. Identification is asynchronous (reader free to leave); confirmation + shelf choice stay synchronous and human. Verbatim: \"a user should never be held hostage to a page and incorrect classifications should never end up on shelves they are not intended for\".",
-    "#351 surface: an inbox accessible from the upload page itself; a notification count on the Add Book nav marker. Add Book STAYS inside the Catalogue dropdown — \"we don't need to render it outside of the drop down, it can remain low-but-easy-visibility\". So #351 does NOT depend on Wave 8 nav work, needs NO email/consent column, and needs NO image.resolved subscriber (the count is a query).",
-    "#349 → #350 → re-read retry frequency → then size #351. Measure before building a retry UI for retries that should not be happening.",
+    "Manual-ISBN preview: ACCEPT the loss of the \"We think this is\u2026\" step on the manual path (no resolve-without-create endpoint exists). Ship as built; cover a wrong add with the Wave 7 undo affordance rather than adding GET /api/books/resolve. Consistent with inform-never-block: act, then make it trivially reversible.",
+    "#351 policy SETTLED: option (b) \u2014 the reader is never held hostage to the upload page. Identification is asynchronous (reader free to leave); confirmation + shelf choice stay synchronous and human. Verbatim: \"a user should never be held hostage to a page and incorrect classifications should never end up on shelves they are not intended for\".",
+    "#351 surface: an inbox accessible from the upload page itself; a notification count on the Add Book nav marker. Add Book STAYS inside the Catalogue dropdown \u2014 \"we don't need to render it outside of the drop down, it can remain low-but-easy-visibility\". So #351 does NOT depend on Wave 8 nav work, needs NO email/consent column, and needs NO image.resolved subscriber (the count is a query).",
+    "#349 \u2192 #350 \u2192 re-read retry frequency \u2192 then size #351. Measure before building a retry UI for retries that should not be happening.",
     "#349 verification scheduled into Wave 7 as 7e, riding on 7b (upload failure UX) since that wave drives the vision path regardless. Wave 6 is session UX and touches no uploads."
   ],
   "_owner_rulings_wave6_2026_08_01": [
     "Full issue audit 2026-08-01: 29 completed issues moved to issues/complete/; #315 (W5 epic) DoD closed out; every remaining open issue assigned to a numbered wave. Two flagged as launch-blocking: #353 (GDPR erasure gap) and #357 (age-gate cache bypass), both scheduled before 11d prod-deploy execution."
   ],
   "notes": [
-    "2026-08-04: owner added #310 (7i) and #382 (7j) to Wave 7, and #304/#306/#307 moved to issues/complete/ (all three had zero open DoD boxes while still sitting in issues/ — the artifact disagreeing with reality). I had sized #310 and #311 as too large for this wave; the owner ruled them in, which means Wave 7 can no longer be closed by finishing drives alone. Both carry measured scope in the epic state rather than an estimate: #310 is 74 real selector-hooks across 63 test files with 12 negative-assertion sites needing judgement; #382 needs a per-page classifier whose negative cases (a promotion, a job ad) matter more than its positives.",
-    "2026-08-04: numbering correction — two issues I filed as #311/#312 collided with this campaign's own Wave 0 and Wave 2 epics and are now #382/#383. `wave-status` caught it by resolving a wave item to the wrong file; nothing else would have."
+    "2026-08-04: owner added #310 (7i) and #382 (7j) to Wave 7, and #304/#306/#307 moved to issues/complete/ (all three had zero open DoD boxes while still sitting in issues/ \u2014 the artifact disagreeing with reality). I had sized #310 and #311 as too large for this wave; the owner ruled them in, which means Wave 7 can no longer be closed by finishing drives alone. Both carry measured scope in the epic state rather than an estimate: #310 is 74 real selector-hooks across 63 test files with 12 negative-assertion sites needing judgement; #382 needs a per-page classifier whose negative cases (a promotion, a job ad) matter more than its positives.",
+    "2026-08-04: numbering correction \u2014 two issues I filed as #311/#312 collided with this campaign's own Wave 0 and Wave 2 epics and are now #382/#383. `wave-status` caught it by resolving a wave item to the wrong file; nothing else would have."
   ]
 }

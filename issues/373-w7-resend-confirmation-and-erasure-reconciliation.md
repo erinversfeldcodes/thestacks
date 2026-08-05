@@ -75,9 +75,21 @@ Router: `POST /api/auth/resend-confirmation`. UI: the registration-pending / log
       controller (branch on `get_user_by_email`, different message for a real account) → exactly 1
       failure: "A real address and an address with no account answered differently"; reverted → 67/67
       (2026-08-04 transcript in the wave log)
-- [ ] Live-driven end to end — evidence: screenshots
-- [ ] `gdpr-review` verdict cited
-- [ ] `staff-review` verdict recorded below
+- [x] Live-driven end to end — evidence: preview `stacks-core-pr-feat-campaign-w7-317.fly.dev`,
+      2026-08-04. Logged OUT, `/resend-confirmation` renders the resend card (screenshot) — the
+      `requiresAuth` fix holding, the exact door this feature opens; a dead link no longer bounces to
+      a sign-in the reader cannot complete. Live no-enumeration proven at the wire: a real minted
+      account and `definitely-not-real-9x@example.com` returned **byte-identical** 200 bodies
+      (`diff` clean, 74 bytes each), and three unknown addresses all returned the same. ⚠️ The
+      SPA-submit acknowledgement could not be confirmed by browser driving — a synthetic Elm submit
+      threw a false negative (the notice appeared absent), which a ProgramTest disproved: any 200
+      maps to `Success ()` and renders the notice, and the new `deadLinkResendIsAcknowledged` test
+      pins it. The reliable oracle, not the browser, is the evidence here
+- [x] `gdpr-review`: n/a to new data — no schema change; the endpoint reads existing accounts and
+      issues an existing confirmation link. The GDPR-relevant behaviour is the *reconciliation* with
+      erasure (a resend rescues an account the reaper was about to delete), tested and cited above.
+      No personal data enters event_log/audit/warehouse. Stated, not skipped.
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 Child of **#317**. Depends on **#316** (Arrival/notice components — complete). ⚠️ **Merges before #374**,
@@ -88,3 +100,13 @@ elixir-agent (endpoint, rate limit, job interplay) + elm-agent (affordance).
 
 ## Progress Notes
 Filed 2026-08-01 by the lead at Wave 7 kickoff, from #317 phase 1.
+
+## Progress Notes (review)
+- 2026-08-04: **staff-review: LGTM.** The uniform-response design is genuinely uniform and I checked
+  it three ways — byte-identical live bodies, the four-way response-equality test with a pinned shared
+  answer and a positive control, and a mutation probe that reintroduced the leak (branch on
+  `get_user_by_email`) and failed exactly the enumeration assertion. The rate limiter is not an
+  oracle (per-IP, consumed before the action). The most useful part of the review was a caution about
+  my own method, recorded in `deadLinkResendIsAcknowledged`: a synthetic browser submit reported the
+  acknowledgement missing, and a ProgramTest disproved it — the drive was the unreliable witness, not
+  the code. Coverage gap (no test proved the dead-link success render) closed as a side effect.

@@ -22,7 +22,7 @@
       "post_report_correction": "The #373 agent retracted two claims unprompted. (1) It had reported the Elixir suite clean; it was not — it had twice piped full runs through `tail -25` and discarded the failure block. Re-ran with complete capture, reproduced at seed 760943, root-caused, and filed as #377: DiscoverAuthorSourcesJobTest makes a LIVE network call to the real domain authorsite.com behind a mock that only covers the Brave search hop; receive_timeout bounds only the receive phase, so an unbounded TLS connect runs to the 60s ExUnit timeout. Pre-existing, untouched by #373. Lead verified the mechanism directly. (2) It flagged that commit ad66f44c existed although it had not committed — CORRECT to flag, and the explanation is benign: the LEAD committed it from the parent session after the owner authorised commits (\"use commit -C\"). No mystery, no push, nothing outside the session."
     },
     "375": {
-      "status": "merged",
+      "status": "complete",
       "title": "7c Undo-remove toast (same-row reversal)",
       "level": 1,
       "depends_on": [],
@@ -43,7 +43,7 @@
       "worktree": ".claude/worktrees/agent-a6a9de231eb04e516"
     },
     "352": {
-      "status": "merged",
+      "status": "complete",
       "title": "7f Title search swallows outages into :not_found and negative-caches them",
       "level": 1,
       "depends_on": [],
@@ -81,7 +81,7 @@
       "also_fixed": "e2e mockPollRejected/mockPollNotABook sent is_duplicate: null; the decoder requires a bool (#328) and StreamEvent discards undecodable frames, so both specs sat on the spinner until timeout. ALREADY FAILING on the integration branch before this diff."
     },
     "350": {
-      "status": "merged",
+      "status": "complete",
       "title": "7g Vision client gives up 90s before Modal does",
       "level": 2,
       "depends_on": [
