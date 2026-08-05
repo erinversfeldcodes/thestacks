@@ -318,8 +318,9 @@
         },
         "8c": {
           "title": "Authed home; settings hub style + IA fold; Looking-for-a-Home room; About copy",
-          "status": "not_started",
-          "issue": 318
+          "status": "in_progress",
+          "issue": 318,
+          "last_action": "Built (authed home / fifth-shelf room / About) + both oracles probed + gdpr PASS + committed; live drive owed at the coherence sweep."
         },
         "8d": {
           "title": "Side-by-side verify; empty-state CTAs; widget styling; a11y follow-through",
