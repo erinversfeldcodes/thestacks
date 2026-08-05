@@ -43,7 +43,6 @@ allRoutes =
     , SettingsProfile
     , SettingsPassword
     , SettingsNotifications
-    , SettingsConsent
     , SettingsAuditLog
     , Insights
     , CostTransparency
@@ -120,9 +119,6 @@ routeLabel route =
 
         SettingsNotifications ->
             "SettingsNotifications"
-
-        SettingsConsent ->
-            "SettingsConsent"
 
         SettingsAuditLog ->
             "SettingsAuditLog"
@@ -293,10 +289,14 @@ suite =
                 \_ ->
                     fromPath "/search"
                         |> Expect.equal Search
-            , test "SettingsConsent" <|
+            , -- #318 TR-4: the consent page folded into Privacy. The legacy path
+              -- resolves to SettingsPrivacy in the SPA (a full-page load is 302'd
+              -- server-side before the SPA sees it — proven in
+              -- CoreWeb.PageControllerTest).
+              test "legacy /settings/consent resolves to Privacy" <|
                 \_ ->
                     fromPath "/settings/consent"
-                        |> Expect.equal SettingsConsent
+                        |> Expect.equal SettingsPrivacy
             , test "Catalogue" <|
                 \_ ->
                     fromPath "/catalogue"
@@ -359,10 +359,6 @@ suite =
                 \_ ->
                     Route.toPath Search
                         |> Expect.equal "/search"
-            , test "SettingsConsent path" <|
-                \_ ->
-                    Route.toPath SettingsConsent
-                        |> Expect.equal "/settings/consent"
             , test "Catalogue path" <|
                 \_ ->
                     Route.toPath Catalogue

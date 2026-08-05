@@ -65,9 +65,6 @@ expectedAuth route =
         SettingsNotifications ->
             True
 
-        SettingsConsent ->
-            True
-
         SettingsAuditLog ->
             True
 
@@ -181,7 +178,6 @@ allRoutes =
     , ( "SettingsProfile", SettingsProfile )
     , ( "SettingsPassword", SettingsPassword )
     , ( "SettingsNotifications", SettingsNotifications )
-    , ( "SettingsConsent", SettingsConsent )
     , ( "SettingsAuditLog", SettingsAuditLog )
     , ( "Insights", Insights )
     , ( "CostTransparency", CostTransparency )
@@ -281,12 +277,12 @@ suite =
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "19 public routes and 23 protected routes are enumerated" <|
+            [ test "19 public routes and 22 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 19, 23 )
+                        |> Expect.equal ( 19, 22 )
             ]
         , describe "admin routes are gated on an ADMIN token, not the ordinary one (#303)"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|

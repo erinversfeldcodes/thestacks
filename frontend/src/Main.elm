@@ -92,7 +92,6 @@ import Page.ResetPassword as ResetPassword
 import Page.Search as Search
 import Page.Settings as Settings
 import Page.Settings.AuditLog as AuditLog
-import Page.Settings.Consent as Consent
 import Page.Settings.Notifications as Notifications
 import Page.Settings.Password as Password
 import Page.Settings.Privacy as Privacy
@@ -226,7 +225,6 @@ type Page
     | PageBookDetail BookDetail.Model
     | PageUpload Upload.Model
     | PageSearch Search.Model
-    | PageSettingsConsent Consent.Model
     | PageSettingsAuditLog AuditLog.Model
     | PageInsights Insights.Model
     | PageSettingsProfile Profile.Model
@@ -1134,20 +1132,6 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
         Search ->
             ( PageSearch Search.init, Cmd.none )
 
-        SettingsConsent ->
-            let
-                consentSeed =
-                    case maybeAuth of
-                        Just auth ->
-                            { analytics = auth.user.consentAnalytics
-                            , writingAssistant = auth.user.consentWritingAssistant
-                            }
-
-                        Nothing ->
-                            { analytics = False, writingAssistant = False }
-            in
-            ( PageSettingsConsent (Consent.init consentSeed), Cmd.none )
-
         SettingsAuditLog ->
             let
                 ( model, cmd ) =
@@ -1248,8 +1232,21 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
 
         SettingsPrivacy ->
             let
+                -- Seed the folded-in consent toggles from the signed-in user's
+                -- current consent (#318 TR-4), exactly as the standalone consent
+                -- page used to. `/settings/consent` now redirects here.
+                consentSeed =
+                    case maybeAuth of
+                        Just auth ->
+                            { analytics = auth.user.consentAnalytics
+                            , writingAssistant = auth.user.consentWritingAssistant
+                            }
+
+                        Nothing ->
+                            { analytics = False, writingAssistant = False }
+
                 ( privacyModel, privacyCmd ) =
-                    Privacy.initWithToken maybeToken
+                    Privacy.initWithToken maybeToken consentSeed
             in
             ( PageSettingsPrivacy privacyModel, Cmd.map PrivacyMsg privacyCmd )
 
@@ -1873,7 +1870,6 @@ type Msg
     | BookDetailMsg BookDetail.Msg
     | UploadMsg Upload.Msg
     | SearchMsg Search.Msg
-    | ConsentMsg Consent.Msg
     | AuditLogMsg AuditLog.Msg
     | InsightsMsg Insights.Msg
     | ProfileMsg Profile.Msg
@@ -1902,7 +1898,6 @@ type Msg
     | UserMenuMsg UserMenu.Msg
     | ToggleNavMenu NavMenu
     | CloseNavMenu
-    | SettingsMobileNavChanged String
     | SwipeReceived String
     | SwipeIgnored
     | OverlayBookDetailMsg BookDetail.Msg
@@ -2286,28 +2281,6 @@ update msg model =
                             ( overlayModel
                             , Cmd.batch [ Cmd.map SearchMsg subCmd, overlayCmd ]
                             )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        ConsentMsg subMsg ->
-            case model.page of
-                PageSettingsConsent subModel ->
-                    let
-                        maybeToken =
-                            Maybe.map .token (currentAuth model.auth)
-
-                        ( newSubModel, subCmd, outMsg ) =
-                            Consent.update subMsg subModel maybeToken
-                    in
-                    case outMsg of
-                        Consent.NoOut ->
-                            ( { model | page = PageSettingsConsent newSubModel }
-                            , Cmd.map ConsentMsg subCmd
-                            )
-
-                        Consent.SessionExpired ->
-                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -3030,9 +3003,6 @@ update msg model =
         CloseNavMenu ->
             ( { model | openNavMenu = Nothing }, Cmd.none )
 
-        SettingsMobileNavChanged path ->
-            ( model, Nav.pushUrl model.key path )
-
         EscapePressed ->
             case model.bookDetailOverlay of
                 Just overlay ->
@@ -3582,9 +3552,6 @@ pageTitle page =
         PageSearch _ ->
             titled "Search"
 
-        PageSettingsConsent _ ->
-            titled "Privacy Settings"
-
         PageSettingsAuditLog _ ->
             titled "Audit Log"
 
@@ -3849,7 +3816,6 @@ settingsLinks =
     , { label = "Privacy", path = Route.toPath SettingsPrivacy }
     , { label = "Notifications", path = Route.toPath SettingsNotifications }
     , { label = "Password", path = Route.toPath SettingsPassword }
-    , { label = "Consent", path = Route.toPath SettingsConsent }
     , { label = "Activity Log", path = Route.toPath SettingsAuditLog }
     , { label = "Reading Insights", path = Route.toPath Insights }
     ]
@@ -4122,10 +4088,6 @@ viewPage model =
         PageSearch subModel ->
             Html.map SearchMsg (Search.view subModel)
 
-        PageSettingsConsent subModel ->
-            viewSettingsHub model.route
-                (Html.map ConsentMsg (Consent.view subModel))
-
         PageSettingsAuditLog subModel ->
             viewSettingsHub model.route
                 (Html.map AuditLogMsg (AuditLog.view subModel))
@@ -4225,7 +4187,6 @@ viewSettingsHub currentRoute content =
     Settings.view
         { currentRoute = currentRoute
         , content = content
-        , onMobileNavChange = SettingsMobileNavChanged
         }
 
 

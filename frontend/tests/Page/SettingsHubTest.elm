@@ -1,12 +1,16 @@
 module Page.SettingsHubTest exposing (suite)
 
-{-| #126 punch 13 — the `Page.Settings` hub shell.
+{-| The `Page.Settings` hub shell, restyled for #318 TR-4.
 
-`Page.Settings.view` is a stateless layout parameterised by the parent's `msg`:
-it renders the sidebar (seven links), marks exactly the current route active, and
-renders a mobile `<select>` whose `onInput` is wired to the parent-provided
-`onMobileNavChange`. These tests pin the seven-item roster, the active-class
-selection, and the mobile-nav intent produced when the select changes.
+`Page.Settings.view` is a stateless layout parameterised by the parent's `msg`.
+Since TR-4 it renders ONE grouped nav (no mobile `<select>`): entries are
+gathered under the "You" / "Privacy" / "Your data" headings, and the current
+sub-page is marked with `aria-current="page"` — the semantic current-page
+treatment that both announces "you are here" and drives the active styling.
+
+These tests pin the grouping, the six-item roster (Consent folded into Privacy),
+and the active-state semantics. Two of them are ORACLES for the redesign: they
+fail against the old flat, un-grouped, `aria-current`-less nav.
 
 -}
 
@@ -16,54 +20,82 @@ import Html.Attributes
 import Navigation.Route as Route exposing (Route(..))
 import Page.Settings as Settings
 import Test exposing (Test, describe, test)
-import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 
 
-{-| The parent's message type, produced only through `onMobileNavChange`.
+{-| The hub emits no messages of its own (the mobile-select `onInput` is gone),
+so `()` stands in for the parent's message type.
 -}
-type Msg
-    = MobileNav String
-
-
-{-| Render the hub for the given active route. `content` is inert here — these
-tests only exercise the sidebar and mobile-nav chrome, not the slotted page.
--}
-viewFor : Route -> Query.Single Msg
+viewFor : Route -> Query.Single ()
 viewFor route =
     Settings.view
         { currentRoute = route
         , content = Html.text ""
-        , onMobileNavChange = MobileNav
         }
         |> Query.fromHtml
 
 
-{-| The seven hub destinations, in sidebar order, with their canonical paths.
+{-| The three IA groups, in sidebar order, and their headings.
+-}
+expectedGroups : List String
+expectedGroups =
+    [ "You", "Privacy", "Your data" ]
+
+
+{-| The six hub destinations (Consent folded into Privacy), with canonical paths.
 -}
 expectedItems : List ( String, String )
 expectedItems =
     [ ( "Profile", Route.toPath SettingsProfile )
     , ( "Password", Route.toPath SettingsPassword )
     , ( "Notifications", Route.toPath SettingsNotifications )
-    , ( "Consent", Route.toPath SettingsConsent )
-    , ( "Privacy", Route.toPath SettingsPrivacy )
+    , ( "Privacy & consent", Route.toPath SettingsPrivacy )
     , ( "Audit Log", Route.toPath SettingsAuditLog )
     , ( "Your Data Insights", Route.toPath Insights )
     ]
 
 
+ariaCurrentPage : Selector.Selector
+ariaCurrentPage =
+    Selector.attribute (Html.Attributes.attribute "aria-current" "page")
+
+
 suite : Test
 suite =
-    describe "Page.Settings — hub shell (#126 punch 13)"
-        [ describe "sidebar roster"
-            [ test "renders exactly seven nav links" <|
+    describe "Page.Settings — hub shell (#318 TR-4)"
+        [ describe "grouped nav (ORACLE: fails on the old flat nav)"
+            [ test "renders the three IA group headings" <|
+                \_ ->
+                    viewFor SettingsProfile
+                        |> (\hub ->
+                                Expect.all
+                                    (List.map
+                                        (\heading ->
+                                            \_ ->
+                                                hub
+                                                    |> Query.has
+                                                        [ Selector.class "settings-hub__group-heading"
+                                                        , Selector.text heading
+                                                        ]
+                                        )
+                                        expectedGroups
+                                    )
+                                    ()
+                           )
+            , test "renders exactly three groups" <|
+                \_ ->
+                    viewFor SettingsProfile
+                        |> Query.findAll [ Selector.class "settings-hub__group" ]
+                        |> Query.count (Expect.equal 3)
+            ]
+        , describe "sidebar roster"
+            [ test "renders exactly six nav links" <|
                 \_ ->
                     viewFor SettingsProfile
                         |> Query.findAll [ Selector.class "settings-hub__nav-link" ]
-                        |> Query.count (Expect.equal 7)
-            , test "renders each of the seven labels" <|
+                        |> Query.count (Expect.equal 6)
+            , test "renders each of the six labels" <|
                 \_ ->
                     viewFor SettingsProfile
                         |> (\hub ->
@@ -95,38 +127,27 @@ suite =
                                     ()
                            )
             ]
-        , describe "active-item selection"
-            [ test "marks exactly one nav item active for the current route" <|
+        , describe "active-item selection via aria-current (ORACLE: the old nav set no aria-current)"
+            [ test "marks exactly one link as the current page" <|
                 \_ ->
                     viewFor SettingsPassword
-                        |> Query.findAll [ Selector.class "settings-hub__nav-item--active" ]
+                        |> Query.findAll [ ariaCurrentPage ]
                         |> Query.count (Expect.equal 1)
-            , test "the active item is the one for the current route" <|
+            , test "the current-page link is the one for the current route" <|
                 \_ ->
                     viewFor SettingsNotifications
-                        |> Query.find [ Selector.class "settings-hub__nav-item--active" ]
+                        |> Query.find [ ariaCurrentPage ]
                         |> Query.has [ Selector.text "Notifications" ]
-            , test "the active class follows the current route" <|
+            , test "the current-page marker follows the current route" <|
                 \_ ->
-                    -- A different route moves the active marker off Notifications.
-                    viewFor SettingsConsent
-                        |> Query.find [ Selector.class "settings-hub__nav-item--active" ]
+                    -- A different route moves aria-current off Notifications.
+                    viewFor SettingsPrivacy
+                        |> Query.find [ ariaCurrentPage ]
                         |> Query.hasNot [ Selector.text "Notifications" ]
-            ]
-        , describe "mobile nav select"
-            [ test "renders all seven options" <|
+            , test "the Privacy link is current on the Privacy route" <|
                 \_ ->
-                    viewFor SettingsProfile
-                        |> Query.find [ Selector.class "settings-hub__mobile-select" ]
-                        |> Query.findAll [ Selector.tag "option" ]
-                        |> Query.count (Expect.equal 7)
-            , test "changing the select produces the navigation intent for the chosen path" <|
-                \_ ->
-                    viewFor SettingsProfile
-                        |> Query.find [ Selector.class "settings-hub__mobile-select" ]
-                        |> Event.simulate (Event.input (Route.toPath SettingsAuditLog))
-                        |> Event.toResult
-                        |> Result.map (\(MobileNav path) -> path)
-                        |> Expect.equal (Ok "/settings/audit-log")
+                    viewFor SettingsPrivacy
+                        |> Query.find [ ariaCurrentPage ]
+                        |> Query.has [ Selector.text "Privacy & consent" ]
             ]
         ]

@@ -442,6 +442,13 @@ defmodule CoreWeb.Router do
   # Catch-all: serve the Elm SPA for any non-API route (client-side routing)
   scope "/", CoreWeb do
     pipe_through :spa
+
+    # Consent folded into Privacy (#318 TR-4). The former /settings/consent page
+    # is gone; a 302 keeps existing links and bookmarks working by sending the
+    # browser to the Privacy page (which now hosts the consent controls). Must
+    # sit BEFORE the catch-all, or the SPA index would swallow it.
+    get "/settings/consent", PageController, :redirect_consent
+
     get "/*path", PageController, :index
   end
 end

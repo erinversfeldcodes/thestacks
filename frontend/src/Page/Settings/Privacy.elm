@@ -14,6 +14,7 @@ import Html exposing (Html, button, div, h1, h2, input, label, option, p, select
 import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
+import Page.Settings.Consent as Consent
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility as Visibility
 import Util.FailureCopy as FailureCopy
@@ -35,6 +36,13 @@ type alias Model =
     , loadingMore : Bool
     , unblocking : Maybe String
     , unblockError : Bool
+
+    -- Analytics + writing-assistant consent, folded in from the former
+    -- standalone /settings/consent page (#318 TR-4). The consent controls now
+    -- render as a section of this page, but the state and the save path are the
+    -- SAME `Page.Settings.Consent` module — moving where they render does not
+    -- change what `Stacks.GDPR.Consent` records.
+    , consent : Consent.Model
     }
 
 
@@ -64,6 +72,7 @@ type Msg
     | LoadMoreBlocked
     | UserClicksUnblock String
     | GotUnblockResponse String (Result Http.Error ())
+    | ConsentMsg Consent.Msg
 
 
 type OutMsg
@@ -145,18 +154,25 @@ init =
     , loadingMore = False
     , unblocking = Nothing
     , unblockError = False
+    , consent = Consent.init { analytics = False, writingAssistant = False }
     }
 
 
 {-| Entry point used by `Main` when the Privacy page opens: seeds the model and,
-when authenticated, kicks off the blocked-users fetch. The bare `init` is kept
+when authenticated, kicks off the blocked-users fetch. `consentSeed` reflects the
+signed-in user's current consent so the folded-in toggles open showing reality
+(same seeding the standalone consent page used to do). The bare `init` is kept
 for tests and flows that don't need the network.
 -}
-initWithToken : Maybe String -> ( Model, Cmd Msg )
-initWithToken maybeToken =
+initWithToken : Maybe String -> { analytics : Bool, writingAssistant : Bool } -> ( Model, Cmd Msg )
+initWithToken maybeToken consentSeed =
+    let
+        seeded =
+            { init | consent = Consent.init consentSeed }
+    in
     case maybeToken of
         Just token ->
-            ( { init | blockedUsers = Loading }
+            ( { seeded | blockedUsers = Loading }
             , Cmd.batch
                 [ Api.getPrivacySettings token GotPrivacySettings
                 , Api.listBlockedUsers token 1 GotBlockedUsers
@@ -164,7 +180,7 @@ initWithToken maybeToken =
             )
 
         Nothing ->
-            ( init, Cmd.none )
+            ( seeded, Cmd.none )
 
 
 update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
@@ -424,6 +440,27 @@ update msg model maybeToken =
                         -- error so the failure isn't silent.
                         ( { model | unblocking = Nothing, unblockError = True }, Cmd.none, NoOut )
 
+        ConsentMsg subMsg ->
+            -- Pure delegation to the embedded consent module. The save path
+            -- (`Api.saveConsent` / `Api.saveWritingAssistantConsent`, and hence
+            -- what `Stacks.GDPR.Consent` records) is entirely unchanged by the
+            -- fold — only its host page moved (#318 TR-4). Consent's own
+            -- SessionExpired is surfaced through Privacy's OutMsg so Main's
+            -- single expiry handler still fires.
+            let
+                ( newConsent, subCmd, consentOut ) =
+                    Consent.update subMsg model.consent maybeToken
+
+                out =
+                    case consentOut of
+                        Consent.NoOut ->
+                            NoOut
+
+                        Consent.SessionExpired ->
+                            SessionExpired
+            in
+            ( { model | consent = newConsent }, Cmd.map ConsentMsg subCmd, out )
+
 
 view : Model -> Html Msg
 view model =
@@ -459,6 +496,7 @@ view model =
                 (List.map (viewShelfRow model.profileVisibility) model.shelfVisibilities)
             , viewFeedback model.savingShelf
             ]
+        , viewConsentSection model.consent
         , viewExportSection model.exporting
         , viewBlockedUsersSection model
         , viewDangerZone model
@@ -547,6 +585,16 @@ viewBlockedRow unblocking user =
                 )
             ]
         ]
+
+
+{-| The consent controls, folded in from the former /settings/consent page
+(#318 TR-4). `Consent.viewSection` renders exactly the toggles the standalone
+page showed; its messages are mapped up through `ConsentMsg` and delegated
+straight back to `Consent.update`, so the recorded consent is unchanged.
+-}
+viewConsentSection : Consent.Model -> Html Msg
+viewConsentSection consent =
+    Html.map ConsentMsg (Consent.viewSection consent)
 
 
 viewExportSection : RemoteData Http.Error () -> Html Msg

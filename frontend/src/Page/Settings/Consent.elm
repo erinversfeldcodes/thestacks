@@ -5,6 +5,7 @@ module Page.Settings.Consent exposing
     , init
     , update
     , view
+    , viewSection
     , writingAssistantOffDescription
     )
 
@@ -140,11 +141,29 @@ update msg model maybeToken =
                         ( { model | saving = Failure err }, Cmd.none, NoOut )
 
 
+{-| The standalone-page wrapper. Since #318 TR-4 the consent controls live as a
+section INSIDE the Privacy page (`Page.Settings.Privacy` embeds this module and
+renders `viewSection`); this whole-page view is retained for direct unit tests
+of the consent surface. The update path — and therefore what
+`Stacks.GDPR.Consent` records via `Api.saveConsent` /
+`Api.saveWritingAssistantConsent` — is unchanged either way.
+-}
 view : Model -> Html Msg
 view model =
     div [ class "page page--settings" ]
         [ h1 [ class "page__title" ] [ text "Privacy & Consent" ]
-        , div [ class "settings-section" ]
+        , viewSection model
+        ]
+
+
+{-| The consent controls with no page chrome, so the Privacy page can fold them
+in as a section (#318 TR-4). Identical markup to the standalone page minus its
+`page`/`h1` wrapper.
+-}
+viewSection : Model -> Html Msg
+viewSection model =
+    div [ class "settings-consent" ]
+        [ div [ class "settings-section" ]
             [ h2 [ class "settings-section__title" ] [ text "Analytics" ]
             , p [ class "settings-section__desc" ]
                 [ text

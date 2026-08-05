@@ -4,7 +4,8 @@ import Api
 import Expect
 import Html.Attributes
 import Http
-import Page.Settings.Privacy as Privacy exposing (Msg(..))
+import Page.Settings.Consent as Consent
+import Page.Settings.Privacy as Privacy exposing (Msg(..), OutMsg(..))
 import Test exposing (Test, describe, test)
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
@@ -228,6 +229,55 @@ suite =
                                 token
                     in
                     List.length model.shelfVisibilities |> Expect.equal 5
+            ]
+        , describe "consent folded into Privacy (#318 TR-4)"
+            [ test "the consent toggles now render within the Privacy page" <|
+                \_ ->
+                    -- ORACLE for the fold: before TR-4 these toggles lived on a
+                    -- separate /settings/consent page and were absent here.
+                    Privacy.init
+                        |> Privacy.view
+                        |> Query.fromHtml
+                        |> Expect.all
+                            [ Query.has
+                                [ Selector.attribute
+                                    (Html.Attributes.attribute "data-testid" "analytics-consent-toggle")
+                                ]
+                            , Query.has
+                                [ Selector.attribute
+                                    (Html.Attributes.attribute "data-testid" "writing-assistant-consent-toggle")
+                                ]
+                            , Query.has [ Selector.text "Writing assistant" ]
+                            ]
+            , test "initWithToken seeds the folded-in consent from the user's state" <|
+                \_ ->
+                    let
+                        ( model, _ ) =
+                            Privacy.initWithToken (Just "tok")
+                                { analytics = True, writingAssistant = True }
+                    in
+                    Expect.all
+                        [ \m -> m.consent.analyticsConsent |> Expect.equal True
+                        , \m -> m.consent.writingAssistantConsent |> Expect.equal True
+                        ]
+                        model
+            , test "ConsentMsg delegates to Consent.update (flips analytics consent)" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Privacy.update (ConsentMsg Consent.ToggleAnalytics) init0 token
+                    in
+                    model.consent.analyticsConsent |> Expect.equal True
+            , test "a consent 401 surfaces as Privacy.SessionExpired (single expiry path)" <|
+                \_ ->
+                    let
+                        ( _, _, out ) =
+                            Privacy.update
+                                (ConsentMsg (Consent.SaveCompleted (Err (Http.BadStatus 401))))
+                                init0
+                                token
+                    in
+                    out |> Expect.equal SessionExpired
             ]
         , describe "shelf ceiling greying (FE-2)"
             [ test "an owner profile greys shelf options above the ceiling" <|
