@@ -342,6 +342,12 @@
             "8b",
             "8c"
           ]
+        },
+        "8f": {
+          "issue": 318,
+          "title": "A11y follow-through (TR-6): search name, aria-live upload, pluralisation, grid-arrow defer",
+          "status": "in_progress",
+          "last_action": "Built + pluralisation oracle probed + committed; a11y follow-ups #388/#389 filed; SR/keyboard drive owed at the coherence sweep."
         }
       }
     },
