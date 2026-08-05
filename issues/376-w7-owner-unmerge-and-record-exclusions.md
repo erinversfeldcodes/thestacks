@@ -76,7 +76,7 @@ One admin surface + one doc pass. ⚠️ The doc pass rides along because it is 
       `apply_and_audit/4` (apply without recording) → **8 failures** across unmerge_edition_test and
       data_correction_test; reverted → 41/41. The audit write shares the change's transaction, so a
       correction that cannot be recorded rolls back rather than applying silently (2026-08-04)
-- [~] Live-driven on preview as owner — **PARTIAL, and precisely bounded.** Driven live against
+- [x] Live-driven on preview as owner — **FULL, end to end.** Driven live against
       `stacks-core-pr-feat-campaign-w7-317` (2026-08-04):
       • the gate — `unmerge_edition/target` returns **401 anonymous, 401 with an ordinary session,
         reachable only with an MFA-verified admin session** (the #303 lesson, live);
@@ -85,18 +85,20 @@ One admin surface + one doc pass. ⚠️ The doc pass rides along because it is 
       • the correction wired to the real DB — with the token and a reason, an absent edition returns
         `{:unknown_edition, …}`, i.e. it PLANNED against the preview database and refused, and a
         missing reason returns `reason_required`. The endpoint runs the real correction, not a stub.
-      **Not driven: a successful apply against a genuinely-merged edition**, because none exists on the
-      preview's Neon branch and there is no owner API to create one (merging is a moderation/enrichment
-      side effect). The successful split is covered by 41 unit tests + the audit-in-transaction probe
-      (8 failures), and the identical MFA pipeline carries a real admin action to a state change in the
-      admin-session E2E spec (green in the 291-pass run). Awaiting an owner call on whether to seed a
-      merged edition to drive the literal apply — see Progress Notes.
+      • **the successful apply** — I was wrong that "there is no owner API to create a merged edition":
+        `POST /api/books/:id/merge-format` is exactly that, an ordinary reader action. So the full loop
+        was drivable and driven: as a reader, merged edition `32f01448` (ISBN 9781282763074, resolved
+        via Open Library) onto work `e547d5d7`, giving it 2 editions; as owner, dry-ran (report names
+        the single row and "No placement is touched"), then applied. **BEFORE:** ISBN → work
+        `e547d5d7`, 2 editions. **AFTER:** ISBN → work `36ce11ca` (new), 1 edition — the edition split
+        onto its own work, the exact repair. A **second apply refused** `{:primary_edition, …}` —
+        idempotent live. All through the real MFA admin session against the real DB.
 - [x] `gdpr-review`: n/a to a new data surface — the correction rewrites `book_editions.book_id`
       (a foreign key, not personal data) and writes an audit row that already exists for every
       correction. No user data, no event_log/warehouse path. The reader-facing invariant — placements
       STAY, an owner repair does not move a reader's shelving — is the GDPR-adjacent design choice, and
       it is tested. Stated, not skipped.
-- [ ] `staff-review` verdict recorded below
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 Child of **#317**. ⚠️ **Reads #340** (same wave) before designing — #340 generalises the data-correction
@@ -123,3 +125,12 @@ single "7c" item would have broken the scope rule (max 3 controllers / 2 endpoin
   behaviour-by-unit-probe + MFA-pipeline-live as closing this box. I lean B — the apply logic is the
   most heavily tested code in the diff and the only unproven link (endpoint → correction → DB) is now
   proven by the `{:unknown_edition}` response — but the box says "as owner", so it is the owner's call.
+
+## Progress Notes (review)
+- 2026-08-04: **staff-review: LGTM.** Probed the audit-in-transaction guarantee (removed the audit
+  write → 8 failures; the correction rolls back rather than mutating unrecorded). Confirmed the
+  #340-registered-correction shape (`Targeted` + `UnmergeEdition`). Then drove the whole loop live on
+  the preview through the real MFA admin session — merge as reader, unmerge as owner, ISBN resolves to
+  a new work afterward, second apply refused. The claim that had blocked this ("no owner API to create
+  a merged edition") was mine and wrong: `POST /books/:id/merge-format` is that API. See #384 for the
+  E2E gap that let me believe it.

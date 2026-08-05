@@ -95,7 +95,7 @@
       "cross_language_gate": "@modal_function_timeout_ms is checked against modal_app.py by parsing the decorator — editing timeout=300 now reddens mix test. A gate over a boundary nothing previously covered."
     },
     "376": {
-      "status": "merged",
+      "status": "complete",
       "title": "7c2 Owner-only un-merge + record the two exclusions",
       "level": 2,
       "depends_on": [
@@ -188,7 +188,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-04",
-  "status": "9 original children merged; #310, #382, #373 complete; full E2E green (291 passed). OUTSTANDING: (b) #351 auto-place prohibition hand-drive (needs Open Library, currently 503), (c) #376 owner unmerge drive.",
+  "status": "All children merged; #310/#382/#373/#376 complete; full E2E green (291 passed). OUTSTANDING: (b) #351 auto-place prohibition hand-drive — Open Library recovered, driving next.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
