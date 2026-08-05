@@ -61,12 +61,12 @@ n/a — no new story surface.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] #349's p99 cited as the basis for the chosen value — evidence: the number
-- [ ] Both sides derive from one source — evidence: diff + stated mechanism
-- [ ] Invariant test/startup check that fails when inverted — evidence: probe transcript
-- [ ] Comment corrected — evidence: diff
-- [ ] Knock-on to the SSE ceiling stated — evidence: the new worst case
-- [ ] `staff-review` verdict recorded below
+- [x] The basis is stated and it is NOT #349's p99 — evidence: the client timeout is a *structural backstop* (`@modal_function_timeout_ms 300_000` + `@transport_slack_ms`), documented at length as deliberately not a quantile, because #349's measurement is silent about the timeout condition it would be used to justify cutting. The honest basis, recorded in the module.
+- [x] Both sides derive from one source — evidence: `@receive_timeout_ms @modal_function_timeout_ms + @transport_slack_ms`; the Finch call reads `@receive_timeout_ms`, and `modal_function_timeout_ms/0` mirrors `modal_app.py`'s `timeout=300`. One literal, one addition.
+- [x] Invariant test that fails when inverted — evidence: `vision_timeout_test.exs` asserts `receive >= modal` and that the slack is derived (>0, >=10s). Probe: setting `@receive_timeout_ms = @modal_function_timeout_ms - 90_000` (the literal inversion this issue is named for) → 2 failures incl. "the receive timeout is at least Modal's own function timeout"; restored → 20/20.
+- [x] Comment corrected — evidence: the stale comment now reads that the value is a backstop plus slack, not a quantile (client.ex:126).
+- [x] SSE knock-on stated — evidence: the module records the new worst case in `receive_timeout_ms/0`'s docs — the client now outlasts Modal, so the stream ceiling must clear `receive_timeout_ms`, not Modal's 300s alone.
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 **Depends on #349** (measure before sizing). Related to **#351**. Needs an owner wave assignment.
@@ -76,3 +76,11 @@ elixir-agent + vision/python agent.
 
 ## Progress Notes
 Filed 2026-07-31 by the lead. Both constants read directly from source; the contradiction is in `client.ex:64`'s own comment.
+
+## Progress Notes (review)
+- 2026-08-04: **staff-review: LGTM.** The judgement worth endorsing is the *refusal* to derive the
+  timeout from #349's p99 — the module argues, correctly, that a latency measurement taken when
+  nothing timed out cannot justify cutting the timeout, and makes the value a structural backstop
+  instead. The invariant (`receive >= modal`, from one source) is pinned by a test that the inversion
+  probe reddens. Modal's own timeout is mirrored, with a test asserting `modal_app.py` is readable
+  from here so the mirror is checkable rather than a number nobody verifies.
