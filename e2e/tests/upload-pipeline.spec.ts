@@ -990,7 +990,7 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
 
 test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
   // US-1.1.8 | Suite 1: Playwright
-  test("merge success shows edition count", async ({ page }) => {
+  test("merge success names the added edition", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page, { isDuplicate: true });
     await mockGetBook(page, FAKE_BOOK_ID, fakeBook());
@@ -1006,8 +1006,15 @@ test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
     // Click "Yes, merge"
     await page.getByRole("button", { name: "Yes, merge" }).click();
 
-    // Should show merge success with edition count
-    await expect(page.getByText(/2 editions/)).toBeVisible({
+    // The completion card names the edition the server actually wrote — its
+    // ISBN and format from the merge-format response — not a client-side
+    // "N editions" count, which was removed because it was computed as
+    // book.editionCount + 1 off a cache #355 found stale.
+    await expect(
+      page.getByText(
+        /The Paperback edition \(ISBN 9780151446476\) is now listed/
+      )
+    ).toBeVisible({
       timeout: 10_000,
     });
 
@@ -1048,7 +1055,11 @@ test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
 
     await page.getByRole("button", { name: "Yes, merge" }).click();
 
-    await expect(page.getByText(/2 editions/)).toBeVisible({
+    await expect(
+      page.getByText(
+        /The Paperback edition \(ISBN 9780151446476\) is now listed/
+      )
+    ).toBeVisible({
       timeout: 10_000,
     });
   });
