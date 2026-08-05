@@ -49,11 +49,11 @@ Router wiring: none. User-facing.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Door plays over the arrival, driven from `Arriving` — evidence: screenshot/recording + `animationsStarted > 0`
-- [ ] Persist-first guarantee intact — evidence: suite green + probe still red
-- [ ] Frozen-animation counterfactual: still authenticated, still navigated — evidence: spec output
-- [ ] `check-orphan-classes.sh` zero new; `check-css.sh` clean — evidence: outputs
-- [ ] `staff-review` verdict recorded below
+- [~] Door plays over the arrival, driven from `Arriving` — BUILT: `viewArrivalDoor : AuthState -> Html Msg` renders the scene (with the port's target ids `#bookshelf` etc.) from the shell over the destination on `Arriving _`, `text ""` on `Anonymous`/`Authenticated`. ⚠️ `animationsStarted > 0` **live drive owed at the epic coherence sweep** — not claimed from the code read (the code-read only shows the ids will be present for `getElementById`).
+- [x] Persist-first guarantee intact — evidence: `loginEffects` UNTOUCHED (diff confirms; `PersistAuth` first / `PlayDoorAnimation` last, ⛔ comment verbatim); `PersistFirstLoginTest` green AND its probe (remove `PersistAuth`) reddens `persist_first_no_animation_signal` — re-run 2026-08-05, reverted via Edit. No animation-finished message added to that suite.
+- [~] Frozen-animation counterfactual — SPEC BUILT in `e2e/tests/auth.spec.ts` (`#364` block) reusing #359's CDP `Animation.setPlaybackRate: 0` + unresolvable-`finished` technique, asserting the stall took hold before asserting still-authenticated-and-navigated; live run owed at the coherence sweep.
+- [x] `check-orphan-classes.sh` zero new; `check-css.sh` clean — evidence: orphans: 0; `check-css` 816 rules 0 problems 0 collisions.
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 **#359** (created this, and built the `Arriving` state this should use). Natural fit alongside **#363** (Wave 6's presentation sweep) or Wave 8's first-impressions work — needs an owner call on which.
@@ -64,3 +64,21 @@ elm-agent.
 ## Progress Notes
 Filed 2026-07-31 by the lead from #359's finding 1. The agent built #359 exactly as specified — the issue said three times that the animation must not gate anything — measured the cost (`animationsStarted=0`), documented it in-code, and reported it rather than smuggling in a redesign. That was the right call; this is the follow-through.
 Lead-verified: `PlayDoorAnimation` is present in `loginEffects` and ordered last, so the effect fires — the scene is simply unmounted by the time it runs.
+
+### Built 2026-08-05 (staff-review: LGTM, live drive owed)
+Implemented as #359's author proposed on the way out: the door is rendered from the SHELL during
+`AuthState.Arriving`, over the destination page, so the port's `getElementById` targets are present
+when it animates — rather than racing the login scene's unmount. `viewArrivalDoor` is a pure
+`AuthState -> Html Msg` (door on `Arriving`, `text ""` otherwise); the whole diff is additive (+253,
+no change to `loginEffects` or `currentAuth`). Reduced-motion: CSS hides `.arrival-door` and `app.js`
+short-circuits the port to `signalComplete()` — no dolly, credential already durable.
+
+**staff-review: LGTM.** The safety property is intact and independently confirmed: `loginEffects` is
+untouched in the diff, and the persist-first probe still reddens. The NEW behaviour's oracle
+(`DoorArrivalTest`) was **mutation-probed** — suppressing the `Arriving` render reds exactly
+`door_renders_while_arriving` + `door_animates_the_bookshelf` (the `#bookshelf` layer the port
+dollies); reverted via Edit, re-confirmed 19/0. Elm suite 1692/0; gates clean.
+
+⚠️ **Owed at the epic coherence sweep:** the actual `animationsStarted > 0` live drive + a recording of
+the dolly-shot, and a live run of the frozen counterfactual. The specs are built and parse; the
+measurement — the entire content of this issue — is NOT claimed from the code read.

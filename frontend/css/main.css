@@ -2696,6 +2696,30 @@ h4 {
     pointer-events: none;
 }
 
+/* -- Arrival door: the login dolly-shot rendered from the shell (#364) --
+
+   The same scene `layer-*` children as `.page--login`, but lifted above the
+   whole app so the dolly-shot plays OVER the destination page the reader just
+   landed on (Main.viewArrivalDoor, shown only while `AuthState` is `Arriving`).
+   `pointer-events: none` so a door that lingers past its animation — the
+   occluded-window backstop case — can never intercept a click on the page
+   underneath. It gates nothing, including the pointer. */
+.arrival-door {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* A reader who asked for no motion gets no dolly-shot: the door is decoration,
+   and `app.js` settles the arrival immediately under the same query. */
+@media (prefers-reduced-motion: reduce) {
+    .arrival-door {
+        display: none;
+    }
+}
+
 /* -- Login overlay + card -- */
 
 .login-overlay {

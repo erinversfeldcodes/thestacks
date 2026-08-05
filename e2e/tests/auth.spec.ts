@@ -417,6 +417,168 @@ test.describe("Login is not downstream of the door animation (#359)", () => {
   });
 });
 
+/**
+ * Issue #364 — the login door dolly-shot plays again, driven from the shell.
+ *
+ * #359 moved the credential off the animation frame by navigating away from the
+ * login scene on the update that decoded the 200 — which unmounted the door
+ * before the port's `requestAnimationFrame` callback could animate it. Measured
+ * live 2026-07-31: `animationsStarted=0`. #364 renders the door scene layers
+ * from the SHELL while `AuthState` is `Arriving`, over the destination page, so
+ * the ids the port targets are on screen again — without moving the credential
+ * back behind the animation.
+ *
+ * A literal occluded-window drive is NOT achievable under Playwright — #359
+ * measured that across three launch modes x two page-open methods: the page
+ * always reports `"visible"` and rAF keeps firing. So these reuse #359's
+ * technique rather than rediscovering it: instrument WAAPI to count the door's
+ * own animations, and for the counterfactual freeze the real timeline at the
+ * browser level (CDP `Animation.setPlaybackRate: 0`), asserting the stall took
+ * hold before asserting anything else.
+ */
+test.describe("The arrival door plays from the shell (#364)", () => {
+  /**
+   * Count WAAPI animations started on the door's OWN scene layers, leaving the
+   * real engine intact. Counting only the door ids — not every animation on the
+   * page — is what makes `> 0` mean "the shell rendered the door and the port
+   * animated it", the precise thing that measured 0 before this issue.
+   */
+  async function instrumentDoorAnimations(page): Promise<void> {
+    await page.addInitScript(() => {
+      const doorIds = new Set([
+        "bookshelf",
+        "bookshelfDim",
+        "passage",
+        "passageBright",
+        "vignette",
+        "wash",
+        "overlay",
+      ]);
+      (window as unknown as { __doorAnimations: number }).__doorAnimations = 0;
+      const realAnimate = Element.prototype.animate;
+      Element.prototype.animate = function (
+        this: Element,
+        ...args: unknown[]
+      ) {
+        if (doorIds.has(this.id)) {
+          (window as unknown as { __doorAnimations: number })
+            .__doorAnimations += 1;
+        }
+        return realAnimate.apply(this, args as Parameters<typeof realAnimate>);
+      };
+    });
+  }
+
+  /** Poll the door-animation counter until it climbs above zero, or give up. */
+  async function doorAnimationCount(page, deadlineMs: number): Promise<number> {
+    const start = Date.now();
+    let count = 0;
+    while (Date.now() - start < deadlineMs) {
+      count = await page.evaluate(
+        () =>
+          (window as unknown as { __doorAnimations: number }).__doorAnimations ||
+          0
+      );
+      if (count > 0) return count;
+      await page.waitForTimeout(25);
+    }
+    return count;
+  }
+
+  /**
+   * Does a freshly-started animation refuse to finish? Run before the frozen
+   * test's real assertions so a harness that quietly stops stalling animations
+   * FAILS rather than passes for the wrong reason (the #359 pattern).
+   */
+  async function stallProof(page): Promise<boolean> {
+    return page.evaluate(() => {
+      const probe = document.createElement("div");
+      document.body.appendChild(probe);
+      const animation = probe.animate([{ opacity: 1 }, { opacity: 0 }], {
+        duration: 30,
+      });
+      return Promise.race([
+        Promise.resolve(animation.finished).then(() => false),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 400)),
+      ]);
+    });
+  }
+
+  test("animationsStarted > 0: the dolly-shot animates the door over the destination", async ({
+    page,
+  }) => {
+    await instrumentDoorAnimations(page);
+
+    await page.goto("/login");
+    await page.fill('input[id="email"]', DEV_EMAIL);
+    await page.fill('input[id="password"]', DEV_PASSWORD);
+
+    const response = page.waitForResponse(
+      (r) => r.url().includes("/api/auth/login") && r.status() === 200
+    );
+    await page.getByTestId("login-submit").click();
+    await response;
+
+    // The shell renders the door only once navigation has put `AuthState` in
+    // `Arriving` over the destination page. Wait for that, then for the port's
+    // rAF to create the animations.
+    await page.waitForURL("**/antilibrary", { timeout: 15000 });
+
+    const count = await doorAnimationCount(page, 4000);
+    expect(
+      count,
+      "the door started zero animations — the dolly-shot is not playing over the arrival (#364)"
+    ).toBeGreaterThan(0);
+  });
+
+  test("frozen door: the dolly-shot starts but never finishes, and the reader still lands authenticated", async ({
+    page,
+    context,
+  }) => {
+    await instrumentDoorAnimations(page);
+
+    // Freeze the real animation timeline: the door animations are created and
+    // started (so the count still climbs) but their `finished` promises never
+    // settle — the occluded compositor's behaviour, reproduced at the engine.
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("Animation.enable");
+    await cdp.send("Animation.setPlaybackRate", { playbackRate: 0 });
+
+    await page.goto("/login");
+
+    const stalled = await stallProof(page);
+    expect(
+      stalled,
+      "the animation timeline is not frozen — this test must not pass without reproducing the condition"
+    ).toBe(true);
+
+    await page.fill('input[id="email"]', DEV_EMAIL);
+    await page.fill('input[id="password"]', DEV_PASSWORD);
+
+    const response = page.waitForResponse(
+      (r) => r.url().includes("/api/auth/login") && r.status() === 200
+    );
+    await page.getByTestId("login-submit").click();
+    await response;
+
+    // Still navigated: the frozen door gated nothing.
+    await page.waitForURL("**/antilibrary", { timeout: 15000 });
+
+    // The door DID start, shell-rendered over the destination — this is really
+    // the frozen dolly-shot, not an empty scene that trivially "cannot gate".
+    const count = await doorAnimationCount(page, 4000);
+    expect(
+      count,
+      "the door never started, so this is not exercising the frozen dolly-shot (#364)"
+    ).toBeGreaterThan(0);
+
+    // ...and the reader is authenticated regardless: the session survives a
+    // reload while the animation is still frozen mid-play.
+    await page.reload();
+    await expect(page.getByTestId("user-menu")).toBeVisible({ timeout: 15000 });
+  });
+});
+
 test.describe("Session expiry", () => {
   test("an expired/revoked token redirects to login with a session-expired notice on the next authed action", async ({
     page,

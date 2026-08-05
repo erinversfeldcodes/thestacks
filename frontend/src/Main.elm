@@ -37,6 +37,7 @@ port module Main exposing
     , shouldShowOnboarding
     , storedSession
     , toggleNavMenu
+    , viewArrivalDoor
     , viewConnectivity
     , viewFooter
     , viewHome
@@ -3461,8 +3462,61 @@ view model =
                 [ viewPage model ]
             , viewFooter
             ]
+        , viewArrivalDoor model.auth
         ]
     }
+
+
+{-| The login door dolly-shot, rendered from the SHELL over the destination page
+for exactly the `Arriving` window (#364).
+
+⛔ This is the observable job `Arriving` was carved for. #359 moved the
+credential off the animation frame by navigating away from the login scene on
+the SAME update that decodes the `200`; that unmounts `Page.Login`'s scene
+layers before the `playLoginTransition` port's `requestAnimationFrame` callback
+runs, so the dolly-shot started **zero** animations (`animationsStarted=0`,
+driven live 2026-07-31). The layers live here instead, keyed on `AuthState`, so
+the exact element ids the port animates are present over the destination page
+while the arrival settles and gone the instant it does.
+
+The animation still cannot gate anything: rendering is downstream of `auth`,
+which `completeLogin` already put in `Arriving` with the token persisted, and
+`Arriving` answers `currentAuth` identically to `Authenticated`. If
+`ArrivalSettled` never comes (occluded window, sleeping machine) the door simply
+lingers behind a session that is already durable — it is `pointer-events: none`
+so it cannot even intercept a click while it does — and the backstop timer
+retires it regardless.
+
+The ids and `layer-*` classes mirror `Page.Login.view`'s scene because
+`app.js`'s port targets them by id; the login card/overlay is deliberately NOT
+rendered — the reader has already stepped through the door, so there is nothing
+left to fade. `Anonymous` and `Authenticated` render nothing, which is what
+removes the door at both ends of the arrival.
+
+-}
+viewArrivalDoor : AuthState -> Html Msg
+viewArrivalDoor authState =
+    case authState of
+        Arriving _ ->
+            div
+                [ class "arrival-door"
+                , attribute "aria-hidden" "true"
+                , testId "arrival-door"
+                ]
+                [ div [ class "layer-arrival" ] []
+                , div [ class "layer-passage", id "passage" ] []
+                , div [ class "layer-passage-bright", id "passageBright" ] []
+                , div [ class "layer-bookshelf", id "bookshelf" ] []
+                , div [ class "layer-bookshelf-dim", id "bookshelfDim" ] []
+                , div [ class "layer-vignette", id "vignette" ] []
+                , div [ class "layer-wash", id "wash" ] []
+                ]
+
+        Anonymous ->
+            text ""
+
+        Authenticated _ ->
+            text ""
 
 
 {-| The document title, derived from the page that is actually on screen.

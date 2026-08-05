@@ -389,6 +389,19 @@ if (app.ports && app.ports.playLoginTransition) {
       }
     }
 
+    // Respect prefers-reduced-motion (#364). The dolly-shot is pure decoration
+    // and the credential is already durable, so a reader who asked for no motion
+    // gets none: settle immediately so Elm retires `Arriving` and the shell drops
+    // the door layers (which CSS also hides under the same query) without playing
+    // a single animation. Gating nothing means this path is safe too.
+    if (
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      signalComplete();
+      return;
+    }
+
     // Rule 2. Elm arms its own backstop as well; this one keeps the JS side from
     // holding a promise nobody will ever settle.
     setTimeout(signalComplete, dur + 1000);
