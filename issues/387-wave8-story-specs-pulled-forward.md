@@ -73,11 +73,11 @@ n/a — the stories are the pre-check for #318; their job is to exist and be tru
 | 1–13 | no | n/a — documentation |
 
 ## Definition of Done
-- [ ] US-14.1.2 describes the D2 flow + the adaptable-steps constraint, with an experiential section — evidence: the file diff
-- [ ] US-15.1.1 no longer denies the shipped home; describes collection-routing — evidence: grep the old drift language is gone
-- [ ] US-18.1.1 describes the Looking-for-a-Home room, reconciled with #318 — evidence: the file diff
-- [ ] `implementation-mapping.md` rows for the three updated and consistent — evidence: diff + a census spot-run
-- [ ] `staff-review` verdict recorded below
+- [x] US-14.1.2 describes the D2 flow + the adaptable-steps constraint, with an experiential section — evidence: rewritten to Welcome→Upload→Consent→Done; the data-driven-steps requirement is AC #2 (verbatim: "an ordered list of step descriptors the view folds over, NOT hardcoded branches … reviewed acceptance criterion"); §12 now describes `steps : List Step` + `currentIndex`.
+- [x] US-15.1.1 no longer denies the shipped home; describes collection-routing — evidence: `grep -niE "known drift|auto-redirect|confirm the need"` → clean; §1 now "two faces of one route", authed = shelf preview / continue-reading / persistent Add-Book CTA (reusing existing bookshelf reads, no bespoke endpoint).
+- [x] US-18.1.1 describes the Looking-for-a-Home room, reconciled with #318 — evidence: §1/§12 now "a real room in the shelf-room family (wallpaper/wood/brass-label/lamplight), pile-view staged inside it"; data/API/age-gate sections untouched.
+- [x] `implementation-mapping.md` rows for the three updated and consistent — evidence: diff scoped to the US-14.1.2 / US-15.1.1 / US-18.1.1 rows only (other US-IDs in the diff are dependency citations inside those rows, not separate edits); the rest left for #320.
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 - Pulled forward from **#320** (phases 2–3); #320 records these as done when it runs. Reason: spec-before-build for Wave 8.
@@ -91,3 +91,13 @@ docs/elm-agent (experiential story authoring); owner reviews the amended story f
 Filed 2026-08-05. Pulled forward from #320 per the owner's Wave 8 kickoff decision, so onboarding and
 the homes build against a truthful spec rather than a self-denying one. About-page copy (the other
 Milestone B content input for 8c) is drafted for owner editing at `plans/318-about-page-copy-draft.md`.
+
+**Implemented + staff-review: LGTM** (2026-08-05). All three stories amended and the mapping updated;
+diff reviewed and verified scoped to the three stories' own rows (the other US-IDs in the mapping diff
+are dependency citations inside those rows). The load-bearing wins: US-14.1.2's data-driven-steps
+constraint is a *reviewed* acceptance criterion, not prose (the #318 onboarding child must be built and
+reviewed for it); US-15.1.1's authed home reuses existing `GET /api/bookshelves/:name` reads rather
+than a bespoke endpoint (no new surface to secure); US-18.1.1 keeps the pile-view but stages it inside
+the shelf-room family. Two honest corrections by the author: the consent story is `US-8.3` (US-8.1.3 is
+file-less) — both cited; and the narrative `user-stories.md` has no entries at these IDs, so the per-file
+docs are the single home. No code touched. This unblocks #318 phases 8b (onboarding) and 8c-homes.

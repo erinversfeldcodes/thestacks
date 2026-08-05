@@ -203,12 +203,12 @@ Each cell indicates the role: **R** = Read, **W** = Write, **RW** = Read/Write, 
 | US-9.8.1 | R (availability display) | R (partner inventory) | -- | -- | R (partner_inventory, book_editions) | -- | -- |
 | US-11.1.5 | R (group feed) | R (aggregated content) | -- | -- | R (blog_posts, bookshelf_placements, groups, group_members, user_blocks) | -- | -- |
 | US-14.1.1 | RW (registration form) | RW (account creation) | -- | -- | W (users, audit_log) | -- | -- |
-| US-14.1.2 | RW (onboarding overlay) | RW (upload + confirm + onboarding flag) | RW (vision) | -- | RW (users, books, book_editions, bookshelf_placements) | -- | Modal, Open Library, Google Books |
+| US-14.1.2 | RW (data-driven onboarding overlay: Welcome/Upload/Consent/Done) | RW (upload + confirm + consent + onboarding steps) | RW (vision) | -- | RW (users incl. consent flags/timestamps, books, book_editions, bookshelf_placements) | -- | Modal, Open Library, Google Books |
 | US-14.2.1 | RW (login form) | RW (authentication) | -- | -- | R (users), W (audit_log) | -- | -- |
 | US-14.3.1 | R (nav state) | R (current user) | -- | -- | R (users) | -- | -- |
 | US-14.3.2 | R (token refresh) | RW (token lifecycle) | -- | -- | R (users) | -- | -- |
 | US-14.3.3 | RW (dropdown menu + sign out) | RW (token revocation) | -- | -- | W (audit_log) | -- | -- |
-| US-15.1.1 | R (landing page or redirect) | R (auth check) | -- | -- | R (users) | -- | -- |
+| US-15.1.1 | R (landing / collection-routing home) | R (auth check + shelf preview) | -- | -- | R (bookshelves, bookshelf_placements when authed) | -- | -- |
 | US-15.2.1 | RW (navigation + user dropdown) | -- | -- | -- | -- | -- | -- |
 | US-15.2.2 | RW (swipe nav) | -- | -- | -- | -- | -- | -- |
 | US-15.3.1 | R (footer) | -- | -- | -- | -- | -- | -- |
@@ -1673,19 +1673,19 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | 3-step guided flow after first registration: Welcome → Upload first book → Choose shelf. Dismissable. Sets `onboarding_completed` flag on completion or skip. |
+| **Summary** | The **D2 flow** — a 4-step guided overlay after first registration: **Welcome → Upload your first book → Consent → Done**. The Upload step is a *real* US-1.1.1 upload; the Consent step collects analytics + writing-assistant consent (`Stacks.GDPR.Consent`, timestamps preserved). ⚠️ **Steps are data-driven** — an ordered list the view folds over, not hardcoded branches, so a step can be added/reordered/removed without rewriting the flow (reviewed acceptance criterion). Dismissable; Skip persists by the same path as advance. Maps client steps onto the server `onboarding_steps` model (#149). |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Components.OnboardingOverlay` — fullscreen overlay with progress dots. `OnboardingStep` type: `Welcome | UploadFirst | PlaceFirst`. Step 2 embeds the standard upload flow inline. "Skip" link always visible. Cinematic aesthetic: slow zoom into empty shelf that fills with first book. |
-| **Backend (Phoenix)** | Reuses `StacksWeb.UploadController.identify/2` and `StacksWeb.BookController.confirm/2` for the inline upload. `Stacks.Accounts.complete_onboarding/1` — sets `users.onboarding_completed = true`. `StacksWeb.AuthController.register/2` returns `onboarding_completed: false` to trigger the flow. |
-| **Database** | **Write:** `op.users` (onboarding_completed). Plus all writes from US-1.1.1 if the user uploads a book. |
-| **Jobs (Oban)** | Same as US-1.1.1 if a book is uploaded. |
-| **External Services** | Same as US-1.1.1 if a book is uploaded. |
+| **Frontend (Elm)** | `Components.OnboardingOverlay` — fullscreen overlay whose flow is **`steps : List Step` + `currentIndex`** (descriptors `Welcome | UploadFirstBook | Consent | Done`), NOT a hardcoded enum-transition chain; progress dots derive from list length. The Upload step embeds the real US-1.1.1 upload/identify sub-view; the Consent step embeds the consent toggles (`POST /api/gdpr/consent`). "Skip" always visible and persists identically to advancing. |
+| **Backend (Phoenix)** | Reuses `StacksWeb.UploadController.create/2` + the confirm/placement flow for the inline upload, and `StacksWeb.GDPRController.update_consent/2` for the Consent step. Server step granularity via `PUT /api/onboarding/step/:step` / `GET /api/onboarding/status` and `Stacks.Accounts.complete_onboarding_step/2` (#149); `onboarding_completed` is a `GENERATED ALWAYS AS` column. |
+| **Database** | **Write:** `op.users` (`onboarding_steps`, and `consent_analytics`/`consent_writing_assistant` + `_at` timestamps if granted). Plus all writes from US-1.1.1 if the user uploads a book. |
+| **Jobs (Oban)** | Same as US-1.1.1 if a book is uploaded; `WritingAssistantDataPurgeWorker` only on a later revoke (not from onboarding grants). |
+| **External Services** | Same as US-1.1.1 if a book is uploaded (Modal, Open Library, Google Books). |
 | **dbt Models** | `int_onboarding_completion_rate`. |
 | **Infrastructure** | None additional. |
-| **Dependencies** | US-14.1.1 (registration), US-1.1.1 (upload flow for step 2). |
+| **Dependencies** | US-14.1.1 (registration), US-1.1.1 (upload flow for the Upload step), US-8.3 (consent for the Consent step), #149 (server step model). |
 
 ---
 
@@ -1745,15 +1745,15 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Dimension | Detail |
 |-----------|--------|
-| **Summary** | Authenticated users are immediately redirected to `/antilibrary`. Unauthenticated users see a static landing page with "Sign In" CTA. The home page is not a dashboard — it's a portal for unauthenticated visitors only. |
+| **Summary** | Two faces of one route (`/`), no forced redirect. **Unauthenticated:** a welcoming static landing (title, subtitle, About + Marketplace CTAs, #235). **Authenticated:** routes the reader into their collection — proposed widget set (confirmed in 8c, #318): a shelf preview, a continue-reading entry point, and a persistent Add-Book CTA. Resolves the former "authed home does nothing useful" drift. |
 | **Phase** | Phase 1 (MVP) |
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | Route handler checks auth state: if authenticated, redirect to `/antilibrary`; if not, render static landing with title, subtitle, and "Sign In" button. |
-| **Backend (Phoenix)** | None additional (routing is client-side). |
-| **Database** | None. |
-| **Dependencies** | US-14.3.1 (auth state determines redirect). |
+| **Frontend (Elm)** | Home view branches on auth state. Unauthenticated → static landing (title, subtitle, `home__link--about` → `/about`, `home__link--marketplace` → `/marketplace`). Authenticated → collection-routing home (shelf preview in the shelf-room aesthetic, continue-reading into the Reading Pile, persistent primary Add-Book CTA); holds a small `RemoteData` preview field. Exact widget composition finalised in 8c (#318). |
+| **Backend (Phoenix)** | Unauthenticated → none (SPA catch-all serve). Authenticated → a lightweight shelf-preview read reusing existing bookshelf reads (`GET /api/bookshelves/:name`, US-1.2.1/US-1.2.4); no bespoke endpoint required. |
+| **Database** | Unauthenticated → none. Authenticated → **Read:** `op.bookshelves`, `op.bookshelf_placements` for the shelf preview / continue-reading data. |
+| **Dependencies** | US-14.3.1 (auth state selects the variant), US-1.2.1/US-1.2.4 (shelf reads reused by the preview), US-1.1.1 (Add-Book CTA target). |
 
 ---
 
@@ -1958,7 +1958,7 @@ See [ADR 013](decisions/013-marketplace-classifieds-first.md) for the decision t
 
 | Layer | Components |
 |-------|------------|
-| **Frontend (Elm)** | `Page.Bookshelf.LookingForHome` module. Uses `CommunityWear` type (not `SpineWear`) for spine rendering. Warm, transitional aesthetic (window ledge / market stall). |
+| **Frontend (Elm)** | `Page.Bookshelf.LookingForHome` module. Renders as a **real room in the shelf-room family** (shared wallpaper / wood / brass-plate label / lamplight, per US-1.2.1), with a **pile-view of face-out cover cards staged inside that room** — not a flat page. Warm, transitional market-stall / windowsill character; uses `CommunityWear` for wear signalling. Room-class alignment settled by #318's "Looking-for-a-Home gets its room" treatment. |
 | **Backend (Phoenix)** | `Stacks.Shelving` context, bookshelf_name `:looking_for_home`. `Stacks.Books.community_read_count/1` — reads from `wh.mart_community_read_count` to determine community wear level. `StacksWeb.BookshelfController.show/2`. |
 | **Database** | **Read:** `op.bookshelves`, `op.bookshelf_placements`, `op.books`, `op.book_editions`. **Read:** `wh.mart_community_read_count` (aggregate read stats). |
 | **Jobs (Oban)** | None directly. `mart_community_read_count` is refreshed by dbt on schedule. |
