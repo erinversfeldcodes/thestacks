@@ -173,7 +173,23 @@ async function gotoShelf(page: Page, path: string): Promise<void> {
 }
 
 async function clickShelf(page: Page, href: string): Promise<void> {
-  const link = page.locator(`a.app-nav__link[href="${href}"]`);
+  // Wave 8 (#318 TR-1) moved the five shelf links INSIDE a "Bookshelves"
+  // disclosure — a real <button aria-haspopup> whose menu is absent from the
+  // DOM until it is clicked open. So the navigation step is now: open the
+  // disclosure, then click the shelf link. Opening the disclosure only toggles
+  // `openNavMenu`; it does NOT touch `main`'s class, so it adds no spurious
+  // sample to the transition recording started before this call. A navigation
+  // does not reset `openNavMenu`, so on a repeat call the menu may already be
+  // open — open only when it is closed.
+  const trigger = page.locator(
+    'button.app-nav__disclosure:has-text("Bookshelves")'
+  );
+  await expect(trigger).toBeVisible({ timeout: 5000 });
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.click();
+  }
+
+  const link = page.locator(`a.app-nav__dropdown-link[href="${href}"]`);
   await expect(link).toBeVisible({ timeout: 5000 });
   await link.click();
   // Exact pathname match via a predicate rather than `new RegExp(href)`:

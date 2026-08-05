@@ -11,10 +11,18 @@ test.describe("Looking for a Home page", () => {
     ).toBeVisible({ timeout: 10000 });
   });
 
-  test("page title is visible", async ({ page }) => {
+  test("the room's brass label carries the shelf name", async ({ page }) => {
     await page.goto("/looking-for-home");
     await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
-    await expect(page.locator(".page__title")).toContainText("Looking for a Home");
+
+    // 8c rebuilt this shelf as a room in the shelf-room family (US-18.1.1): the
+    // flat `h1.page__title` was intentionally removed in favour of a brass-plate
+    // label rendered INSIDE the room scaffold (viewShelfLabel → .shelf-label).
+    await expect(page.locator(".shelf-room")).toBeVisible();
+    const label = page.locator(".shelf-room .shelf-label");
+    await expect(label).toContainText("Looking for a Home");
+    // The removed flat page title must not have crept back.
+    await expect(page.locator("h1.page__title")).toHaveCount(0);
   });
 
   test("empty state matches US-1.6.5 wording", async ({ page }) => {

@@ -76,21 +76,29 @@ test.describe("Login Page Aesthetic", () => {
     await expect(page.locator('input[id="password"]')).toBeVisible();
   });
 
-  test("navbar shows only Costs and Sign In when not authenticated", async ({
+  test("navbar shows the unauthenticated top-level links (Catalogue/Search/Marketplace/About/Sign In)", async ({
     page,
   }) => {
     await page.goto("/login");
 
-    // Sign In link should be visible
-    await expect(page.locator('a[href="/login"]')).toBeVisible();
+    // The Wave 8 unauth nav (#318) is a flat row of top-level links — Search and
+    // Marketplace are now top-level here too (no disclosures for a signed-out
+    // visitor).
+    await expect(page.locator('a.app-nav__link[href="/login"]')).toBeVisible();
+    await expect(
+      page.locator('a.app-nav__link[href="/catalogue"]')
+    ).toBeVisible();
+    await expect(page.locator('a.app-nav__link[href="/search"]')).toBeVisible();
+    await expect(
+      page.locator('a.app-nav__link[href="/marketplace"]')
+    ).toBeVisible();
+    await expect(page.locator('a.app-nav__link[href="/about"]')).toBeVisible();
 
-    // Catalogue link should be visible in nav
-    await expect(page.locator('a[href="/catalogue"]')).toBeVisible();
-
-    // Authenticated-only nav items should not be visible
+    // Authenticated-only surfaces stay hidden, and there is no disclosure
+    // trigger at all in the unauth nav.
     await expect(page.locator('a[href="/upload"]')).not.toBeVisible();
     await expect(page.locator('a[href="/library"]')).not.toBeVisible();
-    await expect(page.locator('a[href="/search"]')).not.toBeVisible();
+    await expect(page.locator("button.app-nav__disclosure")).toHaveCount(0);
   });
 
   test("login card has parchment styling and ARIA attributes", async ({

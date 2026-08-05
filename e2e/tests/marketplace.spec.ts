@@ -142,14 +142,24 @@ test.describe("Marketplace — unauthenticated browse", () => {
 test.describe("Marketplace — authenticated", () => {
   test.use({ storageState: suiteAuthFile("catalogue") });
 
-  test("Marketplace nav link is visible when authenticated", async ({
+  test("Marketplace nav entry is visible when authenticated", async ({
     page,
   }) => {
     await page.goto("/library");
     await page.waitForSelector(".app-nav__link", { timeout: 10000 });
+
+    // Marketplace is a disclosure BUTTON now (#318 TR-1), not a top-level link;
+    // its Browse/Create/Mine links live behind it. Assert the entry point is
+    // present, then open it and confirm Browse points at /marketplace.
+    const marketplace = page.locator(
+      'button.app-nav__disclosure:has-text("Marketplace")'
+    );
+    await expect(marketplace).toBeVisible();
+    await marketplace.click();
+    await expect(marketplace).toHaveAttribute("aria-expanded", "true");
     await expect(
-      page.locator('a.app-nav__link[href="/marketplace"]')
-    ).toBeVisible();
+      page.locator('a.app-nav__dropdown-link[href="/marketplace"]')
+    ).toBeVisible({ timeout: 5000 });
   });
 
   test("active listing appears on browse page and shows contact info on detail", async ({

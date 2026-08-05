@@ -75,9 +75,9 @@ test.describe("Public transparency page (/metrics)", () => {
   }) => {
     await page.goto("/");
 
-    // Home → About via the brand dropdown.
-    await page.locator(".app-nav__dropdown").first().hover();
-    const aboutLink = page.locator('a.app-nav__dropdown-link[href="/about"]');
+    // Home → About: About is a top-level nav item in the Wave 8 nav (#318), a
+    // plain link — the brand/hover dropdown it used to sit under is gone.
+    const aboutLink = page.locator('a.app-nav__link[href="/about"]');
     await expect(aboutLink).toBeVisible({ timeout: 10_000 });
     await aboutLink.click();
     await expect(page).toHaveURL((url) => url.pathname === "/about");

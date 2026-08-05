@@ -68,22 +68,28 @@ test.describe("Settings — Privacy & Consent", () => {
     await page.goto("/settings/consent");
     await page.getByTestId('settings-hub').waitFor({ timeout: 5000 });
 
-    // The clickable save button (Consent.elm renders "Save Preferences" in the
-    // idle state and only wires onClick there — not in the Loading/Success states).
-    const saveBtn = page.locator(".settings-actions button");
+    // #318 TR-4: consent folded into Privacy. /settings/consent 302-redirects to
+    // /settings/privacy, where the consent controls render inside a
+    // `.settings-consent` section. The Privacy page carries SEVERAL
+    // `.settings-actions` blocks (profile visibility, export, shelf visibility),
+    // so the consent save button must be scoped to the consent section — an
+    // unscoped `.settings-actions button` matches many and clicks the wrong one.
+    const consent = page.locator(".settings-consent");
+    const saveBtn = consent.locator(".settings-actions button");
     await expect(saveBtn).toBeVisible();
 
-    // Toggle analytics so there's a change to persist, then save.
+    // Toggle analytics so there's a change to persist, then save. (Analytics is
+    // staged behind Save — only the Save click posts to /api/gdpr/consent.)
     await page.getByTestId("analytics-consent-toggle").click();
     await saveBtn.click();
 
-    // On success Consent.elm swaps the button label to "Saved!" (Consent.elm:110-112).
+    // On success SaveButton swaps the label to "Saved!".
     await expect(
-      page.getByRole("button", { name: "Saved!" })
+      consent.getByRole("button", { name: "Saved!" })
     ).toBeVisible({ timeout: 5000 });
 
-    // And no error paragraph should be present.
-    await expect(page.locator(".error")).toHaveCount(0);
+    // And no error paragraph in the consent section.
+    await expect(consent.locator(".error")).toHaveCount(0);
   });
 
   test("save failure surfaces the error message", async ({ page }) => {
@@ -100,7 +106,10 @@ test.describe("Settings — Privacy & Consent", () => {
       })
     );
 
-    const saveBtn = page.locator(".settings-actions button");
+    // Scoped to the consent section inside the Privacy page (see the success
+    // test above for why an unscoped `.settings-actions button` is ambiguous).
+    const consent = page.locator(".settings-consent");
+    const saveBtn = consent.locator(".settings-actions button");
     await expect(saveBtn).toBeVisible();
 
     await page.getByTestId("analytics-consent-toggle").click();
@@ -110,7 +119,7 @@ test.describe("Settings — Privacy & Consent", () => {
     // a status the app cannot interpret — so it says so rather than issuing the
     // one "Could not save preferences. Please try again." it used to give a 422,
     // a dropped connection and a timeout alike.
-    await expect(page.locator(".error")).toContainText(
+    await expect(consent.locator(".error")).toContainText(
       "We could not save your consent preferences, and we cannot say why."
     );
   });
@@ -525,20 +534,24 @@ async function dismissOnboarding(page: Page): Promise<void> {
 test.describe("Settings — Hub layout & navigation", () => {
   test.use({ storageState: suiteAuthFile("settings") });
 
-  // The seven sidebar links, in render order (Page/Settings.elm:56-65). The last
-  // one, "Your Data Insights", points OUTSIDE the /settings/* prefix at
-  // /me/insights (Route.toPath Insights) but still renders inside the hub chrome.
+  // The six sidebar links, in render order across the three groups
+  // (Page/Settings.elm navGroups, #318 TR-4): You → Privacy → Your data.
+  // Consent folded into "Privacy & consent" (/settings/privacy). The last link,
+  // "Your Data Insights", points OUTSIDE the /settings/* prefix at /me/insights
+  // (Route.toPath Insights) but still renders inside the hub chrome.
   const SIDEBAR = [
     { label: "Profile", path: "/settings/profile" },
     { label: "Password", path: "/settings/password" },
     { label: "Notifications", path: "/settings/notifications" },
-    { label: "Consent", path: "/settings/consent" },
-    { label: "Privacy", path: "/settings/privacy" },
+    { label: "Privacy & consent", path: "/settings/privacy" },
     { label: "Audit Log", path: "/settings/audit-log" },
     { label: "Your Data Insights", path: "/me/insights" },
   ];
 
-  test("/settings renders the hub in place with the 7-link sidebar and profile default", async ({
+  // The three group headings, in render order.
+  const GROUP_HEADINGS = ["You", "Privacy", "Your data"];
+
+  test("/settings renders the hub in place with the grouped sidebar and profile default", async ({
     page,
   }) => {
     await page.goto("/settings");
@@ -555,7 +568,11 @@ test.describe("Settings — Hub layout & navigation", () => {
       page.getByRole("button", { name: "Save Profile" })
     ).toBeVisible();
 
-    // Exactly seven sidebar links, in order, with the expected labels.
+    // The grouped nav (#318 TR-4): three group headings, then the six links in
+    // render order across them.
+    await expect(page.locator(".settings-hub__group-heading")).toHaveText(
+      GROUP_HEADINGS
+    );
     const links = page.locator(".settings-hub__nav-link");
     await expect(links).toHaveText(SIDEBAR.map((i) => i.label));
   });
@@ -577,16 +594,18 @@ test.describe("Settings — Hub layout & navigation", () => {
       await page.waitForURL(`**${item.path}`);
       // The hub chrome persists across the sub-route change...
       await expect(page.getByTestId("settings-hub")).toBeVisible();
-      // ...and the clicked item is the one marked active (viewSidebarItem
-      // compares currentRoute == item.route — a real route change, not a class
-      // flip in isolation).
+      // ...and the clicked item is the one marked active. Active state is now
+      // `aria-current="page"` on the link (#318 TR-4), the single source of
+      // truth for both a11y and styling — not the old `--active` class flip.
+      // (viewSidebarItem sets it from currentRoute == item.route — a real route
+      // change, not a class flip in isolation.)
       await expect(
-        page.locator("li.settings-hub__nav-item--active")
+        page.locator('.settings-hub__nav-link[aria-current="page"]')
       ).toHaveText(item.label);
     }
   });
 
-  test("mobile <select> lists the 7 options and selecting one navigates", async ({
+  test("no mobile <select> at a narrow viewport — the grouped nav reflows and still navigates", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 375, height: 800 });
@@ -595,11 +614,19 @@ test.describe("Settings — Hub layout & navigation", () => {
       timeout: 10000,
     });
 
-    const select = page.locator(".settings-hub__mobile-select");
-    await expect(select.locator("option")).toHaveCount(7);
+    // 8d DELETED the mobile <select>: ONE nav idiom for every viewport, reflowed
+    // from a sidebar to a stacked, wrapping row by a @media (max-width:768px)
+    // CSS rule (Page/Settings.elm viewNav). Prove the <select> is gone…
+    await expect(page.locator(".settings-hub__mobile-select")).toHaveCount(0);
 
-    // Selecting an option fires onInput → SettingsMobileNavChanged → pushUrl.
-    await select.selectOption("/settings/notifications");
+    // …and that the SAME grouped links remain present and navigable at this
+    // width (the reflow is CSS-only — the DOM is one nav for all viewports).
+    const links = page.locator(".settings-hub__nav-link");
+    await expect(links).toHaveText(SIDEBAR.map((i) => i.label));
+
+    await page
+      .locator(".settings-hub__nav-link", { hasText: "Notifications" })
+      .click();
     await page.waitForURL(/\/settings\/notifications$/);
     await expect(page.getByTestId("settings-hub")).toBeVisible();
   });

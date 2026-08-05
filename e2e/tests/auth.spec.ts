@@ -90,11 +90,11 @@ test.describe("Authentication", () => {
     // waitForURL is more reliable than toHaveURL here — Nav.pushUrl is async
     await page.waitForURL("**/antilibrary", { timeout: 15000 });
 
-    // The upload link is inside the Catalogue dropdown — hover to reveal it.
-    // Use the nav link to preserve Elm's in-memory auth state.
-    // A full page.goto("/upload") would reload and reset the model to auth=Nothing.
-    await page.hover('.app-nav__dropdown .app-nav__link:has-text("Catalogue")');
-    await page.click('a[href="/upload"]');
+    // Add Book is a PERSISTENT primary action in the nav now (#318 TR-1) —
+    // always visible, no Catalogue hover/disclosure to open. Click it (an
+    // in-app nav link) to reach /upload while preserving Elm's in-memory auth
+    // state; a full page.goto("/upload") would reload the SPA.
+    await page.click('a.app-nav__add-book[href="/upload"]');
     await page.waitForURL("/upload");
 
     // Should show the upload area, not the auth-required prompt
@@ -104,28 +104,22 @@ test.describe("Authentication", () => {
 });
 
 test.describe("Owner-only admin navigation", () => {
-  test("the platform owner sees the Admin dropdown (Sources/Scrapers)", async ({
+  test("the platform owner sees the Admin disclosure (Sources/Scrapers)", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
-    // navDropdown renders the "Admin" primary as a dropdown toggle link that
-    // points at the sources page (the in-app metrics dashboard was removed in
-    // #267 — superseded by Grafana); the Sources/Scrapers sub-links live in a
-    // sibling <ul class="app-nav__dropdown-menu"> that CSS keeps display:none
-    // until the dropdown is hovered (or focus-within). Target the toggle by
-    // its accessible role/name, then hover to reveal the sub-links.
-    const adminToggle = page.getByRole("link", { name: "Admin", exact: true });
+    // Admin is a disclosure BUTTON now (#318 TR-1), not a hover-revealed
+    // dropdown link: a real <button class="app-nav__disclosure" aria-haspopup>
+    // whose Sources/Scrapers/… sub-links are absent from the DOM until it is
+    // clicked open. The CSS :hover reveal is gone (it was unreachable on touch).
+    const adminToggle = page.locator(
+      'button.app-nav__disclosure:has-text("Admin")'
+    );
     await expect(adminToggle).toBeVisible();
-    await expect(adminToggle).toHaveAttribute("href", "/admin/sources");
+    await adminToggle.click();
+    await expect(adminToggle).toHaveAttribute("aria-expanded", "true");
 
-    // Hovering the toggle reveals the dropdown menu (:hover -> display:block).
-    await adminToggle.hover();
-
-    // Scope to the dropdown SUB-links (`app-nav__dropdown-link`): the "Admin"
-    // toggle ALSO has href="/admin/sources" (it points at the sources page), so
-    // an unscoped `a[href="/admin/sources"]` matches 2 elements and trips
-    // Playwright strict mode. The sub-link is the one carrying text "Sources".
     const sources = page.locator(
       'a.app-nav__dropdown-link[href="/admin/sources"]'
     );
