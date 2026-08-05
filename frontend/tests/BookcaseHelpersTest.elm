@@ -17,6 +17,7 @@ at the real bookcase inner width (990px) rather than a toy `maxWidth`, and the
 import Components.Spine exposing (WearLevel(..))
 import Expect
 import Html
+import Html.Attributes
 import Page.Bookshelf.Helpers exposing (groupIntoRows, minShelfRows, viewShelfRow)
 import ProgramTest
 import Test exposing (Test, describe, test)
@@ -35,7 +36,36 @@ suite =
         , minShelfRowsPadding
         , productionWidthDrivenThroughThePage
         , noPageCountFallsBackToMinimumWidth
+        , shelfLabelPluralisation
         ]
+
+
+{-| The shelf's `role="list"` container carries an `aria-label` a screen reader
+reads verbatim, so its grammar is heard, not just seen (#318 TR-6). A one-book
+shelf must say "1 book", not "1 books"; two must say "2 books". Both directions
+are asserted so the test fails on the old naive `String.fromInt n ++ " books"`.
+-}
+shelfLabelPluralisation : Test
+shelfLabelPluralisation =
+    describe "viewShelfRow aria-label pluralises the book count"
+        [ test "one_book_is_singular: a shelf of one book says '1 book'" <|
+            \_ ->
+                viewShelfRow Softened [ testPlacement ]
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "shelf-row__books" ]
+                    |> Query.has [ shelfAriaLabel "Shelf — 1 book" ]
+        , test "two_books_are_plural: a shelf of two books says '2 books'" <|
+            \_ ->
+                viewShelfRow Softened [ testPlacement, testPlacement ]
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "shelf-row__books" ]
+                    |> Query.has [ shelfAriaLabel "Shelf — 2 books" ]
+        ]
+
+
+shelfAriaLabel : String -> Selector.Selector
+shelfAriaLabel value =
+    Selector.attribute (Html.Attributes.attribute "aria-label" value)
 
 
 {-| A shelf row must include a .shelf-row\_\_lip element after the plank.

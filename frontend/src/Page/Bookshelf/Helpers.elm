@@ -16,6 +16,7 @@ import Html.Attributes exposing (attribute, class, id, style, tabindex)
 import Html.Events exposing (onClick)
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement as Placement exposing (Placement)
+import Util.Plural
 
 
 {-| Pick a texture deterministically from the title.
@@ -100,7 +101,7 @@ viewShelfRow wearLevel placements =
             List.length placements
 
         shelfAriaLabel =
-            "Shelf — " ++ String.fromInt bookCount ++ " books"
+            "Shelf — " ++ Util.Plural.books bookCount
     in
     div [ class "shelf-row" ]
         [ div [ class "shelf-row__back" ] []
@@ -165,7 +166,7 @@ viewShelfRowClickable wearLevel onBookClicked placements =
             List.length placements
 
         shelfAriaLabel =
-            "Shelf — " ++ String.fromInt bookCount ++ " books"
+            "Shelf — " ++ Util.Plural.books bookCount
     in
     div [ class "shelf-row" ]
         [ div [ class "shelf-row__back" ] []

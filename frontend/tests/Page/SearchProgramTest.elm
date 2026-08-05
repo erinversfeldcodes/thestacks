@@ -80,7 +80,24 @@ suite =
         , snippetAndLabelRenderWhenSnippetPresent
         , highlightRendersAsMarkElement
         , noSnippetNoLabelWhenSnippetEmpty
+        , searchInputHasAccessibleName
         ]
+
+
+{-| The search field's only visible cue is its placeholder, which is not an
+accessible name — it disappears the moment the reader types and several screen
+readers ignore it entirely. So the input carries an explicit `aria-label`, and
+this asserts it is present and matches the placeholder copy (#318 TR-6).
+-}
+searchInputHasAccessibleName : Test
+searchInputHasAccessibleName =
+    test "search_input_has_accessible_name: the search field carries an aria-label" <|
+        \() ->
+            startSearch
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute
+                        (Html.Attributes.attribute "aria-label" "Search by title, author, or ISBN...")
+                    ]
 
 
 {-| The book-search request must target `GET /api/search` — the route the

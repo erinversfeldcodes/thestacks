@@ -279,7 +279,26 @@ suite =
         , waitingWatchdogNoticesASilentStream
         , waitingWatchdogIsResetByAHeartbeat
         , shelvingABookAsksForTheInboxAgain
+        , uploadProgressIsAnAriaLiveRegion
         ]
+
+
+{-| The upload flow's status — "Reading your photo…", "Book Identified!", every
+failure card — is swapped in and out of one region as identification proceeds. A
+screen-reader user watching that region must be told when it changes, so it
+carries `aria-live="polite"` (#318 TR-6, US-19.1.1). The `polite` value (not
+`assertive`) is asserted exactly, because an assertive region would interrupt the
+reader on every progress tick.
+-}
+uploadProgressIsAnAriaLiveRegion : Test
+uploadProgressIsAnAriaLiveRegion =
+    test "upload_progress_is_an_aria_live_region: the status region announces politely" <|
+        \() ->
+            startUpload
+                |> ProgramTest.expectViewHas
+                    [ Selector.class "upload-status-region"
+                    , Selector.attribute (Html.Attributes.attribute "aria-live" "polite")
+                    ]
 
 
 {-| Placing or adding a book must tell the shell the inbox has changed (#351).

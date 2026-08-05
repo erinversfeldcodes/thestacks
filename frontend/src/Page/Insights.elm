@@ -31,6 +31,7 @@ import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.Plural
 import Util.TestId exposing (testId)
 
 
@@ -199,7 +200,7 @@ viewBisac : Api.BisacCount -> Html Msg
 viewBisac bisac =
     li [ class "insights__list-item" ]
         [ span [ class "insights__code" ] [ text bisac.code ]
-        , text (" — " ++ pluraliseBooks bisac.count)
+        , text (" — " ++ Util.Plural.books bisac.count)
         ]
 
 
@@ -396,12 +397,3 @@ formatHour hour =
             String.padLeft 2 '0' (String.fromInt hour)
     in
     "around " ++ padded ++ ":00"
-
-
-pluraliseBooks : Int -> String
-pluraliseBooks count =
-    if count == 1 then
-        "1 book"
-
-    else
-        String.fromInt count ++ " books"
