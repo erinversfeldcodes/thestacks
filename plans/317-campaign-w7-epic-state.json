@@ -4,7 +4,7 @@
   "integration_branch": "feat/campaign-w7-317",
   "base": "feat/campaign-w6-316",
   "pr_opened": false,
-  "pr_policy": "DEFERRED — owner ruling 2026-07-30: wave PRs batch until the final wave",
+  "pr_policy": "DEFERRED \u2014 owner ruling 2026-07-30: wave PRs batch until the final wave",
   "children": {
     "373": {
       "status": "complete",
@@ -17,9 +17,9 @@
         "frontend/src/Page/Login.elm"
       ],
       "worktree": ".claude/worktrees/agent-a3bf64b98dc3e2dd6",
-      "note": "Probe 7 found a REAL bug that was the code state: Main.requiresAuth ends in `_ -> True`, so the new PUBLIC route was silently auth-gated — bouncing a logged-out reader to a sign-in they cannot complete, the exact door the feature exists to open.",
-      "outstanding": "E2E spec + live drive — rides on the wave drive. Agent declined to write an unrun spec (\"an unrun spec is a claim, not evidence\"). Correct.",
-      "post_report_correction": "The #373 agent retracted two claims unprompted. (1) It had reported the Elixir suite clean; it was not — it had twice piped full runs through `tail -25` and discarded the failure block. Re-ran with complete capture, reproduced at seed 760943, root-caused, and filed as #377: DiscoverAuthorSourcesJobTest makes a LIVE network call to the real domain authorsite.com behind a mock that only covers the Brave search hop; receive_timeout bounds only the receive phase, so an unbounded TLS connect runs to the 60s ExUnit timeout. Pre-existing, untouched by #373. Lead verified the mechanism directly. (2) It flagged that commit ad66f44c existed although it had not committed — CORRECT to flag, and the explanation is benign: the LEAD committed it from the parent session after the owner authorised commits (\"use commit -C\"). No mystery, no push, nothing outside the session."
+      "note": "Probe 7 found a REAL bug that was the code state: Main.requiresAuth ends in `_ -> True`, so the new PUBLIC route was silently auth-gated \u2014 bouncing a logged-out reader to a sign-in they cannot complete, the exact door the feature exists to open.",
+      "outstanding": "E2E spec + live drive \u2014 rides on the wave drive. Agent declined to write an unrun spec (\"an unrun spec is a claim, not evidence\"). Correct.",
+      "post_report_correction": "The #373 agent retracted two claims unprompted. (1) It had reported the Elixir suite clean; it was not \u2014 it had twice piped full runs through `tail -25` and discarded the failure block. Re-ran with complete capture, reproduced at seed 760943, root-caused, and filed as #377: DiscoverAuthorSourcesJobTest makes a LIVE network call to the real domain authorsite.com behind a mock that only covers the Brave search hop; receive_timeout bounds only the receive phase, so an unbounded TLS connect runs to the 60s ExUnit timeout. Pre-existing, untouched by #373. Lead verified the mechanism directly. (2) It flagged that commit ad66f44c existed although it had not committed \u2014 CORRECT to flag, and the explanation is benign: the LEAD committed it from the parent session after the owner authorised commits (\"use commit -C\"). No mystery, no push, nothing outside the session."
     },
     "375": {
       "status": "complete",
@@ -58,11 +58,11 @@
       "level": 1,
       "depends_on": [],
       "owns": [],
-      "note": "Verification, not a code change — no file contention. On the critical path: gates 350, which gates 351. Start it first. Needs Modal (unblocked since 2026-07-26).",
+      "note": "Verification, not a code change \u2014 no file contention. On the critical path: gates 350, which gates 351. Start it first. Needs Modal (unblocked since 2026-07-26).",
       "staff_review": "LGTM",
       "filed": "issues/complete/",
-      "result": "VERDICT YES — wired end to end. 36 real vision calls on a preview with Modal live; series in VictoriaMetrics and read back through Grafana own datasource. p50 8437.5ms / p95 49500ms / p99 57900ms, +Inf=0. Tail is cold starts: warm (n=30) median (5s,8s], p95 (15s,30s], max <=30s; cold (n=6) reaches 60s. Falsified the \"~3-8s\" estimate at plugins/stacks.ex:41 (only 18/36 <= 8s).",
-      "carried_to_350": "NO evidence beyond 60s — all 36 returned 200, so the :exception path contributed zero samples; a call slower than the deadline never emits :stop. The count of 210s give-ups needs an :exception counter that does not exist. Also: VisionLatencyTest:138-146 ties the top finite bucket to receive_timeout_ms/0, so retuning the timeout without moving the bucket reddens it by design (guards the 2026-04-20 incident)."
+      "result": "VERDICT YES \u2014 wired end to end. 36 real vision calls on a preview with Modal live; series in VictoriaMetrics and read back through Grafana own datasource. p50 8437.5ms / p95 49500ms / p99 57900ms, +Inf=0. Tail is cold starts: warm (n=30) median (5s,8s], p95 (15s,30s], max <=30s; cold (n=6) reaches 60s. Falsified the \"~3-8s\" estimate at plugins/stacks.ex:41 (only 18/36 <= 8s).",
+      "carried_to_350": "NO evidence beyond 60s \u2014 all 36 returned 200, so the :exception path contributed zero samples; a call slower than the deadline never emits :stop. The count of 210s give-ups needs an :exception counter that does not exist. Also: VisionLatencyTest:138-146 ties the top finite bucket to receive_timeout_ms/0, so retuning the timeout without moving the bucket reddens it by design (guards the 2026-04-20 incident)."
     },
     "374": {
       "status": "merged",
@@ -76,8 +76,8 @@
         "frontend/src/Page/Settings/*",
         "frontend/src/Page/Login.elm"
       ],
-      "result": "Built Util/FailureCopy.elm and gave six upload causes their own copy. Fixed TWO upstream defects that made the copy unreachable: (a) Api.PollStatus decoded SSE \"timeout\" to Rejected with a null reason, so a reader the pipeline never answered for was told their photo was unreadable; (b) UploadInitialised/R2PutCompleted error legs stored a LITERAL Failure Http.NetworkError, so a 429, a 413 and a dropped connection were the same value. Also fixed #369 req 5 (the \"Invalid email or password\" catch-all for any status). For 429: elm/http collapses non-2xx to BadStatus Int — the status survives but HEADERS DO NOT — so it moved four :auth endpoints onto expectStringResponse to read retry-after. waitPhrase rounds UP (61s -> \"2 minutes\") because being sent back early produces a second 429; HTTP-date retry-after deliberately returns Nothing rather than a guess.",
-      "best_finding": "PROBE 9 REDDENED NOTHING, and that was the point. Reintroducing the exact UploadInitialised defect left all 1637 tests green — because UploadInitialised takes an opaque `File` that no Elm test can construct, so nothing CAN drive that leg. It added coverage on the sibling R2PutCompleted leg (9b reddens) and wrote the limitation into the test rather than claiming coverage it lacks.",
+      "result": "Built Util/FailureCopy.elm and gave six upload causes their own copy. Fixed TWO upstream defects that made the copy unreachable: (a) Api.PollStatus decoded SSE \"timeout\" to Rejected with a null reason, so a reader the pipeline never answered for was told their photo was unreadable; (b) UploadInitialised/R2PutCompleted error legs stored a LITERAL Failure Http.NetworkError, so a 429, a 413 and a dropped connection were the same value. Also fixed #369 req 5 (the \"Invalid email or password\" catch-all for any status). For 429: elm/http collapses non-2xx to BadStatus Int \u2014 the status survives but HEADERS DO NOT \u2014 so it moved four :auth endpoints onto expectStringResponse to read retry-after. waitPhrase rounds UP (61s -> \"2 minutes\") because being sent back early produces a second 429; HTTP-date retry-after deliberately returns Nothing rather than a guess.",
+      "best_finding": "PROBE 9 REDDENED NOTHING, and that was the point. Reintroducing the exact UploadInitialised defect left all 1637 tests green \u2014 because UploadInitialised takes an opaque `File` that no Elm test can construct, so nothing CAN drive that leg. It added coverage on the sibling R2PutCompleted leg (9b reddens) and wrote the limitation into the test rather than claiming coverage it lacks.",
       "also_fixed": "e2e mockPollRejected/mockPollNotABook sent is_duplicate: null; the decoder requires a bool (#328) and StreamEvent discards undecodable frames, so both specs sat on the spinner until timeout. ALREADY FAILING on the integration branch before this diff."
     },
     "350": {
@@ -90,9 +90,9 @@
       "owns": [
         "apps/core/lib/stacks/ai/client.ex"
       ],
-      "result": "receive_timeout_ms = modal_function_timeout_ms (300000) + transport_slack_ms (30000) = 330000. REJECTED the lead framing of sizing from #349 percentiles, with a better argument: this is not a latency budget but a TRANSPORT LIVENESS BACKSTOP derived from the server deadline. When the timer fires there are only two worlds — before Modal deadline (an answer may still come, abandoning buys nothing and costs a retry) or after (Modal already gave up, socket dead, retry is right). Only the second is actionable. Declined to cut toward the measured distribution because all 36 samples are calls that FINISHED — the histogram is conditional on a response and cannot show its own tail — and queue wait (~120s on a contended A10G) was never exercised.",
+      "result": "receive_timeout_ms = modal_function_timeout_ms (300000) + transport_slack_ms (30000) = 330000. REJECTED the lead framing of sizing from #349 percentiles, with a better argument: this is not a latency budget but a TRANSPORT LIVENESS BACKSTOP derived from the server deadline. When the timer fires there are only two worlds \u2014 before Modal deadline (an answer may still come, abandoning buys nothing and costs a retry) or after (Modal already gave up, socket dead, retry is right). Only the second is actionable. Declined to cut toward the measured distribution because all 36 samples are calls that FINISHED \u2014 the histogram is conditional on a response and cannot show its own tail \u2014 and queue wait (~120s on a contended A10G) was never exercised.",
       "added_in_scope": "the :exception counter, rather than filing it: raising a deadline whose only failure mode is invisible would be unfalsifiable. reason_class=\"timeout\" going non-zero is the one observation that says 330s is wrong.",
-      "cross_language_gate": "@modal_function_timeout_ms is checked against modal_app.py by parsing the decorator — editing timeout=300 now reddens mix test. A gate over a boundary nothing previously covered."
+      "cross_language_gate": "@modal_function_timeout_ms is checked against modal_app.py by parsing the decorator \u2014 editing timeout=300 now reddens mix test. A gate over a boundary nothing previously covered."
     },
     "376": {
       "status": "complete",
@@ -106,7 +106,7 @@
         "docs/implementation-mapping.md"
       ],
       "note": "#340 preferred-first, not hard-blocking: if #340 lands first this should BE a registered correction rather than a bespoke admin action.",
-      "result": "Extended #340 rather than duplicating: `Targeted` behaviour + `run_targeted/3` handing the plan to the SAME private `apply_plan/4` the parameter-free path uses. Probe 1 proved that is genuinely shared code — breaking the audit reddened BOTH its own test and #340's. Placement disposition decided by EVIDENCE not taste: `place_book/3` always writes `primary_edition_id/1` and `merge_edition/2` hardcodes `is_primary: false`, so NO placement has ever named a merged edition — every alternative rule guesses badly. Filed the root cause as #378. Live-driven locally (owner->MFA->target, dry-run then apply, second apply 422); NOT driven on a preview."
+      "result": "Extended #340 rather than duplicating: `Targeted` behaviour + `run_targeted/3` handing the plan to the SAME private `apply_plan/4` the parameter-free path uses. Probe 1 proved that is genuinely shared code \u2014 breaking the audit reddened BOTH its own test and #340's. Placement disposition decided by EVIDENCE not taste: `place_book/3` always writes `primary_edition_id/1` and `merge_edition/2` hardcodes `is_primary: false`, so NO placement has ever named a merged edition \u2014 every alternative rule guesses badly. Filed the root cause as #378. Live-driven locally (owner->MFA->target, dry-run then apply, second apply 422); NOT driven on a preview."
     },
     "351": {
       "status": "complete",
@@ -120,10 +120,10 @@
         "frontend/src/Page/Upload.elm",
         "IdentifyBookJob"
       ],
-      "result": "Async identify + SYNCHRONOUS confirm-and-place, per the owner ruling. Inbox at GET /api/uploads/inbox (deliberately NOT in the :upload rate-limit bucket — that bucket prices GPU work, and throttling this blanks the badge). Badge is Maybe Int: Nothing at zero AND Nothing when unloaded/failed, because \"we do not know\" is not \"nothing\". Counts AwaitingConfirmation only — a failure has nothing to confirm, so a badge counting it could never be cleared. Rendered inside the Catalogue dropdown only; it declined the reviewer-suggested mark on the closed trigger, citing the owner ruling \"we do not need to render it outside of the drop down\".",
+      "result": "Async identify + SYNCHRONOUS confirm-and-place, per the owner ruling. Inbox at GET /api/uploads/inbox (deliberately NOT in the :upload rate-limit bucket \u2014 that bucket prices GPU work, and throttling this blanks the badge). Badge is Maybe Int: Nothing at zero AND Nothing when unloaded/failed, because \"we do not know\" is not \"nothing\". Counts AwaitingConfirmation only \u2014 a failure has nothing to confirm, so a badge counting it could never be cleared. Rendered inside the Catalogue dropdown only; it declined the reviewer-suggested mark on the closed trigger, citing the owner ruling \"we do not need to render it outside of the drop down\".",
       "auto_place_prohibition": "Proven three ways: inbox_places_nothing_by_itself (no placement POST, no completion card), inbox_resume_to_a_shelf_is_four_deliberate_steps (the positive half, so \"nothing happened\" cannot pass vacuously), and two Elixir tests asserting the bookshelves are untouched after reading the inbox.",
-      "service_down_honesty": "HIDDEN, not fixed — and it said so plainly. vision_unavailable is still :transient, so IdentifyBookJob still runs the full retry schedule and the frame still takes minutes. What changed is the reader is no longer waiting for it. The <=5s claim still does not hold; making it hold means reclassifying vision_unavailable as terminal, which is a separate decision.",
-      "best_finding": "PROBE 12 REDDENED NOTHING. Removing the inbox refresh on PlacementCompleted would have left the badge showing 1 for a book just shelved, with 1657 tests green. Structural cause: uploadProgram's wrapper discards the third tuple element, so NO program test can observe an OutMsg; and Main.update is a Browser.application with ports and a Nav.Key, so it is not program-testable at all. It closed the gap with direct assertions on Upload.update's return value + two NoOut anti-vacuity companions — then stated the residual honestly: that proves the signal is RAISED, not that Main acts on it. Main.update's RefreshInbox branch is unreachable from any test in this suite."
+      "service_down_honesty": "HIDDEN, not fixed \u2014 and it said so plainly. vision_unavailable is still :transient, so IdentifyBookJob still runs the full retry schedule and the frame still takes minutes. What changed is the reader is no longer waiting for it. The <=5s claim still does not hold; making it hold means reclassifying vision_unavailable as terminal, which is a separate decision.",
+      "best_finding": "PROBE 12 REDDENED NOTHING. Removing the inbox refresh on PlacementCompleted would have left the badge showing 1 for a book just shelved, with 1657 tests green. Structural cause: uploadProgram's wrapper discards the third tuple element, so NO program test can observe an OutMsg; and Main.update is a Browser.application with ports and a Nav.Key, so it is not program-testable at all. It closed the gap with direct assertions on Upload.update's return value + two NoOut anti-vacuity companions \u2014 then stated the residual honestly: that proves the signal is RAISED, not that Main acts on it. Main.update's RefreshInbox branch is unreachable from any test in this suite."
     },
     "310": {
       "status": "complete",
@@ -138,7 +138,7 @@
         "e2e/tests/*.ts",
         "scripts/check-orphan-classes.sh (remove the hook-exemption branch when the last one lands)"
       ],
-      "note": "Added to W7 by owner ruling 2026-08-04, having been sized as 'too large for this wave'. Scope is measured, not guessed: 88 claimed hooks -> 74 genuinely used as selectors, of which 31 are already styled (keep the class, ADD a testid) and 43 are pure. 63 test files. 12 sites sit in NEGATIVE assertions and are the only ones needing judgement; the ~96 positive occurrences are safe by construction, because a positive assertion that stops matching fails loudly. ISSUE'S OWN DoD MANDATES ONE PR PER TEST FILE — honour that inside the wave rather than one sweeping diff, and mutation-probe each of the 12."
+      "note": "Added to W7 by owner ruling 2026-08-04, having been sized as 'too large for this wave'. Scope is measured, not guessed: 88 claimed hooks -> 74 genuinely used as selectors, of which 31 are already styled (keep the class, ADD a testid) and 43 are pure. 63 test files. 12 sites sit in NEGATIVE assertions and are the only ones needing judgement; the ~96 positive occurrences are safe by construction, because a positive assertion that stops matching fails loudly. ISSUE'S OWN DoD MANDATES ONE PR PER TEST FILE \u2014 honour that inside the wave rather than one sweeping diff, and mutation-probe each of the 12."
     },
     "382": {
       "status": "complete",
@@ -151,8 +151,9 @@
         "apps/core/lib/stacks/enrichment/events_path.ex",
         "apps/core/lib/stacks/workers/discover_bookstore_events_job.ex"
       ],
-      "note": "Added to W7 by owner ruling 2026-08-04. #307's live run (2026-08-04) proved the premise wrong: neither scrapeable shop has an events LISTING page. Wordsworth lists 45 pages, one of which is /pages/treive-nicholas-book-signing-at-our-sea-point-store — a single event as its own page. Exclusive Books' sitemap answers HTTP 500. So this needs a per-page classifier, and its NEGATIVE cases matter more than its positives: /pages/summer-sale-up-to-50-off is a promotion and /pages/careers-at-wordsworth-books is a job ad. A pipeline that invents events is worse than one that produces none. DO NOT widen EventsPath.candidate_tokens/0 — that would make a single event page masquerade as a listing."
-    }
+      "note": "Added to W7 by owner ruling 2026-08-04. #307's live run (2026-08-04) proved the premise wrong: neither scrapeable shop has an events LISTING page. Wordsworth lists 45 pages, one of which is /pages/treive-nicholas-book-signing-at-our-sea-point-store \u2014 a single event as its own page. Exclusive Books' sitemap answers HTTP 500. So this needs a per-page classifier, and its NEGATIVE cases matter more than its positives: /pages/summer-sale-up-to-50-off is a promotion and /pages/careers-at-wordsworth-books is a job ad. A pipeline that invents events is worse than one that produces none. DO NOT widen EventsPath.candidate_tokens/0 \u2014 that would make a single event page masquerade as a listing."
+    },
+    "353": "complete"
   },
   "ready_set": [
     373,
@@ -173,13 +174,13 @@
     310,
     382
   ],
-  "sequencing_rationale": "Two independent orderings. (1) OWNER RULING 2026-07-31 — measure before sizing before redesigning: 349 → 350 → 351. (2) FILE OWNERSHIP, the #343/#344 lesson re-confirmed in Wave 6 — Login.elm is contended by 373 and 374 (373 first); Page/Upload.elm is contended by 374 and 351 (374 first, while the file is still small); Bookshelf.elm belongs to 375 alone. #351 is the tail of both chains, which is why it is level 3.",
-  "critical_path": "349 → 350 → 351 (and 373 → 374 → 351). #349 is a verification with no code, so it can start immediately and should — everything downstream of it idles until it reports a p99.",
+  "sequencing_rationale": "Two independent orderings. (1) OWNER RULING 2026-07-31 \u2014 measure before sizing before redesigning: 349 \u2192 350 \u2192 351. (2) FILE OWNERSHIP, the #343/#344 lesson re-confirmed in Wave 6 \u2014 Login.elm is contended by 373 and 374 (373 first); Page/Upload.elm is contended by 374 and 351 (374 first, while the file is still small); Bookshelf.elm belongs to 375 alone. #351 is the tail of both chains, which is why it is level 3.",
+  "critical_path": "349 \u2192 350 \u2192 351 (and 373 \u2192 374 \u2192 351). #349 is a verification with no code, so it can start immediately and should \u2014 everything downstream of it idles until it reports a p99.",
   "owner_rulings": [
     "2026-07-30: undo-remove SPEC'd (toast); un-merge SPEC'd owner-only; cancel-deletion grace EXCLUDED; public photo-delete EXCLUDED.",
-    "2026-07-31: #349 → #350 → #351 in that order — measure, fix the inversion, re-read retry frequency, then size the reader wait.",
-    "2026-07-31 (#351 shape): async re-attempt + SYNCHRONOUS confirm-and-place; pending confirmations live in an inbox reachable from the upload page; a notification count on the Add-a-book nav marker; not rendered outside the dropdown — low-but-easy visibility.",
-    "2026-08-04: add #310 and #382 to Wave 7. I had assessed both as too large for the wave — #310 is 63 test files and #382 needs a new classifier plus a live drive. Owner decided otherwise, so they are in scope. Recorded because it changes what closing this wave means: it can no longer be finished by completing drives. (#382 was filed as #311, which collided with this campaign's own Wave 0 epic; see the renumbering note below.)"
+    "2026-07-31: #349 \u2192 #350 \u2192 #351 in that order \u2014 measure, fix the inversion, re-read retry frequency, then size the reader wait.",
+    "2026-07-31 (#351 shape): async re-attempt + SYNCHRONOUS confirm-and-place; pending confirmations live in an inbox reachable from the upload page; a notification count on the Add-a-book nav marker; not rendered outside the dropdown \u2014 low-but-easy visibility.",
+    "2026-08-04: add #310 and #382 to Wave 7. I had assessed both as too large for the wave \u2014 #310 is 63 test files and #382 needs a new classifier plus a live drive. Owner decided otherwise, so they are in scope. Recorded because it changes what closing this wave means: it can no longer be finished by completing drives. (#382 was filed as #311, which collided with this campaign's own Wave 0 epic; see the renumbering note below.)"
   ],
   "plan_deviation": {
     "item": "7c",
@@ -188,25 +189,25 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-04",
-  "status": "ALL children complete and driven; full E2E green (291 passed). Wave 7 ready for finalize-pr.",
+  "status": "ALL children complete and driven (incl. #353 GDPR erasure/export for uploaded_images, pulled in per owner ruling on the Mode B DESIGN CONCERN); full suite 3539/0 on a calm machine; security+squawk+dbt green. Wave 7 ready for finalize-pr.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
   "blocked": {
     "resolved": "2026-08-04: stale. The 'staged inside worktrees, tip still 6fd411e5' state was real when written but every child has since merged (15c17bda, 9c3fc0c1, a5e9a78e, 48d56ce9, 1c72300b, 0767e17d, 033a5a3b all ancestors of HEAD). Verified by merge log, not memory."
   },
-  "recurring_finding": "Three of four children independently found a GATE THAT DOES NOT COVER WHAT IT CLAIMS — #373: the sibling forgot-password tests pass the same enumeration mutation, so they cannot detect a leak; #373: MainRequiresAuthTest.allRoutes is hand-maintained and compiler-unchecked while its moduledoc claims the matrix \"cannot silently skip a new constructor\" — which is exactly how the requiresAuth bug got in; #352: the title-search cache path had ZERO coverage because title_search_cache_enabled is false in config/test.exs and nothing overrode it. This is the campaign dominant secondary theme, now at nine instances.",
-  "carried_to_351": "SSE knock-on measured off live code: attempt 690000ms, worst case 2106000ms = 35.1 min (was 23.1). Too long for a reader either way, and #350 states plainly that shortening ITS number is not the fix — it would buy a shorter wait by doing more GPU work, three times over. That is #351 territory.",
+  "recurring_finding": "Three of four children independently found a GATE THAT DOES NOT COVER WHAT IT CLAIMS \u2014 #373: the sibling forgot-password tests pass the same enumeration mutation, so they cannot detect a leak; #373: MainRequiresAuthTest.allRoutes is hand-maintained and compiler-unchecked while its moduledoc claims the matrix \"cannot silently skip a new constructor\" \u2014 which is exactly how the requiresAuth bug got in; #352: the title-search cache path had ZERO coverage because title_search_cache_enabled is false in config/test.exs and nothing overrode it. This is the campaign dominant secondary theme, now at nine instances.",
+  "carried_to_351": "SSE knock-on measured off live code: attempt 690000ms, worst case 2106000ms = 35.1 min (was 23.1). Too long for a reader either way, and #350 states plainly that shortening ITS number is not the fix \u2014 it would buy a shorter wait by doing more GPU work, three times over. That is #351 territory.",
   "integration_branch_head": "69d5d42f",
   "findings_open": [
     {
       "issue": 377,
-      "summary": "unit test makes a live network call to a third-party domain; receive_timeout does not bound the TLS connect — intermittently costs a full run 60s and a red result",
+      "summary": "unit test makes a live network call to a third-party domain; receive_timeout does not bound the TLS connect \u2014 intermittently costs a full run 60s and a red result",
       "severity": "makes `just ci` inexplicably red; the same unbounded connect exists in production"
     },
     {
       "issue": 378,
-      "summary": "the edition a reader actually scanned is never recorded — place_book always writes the work primary, so a non-primary ISBN is silently stored as the primary",
+      "summary": "the edition a reader actually scanned is never recorded \u2014 place_book always writes the work primary, so a non-primary ISBN is silently stored as the primary",
       "severity": "degrades the ISBN hard gate user-visible promise; also blocks a correct un-merge later"
     },
     {
@@ -216,11 +217,11 @@
     },
     {
       "issue": 379,
-      "summary": "third-space geocoding test fails in the full suite, passes isolated, does not reproduce at its own seed — non-deterministic, likely an async/sandbox isolation race",
+      "summary": "third-space geocoding test fails in the full suite, passes isolated, does not reproduce at its own seed \u2014 non-deterministic, likely an async/sandbox isolation race",
       "severity": "makes just ci intermittently red; the gate working as intended"
     },
     {
-      "summary": "bookstore events have NO SPA consumer: AuthorCard renders upcomingEventsCount but no server code produces it — built-not-wired, pre-existing. The first real event row now exists (#382 live run); the surface that should show it is events-story (US-3.1.x) work.",
+      "summary": "bookstore events have NO SPA consumer: AuthorCard renders upcomingEventsCount but no server code produces it \u2014 built-not-wired, pre-existing. The first real event row now exists (#382 live run); the surface that should show it is events-story (US-3.1.x) work.",
       "found": "2026-08-04"
     }
   ],
@@ -230,28 +231,28 @@
     "elm": "1660 passed / 0 failed",
     "dbt": "243/243 PASS + checkpoint",
     "security": "trufflehog 0 secrets, trivy no vulnerabilities; run SIGTERMed during the dockle Docker build (same slow last step as Wave 6). deploy/Dockerfile.core is untouched by this branch, so dockle subject is unchanged.",
-    "elixir": "3506 tests, 1 failure — DiscoveryThirdSpaceProductionTest geocoding. Isolated: 17/0. Same-seed full re-run (268546080243028): 3506/0. NOT reproducible; filed as #379 with five hypotheses ruled out by execution."
+    "elixir": "3506 tests, 1 failure \u2014 DiscoveryThirdSpaceProductionTest geocoding. Isolated: 17/0. Same-seed full re-run (268546080243028): 3506/0. NOT reproducible; filed as #379 with five hypotheses ruled out by execution."
   },
   "live_drive": {
     "target": "https://stacks-core-pr-feat-campaign-w7-317.fly.dev",
     "date": "2026-08-02",
-    "deploy": "exit 0; Modal vision app thestacks-vision-feat-campaign-w7-317 live; Neon branch preview/feat-campaign-w7-317. Resized to 1024MB BEFORE any auth traffic (see #369 — two concurrent logins OOM-kill a 512MB core VM and produced 23 phantom failures across 11 files in Wave 6).",
+    "deploy": "exit 0; Modal vision app thestacks-vision-feat-campaign-w7-317 live; Neon branch preview/feat-campaign-w7-317. Resized to 1024MB BEFORE any auth traffic (see #369 \u2014 two concurrent logins OOM-kill a 512MB core VM and produced 23 phantom failures across 11 files in Wave 6).",
     "partial": "58 passed / 6 failed before the run was stopped. NOT a complete drive.",
     "known": "3 failures = #371 (admin-session specs share one owner MFA factor; pass at --workers=1).",
     "focus_contract_resolved": {
-      "verdict": "NOT a regression — the lead hypothesis was WRONG and is retracted.",
+      "verdict": "NOT a regression \u2014 the lead hypothesis was WRONG and is retracted.",
       "evidence": "book-detail.spec.ts re-run at --workers=1 against the same preview: 27 passed / 0 failed (10.2m).",
-      "why_it_failed_in_parallel": "Same class as #371 — contention, not breakage. The tell is in the passing run own timings: \"loading state is visible before a delayed response resolves\" took 1.3 MINUTES while PASSING, and \"removing the book returns focus to the main landmark\" took 49s. These tests deliberately exercise slow and delayed responses, so under 4 workers against one preview VM they cross the timeout with nothing broken.",
+      "why_it_failed_in_parallel": "Same class as #371 \u2014 contention, not breakage. The tell is in the passing run own timings: \"loading state is visible before a delayed response resolves\" took 1.3 MINUTES while PASSING, and \"removing the book returns focus to the main landmark\" took 49s. These tests deliberately exercise slow and delayed responses, so under 4 workers against one preview VM they cross the timeout with nothing broken.",
       "what_held_up": "Recording it as UNCONFIRMED rather than filing it. The counter-evidence noted at the time (remove-modal focus tests passing) was pointing the right way."
     },
     "e2e_status": "book-detail: 27/27 serially. Full-suite drive still PARTIAL (58 passed / 6 failed before being stopped; 3 = #371, 3 = these, now cleared).",
-    "full_e2e": "2026-08-04: chromium project against stacks-core-pr-feat-campaign-w7-317 — 291 passed, 10 skipped (Modal-excluded upload/rate-limit + local-detected), 0 failed. Resolves outstanding (a).",
-    "upload_351": "2026-08-04: upload→leave(stream never opened)→job terminal→inbox(failed/not_a_book); failure-vs-pending distinct live; inbox item placed on shelf (placement 71d72229, verified in 67)."
+    "full_e2e": "2026-08-04: chromium project against stacks-core-pr-feat-campaign-w7-317 \u2014 291 passed, 10 skipped (Modal-excluded upload/rate-limit + local-detected), 0 failed. Resolves outstanding (a).",
+    "upload_351": "2026-08-04: upload\u2192leave(stream never opened)\u2192job terminal\u2192inbox(failed/not_a_book); failure-vs-pending distinct live; inbox item placed on shelf (placement 71d72229, verified in 67)."
   },
   "bookkeeping": [
     "2026-08-04: ISSUE NUMBER COLLISION, mine. I filed two issues as #311 and #312, both already taken by this campaign's wave epics (issues/complete/311-campaign-w0-quick-fixes.md, 312-campaign-w2-deletions.md). Invisible until `just wave-status` resolved Wave 0 and Wave 2 items to my files and reported their unchecked boxes against those waves. Renumbered to #382 and #383. Root cause: I took the next number by looking at issues/ only. issues/complete/ holds the rest, and `next_issue_number()` reads both."
   ],
   "platform_findings": [
-    "2026-08-04: Open Library fully unreachable (curl timeout at 20s, confirmed independently of the preflight's 3 attempts). Preflight correctly aborted the first preview deploy. Routed around with STACKS_SKIP_RESOLVER_PREFLIGHT=1 — #373/#376 drives and the chromium E2E project do not touch ISBN resolution. #351's upload drive DOES (the ISBN hard gate verifies against OL), so it is sequenced last with OL retried before it; if OL stays down it will be recorded as blocked-by-outage, not skipped."
+    "2026-08-04: Open Library fully unreachable (curl timeout at 20s, confirmed independently of the preflight's 3 attempts). Preflight correctly aborted the first preview deploy. Routed around with STACKS_SKIP_RESOLVER_PREFLIGHT=1 \u2014 #373/#376 drives and the chromium E2E project do not touch ISBN resolution. #351's upload drive DOES (the ISBN hard gate verifies against OL), so it is sequenced last with OL retried before it; if OL stays down it will be recorded as blocked-by-outage, not skipped."
   ]
 }

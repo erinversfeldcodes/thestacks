@@ -290,6 +290,12 @@
           "title": "Events are individual pages, not a listing \u2014 per-page classifier after #307's live run disproved the listing premise",
           "status": "complete",
           "issue": 382
+        },
+        "7k": {
+          "issue": 353,
+          "status": "complete",
+          "title": "GDPR erasure + export for op.uploaded_images (CASCADE FK, storage-object deletion, class-closing schema-guard) \u2014 pulled into Wave 7 to resolve the Mode B DESIGN CONCERN that #351's inbox surfaced unreachable personal data",
+          "last_action": "Implemented + gdpr-review PASS + red-before/green-after evidence + storage mutation probe. Filed #386 (warehouse storage_path, P2, out of scope). 2026-08-05."
         }
       },
       "last_action": "Mirrored from 317 epic-state: all 11 children complete/merged, full E2E green (291 passed). Merge-test drift (upload-pipeline.spec.ts /2 editions/) fixed 2026-08-05 \u2014 own-branch, not #386."
