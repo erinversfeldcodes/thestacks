@@ -49,7 +49,8 @@ Verdict: baseline ❌ ×2.
 - [ ] `completion-audit` passed; `staff-review` per child in Progress Notes
 
 ## Dependencies
-- #314 (registry decision), #317 (ruling stories), #318 (D2/US-15.1.1/US-18.1.1 amendments) — content lands as those waves decide it; mapping-repair child (phase 1) can start immediately. Reason: record decisions, don't pre-empt them.
+- #314 (registry decision), #317 (ruling stories) — content lands as those waves decide it; mapping-repair child (phase 1) can start immediately. Reason: record decisions, don't pre-empt them.
+- The **US-14.1.2 / US-15.1.1 / US-18.1.1** amendments were **pulled forward into #387** (owner decision 2026-08-05) so Wave 8 builds against a settled spec; #320 treats them as already-written and only re-checks them in the exit census. Reason: spec-before-build won over record-after for the surfaces #318 rebuilds.
 - Precedes #321 — its features build against these stories. Reason: spec before build.
 
 ## Agent Assignment

@@ -328,6 +328,15 @@
           "title": "Restore the login door dolly-shot over the arrival, driven from AuthState.Arriving \u2014 the disclosed cost of #359",
           "status": "not_started",
           "issue": 364
+        },
+        "8pre": {
+          "issue": 387,
+          "status": "not_started",
+          "title": "Story specs pulled forward from #320: amend US-14.1.2 (D2 onboarding, adaptable steps), US-15.1.1 (home drift), US-18.1.1 (fifth shelf). Spec-before-build prerequisite for 8b/8c-homes (owner decision 2026-08-05).",
+          "blocks": [
+            "8b",
+            "8c"
+          ]
         }
       }
     },

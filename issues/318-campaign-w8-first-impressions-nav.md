@@ -25,7 +25,7 @@ Router wiring: `/settings/consent` folds into `/settings/privacy` (redirect kept
 
 ## Technical Requirements (child phases)
 1. **Nav IA**: Elm-owned disclosure (`<button aria-haspopup aria-expanded>` + `openMenu` state; delete `:hover`/`:focus-within`-only reveal, `main.css:245-246`); **Add Book as persistent primary action** (unreachable on touch today); Search top-level; five bookshelves grouped; user menu exposes the settings family (2 of 8 today); active-route highlight correct on child routes.
-2. **Onboarding (D2)**: steps = Welcome → **Upload** → **Consent** → Done; real visibility chooser or honestly retitled; Skip persists via the same server path as advance; scrim to ~0.55 with blur (bookcase must read through); focus trap + Escape to honour `aria-modal` (or drop the attribute); dots spec'd and tested (code-level off-by-one not reproducible — remove the dot `transition` and re-verify).
+2. **Onboarding (D2, spec'd in #387)**: steps = Welcome → **Upload** → **Consent** → Done; ⚠️ **the step sequence is data-driven — an ordered list the view folds over, not hardcoded branches** — so a step can be added, reordered, or removed without rewriting the flow (owner constraint, 2026-08-05; reviewed for at kickoff-child). Real visibility chooser or honestly retitled; Skip persists via the same server path as advance; scrim to ~0.55 with blur (bookcase must read through); focus trap + Escape to honour `aria-modal` (or drop the attribute); dots spec'd and tested (code-level off-by-one not reproducible — remove the dot `transition` and re-verify).
 3. **Homes**: authed home gets shelf preview / continue-reading / Add-Book CTA (resolves US-15.1.1's recorded drift, per #320's story edit); Looking-for-a-Home gets its room (wallpaper/wood/label family; pile-view of cover cards is fine if storied — reconcile with US-18.1.1 in #320); About page real copy (Milestone B surface — owner supplies/approves copy).
 4. **Settings**: hub styled to the product (real `--active` treatment, grouped You / Privacy / Your data, one nav idiom with an actual breakpoint — the current mobile select has zero CSS); fold Consent into Privacy (three-names-one-page collision resolved); `.success` styled.
 5. **Upload surface**: side-by-side verify layout per US-1.1.1:16 (uploaded image left, identified book right); shelf-picker and format widgets styled (browser-default today); replace the 📷 emoji with a crafted icon; empty-state CTAs become real actions (link/button, not prose); delete the design-spec sentence shipped as copy (`EmptyBookshelf.elm:28-30`).
@@ -59,7 +59,7 @@ Verdict: baseline ❌ ×9.
 ## Dependencies
 - #316 — Elm-owned disclosure pattern + notice components established there. Reason: one mechanism, not two.
 - #315 — verify-screen redesign sits on the wired confirm flow. Reason: don't restyle a flow being rewired.
-- #320 — story edits (D2 amendment, US-15.1.1 drift, US-18.1.1) coordinate. Reason: spec-before-build for the amended steps.
+- **#387** — the D2 / US-15.1.1 / US-18.1.1 story amendments, **pulled forward from #320** (owner decision 2026-08-05) so 8b (onboarding) and 8c-homes build against a truthful spec. Reason: spec-before-build. #320 now records these as done rather than deciding them.
 
 ## Agent Assignment
 Orchestrator; elm-agent (primary), ux-reviewer per child, elixir-agent (onboarding steps, consent fold).
