@@ -373,11 +373,6 @@
           "title": "Finish the orphan-class styling backlog (one item outstanding: per-group screenshots)",
           "status": "not_started",
           "issue": 306
-        },
-        "9g": {
-          "title": "Convert test-hook classes to data-testid and remove the orphan gate's hook exemption",
-          "status": "not_started",
-          "issue": 310
         }
       }
     },
@@ -527,5 +522,8 @@
   "notes": [
     "2026-08-04: owner added #310 (7i) and #382 (7j) to Wave 7, and #304/#306/#307 moved to issues/complete/ (all three had zero open DoD boxes while still sitting in issues/ \u2014 the artifact disagreeing with reality). I had sized #310 and #311 as too large for this wave; the owner ruled them in, which means Wave 7 can no longer be closed by finishing drives alone. Both carry measured scope in the epic state rather than an estimate: #310 is 74 real selector-hooks across 63 test files with 12 negative-assertion sites needing judgement; #382 needs a per-page classifier whose negative cases (a promotion, a job ad) matter more than its positives.",
     "2026-08-04: numbering correction \u2014 two issues I filed as #311/#312 collided with this campaign's own Wave 0 and Wave 2 epics and are now #382/#383. `wave-status` caught it by resolving a wave item to the wrong file; nothing else would have."
+  ],
+  "decisions": [
+    "2026-08-05: owner ruling \u2014 ONE CUMULATIVE campaign branch (feat/campaign-w7-317 carries all subsequent waves, incl. Wave 8's #318 work), NOT per-wave branches. All wave epics (#317, #318, \u2026) and their children close together at a SINGLE campaign PR after the final wave; nothing goes live until all waves complete. Issues may still be moved to issues/complete/ as their work finishes (bookkeeping), independent of that merge."
   ]
 }
