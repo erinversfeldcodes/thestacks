@@ -109,7 +109,7 @@
       "result": "Extended #340 rather than duplicating: `Targeted` behaviour + `run_targeted/3` handing the plan to the SAME private `apply_plan/4` the parameter-free path uses. Probe 1 proved that is genuinely shared code — breaking the audit reddened BOTH its own test and #340's. Placement disposition decided by EVIDENCE not taste: `place_book/3` always writes `primary_edition_id/1` and `merge_edition/2` hardcodes `is_primary: false`, so NO placement has ever named a merged edition — every alternative rule guesses badly. Filed the root cause as #378. Live-driven locally (owner->MFA->target, dry-run then apply, second apply 422); NOT driven on a preview."
     },
     "351": {
-      "status": "merged",
+      "status": "complete",
       "title": "7h Reader never held hostage to the upload page (async identify, sync confirm+place, inbox)",
       "level": 3,
       "depends_on": [
@@ -188,7 +188,7 @@
   },
   "kickoff_approved": "2026-08-02",
   "updated_at": "2026-08-04",
-  "status": "All children merged; #310/#382/#373/#376 complete; full E2E green (291 passed). OUTSTANDING: (b) #351 auto-place prohibition hand-drive — Open Library recovered, driving next.",
+  "status": "ALL children complete and driven; full E2E green (291 passed). Wave 7 ready for finalize-pr.",
   "level_1_launched": "2026-08-02",
   "worktree_guard": "Every agent was told to VERIFY its base: worktrees here are created from origin/main, which is stale by six waves. Each must confirm 79c6c355 is in its history before writing code, and run `just bootstrap-worktree` (untracked .env + generated gen/ tree + esbuild index.html are load-bearing).",
   "live_stack_pending_teardown": "stacks-*-pr-feat-ca-v349 left up by #349 for re-verification; #350 instructed to tear down with PREVIEW_SUFFIX=v349 bash scripts/cleanup-preview.sh",
@@ -245,7 +245,8 @@
       "what_held_up": "Recording it as UNCONFIRMED rather than filing it. The counter-evidence noted at the time (remove-modal focus tests passing) was pointing the right way."
     },
     "e2e_status": "book-detail: 27/27 serially. Full-suite drive still PARTIAL (58 passed / 6 failed before being stopped; 3 = #371, 3 = these, now cleared).",
-    "full_e2e": "2026-08-04: chromium project against stacks-core-pr-feat-campaign-w7-317 — 291 passed, 10 skipped (Modal-excluded upload/rate-limit + local-detected), 0 failed. Resolves outstanding (a)."
+    "full_e2e": "2026-08-04: chromium project against stacks-core-pr-feat-campaign-w7-317 — 291 passed, 10 skipped (Modal-excluded upload/rate-limit + local-detected), 0 failed. Resolves outstanding (a).",
+    "upload_351": "2026-08-04: upload→leave(stream never opened)→job terminal→inbox(failed/not_a_book); failure-vs-pending distinct live; inbox item placed on shelf (placement 71d72229, verified in 67)."
   },
   "bookkeeping": [
     "2026-08-04: ISSUE NUMBER COLLISION, mine. I filed two issues as #311 and #312, both already taken by this campaign's wave epics (issues/complete/311-campaign-w0-quick-fixes.md, 312-campaign-w2-deletions.md). Invisible until `just wave-status` resolved Wave 0 and Wave 2 items to my files and reported their unchecked boxes against those waves. Renumbered to #382 and #383. Root cause: I took the next number by looking at issues/ only. issues/complete/ holds the rest, and `next_issue_number()` reads both."

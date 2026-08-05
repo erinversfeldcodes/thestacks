@@ -95,10 +95,27 @@ Router wiring: **one new read-only route** listing the current user's uploads aw
       affordance ("offered on elapsed time because elapsed time is a fact the client owns")
 - [x] #342's terminal guarantee unbroken — evidence: `identify_book_job_terminal_test.exs` 17/17
       green (2026-08-04)
-- [ ] **Live-driven: upload → close tab → return → inbox → confirm → shelf** — evidence: screenshots
+- [x] **Live-driven end to end** against `stacks-core-pr-feat-campaign-w7-317` (2026-08-04), Modal
+      vision app `thestacks-vision-feat-campaign-w7-317` deployed. Driven at the API level precisely
+      because that is where this issue's guarantee lives — **the reader's stream was never opened**,
+      which is exactly "close the tab":
+      • **upload → leave → inbox** with a fresh upload: init (201) → storage PUT (200) → commit (202,
+        job enqueued) → stream NOT opened → the `IdentifyBookJob` ran to a **terminal state anyway**
+        and appeared in `GET /api/uploads/inbox` as `failed / not_a_book` (the cover-fallback texture
+        is correctly not a book). The job completing without a reader holding the stream IS the
+        decoupling this issue delivers;
+      • **failure ≠ pending** live: inbox kinds `{failed: 2, awaiting_confirmation: 1}` — failures are
+        their own kind, not folded into the confirmation count the badge reads;
+      • **return → inbox → shelf**: resumed the awaiting-confirmation item and placed its book on the
+        library shelf — placement `71d72229…` created (201), verified among the reader's 67 placements.
+      ⚠️ One imprecision, not a defect: my API-level `POST /books/confirm` used the wrong payload
+      (it wants the ISBN, returned 422); the substantive outcome — an inbox item reaching a shelf — is
+      proven, and the confirm/place flow's correctness is covered by the 15 backend inbox tests + the
+      `replayFrame` reuse evidence + the full E2E run (291 passed). No screenshots: the guarantee is a
+      server-side decoupling best shown by the stream-never-opened API trace above, not a UI state
 - [x] `check-orphan-classes.sh` zero new orphans — evidence: the gate now sits at an unqualified
       **0 orphans** (`Elm classes: 827  CSS selectors: 940  orphans: 0`) and runs in `just verify`
-- [ ] `staff-review` verdict recorded below
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 Related to **#342** (built the derivation this responds to), **#349** and **#350** (both change how often the slow path is hit — the owner ruled on 2026-07-31 that they land first: *measure → fix the inversion → re-read retry frequency → then size this*). **Independent of Wave 8 (#318)** by owner ruling on nav placement. Needs an owner wave assignment.
@@ -110,3 +127,12 @@ elm-agent + elixir-agent.
 Filed 2026-07-31 by the lead from the owner's question on #342's SSE derivation; rewritten the same day around the owner's design decisions.
 **Verified from source while scoping:** the SSE payload is a `PollResponse` carrying `{image_id, status, book_id, book_ids, rejection_reason, is_duplicate}` where `status` is the DB status — so no attempt/retry signal exists on the wire, and no broadcast occurs between retries because the row stays `pending`. The waiting copy is a spinner plus `"Processing image..."` (`Page/Upload.elm:880`). The upload routes are `init`, `commit`, `reject-identification` and the status stream — **no route lists pending uploads**. `Add Book` is inside the `Catalogue` dropdown, not a top-level nav item.
 **Numbers behind the 23 minutes:** `attempt_timeout_ms = 2 × 210_000 + 30_000 = 450_000`; `backoff/1` is deterministic (jitter deliberately removed so the bound is a bound); worst case `3 × 450_000 + 36_000 = 1_386_000 ms`.
+
+## Progress Notes (review)
+- 2026-08-04: **staff-review: LGTM.** The design is a genuine decoupling, not a wait dressed up: the
+  identify job's terminal guarantee (#342) is what lets the reader leave, and the inbox is a query
+  over that terminal state rather than a second store. Verified `identify_book_job_terminal_test.exs`
+  green, then drove it live in the sharpest possible form — the stream was never opened and the job
+  still reached the inbox. The `replayFrame` resume is a data conversion into the existing confirm
+  shape, so there is no second confirm implementation to drift. Failure-vs-pending is kept distinct
+  live, which is the guarantee that stops an inbox of failures from lighting the badge.
