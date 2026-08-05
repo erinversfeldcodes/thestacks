@@ -114,3 +114,14 @@ inside :142 makes it fail in **4.7 s** with
 `Received: "That code was not accepted. Codes expire every 30 seconds — try the current one."` and the
 `gateAdvances` message naming #371 — instead of the old 19 s ambiguous "gate still visible". Probe
 reverted with Edit; `grep -rn PROBE e2e/tests/` clean.
+
+## Related observation (2026-08-05, Wave 8 coherence sweep)
+While re-running the E2E against the 1024MB coherence-sweep preview, the setup step **`enrol the
+owner's admin MFA factor` intermittently returns 422** at `helpers.ts:588` (`mfa confirm — a 422
+here usually means the secret encoding regressed, not a bad code`). It **passed** on one 1024MB run
+and **failed** on another with identical code — so it is intermittent, not a hard regression, and
+Wave 8 touched nothing in the MFA/TOTP/secret-encoding path. It only blocks the admin-MFA-gated
+specs (`admin-session.spec.ts`, `audit-log.spec.ts`); the eight Wave 8 nav/settings/home specs run
+on valid auth regardless. Recorded here as the closest home (MFA-factor reliability); may be the
+same secret-encoding class this issue and the known preview-MFA concern describe. For the auth owner
+to investigate — NOT a Wave 8 defect.
