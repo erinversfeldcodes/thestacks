@@ -129,3 +129,17 @@ applied — validating #353's FK migrations on a real deploy). The automated E2E
 touch/keyboard reachability, the door `animationsStarted > 0` + recording, the settings 768px
 reflow, the two shelf-rooms' rendered coherence, About's typography, and the onboarding journey with
 its focus-trap. The E2E asserts structure; these are the rendered-appearance judgements it cannot.
+
+### Visual/interaction browser drive — 2026-08-06 (the coherence sweep's manual leg)
+Driven live on the 1024MB preview as owner. **Confirmed coherent:**
+- **8e login door:** the dolly-shot plays over the arrival — screenshot caught it mid-animation, and the instrumented counter read **`animationsStarted: 6`** (>0, the exact `=0` regression #364 fixed); door **removed at Authenticated**, reader stays logged in (persist-first intact).
+- **8a nav:** new disclosure IA live — unauth flat row (Catalogue/Search/Marketplace/About/Sign In); authed shows Bookshelves▾ / Search / **Add Book (persistent green primary, NOT inside any disclosure menu → touch-reachable)** / Marketplace▾ / About / Admin▾ / account menu. Opening the Bookshelves disclosure works: `aria-expanded=true`, the 5 shelves listed, backdrop present, caret flips.
+- **8c authed home:** collection-routing "Welcome back / Step back into your collection" + a "Your Library" glimpse (real spines) + Add-a-book / Continue-reading CTAs — the US-15.1.1 drift is gone.
+- **8c About:** renders the owner's edited draft faithfully (hero, what-it-is, five shelves, wider-shelf present-tense).
+- **8d settings:** grouped You/Privacy/Your-data hub, Profile active (`aria-current`), Consent folded into "Privacy & consent", and `/settings/consent` **302-redirects to `/settings/privacy`** (verified).
+
+⚠️ **Finding → #390:** Looking-for-a-Home's room wallpaper + brass label render, but the pile-view "cover cards" are **unstyled at desktop** (`.pile-view__book/__cover` have rules only inside `@media (max-width:480px)`) — bare title/author text on the wallpaper, not face-out cover cards (US-18.1.1). Pre-existing CSS gap surfaced by the room framing. Filed #390.
+
+⚠️ **Inconclusive (NOT asserted as a bug):** disclosure close-on-Escape/outside-click — my attempts left it open, BUT the browser automation on this machine was **intermittently dropping click/key events** throughout the drive (chrome-extension errors, missed pixel-clicks, ref-clicks not always registering), so this is unverifiable via the drive. The `MainNavTest` program test asserts Escape-closes and the updated `navigation.spec` passes; a clean manual spot-check is the tiebreaker.
+
+⚠️ **Not driven:** 8b onboarding JOURNEY (the seeded owner has placements, so onboarding doesn't trigger — covered by `onboarding.spec.ts` with a fresh user); 8f screen-reader announcements (needs an AT); settings 768px reflow (window-resize couldn't force <768 viewport — covered by the updated Playwright spec, which can). The 8b Shift+Tab focus-trap residual remains as previously flagged.
