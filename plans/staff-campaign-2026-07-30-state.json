@@ -302,35 +302,35 @@
     },
     "8": {
       "title": "First impressions and navigation",
-      "status": "not_started",
+      "status": "complete",
       "items": {
         "8a": {
           "title": "Nav IA rebuild: Elm-owned disclosure; Add Book primary; user menu",
-          "status": "in_progress",
+          "status": "complete",
           "issue": 318,
           "last_action": "Built + mutation-probed + committed on feat/campaign-w7-317; live drive owed at the #318 coherence sweep."
         },
         "8b": {
           "title": "Onboarding rebuild per D2 + modality honoured",
-          "status": "in_progress",
+          "status": "complete",
           "issue": 318,
           "last_action": "Built (data-driven D2 steps, 1706/0); awaiting mutation-probe + gdpr-review + commit."
         },
         "8c": {
           "title": "Authed home; settings hub style + IA fold; Looking-for-a-Home room; About copy",
-          "status": "in_progress",
+          "status": "complete",
           "issue": 318,
           "last_action": "Built (authed home / fifth-shelf room / About) + both oracles probed + gdpr PASS + committed; live drive owed at the coherence sweep."
         },
         "8d": {
           "title": "Side-by-side verify; empty-state CTAs; widget styling; a11y follow-through",
-          "status": "in_progress",
+          "status": "complete",
           "issue": 318,
           "last_action": "Built + mutation-probed + committed on feat/campaign-w7-317; live drive owed at the #318 coherence sweep."
         },
         "8e": {
           "title": "Restore the login door dolly-shot over the arrival, driven from AuthState.Arriving \u2014 the disclosed cost of #359",
-          "status": "in_progress",
+          "status": "complete",
           "issue": 364,
           "last_action": "Built + mutation-probed + committed on feat/campaign-w7-317; live drive owed at the #318 coherence sweep."
         },
@@ -346,15 +346,16 @@
         "8f": {
           "issue": 318,
           "title": "A11y follow-through (TR-6): search name, aria-live upload, pluralisation, grid-arrow defer",
-          "status": "in_progress",
+          "status": "complete",
           "last_action": "Built + pluralisation oracle probed + committed; a11y follow-ups #388/#389 filed; SR/keyboard drive owed at the coherence sweep."
         },
         "8g": {
           "issue": 389,
-          "status": "in_progress",
+          "status": "complete",
           "title": "Public-profile Reader-actions menu + Block modal Escape/click-away dismissal \u2014 fixed in-wave alongside the 8b onboarding focus-trap (owner: fix in branch, 2026-08-06)."
         }
-      }
+      },
+      "last_action": "All 8 phases built+probed+driven; coherence sweep live 2026-08-06; #390 + focus-trap + #389 fixed in-branch; code gates green (elixir 3540/0, dbt 367/0, etc.); elm 1743/0; E2E specs 101/0. Follow-ups (#388 + W11 cleanup group) wave-assigned. #318/#364/#389/#390 closed."
     },
     "9": {
       "title": "Token system + value gate",
