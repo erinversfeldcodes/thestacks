@@ -228,6 +228,15 @@ h4 {
     flex-wrap: wrap;
 }
 
+/* The nav `<li>` wrapper. Rule-less by design — all visual styling lives on the child
+   `.app-nav__link` (and on `.app-nav__item--active .app-nav__link` for the current route), the
+   same split as `.user-menu__backdrop` being purely structural. This minimal, inert rule exists
+   only to make that intent explicit and satisfy the orphan gate; `list-style` is already inherited
+   from `.app-nav__list`, so it changes nothing visually. */
+.app-nav__item {
+    list-style: none;
+}
+
 .app-nav__link {
     display: block;
     padding: 0.4rem 0.8rem;
@@ -2922,6 +2931,36 @@ h4 {
     border-bottom-color: #8b4513;
 }
 
+/* Generic tab buttons (Groups / Group-detail views), mirroring the `.login-card__tab` treatment:
+   a transparent button, inactive muted, `--active` accented via colour + underline. Tokens only,
+   so it inherits per-theme accent rather than the login card's parchment-specific hex literals. */
+.tab {
+    padding: 0.5rem 0.75rem;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-heading);
+    font-size: var(--size-base);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.tab:hover {
+    color: var(--text);
+}
+
+.tab--active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* Keep the active tab's accent on hover — a bare `.tab:hover` (0,2,0) would otherwise defeat the
+   `.tab--active` (0,1,0) colour, same fix as `.login-card__tab--active:hover` / `.admin__tab--active:hover`. */
+.tab--active:hover {
+    color: var(--accent);
+}
+
 .login-card__field {
     margin-bottom: 1.25rem;
 }
@@ -2972,6 +3011,29 @@ h4 {
     border: 1px solid rgba(155, 44, 44, 0.2);
     border-radius: 3px;
     line-height: 1.5;
+}
+
+/* -- Base login-card notice (#365): the shared "confirmation" panel treatment,
+      the mirror of `.admin__error`. It MUST be defined here, ABOVE its own
+      `--session-expired` / `--account-deleted` / `--stored-session-unreadable`
+      modifiers. Base and modifier are both single-class (0,1,0), so at equal
+      specificity the rule defined LATER wins — a base placed after its
+      modifiers silently overrides them and the modifier is inert. This rule
+      previously sat ~3500 lines below the modifiers (grouped with
+      `.groups-detail__invite-success` / `.marketplace-create__success`), so its
+      accent-green `background`/`color` and its `margin`/`padding` shorthands
+      beat the amber modifiers below — the amber notices never rendered.
+      `scripts/check-css.sh` check G now guards this ordering. -- */
+
+.login-card__notice {
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--accent);
+    background: rgba(74, 124, 89, 0.15);
+    border-left: 2px solid var(--accent);
+    padding: 0.6rem 0.85rem;
+    margin: 0 0 1rem;
+    border-radius: var(--radius-sm);
 }
 
 /* -- Session-expired notice (calm "lamplight" amber, distinct from the maroon
@@ -5119,6 +5181,19 @@ h4 {
     gap: 0.75rem;
 }
 
+/* Metadata-register base for the status line — small caps, tracked, muted, matching
+   `.book-detail__visibility` / `.settings-section__note`. Split out of that shared metadata
+   group (which sits later in the file) so this base PRECEDES its --error/--loading/--success
+   modifiers; otherwise the later base `color` overrides them at equal specificity and the
+   status never turns red/green (#365 login-card precedent). */
+.book-detail__status {
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
 /* Save-state feedback on the detail overlay, kept consistent with .error. */
 .book-detail__status--error {
     color: #e05050;
@@ -5996,6 +6071,15 @@ h4 {
     transition: border-color 0.2s ease-in;
 }
 
+/* Page-width base for the form-input wrapper. Split out of the `.page--*` wrapper group (which
+   sits later in the file) so this base PRECEDES its --textarea modifier; otherwise the later base
+   `padding` overrides the modifier at equal specificity, breaking textarea padding (#365). */
+.form-input {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+}
+
 /* Form inputs, matching `.search-bar__input`. An inset dark well rather than a light field: a white input on this palette is what made several forms look like browser defaults. */
 .admin__search,
 .admin__search-input,
@@ -6137,6 +6221,15 @@ h4 {
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
+}
+
+/* Page-width base for the feed-item wrapper. Split out of the `.page--*` wrapper group (which sits
+   later in the file) so this base PRECEDES its --blog-post/--placement modifiers; otherwise the
+   later base `padding` overrides them at equal specificity, breaking feed-item padding (#365). */
+.feed-item {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
 }
 
 /* The house panel surface, matching `.removal-queue__row`. A translucent white wash rather than a solid colour so the wallpaper reads through and per-bookshelf themes still tint it. */
@@ -6449,7 +6542,6 @@ h4 {
 
 /* Confirmations: the mirror of `.admin__error`, in the accent. Same shape so success and failure are recognisably the same *kind* of message. */
 .groups-detail__invite-success,
-.login-card__notice,
 .marketplace-create__success {
     font-family: var(--font-body);
     font-size: var(--size-sm);
@@ -6581,10 +6673,8 @@ h4 {
  */
 .book-associations,
 .comment-form,
-.feed-item,
 .feed-item-row,
 .form-group,
-.form-input,
 .form-label,
 .notification-toggles,
 .page--blog-archive,
@@ -6798,8 +6888,8 @@ h4 {
     margin: 0 auto;
 }
 
-/* Metadata-register elements — small caps, tracked, muted, as elsewhere. */
-.book-detail__status,
+/* Metadata-register elements — small caps, tracked, muted, as elsewhere.
+   `.book-detail__status` is styled above (split out so its base precedes its modifiers). */
 .book-detail__visibility,
 .settings-section__note {
     font-family: var(--font-body);
@@ -7324,6 +7414,22 @@ h4 {
     font-family: var(--font-heading);
     font-size: var(--size-xl);
     color: var(--accent);
+}
+
+/* Small pill labels on a marketplace card (listing status, book condition), mirroring the inline-badge
+   pattern (`.rss-link__icon` / `.search-bar__icon`): a bordered, radiused, uppercase, muted chip. The
+   base carries the look; per-status `--<status>` modifiers, where present, tint on top. Tokens only. */
+.marketplace__status-badge,
+.marketplace__condition-badge {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
 }
 
 /* "Merge" on the duplicate-upload prompt: the affirmative action. */

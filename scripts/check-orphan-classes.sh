@@ -49,13 +49,66 @@ from collections import defaultdict
 mode, budget = sys.argv[1], int(sys.argv[2])
 
 # Class literals used in Elm views: `class "a b"`, `classList` entries, and `Attr.class "x"`.
+#
+# ⚠️ #356: `class "a b"` is only the SIMPLE form. Whenever a class depends on state Elm writes a
+# COMPUTED form — `class (if cond then "a--selected" else "a")`, `class ("base " ++ fn x)`,
+# `classList [ ("a", cond) ]` — and the naive `class\s+"…"` regex is blind to every literal in it,
+# because `class` is followed by `(` or `[`, not `"`. That blind spot (42 sites) let
+# `.upload-shelf-picker__shelf(--selected)` ship completely unstyled while the gate read `0 unstyled`:
+# a class named ONLY inside a computed form is invisible to BOTH halves — it can neither be flagged an
+# orphan nor caught as an unstyled surface. So we also harvest every string literal that appears inside
+# a balanced `class (…)` / `classList […]` argument region, including inside `if/then/else` and `case`
+# branches. Over-collecting class-shaped tokens is safe (a spurious `used` entry can only ADD an orphan
+# to investigate, never hide one) — but we drop tokens ending in `-`/`_`, which are concatenation
+# PREFIXES (`"marketplace__status-badge--" ++ fn`), not real class names.
+
+
+def _add_token(token, used):
+    if token.endswith("-") or token.endswith("_"):
+        return
+    if re.fullmatch(r"[a-z][a-z0-9_-]*", token):
+        used.add(token)
+
+
+def _harvest_computed(text, used):
+    """Collect string literals inside `class (…)` / `classList […]` argument regions."""
+    for m in re.finditer(r"(?<![\w.])(?:[A-Z][\w.]*\.)?(class|classList)\b", text):
+        j = m.end()
+        while j < len(text) and text[j] in " \t\r\n":
+            j += 1
+        if j >= len(text) or text[j] not in "([":
+            continue  # `class "x"` (simple form, handled below) or something else — skip.
+        depth, in_str, k = 0, False, j
+        while k < len(text):
+            ch = text[k]
+            if in_str:
+                if ch == "\\":
+                    k += 2
+                    continue
+                if ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch in "([":
+                depth += 1
+            elif ch in ")]":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        region = text[j : k + 1]
+        for literal in re.findall(r'"([^"\n]*)"', region):
+            for token in literal.split():
+                _add_token(token, used)
+
+
 used = set()
 for path in glob.glob("frontend/src/**/*.elm", recursive=True):
     text = open(path, encoding="utf-8").read()
     for literal in re.findall(r'class\s+"([^"\n]+)"', text):
         for token in literal.split():
-            if re.fullmatch(r"[a-z][a-z0-9_-]*", token):
-                used.add(token)
+            _add_token(token, used)
+    _harvest_computed(text, used)
 
 # Selectors defined anywhere in the single stylesheet source.
 defined = set()

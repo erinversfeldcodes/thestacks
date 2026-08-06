@@ -103,6 +103,16 @@ def props_of(body):
     return {d.split(":")[0].strip() for d in body.split(";") if ":" in d and "{" not in d}
 
 
+def decls_of(body):
+    """{property: normalised value} for a rule body — later duplicate wins, as the cascade does."""
+    out = {}
+    for d in body.split(";"):
+        if ":" in d and "{" not in d:
+            k, _, v = d.partition(":")
+            out[k.strip().lower()] = re.sub(r"\s+", " ", v).strip().lower()
+    return out
+
+
 # A rule body containing `{` — defect 1's exact and unambiguous shape.
 #
 # ⚠️ The first version of this check tried to recognise a *selector-looking line* and produced 24 false
@@ -243,17 +253,123 @@ for cls, occ in byclass.items():
                     "wins and the earlier reads as live code that does nothing"
                 )
 
+# ---- G. a base rule placed AFTER its own modifier (order silently defeats it) ----
+#
+# Check C only catches base-beats-modifier UNDER A PSEUDO-CLASS (`.b:hover` at (0,2,0) beating `.b--m`
+# at (0,1,0)). The plainer case (#365) it never saw: a base `.b` and a modifier `.b--m` are BOTH
+# single-class, so their specificity is EQUAL (0,1,0) — and at equal specificity the rule defined LATER
+# in the file wins. So a base rule sitting *after* its own modifier overrides it, and the modifier is
+# inert. That silently killed the amber on three `.login-card__notice--*` surfaces: the base
+# `.login-card__notice` sat ~3500 lines below its modifiers, so its accent-green `background`/`color`
+# and its `margin`/`padding` SHORTHANDS beat the modifiers' amber and their `margin-bottom` longhand.
+#
+# Shorthand-vs-longhand is half the damage, so a `background` base vs a `background-color` modifier, or
+# a `margin` base vs a `margin-bottom` modifier, MUST count as a collision. `_atoms()` expands each
+# property to the set of atomic sub-properties it controls; two properties collide when those sets
+# intersect.
+ORDER_COLLISION_BUDGET = 0
+
+
+def _atoms(prop):
+    prop = prop.strip().lower()
+    if prop in ("margin", "padding"):
+        return {f"{prop}-top", f"{prop}-right", f"{prop}-bottom", f"{prop}-left"}
+    if re.fullmatch(r"(margin|padding)-(top|right|bottom|left)", prop):
+        return {prop}
+    if prop == "background":
+        return {"background-color", "background-image", "background-position",
+                "background-repeat", "background-size", "background-attachment"}
+    if prop.startswith("background-"):
+        return {prop}
+    if prop == "border":
+        return {"border-top", "border-right", "border-bottom", "border-left"}
+    if prop in ("border-top", "border-right", "border-bottom", "border-left"):
+        return {prop}
+    if re.fullmatch(r"border-(top|right|bottom|left)-(width|style|color)", prop):
+        return {"border-" + prop.split("-")[1]}
+    if prop in ("border-width", "border-style", "border-color"):
+        return {"border-top", "border-right", "border-bottom", "border-left"}
+    if prop == "font":
+        return {"font-family", "font-size", "font-style", "font-weight", "line-height"}
+    if prop in ("font-family", "font-size", "font-style", "font-weight", "font-variant", "line-height"):
+        return {prop}
+    return {prop}
+
+
+plain_base, plain_mod = defaultdict(list), defaultdict(list)
+for head, in_media, pos in rules:
+    if in_media:
+        continue
+    decls = decls_of(body_of(pos))
+    for one in head.split(","):
+        one = one.strip()
+        mb = re.fullmatch(r"\.([a-zA-Z][\w-]*)", one)  # a PLAIN single-class selector only
+        if not mb:
+            continue
+        name = mb.group(1)
+        mm = re.fullmatch(r"([a-zA-Z][\w-]*?)--[\w-]+", name)
+        if mm:
+            plain_mod[mm.group(1)].append((one, pos, decls))
+        else:
+            plain_base[name].append((pos, decls))
+
+
+def _defeats(bdecls, mdecls):
+    """Which modifier declarations a later base rule actually defeats.
+
+    Value-aware on purpose. A base redeclaring a property with the SAME value it already has is a
+    harmless redundancy, not a defeated modifier (e.g. `.b--loading{position:relative}` under a later
+    `.b{position:relative}`), and a gate that fires on correct code is one someone switches off — the
+    lesson check A already learned. So a same-NAMED property counts only when the values DIFFER. But
+    shorthand-vs-longhand (base `background`/`margin` beating modifier `background-color`/`margin-bottom`)
+    counts ALWAYS: it is the fragile pattern #365 calls out, and the shorthand resets components the
+    modifier never mentioned regardless of the visible value.
+    """
+    hits = set()
+    for mp, mv in mdecls.items():
+        for bp, bv in bdecls.items():
+            if bp == mp:
+                if bv != mv:
+                    hits.add(mp)
+            elif _atoms(bp) & _atoms(mp):  # shorthand-vs-longhand across different names
+                hits.add(f"{mp} (via base `{bp}`)")
+    return hits
+
+
+order_collisions = []
+for base_name, mods in plain_mod.items():
+    bases = plain_base.get(base_name, [])
+    for modsel, mpos, mdecls in mods:
+        # The base rule that WINS for a shared property is the LAST base occurrence. If ANY base
+        # occurrence sits after this modifier and actually changes one of its declarations, the base
+        # defeats the modifier and the modifier is inert.
+        defeated = set()
+        for bpos, bdecls in bases:
+            if bpos > mpos:
+                defeated.update(_defeats(bdecls, mdecls))
+        if defeated:
+            order_collisions.append(
+                f".{base_name} (base) is defined AFTER {modsel} and overrides it on "
+                f"{sorted(defeated)} at equal specificity (0,1,0) — later wins, so the modifier is inert"
+            )
+
 if mode == "--list":
-    print(f"{len(problems)} problem(s), {len(collisions)} modifier/pseudo collision(s):\n")
+    print(
+        f"{len(problems)} problem(s), {len(collisions)} modifier/pseudo collision(s), "
+        f"{len(order_collisions)} base-after-modifier order collision(s):\n"
+    )
     for p in problems:
         print(f"  !! {p}")
     for c in collisions:
         print(f"  ~~ {c}")
+    for c in order_collisions:
+        print(f"  >< {c}")
     sys.exit(0)
 
 print(
     f"CSS: {len(rules)} rule(s) checked, {len(problems)} problem(s), "
-    f"{len(collisions)} modifier/pseudo collision(s) (budget {budget})"
+    f"{len(collisions)} modifier/pseudo collision(s) (budget {budget}), "
+    f"{len(order_collisions)} base-after-modifier order collision(s) (budget {ORDER_COLLISION_BUDGET})"
 )
 
 failed = False
@@ -261,6 +377,14 @@ if problems:
     print("\nProblems that must be fixed:\n")
     for p in problems:
         print(f"  {p}\n")
+    failed = True
+
+if len(order_collisions) > ORDER_COLLISION_BUDGET:
+    print(f"\n{len(order_collisions) - ORDER_COLLISION_BUDGET} NEW base-after-modifier order collision(s):\n")
+    for c in order_collisions:
+        print(f"  {c}\n")
+    print("Fix by moving the base rule ABOVE its modifiers (or splitting it out of a shared group so it "
+          "precedes them). BEM modifiers only win by cascade ORDER when they follow the base.")
     failed = True
 
 if len(collisions) > budget:
