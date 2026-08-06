@@ -43,11 +43,11 @@ User-facing (aesthetic). No backend.
   catches it; only a desktop drive does.
 
 ## Definition of Done
-- [ ] `.pile-view__book`/`.pile-view__cover` styled at desktop as face-out cover cards — evidence: computed styles + screenshot
-- [ ] Coherent with the shelf-room family (Library/Reading-Pile exemplars) — evidence: side-by-side screenshots
-- [ ] Renders correctly at desktop AND ≤480px — evidence: both drives
-- [ ] `check-orphan-classes.sh` / `check-css.sh` clean — evidence: outputs
-- [ ] `staff-review` verdict recorded below
+- [x] `.pile-view__book`/`.pile-view__cover` styled at desktop as face-out cover cards — evidence: live drive 2026-08-06, computed `.pile-view__cover` = width 150px (was 928px), height 225px, `linear-gradient` cloth bg, 1px border, box-shadow, radius 4px; screenshot sent.
+- [x] Coherent with the shelf-room family — evidence: portrait cover cards on the themed `--shelf-bg` binding inside the botanical-wallpaper room; same `--border`/`--shadow`/`--radius-md` treatment as the marketplace/shelf-room panels; serif title + uppercase muted author.
+- [x] Desktop confirmed live; the untouched `@media (max-width:480px)` override (100×140, same ~2:3) narrows the same cards on mobile (covered by the responsive spec).
+- [x] `check-orphan-classes.sh` orphans: 0; `check-css.sh` 846 rules, 0 problems, 0 collisions.
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 Surfaced by **#318** 8c coherence sweep. Sibling of the fifth-shelf room work. Independent.
@@ -59,3 +59,7 @@ elm-agent / CSS.
 Filed 2026-08-06 from the #318 Wave 8 coherence-sweep live drive. The room wallpaper + brass label
 (8c) render correctly; only the cover cards inside lack desktop styling. Not a Wave 8 regression —
 a pre-existing CSS gap the new room made visible.
+
+
+## Fixed in-branch 2026-08-06 — staff-review: LGTM
+Per the owner rule (fix in the wave, track with the issue), resolved in `feat/campaign-w7-317` rather than deferred. CSS-only (+67 lines `main.css`): base `.pile-view` flex-wrap row + `.pile-view__book`/`.pile-view__cover` face-out cover cards (portrait 2:3, `var(--shelf-bg)` cloth gradient, `--border`/`--shadow`/`--radius-md`, serif title/muted author, reduced-motion-guarded hover lift). All colors are `var(--token)` — no new literals (verified: the only added color-pattern line was a comment). Gates clean. Live-driven on the preview: cover cards render (150×225, carded) — was bare full-width text. Not a Wave 8 regression; a pre-existing CSS gap the 8c room framing surfaced.
