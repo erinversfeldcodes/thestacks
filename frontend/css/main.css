@@ -2668,6 +2668,73 @@ h4 {
     }
 }
 
+/* ===== Looking-for-a-Home pile-view — face-out cover cards (#390) ===== */
+/* The staged pile inside the shelf-room. Previously `.pile-view__book` /
+ * `.pile-view__cover` were sized ONLY inside `@media (max-width: 480px)`, so at
+ * desktop the cards rendered as full-width text blocks. These base (all-width)
+ * rules give them face-out cover-card form — a wrapping row of portrait cards on
+ * a cloth-binding surface — coherent with the shelf-room family (the covers reuse
+ * the themed `--shelf-bg` binding tone, `--border`, and `--shadow-*` the other
+ * bookshelf surfaces use). The `≤480px` block below narrows the same cards for
+ * small screens. Every colour is a `:root`/theme token; only dimensions are px/rem. */
+
+.pile-view {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    justify-content: center;
+    padding: 1.5rem 0;
+}
+
+.pile-view__book {
+    width: 150px;
+    flex: 0 0 auto;
+}
+
+.pile-view__cover {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    width: 150px;
+    height: 225px; /* ~2:3 portrait book proportion */
+    padding: 1rem 0.85rem;
+    background: linear-gradient(145deg, var(--shelf-bg), var(--bg));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* A coverless book still reads as a book: the grouped title/author rules give the
+ * serif heading + muted metadata register; these only fit them to the card. */
+.pile-view__cover .pile-view__title {
+    font-size: var(--size-base);
+    line-height: 1.2;
+}
+
+.pile-view__cover .pile-view__author {
+    margin-top: 0.4rem;
+}
+
+/* Subtle, scoped hover lift — never `transition: all`. */
+.pile-view__book:hover .pile-view__cover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pile-view__cover {
+        transition: none;
+    }
+
+    .pile-view__book:hover .pile-view__cover {
+        transform: none;
+    }
+}
+
 @media (max-width: 480px) {
     .app__main {
         padding: 1rem;
