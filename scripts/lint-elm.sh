@@ -46,6 +46,16 @@ bash "$REPO_ROOT/scripts/check-session-expiry-coverage.sh"
 # selectors, and refuses a modifier whose state a base `:hover` rule silently overrides.
 bash "$REPO_ROOT/scripts/check-css.sh"
 
+# The stylesheet's token VALUES (Issue #319, Wave 9c). The third CSS gate, sibling to the two above:
+# check-orphan-classes.sh governs which classes exist, check-css.sh governs their structure, and this
+# one governs the VALUES a declaration uses. It fails on drift a browser and every test render blind
+# to — a bare hex equal to a token's value (should have been the var()), a var() of an undefined
+# token, a fallback that disagrees with the token's definition, and a spacing literal equal to a
+# --space-* step. Each dimension is an itemised ratchet at its current count (colour/var/fallback are
+# the theme-varying residuals 9b left; spacing is greenfield), so a NEW violation fails while today's
+# known residuals do not.
+bash "$REPO_ROOT/scripts/check-css-values.sh"
+
 (cd frontend && npx elm-format --validate src/)
 (cd frontend && npm audit)
 
