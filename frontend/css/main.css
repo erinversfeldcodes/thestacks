@@ -2,6 +2,37 @@
    Dark-academic meets cottage-core aesthetic
    ------------------------------------------ */
 
+/* ===== Design Tokens (Wave 9 / #319) =====
+ *
+ * Every reusable value lives behind a token so it can be governed at the value
+ * level. All tokens below reuse a value already present in the file — Wave 9
+ * moved values behind names, it did not introduce any new visual value.
+ *
+ * SPACING SCALE (--space-1 … --space-7) — the EMERGENT core, not strict base-4.
+ * These seven steps already cover ~53% of the spacing literals in the file:
+ *   --space-1 0.25rem · --space-2 0.5rem · --space-3 0.75rem · --space-4 1rem
+ *   --space-5 1.5rem · --space-6 2rem · --space-7 3rem
+ * New code MUST use the scale where a value matches a step (gated in 9c).
+ *
+ * TYPE SCALE (--size-xs … --size-8xl) — --size-5xl…8xl extend the ramp past
+ * --size-4xl (2.5rem) to cover the display headings that were previously
+ * off-scale (3 / 3.5 / 4 / 5rem).
+ *
+ * RADII — --radius-sm/md/lg plus --radius-pill (999px) for pills/badges.
+ *
+ * SEMANTIC STATE — one canonical error red (--error), a darker variant
+ * (--error-strong), success green (--success), and the lamplight-amber warning
+ * pair (--warning / --warning-text). See the :root block for the source values.
+ *
+ * PALETTE / THEMES — the :root palette is redefined by five shelf-theme blocks
+ * (.shelf-library / -antilibrary / -wishlist / -looking-for-home / -reading-pile)
+ * and a page-scoped parchment palette (.page--book-detail). A palette value maps
+ * to DIFFERENT token names in different themes; only tokens defined solely in
+ * :root (e.g. --text-muted, --accent-hover) are theme-invariant. Migrate
+ * literals to a token only when the token resolves to that exact value in the
+ * rule's rendering context.
+ */
+
 /* ===== CSS Custom Properties ===== */
 
 :root {
@@ -17,10 +48,25 @@
     --size-xxl: 1.5rem;
     --size-3xl: 2rem;
     --size-4xl: 2.5rem;
+    /* Display sizes — extend the ramp past 4xl for off-scale headings. */
+    --size-5xl: 3rem;
+    --size-6xl: 3.5rem;
+    --size-7xl: 4rem;
+    --size-8xl: 5rem;
+
+    /* Spacing scale — emergent core (see header). */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+    --space-7: 3rem;
 
     --radius-sm: 2px;
     --radius-md: 4px;
     --radius-lg: 8px;
+    --radius-pill: 999px;
 
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
@@ -35,13 +81,24 @@
     --shelf-bg: #3d2b1f;
     --wallpaper-color: #2a3d2f;
     --border: rgba(255, 255, 255, 0.1);
+
+    /* Semantic state — theme-invariant (defined only here). Source values:
+     * --error         #e05050  (the brighter/more-used error red)
+     * --error-strong  #b03030  (the darker error red, e.g. filled buttons)
+     * --success       #4a7c59  (the accent green; = rgba(74,124,89,…) grounds)
+     * --warning       #b8860b  (lamplight amber; = rgba(184,134,11,…) grounds)
+     * --warning-text  #6b4310  (dark brass warning text on the amber panels) */
+    --error: #e05050;
+    --error-strong: #b03030;
+    --success: #4a7c59;
+    --warning: #b8860b;
+    --warning-text: #6b4310;
 }
 
 /* ===== Shelf Theme Classes ===== */
 
 .shelf-library {
     --shelf-bg: #3d2b1f;
-    --shelf-text: #e8dcc8;
     --wallpaper-color: #2a3d2f;
     --accent: #4a7c59;
 }
@@ -50,7 +107,6 @@
     --bg: #f5f0e8;
     --text: #2c1f0e;
     --shelf-bg: #c8a97a;
-    --shelf-text: #2c1f0e;
     --wallpaper-color: #e8e4d6;
     --accent: #7a9e6e;
     --border: rgba(0, 0, 0, 0.1);
@@ -73,7 +129,6 @@
     --bg: #1e2838;
     --text: #d4dde8;
     --shelf-bg: #2c3e55;
-    --shelf-text: #d4dde8;
     --wallpaper-color: #253040;
     --accent: #7b9eb8;
 }
@@ -82,7 +137,6 @@
     --bg: #e8eef5;
     --text: #2c1f0e;
     --shelf-bg: #b8a080;
-    --shelf-text: #2c1f0e;
     --wallpaper-color: #dce8f0;
     --accent: #6a8ea0;
     --border: rgba(0, 0, 0, 0.1);
@@ -105,7 +159,6 @@
     --bg: #2a1a2e;
     --text: #e8dce8;
     --shelf-bg: #3d2b1f;
-    --shelf-text: #e8d4b8;
     --wallpaper-color: #c8b0d0;
     --accent: #9a6aaa;
 }
@@ -199,7 +252,7 @@ h4 {
 .app-header {
     position: relative;
     z-index: 100;
-    background-color: var(--shelf-bg, #3d2b1f);
+    background-color: var(--shelf-bg);
     border-bottom: 1px solid var(--border);
     padding: 1rem 1.5rem;
     display: flex;
@@ -242,7 +295,7 @@ h4 {
     padding: 0.4rem 0.8rem;
     border-radius: var(--radius-md);
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     transition: background-color 0.15s, color 0.15s;
 }
 
@@ -273,7 +326,7 @@ h4 {
     top: 100%;
     right: 0;
     list-style: none;
-    background: var(--shelf-bg, #3d2b1f);
+    background: var(--shelf-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-md);
@@ -339,7 +392,7 @@ h4 {
     width: 100%;
     padding: 0.5rem 1rem;
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     background: none;
     border: none;
     text-align: left;
@@ -367,7 +420,7 @@ h4 {
     margin-left: 0.5rem;
     padding: 0.05em 0.4em;
     border-radius: 999px;
-    background: var(--accent, #8b6f47);
+    background: var(--accent);
     color: var(--parchment, #f4ecd8);
     font-family: var(--font-body);
     font-size: var(--size-xs, 0.75rem);
@@ -387,7 +440,7 @@ h4 {
 
 .app-footer__text {
     font-size: var(--size-xs);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 /* ===== Page Base ===== */
@@ -437,13 +490,13 @@ h4 {
 }
 
 .btn--danger {
-    background-color: #b03030;
+    background-color: var(--error-strong);
     color: #fff;
 }
 
 .btn--ghost {
     background-color: transparent;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     border: none;
 }
 
@@ -466,12 +519,12 @@ h4 {
 .loading {
     text-align: center;
     padding: 3rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
 }
 
 .error {
-    color: #e05050;
+    color: var(--error);
     padding: 1rem;
     border: 1px solid rgba(224, 80, 80, 0.3);
     border-radius: var(--radius-md);
@@ -562,7 +615,7 @@ h4 {
     font-family: var(--font-heading);
     font-size: var(--size-base);
     font-style: italic;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     text-align: center;
     padding: 1rem;
     max-width: 260px;
@@ -758,7 +811,7 @@ h4 {
 .empty-shelf {
     text-align: center;
     padding: 4rem 2rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 .empty-shelf__icon {
@@ -806,7 +859,7 @@ h4 {
 }
 
 .upload-area__or {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-sm);
 }
 
@@ -815,7 +868,7 @@ h4 {
     flex-direction: column;
     align-items: center;
     gap: 1rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 .upload-area__error {
@@ -845,7 +898,7 @@ h4 {
     font-style: italic;
     line-height: 1.55;
     text-align: center;
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
 }
 
 /* ===== Upload inbox (#351) ===== */
@@ -874,7 +927,7 @@ h4 {
     margin: 0 0 1rem;
     font-family: var(--font-body);
     font-size: var(--size-sm);
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
 }
 
 .upload-inbox__list {
@@ -893,7 +946,7 @@ h4 {
     gap: 0.6rem;
     padding: 0.9rem 1rem;
     border: 1px solid var(--border);
-    border-left: 3px solid var(--accent, #8b6f47);
+    border-left: 3px solid var(--accent);
     border-radius: var(--radius-md);
 }
 
@@ -914,7 +967,7 @@ h4 {
 }
 
 .upload-inbox__item--failed .upload-inbox__item-text {
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
     font-style: italic;
 }
 
@@ -926,7 +979,7 @@ h4 {
     font-family: var(--font-body);
     font-size: var(--size-sm);
     font-style: italic;
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
 }
 
 .upload-result {
@@ -969,7 +1022,7 @@ h4 {
 }
 
 .modal__message {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     margin-bottom: 1.5rem;
     line-height: 1.5;
 }
@@ -1004,13 +1057,13 @@ h4 {
 }
 
 .search-bar__input::placeholder {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 .search-bar__clear {
     background: transparent;
     border: none;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     cursor: pointer;
     font-size: var(--size-base);
     padding: 0 0.25rem;
@@ -1024,7 +1077,7 @@ h4 {
 .search-empty {
     text-align: center;
     padding: 3rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
 }
 
@@ -1068,12 +1121,12 @@ h4 {
 }
 
 .search-result__author {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-sm);
 }
 
 .search-result__year {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-xs);
 }
 
@@ -1096,7 +1149,7 @@ h4 {
     align-items: center;
     gap: 0.4rem;
     margin-bottom: 0.75rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-sm);
     cursor: pointer;
 }
@@ -1110,7 +1163,7 @@ h4 {
 .search-result__snippet {
     margin-top: 0.5rem;
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.5;
 }
 
@@ -1146,7 +1199,7 @@ h4 {
 .search-section__title {
     font-family: var(--font-heading);
     font-size: var(--size-lg);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     padding-bottom: 0.35rem;
     border-bottom: 1px solid var(--border);
 }
@@ -1162,7 +1215,7 @@ h4 {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 0.4rem 0.8rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     cursor: pointer;
     font-size: var(--size-sm);
     margin-bottom: 0.5rem;
@@ -1190,7 +1243,7 @@ h4 {
 
 .filter-panel__label {
     font-size: var(--size-xs);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.06em;
 }
@@ -1225,7 +1278,7 @@ h4 {
 
 .sort-selector__label {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 .sort-selector__select {
@@ -1252,7 +1305,7 @@ h4 {
     border: 1.5px solid var(--border);
     border-radius: var(--radius-md);
     background: transparent;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     cursor: pointer;
     font-size: var(--size-sm);
     transition: border-color 0.15s, color 0.15s, background-color 0.15s;
@@ -1326,11 +1379,11 @@ h4 {
 }
 
 .isbn-input--error {
-    border-color: #e05050;
+    border-color: var(--error);
 }
 
 .isbn-input__error {
-    color: #e05050;
+    color: var(--error);
     font-size: var(--size-xs);
 }
 
@@ -1368,9 +1421,6 @@ h4 {
     --parchment-muted: #7a6b54;
     --parchment-border: rgba(44, 31, 14, 0.12);
     --parchment-accent: #4a7c59;
-    --parchment-accent-hover: #5a9a6e;
-    --parchment-gold: #c8a24e;
-    --parchment-gold-muted: #b89a4a;
     --parchment-cream: #faf6ed;
     --parchment-shadow: rgba(44, 31, 14, 0.15);
 }
@@ -1702,7 +1752,7 @@ h4 {
 .book-detail__multi-shelf-note {
     font-size: var(--size-sm);
     font-style: italic;
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
     margin-bottom: 0.75rem;
 }
 
@@ -1763,7 +1813,7 @@ h4 {
     font-family: var(--font-body);
     font-size: var(--size-sm);
     font-style: italic;
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
     margin: 0 0 0.75rem;
 }
 
@@ -1776,7 +1826,7 @@ h4 {
 }
 
 .book-detail__rating--empty {
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
     font-style: italic;
 }
 
@@ -1806,7 +1856,7 @@ h4 {
 }
 
 .book-detail__prices-empty {
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
     font-style: italic;
     font-size: var(--size-sm);
 }
@@ -1836,7 +1886,7 @@ h4 {
 /* -- Stub notice (shared) -- */
 
 .stub-notice {
-    color: var(--parchment-muted, var(--text-muted, #a09070));
+    color: var(--parchment-muted, var(--text-muted));
     font-style: italic;
     font-size: var(--size-sm);
 }
@@ -1882,7 +1932,7 @@ h4 {
 
 .shelf-mover__label {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 .book-detail__shelf-actions .shelf-mover {
@@ -1926,7 +1976,7 @@ h4 {
 }
 
 .book-detail__parchment .btn--danger {
-    background-color: #b03030;
+    background-color: var(--error-strong);
     color: #fff;
 }
 
@@ -1952,7 +2002,7 @@ h4 {
 }
 
 .settings-section__desc {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-sm);
     margin-bottom: 1rem;
 }
@@ -1970,13 +2020,13 @@ h4 {
     margin-top: 2rem;
     padding: 1.5rem;
     border: 1px solid rgba(176, 48, 48, 0.4);
-    border-left: 4px solid #b03030;
+    border-left: 4px solid var(--error-strong);
     border-radius: 4px;
     background-color: rgba(176, 48, 48, 0.05);
 }
 
 .settings-section--danger .settings-section__title {
-    color: #b03030;
+    color: var(--error-strong);
 }
 
 .privacy__delete-confirm {
@@ -1995,7 +2045,7 @@ h4 {
 
 .privacy__delete-hint {
     margin-top: 0.5rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-sm);
     font-style: italic;
 }
@@ -2029,7 +2079,7 @@ h4 {
 
 .toggle--off {
     background-color: transparent;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 /* ===== Consent Banner ===== */
@@ -2039,7 +2089,7 @@ h4 {
     bottom: 0;
     left: 0;
     right: 0;
-    background-color: var(--shelf-bg, #3d2b1f);
+    background-color: var(--shelf-bg);
     border-top: 1px solid var(--border);
     padding: 1rem 1.5rem;
     display: flex;
@@ -2082,7 +2132,7 @@ h4 {
 }
 
 .home__subtitle {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-lg);
     margin-bottom: 2.5rem;
     font-style: italic;
@@ -2132,7 +2182,7 @@ h4 {
 }
 
 .home-collection__status {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
     font-size: var(--size-lg);
@@ -2164,7 +2214,7 @@ h4 {
 }
 
 .page--not-found p {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     margin-bottom: 2rem;
 }
 
@@ -2367,7 +2417,7 @@ h4 {
 }
 
 .costs__subtitle {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
     font-size: var(--size-lg);
@@ -2396,7 +2446,7 @@ h4 {
 
 .costs__banner-label {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-weight: 600;
@@ -2423,7 +2473,7 @@ h4 {
 .costs__banner-term {
     font-family: var(--font-mono);
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     background-color: rgba(255, 255, 255, 0.04);
     padding: 0.25rem 0.6rem;
     border-radius: var(--radius-sm);
@@ -2431,7 +2481,7 @@ h4 {
 }
 
 .costs__banner-plus {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-sm);
     opacity: 0.6;
 }
@@ -2487,7 +2537,7 @@ h4 {
 
 .costs__story-text {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.6;
     flex: 1;
 }
@@ -2574,7 +2624,7 @@ h4 {
 
 .costs__service-desc {
     font-size: var(--size-xs);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     grid-column: 1;
     grid-row: 2;
     line-height: 1.4;
@@ -2618,7 +2668,7 @@ h4 {
 .costs__bar {
     width: 100%;
     max-width: 60px;
-    background: linear-gradient(to top, var(--accent), var(--accent-hover, #5a9a6e));
+    background: linear-gradient(to top, var(--accent), var(--accent-hover));
     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     min-height: 4px;
     transition: height 0.4s ease-out;
@@ -2626,7 +2676,7 @@ h4 {
 
 .costs__bar-label {
     font-size: var(--size-xs);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     white-space: nowrap;
 }
 
@@ -2648,7 +2698,7 @@ h4 {
     font-family: var(--font-heading);
     font-style: italic;
     font-size: var(--size-base);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.8;
     max-width: 700px;
     text-align: center;
@@ -3042,7 +3092,7 @@ h4 {
       >= 4.5:1 contrast on the login card. -- */
 
 .login-card__notice--session-expired {
-    color: #6b4310;
+    color: var(--warning-text);
     font-family: var(--font-heading);
     font-style: italic;
     font-size: var(--size-sm);
@@ -3060,7 +3110,7 @@ h4 {
       of the session-expiry surface. -- */
 
 .login-card__notice--account-deleted {
-    color: #6b4310;
+    color: var(--warning-text);
     font-family: var(--font-heading);
     font-style: italic;
     font-size: var(--size-sm);
@@ -3173,7 +3223,7 @@ h4 {
     display: block;
     padding: 0.4rem 0.8rem;
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
 }
@@ -3211,7 +3261,7 @@ h4 {
 }
 
 .catalogue__subtitle {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
     font-size: var(--size-lg);
@@ -3292,7 +3342,7 @@ h4 {
     justify-content: center;
     font-family: var(--font-heading);
     font-size: 4rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     opacity: 0.4;
 }
 
@@ -3318,7 +3368,7 @@ h4 {
 
 .catalogue__card-author {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
 }
 
@@ -3336,7 +3386,7 @@ h4 {
     border: 1px solid var(--border);
     border-radius: 999px;
     font-size: var(--size-xs);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     white-space: nowrap;
 }
 
@@ -3345,7 +3395,7 @@ h4 {
 .catalogue__empty {
     text-align: center;
     padding: 4rem 2rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
     font-size: var(--size-lg);
@@ -3364,7 +3414,7 @@ h4 {
 
 .catalogue__page-info {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-family: var(--font-heading);
 }
 
@@ -3419,7 +3469,7 @@ h4 {
     border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
     border-radius: var(--radius-sm, 0.25rem);
     background: transparent;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: 0.8rem;
     cursor: pointer;
     transition: background-color 0.15s, color 0.15s, border-color 0.15s;
@@ -3427,13 +3477,13 @@ h4 {
 
 .catalogue__filter-btn:hover {
     border-color: rgba(255, 255, 255, 0.2);
-    color: var(--text, #e8dcc8);
+    color: var(--text);
 }
 
 .catalogue__filter-btn--active {
     background-color: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 255, 255, 0.2);
-    color: var(--text, #e8dcc8);
+    color: var(--text);
 }
 
 /* -- Catalogue shelf actions -- */
@@ -3464,7 +3514,7 @@ h4 {
     border: 1px dashed var(--parchment-border, #c4b69c);
     border-radius: 0.25rem;
     background: transparent;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: 0.8rem;
     cursor: pointer;
     text-align: center;
@@ -3915,7 +3965,7 @@ h4 {
     font-family: var(--font-heading);
     font-size: var(--size-base);
     font-style: italic;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     text-align: center;
     padding: 2rem 1.5rem;
     opacity: 0.7;
@@ -3938,7 +3988,7 @@ h4 {
     font-family: var(--font-heading);
     font-size: var(--size-base);
     font-style: italic;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     text-align: center;
     padding: 0 0 0.75rem;
     opacity: 0.75;
@@ -4261,7 +4311,7 @@ h4 {
 }
 
 .admin__subtitle {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
     font-size: var(--size-lg);
@@ -4271,7 +4321,7 @@ h4 {
 .admin__empty {
     text-align: center;
     padding: 3rem 2rem;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
     font-size: var(--size-lg);
@@ -4290,7 +4340,7 @@ h4 {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-size: var(--size-sm);
     cursor: pointer;
     font-family: var(--font-heading);
@@ -4326,7 +4376,7 @@ h4 {
 
 .admin__page-info {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-family: var(--font-heading);
 }
 
@@ -4365,7 +4415,7 @@ h4 {
 
 .metrics-card__label {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-family: var(--font-heading);
     margin-bottom: 0.25rem;
 }
@@ -4437,7 +4487,7 @@ h4 {
 
 .status-badge--broken {
     background-color: rgba(176, 48, 48, 0.2);
-    color: #e05050;
+    color: var(--error);
     border: 1px solid rgba(176, 48, 48, 0.3);
 }
 
@@ -4453,7 +4503,7 @@ h4 {
     font-family: var(--font-heading);
     font-style: italic;
     font-size: var(--size-base);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.8;
     max-width: 700px;
     text-align: center;
@@ -4630,7 +4680,7 @@ h4 {
     justify-content: space-between;
     padding: 0.85rem 1.1rem;
     margin-bottom: 1.5rem;
-    color: #6b4310;
+    color: var(--warning-text);
     background-color: rgba(184, 134, 11, 0.12);
     border: 1px solid rgba(184, 134, 11, 0.35);
     border-left: 4px solid rgba(184, 134, 11, 0.65);
@@ -4649,7 +4699,7 @@ h4 {
 .marketplace-create__draft-discard {
     flex: 0 0 auto;
     padding: 0.4rem 0.9rem;
-    color: #6b4310;
+    color: var(--warning-text);
     font-family: var(--font-heading);
     font-size: var(--size-sm);
     background-color: rgba(255, 250, 240, 0.6);
@@ -4688,7 +4738,7 @@ h4 {
 
 .metrics__subtitle,
 .about__lede {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     font-family: var(--font-heading);
     font-size: var(--size-lg);
@@ -4703,13 +4753,13 @@ h4 {
 }
 
 .metrics__loading {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     padding: 2rem 0;
 }
 
 .metrics__error {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     padding: 1.5rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -4753,7 +4803,7 @@ h4 {
 
 .metrics__costs-caption {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-weight: 600;
@@ -4763,7 +4813,7 @@ h4 {
     font-family: var(--font-heading);
     font-style: italic;
     font-size: var(--size-base);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.7;
     max-width: 620px;
     margin: 0 auto 1rem;
@@ -4785,7 +4835,7 @@ h4 {
 
 .metrics__section-lede {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.6;
     margin-bottom: 1.25rem;
     max-width: 640px;
@@ -4793,7 +4843,7 @@ h4 {
 
 .metrics__unavailable {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     padding: 1.25rem;
     border: 1px dashed var(--border);
@@ -4834,7 +4884,7 @@ h4 {
 .metrics__panel-label {
     font-family: var(--font-heading);
     font-size: var(--size-base);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 .metrics__panel-value {
@@ -4877,7 +4927,7 @@ h4 {
 .metrics__teaching-how,
 .metrics__teaching-why {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.6;
     margin-top: 0.6rem;
 }
@@ -4923,7 +4973,7 @@ h4 {
 
 .metrics__observe-prose {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.6;
     max-width: 640px;
 }
@@ -4939,7 +4989,7 @@ h4 {
 
 .about__section-prose {
     font-size: var(--size-base);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.7;
     max-width: 640px;
     margin-bottom: 1.25rem;
@@ -4991,7 +5041,7 @@ h4 {
 .about__shelf,
 .about__do-item {
     font-size: var(--size-base);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     line-height: 1.7;
 }
 
@@ -5003,7 +5053,7 @@ h4 {
 
 .about__coming-soon {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
     line-height: 1.6;
 }
@@ -5077,8 +5127,8 @@ h4 {
 /* Status colour coding, drawn from the existing dark-academic palette. */
 .placement-card__badge--to-read {
     background-color: var(--shelf-bg);
-    color: var(--text-muted, #a09070);
-    border-color: var(--text-muted, #a09070);
+    color: var(--text-muted);
+    border-color: var(--text-muted);
 }
 
 .placement-card__badge--reading {
@@ -5101,7 +5151,7 @@ h4 {
 
 .placement-card__progress {
     font-size: var(--size-sm);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
 }
 
 .placement-card__edit-form {
@@ -5120,7 +5170,7 @@ h4 {
 
 .placement-card__label {
     font-size: var(--size-xs);
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
@@ -5196,19 +5246,19 @@ h4 {
 
 /* Save-state feedback on the detail overlay, kept consistent with .error. */
 .book-detail__status--error {
-    color: #e05050;
+    color: var(--error);
     padding: 0.6rem 0.75rem;
     border: 1px solid rgba(224, 80, 80, 0.3);
     border-radius: var(--radius-md);
 }
 
 .book-detail__status--loading {
-    color: var(--text-muted, #a09070);
+    color: var(--text-muted);
     font-style: italic;
 }
 
 .book-detail__status--success {
-    color: var(--accent-hover, #5a9a6e);
+    color: var(--accent-hover);
 }
 
 /* ===== Shelf Organiser (US-1.7.1 / #190) ===== */
@@ -6820,7 +6870,7 @@ h4 {
  * failed validation lost its error colour the instant the reader clicked into the field to correct
  * it — the feedback disappeared exactly when it was needed. */
 .isbn-input--error:focus {
-    border-color: #e05050;
+    border-color: var(--error);
 }
 
 /* The active tab on the parchment login card. */
@@ -6832,7 +6882,7 @@ h4 {
  * A navigation that forgets where you are while you point at it is worse than one with no hover. */
 .catalogue__filter-btn--active:hover {
     border-color: rgba(255, 255, 255, 0.2);
-    color: var(--text, #e8dcc8);
+    color: var(--text);
 }
 
 .admin__tab--active:hover {
