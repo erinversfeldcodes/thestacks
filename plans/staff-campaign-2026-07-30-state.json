@@ -575,6 +575,12 @@
           "status": "not_started",
           "title": "A11y enhancement (deferred from 8f): bookcase grid roving-tabindex arrow-key nav. WCAG 2.1.1 already met via Tab; launch polish, its own scoped widget.",
           "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-391": {
+          "issue": 391,
+          "status": "not_started",
+          "title": "Orphan gate counts classes named only in comments as 'defined' \u2014 strip comments before the selector extraction (surfaced by the Wave 9 Mode B review). Gate-hardening.",
+          "note": "Campaign follow-up assigned to Wave 11 (2026-08-06). Pre-existing; deferred because the fix may surface masked orphans needing disposition."
         }
       }
     }
