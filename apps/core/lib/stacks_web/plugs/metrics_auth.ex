@@ -9,7 +9,9 @@ defmodule StacksWeb.Plugs.MetricsAuth do
   Non-internal paths pass through untouched so the plug is safe to install
   at the endpoint. Currently guards:
 
-    * `/internal/metrics`   — PromEx scrape target (Issue #136).
+    * `/internal/metrics`   — PromEx exposition, read by the SLO gate
+      (Issue #136). Metrics reach VictoriaMetrics by push, not by a scrape
+      of this route — see the 6PN section below.
     * `/internal/deps-check` — synthetic dependency probe (cold-start
       coverage for SearXNG etc., Issue #136 post-launch follow-up).
 
@@ -28,14 +30,15 @@ defmodule StacksWeb.Plugs.MetricsAuth do
   bearer for every public caller, so `remote_ip` is **not** a sufficient
   trust signal on its own.
 
-  ## The Fly managed-Prometheus bypass (Issue #232)
+  ## The 6PN bypass — retained, but currently without a caller (ADR-021)
 
-  Fly's managed Prometheus scrapes the machine **directly over 6PN** (the
-  `[metrics]` block in `deploy/fly.core.toml`); it never traverses
-  fly-proxy. fly-proxy, by contrast, **sets and overwrites** the
-  `fly-client-ip` header on *every* request it forwards from the public edge
-  (the same unspoofable signal `RateLimiter`/`AuthController` key on — Issue
-  #176). So the two callers are distinguishable after all:
+  It was added for Fly's managed Prometheus (Issue #232), which scraped the
+  machine **directly over 6PN** via the `[metrics]` block in
+  `deploy/fly.core.toml`, never traversing fly-proxy. fly-proxy, by
+  contrast, **sets and overwrites** the `fly-client-ip` header on *every*
+  request it forwards from the public edge (the same unspoofable signal
+  `RateLimiter`/`AuthController` key on — Issue #176), which is what makes
+  the two callers distinguishable:
 
     * public request  → arrived via fly-proxy → has `fly-client-ip`.
     * 6PN scrape      → arrived directly      → has **no** `fly-client-ip`.
@@ -47,6 +50,17 @@ defmodule StacksWeb.Plugs.MetricsAuth do
   `fly-client-ip` and the client cannot strip it. The public path — and
   every other `/internal/*` route (e.g. `/internal/deps-check`) — still
   requires the bearer.
+
+  **No 6PN caller exists today.** ADR-021 (#253) replaced scraping with a
+  push: `Core.PromEx.MetricsPusher` POSTs the exposition to self-hosted
+  VictoriaMetrics, and VM does not scrape back (`deploy/fly.victoriametrics.toml`).
+  Issue #323 then removed the dead `[metrics]` block — the platform scraper
+  could send neither the bearer nor a request satisfying this bypass, and had
+  never ingested a sample (#248). The one remaining caller of
+  `/internal/metrics` is `scripts/check-slo-gate.sh`, which arrives over the
+  public edge with the bearer. The bypass is kept because it is the correct
+  rule for any future in-cluster scraper and it widens nothing on the public
+  path; it is not load-bearing today.
   """
 
   @behaviour Plug
@@ -73,11 +87,15 @@ defmodule StacksWeb.Plugs.MetricsAuth do
   @spec authorized?(Plug.Conn.t()) :: boolean()
   def authorized?(conn), do: valid_bearer?(conn) or fly_private_metrics_scrape?(conn)
 
-  # Narrowly-scoped, unauthenticated bypass for Fly's managed-Prometheus
-  # scrape of `/internal/metrics` over the private 6PN network. Requires
-  # BOTH a 6PN remote_ip AND the absence of the fly-proxy-injected
-  # `fly-client-ip` header, so no public-edge caller can reach it without the
-  # bearer. Scoped to the metrics path only — never /internal/deps-check.
+  # Narrowly-scoped, unauthenticated bypass for an in-cluster scrape of
+  # `/internal/metrics` over the private 6PN network. Requires BOTH a 6PN
+  # remote_ip AND the absence of the fly-proxy-injected `fly-client-ip`
+  # header, so no public-edge caller can reach it without the bearer. Scoped
+  # to the metrics path only — never /internal/deps-check.
+  #
+  # Post-ADR-021 there is no such scraper (metrics are pushed to VM, and the
+  # Fly `[metrics]` block was removed in #323) — this branch is currently
+  # unreached in preview and prod. See the @moduledoc.
   defp fly_private_metrics_scrape?(%Plug.Conn{request_path: @metrics_path} = conn) do
     fly_6pn_remote_ip?(conn.remote_ip) and not proxied_from_public_edge?(conn)
   end

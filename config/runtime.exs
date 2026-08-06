@@ -47,11 +47,11 @@ else
     config :core, :vision_together_api_key, together_key
   end
 
-  # Public transparency live signals (#241 / ADR-019). The read-only Fly
-  # managed-Prometheus token + org slug are Fly secrets, guarded like the
-  # Live section of /api/transparency/metrics reads the self-hosted VictoriaMetrics
+  # Public transparency live signals (#241 / ADR-019). The Live section of
+  # /api/transparency/metrics reads the self-hosted VictoriaMetrics
   # (ADR-021 / #255) at `<base>/api/v1/query` — same 6PN VM the metrics pusher
-  # writes to, so no token/org (unlike the retired Fly managed-Prometheus client).
+  # writes to, so no token and no org slug are needed (the retired Fly
+  # managed-Prometheus client required both as Fly secrets).
   # Defaults to the push target; when neither is set the live section degrades to
   # `:unavailable` — it must NOT break boot. Curated allowlist reads only.
   metrics_query_url =
@@ -118,11 +118,12 @@ else
   config :core, :age_gating_enabled, System.get_env("AGE_GATING_ENABLED") == "true"
 
   # METRICS_SCRAPE_TOKEN guards /internal/metrics. StacksWeb.Plugs.MetricsAuth
-  # requires a matching `Authorization: Bearer <token>` from public callers.
-  # The one exception is Fly's managed-Prometheus scrape arriving directly
-  # over 6PN (Issue #232) — see the plug's @moduledoc. Unset = no public
-  # caller (e.g. the SLO gate) can scrape. Required in prod; CI sets it via
-  # `fly secrets`.
+  # requires a matching `Authorization: Bearer <token>` from public callers —
+  # which, post-ADR-021, is the only way in: the store is fed by push
+  # (STACKS_METRICS_PUSH_URL below) and the retired Fly managed-Prometheus
+  # scrape is gone (#323), leaving the plug's 6PN bypass without a caller.
+  # Unset = no public caller (the SLO gate, scripts/check-slo-gate.sh) can
+  # read the exposition. Required in prod; CI sets it via `fly secrets`.
   config :core, :metrics_scrape_token, System.get_env("METRICS_SCRAPE_TOKEN")
 
   # Push PromEx metrics to self-hosted VictoriaMetrics (ADR-021 / #253). When set

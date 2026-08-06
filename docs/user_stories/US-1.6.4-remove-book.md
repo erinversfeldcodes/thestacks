@@ -230,15 +230,28 @@ Remove state initialises as `removeState = NotAsked` in `Page.BookDetail.init`.
 
 ---
 
-## 16. Undo Extension (#375, owner-ruled SPEC 2026-07-30)
+## 16. Undo Extension (#375 — owner-ruled 2026-07-30, **BUILT**)
 
 > **As a** user who has just removed a book, **I want** a few seconds to take it
 > back **so that** a mis-click does not cost me a placement I had annotated.
 
-Written here rather than in a separate `US-1.6.4a` file so the story has **one
+**Status corrected 2026-08-06.** This section was headed "owner-ruled SPEC"
+while its Validation table already cited landed tests — a heading that read as
+"not built yet" over content that was. Verified against the code:
+`POST /api/placements/:id/restore` is routed (`router.ex:242`),
+`BookshelfPlacementController.restore/2` and `Shelving.restore_placement/2`
+exist, `Page.Bookshelf` carries the `UndoToast` type and `viewUndoToast`,
+`Main.pendingUndo`/`applyPendingUndo` carry the removal across the navigation,
+the four `.undo-toast*` CSS rules are in `frontend/css/main.css`, and all three
+test files named below are present. **Shipped, not specified.**
+
+Written here rather than in a separate story file so the story has **one
 home**: an undo is not a feature of its own, it is the second half of removal,
 and a reader deciding whether to press "Remove" needs both halves in front of
-them. `docs/implementation-mapping.md` is edited in #320's single pass, not here.
+them. That decision is recorded so nobody later creates a duplicate
+`US-1.6.x` for the toast — the Wave 10 retro-story pass considered doing exactly
+that and deferred to this section instead. `docs/implementation-mapping.md` is
+edited in #320's single pass, not here.
 
 ### What changes for the reader
 

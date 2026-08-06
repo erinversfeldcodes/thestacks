@@ -4,7 +4,7 @@
   "created_at": "2026-07-30T00:00:00Z",
   "updated_at": "2026-08-06",
   "status": "approved_filed",
-  "current_wave": 10,
+  "current_wave": 11,
   "_why": [
     "Stage 6 artifact for the 2026-07-30 Phase 1 (+extension) campaign. Emitted with the plan,",
     "before any issue exists: every item is not_started with issue: null. On approval, Stage 7",
@@ -405,24 +405,38 @@
     },
     "10": {
       "title": "Documentation, stories, mapping",
-      "status": "not_started",
+      "status": "complete",
       "items": {
         "10a": {
           "title": "Map 7 unmapped stories; fix mapping:1857 + phantom; refresh 6 stale stories",
-          "status": "not_started",
+          "status": "complete",
           "issue": 320
         },
         "10b": {
           "title": "Write missing launch + shipped-unstoried stories",
-          "status": "not_started",
+          "status": "complete",
           "issue": 320
         },
         "10c": {
           "title": "notes corrections; registry moduledoc; record exclusions in mapping; config key docs; re-scope #091 + #191",
-          "status": "not_started",
+          "status": "complete",
           "issue": 320
         }
-      }
+      },
+      "last_action": "R3 verification clean; running Mode B staff-review before close.",
+      "scope_expansion_2026_08_06": "Census found mapping sections 10/11/12/13 missing (~24 Phase-6/7 stories unmapped) beyond the epic's scoped 7. Owner ruling 2026-08-06: EXPAND Wave 10 to map ALL ~31. Also: :716 anchor corrected (only 5 of 8 components absent \u2014 PriceInfo/AuthorCard/ShelfMover shipped, keep them); new defect US-1.5.3 double-mapped (:747/:807) folded in.",
+      "r3_verification": {
+        "reconciled_census": "CLEAN \u2014 0 dup #### ids, phantom US-11.2.1 gone, 0 real gaps (6 flagged files confirmed title-matched ID-scheme drift, sections 4-8, out of scope)",
+        "self_denial": "0 residuals across US-14.3.2/10.2.1/8.5/2.5.3/6.1/14.4.1",
+        "experiential": "all 11 new stories have experiential sections",
+        "citations": "26/26 #NNN resolve; code citations robust-checked, 1 fixed (mapping cited ISBNResolver.editions/1 -> real is editions_for_work/1, isbn_resolver.ex:918)",
+        "defects_caught_and_fixed": [
+          "US-1.6.3 collision (redundant Re-Read twin from 2-pass split, +dead RecalculateWearJob ref) removed",
+          "mapping editions/1 mis-citation corrected"
+        ],
+        "counts": "mapping +516/-21; 43 ids mapped incl sections 10/11/12/13; 11 new stories; epic 20 created, 15 extended; 4 exclusions recorded"
+      },
+      "staff_review": "Mode B staff-review verdict: LGTM WITH NOTES (2026-08-06). All 6 Built stories verified real; all 5 spec-only confirmed absent (no over-claim); anchor fixes correct; 1x \ud83d\udfe8 phase-table rationale staleness FIXED in-wave; 1x \ud83d\udfe6 recorded. Two pre-existing gaps filed to Wave 11 (#392 GDPR blog export, #393 dead 6PN bypass)."
     },
     "11": {
       "title": "Launch gates (existing backlog, re-pointed)",
@@ -587,6 +601,18 @@
           "status": "not_started",
           "title": "Orphan gate counts classes named only in comments as 'defined' \u2014 strip comments before the selector extraction (surfaced by the Wave 9 Mode B review). Gate-hardening.",
           "note": "Campaign follow-up assigned to Wave 11 (2026-08-06). Pre-existing; deferred because the fix may surface masked orphans needing disposition."
+        },
+        "fu-392": {
+          "issue": 392,
+          "status": "not_started",
+          "title": "GDPR export omits blog posts/comments (portability gap). Surfaced by US-6.2.1 in Wave 10.",
+          "note": "Wave 11 (GDPR revisit). Pre-existing; verify erasure reachability too."
+        },
+        "fu-393": {
+          "issue": 393,
+          "status": "not_started",
+          "title": "Dead 6PN MetricsAuth bypass \u2014 no caller post-ADR-021; remove. Surfaced by Wave 10 #323 cleanup.",
+          "note": "Wave 11 (gate/security hardening)."
         }
       }
     }

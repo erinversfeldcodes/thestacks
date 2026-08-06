@@ -1,6 +1,7 @@
 defmodule Stacks.Events.Registry do
   @moduledoc """
-  Central compile-time catalog of event types, and the handlers subscribed to them.
+  Compile-time dispatch table for event types, plus the hand-maintained list of the
+  types known to have no subscriber.
 
   Two lists, deliberately kept apart:
 
@@ -10,9 +11,8 @@ defmodule Stacks.Events.Registry do
       are real events with real rows in `event_log`; they simply have no subscriber
       today.
 
-  `all_event_types/0` returns both, because replay and diagnostics need the whole
-  vocabulary the system can emit — not just the observed part of it. `handlers_for/1`
-  reads only `@registry`.
+  `all_event_types/0` returns both, because replay and diagnostics want more of the
+  vocabulary than the subscribed part of it. `handlers_for/1` reads only `@registry`.
 
   Splitting them is a correction. This moduledoc used to claim `@registry` was "the
   complete catalog … surfaced by `all_event_types/0` for replay/diagnostics" while
@@ -23,6 +23,22 @@ defmodule Stacks.Events.Registry do
   right: it is the standing inventory of what this system announces and nobody acts
   on, which is where the next handler is likely needed.
 
+  ## What these two lists are NOT
+
+  They are not an exhaustive catalog of everything the system can emit, and nothing
+  makes them one. `Stacks.Events.emit/1` accepts any `event_type` string; it does not
+  consult this module. So the honest reading of `all_event_types/0` is *"the event
+  types these two lists currently name"* — a maintained inventory, not a guarantee.
+
+  `registry_completeness_test.exs` closes most of the gap by grepping `apps/core/lib`
+  for `event_type: "..."` and failing on any literal it cannot find here. That guard
+  only sees emit sites where the type is written **at** the emit. An emitter that
+  receives its type as an argument is invisible to it — `Stacks.Discovery`'s
+  `transition_source/3` is the standing example, and `"source.approved"` /
+  `"source.rejected"` are accordingly in neither list despite having payload
+  contracts in `Stacks.Events.PayloadContract`. Treat a lookup miss here as "not
+  catalogued", never as "not emitted".
+
   ## Adding a new subscription
 
   Add an entry to `@registry`:
@@ -30,8 +46,9 @@ defmodule Stacks.Events.Registry do
       "book.created" => [MyApp.SomeHandler]
 
   The handler module must implement `Stacks.Events.Handler`. If you are adding a new
-  event type with no handler, add it to `@unsubscribed` instead — the completeness
-  test in `registry_completeness_test.exs` fails until it is in one list or the other.
+  event type with no handler, add it to `@unsubscribed` instead — for a literal emit
+  site the completeness test fails until it is in one list or the other; for an
+  indirect one nothing will remind you, so add it by hand.
   """
 
   @registry %{
@@ -268,10 +285,12 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-  Returns every event type the system can emit, sorted — subscribed or not.
+  Returns every event type this module catalogues, sorted — subscribed or not.
 
-  This is the vocabulary for replay tooling and diagnostics, so it deliberately
-  includes types with no handler. Use `handlers_for/1` to ask what will actually run.
+  The vocabulary for replay tooling and diagnostics, so it deliberately includes
+  types with no handler. It is the union of two hand-maintained lists, not a derived
+  fact about the codebase: absence here means "not catalogued", not "never emitted"
+  (see the moduledoc). Use `handlers_for/1` to ask what will actually run.
   """
   @spec all_event_types() :: [String.t()]
   def all_event_types do
