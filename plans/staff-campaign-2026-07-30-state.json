@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-30",
   "plan": "plans/staff-campaign-2026-07-30.md",
   "created_at": "2026-07-30T00:00:00Z",
-  "updated_at": "2026-08-05",
+  "updated_at": "2026-08-06",
   "status": "approved_filed",
   "current_wave": 7,
   "_why": [
@@ -348,6 +348,11 @@
           "title": "A11y follow-through (TR-6): search name, aria-live upload, pluralisation, grid-arrow defer",
           "status": "in_progress",
           "last_action": "Built + pluralisation oracle probed + committed; a11y follow-ups #388/#389 filed; SR/keyboard drive owed at the coherence sweep."
+        },
+        "8g": {
+          "issue": 389,
+          "status": "in_progress",
+          "title": "Public-profile Reader-actions menu + Block modal Escape/click-away dismissal \u2014 fixed in-wave alongside the 8b onboarding focus-trap (owner: fix in branch, 2026-08-06)."
         }
       }
     },
@@ -511,6 +516,60 @@
           "title": "Four deterministic E2E failures (public-profile x2, rss, privacy-placement) \u2014 not OOM, not concurrency, not missing data, not Wave 6. Unattributed; needs investigation then splitting.",
           "status": "not_started",
           "issue": 372
+        },
+        "fu-338": {
+          "issue": 338,
+          "status": "not_started",
+          "title": "GDPR: reader placement `notes` free-text leaks into the warehouse \u2014 exclude from stg per house convention. Before prod deploy (11d).",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-386": {
+          "issue": 386,
+          "status": "not_started",
+          "title": "GDPR: `stg_uploaded_images` exposes R2 storage_path/user_id to the warehouse \u2014 minimise. Sibling of fu-338. Before prod deploy (11d).",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-378": {
+          "issue": 378,
+          "status": "not_started",
+          "title": "BUG (correctness): the scanned edition is never recorded on the placement \u2014 a different one is stored. Real product defect; fix before launch.",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-377": {
+          "issue": 377,
+          "status": "not_started",
+          "title": "Test hygiene: a unit test reaches the public internet and its timeout doesn't bound it. Clusters with #347/#381.",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-381": {
+          "issue": 381,
+          "status": "not_started",
+          "title": "Test hygiene: five more unseamed Finch call sites the suite can dial the internet through. Clusters with #377.",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-380": {
+          "issue": 380,
+          "status": "not_started",
+          "title": "Test infra: three book-detail specs fail at the shipped worker count. Clusters with #371.",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-384": {
+          "issue": 384,
+          "status": "not_started",
+          "title": "Test coverage: no Playwright test covers the un-merge correction / its merge inverse end to end (Wave 7 #376 follow-up).",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-385": {
+          "issue": 385,
+          "status": "not_started",
+          "title": "Test coverage: the title-search 'don't cache an outage' wire has no end-to-end test (Wave 7 #352 follow-up).",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
+        },
+        "fu-388": {
+          "issue": 388,
+          "status": "not_started",
+          "title": "A11y enhancement (deferred from 8f): bookcase grid roving-tabindex arrow-key nav. WCAG 2.1.1 already met via Tab; launch polish, its own scoped widget.",
+          "note": "Campaign follow-up assigned to Wave 11 per owner 'no floating follow-ups' rule (2026-08-06); owner may re-prioritise."
         }
       }
     }
