@@ -378,13 +378,15 @@
         },
         "9d": {
           "title": "Orphan-class gate is blind to computed `class (if \u2026)` forms \u2014 42 sites",
-          "status": "not_started",
-          "issue": 356
+          "status": "complete",
+          "issue": 356,
+          "last_action": "Orphan gate parses computed class forms; surfaced 5, all fixed in-wave (siblings-matched styling + no-op). Gates 0/0. Closed."
         },
         "9e": {
           "title": "check-css.sh misses a base rule placed AFTER its own modifier; three login-card notices have never rendered their declared amber",
-          "status": "not_started",
-          "issue": 365
+          "status": "complete",
+          "issue": 365,
+          "last_action": "check-css catches base-after-modifier; login amber repainted; surfaced 6, all fixed in-wave (order-only). Gates 0/0. Closed."
         },
         "9f": {
           "title": "Finish the orphan-class styling backlog (one item outstanding: per-group screenshots)",
