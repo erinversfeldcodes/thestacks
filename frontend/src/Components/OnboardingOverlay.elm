@@ -9,6 +9,8 @@ module Components.OnboardingOverlay exposing
     , initCmd
     , isOnUploadStep
     , isVisible
+    , leadingGuardId
+    , trailingGuardId
     , update
     , view
     )
@@ -52,8 +54,8 @@ the fast client-side re-trigger guard.
 import Api exposing (OnboardingStatus)
 import Browser.Dom
 import Html exposing (Html, button, div, h2, p, span, text)
-import Html.Attributes exposing (attribute, class, tabindex)
-import Html.Events exposing (on, onClick)
+import Html.Attributes exposing (attribute, class, id, tabindex)
+import Html.Events exposing (onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
@@ -123,13 +125,31 @@ type Msg
     | ConfirmConsent
     | UploadMsg Upload.Msg
     | ConsentMsg Consent.Msg
-    | FocusContainer
+    | FocusWrapToFirst
+    | FocusWrapToLast
     | FocusResult
 
 
 containerId : String
 containerId =
     "onboarding-overlay-container"
+
+
+{-| The leading (backward) focus sentinel's DOM id — the first tab stop inside
+the dialog. Shift+Tab off it wraps to the trailing sentinel, so focus can never
+escape the dialog backwards (`aria-modal` containment).
+-}
+leadingGuardId : String
+leadingGuardId =
+    "onboarding-overlay-focus-guard-leading"
+
+
+{-| The trailing (forward) focus sentinel's DOM id — the last tab stop inside
+the dialog. Forward Tab off it wraps back to the leading sentinel.
+-}
+trailingGuardId : String
+trailingGuardId =
+    "onboarding-overlay-focus-guard-trailing"
 
 
 {-| The initial model: the full D2 sequence, index 0, visible, with fresh
@@ -214,14 +234,18 @@ update token msg model =
                 ( { model | visible = False }, Cmd.none, NoOut )
 
             else
+                -- The overlay is now committed to a visible step: pull focus into
+                -- the dialog so `aria-modal` is honoured from the first render
+                -- (focus-on-open). A no-op if the shell has not rendered it.
                 ( { model | currentIndex = indexForNextStep model status.nextStep }
-                , Cmd.none
+                , focusContainerCmd
                 , NoOut
                 )
 
         StatusLoaded (Err _) ->
-            -- On error, start from the first step rather than blocking the reader.
-            ( { model | currentIndex = 0 }, Cmd.none, NoOut )
+            -- On error, start from the first step rather than blocking the reader,
+            -- and still pull focus into the dialog (focus-on-open).
+            ( { model | currentIndex = 0 }, focusContainerCmd, NoOut )
 
         StepCompleted ->
             -- The index is client-driven; the server-step write is fire-and-forget
@@ -302,9 +326,13 @@ update token msg model =
             in
             ( { model | consent = newConsent }, Cmd.map ConsentMsg subCmd, out )
 
-        FocusContainer ->
-            -- A focus guard was reached; pull focus back into the dialog.
-            ( model, focusContainerCmd, NoOut )
+        FocusWrapToFirst ->
+            -- Forward Tab fell off the trailing sentinel: wrap to the leading one.
+            ( model, focusElementCmd leadingGuardId, NoOut )
+
+        FocusWrapToLast ->
+            -- Shift+Tab fell off the leading sentinel: wrap to the trailing one.
+            ( model, focusElementCmd trailingGuardId, NoOut )
 
         FocusResult ->
             ( model, Cmd.none, NoOut )
@@ -337,7 +365,16 @@ finishNow token model =
 
 focusContainerCmd : Cmd Msg
 focusContainerCmd =
-    Task.attempt (\_ -> FocusResult) (Browser.Dom.focus containerId)
+    focusElementCmd containerId
+
+
+{-| Move DOM focus to the given element id, discarding the (ignorable) result —
+a no-op if the element is not in the DOM (e.g. the shell has not rendered the
+overlay yet).
+-}
+focusElementCmd : String -> Cmd Msg
+focusElementCmd elementId =
+    Task.attempt (\_ -> FocusResult) (Browser.Dom.focus elementId)
 
 
 recordCurrentStep : Maybe String -> Model -> Cmd Msg
@@ -437,31 +474,74 @@ view model maybeToken =
             , attribute "role" "dialog"
             , attribute "aria-modal" "true"
             , attribute "aria-label" (ariaLabelFor (currentStep model))
-            , attribute "id" containerId
+            , id containerId
             , tabindex -1
+
+            -- Focus trap (US-14.1.2 §aria-modal): intercept Tab/Shift+Tab at the
+            -- two sentinels so keyboard focus can never escape the dialog in
+            -- either direction. Mirrors the proven BookDetail overlay trap.
+            , preventDefaultOn "keydown" trapKeydownDecoder
             ]
             [ div [ class "onboarding-overlay__backdrop" ] []
+
+            -- Leading (backward) sentinel: Shift+Tab off it wraps to the trailing
+            -- sentinel, so focus never falls off the front of the dialog.
+            , focusGuard leadingGuardId
             , div [ class "onboarding-overlay__card" ]
                 [ viewStep model maybeToken
                 , viewProgressDots model
                 ]
 
-            -- Forward focus guard: Tab off the last control returns focus into
-            -- the dialog rather than escaping to the page behind (see report for
-            -- the residual — a full bidirectional trap needs the browser drive).
-            , focusGuard
+            -- Trailing (forward) sentinel: Tab off it wraps back to the leading
+            -- sentinel, so focus never falls off the back of the dialog.
+            , focusGuard trailingGuardId
             ]
 
 
-focusGuard : Html Msg
-focusGuard =
+{-| An off-screen, tabbable focus sentinel. It is a real tab stop the reader
+lands on momentarily at a dialog boundary; the keydown trap wraps focus to the
+opposite sentinel on the next Tab/Shift+Tab.
+-}
+focusGuard : String -> Html Msg
+focusGuard guardId =
     div
         [ class "onboarding-overlay__focus-guard"
+        , id guardId
         , tabindex 0
         , attribute "aria-hidden" "true"
-        , on "focus" (Decode.succeed FocusContainer)
         ]
         []
+
+
+{-| Keydown decoder implementing the Tab focus trap. It reads `key`, `shiftKey`,
+and the focused element's `target.id`, and only `preventDefault`s (emitting a
+wrap message) at the two dialog boundaries — forward Tab on the trailing
+sentinel wraps to the leading one; Shift+Tab on the leading sentinel wraps to
+the trailing one. Every other keydown fails the decoder, so native tab order is
+preserved for the controls in between.
+-}
+trapKeydownDecoder : Decode.Decoder ( Msg, Bool )
+trapKeydownDecoder =
+    Decode.map3 trapDecision
+        (Decode.field "key" Decode.string)
+        (Decode.field "shiftKey" Decode.bool)
+        (Decode.at [ "target", "id" ] Decode.string)
+        |> Decode.andThen identity
+
+
+trapDecision : String -> Bool -> String -> Decode.Decoder ( Msg, Bool )
+trapDecision key shiftKey targetId =
+    if key /= "Tab" then
+        Decode.fail "focus-trap: not a Tab keydown"
+
+    else if not shiftKey && targetId == trailingGuardId then
+        Decode.succeed ( FocusWrapToFirst, True )
+
+    else if shiftKey && targetId == leadingGuardId then
+        Decode.succeed ( FocusWrapToLast, True )
+
+    else
+        Decode.fail "focus-trap: natural tab order"
 
 
 ariaLabelFor : Maybe Step -> String

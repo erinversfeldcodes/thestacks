@@ -2685,6 +2685,11 @@ update msg model =
                         BlogPostPage.SessionExpired ->
                             handleSessionExpiry model
 
+                        BlogPostPage.EscapeUnhandled ->
+                            ( { model | page = PageBlogPost newSubModel }
+                            , Cmd.map BlogPostMsg subCmd
+                            )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -2885,6 +2890,11 @@ update msg model =
                                 [ Cmd.map GroupsDetailMsg subCmd
                                 , Nav.pushUrl model.key (Route.toPath route)
                                 ]
+                            )
+
+                        GroupsDetail.EscapeUnhandled ->
+                            ( { model | page = PageGroupsDetail newSubModel }
+                            , Cmd.map GroupsDetailMsg subCmd
                             )
 
                 _ ->
@@ -3347,6 +3357,41 @@ escapeForPage model =
                             -- stays put; run its (focus-return) command.
                             ( { model | page = PageBookDetail newSubModel }
                             , Cmd.map BookDetailMsg subCmd
+                            )
+
+                PageBlogPost subModel ->
+                    -- Give the blog post's block affordance (⋯ menu / block
+                    -- confirm) first dibs on Escape (#389); fall through to the
+                    -- default when nothing was open to consume it.
+                    let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            BlogPostPage.update BlogPostPage.EscapePressed subModel maybeToken
+                    in
+                    case outMsg of
+                        BlogPostPage.EscapeUnhandled ->
+                            closeUserMenuOnEscape model
+
+                        _ ->
+                            ( { model | page = PageBlogPost newSubModel }
+                            , Cmd.map BlogPostMsg subCmd
+                            )
+
+                PageGroupsDetail subModel ->
+                    -- Same, for the group feed's per-member block affordances (#389).
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            GroupsDetail.update GroupsDetail.EscapePressed subModel
+                    in
+                    case outMsg of
+                        GroupsDetail.EscapeUnhandled ->
+                            closeUserMenuOnEscape model
+
+                        _ ->
+                            ( { model | page = PageGroupsDetail newSubModel }
+                            , Cmd.map GroupsDetailMsg subCmd
                             )
 
                 _ ->

@@ -209,4 +209,81 @@ suite =
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "block-user__confirm" ]
                     |> Query.has [ Selector.disabled True ]
+
+        -- #389: the ⋯ menu and confirm modal must be Escape/click-away dismissable.
+        , test "the ⋯ trigger carries a stable DOM id so focus can return to it on close" <|
+            \_ ->
+                BlockModal.view initModel
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "block-user__trigger" ]
+                    |> Query.has [ Selector.id "block-user-trigger-user-2" ]
+        , test "an open menu renders a click-away backdrop wired to close it" <|
+            \_ ->
+                BlockModal.view { initModel | menuOpen = True }
+                    |> Query.fromHtml
+                    |> Query.has [ Selector.class "app-nav__backdrop" ]
+        , test "a closed menu renders no backdrop" <|
+            \_ ->
+                BlockModal.view initModel
+                    |> Query.fromHtml
+                    |> Query.hasNot [ Selector.class "app-nav__backdrop" ]
+        , test "MenuClosed (backdrop click-away) closes the menu" <|
+            \_ ->
+                let
+                    ( m, _, out ) =
+                        BlockModal.update MenuClosed { initModel | menuOpen = True } (Just "tok")
+                in
+                Expect.all
+                    [ \_ -> m.menuOpen |> Expect.equal False
+                    , \_ -> out |> Expect.equal NoOut
+                    ]
+                    ()
+        , test "Escape closes an open menu and reports Dismissed (host consumed it)" <|
+            \_ ->
+                let
+                    ( m, _, out ) =
+                        BlockModal.update EscapePressed { initModel | menuOpen = True } (Just "tok")
+                in
+                Expect.all
+                    [ \_ -> m.menuOpen |> Expect.equal False
+                    , \_ -> out |> Expect.equal Dismissed
+                    ]
+                    ()
+        , test "Escape closes the confirm modal and reports Dismissed" <|
+            \_ ->
+                let
+                    ( m, _, out ) =
+                        BlockModal.update EscapePressed { initModel | confirming = True } (Just "tok")
+                in
+                Expect.all
+                    [ \_ -> m.confirming |> Expect.equal False
+                    , \_ -> out |> Expect.equal Dismissed
+                    ]
+                    ()
+        , test "Escape while a block is in flight keeps the modal but still consumes the key" <|
+            \_ ->
+                let
+                    inFlight =
+                        { initModel | confirming = True, status = Loading }
+
+                    ( m, _, out ) =
+                        BlockModal.update EscapePressed inFlight (Just "tok")
+                in
+                Expect.all
+                    [ \_ -> m.confirming |> Expect.equal True
+                    , \_ -> out |> Expect.equal Dismissed
+                    ]
+                    ()
+        , test "Escape with nothing open does NOT consume the key (NoOut → host falls through)" <|
+            \_ ->
+                let
+                    ( m, _, out ) =
+                        BlockModal.update EscapePressed initModel (Just "tok")
+                in
+                Expect.all
+                    [ \_ -> m.menuOpen |> Expect.equal False
+                    , \_ -> m.confirming |> Expect.equal False
+                    , \_ -> out |> Expect.equal NoOut
+                    ]
+                    ()
         ]

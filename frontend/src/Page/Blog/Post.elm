@@ -49,11 +49,15 @@ type Msg
     | DeleteComment String
     | CommentDeleted (Result Http.Error ())
     | BlockModalMsg BlockModal.Msg
+    | EscapePressed
 
 
 type OutMsg
     = NoOut
     | SessionExpired
+      -- Escape reached the page but no block surface was open to consume it, so
+      -- the shell should fall through to its default Escape handling.
+    | EscapeUnhandled
 
 
 init : String -> Maybe String -> Maybe String -> Bool -> ( Model, Cmd Msg )
@@ -255,8 +259,37 @@ update msg model maybeToken =
                         BlockModal.SessionExpired ->
                             ( model, Cmd.none, SessionExpired )
 
+                        BlockModal.Dismissed ->
+                            ( { model | blockModal = Just newBlockModal }
+                            , Cmd.map BlockModalMsg subCmd
+                            , NoOut
+                            )
+
                 Nothing ->
                     ( model, Cmd.none, NoOut )
+
+        EscapePressed ->
+            -- Give the block affordance first dibs on Escape (close its menu /
+            -- confirm modal); if nothing was open, tell the shell to fall
+            -- through to its default Escape handling.
+            case model.blockModal of
+                Just blockModal ->
+                    let
+                        ( newBlockModal, subCmd, outMsg ) =
+                            BlockModal.update BlockModal.EscapePressed blockModal maybeToken
+                    in
+                    case outMsg of
+                        BlockModal.Dismissed ->
+                            ( { model | blockModal = Just newBlockModal }
+                            , Cmd.map BlockModalMsg subCmd
+                            , NoOut
+                            )
+
+                        _ ->
+                            ( model, Cmd.none, EscapeUnhandled )
+
+                Nothing ->
+                    ( model, Cmd.none, EscapeUnhandled )
 
 
 {-| A block affordance is only offered to a signed-in reader who is not the

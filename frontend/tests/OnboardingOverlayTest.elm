@@ -10,8 +10,10 @@ import Components.OnboardingOverlay as Overlay
 import Expect
 import Html.Attributes
 import Http
+import Json.Encode as Encode
 import Page.Settings.Consent as Consent
 import Test exposing (Test, describe, test)
+import Test.Html.Event as Event
 import Test.Html.Query as Query
 import Test.Html.Selector as Selector
 
@@ -341,11 +343,61 @@ modalA11y =
                 Overlay.view init noToken
                     |> Query.fromHtml
                     |> Query.has [ Selector.class "onboarding-overlay__focus-guard" ]
+        , test "BOTH focus sentinels are rendered — leading (backward) and trailing (forward)" <|
+            \_ ->
+                Overlay.view init noToken
+                    |> Query.fromHtml
+                    |> Expect.all
+                        [ Query.has [ Selector.id Overlay.leadingGuardId ]
+                        , Query.has [ Selector.id Overlay.trailingGuardId ]
+                        ]
+        , test "forward Tab on the trailing sentinel wraps to the first (leading) sentinel" <|
+            \_ ->
+                simulateCardKeydown (tabKeydownEvent False Overlay.trailingGuardId)
+                    |> Expect.equal (Ok FocusWrapToFirst)
+        , test "Shift+Tab on the leading sentinel wraps to the last (trailing) sentinel" <|
+            \_ ->
+                simulateCardKeydown (tabKeydownEvent True Overlay.leadingGuardId)
+                    |> Expect.equal (Ok FocusWrapToLast)
+        , test "forward Tab on the leading sentinel is NOT trapped (natural order into the card)" <|
+            \_ ->
+                simulateCardKeydown (tabKeydownEvent False Overlay.leadingGuardId)
+                    |> Expect.err
+        , test "a non-Tab keydown on a sentinel is NOT trapped" <|
+            \_ ->
+                simulateCardKeydown (keydownEvent "Enter" False Overlay.trailingGuardId)
+                    |> Expect.err
         , test "a hidden overlay renders nothing" <|
             \_ ->
                 Overlay.view { init | visible = False } noToken
                     |> Query.fromHtml
                     |> Query.hasNot [ byTestId "onboarding-overlay" ]
+        ]
+
+
+{-| Simulate a `keydown` on the dialog wrapper and return the decoded message
+(if any). The trap decoder reads `key`, `shiftKey`, and the focused element's
+`target.id`, so the event payload carries exactly those fields.
+-}
+simulateCardKeydown : Encode.Value -> Result String Msg
+simulateCardKeydown eventValue =
+    Overlay.view init noToken
+        |> Query.fromHtml
+        |> Event.simulate ( "keydown", eventValue )
+        |> Event.toResult
+
+
+tabKeydownEvent : Bool -> String -> Encode.Value
+tabKeydownEvent shiftKey targetId =
+    keydownEvent "Tab" shiftKey targetId
+
+
+keydownEvent : String -> Bool -> String -> Encode.Value
+keydownEvent key shiftKey targetId =
+    Encode.object
+        [ ( "key", Encode.string key )
+        , ( "shiftKey", Encode.bool shiftKey )
+        , ( "target", Encode.object [ ( "id", Encode.string targetId ) ] )
         ]
 
 

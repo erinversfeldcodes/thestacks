@@ -54,12 +54,16 @@ type Msg
     | LoadMoreFeed
     | MoreFeedLoaded (Result Http.Error FeedResponse)
     | BlockModalMsg String BlockModal.Msg
+    | EscapePressed
 
 
 type OutMsg
     = NoOut
     | NavigateTo Route
     | SessionExpired
+      -- Escape reached the page but no block surface was open to consume it, so
+      -- the shell should fall through to its default Escape handling.
+    | EscapeUnhandled
 
 
 init : String -> String -> String -> ( Model, Cmd Msg )
@@ -77,6 +81,17 @@ init groupId userId token =
       }
     , Api.getGroup groupId token GroupLoaded
     )
+
+
+{-| The first block affordance (by user id) whose menu or confirm modal is open.
+At most one should be open at a time, but folding is robust to more.
+-}
+firstOpenBlockModal : Dict String BlockModal.Model -> Maybe ( String, BlockModal.Model )
+firstOpenBlockModal blockModals =
+    blockModals
+        |> Dict.toList
+        |> List.filter (\( _, bm ) -> bm.menuOpen || bm.confirming)
+        |> List.head
 
 
 {-| Ensure a block affordance exists for every OTHER member seen in the feed.
@@ -257,8 +272,34 @@ update msg model =
                         BlockModal.SessionExpired ->
                             ( model, Cmd.none, SessionExpired )
 
+                        BlockModal.Dismissed ->
+                            ( modelWith newBlockModal, Cmd.map (BlockModalMsg uid) subCmd, NoOut )
+
                 Nothing ->
                     ( model, Cmd.none, NoOut )
+
+        EscapePressed ->
+            -- Give the open block affordance (at most one at a time) first dibs
+            -- on Escape; if none is open, tell the shell to fall through to its
+            -- default Escape handling.
+            case firstOpenBlockModal model.blockModals of
+                Just ( uid, blockModal ) ->
+                    let
+                        ( newBlockModal, subCmd, outMsg ) =
+                            BlockModal.update BlockModal.EscapePressed blockModal (Just model.token)
+                    in
+                    case outMsg of
+                        BlockModal.Dismissed ->
+                            ( { model | blockModals = Dict.insert uid newBlockModal model.blockModals }
+                            , Cmd.map (BlockModalMsg uid) subCmd
+                            , NoOut
+                            )
+
+                        _ ->
+                            ( model, Cmd.none, EscapeUnhandled )
+
+                Nothing ->
+                    ( model, Cmd.none, EscapeUnhandled )
 
 
 view : Model -> Html Msg

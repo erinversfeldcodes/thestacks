@@ -19,9 +19,11 @@ Model-Update-View, `RemoteData` for the request, no ports. Issue #193 (US-10.1.2
 -}
 
 import Api exposing (BlockError(..))
+import Browser.Dom
 import Html exposing (Html, button, div, p, text)
-import Html.Attributes exposing (attribute, class, disabled)
+import Html.Attributes exposing (attribute, class, disabled, id, style)
 import Html.Events exposing (onClick)
+import Task
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
@@ -53,16 +55,31 @@ init target =
 
 type Msg
     = MenuToggled
+    | MenuClosed
+    | EscapePressed
     | BlockRequested
     | BlockDismissed
     | BlockConfirmed
     | BlockCompleted (Result BlockError ())
+    | FocusResult
 
 
 type OutMsg
     = NoOut
     | UserBlocked
     | SessionExpired
+      -- Escape closed (or, mid-flight, kept) an open surface: the host consumed
+      -- the key and must NOT fall through to a page-level Escape handler.
+    | Dismissed
+
+
+{-| The DOM id of the ⋯ trigger for this target, so focus can return to it when
+its menu / confirm modal closes. Unique per target, since a feed can render many
+block affordances at once (Groups feed).
+-}
+triggerId : Target -> String
+triggerId target =
+    "block-user-trigger-" ++ target.userId
 
 
 {-| True while a block request is in flight — the single-flight guard so a
@@ -83,6 +100,32 @@ update msg model maybeToken =
     case msg of
         MenuToggled ->
             ( { model | menuOpen = not model.menuOpen }, Cmd.none, NoOut )
+
+        MenuClosed ->
+            -- Click-away on the backdrop: close the menu and return focus to the
+            -- ⋯ trigger (the disclosure focus-return convention).
+            ( { model | menuOpen = False }, focusTrigger model, NoOut )
+
+        EscapePressed ->
+            -- Escape dismisses the top-most open surface, mirroring the nav /
+            -- account-menu Escape close, and returns focus to the ⋯ trigger.
+            if model.confirming then
+                if isBlocking model.status then
+                    -- A block is in flight: keep the modal (as BlockDismissed
+                    -- does), but the key is still consumed.
+                    ( model, Cmd.none, Dismissed )
+
+                else
+                    ( { model | confirming = False, status = NotAsked }, focusTrigger model, Dismissed )
+
+            else if model.menuOpen then
+                ( { model | menuOpen = False }, focusTrigger model, Dismissed )
+
+            else
+                ( model, Cmd.none, NoOut )
+
+        FocusResult ->
+            ( model, Cmd.none, NoOut )
 
         BlockRequested ->
             ( { model | menuOpen = False, confirming = True, status = NotAsked }
@@ -131,12 +174,20 @@ update msg model maybeToken =
                     ( { model | status = Failure err }, Cmd.none, NoOut )
 
 
+{-| Return DOM focus to the ⋯ trigger, discarding the (ignorable) result.
+-}
+focusTrigger : Model -> Cmd Msg
+focusTrigger model =
+    Task.attempt (\_ -> FocusResult) (Browser.Dom.focus (triggerId model.target))
+
+
 view : Model -> Html Msg
 view model =
     div [ class "block-user" ]
         [ button
             [ class "block-user__trigger"
             , testId "block-user-trigger"
+            , id (triggerId model.target)
             , attribute "aria-label" "Reader actions"
             , attribute "aria-haspopup" "menu"
             , attribute "aria-expanded"
@@ -150,12 +201,28 @@ view model =
             ]
             [ text "⋯" ]
         , if model.menuOpen then
-            div [ class "block-user__menu" ]
-                [ button
-                    [ class "block-user__block-action"
-                    , onClick BlockRequested
+            div []
+                [ -- Transparent full-screen layer that turns an outside click
+                  -- into `MenuClosed` — the same click-away shape as the nav
+                  -- disclosures' `.app-nav__backdrop`.
+                  div
+                    [ class "app-nav__backdrop"
+                    , style "position" "fixed"
+                    , style "top" "0"
+                    , style "left" "0"
+                    , style "width" "100vw"
+                    , style "height" "100vh"
+                    , style "z-index" "999"
+                    , onClick MenuClosed
                     ]
-                    [ text ("Block " ++ model.target.displayName) ]
+                    []
+                , div [ class "block-user__menu", style "z-index" "1000" ]
+                    [ button
+                        [ class "block-user__block-action"
+                        , onClick BlockRequested
+                        ]
+                        [ text ("Block " ++ model.target.displayName) ]
+                    ]
                 ]
 
           else
