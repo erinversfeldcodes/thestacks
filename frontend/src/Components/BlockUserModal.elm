@@ -216,7 +216,16 @@ view model =
                     , onClick MenuClosed
                     ]
                     []
-                , div [ class "block-user__menu", style "z-index" "1000" ]
+                , div
+                    [ class "block-user__menu"
+                    , -- `position` is required for `z-index` to apply: without it the
+                      -- inline z-index is inert and the fixed click-away backdrop
+                      -- (z-index 999, added with the #389 dismissal fix) paints OVER
+                      -- the menu and swallows the "Block <name>" click. `relative`
+                      -- activates the stacking without moving the menu.
+                      style "position" "relative"
+                    , style "z-index" "1000"
+                    ]
                     [ button
                         [ class "block-user__block-action"
                         , onClick BlockRequested

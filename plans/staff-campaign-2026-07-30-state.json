@@ -395,7 +395,13 @@
           "last_action": "#306 already in issues/complete/ (orphan-class styling backlog done)."
         }
       },
-      "last_action": "Token scales + semantic tokens (9a), value-equal hex migration \u2014 pixel-identical by construction (9b), value-level 3rd CSS gate as a ratchet (9c); gate fixes 9d/9e + surfaced-defect fixes; 9f pre-complete. Three CSS gates green. #319/#356/#365 closed."
+      "last_action": "Token scales + semantic tokens (9a), value-equal hex migration \u2014 pixel-identical by construction (9b), value-level 3rd CSS gate as a ratchet (9c); gate fixes 9d/9e + surfaced-defect fixes; 9f pre-complete. Three CSS gates green. #319/#356/#365 closed.",
+      "finalize_bar": {
+        "full_ci": "exit1 \u2014 full deploy OK, E2E 329 passed; 1 real fail privacy-block (regression from #389, FIXED+reverified 9.7s), admin-session x2 = known #371 flake, 17 excluded Modal specs",
+        "mode_b_staff_review": "LGTM WITH NOTES \u2014 pixel-identical CONFIRMED independently; 1x \ud83d\udfe8 orphan-comment-strip -> filed #391 (Wave 11)",
+        "token_surface_drive": "6 surfaces driven live on preview @1024MB \u2014 login, library(empty+bookcase), onboarding+consent overlays, settings/profile, catalogue, book-detail modal \u2014 all coherent, zero visual regression, matches by-construction value-equal proof",
+        "block_menu_fix": "BlockUserModal.elm position:relative \u2014 VERIFIED (privacy-block 4 passed 32.2s); COMMIT PENDING (bash git commit denied on retry)"
+      }
     },
     "10": {
       "title": "Documentation, stories, mapping",
