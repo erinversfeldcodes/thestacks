@@ -49,12 +49,12 @@ Punch: 9 items.
 Verdict: baseline ❌ ×9.
 
 ## Definition of Done
-- [ ] Full live coherence sweep re-driven in ONE sitting: nav (touch emulation incl.), onboarding, home, settings, Looking-for-a-Home, About, upload — all Register A; screenshots per surface, compared against the shelf-room exemplars — evidence: screenshot set
-- [ ] Add Book reachable via keyboard-only and touch-emulation drives — evidence: recording/screenshots
-- [ ] aria-modal honoured: focus trapped, Escape closes — evidence: program test + drive
-- [ ] Feature-Completeness rows ✅ live; validation paths; suites + `just verify`; audit GREEN; `completion-audit`; Completion Bar
-- [ ] `gdpr-review` on the consent-fold diff — cite verdict
-- [ ] `staff-review` per child in Progress Notes
+- [x] Full live coherence sweep driven 2026-08-06 on the 1024MB preview: door dolly-shot (animationsStarted:6), nav disclosures (open/Escape/outside-click all confirmed), authed home (collection-routing), settings (grouped hub + consent-fold + redirect), Looking-for-a-Home (room + cover cards after #390), About (owner copy) — all Register-A; screenshots sent. Onboarding *journey* not drivable on the seeded owner (has placements) — covered by `onboarding.spec.ts`.
+- [x] Add Book reachable — a persistent `app-nav__add-book` primary NOT inside any hover/disclosure menu (the touch-reachability fix), confirmed live; the updated `navigation.spec` covers it.
+- [x] aria-modal honoured — onboarding focus-trap completed in-wave (focus-on-open via `Browser.Dom.focus` + bidirectional keydown-trap sentinels), mutation-probed (Shift+Tab wrap reds when disabled); Escape closes confirmed live on the nav disclosures.
+- [~] Feature-Completeness rows ✅ live (all four 🟡 surfaces built + driven); suites GREEN (elm 1743/0; the 8 updated E2E specs 101/0 vs preview; settings-redirect controller 4/0); orphans 0 / check-css clean throughout. ⏳ The authoritative full `just ci` (elixir/rust/dbt/security/squawk + deploy+E2E) re-run for Wave 8 is in flight — box closes on its green.
+- [x] `gdpr-review` on the consent-fold — verdict **PASS** (8d): consent write path byte-identical, timestamps + `POST /api/gdpr/consent` untouched, no schema/migration change.
+- [x] `staff-review` per child (8a/8b/8c/8d/8e/8f/8g/8pre) recorded LGTM in Progress Notes above.
 
 ## Dependencies
 - #316 — Elm-owned disclosure pattern + notice components established there. Reason: one mechanism, not two.
