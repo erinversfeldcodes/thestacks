@@ -92,3 +92,6 @@ Filed 2026-08-03 by the lead. Both runs are the lead's own against
 `stacks-core-pr-feat-campaign-w7-317.fly.dev` (1 GB): the default-worker drive showing the three
 failures, and the `--workers=1` re-run showing 27/0. The passing-run timings quoted above are from the
 serial run's own output.
+
+## Verification (2026-08-07, Wave 11 verify-and-close)
+ALREADY-FIXED (`babcc4be`) and closed on acceptance evidence: 3× consecutive `--project=chromium admin-session.spec.ts book-detail.spec.ts` at the shipped worker count = **33 passed** each (54.9s / 1.4m / 56.1s), recorded in #371's Progress Notes. #371 = per-run owner-MFA factor isolation (mutation-probed); #380 = the injected sleep became a hold-until-observed promise, removing the contention race at source. Distinct root causes (shared server state vs wall-clock contention). ⚠️ The intermittent mfa-confirm 422 is tracked separately as #394.

@@ -646,11 +646,18 @@
         "338": "DONE (64dc845d) \u2014 notes dbt_exclude; stripped from stg + kept declared on source; proto.sync --check clean, lint-proto 5/5.",
         "386": "DONE (64dc845d) \u2014 storage_path dbt_exclude; stripped from stg + schema.yml not_null test; source note added.",
         "392": "DONE (498991b5) \u2014 blog posts+comments added to GDPR export (portability); export-keys guard updated 9->11; mutation-probe RED confirmed; erasure already covered (not P0).",
-        "393": "DONE \u2014 dead 6PN MetricsAuth bypass removed; authorized?=bearer-only; 6PN test inverted to assert 401; 11 tests 0 fail, credo clean."
+        "393": "DONE \u2014 dead 6PN MetricsAuth bypass removed; authorized?=bearer-only; 6PN test inverted to assert 401; 11 tests 0 fail, credo clean.",
+        "377": "DONE \u2014 closed on fresh green run (69 tests 0 fail); fixed df170b48.",
+        "385": "DONE \u2014 closed on fresh green run; fixed a2393586 (#352).",
+        "371": "DONE \u2014 closed on acceptance evidence (3x 33 passed, babcc4be). mfa-422 flake split to #394.",
+        "380": "DONE \u2014 closed on acceptance evidence (babcc4be); distinct from #371 (contention not shared state).",
+        "370": "CODE-VERIFIED (Elm fix 6f54a28d deployed; bundle+DB checked). E2E confirmation (2 search.spec.ts titles) rides the Wave 11 finalize just ci \u2014 not pre-closing on code-read.",
+        "372": "CODE-VERIFIED (spec fixes 630961cf; triage confirmed locators match current DOM). \u26a0\ufe0f privacy-placement spec interacts with #378 \u2014 must re-run against a preview carrying #378. Rides Wave 11 finalize."
       },
       "reliability_note": "Two background fix-agents (fix-357, fix-358) stalled silently ~45min after completing coherent work (no failed-notification; no live process; no writes). Lead stopped them (TaskStop), verified their on-disk work independently, committed. Remaining contained fixes done in-loop to avoid re-stall.",
       "launch_blocker_batch": "COMPLETE 2026-08-07: #357, #391, #358, #369, #378 all landed+verified+committed. Follow-ups filed: #394 (mfa-422), #395 (onboarding ports), #396 (un-merge placement reconciliation).",
-      "gdpr_security_cluster": "COMPLETE 2026-08-07: #338, #386, #392, #393."
+      "gdpr_security_cluster": "COMPLETE 2026-08-07: #338, #386, #392, #393.",
+      "verify_and_close": "#377/#385/#371/#380 closed (evidence-backed). #370/#372 code-verified, E2E at finalize (esp. #372 now that #378 changed placement\u2192edition behaviour)."
     }
   },
   "_owner_rulings_wave4_2026_07_30": [

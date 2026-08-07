@@ -128,3 +128,6 @@ specs (`admin-session.spec.ts`, `audit-log.spec.ts`); the eight Wave 8 nav/setti
 on valid auth regardless. Recorded here as the closest home (MFA-factor reliability); may be the
 same secret-encoding class this issue and the known preview-MFA concern describe. For the auth owner
 to investigate — NOT a Wave 8 defect.
+
+## Verification (2026-08-07, Wave 11 verify-and-close)
+ALREADY-FIXED (`babcc4be`) and closed on acceptance evidence: 3× consecutive `--project=chromium admin-session.spec.ts book-detail.spec.ts` at the shipped worker count = **33 passed** each (54.9s / 1.4m / 56.1s), recorded in #371's Progress Notes. #371 = per-run owner-MFA factor isolation (mutation-probed); #380 = the injected sleep became a hold-until-observed promise, removing the contention race at source. Distinct root causes (shared server state vs wall-clock contention). ⚠️ The intermittent mfa-confirm 422 is tracked separately as #394.
