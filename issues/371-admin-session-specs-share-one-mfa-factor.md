@@ -1,5 +1,8 @@
 # Issue #371: Three admin specs share one MFA factor, so they can only pass one at a time
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by the lead's Wave 6 live drive, 2026-08-01. Three specs in `admin-session.spec.ts` fail
 under the default worker count and **all pass with `--workers=1`**:

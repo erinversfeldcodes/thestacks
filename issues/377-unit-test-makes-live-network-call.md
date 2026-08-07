@@ -1,5 +1,8 @@
 # Issue #377: A unit test reaches the public internet, and the timeout that was supposed to bound it doesn't
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by the #373 agent during Wave 7, while hunting an intermittent full-suite failure it had twice
 truncated away. Root-caused, located, and reported rather than dismissed as flake.

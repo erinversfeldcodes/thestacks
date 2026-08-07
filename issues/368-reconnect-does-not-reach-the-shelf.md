@@ -1,5 +1,8 @@
 # Issue #368: The banner knows we reconnected; the shelf underneath it never finds out
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by the lead's Wave 6 live drive on the preview, 2026-08-01, while confirming #362's
 connectivity banner. **#362 works** — both halves of it. What the drive exposed is that its two

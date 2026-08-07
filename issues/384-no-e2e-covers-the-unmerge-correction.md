@@ -1,5 +1,8 @@
 # Issue #384: No Playwright test covers the un-merge correction (or its merge inverse end to end)
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 The owner un-merge (#376) — split a wrongly-merged edition back onto its own work — has **no E2E
 coverage**. During #376's staff-review I wrongly claimed there was "no owner API to create a merged

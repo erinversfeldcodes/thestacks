@@ -1,5 +1,8 @@
 # Issue #380: Three book-detail specs fail at the worker count the suite ships with
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by the Wave 7 live drive, 2026-08-02/03. Three `book-detail.spec.ts` specs fail at the
 **default** worker count and pass serially:

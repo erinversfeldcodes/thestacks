@@ -1,5 +1,8 @@
 # Issue #388: Bookcase/shelf grid — roving-tabindex arrow-key navigation (deferred from #318 8f)
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 The bookcase/shelf grid is keyboard-*reachable* today — every spine is a real
 `<button class="book-button">`, so WCAG 2.1.1 (keyboard-operable) is already satisfied by Tab. What

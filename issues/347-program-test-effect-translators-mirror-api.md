@@ -1,5 +1,8 @@
 # Issue #347: Program-test effect translators rebuild Api requests, so a divergence is invisible
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by the lead's independent probe during #343's review. `TestHelpers.uploadEffects` (`frontend/tests/TestHelpers.elm:868-1010`) translates `Upload.Msg` into `SimulatedEffect`s by **hand-constructing the HTTP request** — URL, method and JSON body — rather than deriving it from the `Api.*` function the production code actually calls. There are **5 hand-built requests in that one translator**:
 

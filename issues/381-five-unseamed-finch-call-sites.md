@@ -1,5 +1,8 @@
 # Issue #381: Five more places the test suite can dial the public internet
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 The sibling sweep #377 was asked for, reported. **13 modules make direct `Finch` calls; 8 are properly
 behind a seam; 5 are not.** Of those five, **3 are test-reachable** and **2 can dial a real, resolvable

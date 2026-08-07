@@ -1,5 +1,8 @@
 # Issue #378: The edition a reader actually scanned is never recorded — the shelf silently stores a different one
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by the #376 agent while deciding what un-merge should do with placements. It is the **root cause**
 of that question, and a wiring gap in its own right.

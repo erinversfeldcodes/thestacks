@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-30",
   "plan": "plans/staff-campaign-2026-07-30.md",
   "created_at": "2026-07-30T00:00:00Z",
-  "updated_at": "2026-08-06",
+  "updated_at": "2026-08-07",
   "status": "approved_filed",
   "current_wave": 11,
   "_why": [
@@ -441,7 +441,7 @@
     },
     "11": {
       "title": "Launch gates (existing backlog, re-pointed)",
-      "status": "not_started",
+      "status": "in_progress",
       "items": {
         "11a": {
           "title": "Invite-only registration",
@@ -615,7 +615,8 @@
           "title": "Dead 6PN MetricsAuth bypass \u2014 no caller post-ADR-021; remove. Surfaced by Wave 10 #323 cleanup.",
           "note": "Wave 11 (gate/security hardening)."
         }
-      }
+      },
+      "last_action": "Wave 11 opened 2026-08-07. 23 open items (epic #321 + 22 children). Live re-triage on the warm preview before writing fixes; issue files stamped with wave assignment."
     }
   },
   "_owner_rulings_wave4_2026_07_30": [

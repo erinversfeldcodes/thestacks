@@ -1,5 +1,8 @@
 # Issue #386: `stg_uploaded_images` exposes the R2 `storage_path` (and `user_id`) to the warehouse
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 `dbt/models/staging/stg_uploaded_images.sql` selects `storage_path` and `user_id`
 straight from `op.uploaded_images` into the `wh` staging layer. `storage_path` is the

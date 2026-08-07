@@ -1,5 +1,8 @@
 # Issue #370: Every book in the catalogue says "we can't show its title" — beside its title
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by the lead's Wave 6 live drive, 2026-08-01, while running down two `search.spec.ts` failures
 that had been reading as flakes. They were not flakes. They were the product telling the truth about

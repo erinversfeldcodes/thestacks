@@ -1,5 +1,8 @@
 # Issue #338: Reader's placement `notes` free text flows into the warehouse against house convention
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by #335 and independently confirmed by the lead. `bookshelf_placements.notes` — a reader's personal free-text notes about a book they own — is selected into `dbt/models/staging/stg_bookshelf_placements.sql:14` with no `dbt_exclude`.
 

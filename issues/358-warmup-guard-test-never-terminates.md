@@ -1,5 +1,8 @@
 # Issue #358: `e2e_warmup_guard_test.sh` never terminates — two stub defects, no service bug
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Reported by #337 as "ran 15+ minutes with no tally". Diagnosed by the lead 2026-07-31: **the test hangs forever, and the code under test is fine.** Both defects are in the test's own stubs.
 

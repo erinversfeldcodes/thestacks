@@ -1,5 +1,8 @@
 # Issue #385: The title-search "don't cache an outage" wire has no end-to-end test
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 #352 stops a provider outage during title search from being cached as a negative ("no such book")
 for an hour. Each link is tested in isolation — `determination/1` maps transient errors to

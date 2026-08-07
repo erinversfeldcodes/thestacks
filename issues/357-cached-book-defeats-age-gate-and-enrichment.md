@@ -1,5 +1,8 @@
 # Issue #357: Two writes change a book and never evict it — one is an age-gate bypass window
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by #355's sibling sweep and confirmed by the lead. `BookDetailCache` is now invalidated on `book.created`, `book.cover_confirmed`, `books.edition_merged` and `blog.associations_suggested`. Two write paths that change what `GET /api/books/:id` returns still emit **nothing** and evict **nothing**:
 

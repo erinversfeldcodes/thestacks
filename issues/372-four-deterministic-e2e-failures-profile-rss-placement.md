@@ -1,5 +1,8 @@
 # Issue #372: Four E2E failures that are neither flaky nor Wave 6 — nobody has looked at them
 
+> **Campaign assignment:** Wave 11 (launch gates) — `plans/staff-campaign-2026-07-30.md`. Tracked in the campaign state; completed as part of epic #321.
+
+
 ## Summary
 Found by the lead's Wave 6 live drive, 2026-08-01. After separating out the OOM noise (**#369**) and
 the parallel-MFA artefact (**#371**), four specs still fail, **deterministically, at
