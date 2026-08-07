@@ -111,8 +111,13 @@ for path in glob.glob("frontend/src/**/*.elm", recursive=True):
     _harvest_computed(text, used)
 
 # Selectors defined anywhere in the single stylesheet source.
+#
+# ⚠️ #391: strip comments FIRST. A class named only in a `/* … */` comment is not a rule, but counting
+# it as "defined" silently absolves the orphan of the same name — the exact mask this gate exists to
+# prevent. Same line as `check-css-values.sh`, so both gates agree on what main.css actually defines.
 defined = set()
-css = open("frontend/css/main.css", encoding="utf-8").read()
+raw = open("frontend/css/main.css", encoding="utf-8").read()
+css = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)   # strip comments so their examples never count
 for name in re.findall(r"\.([a-zA-Z][a-zA-Z0-9_-]*)", css):
     defined.add(name)
 
