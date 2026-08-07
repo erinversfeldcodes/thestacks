@@ -264,4 +264,14 @@ config :core, :login_lockout_duration_seconds, 900
 config :core, :login_lockout_max_duration_seconds, 7_200
 config :core, :login_lockout_backoff_window_seconds, 86_400
 
+# Argon2id memory cost (#369). Left unset, argon2_elixir defaults to m_cost 16
+# (2^16 KiB = 64 MiB per hash). With ArgonPool bounding concurrency to 2 that is
+# 128 MiB of peak hashing on a 512 MB VM whose BEAM baseline has grown with the
+# app — the OOM the 0f4a5193 pool only band-aided. m_cost 15 (2^15 KiB = 32 MiB)
+# halves per-hash memory (2×32 = 64 MiB peak) and still sits above the OWASP
+# Argon2id floor of 19 MiB — so this is a root-cause fix, not a VM-size workaround.
+# The cost is encoded in each stored hash, so existing passwords keep verifying;
+# only new/rehashed passwords use the new cost.
+config :argon2_elixir, m_cost: 15
+
 import_config "#{config_env()}.exs"

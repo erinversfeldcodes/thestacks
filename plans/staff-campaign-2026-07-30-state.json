@@ -626,12 +626,19 @@
           "title": "Orphan onboarding ports \u2014 onboarding re-triggers on reload (behaviour half of #366)."
         }
       },
-      "last_action": "Wave 11 opened 2026-08-07. 23 open items (epic #321 + 22 children). Live re-triage on the warm preview before writing fixes; issue files stamped with wave assignment.",
+      "last_action": "Increment 1 + #369 committed and reconciled (strays folded). Next: #378 scanned-edition.",
       "decisions": {
         "369": "Owner 2026-08-07: root cause is untuned Argon2 (64 MiB/hash library default, 3.4x OWASP floor) on scaffolding-default 512MB \u2014 NOT a regression. Fix = tune m_cost to ~32 MiB (>OWASP 19 MiB), keep pool=2, add concurrency test + deploy readback gate. NO VM cost increase.",
         "336": "Owner 2026-08-07: reviews ARE planned (US-2.1.1 re-scoped, not deleted). KEEP the vertical scaffolding (review_snapshots table/proto/staging + int_review_sentiment for 2 marts). Fix = mark the orphan event pending-US-2.1.1 (not a live contract) + inverse completeness guard. #336 keeps its ticket, done in Wave 11. NO full teardown.",
         "pacing": "Launch-blockers first, then check in."
-      }
+      },
+      "progress": {
+        "357": "DONE (4de90010) \u2014 sync BookDetailCache eviction on set_visibility_tier + book.enriched/book.visibility_tier_changed events (UUID-only) + rewrote the false-guarantee test. Verified: compile 0, 74 tests 0 fail, lead mutation-probe RED confirmed (invalidation off \u2192 test fails). Agent stalled silently ~45min; lead verified+committed. + controller-level age-gate-cache integration test (book_controller_test.exs, 56/0) folded in.",
+        "391": "DONE \u2014 orphan gate strips CSS comments before defined-set; gate green 0 orphans; probed.",
+        "358": "DONE \u2014 warmup-guard test terminates (25/25 under lead's 60s guard) + watchdog bound. Agent stalled ~45min; lead verified+committed. + per-suite timeout watchdog in run_all.sh folded in.",
+        "369": "DONE \u2014 Argon2 m_cost tuned 16->15 (64->32 MiB, >OWASP 19 MiB floor) in config.exs; ArgonPool header math updated; readback-guard test added. Verified: compile 0, argon_pool 4/0, accounts 109/0, m_cost readback=15. Root-cause fix (no VM cost). Existing hashes verify unchanged (cost encoded per-hash)."
+      },
+      "reliability_note": "Two background fix-agents (fix-357, fix-358) stalled silently ~45min after completing coherent work (no failed-notification; no live process; no writes). Lead stopped them (TaskStop), verified their on-disk work independently, committed. Remaining contained fixes done in-loop to avoid re-stall."
     }
   },
   "_owner_rulings_wave4_2026_07_30": [

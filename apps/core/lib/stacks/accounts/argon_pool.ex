@@ -3,9 +3,9 @@ defmodule Stacks.Accounts.ArgonPool do
   @behaviour NimblePool
 
   # Pools Argon2 operations so concurrent login/password-change requests cannot
-  # collectively exhaust available memory. Each Argon2 call uses ~64 MB; with
-  # pool_size: 2 at most 128 MB is committed at once, keeping peak RSS safe on
-  # constrained machines (Fly preview: 256 MB, staging: 512 MB).
+  # collectively exhaust available memory. At the tuned m_cost 15 (#369) each
+  # Argon2 call uses ~32 MB; with pool_size: 2 at most 64 MB is committed at once,
+  # keeping peak RSS safe on constrained machines (Fly preview / staging: 512 MB).
   #
   # When all workers are occupied, run/1 returns {:error, :argon2_busy} after
   # 10 seconds. Callers map this to 503 + Retry-After: 5.

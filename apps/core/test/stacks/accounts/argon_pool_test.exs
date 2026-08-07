@@ -58,4 +58,14 @@ defmodule Stacks.Accounts.ArgonPoolTest do
       for t <- holders, do: Task.await(t)
     end
   end
+
+  describe "Argon2 memory cost (#369)" do
+    test "m_cost is tuned to 15 (32 MiB), not the 64 MiB library default" do
+      # A readback guard: left unset, argon2_elixir defaults to m_cost 16 (64 MiB),
+      # which is what OOM'd a 512 MB VM under two concurrent hashes. 15 halves that
+      # and stays above the OWASP Argon2id floor (19 MiB). If this regresses to the
+      # default, peak hashing memory doubles silently — fail loudly here instead.
+      assert Application.get_env(:argon2_elixir, :m_cost) == 15
+    end
+  end
 end
