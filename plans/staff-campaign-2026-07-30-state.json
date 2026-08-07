@@ -624,6 +624,11 @@
           "issue": 395,
           "status": "not_started",
           "title": "Orphan onboarding ports \u2014 onboarding re-triggers on reload (behaviour half of #366)."
+        },
+        "fu-396": {
+          "issue": 396,
+          "status": "not_started",
+          "title": "Un-merge must reconcile a placement naming the split edition (post-#378 premise change)."
         }
       },
       "last_action": "Increment 1 + #369 committed and reconciled (strays folded). Next: #378 scanned-edition.",
