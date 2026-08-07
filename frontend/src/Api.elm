@@ -3501,6 +3501,8 @@ user sees their stored values rather than hardcoded defaults.
 type alias PrivacySettings =
     { profileVisibility : String
     , shelves : List ShelfVisibilitySetting
+    , consentAnalytics : Bool
+    , consentWritingAssistant : Bool
     }
 
 
@@ -3513,9 +3515,11 @@ shelfVisibilitySettingDecoder =
 
 privacySettingsDecoder : Decoder PrivacySettings
 privacySettingsDecoder =
-    Decode.map2 PrivacySettings
+    Decode.map4 PrivacySettings
         (Decode.field "profile_visibility" Decode.string)
         (Decode.field "shelves" (Decode.list shelfVisibilitySettingDecoder))
+        (Decode.field "consent_analytics" Decode.bool)
+        (Decode.field "consent_writing_assistant" Decode.bool)
 
 
 {-| GET /api/settings/privacy — the current user's saved profile visibility and

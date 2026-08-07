@@ -46,6 +46,23 @@ defmodule StacksWeb.UserSettingsPrivacyReadControllerTest do
       assert shelves["wishlist"] == "owner"
     end
 
+    test "includes the user's consent flags so the privacy page hydrates them (#367)", %{
+      conn: conn
+    } do
+      user = insert(:user, consent_analytics: true, consent_writing_assistant: false)
+
+      body =
+        conn
+        |> auth_conn(user)
+        |> get("/api/settings/privacy")
+        |> json_response(200)
+
+      # #367: the page seeds these from the login blob but must hydrate the live
+      # value from this endpoint — so they have to be present here.
+      assert body["consent_analytics"] == true
+      assert body["consent_writing_assistant"] == false
+    end
+
     test "returns an empty shelf list when the user has no bookshelves", %{conn: conn} do
       user = insert(:user, profile_visibility: "owner")
 

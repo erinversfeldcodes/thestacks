@@ -345,6 +345,18 @@ update msg model maybeToken =
                     ( { model
                         | profileVisibility = settings.profileVisibility
                         , shelfVisibilities = seedShelves settings.shelves
+
+                        -- #367: hydrate consent from the SERVER, overwriting the
+                        -- login-blob seed. The blob is written only at login /
+                        -- token renewal, so a consent change made in a prior
+                        -- session (or on another device) left the toggles showing
+                        -- a stale value until now. This init fetch is the source
+                        -- of truth for what the toggles display.
+                        , consent =
+                            Consent.init
+                                { analytics = settings.consentAnalytics
+                                , writingAssistant = settings.consentWritingAssistant
+                                }
                       }
                     , Cmd.none
                     , NoOut

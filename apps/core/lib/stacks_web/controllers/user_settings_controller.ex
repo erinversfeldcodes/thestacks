@@ -138,7 +138,13 @@ defmodule StacksWeb.UserSettingsController do
 
     json(conn, %{
       profile_visibility: user.profile_visibility,
-      shelves: shelves
+      shelves: shelves,
+      # #367: the Privacy page already calls this endpoint on init, so surfacing
+      # consent here lets it hydrate the live server value instead of trusting the
+      # login-time `stacks-auth` blob (which no consent write ever refreshes — the
+      # read-after-write staleness this fixes). No new request, no new route.
+      consent_analytics: user.consent_analytics,
+      consent_writing_assistant: user.consent_writing_assistant
     })
   end
 

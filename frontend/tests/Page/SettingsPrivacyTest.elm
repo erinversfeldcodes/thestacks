@@ -229,6 +229,20 @@ suite =
                                 token
                     in
                     List.length model.shelfVisibilities |> Expect.equal 5
+            , test "GotPrivacySettings Ok hydrates consent from the server, not the stale login blob (#367)" <|
+                \_ ->
+                    let
+                        ( model, _, _ ) =
+                            Privacy.update
+                                (GotPrivacySettings (Ok samplePrivacySettings))
+                                Privacy.init
+                                token
+                    in
+                    -- Privacy.init defaults consent to False/False; the payload
+                    -- says analytics = True. The init fetch is the source of
+                    -- truth, so the toggle must reflect the server value — this is
+                    -- the read-after-write staleness #367 fixes.
+                    model.consent.analyticsConsent |> Expect.equal True
             ]
         , describe "consent folded into Privacy (#318 TR-4)"
             [ test "the consent toggles now render within the Privacy page" <|
@@ -307,6 +321,8 @@ samplePrivacySettings =
         [ { name = "library", visibility = "platform" }
         , { name = "wishlist", visibility = "owner" }
         ]
+    , consentAnalytics = True
+    , consentWritingAssistant = False
     }
 
 
