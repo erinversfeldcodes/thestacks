@@ -11,7 +11,6 @@ select
     removed_at,
     formats,
     personal_rating,
-    notes,
     visibility,
     listing_mode,
     listing_status,

@@ -240,8 +240,6 @@ models:
         description: Formats.
       - name: personal_rating
         description: Personal rating.
-      - name: notes
-        description: Notes.
       - name: visibility
         description: Visibility.
       - name: listing_mode
@@ -320,10 +318,6 @@ models:
         tests:
           - not_null
           - unique
-      - name: storage_path
-        description: Storage path.
-        tests:
-          - not_null
       - name: status
         description: Status.
         tests:

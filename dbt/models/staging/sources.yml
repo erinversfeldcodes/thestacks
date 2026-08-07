@@ -149,7 +149,7 @@ sources:
           - name: personal_rating
             description: User's personal rating for the book.
           - name: notes
-            description: User's private notes about this placement.
+            description: User's private notes about this placement. Present in the DB but deliberately EXCLUDED from the staging model (#338 — user free-text never enters the warehouse; the wh schema has no erasure path).
           - name: visibility
             description: Per-placement visibility override.
           - name: listing_mode
@@ -197,7 +197,7 @@ sources:
           - name: book_id
             description: Legacy FK to books (single-book uploads).
           - name: storage_path
-            description: Object storage path for the image file.
+            description: Object storage path for the image file. Present in the DB but deliberately EXCLUDED from the staging model (#386 — a sensitive per-user pointer never enters the warehouse; the wh schema has no erasure path).
           - name: status
             description: Processing status (pending, classified, rejected, expired).
           - name: rejection_reason

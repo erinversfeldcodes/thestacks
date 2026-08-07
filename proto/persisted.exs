@@ -423,7 +423,11 @@
           ]
         },
         storage_path: %{
-          dbt_tests: [:not_null]
+          # GDPR minimisation (#386): the R2 object path is a sensitive pointer to
+          # a user's uploaded image and must not enter the warehouse (`wh` has no
+          # erasure path). Excluded from stg_uploaded_images and its generated
+          # not_null test; still declared on the source (sources.yml).
+          dbt_exclude: true
         },
         book_ids: %{
           ecto_type: {:array, :binary_id},
@@ -529,7 +533,13 @@
             :not_null,
             {:accepted_values, ["to_read", "reading", "completed", "abandoned"]}
           ]
-        }
+        },
+        # GDPR minimisation (#338): `notes` is user-authored free text. The `wh`
+        # schema has no erasure path, so it must not enter the warehouse — excluded
+        # from stg_bookshelf_placements while staying declared on the source
+        # (sources.yml). Erasure of the op-table row still removes it (the staging
+        # model is a view). No mart selects it.
+        notes: %{dbt_exclude: true}
       }
     },
     %{
