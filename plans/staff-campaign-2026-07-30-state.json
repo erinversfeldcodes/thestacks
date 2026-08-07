@@ -614,9 +614,24 @@
           "status": "not_started",
           "title": "Dead 6PN MetricsAuth bypass \u2014 no caller post-ADR-021; remove. Surfaced by Wave 10 #323 cleanup.",
           "note": "Wave 11 (gate/security hardening)."
+        },
+        "fu-394": {
+          "issue": 394,
+          "status": "not_started",
+          "title": "Intermittent mfa-confirm 422 on preview E2E setup (surfaced by #371 triage). MFA reliability."
+        },
+        "fu-395": {
+          "issue": 395,
+          "status": "not_started",
+          "title": "Orphan onboarding ports \u2014 onboarding re-triggers on reload (behaviour half of #366)."
         }
       },
-      "last_action": "Wave 11 opened 2026-08-07. 23 open items (epic #321 + 22 children). Live re-triage on the warm preview before writing fixes; issue files stamped with wave assignment."
+      "last_action": "Wave 11 opened 2026-08-07. 23 open items (epic #321 + 22 children). Live re-triage on the warm preview before writing fixes; issue files stamped with wave assignment.",
+      "decisions": {
+        "369": "Owner 2026-08-07: root cause is untuned Argon2 (64 MiB/hash library default, 3.4x OWASP floor) on scaffolding-default 512MB \u2014 NOT a regression. Fix = tune m_cost to ~32 MiB (>OWASP 19 MiB), keep pool=2, add concurrency test + deploy readback gate. NO VM cost increase.",
+        "336": "Owner 2026-08-07: reviews ARE planned (US-2.1.1 re-scoped, not deleted). KEEP the vertical scaffolding (review_snapshots table/proto/staging + int_review_sentiment for 2 marts). Fix = mark the orphan event pending-US-2.1.1 (not a live contract) + inverse completeness guard. #336 keeps its ticket, done in Wave 11. NO full teardown.",
+        "pacing": "Launch-blockers first, then check in."
+      }
     }
   },
   "_owner_rulings_wave4_2026_07_30": [
