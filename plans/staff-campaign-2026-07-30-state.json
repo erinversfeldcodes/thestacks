@@ -436,7 +436,8 @@
         ],
         "counts": "mapping +516/-21; 43 ids mapped incl sections 10/11/12/13; 11 new stories; epic 20 created, 15 extended; 4 exclusions recorded"
       },
-      "staff_review": "Mode B staff-review verdict: LGTM WITH NOTES (2026-08-06). All 6 Built stories verified real; all 5 spec-only confirmed absent (no over-claim); anchor fixes correct; 1x \ud83d\udfe8 phase-table rationale staleness FIXED in-wave; 1x \ud83d\udfe6 recorded. Two pre-existing gaps filed to Wave 11 (#392 GDPR blog export, #393 dead 6PN bypass)."
+      "staff_review": "Mode B staff-review verdict: LGTM WITH NOTES (2026-08-06). All 6 Built stories verified real; all 5 spec-only confirmed absent (no over-claim); anchor fixes correct; 1x \ud83d\udfe8 phase-table rationale staleness FIXED in-wave; 1x \ud83d\udfe6 recorded. Two pre-existing gaps filed to Wave 11 (#392 GDPR blog export, #393 dead 6PN bypass).",
+      "code_gates": "2026-08-06 (pinned toolchain, just run): mix compile --warnings-as-errors EXIT 0; mix format --check-formatted on the 4 touched source files EXIT 0; mix credo --strict on endpoint.ex/registry.ex/metrics_auth.ex EXIT 0. Full deploy+E2E N/A \u2014 Wave 10 changed no runtime behaviour (docs + code comments + config-doc). Live drive N/A for the same reason."
     },
     "11": {
       "title": "Launch gates (existing backlog, re-pointed)",
