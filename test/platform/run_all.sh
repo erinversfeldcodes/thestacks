@@ -29,10 +29,29 @@ SUITES=(
     "$HERE/e2e_global_setup_behavior_test.sh"
 )
 
+# Defensive per-suite wall-clock bound. These suites stub `curl`/`date` to keep
+# polling loops instant, and a stub defect can make one of those loops
+# unbounded — e2e_warmup_guard_test.sh did exactly that (Issue #358) and this
+# runner hung for ever on suite 15 of 17 with no output. A bound turns that into
+# a loud failure. `timeout` is GNU coreutils; if it isn't on PATH, run bare
+# rather than skip the suite.
+SUITE_TIMEOUT="${SUITE_TIMEOUT:-300}"
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+
 OVERALL=0
 for s in "${SUITES[@]}"; do
     printf '\n######## %s ########\n' "$(basename "$s")"
-    if ! bash "$s"; then
+    if [[ -n "$TIMEOUT_BIN" ]]; then
+        # Capture the status with `|| rc=$?`, NOT `if ! cmd; then rc=$?`: inside
+        # an `if !` the status has already been negated to 0, so the 124 branch
+        # would never fire.
+        rc=0
+        "$TIMEOUT_BIN" "$SUITE_TIMEOUT" bash "$s" || rc=$?
+        if [[ $rc -eq 124 ]]; then
+            printf '# TIMED OUT after %ss — %s\n' "$SUITE_TIMEOUT" "$(basename "$s")"
+        fi
+        [[ $rc -eq 0 ]] || OVERALL=1
+    elif ! bash "$s"; then
         OVERALL=1
     fi
 done
