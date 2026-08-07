@@ -13,6 +13,7 @@ defmodule StacksWeb.BookControllerTest do
   alias Stacks.Accounts.Guardian
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.MockHttpClient
+  alias Stacks.Workers.EnrichBookJob
 
   # Reset the resolver's circuit breakers before each test. :fuse state is
   # global, so a fuse blown by an earlier suite test can leak in and turn a
@@ -1122,6 +1123,113 @@ defmodule StacksWeb.BookControllerTest do
                  "the reader is shown a book without the edition they just added"
 
         assert "9780099466031" in Enum.map(after_body["book"]["editions"], & &1["isbn"])
+      after
+        Application.put_env(:core, :isbn_http_client, original)
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # The other two writes that changed a book and evicted nothing (Issue #357)
+  #
+  # Same shape as the merge probe above, for the same reason: read, write, read.
+  # Both were found by driving a live database, and both are invisible to a test
+  # that writes into a cold cache.
+  #
+  # The age-gate half is the serious one — it is an unenforced content-safety
+  # control for the length of a cache TTL, not a stale title — so it is the one
+  # that must pass with no queue drained.
+  # ---------------------------------------------------------------------------
+
+  describe "PUT /api/books/:id/age-gate then GET /api/books/:id" do
+    test "the raised gate is enforced on the very next read, not when the TTL expires" do
+      reader = insert(:user, age_verified: false)
+      {book, _edition} = insert_book_with_edition(visibility_tier: "public")
+      BookDetailCache.invalidate(book.id)
+
+      # 1. The reader looks at the book while it is still public. This is the
+      #    load-bearing step: it puts the PUBLIC work in BookDetailCache.
+      before_body =
+        build_conn()
+        |> auth_conn(reader)
+        |> get("/api/books/#{book.id}")
+        |> json_response(200)
+
+      assert before_body["book"]["visibility_tier"] == "public"
+
+      # 2. Someone marks it adults-only.
+      marked =
+        build_conn()
+        |> auth_conn(insert(:user))
+        |> put("/api/books/#{book.id}/age-gate", %{"adults_only" => true})
+        |> json_response(200)
+
+      assert marked["book"]["visibility_tier"] == "age_gated"
+
+      # 3. The same reader comes back — and note what is NOT here: the
+      #    `Oban.drain_queue(queue: :events)` the merge probe needs. The eviction
+      #    is synchronous exactly so the gate does not wait on the queue.
+      assert %{"error" => "age_verification_required"} =
+               build_conn()
+               |> auth_conn(reader)
+               |> get("/api/books/#{book.id}")
+               |> json_response(403),
+             "a book raised to age_gated was still served to a non-verified reader — " <>
+               "the age gate is being enforced against the cached pre-gate copy"
+    end
+  end
+
+  describe "EnrichBookJob then GET /api/books/:id" do
+    test "the enriched title is visible on the next read, not after the TTL" do
+      user = insert(:user)
+      isbn = "9780451524935"
+
+      # A barcode fast-path book: stored with a placeholder title, its real
+      # metadata still owed by EnrichBookJob.
+      {book, _edition} =
+        insert_book_with_edition(title: "ISBN #{isbn}", isbn: isbn, visibility_tier: "public")
+
+      BookDetailCache.invalidate(book.id)
+
+      original = Application.get_env(:core, :isbn_http_client)
+
+      try do
+        Application.put_env(:core, :isbn_http_client, MockHttpClient)
+
+        MockHttpClient.put_response(
+          "openlibrary.org/api/books",
+          {:ok,
+           %{
+             "ISBN:#{isbn}" => %{
+               "title" => "Nineteen Eighty-Four",
+               "authors" => [%{"name" => "George Orwell"}],
+               "publishers" => [%{"name" => "Signet Classics"}]
+             }
+           }}
+        )
+
+        # 1. The reader opens the book while enrichment is still in flight —
+        #    which is precisely when this happens, and what caches the placeholder.
+        assert build_conn()
+               |> auth_conn(user)
+               |> get("/api/books/#{book.id}")
+               |> json_response(200)
+               |> get_in(["book", "title"]) == "ISBN #{isbn}"
+
+        # 2. The job lands the real metadata.
+        assert :ok = EnrichBookJob.perform(%Oban.Job{args: %{"isbn" => isbn}})
+
+        # 3. Oban delivers `book.enriched` to CacheInvalidationHandler. Unlike the
+        #    age gate, eventual is the right latency for a title.
+        Oban.drain_queue(queue: :events)
+
+        assert build_conn()
+               |> auth_conn(user)
+               |> get("/api/books/#{book.id}")
+               |> json_response(200)
+               |> get_in(["book", "title"]) == "Nineteen Eighty-Four",
+               "GET /api/books/:id still served the placeholder title after enrichment — " <>
+                 "BookDetailCache was never evicted"
       after
         Application.put_env(:core, :isbn_http_client, original)
       end
