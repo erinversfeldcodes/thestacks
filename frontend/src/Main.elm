@@ -605,8 +605,8 @@ and `adoptExternalAuth` (cross-tab propagation, Issue #180) share one contract.
 -}
 authDecoder : Decode.Decoder Auth
 authDecoder =
-    Decode.map8
-        (\token userId email displayName handle role consentAnalytics consentWritingAssistant ->
+    Decode.map6
+        (\token userId email displayName handle role ->
             { user =
                 { id = userId
                 , email = email
@@ -615,8 +615,17 @@ authDecoder =
                 , role = role
                 , countryCode = Nothing
                 , city = Nothing
-                , consentAnalytics = consentAnalytics
-                , consentWritingAssistant = consentWritingAssistant
+
+                -- #367: consent is NOT read from the stored blob. The blob is only
+                -- (re)written from the server at login/renewal, so persisting
+                -- consent here let a change made elsewhere show stale AND clobber
+                -- the server hydration when the Privacy page re-initialised. The
+                -- Privacy page is the sole consumer and now hydrates consent from
+                -- GET /api/settings/privacy; this neutral default is just the
+                -- pre-fetch placeholder. Older blobs still carrying the fields
+                -- decode fine — the extra keys are simply ignored.
+                , consentAnalytics = False
+                , consentWritingAssistant = False
                 }
             , token = token
             }
@@ -633,16 +642,6 @@ authDecoder =
         (Decode.oneOf
             [ Decode.field "role" Decode.string
             , Decode.succeed "user"
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "consentAnalytics" Decode.bool
-            , Decode.succeed False
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "consentWritingAssistant" Decode.bool
-            , Decode.succeed False
             ]
         )
 
@@ -1406,8 +1405,12 @@ encodeAuth auth =
         , ( "displayName", Json.Encode.string auth.user.displayName )
         , ( "handle", Json.Encode.string auth.user.handle )
         , ( "role", Json.Encode.string auth.user.role )
-        , ( "consentAnalytics", Json.Encode.bool auth.user.consentAnalytics )
-        , ( "consentWritingAssistant", Json.Encode.bool auth.user.consentWritingAssistant )
+
+        -- #367: consent is deliberately NOT persisted in the stored blob. It is a
+        -- server-owned value the Privacy page hydrates from GET
+        -- /api/settings/privacy; keeping a copy here only created a stale mirror
+        -- with no invalidation. `role` stays because it gates admin UI and is
+        -- re-checked server-side; consent has no such client use.
         ]
 
 
