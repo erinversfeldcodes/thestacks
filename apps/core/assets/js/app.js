@@ -239,6 +239,41 @@ if (app.ports && app.ports.clearAuth) {
 }
 
 // ---------------------------------------------------------------------------
+// Onboarding completion (#395)
+// A SEPARATE localStorage key on purpose — NOT the `stacks-auth` blob. The blob
+// is rewritten from the server's value on every login and token renewal, so
+// storing completion there would be clobbered on the next renewal. This flag is
+// written when the reader finishes onboarding and read back on boot so the
+// overlay does not re-trigger on reload (Elm's `saveOnboardingCompleted` /
+// `onOnboardingStatus` ports were declared but never wired — the orphan #366
+// found). Written value is the string "true"; anything else reads as not-done.
+// ---------------------------------------------------------------------------
+var ONBOARDING_DONE_KEY = "stacks-onboarding-completed";
+
+if (app.ports && app.ports.saveOnboardingCompleted) {
+  app.ports.saveOnboardingCompleted.subscribe(function () {
+    try {
+      localStorage.setItem(ONBOARDING_DONE_KEY, "true");
+    } catch (e) {
+      // localStorage may be full or unavailable — onboarding will re-show, but
+      // that is a soft failure, not a broken app.
+    }
+  });
+}
+
+// Read the stored flag on boot and hand it to Elm, so a reader who finished
+// onboarding in a prior session is not shown it again.
+if (app.ports && app.ports.onOnboardingStatus) {
+  var onboardingDone = false;
+  try {
+    onboardingDone = localStorage.getItem(ONBOARDING_DONE_KEY) === "true";
+  } catch (e) {
+    onboardingDone = false;
+  }
+  app.ports.onOnboardingStatus.send(onboardingDone);
+}
+
+// ---------------------------------------------------------------------------
 // Cross-tab token propagation (Issue #180 Phase 2)
 // The `storage` event fires in OTHER tabs of the same origin when this tab
 // writes `stacks-auth` (the writing tab never receives its own event, so there
