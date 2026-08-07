@@ -186,6 +186,26 @@ defmodule Stacks.BooksTest do
     end
   end
 
+  describe "confirm/2 records the scanned edition on the placement (#378)" do
+    test "placing an existing work by a non-primary ISBN records THAT edition, not the primary" do
+      user = insert(:user)
+      # `insert(:book)` brings the work's primary edition; the scan is of a
+      # second, non-primary printing with its own ISBN.
+      book = insert(:book)
+      primary = Books.primary_edition(Books.get_book_detail(book.id))
+      scanned = insert(:book_edition, book: book, is_primary: false, isbn: "9781600000027")
+      refute scanned.id == primary.id
+
+      assert {:ok, :existing, existing, placement, _placements} =
+               Books.confirm(user.id, %{isbn: "9781600000027", shelf_name: "wishlist"})
+
+      assert existing.id == book.id
+      # The regression: before #378 this recorded `primary.id` for every scan.
+      assert placement.book_edition_id == scanned.id
+      refute placement.book_edition_id == primary.id
+    end
+  end
+
   describe "get_book_detail/1" do
     test "returns book with author and editions preloaded" do
       author = insert(:author)

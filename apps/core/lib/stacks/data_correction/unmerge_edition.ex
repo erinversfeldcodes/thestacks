@@ -45,15 +45,22 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   This is the disposition decision #376 asks for, and the evidence is that the
   database does not record what the other choice would need.
 
-  `Stacks.Shelving.place_book/3` is one of only two writers of a placement's
-  `book_edition_id`, and it always writes the work's *primary* edition
-  (`primary_edition_id/1` orders `desc: is_primary`). The other,
-  `do_reread_book/2`, carries an existing value forward. `merge_edition/2`
-  inserts every merged edition with `is_primary: false`. So **no placement in
-  the system has ever named a merged edition** — a reader who scans the merged
-  ISBN gets `find_existing/1`'s work, and a placement pointing at that work's
-  primary edition. There is no row-level evidence of who acquired the edition
-  being split out.
+  This held categorically *before #378*: `Stacks.Shelving.place_book/3` always
+  wrote the work's *primary* edition (`primary_edition_id/1` orders
+  `desc: is_primary`), `do_reread_book/2` carried an existing value forward, and
+  `merge_edition/2` inserts every merged edition with `is_primary: false` — so no
+  placement ever named a merged edition, and there was no row-level evidence of
+  who acquired the edition being split out.
+
+  ⚠️ **#378 weakens that premise.** `place_book/4` now records the *scanned*
+  edition, so a placement created after #378 CAN name a non-primary (and thus a
+  later-merged) edition. Un-merge still does not move placements here, but the
+  justification is no longer "it is impossible"; it is "the owner-only correction
+  path does not yet reconcile a placement that names the split edition." Handling
+  that case — re-point such a placement to the surviving work, or move it — is
+  tracked as its own follow-up (#396); until then a placement whose
+  `book_edition_id` is the edition being split will keep pointing at it across the
+  reparent, leaving `book_id`/`book_edition_id` on different works.
 
   Moving placements would therefore be guessing, and every available rule guesses
   badly: "move them all" relocates readers who own the original book and never

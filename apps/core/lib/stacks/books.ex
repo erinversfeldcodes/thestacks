@@ -150,16 +150,27 @@ defmodule Stacks.Books do
   """
   @spec find_existing(String.t()) :: Book.t() | nil
   def find_existing(isbn) do
+    case find_existing_edition(isbn) do
+      nil -> nil
+      edition -> edition.book
+    end
+  end
+
+  @doc """
+  Like `find_existing/1`, but returns the matched EDITION (with its parent work
+  preloaded), not just the work. The scan resolves by a specific ISBN, so the
+  edition it matched is the printing the reader owns — the caller keeps it so the
+  placement can record it (#378), instead of discarding it and defaulting to the
+  work's primary edition.
+  """
+  @spec find_existing_edition(String.t()) :: BookEdition.t() | nil
+  def find_existing_edition(isbn) do
     isbn13 = ISBN.to_isbn13(isbn)
 
     BookEdition
     |> where([e], e.isbn == ^isbn13)
     |> preload(book: [:author, :editions])
     |> Repo.one()
-    |> case do
-      nil -> nil
-      edition -> edition.book
-    end
   end
 
   @doc """
@@ -881,7 +892,7 @@ defmodule Stacks.Books do
     shelf_name = attrs[:shelf_name] || attrs["shelf_name"] || "wishlist"
 
     with {:ok, isbn} <- require_isbn(isbn),
-         nil <- find_existing(isbn),
+         nil <- find_existing_edition(isbn),
          {:ok, metadata} <- resolve_for_write(isbn),
          [] <- find_same_work(metadata[:title] || "Unknown Title", metadata[:author] || "") do
       create_confirmed_book(user_id, isbn, metadata, shelf_name)
@@ -889,8 +900,8 @@ defmodule Stacks.Books do
       {:error, :missing_isbn} ->
         {:error, :missing_isbn}
 
-      %Book{} = existing ->
-        place_or_return_existing(user_id, existing, shelf_name)
+      %BookEdition{} = edition ->
+        place_or_return_existing(user_id, edition.book, shelf_name, edition.id)
 
       [%{id: existing_work_id} | _] ->
         {:error, {:merge_required, existing_work_id}}
@@ -911,11 +922,11 @@ defmodule Stacks.Books do
   # which is also the one the rung-4 unique index would reject. Everything else
   # gets its placement, and the caller is *informed* of the others via the
   # returned list.
-  defp place_or_return_existing(user_id, book, shelf_name) do
+  defp place_or_return_existing(user_id, book, shelf_name, book_edition_id) do
     placements = Shelving.get_placements_for_book(user_id, book.id)
 
     case Enum.find(placements, &(&1.bookshelf.name == shelf_name)) do
-      nil -> create_placement_for_existing(user_id, book, shelf_name, placements)
+      nil -> create_placement_for_existing(user_id, book, shelf_name, placements, book_edition_id)
       placement -> {:ok, :already_placed, book, placement, placements}
     end
   end
@@ -926,8 +937,8 @@ defmodule Stacks.Books do
   # multi-shelf add this branch exists to perform. `place_book/3` hands back the
   # row it inserted, so the answer is unambiguous and one query cheaper; only
   # the bookshelf needs preloading for serialisation.
-  defp create_placement_for_existing(user_id, book, shelf_name, existing) do
-    case Shelving.place_book(user_id, book.id, shelf_name) do
+  defp create_placement_for_existing(user_id, book, shelf_name, existing, book_edition_id) do
+    case Shelving.place_book(user_id, book.id, shelf_name, book_edition_id) do
       {:ok, placement} ->
         placement = Repo.preload(placement, :bookshelf)
         {:ok, :existing, book, placement, existing ++ [placement]}

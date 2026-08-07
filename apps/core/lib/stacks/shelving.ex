@@ -392,6 +392,19 @@ defmodule Stacks.Shelving do
   @spec place_book(binary(), binary(), String.t()) ::
           {:ok, Placement.t()} | {:error, Ecto.Changeset.t() | :reading_pile_full}
   def place_book(user_id, book_id, bookshelf_name) do
+    place_book(user_id, book_id, bookshelf_name, nil)
+  end
+
+  @doc """
+  Places a book, recording a specific edition on the placement.
+
+  `book_edition_id` is the edition the reader actually scanned/selected; when it
+  is `nil` (every path that does not know an edition — the create flow, a reread,
+  a manual add) it falls back to the work's primary edition. Recording the scanned
+  edition is #378: without it every placement pointed at the primary, so a reader
+  who scanned a specific printing lost which one they own.
+  """
+  def place_book(user_id, book_id, bookshelf_name, book_edition_id) do
     bookshelf = get_or_create_bookshelf(user_id, bookshelf_name)
 
     default_shelf = get_or_create_default_shelf(bookshelf.id)
@@ -407,7 +420,7 @@ defmodule Stacks.Shelving do
         book_id: book_id,
         bookshelf_id: bookshelf.id,
         shelf_id: default_shelf.id,
-        book_edition_id: primary_edition_id(book_id)
+        book_edition_id: book_edition_id || primary_edition_id(book_id)
       })
     )
     |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
