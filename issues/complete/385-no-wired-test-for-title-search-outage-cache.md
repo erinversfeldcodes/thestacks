@@ -45,3 +45,6 @@ Depends on **#352** (the behaviour under test).
 - 2026-08-04: Filed from #352's review. The gap is not the behaviour (each link is proven) but the
   wire — and a wire that only runs in prod-config is exactly where a future refactor can silently
   re-invert `determination/1` with a green suite.
+
+## Verification (2026-08-07, Wave 11 verify-and-close)
+Confirmed ALREADY-FIXED and closed. Fresh run: `just run mix test` on the seam/coverage test — **69 tests, 0 failures** (batched with its sibling). #377 fixed by `df170b48` (rss_fetcher seam + transport-isolation telemetry assertion); #385 fixed by `a2393586` (isbn_resolver_test outage-not-cached, landed with #352 two days before the issue was filed). Issue filed stale; no build needed.

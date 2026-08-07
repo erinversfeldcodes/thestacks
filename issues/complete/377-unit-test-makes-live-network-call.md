@@ -136,3 +136,6 @@ reached ExUnit's 60s.
 **Lesson for the next reader:** the stack trace pointed at `ssl.connect` and everyone (the lead
 included) concluded the connect was unbounded. It was where the process *happened to be waiting*, not
 where the missing bound was.
+
+## Verification (2026-08-07, Wave 11 verify-and-close)
+Confirmed ALREADY-FIXED and closed. Fresh run: `just run mix test` on the seam/coverage test — **69 tests, 0 failures** (batched with its sibling). #377 fixed by `df170b48` (rss_fetcher seam + transport-isolation telemetry assertion); #385 fixed by `a2393586` (isbn_resolver_test outage-not-cached, landed with #352 two days before the issue was filed). Issue filed stale; no build needed.
