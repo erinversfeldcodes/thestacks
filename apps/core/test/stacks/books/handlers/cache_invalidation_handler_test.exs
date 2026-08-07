@@ -121,6 +121,56 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
     assert {:ok, _} = BookDetailCache.get(id1)
   end
 
+  # #357. The shape `Books.set_visibility_tier/3` emits: it aggregates the WORK,
+  # so `aggregate_id` and `payload.book_id` agree here — the handler still reads
+  # the payload, which is what keeps the clause correct if the aggregate ever
+  # moves (the way `cover_confirmed`'s did).
+  test "invalidates the work on book.visibility_tier_changed", %{id1: id1, id2: id2} do
+    event = %{
+      event_type: "book.visibility_tier_changed",
+      aggregate_type: "book",
+      aggregate_id: id1,
+      payload: %{"book_id" => id1, "visibility_tier" => "age_gated"}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+    assert {:ok, _} = BookDetailCache.get(id2)
+  end
+
+  test "invalidates on book.visibility_tier_changed with atom payload keys", %{id2: id2} do
+    event = %{
+      event_type: "book.visibility_tier_changed",
+      aggregate_id: id2,
+      payload: %{book_id: id2, visibility_tier: "age_gated"}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id2} = BookDetailCache.get(id2)
+  end
+
+  # #357. `EnrichBookJob` replaces a placeholder title/author/cover; this event is
+  # the ONLY route that evicts the work it rewrote.
+  test "invalidates the enriched work on book.enriched", %{id1: id1, id2: id2} do
+    event = %{
+      event_type: "book.enriched",
+      aggregate_type: "book",
+      aggregate_id: id2,
+      payload: %{"book_id" => id2}
+    }
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id2} = BookDetailCache.get(id2)
+    assert {:ok, _} = BookDetailCache.get(id1)
+  end
+
+  test "invalidates on book.enriched with atom payload keys", %{id1: id1} do
+    event = %{event_type: "book.enriched", aggregate_id: id1, payload: %{book_id: id1}}
+
+    assert :ok = CacheInvalidationHandler.handle_event(event)
+    assert {:miss, ^id1} = BookDetailCache.get(id1)
+  end
+
   test "invalidates multiple books on blog.associations_suggested with string keys",
        %{id1: id1, id2: id2} do
     event = %{

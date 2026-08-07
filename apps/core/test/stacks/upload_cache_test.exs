@@ -245,43 +245,76 @@ defmodule Stacks.UploadCacheTest do
       BookDetailCache.put(gated_book.id, gated_book)
 
       # The cached value retains the visibility_tier flag, so AgeGate.enforce
-      # can reject non-verified viewers without consulting the DB. If the
-      # cache stripped this field, segregation would silently break.
+      # can reject non-verified viewers without consulting the DB — as long as
+      # the flag in the cache is the CURRENT one, which is the property the next
+      # test exists to hold. If the cache stripped this field, segregation would
+      # break here; if a tier change failed to evict, it would break there.
       assert {:ok, cached} = BookDetailCache.get(gated_book.id)
       assert cached.visibility_tier == "age_gated"
     end
 
     @tag stories: ["US-1.1.4"], suite: :cache, security: true
-    test "AgeGate.enforce halts a non-verified viewer regardless of cache state" do
-      # End-to-end-equivalent assertion: even when the cache is
-      # pre-populated (as if an age-verified user just fetched the book),
-      # a non-verified viewer's request runs through AgeGate.enforce on
-      # every call. Cache key isolation is therefore NOT required as long
-      # as enforcement is per-request — this test pins that property in
-      # place so a future "skip AgeGate on cache hit" optimisation can't
-      # silently leak gated content.
-      {:ok, gated_book} =
+    test "raising the age gate on an already-cached book gates the very next read" do
+      # ⚠️ What this test used to do: pre-seed the cache with the book ALREADY
+      # `age_gated`, then assert `AgeGate.enforce` halted. The cached copy and the
+      # database agreed, so nothing about caching was exercised — it could only
+      # fail if the plug itself were broken — and it drew the wrong conclusion
+      # from passing: "cache key isolation is therefore NOT required as long as
+      # enforcement is per-request". Enforcement IS per-request. The value it
+      # enforces against is not: `BookController.show/2` gates the book returned
+      # by `cached_or_fetch/1`, so a cached PUBLIC copy was served ungated for the
+      # full 5-minute TTL after the gate was raised (#357).
+      #
+      # The defect needs all three steps in this order: read (which caches the
+      # public copy), raise the gate, read again. Raising into a COLD cache passes
+      # however the invalidation is wired, or whether it is wired at all.
+      {:ok, book} =
         Books.create(%{
           "title" => "Age Gated Cached",
           "isbn" => "9780140449136",
-          "visibility_tier" => "age_gated"
+          "visibility_tier" => "public"
         })
 
-      # Pre-populate the cache (e.g. an age-verified user just fetched it).
-      BookDetailCache.put(gated_book.id, gated_book)
-      assert {:ok, cached} = BookDetailCache.get(gated_book.id)
+      # 1. A reader looks at the public book. This is what populates the cache.
+      assert %{visibility_tier: "public"} = read_as_controller(book.id)
+      assert {:ok, %{visibility_tier: "public"}} = BookDetailCache.get(book.id)
 
-      # A non-verified viewer hits the gate. The plug halts the conn and
-      # writes a 403 — independent of whether the data came from cache or DB.
+      # 2. Someone marks it adults-only. No Oban drain here, on purpose: the
+      #    eviction is synchronous, because a safety control must not wait for a
+      #    queue (Stacks.Books.set_visibility_tier/3).
+      assert {:ok, %{visibility_tier: "age_gated"}} =
+               Books.set_visibility_tier(book.id, "age_gated", source: :user)
+
+      # 3. The next reader, running the sequence the controller runs: cache
+      #    lookup, then the gate on whatever came back.
       non_verified = insert(:user, age_verified: false)
 
       conn =
         Phoenix.ConnTest.build_conn()
         |> Guardian.Plug.put_current_resource(non_verified)
-        |> AgeGate.enforce(cached)
+        |> AgeGate.enforce(read_as_controller(book.id))
 
-      assert conn.halted
+      assert conn.halted,
+             "the age gate did not halt a non-verified viewer on the read after it was raised — " <>
+               "BookDetailCache is still serving the pre-gate copy"
+
       assert conn.status == 403
+    end
+  end
+
+  # Mirrors `StacksWeb.BookController.cached_or_fetch/1` — cache first, database
+  # on a miss, and the miss re-populates. Deliberately NOT a straight
+  # `Books.get_book_detail/1`: reading past the cache is what makes a
+  # cache-staleness test vacuous.
+  defp read_as_controller(book_id) do
+    case BookDetailCache.get(book_id) do
+      {:ok, cached} ->
+        cached
+
+      {:miss, _} ->
+        book = Books.get_book_detail(book_id)
+        BookDetailCache.put(book_id, book)
+        book
     end
   end
 

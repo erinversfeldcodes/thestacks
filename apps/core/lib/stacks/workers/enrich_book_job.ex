@@ -51,6 +51,7 @@ defmodule Stacks.Workers.EnrichBookJob do
   alias Stacks.Books
   alias Stacks.Books.Book
   alias Stacks.Books.BookEdition
+  alias Stacks.Events
 
   @placeholder_title_prefix "ISBN "
 
@@ -168,8 +169,44 @@ defmodule Stacks.Workers.EnrichBookJob do
         book
         |> run_update_transaction(isbn, metadata)
         |> handle_update_result(isbn)
+        |> announce_enrichment(book)
     end
   end
+
+  # This job REWRITES what `GET /api/books/:id` serves — title, description and
+  # author on the work, cover/publisher/page-count/provenance on its primary
+  # edition — and on the barcode fast path it is the only writer that ever fills
+  # those in. It announced nothing, so `BookDetailCache` went on serving the
+  # placeholder: a probe read `title="ISBN 9780451524935"`, let this job write
+  # `"Nineteen Eighty-Four"`, and read the placeholder straight back (#357).
+  #
+  # Only on the `:ok` branch. A rolled-back transaction changed no row, and an
+  # event announcing an enrichment that did not happen is worse than no event —
+  # it would evict a correct cache entry and tell `event_log` a falsehood.
+  #
+  # Eventual delivery (Oban → `CacheInvalidationHandler`) is the right latency
+  # here: a stale title for a queue hop is a freshness bug. Contrast
+  # `Books.set_visibility_tier/3`, which evicts synchronously because its window
+  # is an unenforced age gate.
+  #
+  # Payload is the WORK id and nothing else. It is what the cache is keyed by,
+  # and it is carried explicitly rather than left to `aggregate_id` for the
+  # reason `CacheInvalidationHandler`'s moduledoc gives. The enriched title
+  # deliberately stays out: `event_log` is immutable, and the title is readable
+  # from the book row this event names.
+  defp announce_enrichment(:ok, %Book{} = book) do
+    Events.emit_safe(%{
+      event_type: "book.enriched",
+      aggregate_type: "book",
+      aggregate_id: book.id,
+      payload: %{book_id: book.id},
+      metadata: %{actor: "enrich_book_job"}
+    })
+
+    :ok
+  end
+
+  defp announce_enrichment(other, _book), do: other
 
   defp run_update_transaction(book, isbn, metadata) do
     Repo.transaction(fn ->

@@ -7,12 +7,18 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandler do
   question this handler ever asks of an event is *which work did that change?*,
   and the answer is not always `aggregate_id`.
 
-  Handles `book.created`, `book.cover_confirmed`, `books.edition_merged` and
+  Handles `book.created`, `book.cover_confirmed`, `books.edition_merged`,
+  `book.visibility_tier_changed`, `book.enriched` and
   `blog.associations_suggested`.
 
   ## Where the work id comes from, and why it differs per event
 
   `book.created` aggregates the work, so `aggregate_id` IS the cache key.
+
+  `book.visibility_tier_changed` and `book.enriched` also aggregate the work, so
+  `aggregate_id` would happen to work for them — and they still read the payload,
+  because "the aggregate happens to be the cache key" is exactly the assumption
+  described below.
 
   The other three aggregate something else — an edition, an edition, a blog post
   — and carry the work id in the payload. Reading `aggregate_id` for those is a
@@ -38,6 +44,22 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandler do
   def handle_event(%{event_type: "book.created", aggregate_id: book_id}) do
     BookDetailCache.invalidate(book_id)
     :ok
+  end
+
+  # The age gate moved on the WORK (#357). `Books.set_visibility_tier/3` has
+  # already evicted the entry synchronously by the time this runs — a raised gate
+  # cannot wait for a queue — so this clause is not the primary route; it is what
+  # makes the wire uniform and covers any other emitter of this type.
+  def handle_event(%{event_type: "book.visibility_tier_changed", payload: payload}) do
+    invalidate_from_payload(payload, {"book_id", :book_id}, "book.visibility_tier_changed")
+  end
+
+  # `Stacks.Workers.EnrichBookJob` rewrote the work's title/description/author and
+  # its primary edition's cover in one transaction, then named the work here
+  # (#357). Unlike the age gate above, this IS the only eviction route — the
+  # freshness of a title is worth a queue hop.
+  def handle_event(%{event_type: "book.enriched", payload: payload}) do
+    invalidate_from_payload(payload, {"book_id", :book_id}, "book.enriched")
   end
 
   # aggregate_type "book_edition": the cover was confirmed on an EDITION, and

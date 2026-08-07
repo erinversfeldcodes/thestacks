@@ -31,6 +31,7 @@ defmodule Stacks.Books do
   alias Core.Repo
   alias Ecto.Multi
   alias Stacks.Books.{Author, Book, BookEdition}
+  alias Stacks.Books.BookDetailCache
   alias Stacks.Books.ISBN
   alias Stacks.Books.ISBNResolver
   alias Stacks.Events
@@ -329,12 +330,49 @@ defmodule Stacks.Books do
         |> case do
           {:ok, updated} ->
             emit_tiering(updated.visibility_tier, source)
+            evict_then_announce(updated, source)
             {:ok, updated}
 
           {:error, changeset} ->
             {:error, changeset}
         end
     end
+  end
+
+  # The eviction is SYNCHRONOUS and the event is only the audit trail —
+  # deliberately in that order, and deliberately not the event alone (#357).
+  #
+  # `GET /api/books/:id` enforces the age gate against whatever
+  # `cached_or_fetch/1` returned, so until the `BookDetailCache` entry is gone the
+  # raised gate is not applied to anybody: a probe against a live database read
+  # `tier="public"`, raised the tier, and read `tier="public"` again — for the
+  # full 5-minute TTL. Routing this through the event bus alone (the wire
+  # `books.edition_merged` uses) would replace a 5-minute window with a shorter
+  # one, and a **content-safety control must not have a deferral window whose
+  # width is queue latency**. So the cache is evicted in this process, before the
+  # caller is told the write succeeded. The event still goes out: `event_log` is
+  # where "this book was marked adults-only, by this kind of actor, at this time"
+  # becomes durable, and its subscription covers any future emitter of this type
+  # that is not this function.
+  #
+  # Payload carries the WORK id — what the cache is keyed by — rather than
+  # leaving the subscriber to read `aggregate_id`, because "the aggregate happens
+  # to be the cache key" is the assumption that made `book.cover_confirmed`
+  # silently evict nothing (#355). `visibility_tier` is the same closed
+  # two-value enum `book.created` already carries. Nothing identifies the actor
+  # beyond `metadata.actor`'s `"user" | "owner"`: no id, no free text.
+  defp evict_then_announce(%Book{} = book, source) do
+    BookDetailCache.invalidate(book.id)
+
+    Events.emit_safe(%{
+      event_type: "book.visibility_tier_changed",
+      aggregate_type: "book",
+      aggregate_id: book.id,
+      payload: %{book_id: book.id, visibility_tier: book.visibility_tier},
+      metadata: %{actor: to_string(source)}
+    })
+
+    :ok
   end
 
   # Raising the gate is only public → age_gated. Everything else (already

@@ -60,6 +60,21 @@ defmodule Stacks.Events.Registry do
     "book.cover_confirmed" => [
       Stacks.Books.Handlers.CacheInvalidationHandler
     ],
+    # The age-gate write (#357). Emitted by `Books.set_visibility_tier/3`, which
+    # ALSO evicts BookDetailCache synchronously — see there for why a
+    # content-safety control does not wait on this queue. So this subscription is
+    # the event's secondary route and its audit trail is the primary point.
+    "book.visibility_tier_changed" => [
+      Stacks.Books.Handlers.CacheInvalidationHandler
+    ],
+    # `Stacks.Workers.EnrichBookJob` replaces the placeholder title/author/cover a
+    # barcode fast-path book was stored with. Nothing announced it, so the
+    # placeholder ("ISBN 9780451524935") stayed on screen for the full
+    # BookDetailCache TTL after the real metadata had landed (#357). Here the
+    # event IS the only eviction route.
+    "book.enriched" => [
+      Stacks.Books.Handlers.CacheInvalidationHandler
+    ],
     # An edition merge is a WRITE to what `GET /api/books/:id` serves: the work
     # gains a row in its `editions` preload, which is the very thing
     # BookDetailCache holds. Nothing else announced it, so the cache went on

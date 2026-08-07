@@ -54,6 +54,17 @@ defmodule Stacks.Events.PayloadContract do
     # old row arrives without it, and no version pretends to a migration that
     # cannot be written.
     "book.cover_confirmed" => %{version: 1, keys: ~w(book_id cover_image_url)},
+    # #357, the age-gate write. `book_id` is the WORK id (what the one subscriber
+    # keys its cache by, not read off `aggregate_id` — see
+    # CacheInvalidationHandler); `visibility_tier` is the closed two-value enum
+    # `book.created` already carries. Who raised the gate is `metadata.actor`
+    # ("user" | "owner") and never an id, so the payload says a BOOK changed,
+    # not who changed it.
+    "book.visibility_tier_changed" => %{version: 1, keys: ~w(book_id visibility_tier)},
+    # #357. UUID-only by design: the work whose metadata EnrichBookJob just
+    # rewrote. The enriched title is deliberately absent — `event_log` is
+    # immutable, and the title is readable from the book row this event names.
+    "book.enriched" => %{version: 1, keys: ~w(book_id)},
     "books.confirmed" => %{version: 1, keys: ~w(isbn shelf title)},
     "books.edition_merged" => %{version: 1, keys: ~w(isbn work_id)},
     "image.submitted" => %{version: 1, keys: ~w(storage_path)},
