@@ -631,7 +631,7 @@
           "title": "Un-merge must reconcile a placement naming the split edition (post-#378 premise change)."
         }
       },
-      "last_action": "Batch 2 progress: GDPR/security cluster done (#338/#386/#392/#393). Remaining: verify-and-close the 6 already-fixed; #367/#368; #336 rewiring; test/gate/a11y (#347/#366+#395/#381/#384/#388/#394).",
+      "last_action": "Early drive done. #357/#370/#395 validated live; #367 OPEN (live hydration fails \u2014 suspected double-init clobber, needs real-login root-cause). Next: root-cause #367 init order, then Phase-B code-only items.",
       "decisions": {
         "369": "Owner 2026-08-07: root cause is untuned Argon2 (64 MiB/hash library default, 3.4x OWASP floor) on scaffolding-default 512MB \u2014 NOT a regression. Fix = tune m_cost to ~32 MiB (>OWASP 19 MiB), keep pool=2, add concurrency test + deploy readback gate. NO VM cost increase.",
         "336": "Owner 2026-08-07: reviews ARE planned (US-2.1.1 re-scoped, not deleted). KEEP the vertical scaffolding (review_snapshots table/proto/staging + int_review_sentiment for 2 marts). Fix = mark the orphan event pending-US-2.1.1 (not a live contract) + inverse completeness guard. #336 keeps its ticket, done in Wave 11. NO full teardown.",
@@ -657,7 +657,20 @@
       "reliability_note": "Two background fix-agents (fix-357, fix-358) stalled silently ~45min after completing coherent work (no failed-notification; no live process; no writes). Lead stopped them (TaskStop), verified their on-disk work independently, committed. Remaining contained fixes done in-loop to avoid re-stall.",
       "launch_blocker_batch": "COMPLETE 2026-08-07: #357, #391, #358, #369, #378 all landed+verified+committed. Follow-ups filed: #394 (mfa-422), #395 (onboarding ports), #396 (un-merge placement reconciliation).",
       "gdpr_security_cluster": "COMPLETE 2026-08-07: #338, #386, #392, #393.",
-      "verify_and_close": "#377/#385/#371/#380 closed (evidence-backed). #370/#372 code-verified, E2E at finalize (esp. #372 now that #378 changed placement\u2192edition behaviour)."
+      "verify_and_close": "#377/#385/#371/#380 closed (evidence-backed). #370/#372 code-verified, E2E at finalize (esp. #372 now that #378 changed placement\u2192edition behaviour).",
+      "early_drive_2026_08_07": {
+        "357": "VALIDATED LIVE \u2014 cache\u2192age-gate\u2192immediate re-read = 403 (not stale 200). Sync eviction works.",
+        "370": "VALIDATED LIVE \u2014 search returns real titles.",
+        "395": "VALIDATED LIVE \u2014 finish onboarding\u2192reload\u2192overlay stays gone (port wiring persists key).",
+        "367": "OPEN \u2014 server GET now returns consent fields (deployed \u2713) + Elm hydration unit-proven (1744/0) + committed line present in bundle. BUT live toggle stays Off despite server=true. Full load fires 2x GET; client-side nav fires 0. Likely a double-init where initWithToken's blob-seed (consent) CLOBBERS the GotPrivacySettings hydration. NOT an injection artifact necessarily (library auth worked). Needs root-cause with a REAL login (finalize E2E) + a Main.elm init-order check. #367 committed (5280adb7) but NOT verified-done.",
+        "learnings": [
+          "deploy-preview.sh needs `just run` (pinned py3.12) or codegen dies on zip(strict=) \u2014 fixed+memorized.",
+          "age-gate route is raise-only ratchet by design (can gate, cannot un-gate as a regular signal).",
+          "navigator.onLine=false in automation \u2192 false 'offline' banner; #368 not drive-testable here.",
+          "injected-session drives can't fully validate auth-init-dependent flows (#367 hydration) \u2014 need a real login."
+        ],
+        "cleanup": "1Q84 left age_gated on the throwaway preview COW branch (raise-only route can't revert); restore via targeted UPDATE on Neon branch if desired."
+      }
     }
   },
   "_owner_rulings_wave4_2026_07_30": [
