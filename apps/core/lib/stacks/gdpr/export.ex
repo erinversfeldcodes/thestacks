@@ -8,6 +8,7 @@ defmodule Stacks.GDPR.Export do
 
   alias Core.Repo
   alias Stacks.Accounts
+  alias Stacks.Blog.{Post, PostComment}
   alias Stacks.Books.UploadedImage
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
   alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
@@ -77,6 +78,21 @@ defmodule Stacks.GDPR.Export do
       |> select([i], %{id: i.id, uploaded_at: i.uploaded_at, status: i.status})
       |> Repo.all()
 
+    # The reader's own writing (#392). `blog_posts.body` and `post_comments.body`
+    # are the user's own free text and squarely within the right to portability,
+    # so they are exported in full. Posts are keyed by `user_id`, comments by
+    # `author_id`. We deliberately do NOT export `post_book_associations` — its
+    # `reasoning` is LLM-derived, not the reader's own writing.
+    blog_posts =
+      Post
+      |> where([p], p.user_id == ^user_id)
+      |> Repo.all()
+
+    blog_comments =
+      PostComment
+      |> where([c], c.author_id == ^user_id)
+      |> Repo.all()
+
     export = %{
       exported_at: DateTime.utc_now(),
       # Every personal / user-provided column on op.users is exported here.
@@ -121,7 +137,9 @@ defmodule Stacks.GDPR.Export do
       writing_assistant_sessions: Enum.map(sessions, &session_to_map/1),
       writing_assistant_feedback: Enum.map(feedback, &feedback_to_map/1),
       embeddings_summary: embeddings_summary,
-      uploaded_images: uploaded_images
+      uploaded_images: uploaded_images,
+      blog_posts: Enum.map(blog_posts, &blog_post_to_map/1),
+      blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1)
     }
 
     {:ok, export}
@@ -135,6 +153,26 @@ defmodule Stacks.GDPR.Export do
       name: bookshelf.name,
       visibility: bookshelf.visibility,
       created_at: bookshelf.created_at
+    }
+  end
+
+  defp blog_post_to_map(post) do
+    %{
+      id: post.id,
+      title: post.title,
+      body: post.body,
+      visibility: post.visibility,
+      published_at: post.published_at,
+      created_at: post.created_at
+    }
+  end
+
+  defp blog_comment_to_map(comment) do
+    %{
+      id: comment.id,
+      post_id: comment.post_id,
+      body: comment.body,
+      created_at: comment.created_at
     }
   end
 

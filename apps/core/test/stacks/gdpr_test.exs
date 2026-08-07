@@ -46,6 +46,24 @@ defmodule Stacks.GDPRTest do
       assert is_list(export.placements)
     end
 
+    test "includes the user's own blog posts and comments (#392 — portability of their writing)" do
+      author = insert(:user)
+      post = insert(:post, user: author, title: "My Post", body: "My own words.")
+      insert(:post_comment, author: author, post: post, body: "My comment.")
+
+      # Someone else's comment on the same post must not leak into this export.
+      other = insert(:user)
+      insert(:post_comment, author: other, post: post, body: "Not mine.")
+
+      assert {:ok, export} = Export.export_user_data(author.id)
+
+      assert [%{title: "My Post", body: "My own words."}] = export.blog_posts
+
+      comment_bodies = Enum.map(export.blog_comments, & &1.body)
+      assert "My comment." in comment_bodies
+      refute "Not mine." in comment_bodies
+    end
+
     test "includes bookshelves and placements" do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -86,7 +104,7 @@ defmodule Stacks.GDPRTest do
       assert {:error, _} = Export.export_user_data(Ecto.UUID.generate())
     end
 
-    test "payload contains all 9 documented keys" do
+    test "payload contains all 11 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -100,7 +118,9 @@ defmodule Stacks.GDPRTest do
                  :writing_assistant_sessions,
                  :writing_assistant_feedback,
                  :embeddings_summary,
-                 :uploaded_images
+                 :uploaded_images,
+                 :blog_posts,
+                 :blog_comments
                ])
     end
 
