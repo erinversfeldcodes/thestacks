@@ -30,37 +30,18 @@ defmodule StacksWeb.Plugs.MetricsAuth do
   bearer for every public caller, so `remote_ip` is **not** a sufficient
   trust signal on its own.
 
-  ## The 6PN bypass — retained, but currently without a caller (ADR-021)
+  ## A former 6PN bypass was removed (#393)
 
-  It was added for Fly's managed Prometheus (Issue #232), which scraped the
-  machine **directly over 6PN** via the `[metrics]` block in
-  `deploy/fly.core.toml`, never traversing fly-proxy. fly-proxy, by
-  contrast, **sets and overwrites** the `fly-client-ip` header on *every*
-  request it forwards from the public edge (the same unspoofable signal
-  `RateLimiter`/`AuthController` key on — Issue #176), which is what makes
-  the two callers distinguishable:
-
-    * public request  → arrived via fly-proxy → has `fly-client-ip`.
-    * 6PN scrape      → arrived directly      → has **no** `fly-client-ip`.
-
-  `/internal/metrics` (only) is therefore allowed **without a bearer** iff
-  the request both (a) originates from the Fly 6PN range (`fdaa::/16`) and
-  (b) carries **no** `fly-client-ip` header — i.e. it did not come through
-  the public edge. A public caller cannot forge this: fly-proxy always adds
-  `fly-client-ip` and the client cannot strip it. The public path — and
-  every other `/internal/*` route (e.g. `/internal/deps-check`) — still
-  requires the bearer.
-
-  **No 6PN caller exists today.** ADR-021 (#253) replaced scraping with a
-  push: `Core.PromEx.MetricsPusher` POSTs the exposition to self-hosted
-  VictoriaMetrics, and VM does not scrape back (`deploy/fly.victoriametrics.toml`).
-  Issue #323 then removed the dead `[metrics]` block — the platform scraper
-  could send neither the bearer nor a request satisfying this bypass, and had
-  never ingested a sample (#248). The one remaining caller of
-  `/internal/metrics` is `scripts/check-slo-gate.sh`, which arrives over the
-  public edge with the bearer. The bypass is kept because it is the correct
-  rule for any future in-cluster scraper and it widens nothing on the public
-  path; it is not load-bearing today.
+  There used to be an unauthenticated bypass for an in-cluster scrape of
+  `/internal/metrics` over the Fly 6PN network (added for Fly's managed
+  Prometheus, Issue #232). ADR-021 (#253) replaced scraping with a push
+  (`Core.PromEx.MetricsPusher` POSTs to self-hosted VictoriaMetrics, which does
+  not scrape back), and #323 removed the Fly `[metrics]` block — so the bypass
+  had **no caller** and had never ingested a sample (#248). It was dead
+  auth-relaxing code, so it is gone: the only live caller of `/internal/metrics`,
+  `scripts/check-slo-gate.sh`, arrives over the public edge with the bearer. If a
+  future in-cluster scraper needs bearer-less access, reintroduce a bypass
+  deliberately (and with a test), rather than carrying an unreachable one.
   """
 
   @behaviour Plug
@@ -68,10 +49,6 @@ defmodule StacksWeb.Plugs.MetricsAuth do
   import Plug.Conn
 
   @internal_prefix "/internal/"
-  @metrics_path "/internal/metrics"
-
-  # Fly 6PN addresses live in fdaa::/16 — the first 16-bit group is 0xFDAA.
-  @fly_6pn_group 0xFDAA
 
   @impl Plug
   def init(opts), do: opts
@@ -85,34 +62,7 @@ defmodule StacksWeb.Plugs.MetricsAuth do
 
   @doc false
   @spec authorized?(Plug.Conn.t()) :: boolean()
-  def authorized?(conn), do: valid_bearer?(conn) or fly_private_metrics_scrape?(conn)
-
-  # Narrowly-scoped, unauthenticated bypass for an in-cluster scrape of
-  # `/internal/metrics` over the private 6PN network. Requires BOTH a 6PN
-  # remote_ip AND the absence of the fly-proxy-injected `fly-client-ip`
-  # header, so no public-edge caller can reach it without the bearer. Scoped
-  # to the metrics path only — never /internal/deps-check.
-  #
-  # Post-ADR-021 there is no such scraper (metrics are pushed to VM, and the
-  # Fly `[metrics]` block was removed in #323) — this branch is currently
-  # unreached in preview and prod. See the @moduledoc.
-  defp fly_private_metrics_scrape?(%Plug.Conn{request_path: @metrics_path} = conn) do
-    fly_6pn_remote_ip?(conn.remote_ip) and not proxied_from_public_edge?(conn)
-  end
-
-  defp fly_private_metrics_scrape?(_conn), do: false
-
-  # fly-proxy sets `fly-client-ip` on every request it forwards from the
-  # public edge; a direct 6PN scrape has none. Presence ⇒ came via the edge.
-  defp proxied_from_public_edge?(conn) do
-    case get_req_header(conn, "fly-client-ip") do
-      [ip | _] when ip != "" -> true
-      _ -> false
-    end
-  end
-
-  defp fly_6pn_remote_ip?({@fly_6pn_group, _, _, _, _, _, _, _}), do: true
-  defp fly_6pn_remote_ip?(_), do: false
+  def authorized?(conn), do: valid_bearer?(conn)
 
   defp valid_bearer?(conn) do
     expected = Application.get_env(:core, :metrics_scrape_token)

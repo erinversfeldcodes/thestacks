@@ -64,51 +64,44 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
   # Unit tests — the plug itself
   # ---------------------------------------------------------------------------
 
-  describe "MetricsAuth.call/2 — Fly managed-Prometheus 6PN bypass (Issue #232)" do
-    test "allows a direct 6PN scrape of /internal/metrics with NO bearer token" do
-      # Fly's managed Prometheus scrapes the machine directly over 6PN: a
-      # fdaa::/16 remote_ip AND no fly-proxy `fly-client-ip` header. This is
-      # the one path allowed without the bearer.
+  describe "MetricsAuth.call/2 — no IP-based bypass (former 6PN bypass removed, #393)" do
+    test "a bearer-less 6PN scrape of /internal/metrics is now 401" do
+      # The Fly managed-Prometheus 6PN bypass (Issue #232) was removed in #393:
+      # post-ADR-021 nothing scrapes this route (metrics are pushed to VM), so a
+      # request that used to be waved through — fdaa::/16 remote_ip, no
+      # fly-client-ip, no bearer — must now be rejected like any other. This is
+      # the inverted assertion: the DoD is that the dead bypass is gone.
       result =
         base_conn()
         |> Map.put(:remote_ip, @fly_6pn_ip)
         |> call_plug()
 
-      refute result.halted,
-             "expected a direct 6PN metrics scrape (no fly-client-ip) to be allowed without a token"
+      assert result.halted, "a bearer-less 6PN scrape must no longer be bypassed"
+      assert result.status == 401
     end
 
-    test "still 401s a 6PN request that carries a fly-client-ip header (proxied public caller)" do
-      # Public HTTPS terminates at fly-proxy and re-originates over 6PN, so
-      # remote_ip is fdaa::/16 for public callers too — but fly-proxy stamps
-      # an unspoofable `fly-client-ip`. Its presence proves the request came
-      # via the public edge, so the bearer is still required.
+    test "a 6PN request carrying a fly-client-ip header is 401 without a bearer" do
       result =
         base_conn()
         |> Map.put(:remote_ip, @fly_6pn_ip)
         |> put_req_header("fly-client-ip", "203.0.113.7")
         |> call_plug()
 
-      assert result.halted, "a proxied public caller (fly-client-ip present) must not be bypassed"
+      assert result.halted
       assert result.status == 401
     end
 
-    test "does NOT bypass a non-metrics /internal/* path even from a bare 6PN source" do
-      # The bypass is scoped to /internal/metrics only; /internal/deps-check
-      # (and any other internal route) still demands the bearer.
+    test "a non-metrics /internal/* path from a 6PN source is 401 without a bearer" do
       result =
         Phoenix.ConnTest.build_conn(:get, "/internal/deps-check")
         |> Map.put(:remote_ip, @fly_6pn_ip)
         |> call_plug()
 
-      assert result.halted, "the bypass must not extend beyond /internal/metrics"
+      assert result.halted
       assert result.status == 401
     end
 
-    test "does NOT bypass a public-IP source even without a fly-client-ip header" do
-      # Defence in depth: remote_ip must be inside fdaa::/16 for the bypass.
-      # A public source with no fly-client-ip (e.g. a misrouted direct hit)
-      # is still rejected.
+    test "a public-IP source without a fly-client-ip header is 401 without a bearer" do
       result =
         base_conn()
         |> Map.put(:remote_ip, @public_ipv4)
