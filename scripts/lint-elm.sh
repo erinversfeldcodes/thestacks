@@ -40,6 +40,12 @@ bash "$REPO_ROOT/scripts/check-admin-token-routing.sh"
 # 1427 Elm tests passing.
 bash "$REPO_ROOT/scripts/check-session-expiry-coverage.sh"
 
+# Elm ports must be wired on the JS side (Issue #366). An outbound `Cmd` port with
+# no `app.ports.X.subscribe` drops its command silently — `saveOnboardingCompleted`
+# did exactly that (#395), so finishing onboarding never persisted. Also fails a JS
+# `app.ports.X` naming a port Elm does not declare (a typo that throws at runtime).
+bash "$REPO_ROOT/scripts/check-ports-wired.sh"
+
 # The stylesheet itself (Issue #306). Nothing in this gate looked at main.css before — not its syntax,
 # not its specificity. Three defects shipped through a green `just verify` in one change on
 # 2026-07-29, including CSS a browser cannot parse. Checks well-formedness, bans `[class*=]`
