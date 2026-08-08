@@ -676,7 +676,14 @@
         ],
         "cleanup": "1Q84 left age_gated on the throwaway preview COW branch (raise-only route can't revert); restore via targeted UPDATE on Neon branch if desired."
       },
-      "remaining": "#336 (review-vertical rewiring), #381a-e (Finch seams), #347 (program-test seam), #384 (un-merge E2E), #394 (mfa-422), #388 (nearest-x, decided), #368 (scoped refetch, decided). Then finalize just ci (also the definitive #367 real-login check)."
+      "remaining": "#336 (review-vertical rewiring), #381a-e (Finch seams), #347 (program-test seam), #384 (un-merge E2E), #394 (mfa-422), #388 (nearest-x, decided), #368 (scoped refetch, decided). Then finalize just ci (also the definitive #367 real-login check).",
+      "finalize_attempt": {
+        "code_gates": "GREEN \u2014 Elixir 0 failed, Rust 145 passed, dbt 367/0 checks, checkov+dockle security PASS.",
+        "blockers": "Attempt 1: Colima (local docker) down \u2192 dockle couldn't build (started Colima). Attempt 2: Fly infra flake \u2014 SearXNG deploy 408 on machine-create + stuck machine lease (from this session's repeated deploys); deploy aborted before E2E. NOT a Wave 11 code defect.",
+        "e2e": "NOT RUN \u2014 blocked by the Fly deploy flake. Definitive real-login #367/#370/#372 check still pending a clean deploy. #357/#370/#395 already validated live on an earlier clean preview.",
+        "verdict": "Wave 11 code + security gates locked in green. E2E pending a clean Fly deploy retry (stuck lease expired 06:47, should clear)."
+      },
+      "colima_note": "Lead started Colima (docker daemon) 2026-08-08 to run the finalize dockle scan; left running (harmless). `colima stop` to restore."
     }
   },
   "_owner_rulings_wave4_2026_07_30": [
