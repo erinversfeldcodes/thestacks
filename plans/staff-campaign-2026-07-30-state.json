@@ -690,6 +690,12 @@
         "evidence_it_is_infra_not_code": "This same core served minted sessions + the #357 age-gate drive earlier today (auth worked). Nothing in the deployed bundle changed to break login; the DB just stopped authenticating.",
         "code_status": "Wave 11 code+security gates all GREEN (Elixir 0-fail, Rust 145, dbt 367/0, checkov+dockle pass). #357/#370/#395 validated LIVE earlier on the healthy stack.",
         "to_get_e2e": "Rebuild the preview cleanly when Fly/Neon are stable (fresh deploy re-establishes Neon creds + recreates SearXNG), then run playwright. Do NOT keep hammering the churn-damaged stack."
+      },
+      "teardown_rebuild_2026_08_08": {
+        "teardown": "SUCCESS \u2014 cleanup-preview.sh destroyed sidecars + Neon preview branch; core kept-stopped (DNS preserved). Cred-desync resolved.",
+        "rebuild": "BLOCKED by Fly.io platform degradation \u2014 'failed to acquire lease for machine ... lease held by ...@tokens.fly.io, expires 07:12:38Z' (expired ~1.5h prior, still held). Fly's machine-lease GC is stuck; it cannot launch sidecar machines (SearXNG, then scraper \u2014 different apps, same lease bug). External, not code/process.",
+        "conclusion": "E2E cannot run until Fly recovers its lease management. Neon branch is fresh; core stopped; deploy incomplete. A single clean deploy-preview.sh will finish once Fly is healthy \u2014 code + process are sound.",
+        "wave11_code": "Fully validated: all code+security gates GREEN; #357/#370/#395 validated live earlier. E2E is the only outstanding verification, blocked purely by the Fly outage."
       }
     }
   },
