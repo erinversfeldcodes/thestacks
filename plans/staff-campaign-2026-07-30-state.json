@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-30",
   "plan": "plans/staff-campaign-2026-07-30.md",
   "created_at": "2026-07-30T00:00:00Z",
-  "updated_at": "2026-08-07",
+  "updated_at": "2026-08-08",
   "status": "approved_filed",
   "current_wave": 11,
   "_why": [
@@ -631,7 +631,7 @@
           "title": "Un-merge must reconcile a placement naming the split edition (post-#378 premise change)."
         }
       },
-      "last_action": "Early drive done. #357/#370/#395 validated live; #367 OPEN (live hydration fails \u2014 suspected double-init clobber, needs real-login root-cause). Next: root-cause #367 init order, then Phase-B code-only items.",
+      "last_action": "Drove #367(a)+#366+#395 done; both Phase-C decisions captured. 7 code items + finalize remain.",
       "decisions": {
         "369": "Owner 2026-08-07: root cause is untuned Argon2 (64 MiB/hash library default, 3.4x OWASP floor) on scaffolding-default 512MB \u2014 NOT a regression. Fix = tune m_cost to ~32 MiB (>OWASP 19 MiB), keep pool=2, add concurrency test + deploy readback gate. NO VM cost increase.",
         "336": "Owner 2026-08-07: reviews ARE planned (US-2.1.1 re-scoped, not deleted). KEEP the vertical scaffolding (review_snapshots table/proto/staging + int_review_sentiment for 2 marts). Fix = mark the orphan event pending-US-2.1.1 (not a live contract) + inverse completeness guard. #336 keeps its ticket, done in Wave 11. NO full teardown.",
@@ -652,7 +652,12 @@
         "371": "DONE \u2014 closed on acceptance evidence (3x 33 passed, babcc4be). mfa-422 flake split to #394.",
         "380": "DONE \u2014 closed on acceptance evidence (babcc4be); distinct from #371 (contention not shared state).",
         "370": "CODE-VERIFIED (Elm fix 6f54a28d deployed; bundle+DB checked). E2E confirmation (2 search.spec.ts titles) rides the Wave 11 finalize just ci \u2014 not pre-closing on code-read.",
-        "372": "CODE-VERIFIED (spec fixes 630961cf; triage confirmed locators match current DOM). \u26a0\ufe0f privacy-placement spec interacts with #378 \u2014 must re-run against a preview carrying #378. Rides Wave 11 finalize."
+        "372": "CODE-VERIFIED (spec fixes 630961cf; triage confirmed locators match current DOM). \u26a0\ufe0f privacy-placement spec interacts with #378 \u2014 must re-run against a preview carrying #378. Rides Wave 11 finalize.",
+        "367": "DONE (server GET + Elm hydrate 5280adb7; blob-consent removal 8b79c626 = option (a), server is sole source). Live via injected session didn't visibly hydrate (suspected re-init/injection artifact); DEFINITIVE check = finalize real-login E2E.",
+        "366": "DONE (6f5b5905) \u2014 check-ports-wired.sh built, probed (orphan Cmd\u2192fail), wired into lint-elm.sh; 18 ports all wired.",
+        "395": "DONE (34debb97) \u2014 validated live (finish\u2192reload\u2192gone).",
+        "388": "DECIDED: nearest-x column nav. Elm. Not yet built.",
+        "368": "DECIDED: scoped refetch on reconnect (current page, NetworkError, offline\u2192online). Elm. Not yet built."
       },
       "reliability_note": "Two background fix-agents (fix-357, fix-358) stalled silently ~45min after completing coherent work (no failed-notification; no live process; no writes). Lead stopped them (TaskStop), verified their on-disk work independently, committed. Remaining contained fixes done in-loop to avoid re-stall.",
       "launch_blocker_batch": "COMPLETE 2026-08-07: #357, #391, #358, #369, #378 all landed+verified+committed. Follow-ups filed: #394 (mfa-422), #395 (onboarding ports), #396 (un-merge placement reconciliation).",
@@ -670,7 +675,8 @@
           "injected-session drives can't fully validate auth-init-dependent flows (#367 hydration) \u2014 need a real login."
         ],
         "cleanup": "1Q84 left age_gated on the throwaway preview COW branch (raise-only route can't revert); restore via targeted UPDATE on Neon branch if desired."
-      }
+      },
+      "remaining": "#336 (review-vertical rewiring), #381a-e (Finch seams), #347 (program-test seam), #384 (un-merge E2E), #394 (mfa-422), #388 (nearest-x, decided), #368 (scoped refetch, decided). Then finalize just ci (also the definitive #367 real-login check)."
     }
   },
   "_owner_rulings_wave4_2026_07_30": [
