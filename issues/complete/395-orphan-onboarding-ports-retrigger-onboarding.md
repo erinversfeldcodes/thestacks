@@ -27,3 +27,6 @@ The behaviour half of #366 (the gate). #366 lands the detector; this lands the f
 
 ## Progress Notes
 Filed 2026-08-07 from the #366 triage (the gate found two real live orphans, not hypotheticals).
+
+## Verification (2026-08-08, Wave 11)
+onboarding-ports wiring validated LIVE on preview (finish → reload → overlay stays gone; stacks-onboarding-completed key persists); gated by #366.

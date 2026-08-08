@@ -58,3 +58,6 @@ elm-agent / devops.
 
 ## Progress Notes
 Filed 2026-08-01 by the lead from #362's finding 1. #362 built the connectivity chain and observed that every hop but this one is covered — the port name is the single link where a typo produces silence rather than a failure.
+
+## Verification (2026-08-08, Wave 11)
+gate built (scripts/check-ports-wired.sh), probed (fake orphan Cmd → fail; reverted → green), wired into lint-elm.sh; 18 ports all wired incl the two #395 fixed.
