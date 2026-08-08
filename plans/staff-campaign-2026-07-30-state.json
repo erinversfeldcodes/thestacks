@@ -683,7 +683,14 @@
         "e2e": "NOT RUN \u2014 blocked by the Fly deploy flake. Definitive real-login #367/#370/#372 check still pending a clean deploy. #357/#370/#395 already validated live on an earlier clean preview.",
         "verdict": "Wave 11 code + security gates locked in green. E2E pending a clean Fly deploy retry (stuck lease expired 06:47, should clear)."
       },
-      "colima_note": "Lead started Colima (docker daemon) 2026-08-08 to run the finalize dockle scan; left running (harmless). `colima stop` to restore."
+      "colima_note": "Lead started Colima (docker daemon) 2026-08-08 to run the finalize dockle scan; left running (harmless). `colima stop` to restore.",
+      "e2e_retry_2026_08_08": {
+        "outcome": "BLOCKED by broken preview infra \u2014 NOT Wave 11 code.",
+        "root_cause": "Core login 500 = Postgrex 28P01 invalid_password for neondb_owner (core can't auth to Neon). The preview DB creds desynced: a deploy re-provisioned the Neon branch password but aborted at SearXNG before updating the running core's DATABASE_URL secret. Plus the Fly SearXNG create/lease/secrets race. ~5 deploys + 2 just-ci runs this session churn-damaged the stack.",
+        "evidence_it_is_infra_not_code": "This same core served minted sessions + the #357 age-gate drive earlier today (auth worked). Nothing in the deployed bundle changed to break login; the DB just stopped authenticating.",
+        "code_status": "Wave 11 code+security gates all GREEN (Elixir 0-fail, Rust 145, dbt 367/0, checkov+dockle pass). #357/#370/#395 validated LIVE earlier on the healthy stack.",
+        "to_get_e2e": "Rebuild the preview cleanly when Fly/Neon are stable (fresh deploy re-establishes Neon creds + recreates SearXNG), then run playwright. Do NOT keep hammering the churn-damaged stack."
+      }
     }
   },
   "_owner_rulings_wave4_2026_07_30": [
