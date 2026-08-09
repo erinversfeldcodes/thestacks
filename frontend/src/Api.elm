@@ -48,6 +48,7 @@ module Api exposing
     , RemovalOutcome(..)
     , RemovalRequest
     , RequestError(..)
+    , RequestSpec
     , RiskInference
     , SearchSections
     , ShelfVisibilitySetting
@@ -78,6 +79,7 @@ module Api exposing
     , completeOnboardingStep
     , confirmAssociation
     , confirmBook
+    , confirmBookRequest
     , confirmResponseToResult
     , createBlogPost
     , createComment
@@ -99,6 +101,7 @@ module Api exposing
     , getBlogPost
     , getBlogPosts
     , getBook
+    , getBookRequest
     , getBookshelf
     , getCatalogue
     , getGroup
@@ -129,6 +132,7 @@ module Api exposing
     , login
     , logout
     , mergeFormat
+    , mergeFormatRequest
     , mergeFormatResponseDecoder
     , moveBook
     , moveResponseToResult
@@ -199,6 +203,14 @@ copy.
 of these exports stays justified only while a test consumes it — land an
 exposure together with its consumer, never on its own.
 
+The same reasoning covers the `*Request` builders (`RequestSpec`,
+`confirmBookRequest`, `getBookRequest`, `mergeFormatRequest`): they carry a
+request's method/url/body as data so `TestHelpers`' simulated effects derive
+the request from the SAME definition production sends, instead of hand-building
+a copy (Issue #347). The demonstrated hole was exactly #328's, on the request
+side: hardcoding `confirmBook`'s `shelf_name` left all 1,353 Elm tests green,
+because the only test of that body asserted against the translator's copy.
+
 -}
 
 import Dict
@@ -226,6 +238,38 @@ import Url.Builder
 baseUrl : String
 baseUrl =
     ""
+
+
+{-| A request's data — method, url, JSON body — apart from the `Http.request`
+that sends it (Issue #347).
+
+`elm-program-test` cannot run a real `Http.request`, so `TestHelpers`'
+translators must construct `SimulatedEffect`s. Before this seam they
+hand-copied the URL, method and body — and a divergence between the copy and
+the `Api.*` function it stood in for was invisible to the whole suite (the
+translator's merge-format request really had drifted: it sent an empty body
+where production sends the proto-encoded `{isbn, format_label}`). Production
+and the translator now consume one definition; only the transport differs.
+
+`body = Nothing` means an empty body — kept as data (not `Http.Body`) because
+`elm/http` and `SimulatedEffect.Http` have distinct body types.
+
+-}
+type alias RequestSpec =
+    { method : String
+    , url : String
+    , body : Maybe Encode.Value
+    }
+
+
+specHttpBody : RequestSpec -> Http.Body
+specHttpBody spec =
+    case spec.body of
+        Just value ->
+            Http.jsonBody value
+
+        Nothing ->
+            Http.emptyBody
 
 
 {-| How long a request may hang before `elm/http` gives up and reports
@@ -1418,8 +1462,12 @@ getBook :
     -> (Result Http.Error BookDetailResponse -> msg)
     -> Cmd msg
 getBook bookId maybeToken toMsg =
+    let
+        spec =
+            getBookRequest bookId
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers =
             case maybeToken of
                 Just token ->
@@ -1427,12 +1475,22 @@ getBook bookId maybeToken toMsg =
 
                 Nothing ->
                     []
-        , url = baseUrl ++ "/api/books/" ++ bookId
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg bookDetailResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `getBook`'s request — see `RequestSpec`.
+-}
+getBookRequest : String -> RequestSpec
+getBookRequest bookId =
+    { method = "GET"
+    , url = baseUrl ++ "/api/books/" ++ bookId
+    , body = Nothing
+    }
 
 
 searchBooks :
@@ -2497,21 +2555,35 @@ confirmBook :
     -> (Result ConfirmError ConfirmResponse -> msg)
     -> Cmd msg
 confirmBook body token toMsg =
+    let
+        spec =
+            confirmBookRequest body
+    in
     Http.request
-        { method = "POST"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/confirm"
-        , body =
-            Http.jsonBody
-                (Encode.object
-                    [ ( "isbn", Encode.string body.isbn )
-                    , ( "shelf_name", Encode.string body.shelfName )
-                    ]
-                )
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectStringResponse toMsg confirmResponseToResult
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `confirmBook`'s request — see `RequestSpec`.
+-}
+confirmBookRequest : { isbn : String, shelfName : String } -> RequestSpec
+confirmBookRequest body =
+    { method = "POST"
+    , url = baseUrl ++ "/api/books/confirm"
+    , body =
+        Just
+            (Encode.object
+                [ ( "isbn", Encode.string body.isbn )
+                , ( "shelf_name", Encode.string body.shelfName )
+                ]
+            )
+    }
 
 
 {-| GET /api/catalogue — fetch paginated book catalogue.
@@ -2826,21 +2898,35 @@ mergeFormat :
     -> (Result Http.Error MergeFormatResponse -> msg)
     -> Cmd msg
 mergeFormat bookId body token toMsg =
+    let
+        spec =
+            mergeFormatRequest bookId body
+    in
     Http.request
-        { method = "POST"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/" ++ bookId ++ "/merge-format"
-        , body =
-            Http.jsonBody
-                (Requests.encodeMergeFormatRequest
-                    { isbn = body.isbn
-                    , formatLabel = body.formatLabel
-                    }
-                )
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg mergeFormatResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `mergeFormat`'s request — see `RequestSpec`.
+-}
+mergeFormatRequest : String -> { isbn : String, formatLabel : String } -> RequestSpec
+mergeFormatRequest bookId body =
+    { method = "POST"
+    , url = baseUrl ++ "/api/books/" ++ bookId ++ "/merge-format"
+    , body =
+        Just
+            (Requests.encodeMergeFormatRequest
+                { isbn = body.isbn
+                , formatLabel = body.formatLabel
+                }
+            )
+    }
 
 
 

@@ -868,6 +868,40 @@ simulatePlacementVisibilityResponse placementId visibility =
 -- SIMULATED EFFECT TRANSLATORS
 
 
+{-| A simulated request derived from the REAL `Api.*` request definition
+(Issue #347).
+
+Hand-copying the method/url/body here is the request-side twin of the decoder
+mirrors #328 removed: the copy and the fixture agree with each other while
+drifting from production, and the drift is invisible — hardcoding
+`Api.confirmBook`'s `shelf_name` left all 1,353 tests green. Deriving from
+`Api.RequestSpec` means a change to the production request is a change to what
+these tests assert against.
+
+-}
+authedRequestFromSpec :
+    Api.RequestSpec
+    -> String
+    -> SimulatedEffect.Http.Expect msg
+    -> SimulatedEffect msg
+authedRequestFromSpec spec token expect =
+    SimulatedEffect.Http.request
+        { method = spec.method
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = spec.url
+        , body =
+            case spec.body of
+                Just value ->
+                    SimulatedEffect.Http.jsonBody value
+
+                Nothing ->
+                    SimulatedEffect.Http.emptyBody
+        , expect = expect
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
 {-| Translate Upload page Cmds into SimulatedEffects.
 -}
 uploadEffects : Upload.Msg -> Upload.Model -> Maybe String -> SimulatedEffect Upload.Msg
@@ -915,15 +949,9 @@ uploadEffects msg model maybeToken =
                             if response.isDuplicate then
                                 case bookIds of
                                     [ singleId ] ->
-                                        SimulatedEffect.Http.request
-                                            { method = "GET"
-                                            , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                            , url = "/api/books/" ++ singleId
-                                            , body = SimulatedEffect.Http.emptyBody
-                                            , expect = SimulatedEffect.Http.expectJson Upload.GotDuplicateBook Api.bookDetailResponseDecoder
-                                            , timeout = Nothing
-                                            , tracker = Nothing
-                                            }
+                                        authedRequestFromSpec (Api.getBookRequest singleId)
+                                            token
+                                            (SimulatedEffect.Http.expectJson Upload.GotDuplicateBook Api.bookDetailResponseDecoder)
 
                                     _ ->
                                         SimulatedEffect.Cmd.none
@@ -932,15 +960,9 @@ uploadEffects msg model maybeToken =
                                 SimulatedEffect.Cmd.batch
                                     (List.map
                                         (\bid ->
-                                            SimulatedEffect.Http.request
-                                                { method = "GET"
-                                                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                                , url = "/api/books/" ++ bid
-                                                , body = SimulatedEffect.Http.emptyBody
-                                                , expect = SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) Api.bookDetailResponseDecoder
-                                                , timeout = Nothing
-                                                , tracker = Nothing
-                                                }
+                                            authedRequestFromSpec (Api.getBookRequest bid)
+                                                token
+                                                (SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) Api.bookDetailResponseDecoder)
                                         )
                                         bookIds
                                     )
@@ -960,24 +982,17 @@ uploadEffects msg model maybeToken =
             if Components.ISBNInput.isValidISBN model.manualIsbn then
                 case maybeToken of
                     Just token ->
-                        SimulatedEffect.Http.request
-                            { method = "POST"
-                            , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                            , url = "/api/books/confirm"
-                            , body =
-                                SimulatedEffect.Http.jsonBody
-                                    (Encode.object
-                                        [ ( "isbn", Encode.string model.manualIsbn )
-                                        , ( "shelf_name", Encode.string model.selectedShelf )
-                                        ]
-                                    )
-                            , expect =
-                                SimulatedEffect.Http.expectStringResponse
-                                    Upload.ConfirmCompleted
-                                    Api.confirmResponseToResult
-                            , timeout = Nothing
-                            , tracker = Nothing
-                            }
+                        authedRequestFromSpec
+                            (Api.confirmBookRequest
+                                { isbn = model.manualIsbn
+                                , shelfName = model.selectedShelf
+                                }
+                            )
+                            token
+                            (SimulatedEffect.Http.expectStringResponse
+                                Upload.ConfirmCompleted
+                                Api.confirmResponseToResult
+                            )
 
                     Nothing ->
                         SimulatedEffect.Cmd.none
@@ -988,31 +1003,27 @@ uploadEffects msg model maybeToken =
         Upload.ConfirmCompleted (Err (Api.ConfirmMergeRequired workId)) ->
             case maybeToken of
                 Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "GET"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/books/" ++ workId
-                        , body = SimulatedEffect.Http.emptyBody
-                        , expect = SimulatedEffect.Http.expectJson Upload.GotSameWorkBook Api.bookDetailResponseDecoder
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
+                    authedRequestFromSpec (Api.getBookRequest workId)
+                        token
+                        (SimulatedEffect.Http.expectJson Upload.GotSameWorkBook Api.bookDetailResponseDecoder)
 
                 Nothing ->
                     SimulatedEffect.Cmd.none
 
         Upload.ConfirmMergeFormat bookId ->
+            -- Derived from the real request (#347), which also corrected a live
+            -- drift: this branch used to send an EMPTY body where production
+            -- sends the proto-encoded {isbn, format_label} from the model.
             case maybeToken of
                 Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/books/" ++ bookId ++ "/merge-format"
-                        , body = SimulatedEffect.Http.emptyBody
-                        , expect = SimulatedEffect.Http.expectJson Upload.MergeFormatCompleted Api.mergeFormatResponseDecoder
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
+                    authedRequestFromSpec
+                        (Api.mergeFormatRequest bookId
+                            { isbn = model.mergeIsbn
+                            , formatLabel = model.mergeFormatLabel
+                            }
+                        )
+                        token
+                        (SimulatedEffect.Http.expectJson Upload.MergeFormatCompleted Api.mergeFormatResponseDecoder)
 
                 Nothing ->
                     SimulatedEffect.Cmd.none

@@ -62,12 +62,12 @@ n/a — no user story. Acceptance is the counterfactual in Technical Requirement
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] `Api.*` request seam exposed and documented in the module doc — evidence: diff
-- [ ] `uploadEffects` derives all five requests from it — evidence: diff + grep showing no hand-built records
-- [ ] Counterfactual red — evidence: both transcripts quoted
-- [ ] Repo-wide hand-built-request count reported — evidence: the number and what was done about it
-- [ ] Elm suite green at cited count; `lint-elm.sh` clean — evidence: outputs
-- [ ] `staff-review` verdict recorded below
+- [x] `Api.*` request seam exposed and documented in the module doc — evidence: 2026-08-09 diff — `RequestSpec` (method/url/`Maybe Encode.Value` body, kept as data because `elm/http` and `SimulatedEffect.Http` body types differ) + `confirmBookRequest`/`getBookRequest`/`mergeFormatRequest`; production `confirmBook`/`getBook`/`mergeFormat` now derive from the same specs via `specHttpBody`; moduledoc paragraph added beside the #328 note
+- [x] `uploadEffects` derives all five requests from it — evidence: the 5 sites named at filing (2× duplicate/batch `getBook`, same-work `getBook`, `confirmBook`, `mergeFormat`) now call `TestHelpers.authedRequestFromSpec`; converting `mergeFormat` exposed and fixed a REAL drift — the translator sent an empty body where production sends proto-encoded `{isbn, format_label}`
+- [x] Counterfactual red — evidence: before (filing probe): hardcoded `shelf_name` → `1353 passed, 0 failed`; after: same mutation → `Passed: 1743, Failed: 1` — `manual_isbn_shelf_choice` fails with `Ok "wishlist"` vs `Ok "antilibrary"`; reverted → `Passed: 1744, Failed: 0`
+- [x] Repo-wide hand-built-request count reported — evidence: 47 `SimulatedEffect.Http.request` sites pre-change (34 in TestHelpers.elm + 13 across 8 program-test files); 5 converted, 42 remain hand-built. `uploadEffects` itself grew post-filing branches (multipart `GotFile` — not servable by a JSON spec — placement, reject-identification, age-gate) which follow the now-established `RequestSpec` convention as their `Api.*` builders gain specs; not forced here per Technical Requirement 4's own instruction
+- [x] Elm suite green at cited count; `lint-elm.sh` clean — evidence: 1744 passed / 0 failed; `just run bash scripts/lint-elm.sh` fully green 2026-08-09 (elm-review keeps the new exposures because the tests consume them)
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Related to **#328** (removed the decoder-side mirrors and set the precedent). Surfaced during **#343**. Not blocking any wave — needs an owner wave assignment.
@@ -77,3 +77,7 @@ elm-agent.
 
 ## Progress Notes
 Filed 2026-07-31 by the lead. Probe transcript: hardcoding `Api.confirmBook`'s `shelf_name` to `"wishlist"` left the Elm suite fully green (1353 passed, 0 failed), proving the production encoder is untested. Probe reverted via Edit; `git status` clean, `grep -c` → 1.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM WITH NOTES** — RequestSpec carries data, not transport — the right seam given Elm's two body types; the counterfactual that motivated the issue now reds the suite. Note: 42 hand-built simulated requests remain repo-wide (13 outside TestHelpers); convention established, conversion is follow-up-class work.
