@@ -83,12 +83,12 @@ split — and this ticket becomes the parent. Do not force them into one fix.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Per-row verdict: product defect or spec defect, with reasoning — evidence: the four verdicts
-- [ ] Profile shelf question answered — evidence: the cause, not just the fix
-- [ ] Whether RSS shares that cause, stated either way — evidence: the comparison
-- [ ] `privacy-placement.spec.ts:189` selector made sound — evidence: diff
-- [ ] All four pass, no assertion weakened or guarded — evidence: the run + diff
-- [ ] `staff-review` verdict recorded below
+- [x] Per-row verdict — evidence: ALL FOUR are SPEC defects, zero product defects (verdicts below); repaired by `630961cf` (2026-08-03, "repair three E2E locators that described DOM and contracts the product no longer has")
+- [x] Profile shelf question answered — evidence: the rows were rendering correctly the whole time. `.profile__shelf` gained a sibling "Feed" anchor when the Atom subscribe link shipped, so the row's `textContent` became `"LibraryFeed"` — and the spec's anchored `hasText: /^Library$/` matched NOTHING. Cause: a locator describing pre-feed DOM, not a query/exposure defect. Fix: `shelfRow()` filters on the row's own exact browse link (both :55→:76 and :296→:320 rows)
+- [x] Whether RSS shares that cause — evidence: NO. The profile rows were correct DOM mis-read by a locator; the RSS 404 was correct AUTH POLICY mis-modelled by the spec — a `platform` shelf is signed-in-only on the Audience ladder (`Stacks.Feeds.feed_requires_auth?/1`, owner decision 2026-07-29), and the `request` fixture carries no Authorization header, so the read was anonymous and 404'd BY DESIGN. The repair reads the feed as the signed-in reader, and the anonymous-404 contract got its own test (`rss.spec.ts:247`). Neither row was an over-exposure — the feared urgent case is ruled out; the product was stricter than the spec assumed
+- [x] `privacy-placement.spec.ts:189` selector made sound — evidence: `630961cf` — fresh isolated user (`landAsFreshUser`) owning exactly ONE placement + `toHaveCount(1)` on `.book--hidden` (an assertion, not a guard) + attribute-contains checks; the `.first()`-of-many read is gone. Also corrected the identity token: the spine's raw `book.title`, not the overlay's `displayTitle` (which reads "Not yet identified" on `barcode_unverified` editions — the #370 surface)
+- [x] All four pass, no assertion weakened or guarded — evidence: 2026-08-09 full real-login run (301 passed): `public-profile.spec.ts:76` ✓ `:320` ✓ `rss.spec.ts:207` ✓ `privacy-placement.spec.ts:189` ✓ — at the shipped parallel worker count, stronger than the filing's `--workers=1` bar; the repair diff deletes no assertion and adds none of the #275 guard shapes
+- [x] `staff-review` verdict recorded below — see close-out
 
 ## Dependencies
 Surfaced by the Wave 6 live drive. Independent of Wave 6. Reading the results requires **#369**'s
@@ -106,3 +106,7 @@ the OOM, the `--workers=1` run for concurrency, the preview-branch counts for da
 selector, and `git diff main...HEAD` plus the Wave 6 file-ownership map for attribution. No fix
 attempted — the point of this ticket is that four deterministic failures were sitting inside a run
 everyone had learned to read as flaky.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09, of `630961cf` + today's run): **LGTM** — each repaired locator carries the why in-comment (the "LibraryFeed" textContent trap, the Audience-ladder auth semantics, the count-1 soundness argument), the anonymous-404 behaviour was promoted to its own test instead of being silently accommodated, and the fix direction was tighten-not-weaken throughout. The filing's discipline (four rule-outs, "do not assume one root cause") is what made this close-out cheap: the four rows split exactly as it suspected — three UI-contract drifts and one unsound selector.

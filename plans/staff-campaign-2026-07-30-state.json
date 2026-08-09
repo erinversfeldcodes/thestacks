@@ -540,7 +540,7 @@
         },
         "11u": {
           "title": "Four deterministic E2E failures (public-profile x2, rss, privacy-placement) — not OOM, not concurrency, not missing data, not Wave 6. Unattributed; needs investigation then splitting.",
-          "status": "not_started",
+          "status": "complete",
           "issue": 372
         },
         "fu-338": {
