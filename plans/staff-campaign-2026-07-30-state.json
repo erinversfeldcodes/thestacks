@@ -631,7 +631,7 @@
           "title": "Un-merge must reconcile a placement naming the split edition (post-#378 premise change)."
         }
       },
-      "last_action": "Drove #367(a)+#366+#395 done; both Phase-C decisions captured. 7 code items + finalize remain.",
+      "last_action": "#381a landed+verified+committed. Continuing Wave 11 net-new items.",
       "decisions": {
         "369": "Owner 2026-08-07: root cause is untuned Argon2 (64 MiB/hash library default, 3.4x OWASP floor) on scaffolding-default 512MB \u2014 NOT a regression. Fix = tune m_cost to ~32 MiB (>OWASP 19 MiB), keep pool=2, add concurrency test + deploy readback gate. NO VM cost increase.",
         "336": "Owner 2026-08-07: reviews ARE planned (US-2.1.1 re-scoped, not deleted). KEEP the vertical scaffolding (review_snapshots table/proto/staging + int_review_sentiment for 2 marts). Fix = mark the orphan event pending-US-2.1.1 (not a live contract) + inverse completeness guard. #336 keeps its ticket, done in Wave 11. NO full teardown.",
@@ -657,7 +657,8 @@
         "366": "DONE (6f5b5905) \u2014 check-ports-wired.sh built, probed (orphan Cmd\u2192fail), wired into lint-elm.sh; 18 ports all wired.",
         "395": "DONE (34debb97) \u2014 validated live (finish\u2192reload\u2192gone).",
         "388": "DECIDED: nearest-x column nav. Elm. Not yet built.",
-        "368": "DECIDED: scoped refetch on reconnect (current page, NetworkError, offline\u2192online). Elm. Not yet built."
+        "368": "DECIDED: scoped refetch on reconnect (current page, NetworkError, offline\u2192online). Elm. Not yet built.",
+        "381": "PARTIAL \u2014 381a DONE (f762ea07, cover-download seam + get_binary callback + transport-isolation test, mutation-probed; also request_timeout for that site=381d-partial). 381b/c/d/e remain."
       },
       "reliability_note": "Two background fix-agents (fix-357, fix-358) stalled silently ~45min after completing coherent work (no failed-notification; no live process; no writes). Lead stopped them (TaskStop), verified their on-disk work independently, committed. Remaining contained fixes done in-loop to avoid re-stall.",
       "launch_blocker_batch": "COMPLETE 2026-08-07: #357, #391, #358, #369, #378 all landed+verified+committed. Follow-ups filed: #394 (mfa-422), #395 (onboarding ports), #396 (un-merge placement reconciliation).",

@@ -114,3 +114,7 @@ elixir-agent.
 Filed 2026-08-03 by the lead from #377's sweep (13 modules examined, 5 un-seamed) with #379's
 independent corroboration. Site 1's remote-dependent-assertion hazard and site 2's timing-race masking
 are the sweeping agent's findings, not the lead's.
+
+## Progress (2026-08-09, Wave 11)
+- **381a DONE** (f762ea07): `Books.download_cover/1` seamed through `HttpClientBehaviour.get_binary/1` (new callback; real client + MockHttpClient + FailingHttpClient all implement it). Test no longer dials out — transport-isolation test added + mutation-probed (bare-Finch revert reds it). Also bounds the request (`request_timeout` + `receive_timeout`) — closes #381d for this site.
+- **Remaining:** 381b (circuit_breakers 4 bare Finch sites), 381c (rss_liveness one-liner → RssFetcher.probe), 381d (request_timeout audit at the other sites), 381e (the outbound-client `:test`-default gate).
