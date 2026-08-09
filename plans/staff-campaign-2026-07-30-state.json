@@ -2,7 +2,7 @@
   "campaign": "staff-campaign-2026-07-30",
   "plan": "plans/staff-campaign-2026-07-30.md",
   "created_at": "2026-07-30T00:00:00Z",
-  "updated_at": "2026-08-08",
+  "updated_at": "2026-08-09",
   "status": "approved_filed",
   "current_wave": 11,
   "_why": [
@@ -696,7 +696,14 @@
         "rebuild": "BLOCKED by Fly.io platform degradation \u2014 'failed to acquire lease for machine ... lease held by ...@tokens.fly.io, expires 07:12:38Z' (expired ~1.5h prior, still held). Fly's machine-lease GC is stuck; it cannot launch sidecar machines (SearXNG, then scraper \u2014 different apps, same lease bug). External, not code/process.",
         "conclusion": "E2E cannot run until Fly recovers its lease management. Neon branch is fresh; core stopped; deploy incomplete. A single clean deploy-preview.sh will finish once Fly is healthy \u2014 code + process are sound.",
         "wave11_code": "Fully validated: all code+security gates GREEN; #357/#370/#395 validated live earlier. E2E is the only outstanding verification, blocked purely by the Fly outage."
-      }
+      },
+      "finalize_e2e_2026_08_09": {
+        "deploy": "CLEAN \u2014 Fly recovered; fresh Neon branch + seeds; stack live; HEAD code.",
+        "e2e": "Real logins PASS. Chromium: 298 passed, 10 skipped (Modal, by design). 1 REAL failure: settings.spec.ts:843 (notifications) \u2014 its post-reload re-dismiss relied on the pre-#395 bug (onboarding not persisting); FIXED (removed the second dismiss) + reverified passing. 2 contention-flakes (:82 shelf-vis PUT, :132 WA-consent) both PASS run-solo \u2014 shared 'settings' suite user under parallel workers (#275-class), not code.",
+        "wave11_validated_live": "#367 consent persists server-side (settings:132 real login) \u2713; #395 onboarding persists across reload (settings:843, and #395's fix is what the spec update reflects) \u2713; #357/#370/#372/#378 + all settings/privacy/nav surfaces in the 298 pass.",
+        "verdict": "Finalize GREEN \u2014 Wave 11 landed batch validated via real-login E2E on a clean HEAD stack."
+      },
+      "remaining_after_finalize": "Code items still to BUILD: #336, #381a-e, #347, #384, #394, #388 (nearest-x, decided), #368 (scoped refetch, decided). The finalize validated everything LANDED; these are net-new."
     }
   },
   "_owner_rulings_wave4_2026_07_30": [
