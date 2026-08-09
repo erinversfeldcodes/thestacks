@@ -298,19 +298,9 @@ defmodule Stacks.CircuitBreakers do
     # the cheapest authenticated endpoint (no token spend).
     case Application.get_env(:core, :vision_together_api_key) do
       key when is_binary(key) and byte_size(key) > 0 ->
-        req =
-          Finch.build(
-            :get,
-            "https://api.together.xyz/v1/models",
-            [{"authorization", "Bearer #{key}"}],
-            nil
-          )
-
-        case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
-          {:ok, %Finch.Response{status: 200}} -> :ok
-          {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
-          {:error, reason} -> {:error, reason}
-        end
+        probe_http_get("https://api.together.xyz/v1/models", [
+          {"authorization", "Bearer #{key}"}
+        ])
 
       _ ->
         Logger.warning(
@@ -346,22 +336,10 @@ defmodule Stacks.CircuitBreakers do
     # blown, that's <1% of budget per hour of outage — acceptable.
     case Application.get_env(:core, :brave_search_api_key) do
       key when is_binary(key) and byte_size(key) > 0 ->
-        req =
-          Finch.build(
-            :get,
-            "https://api.search.brave.com/res/v1/web/search?q=test&count=1",
-            [
-              {"Accept", "application/json"},
-              {"X-Subscription-Token", key}
-            ],
-            nil
-          )
-
-        case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
-          {:ok, %Finch.Response{status: 200}} -> :ok
-          {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
-          {:error, reason} -> {:error, reason}
-        end
+        probe_http_get("https://api.search.brave.com/res/v1/web/search?q=test&count=1", [
+          {"Accept", "application/json"},
+          {"X-Subscription-Token", key}
+        ])
 
       _ ->
         Logger.warning(
@@ -431,11 +409,9 @@ defmodule Stacks.CircuitBreakers do
   end
 
   defp do_probe_r2(url) do
-    req = Finch.build(:get, url, [], nil)
-
-    case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
-      {:ok, %Finch.Response{status: status}} when status < 500 -> :ok
-      {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
+    case probe_http_client().get(url, []) do
+      {:ok, status} when status < 500 -> :ok
+      {:ok, status} -> {:error, {:http_status, status}}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -589,13 +565,22 @@ defmodule Stacks.CircuitBreakers do
     end
   end
 
-  defp probe_http_get(url) do
-    req = Finch.build(:get, url, [], nil)
-
-    case Finch.request(req, Stacks.Finch, receive_timeout: 5_000) do
-      {:ok, %Finch.Response{status: 200}} -> :ok
-      {:ok, %Finch.Response{status: status}} -> {:error, {:http_status, status}}
+  # All probe HTTP goes through one seamed transport (#381b): in `:test` the
+  # config key points at a client that refuses to dial, so a probe firing
+  # mid-suite cannot reach a real host even when nothing overrode the probe fn.
+  defp probe_http_get(url, headers \\ []) do
+    case probe_http_client().get(url, headers) do
+      {:ok, 200} -> :ok
+      {:ok, status} -> {:error, {:http_status, status}}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp probe_http_client do
+    Application.get_env(
+      :core,
+      :circuit_breaker_probe_http_client,
+      Stacks.CircuitBreakers.ProbeHttpClient
+    )
   end
 end

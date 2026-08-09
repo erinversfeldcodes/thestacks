@@ -594,6 +594,110 @@ defmodule Stacks.CircuitBreakersTest do
   end
 
   # ---------------------------------------------------------------------------
+  # 8b. Probe transport isolation (#381b)
+  # ---------------------------------------------------------------------------
+
+  describe "probe transport isolation (#381b)" do
+    # Before the probe transport was seamed, these probe functions issued bare
+    # Finch requests to openlibrary.org, googleapis.com, api.together.xyz and
+    # api.search.brave.com — fired 15s after any fuse blew, and kept off the
+    # network only by tests winning the on_exit fuse-reset race (#379 lost the
+    # equivalent race). The :test config now floors the transport at
+    # Stacks.Testing.DisabledProbeHttpClient.
+    @probe_env_keys [
+      :vision_together_api_key,
+      :brave_search_api_key,
+      :searxng_url,
+      :r2_endpoint_host
+    ]
+
+    setup do
+      originals = Enum.map(@probe_env_keys, &{&1, Application.get_env(:core, &1)})
+
+      on_exit(fn ->
+        Enum.each(originals, fn
+          {key, nil} -> Application.delete_env(:core, key)
+          {key, value} -> Application.put_env(:core, key, value)
+        end)
+      end)
+
+      :ok
+    end
+
+    test "no probe function reaches a real transport in test" do
+      # Give every conditional probe what it needs to take its network path,
+      # with sentinel hosts recognisable in the telemetry below.
+      Application.put_env(:core, :vision_together_api_key, "probe-isolation-key")
+      Application.put_env(:core, :brave_search_api_key, "probe-isolation-key")
+      Application.put_env(:core, :searxng_url, "https://searxng.probe-isolation.test")
+      Application.put_env(:core, :r2_endpoint_host, "r2.probe-isolation.test")
+
+      # The #377 technique: attach to Finch's own request-start telemetry. A
+      # "the mock was called" assertion alone would not prove the real
+      # transport was not ALSO called.
+      test_pid = self()
+      handler_id = "test-finch-dial-#{inspect(make_ref())}"
+
+      :telemetry.attach(
+        handler_id,
+        [:finch, :request, :start],
+        fn _event, _measurements, %{request: request}, _config ->
+          send(test_pid, {:finch_dial, request.host})
+        end,
+        nil
+      )
+
+      results =
+        try do
+          Enum.map(
+            [
+              &CircuitBreakers.probe_vision/0,
+              &CircuitBreakers.probe_scraper/0,
+              &CircuitBreakers.probe_together_ai/0,
+              &CircuitBreakers.probe_open_library/0,
+              &CircuitBreakers.probe_google_books/0,
+              &CircuitBreakers.probe_brave/0,
+              &CircuitBreakers.probe_searxng/0,
+              &CircuitBreakers.probe_r2/0
+            ],
+            & &1.()
+          )
+        after
+          :telemetry.detach(handler_id)
+        end
+
+      # Every probe went through the disabled client — only it produces this
+      # reason, so this also covers the localhost-target probes (vision,
+      # scraper) that the host filter below cannot distinguish from other
+      # suites' legitimate localhost traffic.
+      assert Enum.all?(results, &(&1 == {:error, :outbound_disabled_in_test})),
+             "expected every probe to be refused by the seamed test transport, got: " <>
+               inspect(results)
+
+      # And nothing dialled a probe target at the transport layer. (Filtered
+      # to the probes' own hosts: concurrently running async suites may
+      # legitimately hit localhost through their own seams.)
+      probe_hosts =
+        ~w(openlibrary.org www.googleapis.com api.together.xyz api.search.brave.com) ++
+          ~w(searxng.probe-isolation.test r2.probe-isolation.test)
+
+      dialled = collect_finch_dials()
+      dialled_probe_hosts = Enum.filter(dialled, &(&1 in probe_hosts))
+
+      assert dialled_probe_hosts == [],
+             "probe(s) reached the real transport for: #{inspect(dialled_probe_hosts)}"
+    end
+
+    defp collect_finch_dials do
+      receive do
+        {:finch_dial, host} -> [host | collect_finch_dials()]
+      after
+        0 -> []
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # 9. Probe-based recovery
   # ---------------------------------------------------------------------------
 

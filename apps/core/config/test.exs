@@ -85,6 +85,11 @@ config :core, :brave_client, Stacks.Discovery.MockBraveClient
 config :core, :searxng_client, Stacks.Discovery.MockSearxngClient
 config :core, :together_client, Stacks.AI.MockTogetherClient
 config :core, :rss_fetcher, Stacks.Enrichment.MockRssFetcher
+# Circuit-breaker probes dial real hosts (openlibrary.org, googleapis.com, …)
+# 15s after a fuse blows; the disabled client refuses so a lost on_exit reset
+# race cannot dial out (#381b). Probe *scheduling* tests keep injecting probe
+# fns via :circuit_breaker_probe_overrides.
+config :core, :circuit_breaker_probe_http_client, Stacks.Testing.DisabledProbeHttpClient
 config :core, :storage, Stacks.Storage.Mock
 config :core, :dbt_runner, Stacks.Workers.MockDbtRunner
 config :core, :transparency_prometheus_client, Stacks.Transparency.MockPrometheusClient

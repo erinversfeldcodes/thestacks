@@ -274,7 +274,16 @@ defmodule Stacks.AI.Client do
       %{endpoint: endpoint}
     )
 
-    result = Finch.request(req, Stacks.Finch, receive_timeout: @receive_timeout_ms)
+    # Both bounds carry the same value: the vision service holds the
+    # connection open while Modal runs inference, then returns a small JSON
+    # body — so "longest wait for a chunk" and "longest whole response" are
+    # the same budget. request_timeout closes the dribbling-peer hole
+    # (receive_timeout alone is per-chunk and unbounded in total — #381d).
+    result =
+      Finch.request(req, Stacks.Finch,
+        receive_timeout: @receive_timeout_ms,
+        request_timeout: @receive_timeout_ms
+      )
 
     # Record the per-call cost regardless of outcome. Rejection ≠ free —
     # Modal bills for GPU time whether or not we use the result.

@@ -94,13 +94,13 @@ than forcing one diff.
 | Regression | yes | ❌ Finch telemetry asserts an empty dialled list across the suite |
 
 ## Definition of Done
-- [ ] Site 1 seamed; assertion no longer remote-dependent — evidence: diff + telemetry assertion
-- [ ] Site 2 seamed — evidence: diff + probe
-- [ ] Site 3 verified closed by #379 — evidence: the check
-- [ ] Site 4 seamed or justified — evidence: diff or reasoning
-- [ ] `request_timeout` set or justified at every site — evidence: the list
-- [ ] Gate added, with a counterfactual red — evidence: transcript
-- [ ] `staff-review` verdict recorded below
+- [x] Site 1 seamed; assertion no longer remote-dependent — evidence: f762ea07 (381a), `HttpClientBehaviour.get_binary/1` + transport-isolation test, mutation-probed RED
+- [x] Site 2 seamed — evidence: 2026-08-09 diff — all 4 bare Finch sites in `circuit_breakers.ex` route through the `:circuit_breaker_probe_http_client` seam (`ProbeHttpClientBehaviour`; `:test` floor = `Stacks.Testing.DisabledProbeHttpClient`); "probe transport isolation (#381b)" test attaches to `[:finch, :request, :start]`, mutation-probe RED (seam bypass → 1 failure), restored green 48/0
+- [x] Site 3 verified closed by #379 — evidence: `config :core, :geocoder, Stacks.Geocoding.Mock` present in `config/test.exs`, and `check-outbound-test-default.sh --list` reports `Stacks.Geocoding.Nominatim [ok]` — the gate now re-verifies this every run
+- [x] Site 4 seamed — evidence: 2026-08-09 diff — `RSSLivenessJob.check_feed/1` probes via the `:rss_fetcher` seam (`RssFetcher.probe/1`, which bounds both phases); success-path test added, mutation-probe RED (seam bypass → "records success" fails), restored green 7/0
+- [x] `request_timeout` set or justified at every site — evidence: audit list in Progress Notes below; sweep `grep Finch.request | grep -v request_timeout` returns only sites carrying it multiline or via `request_opts`
+- [x] Gate added, with a counterfactual red — evidence: `scripts/check-outbound-test-default.sh` (discovering: any module calling `Finch.request` must be seam-selected with a `:test` floor), wired into `lint-elixir.sh`; counterfactual A (floor removed) FAIL naming the key, counterfactual B (floor = real client) FAIL "the floor points at the internet", restored OK 10 transports/1 exempt
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Reported by **#377**'s sweep; corroborated by **#379**, which was the same class found independently.
@@ -117,4 +117,12 @@ are the sweeping agent's findings, not the lead's.
 
 ## Progress (2026-08-09, Wave 11)
 - **381a DONE** (f762ea07): `Books.download_cover/1` seamed through `HttpClientBehaviour.get_binary/1` (new callback; real client + MockHttpClient + FailingHttpClient all implement it). Test no longer dials out — transport-isolation test added + mutation-probed (bare-Finch revert reds it). Also bounds the request (`request_timeout` + `receive_timeout`) — closes #381d for this site.
-- **Remaining:** 381b (circuit_breakers 4 bare Finch sites), 381c (rss_liveness one-liner → RssFetcher.probe), 381d (request_timeout audit at the other sites), 381e (the outbound-client `:test`-default gate).
+- **381b DONE** (2026-08-09): the 4 bare Finch sites in `circuit_breakers.ex` (together_ai, brave, r2, `probe_http_get`) now go through one seamed transport — `ProbeHttpClientBehaviour.get(url, headers) -> {:ok, status}` so per-probe status policy (200-only vs R2's sub-500) stays in the breaker. `:test` floor: `Stacks.Testing.DisabledProbeHttpClient` returns `{:error, :outbound_disabled_in_test}` — a mid-suite probe now reads as a failed probe and the fuse recovers on the backstop, instead of dialling openlibrary.org.
+- **381c DONE** (2026-08-09): `RSSLivenessJob` probes via the `:rss_fetcher` seam. Fidelity note: non-2xx statuses are now recorded as `:not_found` rather than `"HTTP 404"` — `probe/1` deliberately collapses status detail; acceptable for a liveness boolean and stated in the moduledoc.
+- **381d DONE** (2026-08-09): whole-response bound audit. Sites now carrying `request_timeout` (value, justification): searxng 20s / brave 20s / nominatim 15s (small JSON, margin over receive); vision client = `@receive_timeout_ms` and scraper 600s/120s/30s ×5 (server holds the connection while working then returns small JSON — chunk budget == whole budget); together 30s ×2; transparency-prometheus 8s; metrics-pusher 10s; books get 15s (was fully unbounded: Finch defaults request_timeout to `:infinity`); books get_binary 10s + probe client 5s (already). `RssFetcher` already bounded via `request_opts/1`.
+- **381e DONE** (2026-08-09): `scripts/check-outbound-test-default.sh`, modelled on `check-session-expiry-coverage.sh` — the roster is recomputed each run (any module under `apps/core/lib` calling `Finch.request` must be selected through an `Application.get_env(:core, :key, Module)` seam whose key has a `:test` default that is not the real client). 11 transports discovered, 10 ok, 1 exempt (`Core.PromEx.MetricsPusher`: `init/1` → `:ignore` without `:metrics_push_url`, never set in test). Stale exemptions fail. Wired into `scripts/lint-elixir.sh`.
+- Full core suite after all four: **3553 tests, 0 failures**; credo --strict clean.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — one probe transport with per-probe status policy kept in the breaker (deep module, thin seam); the discovering gate closes the whole class at the edge — counterfactual A/B both red. Self-review by the implementing session, backed by 8 mutation probes all RED-then-restored and 3553/0.

@@ -9,7 +9,10 @@ defmodule Stacks.Books.HttpClient do
   def get(url) do
     req = Finch.build(:get, url)
 
-    case Finch.request(req, Stacks.Finch) do
+    # Explicit bounds (#381d): without options Finch defaults receive_timeout
+    # to 15s but request_timeout to :infinity — so a resolver host dribbling
+    # bytes held the caller forever. Resolver JSON is small; 15s each.
+    case Finch.request(req, Stacks.Finch, receive_timeout: 15_000, request_timeout: 15_000) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         decode_body(body, url)
 

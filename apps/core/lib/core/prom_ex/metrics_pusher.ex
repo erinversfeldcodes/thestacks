@@ -83,7 +83,12 @@ defmodule Core.PromEx.MetricsPusher do
   defp do_post(url, metrics) do
     req = Finch.build(:post, url, [{"content-type", "text/plain"}], metrics)
 
-    case Finch.request(req, Stacks.Finch, receive_timeout: @receive_timeout) do
+    # request_timeout bounds the WHOLE response (receive_timeout is
+    # per-chunk — #381d); the import endpoint answers with an empty body.
+    case Finch.request(req, Stacks.Finch,
+           receive_timeout: @receive_timeout,
+           request_timeout: @receive_timeout
+         ) do
       {:ok, %Finch.Response{status: status}} when status in 200..299 ->
         :ok
 

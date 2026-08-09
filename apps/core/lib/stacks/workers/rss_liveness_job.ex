@@ -2,9 +2,10 @@ defmodule Stacks.Workers.RSSLivenessJob do
   @moduledoc """
   Weekly Oban cron worker that checks the liveness of author RSS feed URLs.
 
-  Sends an HTTP HEAD request to each author's `rss_feed_url` and records the
-  result in `source_health_checks` via `Stacks.Monitoring`. A 2xx response
-  is recorded as success; 404, 410, timeouts, and errors are recorded as
+  Probes each author's `rss_feed_url` (HTTP HEAD via the seamed
+  `Stacks.Enrichment.RssFetcher`, #381c) and records the result in
+  `source_health_checks` via `Stacks.Monitoring`. A 2xx response is recorded
+  as success; non-2xx statuses, timeouts, and errors are recorded as
   failures.
 
   Scheduled via cron: `{"0 3 * * 0", Stacks.Workers.RSSLivenessJob}` (Sundays
@@ -17,8 +18,6 @@ defmodule Stacks.Workers.RSSLivenessJob do
 
   alias Stacks.Enrichment.Authors
   alias Stacks.Monitoring
-
-  @head_timeout 5_000
 
   @impl true
   def perform(%Oban.Job{}) do
@@ -33,16 +32,9 @@ defmodule Stacks.Workers.RSSLivenessJob do
   defp check_feed(author) do
     source_name = "author_rss:#{author.id}"
 
-    case head_request(author.rss_feed_url) do
-      {:ok, status} when status in 200..299 ->
+    case rss_fetcher().probe(author.rss_feed_url) do
+      {:ok, _url} ->
         Monitoring.record_success(source_name, "rss_feed")
-
-      {:ok, status} ->
-        Monitoring.record_failure(
-          source_name,
-          "rss_feed",
-          "HTTP #{status}"
-        )
 
       {:error, reason} ->
         Monitoring.record_failure(
@@ -64,20 +56,11 @@ defmodule Stacks.Workers.RSSLivenessJob do
       )
   end
 
-  defp head_request(url) do
-    req = Finch.build(:head, url)
-
-    # ⚠️ `receive_timeout` bounds each CHUNK, not the request — see the note in
-    # `Core.Application`. This is an un-seamed Finch call in a worker, the same
-    # shape as the one #377 fixed in DiscoverAuthorSourcesJob; it is survivable
-    # today only because `rss_liveness_job_test.exs` uses `.invalid` hosts,
-    # which cannot resolve. Tracked as a follow-up, not fixed here.
-    case Finch.request(req, Stacks.Finch, receive_timeout: @head_timeout) do
-      {:ok, %Finch.Response{status: status}} ->
-        {:ok, status}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  # The seamed transport (#381c) — same shape as #377's fix in
+  # DiscoverAuthorSourcesJob. `RssFetcher.probe/1` bounds both the per-chunk
+  # AND whole-response phases (`request_opts(:probe)`), which the bare Finch
+  # call here did not.
+  defp rss_fetcher do
+    Application.get_env(:core, :rss_fetcher, Stacks.Enrichment.RssFetcher)
   end
 end

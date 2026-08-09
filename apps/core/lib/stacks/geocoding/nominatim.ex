@@ -54,8 +54,10 @@ defmodule Stacks.Geocoding.Nominatim do
       "#{base_url()}/search?" <>
         URI.encode_query(%{"q" => query, "format" => "json", "limit" => "1"})
 
+    # request_timeout bounds the WHOLE response (receive_timeout is
+    # per-chunk — #381d); a limit=1 geocode result is tiny.
     Finch.build(:get, url, [{"user-agent", @user_agent}, {"accept", "application/json"}])
-    |> Finch.request(Stacks.Finch, receive_timeout: 10_000)
+    |> Finch.request(Stacks.Finch, receive_timeout: 10_000, request_timeout: 15_000)
     |> handle(query)
   end
 

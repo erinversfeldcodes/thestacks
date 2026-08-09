@@ -80,7 +80,7 @@ defmodule Stacks.Enrichment.ScraperClient do
         )
 
       req
-      |> Finch.request(Stacks.Finch, receive_timeout: 600_000)
+      |> Finch.request(Stacks.Finch, receive_timeout: 600_000, request_timeout: 600_000)
       |> handle_titles_response(store_name)
     end
   end
@@ -202,7 +202,7 @@ defmodule Stacks.Enrichment.ScraperClient do
           if_modified_since: Keyword.get(validators, :last_modified) || ""
         })
       )
-      |> Finch.request(Stacks.Finch, receive_timeout: 30_000)
+      |> Finch.request(Stacks.Finch, receive_timeout: 30_000, request_timeout: 30_000)
       |> handle_fetch_response(store_name, store_fuse)
     end
   end
@@ -235,7 +235,7 @@ defmodule Stacks.Enrichment.ScraperClient do
       )
       # Longer than `fetch_page`'s 30s: the walk fetches several documents and pauses between them
       # on purpose. The courtesy delay is the reason this needs room, not slowness.
-      |> Finch.request(Stacks.Finch, receive_timeout: 120_000)
+      |> Finch.request(Stacks.Finch, receive_timeout: 120_000, request_timeout: 120_000)
       |> handle_sitemap_response(store_name, store_fuse)
     end
   end
@@ -447,7 +447,7 @@ defmodule Stacks.Enrichment.ScraperClient do
     with :ok <- ask(@fuse_name) do
       # Minutes, not seconds: the sweep waits on the shop's rate limit by design.
       index_request(store_name)
-      |> Finch.request(Stacks.Finch, receive_timeout: 600_000)
+      |> Finch.request(Stacks.Finch, receive_timeout: 600_000, request_timeout: 600_000)
       |> handle_index_response(store_name)
     end
   end
@@ -516,7 +516,7 @@ defmodule Stacks.Enrichment.ScraperClient do
       %{isbn: isbn, store: store_name}
     )
 
-    case Finch.request(req, Stacks.Finch, receive_timeout: 30_000) do
+    case Finch.request(req, Stacks.Finch, receive_timeout: 30_000, request_timeout: 30_000) do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
         duration = System.monotonic_time() - start_time
 

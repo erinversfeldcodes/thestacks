@@ -67,7 +67,7 @@ defmodule Stacks.AI.TogetherClient do
       )
 
     req
-    |> Finch.request(Stacks.Finch, receive_timeout: 30_000)
+    |> Finch.request(Stacks.Finch, receive_timeout: 30_000, request_timeout: 30_000)
     |> handle_response()
   end
 
@@ -167,7 +167,7 @@ defmodule Stacks.AI.TogetherClient do
           ],
           body
         )
-        |> Finch.request(Stacks.Finch, receive_timeout: 30_000)
+        |> Finch.request(Stacks.Finch, receive_timeout: 30_000, request_timeout: 30_000)
         |> handle_response()
     end
   end

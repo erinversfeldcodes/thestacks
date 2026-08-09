@@ -70,7 +70,9 @@ defmodule Stacks.Discovery.BraveClient do
           ]
         )
 
-      case Finch.request(req, Stacks.Finch, receive_timeout: 15_000) do
+      # request_timeout bounds the WHOLE response (receive_timeout is
+      # per-chunk — #381d); result JSON is small, so 20s total is generous.
+      case Finch.request(req, Stacks.Finch, receive_timeout: 15_000, request_timeout: 20_000) do
         {:ok, %Finch.Response{status: 200, body: body, headers: headers}} ->
           increment_daily_counter()
           parse_results(maybe_gunzip(body, headers))

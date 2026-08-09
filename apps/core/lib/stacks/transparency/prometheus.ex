@@ -40,7 +40,12 @@ defmodule Stacks.Transparency.Prometheus do
 
     req = Finch.build(:get, url, [{"Accept", "application/json"}])
 
-    case Finch.request(req, Stacks.Finch, receive_timeout: @receive_timeout) do
+    # request_timeout bounds the WHOLE response (receive_timeout is
+    # per-chunk — #381d); an instant-query scalar is tiny.
+    case Finch.request(req, Stacks.Finch,
+           receive_timeout: @receive_timeout,
+           request_timeout: @receive_timeout
+         ) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         parse_scalar(body)
 
