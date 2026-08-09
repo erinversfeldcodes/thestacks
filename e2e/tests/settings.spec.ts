@@ -865,10 +865,11 @@ test.describe("Settings — Notifications UI flow", () => {
     await expect(toggle(page, "Price Drops")).toHaveClass(/toggle--on/);
 
     // Reload: the SPA re-fetches and the flip is still there (durable, not an
-    // optimistic client-only change). The onboarding overlay reappears (its
-    // dismissal is not persisted), so dismiss it again before reading state.
+    // optimistic client-only change). Onboarding does NOT reappear — #395 wired
+    // the completion port to localStorage, so a finished onboarding stays
+    // dismissed across a reload. (This test used to dismiss it a second time
+    // here, which relied on the very bug #395 fixed.)
     await page.reload();
-    await dismissOnboarding(page);
     await expect(toggle(page, "Price Drops")).toHaveText("On");
   });
 });
