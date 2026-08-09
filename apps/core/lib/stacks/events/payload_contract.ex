@@ -93,6 +93,11 @@ defmodule Stacks.Events.PayloadContract do
     "user.profile_visibility_changed" => %{version: 1, keys: ~w(visibility)},
     "user.location_updated" => %{version: 1, keys: ~w()},
     "user.password_changed" => %{version: 1, keys: ~w()},
+    # US-14.1.3 — deliberately no code, no note, no invited address; a payload
+    # carrying any of those would fail this contract in test.
+    "invite.issued" => %{version: 1, keys: ~w(max_uses expires_at email_bound)},
+    "invite.redeemed" => %{version: 1, keys: ~w(user_id use_count)},
+    "invite.revoked" => %{version: 1, keys: ~w()},
     "user.notifications_updated" => %{version: 1, keys: ~w()},
     "user.visibility_recap_completed" => %{
       version: 1,
@@ -154,7 +159,10 @@ defmodule Stacks.Events.PayloadContract do
     "rss_feed_url" => "external author RSS URL, not user PII",
     "website_url" => "external author website URL, not user PII",
     "cover_image_url" => "book cover image URL, not user PII",
-    "storage_path" => "opaque object-storage key, not free-text personal data"
+    "storage_path" => "opaque object-storage key, not free-text personal data",
+    # US-14.1.3: a BOOLEAN — whether the invitation is bound to some address —
+    # deliberately chosen so event_log never carries the address itself.
+    "email_bound" => "boolean flag (bound-or-not), never the address itself"
   }
 
   # Substrings that mark a payload key as personal/free-text-shaped (PII-lint trigger).

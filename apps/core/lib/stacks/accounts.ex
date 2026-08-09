@@ -21,6 +21,7 @@ defmodule Stacks.Accounts do
   alias Guardian.DB.Token, as: GuardianDbToken
   alias Stacks.Accounts.ArgonPool
   alias Stacks.Accounts.AuthTokenFamily
+  alias Stacks.Accounts.Invites
   alias Stacks.Accounts.ReservedHandles
   alias Stacks.Accounts.User
   alias Stacks.Duration
@@ -635,7 +636,11 @@ defmodule Stacks.Accounts do
     Enum.each(ids, fn id ->
       Deletion.delete_user_data(id,
         reason: "unverified account expired — email never confirmed within TTL",
-        actor: "system:registration_reap"
+        actor: "system:registration_reap",
+        # US-14.1.3: an abandoned signup never became a participant, so the
+        # invitation it consumed is restored. Explicit opt, never inferred
+        # from the actor string.
+        restore_invite: true
       )
     end)
   rescue
@@ -666,6 +671,15 @@ defmodule Stacks.Accounts do
   # they cannot see.
   defp do_register(attrs, retries_left) do
     Multi.new()
+    # Invite gate (US-14.1.3): when INVITE_ONLY_REGISTRATION is on, the code is
+    # locked and validated BEFORE the user insert and consumed after it — all
+    # inside this one transaction, so two concurrent redemptions of a
+    # single-use code produce exactly one account. When the flag is off these
+    # calls add nothing and any submitted code is ignored.
+    |> Invites.redeem_steps(
+      attrs[:invite_code] || attrs["invite_code"],
+      attrs[:email] || attrs["email"]
+    )
     |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
       # Generate the FINAL, verifiable confirmation token synchronously so it is
@@ -696,6 +710,7 @@ defmodule Stacks.Accounts do
 
       {:ok, user}
     end)
+    |> Invites.consume_steps()
     |> Repo.transaction()
     |> case do
       {:ok, %{set_confirmation: user}} ->

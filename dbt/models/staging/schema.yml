@@ -1309,3 +1309,43 @@ models:
         description: Timestamp when the record was created.
         tests:
           - not_null
+
+  - name: stg_invite_codes
+    description: >
+      Proto-synced staging model for invite_codes.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: code_prefix
+        description: Code prefix.
+        tests:
+          - not_null
+      - name: issued_by_id
+        description: Issued by id.
+      - name: max_uses
+        description: Max uses.
+        tests:
+          - not_null
+      - name: use_count
+        description: Use count.
+        tests:
+          - not_null
+      - name: expires_at
+        description: Expires at.
+      - name: redeemed_by_id
+        description: Redeemed by id.
+      - name: redeemed_at
+        description: Redeemed at.
+      - name: revoked_at
+        description: Revoked at.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null

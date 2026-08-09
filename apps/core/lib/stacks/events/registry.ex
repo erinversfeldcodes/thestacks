@@ -272,7 +272,13 @@ defmodule Stacks.Events.Registry do
     "enrichment.author_sources_discovered",
     "third_space.created",
     "third_space.delisted",
-    "costs.refreshed"
+    "costs.refreshed",
+    # Invitation lifecycle (US-14.1.3) — audit record only. The owner is the
+    # one issuing invitations, so there is nobody to notify. Payloads carry no
+    # code, no note, no address (email_bound is a boolean, never the address).
+    "invite.issued",
+    "invite.redeemed",
+    "invite.revoked"
   ]
 
   # Catalogued event types whose emitter does not exist YET — the consumer-side

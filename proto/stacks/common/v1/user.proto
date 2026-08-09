@@ -153,3 +153,42 @@ message User {
   // DB-only — never sent on the wire (clients learn lock state from the 423 response).
   google.protobuf.Timestamp locked_until = 29 [json_name = "locked_until"];
 }
+
+// An invitation to the closed beta (US-14.1.3, invite-only registration).
+//
+// The full code is a bearer secret shown once at issue time and never stored —
+// only its SHA-256 hash (the redemption lookup key) and a short display prefix
+// survive. `note` (the owner's free text about the invitee) and
+// `invited_email` are personal data: scrubbed by GDPR erasure, excluded from
+// the warehouse, and never written to event_log.
+message InviteCode {
+  // Row id.
+  string id = 1 [json_name = "id"];
+  // SHA-256 of the normalised code, hex. DB-only; never on the wire.
+  string code_hash = 2 [json_name = "code_hash"];
+  // First display groups of the code (e.g. "STK-4F2A") for the admin list.
+  string code_prefix = 3 [json_name = "code_prefix"];
+  // The owner who wrote the invitation. Nulled if that account is deleted.
+  string issued_by_id = 4 [json_name = "issued_by_id"];
+  // Owner's private note about the invitee ("Mara — book club"). Personal data.
+  string note = 5 [json_name = "note"];
+  // Optional binding to one email address. Personal data.
+  string invited_email = 6 [json_name = "invited_email"];
+  // How many redemptions the code allows (default 1).
+  int32 max_uses = 7 [json_name = "max_uses"];
+  // How many redemptions have happened.
+  int32 use_count = 8 [json_name = "use_count"];
+  // NULL = never expires.
+  google.protobuf.Timestamp expires_at = 9 [json_name = "expires_at"];
+  // The FIRST redeemer (a multi-use invitation records its first taker).
+  string redeemed_by_id = 10 [json_name = "redeemed_by_id"];
+  // When the first redemption happened.
+  google.protobuf.Timestamp redeemed_at = 11 [json_name = "redeemed_at"];
+  // Revocation is a timestamp, not a delete — the beta's issue history is
+  // legitimate record-keeping.
+  google.protobuf.Timestamp revoked_at = 12 [json_name = "revoked_at"];
+  // When the invitation was written.
+  google.protobuf.Timestamp created_at = 13 [json_name = "created_at"];
+  // When the row last changed.
+  google.protobuf.Timestamp updated_at = 14 [json_name = "updated_at"];
+}

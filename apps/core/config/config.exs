@@ -101,7 +101,10 @@ config :core, Oban,
        # Reaps abandoned signups: accounts that never confirmed their email and
        # whose 24h confirmation link has expired. Each is erased via the full
        # GDPR right-to-erasure path. 09:00 UTC (an otherwise-empty slot).
-       {"0 9 * * *", Stacks.Workers.ExpiredUnverifiedAccountsJob}
+       {"0 9 * * *", Stacks.Workers.ExpiredUnverifiedAccountsJob},
+       # US-14.1.3: expired unredeemed invitations hold PII about people who
+       # never became users and can never exercise erasure — dropped on a clock.
+       {"30 9 * * *", Stacks.Workers.ExpiredInvitesSweepJob}
      ]}
   ],
   # Queue concurrency is sized against the ObanRepo pool + each queue's real

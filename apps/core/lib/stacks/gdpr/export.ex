@@ -93,6 +93,21 @@ defmodule Stacks.GDPR.Export do
       |> where([c], c.author_id == ^user_id)
       |> Repo.all()
 
+    # US-14.1.3: invitations the user REDEEMED — their entry into the beta is
+    # part of their record. Deliberately excluded: `code_hash` (a credential),
+    # `note` (the OWNER's private writing about them, not their own data), and
+    # anything they merely issued as owner (platform-operations data, on the
+    # admin surface).
+    invitations =
+      Stacks.Accounts.InviteCode
+      |> where([i], i.redeemed_by_id == ^user_id)
+      |> select([i], %{
+        code_prefix: i.code_prefix,
+        redeemed_at: i.redeemed_at,
+        expires_at: i.expires_at
+      })
+      |> Repo.all()
+
     export = %{
       exported_at: DateTime.utc_now(),
       # Every personal / user-provided column on op.users is exported here.
@@ -139,7 +154,8 @@ defmodule Stacks.GDPR.Export do
       embeddings_summary: embeddings_summary,
       uploaded_images: uploaded_images,
       blog_posts: Enum.map(blog_posts, &blog_post_to_map/1),
-      blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1)
+      blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),
+      invitations: invitations
     }
 
     {:ok, export}

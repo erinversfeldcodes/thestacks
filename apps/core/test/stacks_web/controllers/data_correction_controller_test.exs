@@ -154,7 +154,8 @@ defmodule StacksWeb.DataCorrectionControllerTest do
 
       assert Enum.map(corrections, & &1["name"]) == [
                "normalise_edition_isbn10",
-               "stale_seed_edition_isbn"
+               "stale_seed_edition_isbn",
+               "seed_edition_verification_source"
              ]
 
       for correction <- corrections do

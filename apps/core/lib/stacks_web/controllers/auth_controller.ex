@@ -32,9 +32,26 @@ defmodule StacksWeb.AuthController do
         # low-cardinality and alertable for a registration-failure spike.
         :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :ok})
 
+        if Stacks.FeatureFlags.invite_only_registration?() do
+          :telemetry.execute([:stacks, :auth, :invite], %{count: 1}, %{result: :ok})
+        end
+
         conn
         |> put_status(201)
         |> json(%{message: "confirmation_email_sent"})
+
+      # Invite-gate refusals (US-14.1.3). Counted on the invite event, NOT as
+      # registration errors, so the registration-failure alert does not fire on
+      # a working gate. `result` is a bounded label derived from the outcome,
+      # never from user input.
+      {:error, invite_error} when is_atom(invite_error) ->
+        :telemetry.execute([:stacks, :auth, :invite], %{count: 1}, %{
+          result: invite_telemetry_label(invite_error)
+        })
+
+        conn
+        |> put_status(invite_error_status(invite_error))
+        |> json(%{error: Atom.to_string(invite_error)})
 
       {:error, changeset} ->
         :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :error})
@@ -417,4 +434,16 @@ defmodule StacksWeb.AuthController do
       _ -> conn.remote_ip |> :inet.ntoa() |> to_string()
     end
   end
+
+  # US-14.1.3's status table: expired 410, exhausted 409, everything else 403.
+  defp invite_error_status(:invite_expired), do: 410
+  defp invite_error_status(:invite_exhausted), do: 409
+  defp invite_error_status(_), do: 403
+
+  defp invite_telemetry_label(:invite_required), do: :required
+  defp invite_telemetry_label(:invite_invalid), do: :invalid
+  defp invite_telemetry_label(:invite_expired), do: :expired
+  defp invite_telemetry_label(:invite_revoked), do: :revoked
+  defp invite_telemetry_label(:invite_exhausted), do: :exhausted
+  defp invite_telemetry_label(:invite_email_mismatch), do: :email_mismatch
 end

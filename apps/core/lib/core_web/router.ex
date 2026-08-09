@@ -364,6 +364,24 @@ defmodule CoreWeb.Router do
     post "/auth/verify_mfa", AdminAuthController, :verify_mfa
   end
 
+  # Invitation lookup (US-14.1.3) — public, but on the shared :auth rate bucket:
+  # a code-guessing sweep and a password-guessing sweep are the same attack
+  # against the same door (#373), so they share one budget.
+  scope "/api/auth", StacksWeb do
+    pipe_through [:api, :rate_limit_auth]
+    get "/invite/:code", InviteController, :show
+  end
+
+  # Invitation issue/revoke (US-14.1.3) — the owner widens the beta, nobody
+  # else. `:require_owner` on top of `:admin` for the same stale-token reason
+  # as the data-correction routes (#340).
+  scope "/api/admin", StacksWeb do
+    pipe_through [:api, :admin, :require_owner, :rate_limit_admin]
+    get "/invites", InviteAdminController, :index
+    post "/invites", InviteAdminController, :create
+    delete "/invites/:id", InviteAdminController, :delete
+  end
+
   # Admin auth — requires valid admin session with MFA verified
   scope "/api/admin", StacksWeb do
     pipe_through [:api, :admin]

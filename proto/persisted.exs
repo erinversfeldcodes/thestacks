@@ -295,6 +295,49 @@
         locked_until: %{dbt_exclude: true}
       }
     },
+    %{
+      proto_file: "stacks/common/v1/user.proto",
+      proto_message: "InviteCode",
+      table_name: "invite_codes",
+      schema_prefix: "op",
+      ecto_module: Stacks.Accounts.InviteCode,
+      ecto_path: "lib/stacks/gen/accounts/invite_code.ex",
+      dbt_path: "stg_invite_codes.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      dbt_grant: true,
+      indexes: [
+        # The redemption lookup — the code arrives, is hashed, and must find
+        # its row in one indexed read.
+        %{name: "invite_codes_code_hash_index", columns: [:code_hash], unique: true},
+        # The admin list, newest first.
+        %{name: "invite_codes_created_at_index", columns: [{:desc, :created_at}]}
+      ],
+      field_overrides: %{
+        # The credential's hash. NEVER in the warehouse — `wh` has no erasure
+        # path and a hash of a live bearer secret is still a credential.
+        code_hash: %{null: false, dbt_exclude: true},
+        code_prefix: %{null: false},
+        # Free-text PII (US-14.1.3): the owner's note about a person and that
+        # person's address. Erasure scrubs both; the warehouse never sees them.
+        note: %{dbt_exclude: true},
+        invited_email: %{dbt_exclude: true},
+        max_uses: %{default: 1, null: false},
+        use_count: %{default: 0, null: false},
+        # `nilify_all` both ways: deleting an account must never delete the
+        # beta's issue/redemption record, only the reference to the person.
+        issued_by_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :nilify_all
+        },
+        redeemed_by_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :nilify_all
+        }
+      }
+    },
 
     # -------------------------------------------------------------------------
     # Books

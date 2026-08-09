@@ -26,4 +26,19 @@ defmodule Stacks.FeatureFlags do
   def age_gating_enabled? do
     Application.get_env(:core, :age_gating_enabled, false)
   end
+
+  @doc """
+  Whether registration is gated behind an invitation (US-14.1.3, closed beta).
+
+  When `true`, `POST /api/auth/register` refuses any request whose
+  `invite_code` is missing or not redeemable, and the SPA (told via
+  `GET /api/config`) replaces the Register form with the invite-only panel.
+  Flipping it off restores open registration with no code change. The SPA
+  fails CLOSED on a config decode failure — a config blip must not reopen
+  public registration.
+  """
+  @spec invite_only_registration?() :: boolean()
+  def invite_only_registration? do
+    Application.get_env(:core, :invite_only_registration, false)
+  end
 end

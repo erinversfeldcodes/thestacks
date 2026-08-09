@@ -16,9 +16,13 @@ defmodule StacksWeb.ConfigController do
   @doc """
   GET /api/config — returns the frontend-visible feature-flag map.
 
-  Response: `{"ageGatingEnabled": <boolean>}`.
+  Response: `{"ageGatingEnabled": <boolean>, "inviteOnly": <boolean>}` — the
+  flat-map contract ADR-020 established, one boolean per flag.
   """
   def show(conn, _params) do
-    json(conn, %{ageGatingEnabled: Stacks.FeatureFlags.age_gating_enabled?()})
+    json(conn, %{
+      ageGatingEnabled: Stacks.FeatureFlags.age_gating_enabled?(),
+      inviteOnly: Stacks.FeatureFlags.invite_only_registration?()
+    })
   end
 end

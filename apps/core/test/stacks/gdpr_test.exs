@@ -104,7 +104,7 @@ defmodule Stacks.GDPRTest do
       assert {:error, _} = Export.export_user_data(Ecto.UUID.generate())
     end
 
-    test "payload contains all 11 documented keys" do
+    test "payload contains all 12 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -120,7 +120,9 @@ defmodule Stacks.GDPRTest do
                  :embeddings_summary,
                  :uploaded_images,
                  :blog_posts,
-                 :blog_comments
+                 :blog_comments,
+                 # US-14.1.3: invitations the user redeemed (prefix-only).
+                 :invitations
                ])
     end
 

@@ -128,7 +128,12 @@ defmodule Stacks.FactoryProtoValidationTest do
     Stacks.Audit.Entry,
     Stacks.Books.IsbnResolverCacheEntry,
     Stacks.Books.TitleSearchCacheEntry,
-    Stacks.Feeds.FeedCacheEntry
+    Stacks.Feeds.FeedCacheEntry,
+    # US-14.1.3: rows are only ever written through Stacks.Accounts.Invites
+    # (the code/hash pair must be generated together); invites_test builds
+    # them via Invites.issue/2, so a bare-struct factory would invite exactly
+    # the hashless shape production cannot produce.
+    Stacks.Accounts.InviteCode
   ]
 
   # ── Per-factory field coverage tests ──────────────────────────────────────

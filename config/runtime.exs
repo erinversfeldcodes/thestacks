@@ -117,6 +117,13 @@ else
   # through Stacks.FeatureFlags.age_gating_enabled?/0.
   config :core, :age_gating_enabled, System.get_env("AGE_GATING_ENABLED") == "true"
 
+  # Invite-only registration (US-14.1.3, closed beta). When on, POST
+  # /api/auth/register requires a redeemable invitation code and the SPA shows
+  # the invite-only panel instead of the Register form. Read only through
+  # Stacks.FeatureFlags.invite_only_registration?/0; surfaced to the SPA on
+  # GET /api/config (which fails CLOSED client-side on decode failure).
+  config :core, :invite_only_registration, System.get_env("INVITE_ONLY_REGISTRATION") == "true"
+
   # METRICS_SCRAPE_TOKEN guards /internal/metrics. StacksWeb.Plugs.MetricsAuth
   # requires a matching `Authorization: Bearer <token>` from public callers —
   # which, post-ADR-021, is the only way in: the store is fed by push

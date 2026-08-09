@@ -240,6 +240,26 @@ defmodule Stacks.GDPR.Deletion do
       # operator break-glass summary reports (`Stacks.Release.do_erase/2`).
       {:ok, session_row_count(repo, user_id)}
     end)
+    # US-14.1.3: settle invitations that NAME this user, before the row goes.
+    # One ordered step, deliberately not two: the scrub nulls `redeemed_by_id`,
+    # which is the only thing identifying WHICH invitation to restore — split
+    # or reordered, the restore silently matches nothing on every reap forever.
+    #
+    # Restore is CONDITIONAL on the explicit `:restore_invite` opt (default
+    # false). Only the two abandoned-signup reap paths pass true — an invitee
+    # who never confirmed never became a participant, so their key is unspent.
+    # A user-requested erasure must NOT resurrect the code: it was legitimately
+    # consumed, and consumption is not undone by the consumer leaving. Never
+    # inferred from `:actor` — that is a free-text audit label, and branching
+    # security behaviour on a log string breaks when someone rewords it.
+    #
+    # The scrub itself is unconditional: `note` is the owner's free text about
+    # the invitee and `invited_email` is the invitee's address — author-nulling
+    # alone would be a breach. The row survives (the beta's issue/revoke
+    # history is legitimate record-keeping); every field naming a person goes.
+    |> Multi.run(:settle_invites_naming_user, fn repo, _ ->
+      settle_invites(repo, user_id, Keyword.get(opts, :restore_invite, false))
+    end)
     |> Multi.run(:delete_user, fn repo, _ ->
       case repo.get(User, user_id) do
         nil -> {:error, :user_not_found}
@@ -306,5 +326,46 @@ defmodule Stacks.GDPR.Deletion do
       {:ok, :reset}
     end)
     |> Repo.transaction()
+  end
+
+  # US-14.1.3 — see the :settle_invites_naming_user step's comment above.
+  # Restore (conditional) BEFORE scrub (unconditional): the scrub nulls
+  # `redeemed_by_id`, the only pointer identifying which invitation to restore.
+  defp settle_invites(repo, user_id, restore?) do
+    user_email =
+      case repo.get(User, user_id) do
+        nil -> nil
+        user -> user.email
+      end
+
+    if restore? do
+      repo.update_all(
+        from(i in Stacks.Accounts.InviteCode,
+          where: i.redeemed_by_id == ^user_id and i.use_count > 0
+        ),
+        inc: [use_count: -1],
+        set: [redeemed_at: nil]
+      )
+    end
+
+    {:ok, %{scrubbed: scrub_invites(repo, user_id, user_email), restored: restore?}}
+  end
+
+  # The unconditional half of the settle: every field naming a person goes,
+  # whichever restore branch ran. The row itself survives as beta history.
+  defp scrub_invites(repo, user_id, user_email) do
+    {scrubbed, _} =
+      repo.update_all(
+        from(i in Stacks.Accounts.InviteCode,
+          where:
+            i.redeemed_by_id == ^user_id or
+              (not is_nil(i.invited_email) and
+                 fragment("lower(?)", i.invited_email) == ^String.downcase(user_email || "")),
+          where: not is_nil(i.note) or not is_nil(i.invited_email) or not is_nil(i.redeemed_by_id)
+        ),
+        set: [note: nil, invited_email: nil, redeemed_by_id: nil]
+      )
+
+    scrubbed
   end
 end

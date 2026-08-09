@@ -568,7 +568,14 @@ defmodule Stacks.GDPR.DeletionTest do
       # erased by the `:erase_comments` Multi step in delete_user_data/1 (body
       # tombstoned + author_id nulled). Nilify on author_id is retained to
       # preserve threaded replies. See the "blog comment erasure" test above.
-      "post_comments" => "free-text body erased by :erase_comments step; nilify preserves thread"
+      "post_comments" => "free-text body erased by :erase_comments step; nilify preserves thread",
+      # US-14.1.3: the beta's issue/redemption history is platform record-
+      # keeping, so the row survives — but `note` and `invited_email` (the PII)
+      # are scrubbed by the ordered `:settle_invites_naming_user` Multi step,
+      # which also nulls `redeemed_by_id`. See the invite settle tests in
+      # invites_test.exs (both restore branches exercised).
+      "invite_codes" =>
+        "note/invited_email scrubbed by :settle_invites_naming_user step; nilify keeps beta history"
     }
 
     test "every op.* FK that references op.users cascades, or nullifies only on the allowlist" do
