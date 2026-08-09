@@ -704,7 +704,29 @@
         "wave11_validated_live": "#367 consent persists server-side (settings:132 real login) \u2713; #395 onboarding persists across reload (settings:843, and #395's fix is what the spec update reflects) \u2713; #357/#370/#372/#378 + all settings/privacy/nav surfaces in the 298 pass.",
         "verdict": "Finalize GREEN \u2014 Wave 11 landed batch validated via real-login E2E on a clean HEAD stack."
       },
-      "remaining_after_finalize": "Code items still to BUILD: #336, #381a-e, #347, #384, #394, #388 (nearest-x, decided), #368 (scoped refetch, decided). The finalize validated everything LANDED; these are net-new."
+      "remaining_after_finalize": "Code items still to BUILD: #336, #381a-e, #347, #384, #394, #388 (nearest-x, decided), #368 (scoped refetch, decided). The finalize validated everything LANDED; these are net-new.",
+      "RESUMPTION_NEXT_SESSION": {
+        "status": "Wave 11 in progress. Landed+committed+finalize-E2E-validated: launch-blockers (#357/#369/#378/#358/#391), GDPR/security (#338/#386/#392/#393), verify-and-closed (#377/#385/#371/#380), #367(a), #366, #395, #381a.",
+        "finalize": "just ci GREEN on a clean HEAD preview (real-login E2E: 298 pass; #367 consent + #395 onboarding validated live). 2 known contention flakes (#275-class, pass solo). settings.spec.ts:843 fixed (was relying on the pre-#395 bug).",
+        "remaining_to_build": [
+          "#381b: seam circuit_breakers.ex 4 bare Finch sites (302/350/434/593) via probe_http_get.",
+          "#381c: rss_liveness_job.ex:67 head_request \u2192 RssFetcher.probe (one-liner, like #377).",
+          "#381d: request_timeout audit at the remaining Finch sites (cover site already done in 381a).",
+          "#381e: the outbound-client :test-default gate (model on check-session-expiry-coverage.sh).",
+          "#336: KEEP the review vertical (reviews ARE planned, US-2.1.1); mark enrichment.reviews_scraped orphan event as pending-US-2.1.1 (not a live contract) + add inverse registry-completeness guard (catalogued\u21d2emit-site) \u2014 WILL surface other orphans, disposition them.",
+          "#347: seam program-test effect translators (confirmBookRequest in Api.elm consumed by both Api + the translator); fix uploadEffects' 5 branches.",
+          "#384: NEW e2e/tests/unmerge-edition.spec.ts (chromium; uses #371 MFA helpers \u2014 now working). Preview + MFA verified live.",
+          "#394: intermittent mfa-confirm 422 (TOTP window/base32 edge) \u2014 root-cause + make deterministic.",
+          "#388: roving-tabindex NEAREST-X column nav (decided) \u2014 pure fn over the 990px-packed row model; keep away from Main's Escape/overlay-focus routing.",
+          "#368: scoped refetch on reconnect (decided) \u2014 current-routed-page-in-NetworkError only, on offline->online transition; verify by unit (navigator.onLine artifact blocks live drive)."
+        ],
+        "housekeeping": [
+          "Colima (docker daemon) LEFT RUNNING (started to run the finalize dockle scan). `colima stop` to restore. A fresh finalize/deploy benefits from it being up.",
+          "1Q84 (a1b2c3d4-...-000000001104) age_gated on the preview COW branch from the #357 drive (raise-only route can't revert); harmless on the throwaway; a fresh deploy reseeds it.",
+          "Preview stack is currently CLEAN + HEALTHY (rebuilt 2026-08-09, fresh Neon branch)."
+        ],
+        "gotchas_learned_this_session": "deploy-preview.sh must run via `just run` (pinned py3.12; zip(strict=) dies on system 3.9) \u2014 memorized. Do NOT background `just run mix`/`just ci` across a turn (collides with the bare-mix Stop hook \u2192 _build poison). Injected sessions can't validate auth-init-dependent flows (use real-login E2E)."
+      }
     }
   },
   "_owner_rulings_wave4_2026_07_30": [
