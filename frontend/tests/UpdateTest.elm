@@ -37,6 +37,9 @@ libraryInit =
     -- No pending undo: this fixture is a plain visit, not an arrival off a
     -- removal. `Bookshelf.withPendingUndo` is the only thing that changes it.
     , undoToast = Bookshelf.ToastHidden
+
+    -- No spine has taken arrow-key focus yet (#388).
+    , focusedSpine = Nothing
     }
 
 

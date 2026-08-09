@@ -43,10 +43,10 @@ User-facing (keyboard). No backend.
   coordinate, don't collide.
 
 ## Definition of Done
-- [ ] Column model decided + recorded in US-19.1.2 — evidence: the story edit
-- [ ] Roving-tabindex arrow-key nav on a bookcase grid — evidence: program tests + keyboard drive
-- [ ] No regression to Tab reachability / overlay focus / Escape — evidence: existing suites green + drive
-- [ ] `staff-review` verdict recorded below
+- [x] Column model decided + recorded in US-19.1.2 — evidence: owner decision NEAREST-X; `docs/user_stories/US-19.1.2-keyboard-nav.md` decision block added 2026-08-09 (ties → earlier book so ↑↓ does not drift; keydown on the spine buttons, not a global subscription, so Main's Escape routing is untouched)
+- [x] Roving-tabindex arrow-key nav on a bookcase grid — evidence: `Page.Bookshelf.GridNav` (pure fn over `(bookId, spineWidth)` rows sharing the packer's `placementSpineWidth`); `GridNavTest.elm` (24 cases incl. the index-model-refuting nearest-x cases + keyDecoder claims exactly 6 keys) + 3 roving program tests in `BookshelfProgramTest.elm`. Mutation-probed: nearest-x → row-head mutation reds exactly the discriminating case; tabindex-always-0 mutation reds all 3 roving tests. KEYBOARD DRIVE DONE 2026-08-09 on the deployed preview (real owner login, /antilibrary, 32 spines): exactly one tabindex-0 spine; ArrowRight moved focus+tab stop with the amber ring visible (screenshot-verified — an occluded automation tab defers Elm's rAF repaint, the #368 filing's own harness note, so every step was read after a forced frame); ArrowDown landed nearest-x on the row below (The Goldfinch → The Book of Sand); End → row end; Enter opened the detail overlay; Escape closed it and returned focus to the SAME spine with the tab stop following — Main's routing intact and composing with the roving state
+- [x] No regression to Tab reachability / overlay focus / Escape — evidence: full Elm suite 1772/0 (incl. overlay focus-return + onboarding trap suites); `lint-elm.sh` fully green; the six-key decoder FAILS for Tab/Enter/Space/Escape so their defaults stand; drive re-checks at finalize
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out (LGTM WITH NOTES; the noted owed drive is now done)
 
 ## Dependencies
 Deferred from **#318** (Wave 8 8f). Independent of the rest of Wave 8. Owner to confirm defer-vs-now.
@@ -59,3 +59,7 @@ Filed 2026-08-05 from #318 8f's recorded defer. Rationale for deferring: WCAG 2.
 (Tab-reachable), and a correct roving-tabindex over a variable-length grid is a new widget well
 beyond 8f's attributes-only boundary, with an unanswered up/down UX question. Awaiting owner nod on
 whether to schedule now or hold to a later a11y pass.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM WITH NOTES** — GridNav is a pure function over the packer's own widths — the nearest-x tests refute an index model, not just exercise the happy path; keydown on the buttons keeps Main's Escape routing untouched. Note: the deployed-keyboard drive is owed at wave finalize before the remaining DoD box closes.

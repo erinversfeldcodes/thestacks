@@ -19,6 +19,7 @@ module Page.Bookshelf exposing
     )
 
 import Api
+import Browser.Dom
 import Components.AgeGate exposing (ageGate)
 import Components.BookList as BookList
 import Components.RSSLink as RSSLink
@@ -30,10 +31,12 @@ import Html.Attributes exposing (attribute, class, disabled, href)
 import Html.Events exposing (onClick)
 import Http
 import Navigation.Route exposing (Route(..))
+import Page.Bookshelf.GridNav as GridNav
 import Page.Bookshelf.Helpers
     exposing
         ( groupIntoRows
         , minShelfRows
+        , placementSpineWidth
         , viewBookcase
         , viewEmptyShelfMessage
         , viewLoadingShelfRows
@@ -174,6 +177,10 @@ type alias Model =
     -- Undo-remove (US-1.6.4 extension, #375). Seeded by `withPendingUndo` when the
     -- reader arrives here straight off a removal; see `UndoToast` below.
     , undoToast : UndoToast
+
+    -- Roving tabindex (#388): the spine that last held arrow-key focus, and so
+    -- the bookcase's single tab stop. Nothing = the grid's first spine.
+    , focusedSpine : Maybe String
     }
 
 
@@ -251,6 +258,8 @@ type Msg
     | UndoRemove
     | UndoCompleted (Result Http.Error ())
     | ToastExpired
+    | SpineNavKey String GridNav.Key
+    | SpineFocusAttempted
 
 
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
@@ -308,6 +317,7 @@ init config maybeToken userId =
       -- No toast by default: a plain visit to a bookshelf has nothing to undo.
       -- `withPendingUndo` is the only way in.
       , undoToast = ToastHidden
+      , focusedSpine = Nothing
       }
     , apiCmd
     )
@@ -509,6 +519,47 @@ update msg model =
                     -- this timer was started for, so it has nothing to retract.
                     ( model, Cmd.none, NoOut )
 
+        SpineNavKey originId key ->
+            case model.shelves of
+                Success shelves ->
+                    case GridNav.nextFocus key originId (navRows shelves) of
+                        Just nextId ->
+                            -- The Result is dropped: the model already points
+                            -- at the spine, and a focus miss (the node vanished
+                            -- mid-move) self-heals on the next key press.
+                            ( { model | focusedSpine = Just nextId }
+                            , Task.attempt (\_ -> SpineFocusAttempted)
+                                (Browser.Dom.focus ("spine-" ++ nextId))
+                            , NoOut
+                            )
+
+                        Nothing ->
+                            -- Off the edge of the grid: focus stays put.
+                            ( model, Cmd.none, NoOut )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        SpineFocusAttempted ->
+            ( model, Cmd.none, NoOut )
+
+
+{-| The packed rows as `GridNav` reasons about them: the SAME grouping the
+SpineView renders, each spine as ( book id, the width the packer gave it ).
+-}
+navRows : List Shelf -> List (List ( String, Int ))
+navRows shelves =
+    List.concatMap .placements shelves
+        |> groupIntoRows bookcaseInnerWidth
+        |> List.map
+            (List.map
+                (\placement ->
+                    ( placement.book |> Maybe.map .id |> Maybe.withDefault ""
+                    , placementSpineWidth placement
+                    )
+                )
+            )
+
 
 {-| The credential a **mutating** organiser branch requires.
 
@@ -699,7 +750,12 @@ loadError config err =
             "Your " ++ shelf ++ " is taking too long to arrive. The library may be busy — please try again."
 
         Http.NetworkError ->
-            "The library is unreachable. Check your connection, then try again."
+            -- No "try again": since #368 the app reloads this shelf itself the
+            -- moment the connection returns, so the copy promises exactly what
+            -- happens and asks for nothing.
+            "The library is unreachable. Your "
+                ++ shelf
+                ++ " will reload by itself as soon as the connection returns."
 
         _ ->
             "Could not load your " ++ shelf ++ ". Please try again."
@@ -994,10 +1050,38 @@ viewBookshelfFromShelves model shelves =
                 -- physical op.shelves boundaries (#151). The shelves themselves are
                 -- live backend infrastructure (place_book assigns each placement a
                 -- shelf); we simply render across them rather than per-shelf.
-                shelfRows =
+                packedRows =
                     List.concatMap .placements shelves
                         |> groupIntoRows bookcaseInnerWidth
-                        |> List.map (viewShelfRowClickable model.config.wearLevel BookClicked)
+
+                -- The bookcase's one tab stop (#388): the last arrow-focused
+                -- spine while it is still on the grid, else the first spine.
+                tabStopId =
+                    let
+                        gridIds =
+                            List.concatMap (List.filterMap (.book >> Maybe.map .id)) packedRows
+                    in
+                    case model.focusedSpine of
+                        Just focusedId ->
+                            if List.member focusedId gridIds then
+                                Just focusedId
+
+                            else
+                                List.head gridIds
+
+                        Nothing ->
+                            List.head gridIds
+
+                shelfRows =
+                    packedRows
+                        |> List.map
+                            (viewShelfRowClickable
+                                { wearLevel = model.config.wearLevel
+                                , onBookClicked = BookClicked
+                                , onNavKey = SpineNavKey
+                                , tabStopId = tabStopId
+                                }
+                            )
             in
             div [ class "bookshelf" ]
                 [ viewBookcase (minShelfRows 4 shelfRows)

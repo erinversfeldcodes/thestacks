@@ -18,6 +18,7 @@ import Dict
 import Expect
 import Html.Attributes
 import Http
+import Json.Encode as Encode
 import Page.Bookshelf as Bookshelf
 import ProgramTest
 import Test exposing (Test, describe, test)
@@ -55,11 +56,82 @@ suite =
         , bookshelfRendersPlacements
         , bookshelfEmptyState
         , bookshelfErrorState
+        , bookshelfErrorIsNotEmpty
         , bookshelfAgeGate
         , antiLibrarySuite
         , wishListSuite
         , noTokenSuite
         , viewModeSuite
+        , rovingTabindexSuite
+        ]
+
+
+{-| Roving tabindex (#388): the bookcase is ONE tab stop, and the arrow keys
+move it. Each negative (tabindex -1) is paired with the positive control that
+proves the selector is real — a suite asserting only "some spine has
+tabindex 0" would have passed before the widget existed, when EVERY spine did.
+-}
+rovingTabindexSuite : Test
+rovingTabindexSuite =
+    let
+        loaded =
+            startLibrary
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/bookshelves/library"
+                    (simulateBookshelfResponse
+                        [ namedPlacement "book-1" "First Book"
+                        , namedPlacement "book-2" "Second Book"
+                        ]
+                    )
+
+        spinesWithTabindex value =
+            Query.findAll
+                [ Selector.class "book-button"
+                , Selector.attribute (Html.Attributes.tabindex value)
+                ]
+
+        arrowRightOn spineId =
+            ProgramTest.simulateDomEvent
+                (Query.find [ Selector.id ("spine-" ++ spineId) ])
+                ( "keydown", Encode.object [ ( "key", Encode.string "ArrowRight" ) ] )
+    in
+    describe "roving tabindex (#388)"
+        [ test "roving_single_tab_stop: exactly the first spine is tabbable on load" <|
+            \() ->
+                loaded
+                    |> ProgramTest.expectView
+                        (Expect.all
+                            [ Query.findAll [ Selector.class "book-button" ]
+                                >> Query.count (Expect.equal 2)
+                            , spinesWithTabindex 0 >> Query.count (Expect.equal 1)
+                            , spinesWithTabindex 0
+                                >> Query.first
+                                >> Query.has [ Selector.id "spine-book-1" ]
+                            , spinesWithTabindex -1 >> Query.count (Expect.equal 1)
+                            ]
+                        )
+        , test "roving_arrow_moves_the_tab_stop: ArrowRight hands the tab stop to the next spine" <|
+            \() ->
+                loaded
+                    |> arrowRightOn "book-1"
+                    |> ProgramTest.expectView
+                        (Expect.all
+                            [ spinesWithTabindex 0 >> Query.count (Expect.equal 1)
+                            , spinesWithTabindex 0
+                                >> Query.first
+                                >> Query.has [ Selector.id "spine-book-2" ]
+                            ]
+                        )
+        , test "roving_grid_edge_keeps_focus: ArrowRight on the last spine moves nothing" <|
+            \() ->
+                loaded
+                    |> arrowRightOn "book-1"
+                    |> arrowRightOn "book-2"
+                    |> ProgramTest.expectView
+                        (spinesWithTabindex 0
+                            >> Query.first
+                            >> Query.has [ Selector.id "spine-book-2" ]
+                        )
         ]
 
 
@@ -177,6 +249,25 @@ bookshelfErrorState =
                     (shelfErrorResponse "/api/bookshelves/library" 500)
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Could not load your library. Please try again." ]
+
+
+{-| #368's higher-severity property, pinned: a failed load must NEVER read as
+an empty library. `bookshelf_empty_state` above is the positive control — it
+proves both marks (`shelf-row--empty`, the "waiting" copy) are what a real
+empty library shows, so the two `ensureViewHasNot`s here cannot pass vacuously.
+-}
+bookshelfErrorIsNotEmpty : Test
+bookshelfErrorIsNotEmpty =
+    test "bookshelf_error_is_not_the_empty_state: a failed load never paints an empty library" <|
+        \() ->
+            startLibrary
+                |> ProgramTest.simulateHttpResponse "GET"
+                    "/api/bookshelves/library"
+                    (TestHelpers.simulateBookshelfErrorResponse 500)
+                |> ProgramTest.ensureViewHasNot [ Selector.text "Your library is waiting" ]
+                |> ProgramTest.ensureViewHasNot [ Selector.class "shelf-row--empty" ]
+                |> ProgramTest.expectViewHas
+                    [ Selector.attribute (Html.Attributes.attribute "data-testid" "shelf-error") ]
 
 
 bookshelfAgeGate : Test

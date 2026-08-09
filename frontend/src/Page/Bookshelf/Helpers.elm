@@ -1,7 +1,9 @@
 module Page.Bookshelf.Helpers exposing
-    ( groupIntoRows
+    ( SpineGridConfig
+    , groupIntoRows
     , minShelfRows
     , pickTexture
+    , placementSpineWidth
     , viewBookcase
     , viewEmptyShelfMessage
     , viewLoadingShelfRows
@@ -13,7 +15,9 @@ module Page.Bookshelf.Helpers exposing
 import Components.Spine exposing (SpineTexture(..), WearLevel, book, spineHeight, spineWidth)
 import Html exposing (Html, button, div, p, span, text)
 import Html.Attributes exposing (attribute, class, id, style, tabindex)
-import Html.Events exposing (onClick)
+import Html.Events exposing (onClick, preventDefaultOn)
+import Json.Decode as Decode
+import Page.Bookshelf.GridNav as GridNav
 import Types.Book exposing (Book, bookCoverImageUrl, bookPageCount)
 import Types.Placement as Placement exposing (Placement)
 import Util.Plural
@@ -54,22 +58,35 @@ groupIntoRowsHelp maxWidth currentWidth currentRow remaining =
 
         p :: rest ->
             let
-                pageCount =
-                    case p.book of
-                        Just bk ->
-                            Maybe.withDefault 200 (bookPageCount bk)
-
-                        Nothing ->
-                            200
-
                 w =
-                    spineWidth pageCount + 2
+                    placementSpineWidth p
             in
             if currentWidth + w > maxWidth && not (List.isEmpty currentRow) then
                 List.reverse currentRow :: groupIntoRowsHelp maxWidth w [ p ] rest
 
             else
                 groupIntoRowsHelp maxWidth (currentWidth + w) (p :: currentRow) rest
+
+
+{-| The horizontal room one placement's spine occupies in a row (spine + gap).
+
+Exposed because `GridNav`'s nearest-x arithmetic (#388) must reason with the
+SAME widths this packer laid the row out with — a second width formula would
+navigate a different bookcase than the one on screen.
+
+-}
+placementSpineWidth : Placement -> Int
+placementSpineWidth placement =
+    let
+        pageCount =
+            case placement.book of
+                Just bk ->
+                    Maybe.withDefault 200 (bookPageCount bk)
+
+                Nothing ->
+                    200
+    in
+    spineWidth pageCount + 2
 
 
 {-| Render a bookcase frame wrapping inner content with side panels.
@@ -158,9 +175,24 @@ viewSpine wearLevel placement =
 
 {-| Render a shelf row where each book spine is clickable.
 The onBookClicked callback receives the Book data when a spine is clicked.
+
+`tabStopId` is the roving tabindex (#388): exactly one spine per bookcase
+carries `tabindex 0` — the last-focused one, or the grid's first spine — and
+every other spine is reachable from it with the arrow keys via `onNavKey`.
+`Nothing` (no roving state, e.g. the plain `viewShelfRow`) leaves every spine
+a tab stop, the pre-#388 behaviour.
+
 -}
-viewShelfRowClickable : WearLevel -> (Book -> msg) -> List Placement -> Html msg
-viewShelfRowClickable wearLevel onBookClicked placements =
+type alias SpineGridConfig msg =
+    { wearLevel : WearLevel
+    , onBookClicked : Book -> msg
+    , onNavKey : String -> GridNav.Key -> msg
+    , tabStopId : Maybe String
+    }
+
+
+viewShelfRowClickable : SpineGridConfig msg -> List Placement -> Html msg
+viewShelfRowClickable config placements =
     let
         bookCount =
             List.length placements
@@ -175,7 +207,7 @@ viewShelfRowClickable wearLevel onBookClicked placements =
             , attribute "role" "list"
             , attribute "aria-label" shelfAriaLabel
             ]
-            (List.map (viewClickableSpine wearLevel onBookClicked) placements)
+            (List.map (viewClickableSpine config) placements)
         , div [ class "shelf-row__plank" ] []
         , div [ class "shelf-row__lip" ] []
         ]
@@ -297,8 +329,8 @@ minShelfRows minRows rows =
 The onBookClicked callback receives the Book data when the spine is clicked.
 Reusable across all shelf pages (Library, AntiLibrary, WishList, ReadingPile).
 -}
-viewClickableSpine : WearLevel -> (Book -> msg) -> Placement -> Html msg
-viewClickableSpine wearLevel onBookClicked placement =
+viewClickableSpine : SpineGridConfig msg -> Placement -> Html msg
+viewClickableSpine config placement =
     let
         bookData =
             case placement.book of
@@ -319,17 +351,39 @@ viewClickableSpine wearLevel onBookClicked placement =
 
         texture =
             pickTexture bookData.title
+
+        -- Roving tabindex (#388): one tab stop per bookcase. No roving state
+        -- (tabStopId = Nothing) keeps every spine tabbable.
+        spineTabIndex =
+            case config.tabStopId of
+                Nothing ->
+                    0
+
+                Just tabStopId ->
+                    if tabStopId == bookData.id then
+                        0
+
+                    else
+                        -1
     in
     button
         [ class "book-button"
         , attribute "role" "listitem"
         , id ("spine-" ++ bookData.id)
-        , tabindex 0
-        , onClick (onBookClicked bookData)
+        , tabindex spineTabIndex
+
+        -- Arrows/Home/End move focus; the decoder FAILS for every other key,
+        -- so Tab keeps tabbing and Enter/Space keep clicking. preventDefault
+        -- stops the arrows scrolling the page under the move.
+        , preventDefaultOn "keydown"
+            (GridNav.keyDecoder
+                |> Decode.map (\key -> ( config.onNavKey bookData.id key, True ))
+            )
+        , onClick (config.onBookClicked bookData)
         ]
         [ Components.Spine.book
             { pageCount = Maybe.withDefault 200 (bookPageCount bookData)
-            , wearLevel = wearLevel
+            , wearLevel = config.wearLevel
             , texture = texture
             , title = bookData.title
             , author = Types.Book.authorName bookData
