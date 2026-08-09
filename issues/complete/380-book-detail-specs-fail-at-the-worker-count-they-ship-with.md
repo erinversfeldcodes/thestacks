@@ -75,10 +75,10 @@ One spec file's timing/isolation design. Single concern.
 | E2E | yes | ❌ the deliberately-slow specs still assert what they did, at a budget that names its own delay |
 
 ## Definition of Done
-- [ ] Three specs green at the shipped worker count — evidence: N runs, quoted
-- [ ] Timeouts derived from induced delay, not raised globally — evidence: diff
-- [ ] No assertion weakened, skipped or made conditional — evidence: diff
-- [ ] `staff-review` verdict recorded below
+- [x] Three specs green at the shipped worker count — evidence: 3× consecutive `--project=chromium admin-session.spec.ts book-detail.spec.ts` = 33 passed each (54.9s / 1.4m / 56.1s), recorded 2026-08-07
+- [x] Timeouts derived from induced delay, not raised globally — evidence: `babcc4be` — the injected sleep became a hold-until-observed promise, removing the wall-clock race at source
+- [x] No assertion weakened, skipped or made conditional — evidence: `babcc4be` diff; the specs' assertions are unchanged
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Found by the Wave 7 drive; independent of Wave 7's changes. Pairs with **#371**. Both must land before
@@ -95,3 +95,7 @@ serial run's own output.
 
 ## Verification (2026-08-07, Wave 11 verify-and-close)
 ALREADY-FIXED (`babcc4be`) and closed on acceptance evidence: 3× consecutive `--project=chromium admin-session.spec.ts book-detail.spec.ts` at the shipped worker count = **33 passed** each (54.9s / 1.4m / 56.1s), recorded in #371's Progress Notes. #371 = per-run owner-MFA factor isolation (mutation-probed); #380 = the injected sleep became a hold-until-observed promise, removing the contention race at source. Distinct root causes (shared server state vs wall-clock contention). ⚠️ The intermittent mfa-confirm 422 is tracked separately as #394.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — hold-until-observed replaces the injected sleep — fixes the race at source instead of raising timeouts; no assertion weakened.

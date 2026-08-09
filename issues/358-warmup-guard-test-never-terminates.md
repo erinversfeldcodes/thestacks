@@ -70,11 +70,11 @@ Router wiring: none.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Clock stub monotonic — evidence: diff
-- [ ] curl stub returns a status on stdout — evidence: diff
-- [ ] Suite terminates and `run_all.sh` completes — evidence: tally + wall-clock
-- [ ] `remote_mode_healthy` reaches the success branch — evidence: assertion on the warm message
-- [ ] `staff-review` verdict recorded below
+- [x] Clock stub monotonic — evidence: `458ca44b` (monotonic clock stub)
+- [x] curl stub returns a status on stdout — evidence: `458ca44b` (status-emitting curl stub)
+- [x] Suite terminates and `run_all.sh` completes — evidence: 25/25 under the lead's 60s guard; per-suite timeout watchdog added to `run_all.sh` so a future hang fails loudly
+- [x] `remote_mode_healthy` reaches the success branch — evidence: `458ca44b` — "a real success-branch assertion" replaced the never-reached path
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 None. Reported by **#337**; diagnosed by the lead. Needs an owner wave assignment.
@@ -84,3 +84,7 @@ devops / platform-test agent.
 
 ## Progress Notes
 Filed 2026-07-31 by the lead, after the owner asked to determine whether the hang was a script bug or a service bug. **It is a script bug — two of them, both in the stubs.** Diagnosis method: ran the suite in the background, watched it stall at `remote_mode_healthy`, confirmed no `curl` process was alive (so it was not blocked on the network), then read `warm_remote_preview` and found the second loop whose deadline derives from the stubbed constant clock. Process killed; nothing else was affected.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — the fix removed both stub defects AND added the run_all.sh watchdog so the next non-terminating suite fails loudly instead of hanging the runner — the structural half is what earns the verdict.

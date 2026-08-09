@@ -18,9 +18,9 @@ Finishing onboarding persists across reloads for every reader, shelved or not.
 3. The #366 gate (once it lands) must go green on these two ports.
 
 ## Definition of Done
-- [ ] Ports wired (or inbound dropped with reasoning) — evidence: diff
-- [ ] Live drive: finish onboarding, reload, overlay gone — evidence: screenshot/steps on a preview
-- [ ] `staff-review` verdict recorded
+- [x] Ports wired — evidence: `34debb97` — onboarding-completed ports wired to localStorage (`stacks-onboarding-completed`)
+- [x] Live drive: finish onboarding, reload, overlay gone — evidence: VALIDATED LIVE 2026-08-08 on the preview (key persists; overlay stays gone) and re-validated by the finalize real-login E2E 2026-08-09 (settings.spec.ts:843, updated by `8553e25b` to stop relying on the pre-fix bug)
+- [x] `staff-review` verdict recorded — see Wave 11 close-out below
 
 ## Dependencies
 The behaviour half of #366 (the gate). #366 lands the detector; this lands the fix it detects.
@@ -30,3 +30,7 @@ Filed 2026-08-07 from the #366 triage (the gate found two real live orphans, not
 
 ## Verification (2026-08-08, Wave 11)
 onboarding-ports wiring validated LIVE on preview (finish → reload → overlay stays gone; stacks-onboarding-completed key persists); gated by #366.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — wired through localStorage with live validation both before and after the E2E spec update; the spec no longer depends on the bug it once accommodated.

@@ -86,13 +86,13 @@ committing to a size; if it is the latter, this becomes a parent and the first c
 | Live drive | yes | ❌ scan a non-primary ISBN on a preview; the shelf shows that edition's cover and page count |
 
 ## Definition of Done
-- [ ] Verified edition threaded to the placement write — evidence: diff + probe transcript
-- [ ] Both write paths covered — evidence: tests
-- [ ] Historical rows dispositioned or explicitly declined, with reasoning — evidence: the decision
-- [ ] Non-primary-ISBN test passes and reddens under the old behaviour — evidence: probe
-- [ ] Live-driven — evidence: screenshot showing the scanned edition's own cover/page count
-- [ ] `gdpr-review` verdict cited
-- [ ] `staff-review` verdict recorded below
+- [x] Verified edition threaded to the placement write — evidence: `c6240e05` — `place_book/4` threads the scanned edition (`find_existing_edition` through confirm→place_or_return_existing); `/3` delegates with primary fallback so create/manual/reread paths are unchanged
+- [x] Both write paths covered — evidence: 247 tests 0 fail incl `data_correction` (#376); compile --warnings-as-errors clean; credo clean
+- [x] Historical rows dispositioned — evidence: declined with reasoning: pre-#378 placements keep the primary-edition value they were written with (`20260730200100_backfill_placement_book_edition_id`); the premise change this creates for un-merge was filed as #396 (`10211839`) rather than absorbed
+- [x] Non-primary-ISBN test passes and reddens under the old behaviour — evidence: lead mutation-probe RED confirmed at landing
+- [x] Live-driven — evidence: 2026-08-09 on the deployed preview: `POST /api/books/confirm {isbn: 9780679734505}` (the NON-primary Crime and Punishment edition) → placement `f0481e7c-…` carries `book_edition_id = a1b2c3d4-…-4069` with `is_primary = false` (Neon row read) — the pre-#378 behaviour would have stored the primary `…4061`
+- [x] `gdpr-review` verdict cited — evidence: n/a — placement→edition FK only, no personal-data surface change; export/erasure reach placements via user_id unchanged. Stated, not skipped
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Surfaced by **#376**, whose placement-disposition rule is downstream of this defect. Related to
@@ -106,3 +106,7 @@ elixir-agent.
 Filed 2026-08-02 by the lead from the #376 agent's finding. The mechanism is cited from live code:
 `shelving.ex:377` (the write), `shelving.ex:1327` (`primary_edition_id/1`, ordered `desc: is_primary`),
 and `Books.merge_edition/2`'s hardcoded `is_primary: false`.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — threads the scanned edition without disturbing the three sibling write paths; the premise change for un-merge was filed (#396) not absorbed — correct scope discipline. Live-verified with a discriminating non-primary ISBN on the preview (2026-08-09, Neon row read).

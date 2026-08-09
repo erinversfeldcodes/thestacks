@@ -69,12 +69,12 @@ Router wiring: none. Emitter → registry → `CacheInvalidationHandler` → `Bo
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] `set_visibility_tier/3` invalidates; sync-vs-async decision stated — evidence: diff + reasoning
-- [ ] `EnrichBookJob` invalidates — evidence: diff
-- [ ] Payloads carry the work id — evidence: contract + test
-- [ ] Structural test over write paths — evidence: test name + probe
-- [ ] Read-write-read probes for both — evidence: transcripts
-- [ ] `staff-review` verdict recorded below
+- [x] `set_visibility_tier/3` invalidates; sync-vs-async decision stated — evidence: `4de90010` — SYNC eviction on the age-gate write (a content-safety control does not wait on the queue; reasoning in `books.ex`) + `book.visibility_tier_changed` for the audit trail
+- [x] `EnrichBookJob` invalidates — evidence: `4de90010` — `book.enriched` emitted + sync eviction in the job
+- [x] Payloads carry the work id — evidence: payload contracts (UUID-only) in `payload_contract.ex` + handler tests (`cache_invalidation_handler_test.exs`, 50 lines added)
+- [x] Structural test over write paths — evidence: full enumeration impractical (stated per TR-4's own alternative): per-path coverage instead — sync-eviction tests for both new paths + controller-level age-gate-cache integration test (`book_controller_test.exs`, 56/0) + the false-guarantee test rewritten; #336's inverse registry guard now makes an invalidation event without an emitter structurally visible
+- [x] Read-write-read probes for both — evidence: lead mutation-probe RED confirmed (invalidation off → test fails), 74 tests 0 fail; VALIDATED LIVE 2026-08-07: cache→age-gate→immediate re-read = 403, not stale 200
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 **#355** (built the invalidation wire and found these). Needs an owner wave assignment. ⚠️ The age-gate half should land **before** `AGE_GATING_ENABLED` is ever turned on in production.
@@ -84,3 +84,7 @@ elixir-agent.
 
 ## Progress Notes
 Filed 2026-07-31 by the lead from #355's sibling sweep. Independently verified: `book_controller.ex:223-231` enforces the gate on the value from `cached_or_fetch/1`; `set_visibility_tier/3` contains no `Events.emit` and no `BookDetailCache` reference; `book_detail_cache.ex:12` sets `@ttl_ms 300_000`; `config/runtime.exs:118` gates the feature on `AGE_GATING_ENABLED`, unset in production.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — sync eviction on a safety control is the right call and the reasoning is written where the code is; the false-guarantee test was rewritten rather than deleted. Landed diff scoped, lead mutation-probe RED at landing, age-gate 403 validated live.

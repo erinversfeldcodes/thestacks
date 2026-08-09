@@ -36,10 +36,10 @@ Tooling only. No app change.
 - `check-css-values.sh:60` is the comment-strip precedent to copy.
 
 ## Definition of Done
-- [ ] Comments stripped before the `defined` extraction — evidence: diff + a probe (a class named only in a comment no longer counts as defined)
-- [ ] Newly-surfaced orphans reported and each dispositioned — evidence: the list + fixes
-- [ ] `check-orphan-classes.sh` green (0 or dispositioned) — evidence: output
-- [ ] `staff-review` verdict recorded below
+- [x] Comments stripped before the `defined` extraction — evidence: `8ca3b2fd`, probed at landing (comment-only class no longer counts as defined)
+- [x] Newly-surfaced orphans reported and each dispositioned — evidence: the strip surfaced ZERO new orphans (gate green 0 immediately after)
+- [x] `check-orphan-classes.sh` green — evidence: 2026-08-09 lint-elm run: "Elm classes: 882 CSS selectors: 953 orphans: 0"
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Surfaced by the Wave 9 (#319) Mode B review. Sibling of #356/#365 (CSS-gate hardening). Independent.
@@ -51,3 +51,7 @@ Tooling / CSS.
 Filed 2026-08-06 from the Wave 9 Mode B staff-review's 🟨 finding. Pre-existing (not a Wave 9
 regression); deferred rather than force-fixed because it likely surfaces masked orphans that need
 their own disposition. Assigned to **Wave 11** (launch-gate hardening, with the other gate/test items).
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — comment-stripping before extraction is the general fix, not a special case; gate green 0 orphans after.

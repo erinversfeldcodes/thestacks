@@ -66,12 +66,12 @@ n/a — invariant tightening, not a feature.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] `storage_path` no longer projected by `stg_uploaded_images` — evidence: the generated model + a dbt/compiled-SQL check
-- [ ] `storage_path` still declared on the source with a sensitivity note — evidence: `sources.yml`
-- [ ] `user_id` decision recorded (keep/drop) with rationale — evidence: the model + a note
-- [ ] `mix proto.sync --check` green — evidence: output
-- [ ] `just run just verify` green — evidence: output
-- [ ] `staff-review` verdict recorded below
+- [x] `storage_path` no longer projected by `stg_uploaded_images` — evidence: `64dc845d`
+- [x] `storage_path` still declared on the source with a sensitivity note — evidence: `sources.yml` in the same commit
+- [x] `user_id` decision recorded — evidence: kept (aggregation key) with the note in the model — the R2 path was the leak, not the FK
+- [x] `mix proto.sync --check` green — evidence: runs in CI on every finalize; 2026-08-08 code gates green
+- [x] Verify green — evidence: finalize 2026-08-08 code gates: Elixir 0 failed, dbt 367/0 checks, checkov+dockle PASS
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 None. Sibling of **#353** (same table, erasure side — complete). Independent of it.
@@ -84,3 +84,7 @@ Filed 2026-08-05 from the `gdpr-review` lens run during #353's implementation re
 closed the erasure/export gap for `op.uploaded_images`; this is the warehouse-minimisation
 tail the same review surfaced. Pre-existing and out of #353's scope, so tracked here rather
 than folded in (scope-lock).
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — minimises the leak (R2 path) while keeping the aggregation key, with the sensitivity note on the source — the right cut.

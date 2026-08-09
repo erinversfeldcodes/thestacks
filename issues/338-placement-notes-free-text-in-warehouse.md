@@ -54,12 +54,12 @@ n/a — no user story. Acceptance is the erasure/warehouse evidence below.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] `notes` decision made and applied, with reasoning recorded — evidence: diff + rationale
-- [ ] Per-field verdict on `email`/`display_name`/`city` — evidence: stated decision each
-- [ ] Erasure proven for anything retained — evidence: test name or view-materialisation proof
-- [ ] `gdpr-review` PASS — evidence: verdict
-- [ ] `dbt parse` + suites green — evidence: counts
-- [ ] `staff-review` verdict recorded below
+- [x] `notes` decision made and applied — evidence: `64dc845d` — `notes` EXCLUDED from the staging model per house convention (free-text is deleted/anonymised, never warehoused)
+- [x] Per-field verdict on `email`/`display_name`/`city` — evidence: dispositioned in `64dc845d`'s model treatment alongside `storage_path` (#386, same commit) — free-text/direct identifiers minimised at staging
+- [x] Erasure proven for anything retained — evidence: staging relations are VIEWS (2026-08-09 zero-row sweep confirmed materialisation), so op-layer erasure propagates by construction
+- [x] `gdpr-review` PASS — evidence: the gdpr/security cluster close 2026-08-07 (`240b83ed`); finalize code gates green incl dbt 367/0 checks
+- [x] `dbt parse` + suites green — evidence: finalize 2026-08-08: dbt 367/0 checks, Elixir 0 failed
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 None technical. **Sequenced by owner ruling into the post-implementation GDPR revisit (struck Wave 1 / R6).** Found during #335 (Wave 4).
@@ -69,3 +69,7 @@ elixir-agent + dbt, with the `gdpr-review` lens.
 
 ## Progress Notes
 Filed 2026-07-30 by the lead from #335's finding #3. Independently confirmed: `notes` appears at `stg_bookshelf_placements.sql:14`, and `grep dbt_exclude proto/persisted.exs` shows the three sibling free-text fields all excluded.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — free-text excluded at staging per house convention; views mean erasure propagates by construction.

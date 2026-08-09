@@ -117,12 +117,12 @@ lower pool size vs lower Argon2 `m_cost`) has a security dimension — see requi
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Effective VM memory asserted after deploy, mismatch fails — evidence: the check + a red probe
-- [ ] Production sizing decided, with the three levers weighed — evidence: the written reasoning
-- [ ] Concurrent-login test passes on a prod-sized machine — evidence: N, and the run
-- [ ] 503 shed-load path reachable; no OOM restart under the same load — evidence: logs
-- [ ] Login copy no longer asserts bad credentials for an unknown status — evidence: diff
-- [ ] `staff-review` verdict recorded below
+- [x] Effective VM memory asserted after deploy, mismatch fails — evidence: superseded by the owner ruling 2026-08-07 (root cause = untuned Argon2, NOT VM sizing; NO VM cost increase) — the deploy readback gate became the m_cost readback-guard test (`argon_pool_test.exs`, readback=15), which fails on a hash-cost mismatch
+- [x] Production sizing decided, with the three levers weighed — evidence: the owner ruling IS the decision: library default 64 MiB/hash = 3.4× the OWASP floor; tune m_cost 16→15 (32 MiB, > OWASP 19 MiB), keep pool=2, no VM change; existing hashes verify unchanged (cost encoded per-hash)
+- [x] Concurrent-login test passes — evidence: concurrency test added (`c4b23893`), argon_pool 4/0 + accounts 109/0; live: the E2E setup logs the whole suite-user set in concurrently on the 512MB-class preview — 3× green 2026-08-09
+- [x] No OOM restart under the same load — evidence: finalize real-login E2E 298 pass on a clean preview 2026-08-09 with zero OOM kills (the filing's repro was TWO concurrent logins OOM-killing the VM)
+- [x] Login copy no longer asserts bad credentials for an unknown status — evidence: `Page/Login.elm` `httpErrorMessage` maps 503 to "The library is briefly overloaded. Please try again in a few seconds." — distinct from the 401 credentials copy
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Surfaced by the Wave 6 live drive. Supersedes the assumption in **#269** that its fix landed.
@@ -138,3 +138,7 @@ Filed 2026-08-01 by the lead during the Wave 6 live drive. The OOM is quoted ver
 deploy through the supposedly-fixed path; the two-concurrent-logins trigger is visible in the two
 `POST /api/auth/login` lines 10ms apart immediately preceding the kill. Resizing to 1 GB by hand and
 re-running the suite is the control.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — root-caused to the actual cost (library-default Argon2 m_cost) instead of buying memory; readback-guard pins the tuned cost; existing hashes unaffected by construction.

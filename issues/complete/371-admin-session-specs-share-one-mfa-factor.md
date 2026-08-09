@@ -79,7 +79,7 @@ One spec file. Single concern.
 - [x] Still traverses the real MFA gate — evidence: diff — `passTheGate` is unchanged in its UI path
       (fills `admin-email`/`admin-password`/`admin-code`, clicks `admin-verify`); no injected token
 - [x] Before/after counterfactual quoted — evidence: both transcripts, in Progress Notes
-- [ ] `staff-review` verdict recorded below
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Surfaced by the Wave 6 live drive. Independent of Wave 6's changes — the file was added
@@ -131,3 +131,7 @@ to investigate — NOT a Wave 8 defect.
 
 ## Verification (2026-08-07, Wave 11 verify-and-close)
 ALREADY-FIXED (`babcc4be`) and closed on acceptance evidence: 3× consecutive `--project=chromium admin-session.spec.ts book-detail.spec.ts` at the shipped worker count = **33 passed** each (54.9s / 1.4m / 56.1s), recorded in #371's Progress Notes. #371 = per-run owner-MFA factor isolation (mutation-probed); #380 = the injected sleep became a hold-until-observed promise, removing the contention race at source. Distinct root causes (shared server state vs wall-clock contention). ⚠️ The intermittent mfa-confirm 422 is tracked separately as #394.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — per-run factor isolation removes the shared-state class; passTheGate unchanged so the real MFA gate is still traversed; counterfactual quoted.

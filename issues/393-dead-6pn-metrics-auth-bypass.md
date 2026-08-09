@@ -22,9 +22,9 @@ One plug + its test. Security-adjacent — verify the SLO-gate caller path befor
 3. Test: a request with no bearer and no `fly-client-ip` is now **rejected** (the bypass is gone).
 
 ## Definition of Done
-- [ ] Bypass removed; bearer-only guard remains — evidence: diff + the new rejection test
-- [ ] SLO-gate caller still green — evidence: run
-- [ ] `staff-review` verdict recorded
+- [x] Bypass removed; bearer-only guard remains — evidence: `7392f527` ("remove the dead 6PN metrics-auth bypass so every internal route requires the bearer") + rejection test in the same commit
+- [x] SLO-gate caller still green — evidence: finalize `just ci` 2026-08-08 code gates green (the SLO gate runs inside it)
+- [x] `staff-review` verdict recorded — see Wave 11 close-out below
 
 ## Dependencies
 Surfaced by the Wave 10 #323 comment cleanup. Sibling of the metrics-pipeline work. **Assigned to Wave 11.**
@@ -32,3 +32,7 @@ Surfaced by the Wave 10 #323 comment cleanup. Sibling of the metrics-pipeline wo
 ## Progress Notes
 Filed 2026-08-06. Dead code, not a live vuln (bearer still required on the public path); removing it
 closes a latent bypass.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — dead trust path removed with a rejection test; the SLO caller proves nothing depended on it.

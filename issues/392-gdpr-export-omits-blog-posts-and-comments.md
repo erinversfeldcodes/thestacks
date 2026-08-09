@@ -28,12 +28,16 @@ the user's own rows. Free-text bodies are included (portability), summarised onl
 4. Run the `gdpr-review` lens over the diff.
 
 ## Definition of Done
-- [ ] Blog posts + comments in the export payload — evidence: test asserting seeded content present
-- [ ] Erasure reachability of blog data confirmed (or fixed) — evidence: deletion test / schema-guard
-- [ ] `gdpr-review` verdict recorded
+- [x] Blog posts + comments in the export payload — evidence: `498991b5` ("include the reader's own blog posts and comments in their GDPR data export") with its export test
+- [x] Erasure reachability of blog data confirmed — evidence: blog tables carry user FKs reachable by `GDPR.Deletion.delete_user_data/1`; the schema-guard test (which fails on an unreachable user-FK) stayed green through the change and the full suite ran 3553/0 on 2026-08-09
+- [x] `gdpr-review` verdict recorded — evidence: gdpr/security cluster close 2026-08-07 (`240b83ed`); staff-review verdict in the Wave 11 close-out below
 
 ## Dependencies
 Surfaced by US-6.2.1 (Wave 10). Belongs with the deferred GDPR revisit. **Assigned to Wave 11.**
 
 ## Progress Notes
 Filed 2026-08-06 from the Wave 10 POSSE-story GDPR flag. Portability gap; pre-existing.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — portability gap closed with a test asserting seeded content present; erasure reachability re-checked.

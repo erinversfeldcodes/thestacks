@@ -30,10 +30,10 @@ fails if `determination/1` misclassifies a transient error.
 - Probe: `determination(:timeout) -> :not_found` must red the new test.
 
 ## Definition of Done
-- [ ] A cache-enabled test proves an outage writes no negative entry — evidence: test name
-- [ ] `determination(:timeout) -> :not_found` reddens it — evidence: transcript
-- [ ] `just run just verify` passes
-- [ ] `gdpr-review`: n/a — cache mechanics, no personal data. Stated, not skipped.
+- [x] A cache-enabled test proves an outage writes no negative entry — evidence: `a2393586` (isbn_resolver_test outage-not-cached, landed with #352)
+- [x] `determination(:timeout) -> :not_found` reddens it — evidence: #352's landing counterfactual; verify-and-close fresh run 2026-08-07: 69 tests 0 failures
+- [x] Verify passes — evidence: finalize 2026-08-08 code gates green (Elixir 0 failed, dbt 367/0)
+- [x] `gdpr-review`: n/a — cache mechanics, no personal data. Stated, not skipped. staff-review verdict in the Wave 11 close-out below
 
 ## Dependencies
 Depends on **#352** (the behaviour under test).
@@ -48,3 +48,7 @@ Depends on **#352** (the behaviour under test).
 
 ## Verification (2026-08-07, Wave 11 verify-and-close)
 Confirmed ALREADY-FIXED and closed. Fresh run: `just run mix test` on the seam/coverage test — **69 tests, 0 failures** (batched with its sibling). #377 fixed by `df170b48` (rss_fetcher seam + transport-isolation telemetry assertion); #385 fixed by `a2393586` (isbn_resolver_test outage-not-cached, landed with #352 two days before the issue was filed). Issue filed stale; no build needed.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — already-fixed confirmed by fresh run rather than assumed; correctly closed as filed-stale with the fixing commits named.

@@ -43,12 +43,12 @@ Router wiring: none. CI gate over the Elm↔JS boundary.
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Both sides enumerated and diffed — evidence: diff
-- [ ] Direction handled deliberately, with reasoning — evidence: the decision
-- [ ] Fails closed on unparseable input — evidence: probe
-- [ ] Counterfactual red + Elm suite green under the same mismatch — evidence: both transcripts
-- [ ] Existing mismatch count reported and dispositioned — evidence: the number
-- [ ] `staff-review` verdict recorded below
+- [x] Both sides enumerated and diffed — evidence: `6f5b5905` — `scripts/check-ports-wired.sh` recomputes both rosters every run
+- [x] Direction handled deliberately — evidence: both directions gated (every Elm outbound Cmd needs a JS subscriber; every JS port ref must be declared)
+- [x] Fails closed on unparseable input — evidence: probed at landing 2026-08-08
+- [x] Counterfactual red + Elm suite green under the same mismatch — evidence: fake orphan Cmd → gate FAIL while suite green; reverted → gate green (Verification block)
+- [x] Existing mismatch count reported and dispositioned — evidence: 2 real live orphans found (the onboarding ports) → fixed as #395; 18 ports all wired (2026-08-09 lint run)
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Surfaced by **#362**. Same family as **#361** and **#362**'s own gates. Needs an owner wave assignment — Wave 11 sits beside the other gate work (#336, #337), though this one protects features shipping sooner.
@@ -61,3 +61,7 @@ Filed 2026-08-01 by the lead from #362's finding 1. #362 built the connectivity 
 
 ## Verification (2026-08-08, Wave 11)
 gate built (scripts/check-ports-wired.sh), probed (fake orphan Cmd → fail; reverted → green), wired into lint-elm.sh; 18 ports all wired incl the two #395 fixed.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM WITH NOTES** — the gate is a set-difference, not a roster — right shape. Note: it found 2 real orphans on arrival (#395), which is the gate paying for itself; note recorded that any future port consumer should extend the gate, not exempt it.

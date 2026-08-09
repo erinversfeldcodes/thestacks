@@ -257,3 +257,7 @@ against a fixture is not evidence that a real shop has an events page — that c
 pipeline sat at zero rows with every test passing, and it is the one mistake this issue exists to
 correct.
 
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — sitemap harvesting argued and run live; every store accounted for with a durable reason; verify 3235/1285/15 green at close.

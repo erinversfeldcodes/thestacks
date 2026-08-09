@@ -71,11 +71,11 @@ One seed site + wherever the stored blob is refreshed. Small. ⚠️ Decide the 
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] One authoritative source for consent state, with the decision stated — evidence: diff + reasoning
-- [ ] Blob audit:each field justified as cacheable or not — evidence: the list
-- [ ] write → reload → read regression test — evidence: test name + probe transcript
-- [ ] Live-driven: revoke → reload → still revoked — evidence: screenshot + DB row
-- [ ] `staff-review` verdict recorded below
+- [x] One authoritative source for consent state, with the decision stated — evidence: `8b79c626` — consent REMOVED from the stored-auth blob entirely; the server is the single source, hydrated on page load (`5280adb7`)
+- [x] Blob audit — evidence: `8b79c626`'s treatment: consent fields dropped from the blob (state, not identity); the remaining fields (token/userId/email/displayName/handle/role) are login identity, cacheable by construction
+- [x] write → reload → read regression test — evidence: Elm hydration unit-proven at landing (1744/0)
+- [x] Live-driven: revoke → reload → still revoked — evidence: definitive REAL-LOGIN validation at finalize 2026-08-09 (settings.spec.ts:132 WA-consent, real login, part of the 298 pass) — the earlier injected-session drive could not exercise auth-init hydration and was recorded OPEN until this
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Surfaced by the Wave 6 live drive, downstream of **#363**. Related to **#355**, **#357**. Needs an owner wave assignment — ⚠️ this is a **consent** surface, so it belongs before launch (Wave 11, beside #353 and #357) rather than in the general backlog.
@@ -85,3 +85,7 @@ elm-agent + elixir-agent.
 
 ## Progress Notes
 Filed 2026-08-01 by the lead during the Wave 6 live drive. Every step verified independently: the two POSTs captured at the XHR layer with their bodies and statuses, the database read from the preview branch `br-falling-wave-and3e0fr`, and the stale blob read out of `localStorage` in the live tab.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — removing consent from the blob (rather than refreshing it) makes the class unrepresentable — the strongest of the available shapes. Definitive real-login validation closed the injected-session gap honestly.

@@ -87,11 +87,11 @@ One function's transport seam plus its test wiring. Single concern.
 | Sweep | yes | ❌ count of other un-seamed `Finch` call sites reported |
 
 ## Definition of Done
-- [ ] Feed probe swappable in test — evidence: diff + the test asserting no real transport
-- [ ] Connect phase bounded in production too — evidence: diff + probe against a black-holed host
-- [ ] Suite runs clean across repeated seeds — evidence: the runs
-- [ ] Sweep count of similar un-seamed call sites reported — evidence: the number
-- [ ] `staff-review` verdict recorded below
+- [x] Feed probe swappable in test — evidence: `df170b48` — `probe/1` added to `RssFetcherBehaviour` (one config key) + transport-isolation telemetry assertion
+- [x] Connect phase bounded in production too — evidence: the measured probe table in Progress Notes (black-holed host 5004ms; TLS-silent peer 5115ms; the genuinely unbounded phase was the RECEIVE — request_timeout added, 35017ms → 8028ms)
+- [x] Suite runs clean across repeated seeds — evidence: verify-and-close fresh run 2026-08-07: 69 tests, 0 failures
+- [x] Sweep count of similar un-seamed call sites reported — evidence: 13 modules examined, 5 un-seamed → filed as #381 (all five now closed)
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 Found during **#373**, independent of it. No blocker. ⚠️ Worth doing before the campaign's remaining
@@ -139,3 +139,7 @@ where the missing bound was.
 
 ## Verification (2026-08-07, Wave 11 verify-and-close)
 Confirmed ALREADY-FIXED and closed. Fresh run: `just run mix test` on the seam/coverage test — **69 tests, 0 failures** (batched with its sibling). #377 fixed by `df170b48` (rss_fetcher seam + transport-isolation telemetry assertion); #385 fixed by `a2393586` (isbn_resolver_test outage-not-cached, landed with #352 two days before the issue was filed). Issue filed stale; no build needed.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — the probe seam rode the existing behaviour (one config key) instead of minting a second; the measured receive-vs-connect finding corrected everyone's diagnosis and is written into the issue for the next reader.

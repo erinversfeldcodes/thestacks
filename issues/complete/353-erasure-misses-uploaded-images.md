@@ -178,3 +178,7 @@ non-vacuous: the storage-deletion test reds when the delete is neutered (my prob
 erasure test (`left: 1 / right: 0`, row survives) and the schema-guard (`Offenders:
 ["uploaded_images.user_id"]`) were captured RED against the genuine pre-#353 schema and GREEN after.
 The fix resolves the DESIGN CONCERN raised against the wave; no residue is claimed erased that is not.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — erasure + export for uploaded images landed with the missing-FK guard-gap closed — the guard now sees what it was structurally blind to.

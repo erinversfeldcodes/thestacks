@@ -55,7 +55,7 @@ n/a — no user story. Acceptance is the counterfactual probe below.
 - [x] Empty case reports SKIP not PASS — evidence: `just ci` summary output (Progress Notes)
 - [x] Historical-noise suppression preserved — evidence: clean tree lints the same 23 committed branch migrations as before, not 105
 - [x] Campaign squawk citations re-checked and corrected where vacuous — evidence: per-wave statement below
-- [ ] `staff-review` verdict recorded below
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 None — independent. Should land **before** any further migration-bearing wave so their squawk evidence means something. Found during #335 (Wave 4).
@@ -159,3 +159,7 @@ Net: exactly **one** citation was outright vacuous (#335's), and it was already 
 **Per-wave verdict on this campaign's squawk citations:** Wave 0 **REAL** (`20260727204800…` was an ancestor commit, inside the committed diff — with the nuance that the migration it caught was an ancestor's, not Wave 0's own); Waves 2, 3, 5 and follow-ups A **N/A** (zero own migrations — "squawk clean" was true but carried no content of theirs, now stated in #312/#313); Wave 4 child **#335 VACUOUS** — the one outright bad citation, and the finding that produced this issue; Wave 4 wave-level **REAL but miscounted** (above).
 **Findings carried forward:** (1) `drop index` / `drop_if_exists index` DSL is **not translated at all**, so a non-concurrent index *drop* is invisible exactly the way creates used to be — same class, not fixed; (2) **12 genuine hazards in deployed migration history** (9× non-concurrent index creation on live tables, 2× deletion, plus `ban-drop-column`, `changing-column-type`, `adding-foreign-key-constraint`, `adding-not-nullable-field`, `constraint-missing-not-valid`, `require-enum-value-ordering`) — worth a triage issue; (3) `security-squawk-test-wrapper.sh` had **drifted** from the gate (2 excluded rules vs 3) despite both files' comments asserting they cannot disagree — aligned, but nothing tests that they match; (4) ⚠️ **`test/platform/e2e_warmup_guard_test.sh` does not terminate** — ran 15+ minutes with no tally; likely a hot spin because the suite replaces `curl` with an instant shell function while `wait_for_health` deliberately has no `sleep` ("curl has a 2s timeout"). Unrelated to this diff; the 14 suites ahead of it, including all four migration suites, are green.
 Clean-tree behaviour: **23 files selected, not 105** — identical selection to before, now honest about depth (`squawk: clean — 9 of 23 changed migration file(s) carried analysable SQL`, where it previously said "all migrations clean" while silently skipping 14).
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — working-tree lint + SKIP-not-PASS empty case; historical-noise suppression preserved and the campaign's prior squawk citations were re-audited rather than trusted.

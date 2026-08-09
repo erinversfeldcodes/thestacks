@@ -146,3 +146,7 @@ have demonstrated, and is stated rather than left to be discovered again.
   keep working on any errors"). The job returned `:ok` with `EVENTS before=0 after=0` — a clean
   success that wrote nothing, which is the failure mode the zero-row sweep exists to catch. Numbers
   above measured directly against the live stack.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — resolved by driving the real pages — the answer ('nothing to validate; the diagnosis was wrong') is exactly what a live drive is for; zero-row batches now explain themselves per store.
