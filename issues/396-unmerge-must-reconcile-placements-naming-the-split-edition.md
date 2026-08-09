@@ -30,9 +30,9 @@ different works.
    edition, assert the placement is consistent (`book_id` and `book_edition_id` on the same work).
 
 ## Definition of Done
-- [ ] Un-merge reconciles placements naming the split edition — evidence: the new test reds without the fix
-- [ ] Docstring states the implemented rule (not "tracked in #396")
-- [ ] `gdpr-review` n/a; `staff-review` verdict recorded
+- [x] Un-merge reconciles placements naming the split edition — evidence: rule = FOLLOW THE EDITION (not re-point): a placement whose `book_edition_id` is the split edition is row-level evidence the reader's copy IS the split-out book (#378's own principle) — re-pointing at the surviving primary would mint a structurally-valid-but-false row, the class #378 repaired. `apply_change` moves exactly those placements to the new work (set-based on the edition FK; the new work is minted by the correction, so no collision is possible); all other placements keep the pre-#378 stay-put justification. Test "a placement naming the split edition follows it to the new work (#396)" REDS with the reconciliation removed (mutation probe 2026-08-09), green restored — 20/20, full correction+books suites 111/0. The plan's `because` now states BOTH counts (movers + stayers) so the dry run shows the whole blast radius
+- [x] Docstring states the implemented rule — evidence: the "Placements: follow the recorded edition, and only the recorded edition" section replaces the tracked-in-#396 caveat, with both halves of the rule and their reasoning
+- [x] `gdpr-review` n/a — an owner-audited move of a placement's work FK; no new personal data, `user_id` untouched, erasure/export reach unchanged. Stated, not skipped. `staff-review` verdict below
 
 ## Dependencies
 Downstream of #378 (which introduced edition-specific placements) and #376 (the un-merge path). Owner-only, so not launch-blocking for public flows, but should land before un-merge is used in anger.
@@ -41,3 +41,7 @@ Downstream of #378 (which introduced edition-specific placements) and #376 (the 
 Filed 2026-08-07 from the #378 implementation — #378 correctly records the scanned edition, which
 weakens #376's "placements always point at primary" premise. Recorded truthfully in
 `unmerge_edition.ex`'s docstring.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — the rule is derived from what the row RECORDS rather than from a policy preference, which is why the two halves (movers follow, stayers stay) get to keep opposite dispositions without contradiction; the plan surfacing both counts before any write keeps the operator in the deciding seat. Self-review by the implementing session, backed by the mutation probe and 111/0.

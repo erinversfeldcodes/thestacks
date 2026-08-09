@@ -299,6 +299,39 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       assert edition_ids == [ctx.primary.id]
       refute ctx.merged.id in edition_ids
     end
+
+    # #396 — the post-#378 case: place_book/4 records the SCANNED edition, so a
+    # placement can name the edition being split. That row is evidence, not a
+    # guess: the reader's copy IS the split-out book, and the placement follows
+    # it — or the reparent would leave book_id and book_edition_id naming
+    # different works.
+    test "a placement naming the split edition follows it to the new work (#396)", ctx do
+      scanner = insert(:placement, book: ctx.work, book_edition_id: ctx.merged.id)
+
+      DataCorrection.run_targeted(UnmergeEdition, argument(ctx.merged.id),
+        apply: true,
+        invoked_by: "test"
+      )
+
+      new_work_id = work_id_of(ctx.merged.id)
+      moved = Repo.reload!(scanner)
+
+      # Internally consistent: both FKs on the SAME (new) work…
+      assert moved.book_id == new_work_id
+      assert moved.book_edition_id == ctx.merged.id
+
+      # …while the two primary-edition readers stay put, untouched.
+      assert Repo.aggregate(from(p in Placement, where: p.book_id == ^ctx.work.id), :count) == 2
+    end
+
+    test "the plan states both counts — who follows the edition, who stays (#396)", ctx do
+      insert(:placement, book: ctx.work, book_edition_id: ctx.merged.id)
+
+      {:ok, [change]} = UnmergeEdition.plan(argument(ctx.merged.id))
+
+      assert change.because =~ "1 placement(s) name this edition and follow it"
+      assert change.because =~ "2 placement(s) stay on"
+    end
   end
 
   # ── The audit ─────────────────────────────────────────────────────────────

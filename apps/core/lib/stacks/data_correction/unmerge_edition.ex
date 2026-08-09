@@ -40,45 +40,38 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   the old work; that is a live-listing decision for the operator and not
   something this correction should guess at.
 
-  ## Placements stay on the work they were made against
+  ## Placements: follow the recorded edition, and only the recorded edition
 
-  This is the disposition decision #376 asks for, and the evidence is that the
-  database does not record what the other choice would need.
+  This is the disposition decision #376 asked for, revised once by #396 when
+  #378 changed what the database records. The rule has two halves, and each is
+  driven by what a placement's `book_edition_id` actually says:
 
-  This held categorically *before #378*: `Stacks.Shelving.place_book/3` always
-  wrote the work's *primary* edition (`primary_edition_id/1` orders
-  `desc: is_primary`), `do_reread_book/2` carried an existing value forward, and
-  `merge_edition/2` inserts every merged edition with `is_primary: false` — so no
-  placement ever named a merged edition, and there was no row-level evidence of
-  who acquired the edition being split out.
+  **A placement that names the edition being split moves with it** — its
+  `book_id` is rewritten to the newly minted work (#396). Post-#378,
+  `Stacks.Shelving.place_book/4` records the *scanned* edition, so such a
+  placement is row-level evidence that this reader's physical copy IS the
+  split-out book. Moving it is not a guess; it is reading the record. The
+  alternative (re-pointing it at the surviving work's primary edition) would
+  assert the reader owns an edition they never scanned — a structurally valid
+  but false row, the same class #378 itself repaired. It also keeps the row
+  internally consistent: without the move, the reparent would leave `book_id`
+  (old work) and `book_edition_id` (new work) naming different works. The new
+  work is minted by this very correction, so the move cannot collide with an
+  existing placement.
 
-  ⚠️ **#378 weakens that premise.** `place_book/4` now records the *scanned*
-  edition, so a placement created after #378 CAN name a non-primary (and thus a
-  later-merged) edition. Un-merge still does not move placements here, but the
-  justification is no longer "it is impossible"; it is "the owner-only correction
-  path does not yet reconcile a placement that names the split edition." Handling
-  that case — re-point such a placement to the surviving work, or move it — is
-  tracked as its own follow-up (#396); until then a placement whose
-  `book_edition_id` is the edition being split will keep pointing at it across the
-  reparent, leaving `book_id`/`book_edition_id` on different works.
+  **Every other placement stays on the work it was made against.** For rows
+  that name the primary (or carry no edition), the pre-#378 argument still
+  governs: the database does not record who acquired the split-out edition,
+  and every rule for guessing guesses badly — "move them all" relocates
+  readers who own the original book and never touched this ISBN; "move the
+  ones created after the merge" catches everyone who added the original in
+  that window. A wrong reassignment is a second wrong merge, performed on user
+  data, and it is not undoable by the same argument that makes the merge
+  itself not undoable.
 
-  Moving placements would therefore be guessing, and every available rule guesses
-  badly: "move them all" relocates readers who own the original book and never
-  touched this ISBN; "move the ones created after the merge" catches everyone who
-  added the original in that window; "move the ones whose upload named the ISBN"
-  reads evidence that GDPR image retention deletes after 30 days and that the
-  manual-ISBN path never writes at all. A wrong reassignment is a second wrong
-  merge, performed on user data, and it is not undoable by the same argument that
-  makes the merge itself not undoable.
-
-  So they stay, and the correction is not thereby cosmetic. The repair that
-  matters is at the source: after the split the ISBN resolves to the right work
-  for every future lookup, the wrong work stops advertising a book it does not
-  contain, and the split-out book exists as itself. What is left is a bounded,
-  countable set of readers whose shelf shows the old work — and the plan states
-  that count in its `:because`, before anything is written, so the operator sees
-  the blast radius and can reach those readers as a human decision rather than
-  having one made for them silently.
+  Both counts are stated in the plan's `:because`, before anything is written,
+  so the operator sees the blast radius — who follows the edition, who stays —
+  as part of the dry run.
 
   ## Reading through Ecto rather than `Column`
 
@@ -118,7 +111,8 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   def scope(%{edition_id: edition_id}),
     do:
       "the single op.book_editions row #{edition_id} — its book_id and is_primary, " <>
-        "plus one new op.books row to hold it. No placement is touched."
+        "plus one new op.books row to hold it. Placements that NAME this edition " <>
+        "follow it to the new work (#396); every other placement is untouched."
 
   @impl true
   def reversibility,
@@ -157,6 +151,17 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     with {:ok, work} <- mint_work(to),
          :ok <- Column.swap(@work, edition_id, uuid(work_id), uuid(work.id)),
          :ok <- Column.swap(@primary, edition_id, false, true) do
+      # #396: a placement whose book_edition_id IS this edition records that
+      # the reader's copy is the split-out book — it follows the edition, or
+      # the reparent would leave its book_id and book_edition_id naming
+      # different works. Set-based on the edition FK, so no other placement
+      # can match.
+      {moved, _} =
+        Repo.update_all(
+          from(p in Placement, where: p.book_edition_id == ^edition_id),
+          set: [book_id: work.id, updated_at: DateTime.utc_now()]
+        )
+
       # The book detail page is served from a 5-minute ETS cache keyed by work
       # id, so without this both works keep describing the pre-split shape for
       # up to five minutes — the same eviction-under-the-wrong-key defect #355
@@ -165,7 +170,7 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
       BookDetailCache.invalidate(work_id)
       BookDetailCache.invalidate(work.id)
 
-      {:ok, %{new_work_id: work.id}}
+      {:ok, %{new_work_id: work.id, placements_moved: moved}}
     end
   end
 
@@ -201,7 +206,17 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
   end
 
   defp change(edition, work, title) do
-    retained = Repo.aggregate(from(p in Placement, where: p.book_id == ^work.id), :count)
+    movers =
+      Repo.aggregate(from(p in Placement, where: p.book_edition_id == ^edition.id), :count)
+
+    retained =
+      Repo.aggregate(
+        from(p in Placement,
+          where: p.book_id == ^work.id,
+          where: p.book_edition_id != ^edition.id or is_nil(p.book_edition_id)
+        ),
+        :count
+      )
 
     %{
       id: edition.id,
@@ -209,9 +224,10 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
       to: %{work_title: title, visibility_tier: work.visibility_tier},
       because:
         "ISBN #{edition.isbn} is not an edition of #{inspect(work.title)}; splitting it onto " <>
-          "its own work. #{retained} placement(s) stay on #{inspect(work.title)} — no " <>
-          "placement has ever named a merged edition, so which readers acquired this one is " <>
-          "not recorded and may not be guessed."
+          "its own work. #{movers} placement(s) name this edition and follow it (#396 — the " <>
+          "recorded scan is the evidence); #{retained} placement(s) stay on " <>
+          "#{inspect(work.title)}, whose readers' acquisitions are not recorded and may not " <>
+          "be guessed."
     }
   end
 

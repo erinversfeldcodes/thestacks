@@ -627,7 +627,7 @@
         },
         "fu-396": {
           "issue": 396,
-          "status": "not_started",
+          "status": "complete",
           "title": "Un-merge must reconcile a placement naming the split edition (post-#378 premise change)."
         }
       },
