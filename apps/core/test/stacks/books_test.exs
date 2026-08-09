@@ -585,6 +585,22 @@ defmodule Stacks.BooksTest do
       assert updated.cover_image_url == cover_url
     end
 
+    test "the cover fetch is seamed — routed through the client, never a live request (#381a)" do
+      edition = insert(:book_edition)
+      cover_url = "https://covers.example.test/#{edition.isbn}.jpg"
+
+      MockHttpClient.capture_requests()
+
+      assert {:ok, updated} = Books.confirm_cover_association(edition.id, cover_url)
+
+      # The download went THROUGH the mocked client — proof it is not a bare
+      # Finch call. Before #381a this fetch hit the network, and the assertion
+      # below was green only because the real host returned non-200.
+      assert_receive {MockHttpClient, :request, ^cover_url}, 1_000
+      # Unmatched, the mock fails closed, so the source URL is kept (no R2 store).
+      assert updated.cover_image_url == cover_url
+    end
+
     test "returns {:error, :not_found} for an unknown edition_id" do
       assert {:error, :not_found} =
                Books.confirm_cover_association(Ecto.UUID.generate(), "https://example.com/x.jpg")

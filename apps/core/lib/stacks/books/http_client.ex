@@ -22,6 +22,27 @@ defmodule Stacks.Books.HttpClient do
     end
   end
 
+  @impl true
+  def get_binary(url) do
+    req = Finch.build(:get, url)
+
+    # Bound BOTH the per-receive idle window AND the whole request (#381d): a
+    # cover host that accepts the connection then dribbles bytes forever would
+    # otherwise hang past `receive_timeout`. Covers are small, so 10s each is
+    # generous.
+    case Finch.request(req, Stacks.Finch, receive_timeout: 10_000, request_timeout: 10_000) do
+      {:ok, %Finch.Response{status: 200, body: body}} ->
+        {:ok, body}
+
+      {:ok, %Finch.Response{status: status}} ->
+        Logger.warning("Books.get_binary: unexpected status #{status} for #{url}")
+        {:error, :unexpected_status}
+
+      {:error, error} ->
+        map_error(error, url)
+    end
+  end
+
   # Finch >= 0.23 wraps every failure in one of its own exception structs
   # (`t:Finch.error/0`): `%Finch.TransportError{reason, source}`,
   # `%Finch.HTTPError{reason, module, source}`, or `%Finch.Error{reason}`.

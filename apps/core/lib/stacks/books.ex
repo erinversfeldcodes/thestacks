@@ -799,17 +799,16 @@ defmodule Stacks.Books do
 
   defp maybe_store_cover_in_r2(_isbn, cover_url), do: cover_url
 
+  # Routed through the configured Books HTTP client (#381a) rather than a bare
+  # `Finch.build/request`, so tests mock it via `:isbn_http_client` and never
+  # dial the cover host. Any non-200 / transport error surfaces as `{:error, _}`,
+  # which `maybe_store_cover_in_r2/2` falls back on (keeps the source URL).
   defp download_cover(url) when is_binary(url) do
-    req = Finch.build(:get, url)
+    books_http_client().get_binary(url)
+  end
 
-    case Finch.request(req, Stacks.Finch, receive_timeout: 10_000) do
-      {:ok, %Finch.Response{status: 200, body: body}} -> {:ok, body}
-      _ -> {:error, :download_failed}
-    end
-  rescue
-    e ->
-      Logger.warning("Books: cover download failed for #{url}: #{Exception.message(e)}")
-      {:error, :download_failed}
+  defp books_http_client do
+    Application.get_env(:core, :isbn_http_client, Stacks.Books.HttpClient)
   end
 
   @doc """
