@@ -519,8 +519,8 @@ export function base32Decode(input: string): Buffer {
 }
 
 /** RFC 6238 TOTP, SHA-1, 6 digits, 30s step — what an authenticator app would show. */
-export function totp(secretBase32: string): string {
-  const counter = Math.floor(Date.now() / 1000 / 30);
+export function totp(secretBase32: string, atMs: number = Date.now()): string {
+  const counter = Math.floor(atMs / 1000 / 30);
   const buf = Buffer.alloc(8);
   buf.writeUInt32BE(counter, 4);
   const mac = createHmac("sha1", base32Decode(secretBase32)).update(buf).digest();
@@ -531,6 +531,38 @@ export function totp(secretBase32: string): string {
     (mac[offset + 2] << 8) |
     mac[offset + 3];
   return String(bin % 1_000_000).padStart(6, "0");
+}
+
+/**
+ * A TOTP code guaranteed to still be inside its 30-second validity window when
+ * the server checks it (#394).
+ *
+ * The server validates with a bare `NimbleTOTP.valid?` — EXACTLY the current
+ * 30s step, no ±1-step allowance (`Stacks.MFA` confirm_enrollment/verify_totp).
+ * A code computed from the local clock in the last moments of a step is
+ * therefore rejected when validation lands in the next step — an intermittent
+ * 422 whose per-run probability is (latency + clock skew)/30s, i.e. "passes one
+ * run, fails the next at identical code". Root cause of the #394 flake.
+ *
+ * Deterministic fix, not a retry: when the (server-adjusted) clock is inside
+ * the guard band before a step boundary, wait the boundary out, then compute.
+ * The code presented is always fresh for ≥ GUARD_MS − skew-estimate error, and
+ * a genuine encoding regression still fails every run rather than being
+ * retried into a green.
+ *
+ * `skewMs` is server-minus-local, best taken from a response's `Date` header
+ * (1s granularity — see `enrolOwnerMfa`). Defaulting it to 0 still removes the
+ * dominant boundary race; the skew term guards against a drifted clock.
+ */
+export async function freshTotp(secretBase32: string, skewMs = 0): Promise<string> {
+  const STEP_MS = 30_000;
+  const GUARD_MS = 5_000;
+  const serverNow = () => Date.now() + skewMs;
+  const intoStep = serverNow() % STEP_MS;
+  if (intoStep > STEP_MS - GUARD_MS) {
+    await new Promise((resolve) => setTimeout(resolve, STEP_MS - intoStep + 250));
+  }
+  return totp(secretBase32, serverNow());
 }
 
 /**
@@ -571,6 +603,13 @@ export async function enrolOwnerMfa(request: APIRequestContext): Promise<string>
     data: {},
   });
   expect(setup.status(), "mfa setup").toBe(200);
+
+  // Server-minus-local clock skew from the response's own Date header (1s
+  // granularity; +500ms centres the truncation). Feeds freshTotp so the
+  // confirm code is computed against the SERVER's step, not ours (#394).
+  const setupDate = setup.headers()["date"];
+  const skewMs = setupDate ? new Date(setupDate).getTime() + 500 - Date.now() : 0;
+
   const { provisioning_uri, recovery_codes } = await setup.json();
 
   const secret = new URL(
@@ -580,7 +619,7 @@ export async function enrolOwnerMfa(request: APIRequestContext): Promise<string>
 
   const confirm = await request.post("/api/admin/auth/mfa/confirm", {
     headers: auth,
-    data: { totp_code: totp(secret!), secret: secret!, recovery_codes },
+    data: { totp_code: await freshTotp(secret!, skewMs), secret: secret!, recovery_codes },
   });
   expect(
     confirm.status(),

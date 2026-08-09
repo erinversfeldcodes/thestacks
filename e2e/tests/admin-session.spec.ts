@@ -2,8 +2,8 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import {
   DEV_EMAIL,
   DEV_PASSWORD,
+  freshTotp,
   readOwnerMfaSecret,
-  totp,
 } from "./helpers";
 
 /**
@@ -84,7 +84,11 @@ async function passTheGate(page: Page, secret: string) {
     page.getByTestId("admin-code").waitFor({ state: "visible", timeout: 15000 }),
     "the gate never offered the code field",
   );
-  await page.getByTestId("admin-code").fill(totp(secret));
+  // freshTotp, not totp: the server accepts exactly the current 30s step, so a
+  // code computed at the tail of a step is stale by the time it is verified —
+  // the #394 intermittent 422, which at THIS call site presents as "the gate
+  // never opened".
+  await page.getByTestId("admin-code").fill(await freshTotp(secret));
   await page.getByTestId("admin-verify").click();
   await gateAdvances(
     page,
