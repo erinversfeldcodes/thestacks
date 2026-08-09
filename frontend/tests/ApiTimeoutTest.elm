@@ -126,7 +126,11 @@ timeoutIsVisibleToTheReader =
                     |> ProgramTest.expectView
                         (Query.find [ Selector.attribute (Attr.attribute "data-testid" "shelf-error") ]
                             >> Query.has
-                                [ Selector.exactText "The library is unreachable. Check your connection, then try again." ]
+                                -- #368: no "try again" — the app reloads the
+                                -- shelf itself on reconnect, and the copy
+                                -- promises exactly that instead of naming an
+                                -- affordance that does not exist.
+                                [ Selector.exactText "The library is unreachable. Your library will reload by itself as soon as the connection returns." ]
                         )
         , test "server_error_stays_generic: the positive control proving the two negatives above are real" <|
             \() ->

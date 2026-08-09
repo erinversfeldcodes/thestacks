@@ -28,6 +28,7 @@ port module Main exposing
     , main
     , pageTitle
     , parkPending
+    , reconnectShouldRefetch
     , redirectAfterNavigation
     , renewAuthToken
     , requiresAuth
@@ -316,6 +317,60 @@ connectivityFromOnline isOnline =
 
     else
         Offline
+
+
+{-| The whole #368 refetch decision, pure: refetch exactly when the
+connectivity change is the offline→online TRANSITION (not a repeated `online`
+event, not going offline) and the routed page lost its content to the network.
+-}
+reconnectShouldRefetch : Connectivity -> Connectivity -> Page -> Bool
+reconnectShouldRefetch before after page =
+    before == Offline && after == Online && pageLostToNetwork page
+
+
+{-| Whether the routed page's PRIMARY content was lost to a `NetworkError` —
+the one failure reconnecting actually fixes (Issue #368).
+
+Scope rule, stated: reconnect recovery is a SHARED Main-level behaviour (the
+connectivity signal lives here, and re-entering a route is Main's job — a
+per-page copy in every module is the duplication #363 collapsed), but pages
+opt IN by naming their content field here. Seeded with the shelf/book family
+the Wave 6 drive covered. The catch-all is honest: a page not named simply
+keeps today's behaviour (its own error copy), it does not break — and
+`Timeout`/5xx deliberately never trigger a refetch, because reconnecting is
+not what fixes those (#362's split, kept).
+
+-}
+pageLostToNetwork : Page -> Bool
+pageLostToNetwork page =
+    let
+        lost : RemoteData Http.Error a -> Bool
+        lost remote =
+            case remote of
+                Failure Http.NetworkError ->
+                    True
+
+                _ ->
+                    False
+    in
+    case page of
+        PageBookshelf m ->
+            lost m.shelves
+
+        PageReadingPile m ->
+            lost m.books
+
+        PageLookingForHome m ->
+            lost m.books
+
+        PageBookDetail m ->
+            lost m.book
+
+        PageCatalogue m ->
+            lost m.books
+
+        _ ->
+            False
 
 
 {-| The session, whatever stage of arrival it is in. The ONE accessor — nothing
@@ -3108,12 +3163,37 @@ update msg model =
             ( { model | config = { config | ageGatingEnabled = enabled } }, Cmd.none )
 
         ConnectivityChanged isOnline ->
-            -- The browser's own `online`/`offline` event (Issue #362). No
-            -- effect: the banner is the whole response. Deliberately NOT a
-            -- retry trigger — a page that refetches on reconnect is a separate
-            -- decision, and quietly re-issuing a request the reader has since
-            -- navigated away from is how stale data lands on the wrong page.
-            ( { model | connectivity = connectivityFromOnline isOnline }, Cmd.none )
+            -- The browser's own `online`/`offline` event (Issue #362).
+            --
+            -- #368 (owner-decided scope): on the offline→online TRANSITION,
+            -- and only then, re-enter the current route IF its page lost its
+            -- content to a `NetworkError` — the app demonstrably knows the
+            -- connection returned (it clears its own banner on this very
+            -- message), so leaving the reader staring at "unreachable" on a
+            -- working connection was the worse behaviour. The old worry here
+            -- ("quietly re-issuing a request the reader has since navigated
+            -- away from is how stale data lands on the wrong page") is what
+            -- the scoping answers: only the page CURRENTLY routed, only in
+            -- `NetworkError`, and through `initPage` — the same path the page
+            -- loads through on arrival, not a side-channel refetch.
+            let
+                connectivity =
+                    connectivityFromOnline isOnline
+            in
+            if reconnectShouldRefetch model.connectivity connectivity model.page then
+                let
+                    ( page, cmd ) =
+                        initPage model.config
+                            model.route
+                            (currentAuth model.auth)
+                            (adminTokenFor model)
+                            (Just model.route)
+                            model.arrival
+                in
+                ( { model | connectivity = connectivity, page = page }, cmd )
+
+            else
+                ( { model | connectivity = connectivity }, Cmd.none )
 
         FocusResult ->
             -- Shared fire-and-forget no-op: absorbs focus-attempt results and
