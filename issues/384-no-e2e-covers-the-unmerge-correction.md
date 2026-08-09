@@ -57,12 +57,11 @@ depending on the Modal vision backend being deployed.
 | E2E (unmerge) | yes | ❌ absent — this issue |
 
 ## Definition of Done
-- [ ] A chromium-project spec drives merge→unmerge and asserts the split — evidence: spec name + run
-- [ ] It skips with a clear message when Open Library is unreachable, and does not fail the build —
-      evidence: the guard + a forced-skip run
-- [ ] Probed: breaking the unmerge (e.g. not reassigning `book_id`) reddens it — evidence: transcript
-- [ ] `just run just verify` / the E2E project passes
-- [ ] `gdpr-review`: n/a — edition/work FKs, no personal data. Stated, not skipped.
+- [x] A chromium-project spec drives merge→unmerge and asserts the split — evidence: `e2e/tests/unmerge-edition.spec.ts` ("a merged edition can be split onto its own work, exactly once"): reader `merge-format`s a pool ISBN onto a catalogue work, owner (MFA via shared #371 secret + #394 `freshTotp`) dry-runs (mode `dry_run`, count 1, writes nothing — asserted) then applies; the ISBN then resolves to a different work; a second apply 422s naming `primary_edition`. Run against the live preview 2026-08-09: 1 passed (7.5s), and again post-probe (8.9s, different pool ISBN — proving the state-aware idempotence across runs of a persistent preview DB)
+- [x] It skips with a clear message when Open Library is unreachable, and does not fail the build — evidence: `openLibraryReachable` probes OL `/search.json` (the preflight's endpoint); forced-skip run (OL host pointed at `.invalid`): `1 skipped`, exit 0. A second guard skips with a reason when the split-ISBN pool is exhausted on a long-lived DB
+- [x] Probed: an unmerge that writes nothing reddens it — evidence: apply flag muted → red at exactly `"the split edition lives on its own work now"` (`.not.toBe(target.id)` received the merged-onto work); reverted → green. (Server-side book_id-mutation probing lives in `unmerge_edition_test.exs`'s 41 tests; this probe proves the E2E assertion has the same bite.) Note: the probe run left pool ISBN 9780140449266 merged onto a catalogue work on the throwaway preview DB — harmless, reseeded on next deploy
+- [x] The E2E project passes — evidence: setup + chromium runs above; full `just ci` at wave finalize
+- [x] `gdpr-review`: n/a — the spec touches edition/work FKs and a minted `.test` user only; no personal data surface added. Stated, not skipped.
 
 ## Dependencies
 Depends on **#376** (the correction it drives) and **#371** (the admin-session MFA-sharing fix — this
@@ -75,3 +74,7 @@ spec enrols MFA the same way and must not collide with the admin-session specs' 
 - 2026-08-04: Filed from #376's review, at the owner's prompting ("why don't we have a playwright test
   for this functionality?"). The absence was load-bearing: it let a reviewer (me) assert a
   non-existent limitation about the merge API and nearly scope #376's live drive down because of it.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM WITH NOTES** — state-aware design (ISBN pool + availability probe) makes a destructive round trip repeatable on a persistent DB; skip guards fail open with reasons. Note: pool exhaustion on a long-lived preview is a standing operational caveat, stated in-spec; the probe run left one ISBN merged on the throwaway preview.
