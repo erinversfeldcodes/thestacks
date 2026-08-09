@@ -62,11 +62,17 @@ defmodule Stacks.DataCorrection.Registry do
   powerful than a standing one is exactly why it may not also be more reachable.
   """
 
-  alias Stacks.DataCorrection.{NormaliseEditionIsbn10, StaleSeedEditionIsbn, UnmergeEdition}
+  alias Stacks.DataCorrection.{
+    NormaliseEditionIsbn10,
+    SeedEditionVerificationSource,
+    StaleSeedEditionIsbn,
+    UnmergeEdition
+  }
 
   @corrections [
     NormaliseEditionIsbn10,
-    StaleSeedEditionIsbn
+    StaleSeedEditionIsbn,
+    SeedEditionVerificationSource
   ]
 
   @targeted [

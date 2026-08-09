@@ -121,13 +121,13 @@ correction turns out to need provider re-verification rather than a relabel, spl
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Disposition of the legacy rows decided and justified — evidence: the reasoning, not just the SQL
-- [ ] Correction registered and idempotent — evidence: two consecutive runs, second a no-op
-- [ ] Title shown whenever a title exists; provisional copy reserved for records without one — evidence: diff
-- [ ] Invariant test (title present ⇒ never the provisional copy) — evidence: test name + probe transcript
-- [ ] `search.spec.ts:312` and `:432` pass unmodified — evidence: the run
-- [ ] Live-driven: catalogue book opens showing its real title — evidence: screenshot
-- [ ] `staff-review` verdict recorded below
+- [x] Disposition of the legacy rows decided and justified — evidence: the true origin is the #335 BACKFILL, not the seed: migration `20260730200000` filled pre-column rows from provider identifiers and fell back to `barcode_unverified` when none was stored — and the seed fixtures predate identifier storage, so 100% fell into that bucket (staging still has NO `verification_source` column; every migrated branch re-manufactures the 206/206). Disposition: seed-shaped rows (deterministic `a1b2c3d4-…` ids no production write can mint) → `open_library`, because `seeds.exs` DECLARES that provenance for these very rows with its own in-file justification — the `StaleSeedEditionIsbn` argument: for a fixture row, seeds.exs is the correct value. Reader-created `barcode_unverified` rows are deliberately untouched — for them the label is true
+- [x] Correction registered and idempotent — evidence: `SeedEditionVerificationSource` in `Registry.all()` (swept by `Stacks.Release.deploy/0`); `seed_edition_verification_source_test.exs` "applies the seed's declared provenance, and a second run is a no-op" — two consecutive runs, second plans nothing. Scope mutation-probed: filter removed → "never claims a reader-created barcode_unverified edition" REDS; restored → 5/0, full correction suites 71/0
+- [x] Title shown whenever a title exists; provisional copy reserved for records without one — evidence: `6f54a28d` (landed earlier in the wave): `isUnidentified = isProvisional AND no known title`; `displayTitle` keyed off `isUnidentified`, never `isProvisional`
+- [x] Invariant test (title present ⇒ never the provisional copy) — evidence: `ProvisionalBookTest.elm` fuzz "a book whose title is a name shows it, and the page never says it cannot" (+ the exact 1Q84 preview row as a pinned case). Probed 2026-08-09: reverting `displayTitle` to `isProvisional` reds 3 tests incl. the 1Q84 row; restored 29/0
+- [x] `search.spec.ts:312` and `:432` pass unmodified — evidence: 2026-08-09 full real-login run: `:312` ✓ (2.4s) and `:432` ✓ (3.9s) among 301 passed
+- [ ] Live-driven post-correction: catalogue book opens showing its real title AND the branch's `barcode_unverified` count drops to reader-created rows only — evidence: owed at the batch-final deploy (the deployed release predates this correction; `Release.deploy/0` will sweep it), then screenshot + post-correction counts land here. (The UI half is already live-validated: 2026-08-07 "search returns real titles" + today's search specs)
+- [ ] `staff-review` verdict recorded below — with the live box, at batch close
 
 ## Dependencies
 Surfaced by the Wave 6 live drive. Answers the open question in **#346** and supersedes its

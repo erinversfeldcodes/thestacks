@@ -467,7 +467,8 @@ defmodule Stacks.DataCorrectionTest do
 
       assert Enum.map(outcomes, & &1.correction) == [
                "normalise_edition_isbn10",
-               "stale_seed_edition_isbn"
+               "stale_seed_edition_isbn",
+               "seed_edition_verification_source"
              ]
 
       assert Enum.all?(outcomes, &(&1.count == 0))
