@@ -133,12 +133,10 @@ defmodule Stacks.Events.Registry do
     "enrichment.prices_scraped" => [
       Stacks.Workers.DbtRefreshHandler
     ],
-    # NOTE: nothing emits "enrichment.reviews_scraped". It has a handler here, a
-    # model mapping in DbtRefreshHandler, and a payload contract — and no emitter
-    # anywhere in apps/core. The subscription is left in place (it is correct for
-    # the event it describes, and removing it would lose the wiring) but it is dead
-    # until a review scraper emits. Kept out of @unsubscribed, which is for types
-    # that ARE emitted; this is the opposite drift and is tracked separately.
+    # Pending, not dead: see @pending below. The subscription is correct for the
+    # event it describes and is deliberately kept while the review vertical
+    # (US-2.1.1) is built; the completeness test's inverse guard holds it to
+    # that designation.
     "enrichment.reviews_scraped" => [
       Stacks.Workers.DbtRefreshHandler
     ],
@@ -277,11 +275,36 @@ defmodule Stacks.Events.Registry do
     "costs.refreshed"
   ]
 
+  # Catalogued event types whose emitter does not exist YET — the consumer-side
+  # wiring (handlers, payload contract, dbt mapping) is deliberately kept for a
+  # planned vertical. Every entry carries the story/ruling that keeps it, so
+  # "pending" is a claim someone made on the record, not a place orphans hide:
+  # the completeness test's inverse guard fails any catalogued type that is
+  # neither emitted nor named here, and fails a pending entry the moment an
+  # emitter appears (it must then leave this map).
+  @pending %{
+    "enrichment.reviews_scraped" =>
+      "US-2.1.1 — reviews are planned, not deleted (owner ruling 2026-08-07, #336): " <>
+        "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>
+        "returns; its handler, payload contract and dbt models stay wired"
+  }
+
   # An event type in both lists would make all_event_types/0 return duplicates and
   # leave it ambiguous which list is authoritative. Fail the compile instead.
   @overlap Enum.filter(@unsubscribed, &Map.has_key?(@registry, &1))
   if @overlap != [] do
     raise CompileError, description: "event type in @registry and @unsubscribed: #{@overlap}"
+  end
+
+  # A pending type must be catalogued — the designation qualifies an entry in one
+  # of the two lists above; a pending entry for an uncatalogued type is a typo.
+  @uncatalogued_pending Enum.reject(
+                          Map.keys(@pending),
+                          &(Map.has_key?(@registry, &1) or &1 in @unsubscribed)
+                        )
+  if @uncatalogued_pending != [] do
+    raise CompileError,
+      description: "pending event type not in @registry/@unsubscribed: #{@uncatalogued_pending}"
   end
 
   @doc """
@@ -319,4 +342,11 @@ defmodule Stacks.Events.Registry do
   """
   @spec unsubscribed_event_types() :: [String.t()]
   def unsubscribed_event_types, do: @unsubscribed
+
+  @doc """
+  Catalogued event types with no emitter yet, mapped to the reason each one's
+  consumer-side wiring is kept. See `@pending`.
+  """
+  @spec pending_event_types() :: %{String.t() => String.t()}
+  def pending_event_types, do: @pending
 end

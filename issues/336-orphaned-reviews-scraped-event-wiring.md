@@ -49,12 +49,12 @@ n/a — no user story. The pre-check that matters is the **zero-row sweep**: con
 | Others | no | n/a |
 
 ## Definition of Done
-- [ ] Direction decided with `45ddcc44`'s rationale cited — evidence: quoted rationale + decision
-- [ ] Zero-row sweep on both models — evidence: row counts
-- [ ] All five references resolved consistently — evidence: `grep -rn reviews_scraped` → 0 (or an emitter exists)
-- [ ] Registry test extended to catch the inverse case, mutation-probed — evidence: probe transcript
-- [ ] `dbt parse` + suites green — evidence: counts
-- [ ] `staff-review` verdict recorded below
+- [x] Direction decided with `45ddcc44`'s rationale cited — evidence: owner ruling 2026-08-07 (campaign state, decisions.336): "reviews ARE planned (US-2.1.1 re-scoped, not deleted). KEEP the vertical scaffolding … mark the orphan event pending-US-2.1.1 (not a live contract) + inverse completeness guard … NO full teardown." Direction = KEEP, third state made legitimate by a checked designation rather than a comment.
+- [x] Zero-row sweep — evidence: 2026-08-09 local warehouse counts `op.review_snapshots` 0, `staging.stg_review_snapshots` 0, `intermediate.int_review_sentiment` 0, `marts.mart_book_reviews` 0 (all three dbt relations are VIEWS, so nothing stale is materialised)
+- [x] All five references resolved consistently — evidence: all five KEPT per ruling; the registry entry now points at `Registry.pending_event_types/0`, whose entry carries US-2.1.1 + the ruling; `DbtRefreshHandler` mapping and payload contract stand unchanged as the wiring the vertical returns to
+- [x] Registry test extended to catch the inverse case, mutation-probed — evidence: "every catalogued type is emitted, indirectly emitted, or explicitly pending" + stale-pending test in `registry_completeness_test.exs`; probe A (fake `probe.never_emitted` in @unsubscribed) → 1 failure naming it; probe B (@pending emptied) → 1 failure naming `enrichment.reviews_scraped`; restored → 39/0 across events suite. Guard surfaced NO further orphans (`source.approved`/`source.rejected` are uncatalogued indirect emits, out of its scope by design — named exemption map provided for when they are catalogued).
+- [x] `dbt parse` + suites green — evidence: no dbt file changed (KEEP direction); events suite 39 tests 0 failures; full core suite 3553/0 this session
+- [x] `staff-review` verdict recorded below — see Wave 11 close-out
 
 ## Dependencies
 **#334** (built the registry completeness test this extends; found the orphan). Not blocking any wave — schedule into Wave 11 (#321) with the other wiring work, or earlier if a wave touches `DbtRefreshHandler`.
@@ -65,5 +65,11 @@ elixir-agent + dbt.
 ## Progress Notes
 Filed 2026-07-30 by the lead during Wave 4, from #334's follow-up finding. Independently confirmed: `git log -S"reviews_scraped"` identifies `45ddcc44` as the commit that removed the emitter (`- event_type: "enrichment.reviews_scraped"`), and both dbt models still exist on disk.
 
+**Built 2026-08-09 (Wave 11, 11f).** Direction KEEP per the 2026-08-07 owner ruling. `Registry` gains `@pending` (type → reason, compile-checked ⊆ catalogue) + `pending_event_types/0`; the completeness test gains the inverse guard (catalogued ⇒ emitted ∨ pending ∨ named-indirect) and a stale-pending guard (an emitter appearing forces the entry out of pending). The `NOTE:` comment at the registry entry is gone, replaced by the checked designation.
+
 **Wave assignment (owner-approved 2026-07-31): Wave 11.**
 Scheduled as item **11f**, beside **11e** (wire the bookstore-events vertical): both are the same decision in opposite directions — 11e wires a vertical that was built but never connected, 11f resolves one whose source was deleted while its consumers remain.
+
+
+## Wave 11 close-out (2026-08-09)
+staff-review (Mode B shadow, 2026-08-09): **LGTM** — pending-with-reason is a checked designation, not a comment — the inverse guard fails it in both directions (orphan appears / emitter appears). Owner ruling honoured without keeping dead prose.

@@ -62,6 +62,58 @@ defmodule Stacks.Events.RegistryCompletenessTest do
              """
     end
 
+    # The INVERSE direction (#336): a catalogued type nothing emits. That is how
+    # `enrichment.reviews_scraped` sat for months — Wave 2 deleted its sole
+    # emitter while its handler, payload contract and two dbt models stayed
+    # wired, and no test asked the question in this direction. A type may be
+    # catalogued-but-unemitted only by naming itself in
+    # `Registry.pending_event_types/0` with the story/ruling that keeps it.
+    #
+    # Exemption class this test cannot see on its own: an emitter whose event
+    # type reaches `emit/1` as an argument is invisible to the literal scan
+    # (`Stacks.Discovery.transition_source/3` is the standing example — its
+    # types are deliberately uncatalogued today, see the Registry moduledoc).
+    # If such a type is ever catalogued, name it here with its emitting
+    # function rather than widening `pending`:
+    @indirectly_emitted %{}
+
+    test "every catalogued type is emitted, indirectly emitted, or explicitly pending" do
+      emitted = MapSet.new(emitted_event_types(), &elem(&1, 0))
+      pending = Registry.pending_event_types()
+
+      orphans =
+        Enum.reject(
+          Registry.all_event_types(),
+          &(MapSet.member?(emitted, &1) or Map.has_key?(pending, &1) or
+              Map.has_key?(@indirectly_emitted, &1))
+        )
+
+      assert orphans == [],
+             """
+             Catalogued event types with no emit site anywhere in apps/core/lib:
+
+             #{Enum.map_join(orphans, "\n", &"  #{&1}")}
+
+             Either the emitter was deleted out from under the wiring (the #336
+             defect: a handler that can never run, dbt models nothing refreshes),
+             or the type is planned — in which case record it in
+             Registry.pending_event_types/0 with the story that keeps it.
+             """
+    end
+
+    test "pending types really have no emitter — pending is not a place to forget" do
+      emitted = MapSet.new(emitted_event_types(), &elem(&1, 0))
+
+      stale =
+        Registry.pending_event_types()
+        |> Map.keys()
+        |> Enum.filter(&MapSet.member?(emitted, &1))
+
+      assert stale == [],
+             "pending event type(s) now have an emitter — remove from Registry @pending: " <>
+               inspect(stale)
+    end
+
     # Guards the guard: if the scanner stops finding emit sites the test above
     # passes vacuously, which is precisely how the original 22-of-54 gap survived.
     test "the emit-site scan finds a realistic number of event types" do
