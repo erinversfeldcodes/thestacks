@@ -45,11 +45,6 @@ defmodule StacksWeb.ImportController do
           conn
           |> put_status(422)
           |> json(%{error: "unrecognised_format", found_headers: headers})
-
-        {:error, _other} ->
-          conn
-          |> put_status(422)
-          |> json(%{error: "import_failed"})
       end
     else
       {:ok, %{size: _too_big}} ->

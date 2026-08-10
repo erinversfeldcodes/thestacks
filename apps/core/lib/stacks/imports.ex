@@ -20,6 +20,10 @@ defmodule Stacks.Imports do
   their dedup checks. `{:error, :import_in_progress}` is the API's 409.
   """
 
+  # Ecto.Multi's opaque internals trip dialyzer's call_without_opaque on every
+  # chained call — the same known false positive Stacks.GDPR.Deletion documents.
+  @dialyzer :no_opaque
+
   import Ecto.Query
 
   alias Core.Repo

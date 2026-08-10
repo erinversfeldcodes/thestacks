@@ -606,7 +606,16 @@ defmodule Stacks.Accounts do
   hole in the beta gate. The public path calls `register/1` and can never
   reach it.
   """
-  @spec register(map(), keyword()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  @spec register(map(), keyword()) ::
+          {:ok, User.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error,
+             :invite_required
+             | :invite_invalid
+             | :invite_expired
+             | :invite_revoked
+             | :invite_exhausted
+             | :invite_email_mismatch}
   def register(attrs, opts \\ []) do
     # Reap abandoned signups on the way in, so this does not depend on a nightly job.
     #

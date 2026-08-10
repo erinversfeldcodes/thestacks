@@ -166,6 +166,8 @@ sources:
             description: Last modification timestamp (UTC).
           - name: reading_status
             description: Reading lifecycle status (to_read, reading, completed, abandoned).
+          - name: source
+            description: Capture provenance (manual, upload, goodreads_import) — US-1.1.9.
           - name: current_page
             description: Current page the user is on (null if not reading).
           - name: started_at
@@ -254,6 +256,8 @@ sources:
             description: Whether the user consented to writing-assistant personalisation.
           - name: consent_writing_assistant_at
             description: Timestamp of writing-assistant consent decision.
+          - name: syndication_default
+            description: Account-level default for new posts' syndication-feed inclusion (US-6.2.1).
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -714,6 +718,8 @@ sources:
             description: FK to groups; non-null when visibility is "group".
           - name: published_at
             description: Timestamp when the post was published (null if draft).
+          - name: syndicated
+            description: Whether the post is included in the author's public syndication feed (US-6.2.1).
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -1042,6 +1048,103 @@ sources:
             description: When access was granted.
           - name: created_at
             description: Row creation timestamp.
+
+      - name: invite_codes
+        description: >
+          Beta invitation codes (US-14.1.3). The staging model excludes
+          `code_hash` (a credential), `note` and `invited_email` (the owner's
+          private notes about a person, and an address) — the warehouse sees
+          lifecycle and counts only.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: code_prefix
+            description: First characters of the code, for owner-side identification (never the code).
+          - name: code_hash
+            description: SHA-256 of the full code (credential; excluded from staging).
+          - name: note
+            description: The owner's note about the invitee (PII; excluded from staging).
+          - name: invited_email
+            description: Optional email binding (PII; excluded from staging).
+          - name: issued_by_id
+            description: FK to users (the issuing owner).
+          - name: max_uses
+            description: How many redemptions the code allows.
+          - name: use_count
+            description: Redemptions so far.
+          - name: expires_at
+            description: When the code stops working.
+          - name: redeemed_by_id
+            description: FK to users (latest redeemer; nullable).
+          - name: redeemed_at
+            description: When last redeemed (nullable).
+          - name: revoked_at
+            description: When revoked (nullable).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
+      - name: library_imports
+        description: >
+          Goodreads library imports (US-1.1.9) — the durable per-import summary.
+          The raw per-row table (library_import_rows) is deliberately ABSENT
+          from the warehouse: it carries the reader's own free text (reviews,
+          private notes) under a 30-day retention, and wh has no erasure path.
+          `filename` exists on the op table but is excluded from the staging
+          model — a reader's filename often carries their own name.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: user_id
+            description: FK to users (the importing reader).
+          - name: source
+            description: Import source (goodreads).
+          - name: filename
+            description: Uploaded filename (PII-adjacent; excluded from staging).
+          - name: status
+            description: Import status (enqueued, running, complete, failed).
+          - name: row_count
+            description: Total rows parsed from the export.
+          - name: processed_count
+            description: Rows with an outcome written so far.
+          - name: shelved_count
+            description: Rows that became placements.
+          - name: duplicate_count
+            description: Rows already on the destination bookshelf.
+          - name: unverified_count
+            description: Rows refused by the ISBN hard gate.
+          - name: unreadable_count
+            description: Rows the CSV parser could not read.
+          - name: started_at
+            description: When the job began processing.
+          - name: finished_at
+            description: When the import reached a terminal status.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
+      - name: post_syndications
+        description: >
+          POSSE syndication records (US-6.2.1) — which post went where, by
+          which mechanism, and the canonical URL as published. No free text:
+          the canonical URL embeds the post UUID, never a title-derived slug.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: post_id
+            description: FK to blog_posts (cascade on delete).
+          - name: target
+            description: Syndication target (substack).
+          - name: method
+            description: How the copy went out (rss or export).
+          - name: canonical_url
+            description: The permanent Stacks address, stored as published.
+          - name: syndicated_url
+            description: The live copy's URL, pasted back by the writer (nullable).
+          - name: created_at
+            description: Row creation timestamp (UTC).
 
   - name: audit
     schema: audit
