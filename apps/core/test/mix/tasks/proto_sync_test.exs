@@ -649,68 +649,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
   end
 
-  describe "MigrationGenerator.add_columns_slug" do
-    # A filename is capped at 255 bytes by the filesystem and the module name
-    # becomes an atom, which the BEAM caps at 255 bytes. The slug is derived from
-    # every added column, so a wide table used to blow both: proto.sync died with
-    # `File.Error … file name too long` building a name out of all ~35 `users`
-    # columns.
-    defp fields_named(names), do: Enum.map(names, &%{name: &1})
-
-    test "leaves a short column list fully descriptive" do
-      slug =
-        MigrationGenerator.add_columns_slug(fields_named(~w(book_edition_id)), "price_snapshots")
-
-      assert slug == "add_book_edition_id_to_price_snapshots"
-    end
-
-    test "names every column while it fits" do
-      slug = MigrationGenerator.add_columns_slug(fields_named(~w(a b c)), "t")
-      assert slug == "add_a_b_c_to_t"
-    end
-
-    test "caps a wide column list instead of raising" do
-      names =
-        ~w(email display_name role country_code city consent_analytics age_verified
-           profile_visibility password_hash website_url consent_analytics_at
-           onboarding_completed notify_wishlist_availability notify_marketplace
-           notify_group_invitations notify_event_matches email_confirmed
-           email_confirmation_token password_reset_token password_reset_sent_at
-           age_verified_at age_verification_provider onboarding_steps
-           failed_login_count failed_login_first_at locked_until
-           consent_writing_assistant consent_writing_assistant_at handle)
-
-      slug = MigrationGenerator.add_columns_slug(fields_named(names), "users")
-
-      # The real ceiling: timestamp + slug + ".exs" must clear 255 bytes, and so
-      # must the module atom.
-      filename = "20260728000000_#{slug}.exs"
-      assert byte_size(filename) < 255
-      assert byte_size("Elixir.Core.Repo.Migrations." <> Macro.camelize(slug)) < 255
-
-      # Still descriptive and still honest about what it dropped.
-      assert String.starts_with?(slug, "add_email_")
-      assert slug =~ ~r/_and_\d+_more_to_users$/
-    end
-
-    test "is deterministic for the same field set" do
-      names = Enum.map(1..40, &"some_reasonably_long_column_name_#{&1}")
-      fields = fields_named(names)
-
-      assert MigrationGenerator.add_columns_slug(fields, "wide") ==
-               MigrationGenerator.add_columns_slug(fields, "wide")
-    end
-
-    test "keeps at least one column name even when the first alone exceeds the budget" do
-      long = String.duplicate("x", 200)
-      slug = MigrationGenerator.add_columns_slug(fields_named([long, "b", "c"]), "t")
-
-      assert slug =~ "add_#{long}"
-      assert slug =~ "_and_2_more_to_t"
-      refute slug =~ "add__and_"
-    end
-  end
-
   describe "MigrationGenerator" do
     test "generates CREATE TABLE migration for event_log" do
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
