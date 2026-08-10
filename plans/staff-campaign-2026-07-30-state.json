@@ -768,6 +768,7 @@
   ],
   "session4_2026_08_10": {
     "summary": "11b+11c+11e built, deployed (deploy6/7), driven live with screenshots. Wiring-class defect found ONLY by drive: ProtoJSON blog_post take-list dropped `syndicated` (6th confirmed instance of built-but-not-wired) \u2014 fixed, wire-pinned, toggle E2E added. 11e zero-row sweep 0->1 via real job; first run's transient 'no sitemap declared' absorbed by the recheck design. Deploy5 failed from a mid-deploy source edit (new memory: no source edits during deploys). Remaining: 11d (owner-gated prod deploy + backup drill) and epic close-out boxes 49-50.",
-    "evidence": "shots/11b-1..4, 11c-1..3, 11e-1; batch log '1 event(s) written'; E2E setup3+import3+syndication4 green vs preview"
+    "evidence": "shots/11b-1..4, 11c-1..3, 11e-1; batch log '1 event(s) written'; E2E setup3+import3+syndication4 green vs preview",
+    "ci_and_397_close": "just ci run 3: 16/16 code gates green; e2e 351 passed with onboarding fix verified. #397 pulled IN-WAVE by owner and CLOSED: upload project 16/16 green on real GPU inference (deploy8 preview). Fixes: 8 stale pre-#351 copy assertions; duplicate-notice asserted on the completion card (one-hop manual path per #343); probe-chosen unresolvable ISBN fixture (old one now resolves on OL \u2014 world drift); TogetherClient -> Llama-3.3-70B-Instruct-Turbo (only surviving serverless Llama, live-probed); INVITE_ONLY_REGISTRATION added to deploy-production.yml env (merge would otherwise launch OPEN registration). Remaining: 11d only \u2014 merge to main (IS the prod deploy), #066 backup drill, feedback channel."
   }
 }
