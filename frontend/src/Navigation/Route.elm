@@ -25,6 +25,7 @@ type Route
     | LookingForHome
     | BookDetail String
     | Upload
+    | Import
     | Search
     | SettingsProfile
     | SettingsPassword
@@ -73,6 +74,7 @@ parser =
         , Parser.map LookingForHome (s "looking-for-home")
         , Parser.map BookDetail (s "books" </> string)
         , Parser.map Upload (s "upload")
+        , Parser.map Import (s "import")
         , Parser.map Search (s "search")
         , Parser.map SettingsProfile (s "settings" </> s "profile")
         , Parser.map SettingsPassword (s "settings" </> s "password")
@@ -151,6 +153,9 @@ toPath route =
 
         Upload ->
             "/upload"
+
+        Import ->
+            "/import"
 
         Search ->
             "/search"

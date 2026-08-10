@@ -7728,3 +7728,165 @@ h4 {
     font-family: var(--font-body);
     color: var(--text);
 }
+
+/* ===== Goodreads library import (US-1.1.9) ===== */
+
+/* The migration desk: one column, reading-width, the same parchment manners as
+ * the rest of the site. The page has four phases (choose / uploading / watching
+ * / report) and they all live inside this frame. */
+.import-page {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: var(--space-5) var(--space-4);
+    font-family: var(--font-body);
+    color: var(--text);
+}
+
+.import__title {
+    font-family: var(--font-heading);
+    font-size: var(--size-3xl);
+    margin: 0 0 var(--space-4);
+}
+
+.import__subtitle {
+    font-family: var(--font-heading);
+    font-size: var(--size-xl);
+    margin: var(--space-4) 0 var(--space-2);
+}
+
+.import__chooser {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.import__lead {
+    margin: 0;
+    line-height: 1.6;
+}
+
+.import__lead--gate {
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+}
+
+.import__error {
+    color: #a04434;
+    margin: 0;
+}
+
+.import__choose-button {
+    align-self: flex-start;
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid #5c3a1e;
+    border-radius: 3px;
+    background: linear-gradient(135deg, #5c3a1e, #3d2610);
+    color: #f4ead6;
+    font-family: var(--font-body);
+    font-size: var(--size-base);
+    cursor: pointer;
+}
+
+.import__uploading {
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.import__progress,
+.import__report {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.import__progress-count {
+    font-family: var(--font-heading);
+    font-size: var(--size-xxl);
+    margin: 0 0 var(--space-2);
+}
+
+.import__progress-note {
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.6;
+}
+
+/* The four outcomes, side by side — the numbers ARE the summary, so they get
+ * the display type and the labels stay small underneath. */
+.import__counts {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    margin: var(--space-3) 0 var(--space-4);
+}
+
+.import__count {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 7rem;
+    padding: var(--space-3);
+    border: 1px solid rgba(92, 58, 30, 0.25);
+    border-radius: 4px;
+}
+
+.import__count-number {
+    font-family: var(--font-heading);
+    font-size: var(--size-3xl);
+}
+
+.import__count-label {
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.import__all-shelved {
+    color: var(--accent);
+}
+
+.import__rows-wrap {
+    overflow-x: auto;
+}
+
+.import__rows {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--size-sm);
+}
+
+.import__rows th {
+    text-align: left;
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid rgba(92, 58, 30, 0.35);
+}
+
+.import__row td {
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid rgba(92, 58, 30, 0.15);
+    vertical-align: top;
+}
+
+.import__row-number {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.import__row-title {
+    font-style: italic;
+}
+
+.import__row-reason {
+    color: #6b5d4f;
+}
+
+.import__rows-loading {
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+/* Sits under the manual-ISBN escape hatch on the upload page. */
+.upload-import-link {
+    margin-top: var(--space-2);
+    text-align: center;
+}

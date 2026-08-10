@@ -1293,6 +1293,14 @@ viewUploadArea model =
                 ]
                 [ text "Enter ISBN manually instead" ]
             ]
+        , div [ class "upload-import-link" ]
+            [ a
+                [ class "btn btn--ghost"
+                , href (Route.toPath Route.Import)
+                , testId "upload-import-link"
+                ]
+                [ text "Coming from Goodreads? Import your whole library" ]
+            ]
         ]
 
 

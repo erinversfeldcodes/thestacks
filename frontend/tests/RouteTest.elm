@@ -39,6 +39,7 @@ allRoutes =
     , LookingForHome
     , BookDetail "abc123"
     , Upload
+    , Import
     , Search
     , SettingsProfile
     , SettingsPassword
@@ -107,6 +108,9 @@ routeLabel route =
 
         Upload ->
             "Upload"
+
+        Import ->
+            "Import"
 
         Search ->
             "Search"

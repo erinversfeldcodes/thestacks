@@ -23,10 +23,13 @@ module Api exposing
     , ConfirmOutcome(..)
     , ConfirmResponse
     , Deanonymisation
+    , ImportError(..)
+    , ImportRow
     , InboxItem
     , InboxKind(..)
     , InterestProfile
     , InviteStatus
+    , LibraryImport
     , ListingParams
     , LiveSignals(..)
     , MergeFormatResponse
@@ -87,6 +90,7 @@ module Api exposing
     , createAdminInvite
     , createBlogPost
     , createComment
+    , createGoodreadsImport
     , createGroup
     , createListing
     , createShelf
@@ -111,6 +115,8 @@ module Api exposing
     , getCatalogue
     , getGroup
     , getGroupFeed
+    , getImport
+    , getImportRows
     , getInferences
     , getListings
     , getMyListings
@@ -571,6 +577,160 @@ getUploadInbox token toMsg =
         , url = baseUrl ++ "/api/uploads/inbox"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg uploadInboxDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+
+-- GOODREADS LIBRARY IMPORT (US-1.1.9)
+
+
+{-| An import's summary — the progress counters the reader watches while the
+job works through their library, and the durable record afterwards.
+-}
+type alias LibraryImport =
+    { id : String
+    , status : String
+    , filename : String
+    , rowCount : Int
+    , processedCount : Int
+    , shelvedCount : Int
+    , duplicateCount : Int
+    , unverifiedCount : Int
+    , unreadableCount : Int
+    }
+
+
+{-| One row of the per-row report. `outcome` is `Nothing` until the job
+reaches the row.
+-}
+type alias ImportRow =
+    { rowNumber : Int
+    , title : String
+    , author : String
+    , isbn13 : String
+    , goodreadsShelf : String
+    , outcome : Maybe String
+    , reason : Maybe String
+    }
+
+
+{-| Upload refusals the page owes distinct copy for. The server answers each
+with a distinct status (409 / 413 / 422), so the STATUS is the discriminant —
+no body parse to drift.
+-}
+type ImportError
+    = ImportInProgress
+    | ImportFileTooLarge
+    | ImportUnrecognised
+    | ImportRequestFailed Http.Error
+
+
+libraryImportDecoder : Decoder LibraryImport
+libraryImportDecoder =
+    -- All fields required: ImportController.import_json/1 emits every one on
+    -- every branch. A fallback here would let a wire rename pass silently.
+    Decode.succeed LibraryImport
+        |> andMap (Decode.field "id" Decode.string)
+        |> andMap (Decode.field "status" Decode.string)
+        |> andMap (Decode.field "filename" Decode.string)
+        |> andMap (Decode.field "row_count" Decode.int)
+        |> andMap (Decode.field "processed_count" Decode.int)
+        |> andMap (Decode.field "shelved_count" Decode.int)
+        |> andMap (Decode.field "duplicate_count" Decode.int)
+        |> andMap (Decode.field "unverified_count" Decode.int)
+        |> andMap (Decode.field "unreadable_count" Decode.int)
+
+
+importRowDecoder : Decoder ImportRow
+importRowDecoder =
+    Decode.map7 ImportRow
+        (Decode.field "row_number" Decode.int)
+        (Decode.field "title" Decode.string)
+        (Decode.field "author" Decode.string)
+        (Decode.field "isbn13" Decode.string)
+        (Decode.field "goodreads_shelf" Decode.string)
+        (Decode.field "outcome" (Decode.nullable Decode.string))
+        (Decode.field "reason" (Decode.nullable Decode.string))
+
+
+{-| `POST /api/imports/goodreads` — the export CSV as a multipart `file`.
+The parse happens synchronously server-side, so a refusal (wrong file, one
+already running, too large) arrives on THIS response, not minutes later.
+-}
+createGoodreadsImport : String -> File -> (Result ImportError LibraryImport -> msg) -> Cmd msg
+createGoodreadsImport token file toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/imports/goodreads"
+        , body = Http.multipartBody [ Http.filePart "file" file ]
+        , expect = expectImport toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+expectImport : (Result ImportError LibraryImport -> msg) -> Http.Expect msg
+expectImport toMsg =
+    Http.expectStringResponse toMsg <|
+        \response ->
+            case response of
+                Http.GoodStatus_ _ body ->
+                    Decode.decodeString (Decode.field "import" libraryImportDecoder) body
+                        |> Result.mapError
+                            (\err -> ImportRequestFailed (Http.BadBody (Decode.errorToString err)))
+
+                Http.BadStatus_ metadata _ ->
+                    case metadata.statusCode of
+                        409 ->
+                            Err ImportInProgress
+
+                        413 ->
+                            Err ImportFileTooLarge
+
+                        422 ->
+                            Err ImportUnrecognised
+
+                        status ->
+                            Err (ImportRequestFailed (Http.BadStatus status))
+
+                Http.BadUrl_ url ->
+                    Err (ImportRequestFailed (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (ImportRequestFailed Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (ImportRequestFailed Http.NetworkError)
+
+
+{-| `GET /api/imports/:id` — polled while the job runs.
+-}
+getImport : String -> String -> (Result Http.Error LibraryImport -> msg) -> Cmd msg
+getImport token importId toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/imports/" ++ importId
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "import" libraryImportDecoder)
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `GET /api/imports/:id/rows` — the per-row report.
+-}
+getImportRows : String -> String -> (Result Http.Error (List ImportRow) -> msg) -> Cmd msg
+getImportRows token importId toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/imports/" ++ importId ++ "/rows"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "rows" (Decode.list importRowDecoder))
         , timeout = standardTimeout
         , tracker = Nothing
         }

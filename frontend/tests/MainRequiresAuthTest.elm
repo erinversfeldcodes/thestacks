@@ -53,6 +53,10 @@ expectedAuth route =
         Upload ->
             True
 
+        Import ->
+            -- The reader's own shelves arrive here; nothing to import signed out.
+            True
+
         Search ->
             False
 

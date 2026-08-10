@@ -81,6 +81,7 @@ import Page.CostTransparency as CostTransparency
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
 import Page.Home as Home
+import Page.Import as ImportPage
 import Page.Insights as Insights
 import Page.ListingRemoval as ListingRemoval
 import Page.Login as Login
@@ -234,6 +235,7 @@ type Page
     | PageLookingForHome LookingForHome.Model
     | PageBookDetail BookDetail.Model
     | PageUpload Upload.Model
+    | PageImport ImportPage.Model
     | PageSearch Search.Model
     | PageSettingsAuditLog AuditLog.Model
     | PageInsights Insights.Model
@@ -1217,6 +1219,9 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
             in
             ( PageUpload { uploadModel | ageGatingEnabled = config.ageGatingEnabled }, Cmd.none )
 
+        Import ->
+            ( PageImport ImportPage.init, Cmd.none )
+
         Search ->
             ( PageSearch Search.init, Cmd.none )
 
@@ -1975,6 +1980,7 @@ type Msg
     | LookingForHomeMsg LookingForHome.Msg
     | BookDetailMsg BookDetail.Msg
     | UploadMsg Upload.Msg
+    | ImportPageMsg ImportPage.Msg
     | SearchMsg Search.Msg
     | AuditLogMsg AuditLog.Msg
     | InsightsMsg Insights.Msg
@@ -2378,6 +2384,28 @@ update msg model =
                                 , fetchUploadInbox (currentAuth model.auth)
                                 ]
                             )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        ImportPageMsg subMsg ->
+            case model.page of
+                PageImport subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            ImportPage.update subMsg subModel maybeToken
+                    in
+                    case outMsg of
+                        ImportPage.NoOut ->
+                            ( { model | page = PageImport newSubModel }
+                            , Cmd.map ImportPageMsg subCmd
+                            )
+
+                        ImportPage.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -3637,6 +3665,14 @@ subscriptions model =
                 PageUpload _ ->
                     uploadSubscriptions UploadMsg
 
+                PageImport _ ->
+                    -- The import page's poll clock (US-1.1.9). Interval MUST
+                    -- match `ImportPage.pollSeconds`; `PollTick` is a no-op in
+                    -- every phase but Watching, so an idle import surface
+                    -- costs one discarded message every two seconds.
+                    Time.every (toFloat ImportPage.pollSeconds * 1000)
+                        (\_ -> ImportPageMsg ImportPage.PollTick)
+
                 PageMarketplaceCreate _ ->
                     gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)
 
@@ -3841,6 +3877,9 @@ pageTitle page =
 
         PageUpload _ ->
             titled "Add a Book"
+
+        PageImport _ ->
+            titled "Import Your Library"
 
         PageSearch _ ->
             titled "Search"
@@ -4380,6 +4419,9 @@ viewPage model =
                     (Maybe.map .token (currentAuth model.auth))
                     model.uploadInbox
                 )
+
+        PageImport subModel ->
+            Html.map ImportPageMsg (ImportPage.view subModel)
 
         PageSearch subModel ->
             Html.map SearchMsg (Search.view subModel)
