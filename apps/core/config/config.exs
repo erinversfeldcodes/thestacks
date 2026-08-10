@@ -54,6 +54,11 @@ config :core, Oban,
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
        {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},
+       # Bookstore events, weekly (US-2.4.1 / #321 item 4 — the cron whose
+       # absence kept this pipeline at zero rows for a year). Weekly because
+       # the per-page path may walk a store's sitemap, and shop events change
+       # on that cadence; Monday 07:30 sits clear of the nightly batch jobs.
+       {"30 7 * * 1", Stacks.Workers.DiscoverBookstoreEventsJob, args: %{batch: true}},
        {"0 1 * * *", Stacks.Workers.ListingExpiryJob},
        {"0 3 * * 0", Stacks.Workers.RSSLivenessJob},
        {"0 5 * * *", Stacks.Workers.DbtRefreshJob, args: %{full: true}},

@@ -60,6 +60,7 @@ bookDetailInit =
     , removeState = NotAsked
     , selectedEdition = Nothing
     , previousRoute = Nothing
+    , authorEvents = NotAsked
     , showAgeGate = False
     , entryAnimationActive = False
     , isAuthenticated = True

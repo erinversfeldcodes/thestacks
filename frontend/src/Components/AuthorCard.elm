@@ -8,9 +8,11 @@ RSS or event data, those sections show "Coming soon" stubs.
 
 -}
 
-import Html exposing (Html, a, div, h3, p, section, span, text)
+import Api exposing (AuthorEvent)
+import Html exposing (Html, a, div, h3, li, p, section, span, text, ul)
 import Html.Attributes exposing (attribute, class, href, id, rel, target)
 import Types.Book exposing (Author)
+import Util.TestId exposing (testId)
 
 
 {-| An RSS post from the author's feed.
@@ -37,8 +39,8 @@ Takes the Author from the Book type and optional enrichment data.
 When enrichment is Nothing, stubs are shown for RSS and events.
 
 -}
-view : Maybe Author -> Maybe AuthorEnrichment -> Html msg
-view maybeAuthor maybeEnrichment =
+view : Maybe Author -> Maybe AuthorEnrichment -> Maybe (List AuthorEvent) -> Html msg
+view maybeAuthor maybeEnrichment maybeEvents =
     case maybeAuthor of
         Nothing ->
             section
@@ -70,7 +72,7 @@ view maybeAuthor maybeEnrichment =
                         , viewBio author.bio
                         , viewWebsite author.website
                         , viewRssPost maybeEnrichment
-                        , viewEvents maybeEnrichment
+                        , viewEvents maybeEvents
                         ]
                     ]
                 ]
@@ -128,29 +130,65 @@ viewRssPost maybeEnrichment =
                 [ text "RSS feed coming soon" ]
 
 
-viewEvents : Maybe AuthorEnrichment -> Html msg
-viewEvents maybeEnrichment =
-    case maybeEnrichment of
-        Just enrichment ->
-            if enrichment.upcomingEventsCount > 0 then
-                div [ class "book-detail__author-events" ]
-                    [ text
-                        (String.fromInt enrichment.upcomingEventsCount
-                            ++ " upcoming event"
-                            ++ (if enrichment.upcomingEventsCount == 1 then
-                                    ""
+{-| The author's bookstore events (#321 item 4), live from
+`GET /api/authors/:id/events`.
 
-                                else
-                                    "s"
-                               )
-                            ++ " at bookstores near you"
-                        )
-                    ]
+`Nothing` = not fetched (or the fetch failed): the honest "coming soon" stub —
+never "no events", which would be a claim we haven't earned. `Just []` = we
+looked, and the author has none listed. A dateless event links to the shop's
+own page instead of pretending to a date.
 
-            else
-                div [ class "book-detail__author-events stub-notice" ]
-                    [ text "No upcoming events" ]
+-}
+viewEvents : Maybe (List AuthorEvent) -> Html msg
+viewEvents maybeEvents =
+    case maybeEvents of
+        Just [] ->
+            div [ class "book-detail__author-events stub-notice" ]
+                [ text "No listed events" ]
+
+        Just events ->
+            div [ class "book-detail__author-events", testId "author-events" ]
+                [ ul [ class "book-detail__author-events-list" ]
+                    (List.map viewEvent events)
+                ]
 
         Nothing ->
             div [ class "book-detail__author-events stub-notice" ]
                 [ text "Events coming soon" ]
+
+
+viewEvent : AuthorEvent -> Html msg
+viewEvent event =
+    li [ class "book-detail__author-event", testId "author-event" ]
+        [ span [ class "book-detail__author-event-title" ] [ text event.title ]
+        , span [ class "book-detail__author-event-where" ]
+            [ text (eventWhere event) ]
+        , case event.url of
+            Just url ->
+                a
+                    [ class "book-detail__author-event-link"
+                    , href url
+                    , target "_blank"
+                    , rel "noopener noreferrer"
+                    ]
+                    [ text "Details on the shop's page" ]
+
+            Nothing ->
+                text ""
+        ]
+
+
+eventWhere : AuthorEvent -> String
+eventWhere event =
+    case ( event.eventDate, event.storeName ) of
+        ( Just date, Just store ) ->
+            String.left 10 date ++ " — " ++ store
+
+        ( Just date, Nothing ) ->
+            String.left 10 date
+
+        ( Nothing, Just store ) ->
+            store
+
+        ( Nothing, Nothing ) ->
+            ""

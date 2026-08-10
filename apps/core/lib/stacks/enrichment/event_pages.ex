@@ -37,6 +37,7 @@ defmodule Stacks.Enrichment.EventPages do
   sitemap cannot turn classification into a crawl.
   """
 
+  alias Stacks.Enrichment.EventExtractor
   alias Stacks.Enrichment.Events
   alias Stacks.Enrichment.EventsPath
 
@@ -132,14 +133,21 @@ defmodule Stacks.Enrichment.EventPages do
   end
 
   defp store_event(url, body, store) do
+    # Structured tier first (#321 item 4): a page declaring its event as
+    # schema.org JSON-LD names its own title/date/location, which beats both
+    # the <title> heuristic and the single-unambiguous-date rule. The text
+    # tiers keep serving the pages (like the known live fixture) that declare
+    # nothing.
+    structured = body |> EventExtractor.events() |> List.first()
+
     attrs = %{
       store_id: store.id,
-      title: title_of(body, url),
+      title: (structured && structured.title) || title_of(body, url),
       # nil unless the page states a date unambiguously. The real page states none, and "the shop's
       # own page has the details" is the honest payload — see `event_date`'s changeset note.
-      event_date: date_of(body),
-      description: nil,
-      location: nil,
+      event_date: (structured && structured.event_date) || date_of(body),
+      description: structured && structured.description,
+      location: structured && structured.location,
       url: url,
       scraped_at: DateTime.utc_now()
     }

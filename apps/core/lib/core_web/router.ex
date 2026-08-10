@@ -104,6 +104,9 @@ defmodule CoreWeb.Router do
     # of observability. No auth; the whitelist + mart columns ARE the privacy
     # boundary. Rate-limited via :rate_limit_public.
     get "/transparency/metrics", TransparencyController, :index
+    # An author's bookstore events (#321 item 4) — scraped from shops' own
+    # public pages; nothing about any reader.
+    get "/authors/:id/events", AuthorEventsController, :index
     post "/opt-out", OptOutController, :create
     post "/partners/register", PartnerRegistrationController, :create
   end

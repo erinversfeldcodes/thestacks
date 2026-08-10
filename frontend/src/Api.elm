@@ -11,6 +11,7 @@ module Api exposing
     , AuditLogResponse
     , AuthResponse
     , Authed
+    , AuthorEvent
     , Behaviour
     , BisacCount
     , BlockError(..)
@@ -110,6 +111,7 @@ module Api exposing
     , getAdminInvites
     , getAdminSources
     , getAuditLog
+    , getAuthorEvents
     , getBlogPost
     , getBlogPosts
     , getBook
@@ -585,6 +587,45 @@ getUploadInbox token toMsg =
         , expect = Http.expectJson toMsg uploadInboxDecoder
         , timeout = standardTimeout
         , tracker = Nothing
+        }
+
+
+
+-- AUTHOR BOOKSTORE EVENTS (US-2.4.1 / #321 item 4)
+
+
+{-| One bookstore event for an author, scraped from the shop's own page.
+`eventDate` is Nothing when the page states none — the shop's page has the
+details, and the card must not pretend to a date it doesn't hold.
+-}
+type alias AuthorEvent =
+    { id : String
+    , title : String
+    , eventDate : Maybe String
+    , location : Maybe String
+    , url : Maybe String
+    , storeName : Maybe String
+    }
+
+
+authorEventDecoder : Decoder AuthorEvent
+authorEventDecoder =
+    Decode.map6 AuthorEvent
+        (Decode.field "id" Decode.string)
+        (Decode.field "title" Decode.string)
+        (Decode.field "event_date" (Decode.nullable Decode.string))
+        (Decode.field "location" (Decode.nullable Decode.string))
+        (Decode.field "url" (Decode.nullable Decode.string))
+        (Decode.field "store_name" (Decode.nullable Decode.string))
+
+
+{-| `GET /api/authors/:id/events` — public, no token.
+-}
+getAuthorEvents : String -> (Result Http.Error (List AuthorEvent) -> msg) -> Cmd msg
+getAuthorEvents authorId toMsg =
+    Http.get
+        { url = baseUrl ++ "/api/authors/" ++ authorId ++ "/events"
+        , expect = Http.expectJson toMsg (Decode.field "events" (Decode.list authorEventDecoder))
         }
 
 

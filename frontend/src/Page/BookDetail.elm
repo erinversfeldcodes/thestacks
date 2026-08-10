@@ -69,6 +69,11 @@ type alias Model =
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
 
+    -- The author's bookstore events (#321 item 4). NotAsked = fetch not yet
+    -- issued (the card says "Events coming soon"); Success [] = we looked and
+    -- the author has none listed.
+    , authorEvents : RemoteData Http.Error (List Api.AuthorEvent)
+
     -- Set True only on a backend 403 (age_verification_required). The server
     -- issues that 403 ONLY when age-gating is enforced (ADR-020: dark in prod →
     -- no 403 → the gate never shows), so this flag alone is the correct signal;
@@ -108,6 +113,7 @@ type OutMsg
 
 type Msg
     = BookLoaded (Result Http.Error Api.BookDetailResponse)
+    | GotAuthorEvents (Result Http.Error (List Api.AuthorEvent))
     | OpenBookshelfMover
     | CloseBookshelfMover
     | SelectBookshelf String
@@ -167,6 +173,7 @@ init bookId maybeToken maybePreviousRoute =
       , removeState = NotAsked
       , selectedEdition = Nothing
       , previousRoute = maybePreviousRoute
+      , authorEvents = NotAsked
       , showAgeGate = False
       , entryAnimationActive = True
       , isAuthenticated = maybeToken /= Nothing
@@ -425,6 +432,13 @@ update msg model maybeToken =
                     in
                     ( { model
                         | book = Success response.book
+                        , authorEvents =
+                            case response.book.author of
+                                Just _ ->
+                                    Loading
+
+                                Nothing ->
+                                    NotAsked
                         , placement = response.placement
                         , placements = response.placements
                         , removingPlacementId = Nothing
@@ -437,7 +451,12 @@ update msg model maybeToken =
                         , shelfCeiling = shelfCeiling
                         , progressCard = progressCard
                       }
-                    , Cmd.none
+                    , case response.book.author of
+                        Just author ->
+                            Api.getAuthorEvents author.id GotAuthorEvents
+
+                        Nothing ->
+                            Cmd.none
                     , NoOut
                     )
 
@@ -450,6 +469,16 @@ update msg model maybeToken =
 
                     else
                         ( { model | book = Failure err }, Cmd.none, NoOut )
+
+        GotAuthorEvents result ->
+            case result of
+                Ok events ->
+                    ( { model | authorEvents = Success events }, Cmd.none, NoOut )
+
+                Err err ->
+                    -- The card keeps its stub; events are enrichment, never a
+                    -- reason to degrade the page.
+                    ( { model | authorEvents = Failure err }, Cmd.none, NoOut )
 
         DismissAgeGate ->
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
@@ -1062,7 +1091,7 @@ viewBook model book =
          , viewAboutSection book
          , viewPricesSection model
          , viewAvailabilitySection model
-         , viewAuthorSection book
+         , viewAuthorSection model book
          , viewWritingSection
          ]
             ++ (case ( model.placement, model.isAuthenticated ) of
@@ -1592,11 +1621,21 @@ formatPrice cents =
 
 
 {-| Author card section — delegates to the AuthorCard component.
-Passes the author from the book; enrichment is Nothing until the API is extended.
+RSS enrichment stays Nothing (its API is future work); events are live
+(#321 item 4), passed only once fetched so the card's "coming soon" stub
+remains the honest not-yet-asked state.
 -}
-viewAuthorSection : Book -> Html Msg
-viewAuthorSection book =
-    AuthorCard.view book.author Nothing
+viewAuthorSection : Model -> Book -> Html Msg
+viewAuthorSection model book =
+    AuthorCard.view book.author
+        Nothing
+        (case model.authorEvents of
+            Success events ->
+                Just events
+
+            _ ->
+                Nothing
+        )
 
 
 viewWritingSection : Html Msg

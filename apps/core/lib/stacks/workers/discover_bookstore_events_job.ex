@@ -34,7 +34,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   require Logger
 
   alias Stacks.Books.Author
-  alias Stacks.Enrichment.{EventPages, Events, EventsPath, Prices, ScraperClient}
+  alias Stacks.Enrichment.{EventExtractor, EventPages, Events, EventsPath, Prices, ScraperClient}
   alias Stacks.Monitoring
 
   @impl true
@@ -255,8 +255,12 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   end
 
   @doc """
-  Parses event data from an HTML body. Uses simple regex-based extraction
-  to find event titles, dates, and descriptions.
+  Parses event data from an HTML body.
+
+  Structured tier first (US-2.4.1 / #321 item 4): schema.org `Event` objects
+  from the page's JSON-LD, which carry their own title↔date pairing and are
+  believed over any text heuristic. Only a page declaring NO structured events
+  falls through to the heading-block extraction below.
 
   Returns a list of maps with `:title`, `:event_date`, `:description`,
   `:location`, and `:url` keys.
@@ -265,6 +269,24 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   def parse_events(body, store) do
     authors = load_known_authors()
 
+    case EventExtractor.events(body) do
+      [] ->
+        heading_block_events(body, store, authors)
+
+      structured ->
+        Enum.map(structured, fn event ->
+          event
+          |> Map.merge(%{
+            store_id: store.id,
+            url: event.url || store.website_url,
+            author_id: match_author(event.title, authors),
+            scraped_at: DateTime.utc_now()
+          })
+        end)
+    end
+  end
+
+  defp heading_block_events(body, store, authors) do
     body
     |> heading_blocks()
     |> Enum.reject(fn {title, _block} -> chrome_heading?(title) end)

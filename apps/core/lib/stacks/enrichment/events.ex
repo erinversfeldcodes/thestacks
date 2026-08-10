@@ -68,6 +68,23 @@ defmodule Stacks.Enrichment.Events do
     |> Repo.all()
   end
 
+  @doc """
+  Every listed event linked to an author, dated (soonest first) then dateless —
+  the read behind the book-detail author card (#321 item 4: "surface events").
+  `listed_events/1` semantics, author-keyed: a dateless event is listed, not
+  "upcoming" — it cannot honestly make a claim about time.
+  """
+  @spec listed_events_for_author(String.t()) :: [BookstoreEvent.t()]
+  def listed_events_for_author(author_id) do
+    now = DateTime.utc_now()
+
+    BookstoreEvent
+    |> where([e], e.author_id == ^author_id)
+    |> where([e], is_nil(e.event_date) or e.event_date >= ^now)
+    |> order_by([e], asc_nulls_last: e.event_date)
+    |> Repo.all()
+  end
+
   # ── Third Space Events ──────────────────────────────────────────────────────
 
   @doc """

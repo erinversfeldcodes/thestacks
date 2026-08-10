@@ -394,6 +394,47 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
            "a fetch was attempted with a nil store key — the config gate did not hold"
   end
 
+  describe "parse_events/2 — structured tier (#321 item 4)" do
+    test "schema.org JSON-LD events are believed OVER the heading heuristics" do
+      store = insert(:bookstore)
+      author = insert(:author, name: "Jane Doe")
+
+      # The headings tier would read "Newsletter" with a footer-adjacent date;
+      # the JSON-LD declares the real event. Structured wins.
+      html = """
+      <html><head>
+      <script type="application/ld+json">
+      {"@type":"LiteraryEvent","name":"An evening with Jane Doe",
+       "startDate":"2027-04-15T18:30:00Z",
+       "location":{"@type":"Place","name":"Main branch"}}
+      </script>
+      </head><body>
+      <h2>Newsletter</h2><p>2026-01-01</p>
+      </body></html>
+      """
+
+      assert [event] = DiscoverBookstoreEventsJob.parse_events(html, store)
+      assert event.title == "An evening with Jane Doe"
+      assert event.location == "Main branch"
+      assert event.store_id == store.id
+      # Author matching applies to structured events too.
+      assert event.author_id == author.id
+      assert DateTime.compare(event.event_date, ~U[2027-04-15 18:30:00Z]) == :eq
+    end
+
+    test "a page with no structured events falls through to the heading tier" do
+      store = insert(:bookstore)
+
+      html = """
+      <h2>Author Reading</h2>
+      <p>Date: 2026-04-15</p>
+      """
+
+      assert [event] = DiscoverBookstoreEventsJob.parse_events(html, store)
+      assert event.title == "Author Reading"
+    end
+  end
+
   describe "parse_events/2" do
     test "extracts events from HTML with h2 tags and dates" do
       store = insert(:bookstore)
