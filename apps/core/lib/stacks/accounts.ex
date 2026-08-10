@@ -595,9 +595,17 @@ defmodule Stacks.Accounts do
   A confirmation email is sent via `EmailConfirmationHandler` (event-driven)
   and the caller receives `{:ok, user}` where `user.email_confirmed == false`.
   The user must confirm their email before they can authenticate.
+
+  `opts` may carry `skip_invite_gate: true` — ONLY for the flag-gated
+  `.test`-domain E2E mint helper (`TestHelperController.mint_session/2`),
+  which bypasses the confirmation ceremony for the same reason. Deliberately
+  an OPT and not an attrs key: `AuthController.register/2` passes raw request
+  params as attrs, so a params-reachable bypass would be a mass-assignment
+  hole in the beta gate. The public path calls `register/1` and can never
+  reach it.
   """
-  @spec register(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
-  def register(attrs) do
+  @spec register(map(), keyword()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def register(attrs, opts \\ []) do
     # Reap abandoned signups on the way in, so this does not depend on a nightly job.
     #
     # `ExpiredUnverifiedAccountsJob` was the only thing erasing accounts that never
@@ -613,7 +621,7 @@ defmodule Stacks.Accounts do
     reap_abandoned_signups(attrs)
 
     attrs = maybe_assign_owner_role(attrs)
-    do_register(attrs, 2)
+    do_register(attrs, 2, opts)
   end
 
   # Erases the abandoned signup for this email, if there is one, plus a small batch of
@@ -669,17 +677,24 @@ defmodule Stacks.Accounts do
   # the user never chose it, regenerate (a fresh random suffix) and retry rather
   # than surfacing an inexplicable "handle has already been taken" for a handle
   # they cannot see.
-  defp do_register(attrs, retries_left) do
+  defp do_register(attrs, retries_left, opts) do
     Multi.new()
     # Invite gate (US-14.1.3): when INVITE_ONLY_REGISTRATION is on, the code is
     # locked and validated BEFORE the user insert and consumed after it — all
     # inside this one transaction, so two concurrent redemptions of a
     # single-use code produce exactly one account. When the flag is off these
     # calls add nothing and any submitted code is ignored.
-    |> Invites.redeem_steps(
-      attrs[:invite_code] || attrs["invite_code"],
-      attrs[:email] || attrs["email"]
-    )
+    |> then(fn multi ->
+      if Keyword.get(opts, :skip_invite_gate, false) do
+        multi
+      else
+        Invites.redeem_steps(
+          multi,
+          attrs[:invite_code] || attrs["invite_code"],
+          attrs[:email] || attrs["email"]
+        )
+      end
+    end)
     |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
       # Generate the FINAL, verifiable confirmation token synchronously so it is
@@ -718,7 +733,7 @@ defmodule Stacks.Accounts do
 
       {:error, :user, changeset, _} ->
         if retries_left > 0 and handle_collision?(changeset) do
-          do_register(attrs, retries_left - 1)
+          do_register(attrs, retries_left - 1, opts)
         else
           {:error, changeset}
         end

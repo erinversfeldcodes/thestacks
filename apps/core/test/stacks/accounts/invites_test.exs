@@ -108,6 +108,28 @@ defmodule Stacks.Accounts.InvitesTest do
       assert {:ok, _} = register("open2@example.test", "STK-NONSENSE")
     end
 
+    test "the E2E mint helper's bypass is an OPT, and attrs cannot reach it" do
+      gate_on()
+
+      # The helper path (flag-gated, .test-only) skips the gate explicitly —
+      # this is the 2026-08-10 live failure: every mint-session 500'd because
+      # the gate refused it and the helper's `with` had no clause for that.
+      assert {:ok, _} =
+               Accounts.register(
+                 %{"email" => "minted@thestacks.test", "password" => "long-enough-password"},
+                 skip_invite_gate: true
+               )
+
+      # The public path passes raw params as ATTRS — a params-shaped bypass
+      # must NOT open the gate (mass-assignment).
+      assert {:error, :invite_required} =
+               Accounts.register(%{
+                 "email" => "sneaky@example.test",
+                 "password" => "long-enough-password",
+                 "skip_invite_gate" => true
+               })
+    end
+
     test "two simultaneous redemptions of a single-use code admit exactly one" do
       gate_on()
       %{code: code} = issue!()

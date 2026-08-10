@@ -197,11 +197,18 @@ defmodule StacksWeb.TestHelperController do
 
     with true <- e2e_test_email?(email),
          {:ok, user} <-
-           Accounts.register(%{
-             "email" => email,
-             "password" => @mint_password,
-             "display_name" => display_name
-           }),
+           Accounts.register(
+             %{
+               "email" => email,
+               "password" => @mint_password,
+               "display_name" => display_name
+             },
+             # This helper exists to mint isolated `.test` users without the
+             # auth ceremony (it also skips email confirmation below); the
+             # closed-beta gate (US-14.1.3) is part of that ceremony. Explicit
+             # opt — never attrs-reachable from public registration.
+             skip_invite_gate: true
+           ),
          {:ok, user} <- Accounts.mark_confirmed(user) do
       issue_session(conn, user)
     else
