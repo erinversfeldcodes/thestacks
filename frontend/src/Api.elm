@@ -25,6 +25,7 @@ module Api exposing
     , InboxItem
     , InboxKind(..)
     , InterestProfile
+    , InviteStatus
     , ListingParams
     , LiveSignals(..)
     , MergeFormatResponse
@@ -75,6 +76,7 @@ module Api exposing
     , blockUser
     , bookDetailResponseDecoder
     , catalogueResponseDecoder
+    , checkInvite
     , commitUpload
     , completeOnboardingStep
     , confirmAssociation
@@ -694,6 +696,7 @@ parse) is a `RegisterRequestFailed`.
 type RegisterError
     = RegisterValidationFailed (List ( String, List String ))
     | RegisterRateLimited (Maybe Int)
+    | RegisterInviteRefused String
     | RegisterRequestFailed Http.Error
 
 
@@ -705,8 +708,60 @@ registerErrorsDecoder =
     Decode.field "errors" (Decode.keyValuePairs (Decode.list Decode.string))
 
 
+{-| The invite gate's refusal body — only `invite_*` reasons qualify, so an
+unrelated `{"error": ...}` still reads as its plain HTTP status.
+-}
+inviteErrorDecoder : Decoder String
+inviteErrorDecoder =
+    Decode.field "error" Decode.string
+        |> Decode.andThen
+            (\reason ->
+                if String.startsWith "invite_" reason then
+                    Decode.succeed reason
+
+                else
+                    Decode.fail "not an invite refusal"
+            )
+
+
+{-| What `GET /api/auth/invite/:code` says about a redeemable code (US-14.1.3).
+Deliberately tiny: the server never reveals the note, the bound address, or a
+redeemer — `emailBound` is a boolean so the form can say "written for a
+specific address" without naming it.
+-}
+type alias InviteStatus =
+    { expiresAt : Maybe String
+    , emailBound : Bool
+    }
+
+
+inviteStatusDecoder : Decoder InviteStatus
+inviteStatusDecoder =
+    Decode.map2 InviteStatus
+        (Decode.field "expires_at" (Decode.nullable Decode.string))
+        (Decode.field "email_bound" Decode.bool)
+
+
+{-| Look an invitation code up before offering the Register form (US-14.1.3).
+The failure statuses (404/410/403/409) arrive as `BadStatus` — the card maps
+them to copy; it never needs the body's error string because the status alone
+distinguishes the four refusals.
+-}
+checkInvite : String -> (Result Http.Error InviteStatus -> msg) -> Cmd msg
+checkInvite code toMsg =
+    Http.request
+        { method = "GET"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/invite/" ++ code
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg inviteStatusDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
 register :
-    { email : String, password : String, displayName : String }
+    { email : String, password : String, displayName : String, inviteCode : String }
     -> (Result RegisterError () -> msg)
     -> Cmd msg
 register body toMsg =
@@ -720,6 +775,7 @@ register body toMsg =
                     { email = body.email
                     , password = body.password
                     , displayName = body.displayName
+                    , inviteCode = body.inviteCode
                     }
                 )
         , expect = expectRegister toMsg
@@ -771,7 +827,16 @@ resolveRegister response =
                 Err (RegisterRateLimited (retryAfterSeconds metadata))
 
             else
-                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+                -- The invite gate answers 403/409/410 with {"error":
+                -- "invite_*"} (US-14.1.3); carry the bounded reason string so
+                -- the card can explain, falling through to the plain status
+                -- for any other refusal.
+                case Decode.decodeString inviteErrorDecoder bodyText of
+                    Ok reason ->
+                        Err (RegisterInviteRefused reason)
+
+                    Err _ ->
+                        Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
 
         Http.GoodStatus_ _ bodyText ->
             case Decode.decodeString registrationResponseDecoder bodyText of

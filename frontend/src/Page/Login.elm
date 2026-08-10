@@ -20,11 +20,12 @@ module Page.Login exposing
     , validatePassword
     , validatePasswordConfirm
     , view
+    , withInviteOnly
     )
 
 import Api exposing (AuthResponse, RegisterError(..), RequestError(..))
-import Html exposing (Html, button, div, h1, input, label, p, span, text)
-import Html.Attributes exposing (attribute, class, disabled, for, id, placeholder, type_, value)
+import Html exposing (Html, a, button, div, h1, h3, input, label, p, span, text)
+import Html.Attributes exposing (attribute, class, disabled, for, href, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Types.PasswordRule as PasswordRule
@@ -69,6 +70,19 @@ type alias Model =
     -- is precisely why it is ONE field: the reader can only be asking once, and
     -- a second flag per entry point could disagree about whether they had.
     , resendState : RemoteData RequestError ()
+
+    -- The closed-beta invitation (US-14.1.3). `inviteCheck` is the code's whole
+    -- lifecycle: `NotAsked` = the gate panel with an empty field, `Loading` =
+    -- redeeming, `Success` = the gate is UNLOCKED and the Register form shows,
+    -- `Failure` = refused with copy per status. No separate gate-state field —
+    -- "unlocked" IS `Success`, so the two cannot disagree.
+    , inviteCode : String
+    , inviteCheck : RemoteData Http.Error Api.InviteStatus
+
+    -- Whether registration is invite-gated (US-14.1.3). Set by Main from
+    -- server config via `withInviteOnly` — see that function's note on where
+    -- the fail-closed default lives.
+    , inviteOnly : Bool
     }
 
 
@@ -183,6 +197,7 @@ type SubmitError
     = SubmitHttpError Http.Error
     | SubmitValidationError (List ( String, List String ))
     | SubmitRateLimited (Maybe Int)
+    | SubmitInviteRefused String
 
 
 type Msg
@@ -198,6 +213,9 @@ type Msg
     | GotResendResponse (Result RequestError ())
     | GotAuthResponse (Result RequestError AuthResponse)
     | GotRegisterResponse (Result RegisterError ())
+    | InviteCodeChanged String
+    | InviteSubmitted
+    | GotInviteCheck (Result Http.Error Api.InviteStatus)
 
 
 {-| What the card asks the shell to do. There is exactly one way to report a
@@ -249,6 +267,9 @@ init arrival =
     , arrival = arrival
     , forgotState = NotAsked
     , resendState = NotAsked
+    , inviteCode = ""
+    , inviteCheck = NotAsked
+    , inviteOnly = False
     }
 
 
@@ -482,6 +503,7 @@ update msg model =
                                 { email = model.email
                                 , password = model.password
                                 , displayName = model.displayName
+                                , inviteCode = model.inviteCode
                                 }
                                 GotRegisterResponse
 
@@ -531,6 +553,24 @@ update msg model =
 
         GotRegisterResponse (Err registerError) ->
             ( { model | submitState = Failure (fromRegisterError registerError) }, Cmd.none, NoOut )
+
+        InviteCodeChanged code ->
+            -- Typing resets the lifecycle: a refusal about the OLD string must
+            -- not keep gating the new one.
+            ( { model | inviteCode = code, inviteCheck = NotAsked }, Cmd.none, NoOut )
+
+        InviteSubmitted ->
+            if String.trim model.inviteCode == "" then
+                ( model, Cmd.none, NoOut )
+
+            else
+                ( { model | inviteCheck = Loading }
+                , Api.checkInvite (String.trim model.inviteCode) GotInviteCheck
+                , NoOut
+                )
+
+        GotInviteCheck result ->
+            ( { model | inviteCheck = Types.RemoteData.fromResult result }, Cmd.none, NoOut )
 
 
 view : Model -> Html Msg
@@ -839,7 +879,39 @@ viewForgotForm model =
 
 viewCredentialsForm : Model -> List (Html Msg)
 viewCredentialsForm model =
-    [ div
+    viewTabs model
+        :: (if model.mode == RegisterMode && registerGateLocked model then
+                -- US-14.1.3: an uninvited visitor sees the invite-only panel
+                -- where the Register form would be. The tabs stay — hiding the
+                -- tab would be a small lie about what the platform is.
+                [ viewInviteOnlyPanel model ]
+
+            else
+                viewFormFields model
+           )
+
+
+{-| Whether the Register form is withheld: the gate is on and no code has been
+accepted. "Unlocked" IS `inviteCheck = Success` — no second field to disagree.
+-}
+registerGateLocked : Model -> Bool
+registerGateLocked model =
+    model.inviteOnly && not (inviteUnlocked model)
+
+
+inviteUnlocked : Model -> Bool
+inviteUnlocked model =
+    case model.inviteCheck of
+        Success _ ->
+            True
+
+        _ ->
+            False
+
+
+viewTabs : Model -> Html Msg
+viewTabs model =
+    div
         [ class "login-card__tabs"
         , attribute "role" "tablist"
         ]
@@ -882,6 +954,11 @@ viewCredentialsForm model =
             ]
             [ text "Register" ]
         ]
+
+
+viewFormFields : Model -> List (Html Msg)
+viewFormFields model =
+    [ viewInviteField model
     , case model.mode of
         RegisterMode ->
             div [ class (fieldClass model.displayNameValidation) ]
@@ -1199,6 +1276,134 @@ viewError model =
             text ""
 
 
+{-| The accepted invitation, shown above Display Name once the gate unlocks
+(US-14.1.3). Read-only: the code was just validated, and editing it here would
+race the registration against a different code than the one checked.
+-}
+viewInviteField : Model -> Html Msg
+viewInviteField model =
+    if model.mode == RegisterMode && model.inviteOnly then
+        div [ class "login-card__field login-card__field--invite login-card__field--valid" ]
+            [ label [ class "login-card__label", for "invite-code" ]
+                [ text "Invitation code" ]
+            , input
+                [ id "invite-code"
+                , class "login-card__input"
+                , testId "invite-code-input"
+                , type_ "text"
+                , value model.inviteCode
+                , attribute "readonly" "readonly"
+                , attribute "aria-required" "true"
+                ]
+                []
+            , span [ class "login-card__invite-caption" ]
+                [ text "Invitation accepted. Welcome — the door is open." ]
+            ]
+
+    else
+        text ""
+
+
+{-| The closed-beta panel an uninvited visitor sees on the Register tab
+(US-14.1.3). No email capture, no waitlist — the platform does not collect
+addresses from people it has not invited.
+-}
+viewInviteOnlyPanel : Model -> Html Msg
+viewInviteOnlyPanel model =
+    div [ class "login-card__invite-only", testId "invite-only-panel" ]
+        [ h3 [ class "login-card__invite-only-title" ]
+            [ text "The Stacks is in closed beta." ]
+        , p [ class "login-card__invite-only-copy" ]
+            [ text
+                ("New accounts are opened by invitation for now — a small, trusted circle "
+                    ++ "while the shelves are still being built. If you have a code, paste it "
+                    ++ "below. If you don't, the "
+                )
+            , a [ href "/faq" ] [ text "FAQ" ]
+            , text " explains what The Stacks is and how the beta works."
+            ]
+        , div [ class "login-card__field login-card__field--invite" ]
+            [ label [ class "login-card__label", for "invite-code" ]
+                [ text "Invitation code" ]
+            , input
+                [ id "invite-code"
+                , class "login-card__input"
+                , testId "invite-code-input"
+                , type_ "text"
+                , placeholder "STK-XXXX-XXXX"
+                , value model.inviteCode
+                , onInput InviteCodeChanged
+                , attribute "autocapitalize" "characters"
+                , attribute "aria-required" "true"
+                ]
+                []
+            , viewInviteRefusal model
+            ]
+        , button
+            [ class "login-card__submit"
+            , type_ "button"
+            , testId "invite-redeem-button"
+            , onClick InviteSubmitted
+            , disabled (model.inviteCheck == Loading || String.trim model.inviteCode == "")
+            ]
+            [ case model.inviteCheck of
+                Loading ->
+                    span [ class "spinner spinner--small" ] []
+
+                _ ->
+                    text "Redeem"
+            ]
+        ]
+
+
+viewInviteRefusal : Model -> Html Msg
+viewInviteRefusal model =
+    case model.inviteCheck of
+        Failure err ->
+            span [ class "login-card__invite-caption login-card__invite-caption--error" ]
+                [ text (inviteErrorMessage err) ]
+
+        _ ->
+            text ""
+
+
+{-| Refusal copy per status (US-14.1.3's sad paths). Revoked deliberately reads
+as expired — the reader learns nothing about WHY it stopped working, and
+neither wording implies the code was ever valid for someone else.
+-}
+inviteErrorMessage : Http.Error -> String
+inviteErrorMessage err =
+    case err of
+        Http.BadStatus 404 ->
+            "We don't recognise that code. Check it against the message you were sent."
+
+        Http.BadStatus 410 ->
+            "That invitation has expired. Ask whoever sent it for a fresh one."
+
+        Http.BadStatus 403 ->
+            "That invitation has expired. Ask whoever sent it for a fresh one."
+
+        Http.BadStatus 409 ->
+            "That invitation has already been used."
+
+        Http.NetworkError ->
+            "The library is unreachable. Your code is fine — try again in a moment."
+
+        _ ->
+            "Something went wrong checking that code. Please try again."
+
+
+{-| Main applies the server's `inviteOnly` flag to a freshly built card, and
+re-applies it when the background config fetch resolves. The MODEL defaults to
+open (so the page's own tests read naturally); the fail-CLOSED guarantee lives
+in `Main.defaultConfig` (inviteOnly = True until the server says otherwise),
+which every production build site passes through here.
+-}
+withInviteOnly : Bool -> Model -> Model
+withInviteOnly flag model =
+    { model | inviteOnly = flag }
+
+
 {-| Map an `Api.RegisterError` into the page's own submit-error representation.
 -}
 fromRegisterError : RegisterError -> SubmitError
@@ -1209,6 +1414,9 @@ fromRegisterError registerError =
 
         RegisterRateLimited retryAfter ->
             SubmitRateLimited retryAfter
+
+        RegisterInviteRefused reason ->
+            SubmitInviteRefused reason
 
         RegisterRequestFailed err ->
             SubmitHttpError err
@@ -1240,8 +1448,40 @@ errorMessage mode submitError =
         SubmitRateLimited retryAfter ->
             FailureCopy.rateLimited retryAfter
 
+        -- US-14.1.3: the gate refused at REGISTRATION time (the code moved
+        -- between check and submit — revoked, exhausted by a race, or bound to
+        -- a different address). Same vocabulary as the check-time refusals.
+        SubmitInviteRefused reason ->
+            inviteRefusalMessage reason
+
         SubmitHttpError err ->
             httpErrorMessage mode err
+
+
+{-| Registration-time refusal copy, keyed by the server's bounded reason
+string (US-14.1.3). Revoked reads as expired on purpose — see
+`inviteErrorMessage`.
+-}
+inviteRefusalMessage : String -> String
+inviteRefusalMessage reason =
+    case reason of
+        "invite_required" ->
+            "The Stacks is in closed beta — registration needs an invitation code."
+
+        "invite_expired" ->
+            "That invitation has expired. Ask whoever sent it for a fresh one."
+
+        "invite_revoked" ->
+            "That invitation has expired. Ask whoever sent it for a fresh one."
+
+        "invite_exhausted" ->
+            "That invitation has already been used."
+
+        "invite_email_mismatch" ->
+            "This invitation was written for a different email address."
+
+        _ ->
+            "We don't recognise that code. Check it against the message you were sent."
 
 
 {-| Turn a 422's per-field validation errors into a warm, specific message.

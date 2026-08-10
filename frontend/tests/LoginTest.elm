@@ -125,6 +125,9 @@ suite =
                             , arrival = Login.Fresh
                             , forgotState = NotAsked
                             , resendState = NotAsked
+                            , inviteCode = ""
+                            , inviteCheck = NotAsked
+                            , inviteOnly = False
                             }
 
                         ( model, _, _ ) =

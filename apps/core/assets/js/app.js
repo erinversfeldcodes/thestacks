@@ -206,6 +206,9 @@ function boot() {
     flags.storedAuthUnreadable = storedAuthUnreadable;
   }
   flags.ageGatingEnabled = false;
+  // Fail CLOSED (US-14.1.3): registration stays invite-gated until the real
+  // config arrives; a fetch failure must not reopen public sign-ups.
+  flags.inviteOnly = true;
 
   var app = Elm.Main.init({
     node: document.getElementById("elm"),
@@ -652,6 +655,11 @@ if (app.ports && app.ports.ageGatingConfig) {
     .then(function (config) {
       if (config) {
         app.ports.ageGatingConfig.send(Boolean(config.ageGatingEnabled));
+        if (app.ports.inviteOnlyConfig && typeof config.inviteOnly === "boolean") {
+          // Sent only for a well-formed boolean — anything else keeps the
+          // fail-closed boot default (US-14.1.3).
+          app.ports.inviteOnlyConfig.send(config.inviteOnly);
+        }
       }
     })
     .catch(function () {

@@ -182,6 +182,14 @@ network round-trip never blocks first paint. The payload is the resolved
 port ageGatingConfig : (Bool -> msg) -> Sub msg
 
 
+{-| Second server-config flag (US-14.1.3), same channel shape as
+`ageGatingConfig`. app.js sends the resolved `inviteOnly` boolean from the same
+`GET /api/config` fetch; on ANY failure it sends nothing and the fail-CLOSED
+boot default (`True`) stands — a config blip must not reopen registration.
+-}
+port inviteOnlyConfig : (Bool -> msg) -> Sub msg
+
+
 {-| Browser connectivity (Issue #362). `app.js` subscribes to the `online` and
 `offline` window events and sends `navigator.onLine` here, plus one send at boot
 so a tab opened while already offline is not told it is connected.
@@ -536,7 +544,9 @@ type alias Model =
 extend this record as new server-driven flags land.
 -}
 type alias AppConfig =
-    { ageGatingEnabled : Bool }
+    { ageGatingEnabled : Bool
+    , inviteOnly : Bool
+    }
 
 
 {-| The fail-safe default config: age-gating OFF (all age UI hidden). Used when
@@ -544,7 +554,15 @@ type alias AppConfig =
 -}
 defaultConfig : AppConfig
 defaultConfig =
-    { ageGatingEnabled = False }
+    { ageGatingEnabled = False
+
+    -- Fail CLOSED (US-14.1.3): a gate on account creation must not reopen
+    -- because a config fetch blipped. The server's real value arrives over
+    -- `inviteOnlyConfig` a beat after boot; until then Register shows the
+    -- invite panel, which an open-registration deployment replaces almost
+    -- immediately.
+    , inviteOnly = True
+    }
 
 
 {-| Decode the runtime config out of the boot flags. A missing or malformed
@@ -552,10 +570,17 @@ defaultConfig =
 -}
 configDecoder : Decode.Decoder AppConfig
 configDecoder =
-    Decode.map AppConfig
+    Decode.map2 AppConfig
         (Decode.oneOf
             [ Decode.field "ageGatingEnabled" Decode.bool
             , Decode.succeed False
+            ]
+        )
+        -- Opposite fail direction from age-gating, deliberately: a missing or
+        -- malformed `inviteOnly` means the gate is ON (US-14.1.3).
+        (Decode.oneOf
+            [ Decode.field "inviteOnly" Decode.bool
+            , Decode.succeed True
             ]
         )
 
@@ -1048,7 +1073,7 @@ previously not told.
 initPage : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
 initPage config route maybeAuth adminToken maybePreviousRoute arrival =
     if loginRedirectFor route maybeAuth /= Nothing then
-        ( PageLogin (Login.init arrival), Cmd.none )
+        ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
     else if isAdminRoute route && adminToken == Nothing then
         -- ⛔ The gate that makes #303's four surfaces reachable. `/api/admin/*` needs an
@@ -1146,7 +1171,7 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
             ( PageHome subModel, Cmd.map HomeMsg subCmd )
 
         Login ->
-            ( PageLogin (Login.init arrival), Cmd.none )
+            ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         Library ->
             initBookshelf Bookshelf.libraryConfig maybeAuth
@@ -1436,13 +1461,13 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
             -- card straight onto that mode. Asking to reset a password is
             -- itself an arrival reason, which is why it is a constructor of the
             -- same type and not a fourth boolean (#360).
-            ( PageLogin (Login.init Login.ForgotPassword), Cmd.none )
+            ( PageLogin (Login.init Login.ForgotPassword |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         ResendConfirmation ->
             -- Where a dead confirmation link sends the reader (#373). Same shape
             -- as ForgotPassword directly above: a mode of the login card, opened
             -- by an arrival, not a page of its own.
-            ( PageLogin (Login.init Login.ConfirmationExpired), Cmd.none )
+            ( PageLogin (Login.init Login.ConfirmationExpired |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         ResetPassword token ->
             ( PageResetPassword (ResetPassword.init token), Cmd.none )
@@ -1975,6 +2000,7 @@ type Msg
     | AuthChangedExternally Decode.Value
     | GotStoredAuth Decode.Value
     | AgeGatingConfigReceived Bool
+    | InviteOnlyConfigReceived Bool
     | ConnectivityChanged Bool
 
 
@@ -3070,7 +3096,7 @@ update msg model =
                         -- A deliberate sign-out needs no explanation, so the
                         -- card is built `Fresh` — and any arrival left pending
                         -- from an earlier session goes with it.
-                        , page = PageLogin (Login.init Login.Fresh)
+                        , page = PageLogin (Login.init Login.Fresh |> Login.withInviteOnly model.config.inviteOnly)
                         , arrival = Login.Fresh
                       }
                     , Cmd.batch
@@ -3151,6 +3177,24 @@ update msg model =
 
         OnboardingStatusReceived completed ->
             ( { model | onboardingCompleted = completed }, Cmd.none )
+
+        InviteOnlyConfigReceived enabled ->
+            let
+                config =
+                    model.config
+
+                -- A login card already on screen adopts the resolved flag —
+                -- the boot default is fail-closed, so this only ever REVEALS
+                -- the Register form on open-registration deployments.
+                page =
+                    case model.page of
+                        PageLogin loginModel ->
+                            PageLogin (Login.withInviteOnly enabled loginModel)
+
+                        other ->
+                            other
+            in
+            ( { model | config = { config | inviteOnly = enabled }, page = page }, Cmd.none )
 
         AgeGatingConfigReceived enabled ->
             -- The background `GET /api/config` fetch resolved (ADR-020). Adopt the
@@ -3528,6 +3572,7 @@ subscriptions model =
         , authChanged AuthChangedExternally
         , gotStoredAuth GotStoredAuth
         , ageGatingConfig AgeGatingConfigReceived
+        , inviteOnlyConfig InviteOnlyConfigReceived
         , connectivityChanged ConnectivityChanged
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string

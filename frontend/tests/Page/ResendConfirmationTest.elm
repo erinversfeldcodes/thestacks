@@ -332,7 +332,7 @@ theRouteIsWiredToTheArrival : Test
 theRouteIsWiredToTheArrival =
     test "route_is_wired: /resend-confirmation builds the card on the confirmation-expired arrival" <|
         \() ->
-            Main.initPage { ageGatingEnabled = False }
+            Main.initPage { ageGatingEnabled = False, inviteOnly = False }
                 Navigation.Route.ResendConfirmation
                 Nothing
                 Nothing

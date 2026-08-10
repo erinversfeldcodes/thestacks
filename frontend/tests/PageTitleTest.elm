@@ -115,12 +115,12 @@ readerAuth =
 
 ageGatingOff : Main.AppConfig
 ageGatingOff =
-    { ageGatingEnabled = False }
+    { ageGatingEnabled = False, inviteOnly = False }
 
 
 ageGatingOn : Main.AppConfig
 ageGatingOn =
-    { ageGatingEnabled = True }
+    { ageGatingEnabled = True, inviteOnly = False }
 
 
 {-| Build a page exactly the way the shell does, so a test cannot assert about a

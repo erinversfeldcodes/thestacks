@@ -211,7 +211,7 @@ allRoutes =
 
 config : Main.AppConfig
 config =
-    { ageGatingEnabled = False }
+    { ageGatingEnabled = False, inviteOnly = False }
 
 
 matrixTest : ( String, Route ) -> Test

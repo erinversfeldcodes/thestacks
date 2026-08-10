@@ -322,7 +322,7 @@ consumedByABounce =
         \() ->
             let
                 bouncedPage =
-                    Main.initPage { ageGatingEnabled = False }
+                    Main.initPage { ageGatingEnabled = False, inviteOnly = False }
                         Navigation.Route.Library
                         Nothing
                         Nothing

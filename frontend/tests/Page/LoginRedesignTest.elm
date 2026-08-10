@@ -177,6 +177,9 @@ formValidationTests =
                         , arrival = Login.Fresh
                         , forgotState = NotAsked
                         , resendState = NotAsked
+                        , inviteCode = ""
+                        , inviteCheck = NotAsked
+                        , inviteOnly = False
                         }
 
                     html =
@@ -212,6 +215,9 @@ formValidationTests =
                         , arrival = Login.Fresh
                         , forgotState = NotAsked
                         , resendState = NotAsked
+                        , inviteCode = ""
+                        , inviteCheck = NotAsked
+                        , inviteOnly = False
                         }
 
                     html =
