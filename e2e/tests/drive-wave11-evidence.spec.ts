@@ -4,6 +4,17 @@
  * Run: BASE_URL=https://<preview>.fly.dev npx playwright test drive-wave11-evidence.ts --project=chromium
  */
 import { test, expect } from "@playwright/test";
+
+/**
+ * Evidence drives are NOT regression tests: they screenshot surfaces and (for
+ * 11e) depend on a row hand-seeded into one specific preview DB. A fresh CI
+ * stack has neither, so the whole file stands down unless explicitly invoked
+ * with DRIVE_EVIDENCE=1 — its first full-suite run failed exactly this way.
+ */
+test.skip(
+  process.env.DRIVE_EVIDENCE !== "1",
+  "evidence drive — run explicitly with DRIVE_EVIDENCE=1",
+);
 import * as path from "path";
 import { mintSession, injectSession, uniqueEmail, type MintedSession } from "./helpers";
 import type { Page } from "@playwright/test";

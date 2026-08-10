@@ -160,7 +160,8 @@ init =
     { steps = defaultSteps
     , currentIndex = 0
     , visible = True
-    , upload = Upload.init
+    , upload =
+        (\u -> { u | embedded = True }) Upload.init
     , consent = Consent.init { analytics = False, writingAssistant = False }
     }
 

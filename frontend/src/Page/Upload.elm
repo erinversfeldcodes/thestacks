@@ -175,6 +175,13 @@ type alias Model =
     -- placement never fires the raise-only age-gate call.
     , ageGatingEnabled : Bool
 
+    -- True when this flow is EMBEDDED in the onboarding overlay rather than
+    -- the standalone /upload page. The overlay reuses Upload.view wholesale,
+    -- so page-only affordances (the Goodreads-import link) must know to stand
+    -- down: the link made the overlay tall enough to push its own Skip button
+    -- out of the viewport (caught by onboarding.spec in the full just ci run).
+    , embedded : Bool
+
     -- Manual-entry confirm state (#343). The manual path is one round trip
     -- through `POST /api/books/confirm`, so this covers resolving, creating and
     -- placing together — there is no separate lookup state to be in.
@@ -292,6 +299,7 @@ init =
     , markAdultsOnly = False
     , ageGateError = Nothing
     , ageGatingEnabled = False
+    , embedded = False
     , confirmState = NotAsked
     , confirmOutcome = Nothing
     , existingShelves = []
@@ -1293,14 +1301,18 @@ viewUploadArea model =
                 ]
                 [ text "Enter ISBN manually instead" ]
             ]
-        , div [ class "upload-import-link" ]
-            [ a
-                [ class "btn btn--ghost"
-                , href (Route.toPath Route.Import)
-                , testId "upload-import-link"
+        , if model.embedded then
+            text ""
+
+          else
+            div [ class "upload-import-link" ]
+                [ a
+                    [ class "btn btn--ghost"
+                    , href (Route.toPath Route.Import)
+                    , testId "upload-import-link"
+                    ]
+                    [ text "Coming from Goodreads? Import your whole library" ]
                 ]
-                [ text "Coming from Goodreads? Import your whole library" ]
-            ]
         ]
 
 
