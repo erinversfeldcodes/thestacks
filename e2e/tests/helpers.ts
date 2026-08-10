@@ -214,11 +214,23 @@ export async function registerViaApi(
   request: APIRequestContext,
   opts: { email: string; password: string; displayName?: string },
 ) {
+  // US-14.1.3: the preview runs invite-gated (the launch posture), so every
+  // registration carries a fresh owner-issued single-use code. Ignored by the
+  // server when the gate is off, so this helper works in both postures.
+  const adminToken = await ownerAdminToken(request);
+  const created = await request.post("/api/admin/invites", {
+    headers: { Authorization: `Bearer ${adminToken}` },
+    data: { note: "registerViaApi" },
+  });
+  expect(created.status(), "registerViaApi invite mint").toBe(201);
+  const invite_code = (await created.json()).invite.code as string;
+
   return request.post("/api/auth/register", {
     data: {
       email: opts.email,
       password: opts.password,
       display_name: opts.displayName ?? "E2E Newcomer",
+      invite_code,
     },
   });
 }
@@ -627,6 +639,25 @@ export async function enrolOwnerMfa(request: APIRequestContext): Promise<string>
   ).toBe(200);
 
   return secret!;
+}
+
+/**
+ * An MFA-verified owner ADMIN token (US-14.1.3 / #384): login, then verify
+ * with a fresh TOTP from the run's shared factor (enrolled once by
+ * auth.setup.ts — never re-enrol here, #371).
+ */
+export async function ownerAdminToken(request: APIRequestContext): Promise<string> {
+  const login = await request.post("/api/admin/auth/login", {
+    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
+  });
+  expect(login.status(), "admin login").toBe(200);
+  const { session_id } = await login.json();
+
+  const verify = await request.post("/api/admin/auth/verify_mfa", {
+    data: { session_id, totp_code: await freshTotp(readOwnerMfaSecret()) },
+  });
+  expect(verify.status(), "admin MFA verify").toBe(200);
+  return (await verify.json()).token as string;
 }
 
 /** Persist the run's single owner TOTP secret for the parallel phase to read. */

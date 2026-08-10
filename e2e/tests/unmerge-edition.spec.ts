@@ -34,13 +34,7 @@
  * Enrolling here would replace the secret under the admin-session specs.
  */
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import {
-  DEV_EMAIL,
-  DEV_PASSWORD,
-  freshTotp,
-  mintSession,
-  readOwnerMfaSecret,
-} from "./helpers";
+import { mintSession, ownerAdminToken } from "./helpers";
 
 /**
  * Stable, widely-held Penguin/Vintage paperback ISBNs Open Library resolves.
@@ -78,21 +72,6 @@ async function pickAvailableIsbn(
     if (res.status() === 404) return isbn;
   }
   return null;
-}
-
-/** MFA-verified owner admin token — login, then verify with a fresh TOTP. */
-async function ownerAdminToken(request: APIRequestContext): Promise<string> {
-  const login = await request.post("/api/admin/auth/login", {
-    data: { email: DEV_EMAIL, password: DEV_PASSWORD },
-  });
-  expect(login.status(), "admin login").toBe(200);
-  const { session_id } = await login.json();
-
-  const verify = await request.post("/api/admin/auth/verify_mfa", {
-    data: { session_id, totp_code: await freshTotp(readOwnerMfaSecret()) },
-  });
-  expect(verify.status(), "admin MFA verify").toBe(200);
-  return (await verify.json()).token as string;
 }
 
 /** A catalogue work the reader can merge onto, readable by this reader. */

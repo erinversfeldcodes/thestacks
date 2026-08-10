@@ -298,6 +298,9 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     # block below can never stage it onto the prod app; the prod-only purge
     # block below also unsets any lingering value as defense-in-depth.
     SMOKE_TESTS_ENABLED=""
+    # Invite-only registration (US-14.1.3) is the LAUNCH posture, so unlike the
+    # dark flags above it is NOT forced empty here — prod takes whatever the
+    # deploy environment provides (11d's runbook sets it explicitly).
     echo "==> Deploy stack in PRODUCTION mode"
 else
     # Preview-only preflight: the preview branch-creation block below
@@ -324,6 +327,10 @@ else
     # on here (preview branch only) alongside the test-helper flag — the --production
     # branch above forces it empty so it can never reach the prod app.
     AGE_GATING_ENABLED="true"
+    # The closed-beta gate (US-14.1.3) must be ON for the preview stack — it is
+    # the launch posture, and register.spec/invite-gate.spec drive the gated
+    # journey. Preview-only here; prod sets it via its own deploy env.
+    INVITE_ONLY_REGISTRATION="true"
     # Raise the public rate limit well above the 200/60s default for the preview
     # stack: the E2E suite runs many specs in parallel from one runner IP, all
     # hitting per-IP public endpoints (catalogue/search/profile/config), which
@@ -923,6 +930,7 @@ fly secrets set \
     ${STACKS_PROBER_PASSWORD:+STACKS_PROBER_PASSWORD="${STACKS_PROBER_PASSWORD}"} \
     ${STACKS_E2E_TEST_HELPERS:+STACKS_E2E_TEST_HELPERS="${STACKS_E2E_TEST_HELPERS}"} \
     ${AGE_GATING_ENABLED:+AGE_GATING_ENABLED="${AGE_GATING_ENABLED}"} \
+    ${INVITE_ONLY_REGISTRATION:+INVITE_ONLY_REGISTRATION="${INVITE_ONLY_REGISTRATION}"} \
     ${RATE_LIMIT_PUBLIC:+RATE_LIMIT_PUBLIC="${RATE_LIMIT_PUBLIC}"} \
     ${RATE_LIMIT_E2E_HELPER:+RATE_LIMIT_E2E_HELPER="${RATE_LIMIT_E2E_HELPER}"} \
     ${SMOKE_TESTS_ENABLED:+SMOKE_TESTS_ENABLED="${SMOKE_TESTS_ENABLED}"} \
