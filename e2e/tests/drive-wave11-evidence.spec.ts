@@ -99,3 +99,23 @@ test("drive 11c: syndication panel with screenshots", async ({ page, request, co
   await page.goto(`/api/feeds/u/${handle}/blog`);
   await page.screenshot({ path: `${SHOTS}/11c-3-feed.png` });
 });
+
+test("drive 11e: author card shows live bookstore events", async ({ page, request }) => {
+  const session = await mintSession(request, { email: uniqueEmail("evidence-events") });
+  test.skip(session === null, "helper off");
+  if (!session) return;
+
+  // The seeded book may be age-gated on the preview (AGE_GATING_ENABLED=true);
+  // flip the drive user's verification via the gated test helper first.
+  await request.put("/api/test/age-verification", {
+    data: { email: session.email, verified: true },
+  });
+
+  // Umberto Eco's seeded book; the event was written to op.bookstore_events.
+  await landOn(page, session, "/books/a1b2c3d4-0000-0000-0000-000000001037");
+  const events = page.getByTestId("author-events");
+  await events.scrollIntoViewIfNeeded();
+  await expect(events).toBeVisible({ timeout: 15_000 });
+  await expect(events).toContainText("An evening with Umberto Eco");
+  await page.screenshot({ path: `${SHOTS}/11e-1-author-events.png`, fullPage: true });
+});
