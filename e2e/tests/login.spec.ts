@@ -56,24 +56,19 @@ test.describe("Login Page Aesthetic", () => {
     await page.waitForURL("**/antilibrary", { timeout: 15000 });
   });
 
-  test("register tab shows display name field", async ({ page }) => {
+  test("the register tab holds the closed-beta panel until a code is redeemed (US-14.1.3)", async ({
+    page,
+  }) => {
     await page.goto("/login");
 
     // Display name field should not be visible in login mode
     await expect(page.locator('input[id="display-name"]')).not.toBeVisible();
 
-    // Click the Register tab
+    // The Register tab opens on the invite-only panel, not the form — the
+    // gated journey itself (redeem → form → register) lives in register.spec.
     await page.click('button:has-text("Register")');
-
-    // Display name field should now be visible
-    await expect(page.locator('input[id="display-name"]')).toBeVisible();
-    await expect(
-      page.locator('label[for="display-name"]')
-    ).toHaveText("Display Name");
-
-    // Email and password should still be visible
-    await expect(page.locator('input[id="email"]')).toBeVisible();
-    await expect(page.locator('input[id="password"]')).toBeVisible();
+    await expect(page.getByTestId("invite-only-panel")).toBeVisible();
+    await expect(page.locator('input[id="display-name"]')).not.toBeVisible();
   });
 
   test("navbar shows the unauthenticated top-level links (Catalogue/Search/Marketplace/About/Sign In)", async ({
