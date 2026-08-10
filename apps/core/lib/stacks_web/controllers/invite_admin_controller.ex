@@ -29,7 +29,7 @@ defmodule StacksWeb.InviteAdminController do
 
   @doc "POST /api/admin/invites"
   def create(conn, params) do
-    owner = Guardian.Plug.current_resource(conn)
+    owner = conn.assigns.current_user
 
     case Invites.issue(
            owner,
@@ -49,7 +49,7 @@ defmodule StacksWeb.InviteAdminController do
 
   @doc "DELETE /api/admin/invites/:id"
   def delete(conn, %{"id" => id}) do
-    owner = Guardian.Plug.current_resource(conn)
+    owner = conn.assigns.current_user
 
     case Invites.revoke(owner, id) do
       {:ok, invite} ->
