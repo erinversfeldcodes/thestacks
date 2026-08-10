@@ -658,8 +658,21 @@ defmodule StacksWeb.ProtoJSONTest do
                created_at: post.created_at,
                updated_at: post.updated_at,
                author_display_name: "Fable Quill",
-               author_handle: user.handle
+               author_handle: user.handle,
+               syndicated: true
              }
+    end
+
+    test "carries the syndicated flag — the take-list drops what it does not name (US-6.2.1)" do
+      # The live drive found the tickbox rendering unchecked for an in-feed
+      # post: the field existed in proto, schema, DB and Elm, and was dropped
+      # ONLY at this serializer's Map.take. This is the wire's own test.
+      user = insert(:user)
+      in_feed = insert(:post, user: user, syndicated: true)
+      opted_out = insert(:post, user: user, syndicated: false)
+
+      assert ProtoJSON.blog_post(in_feed).syndicated == true
+      assert ProtoJSON.blog_post(opted_out).syndicated == false
     end
 
     test "published_at is nil for unpublished post" do

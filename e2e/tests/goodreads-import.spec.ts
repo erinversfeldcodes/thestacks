@@ -81,8 +81,14 @@ test.describe("Goodreads import", () => {
     await expect(zineRow).toContainText("no valid ISBN");
 
     // The read book is genuinely on the Library bookshelf — not just counted.
+    // Matched loosely because the TITLE is the real resolver's to choose: Open
+    // Library catalogues this ISBN as "Nineteen eighty-four", not "1984" —
+    // which is itself proof the book came through the live resolver, not a
+    // fixture.
     await page.goto("/library");
-    await expect(page.locator("body")).toContainText("1984", { timeout: 15_000 });
+    await expect(page.locator("body")).toContainText(/1984|[Nn]ineteen [Ee]ighty/, {
+      timeout: 15_000,
+    });
   });
 
   test("a non-Goodreads CSV is refused at upload time with its own copy", async ({

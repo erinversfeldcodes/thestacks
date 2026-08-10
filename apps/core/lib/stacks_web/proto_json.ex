@@ -419,7 +419,12 @@ defmodule StacksWeb.ProtoJSON do
       :visibility,
       :published_at,
       :created_at,
-      :updated_at
+      :updated_at,
+      # US-6.2.1. ⚠️ This take-list is a WIRE ALLOWLIST: a proto field absent
+      # here is silently dropped, and the Elm decoder then defaults the bool —
+      # which is how the syndication tickbox rendered unchecked for a post that
+      # WAS in the feed (found only by the live drive, 2026-08-10).
+      :syndicated
     ])
     |> Map.put(:author_display_name, author_display_name(post))
     |> Map.put(:author_handle, author_handle(post))
