@@ -144,13 +144,44 @@ defmodule Stacks.DataCorrection.Column do
     regclass != nil
   end
 
-  defp query({table, _column}, sql, params) do
-    if table_present?(table) do
+  defp query({table, column} = target, sql, params) do
+    if table_present?(table) and column_present?(target) do
       %{rows: rows} = Repo.query!(sql, params)
       Enum.map(rows, fn [id, value] -> {load_uuid(id), value} end)
     else
       []
     end
+  end
+
+  @doc """
+  False on a database whose migrations have not added `column` yet.
+
+  The `to_regclass` guard above covers a table that does not exist; this covers
+  the OTHER pre-migration shape — the table exists but the correction's column
+  is newer than the branch. Both read as "nothing to correct yet": corrections
+  run BEFORE migrations, so on a fresh fork of an older database the sweep must
+  come up empty rather than abort the release (the exact failure the
+  `seed_edition_verification_source` sweep hit on a staging fork, 2026-08-10:
+  Postgrex 42703 in the release command, core deploy dead on both attempts).
+  """
+  @spec column_present?(target()) :: boolean()
+  def column_present?({table, column}) do
+    {schema, bare_table} =
+      case String.split(table, ".") do
+        [schema, bare] -> {schema, bare}
+        [bare] -> {"public", bare}
+      end
+
+    %{rows: [[count]]} =
+      Repo.query!(
+        """
+        SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_schema = $1 AND table_name = $2 AND column_name = $3
+        """,
+        [schema, bare_table, column]
+      )
+
+    count > 0
   end
 
   defp validate!({table, column}) do

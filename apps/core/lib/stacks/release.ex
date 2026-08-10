@@ -59,9 +59,25 @@ defmodule Stacks.Release do
   """
   @spec deploy() :: :ok
   def deploy do
+    # Two sweeps, one on each side of the migrations, because corrections have
+    # two relationships to schema change and one pass cannot serve both:
+    #
+    #   * BEFORE — a repair that must land ahead of the constraint that would
+    #     reject the row (#339's original case: the CHECK validates existing
+    #     rows, so the bad rows must be fixed first).
+    #   * AFTER — a repair over a column the migrations have just ADDED. On a
+    #     fresh fork of an older database the pre-migration pass sees no such
+    #     column (Column.column_present?/1 reads it as nothing-to-correct,
+    #     2026-08-10) and only this pass can reach the backfilled rows.
+    #
+    # Safe to run twice: every correction plans against current state and is
+    # idempotent by the mechanism's own contract (the second run of a repair
+    # plans nothing).
     correct_data(apply: true)
 
     migrate()
+
+    correct_data(apply: true)
 
     :ok
   end

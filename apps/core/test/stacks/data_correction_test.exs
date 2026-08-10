@@ -545,6 +545,13 @@ defmodule Stacks.DataCorrectionTest do
       assert Repo.reload!(edition).publisher == "Vintage"
     end
 
+    # The 2026-08-10 release failure: corrections run BEFORE migrations, so on
+    # a fresh fork of an older database a correction whose COLUMN is newer than
+    # the branch must plan nothing — not abort the release with Postgrex 42703.
+    test "a column the migrations have not added yet reads as nothing-to-correct" do
+      assert Column.holding({"op.book_editions", "not_yet_migrated_column"}, "x") == []
+    end
+
     test "holding/2 selects exactly the rows carrying one value" do
       book = insert(:book)
       target = Repo.insert!(build(:book_edition, book: book, verification_source: "open_library"))
