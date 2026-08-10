@@ -72,6 +72,7 @@ AdminRemovalRequestsTest.elm|Approve|renders the queue ALONE; "Approved" is Sour
 SessionExpiryTest.elm|closed your session|supersets are ALL expiry-banner variants; matching any is the intent
 Page/BookshelfReadOnlyTest.elm|Could not load your|supersets are ALL owner-error variants; matching any is intended
 Page/ForgotPasswordNoticeTest.elm|60 seconds|#374: the superset "wait 60 seconds" is EXACTLY the copy being guarded against — a retry-after the response did not carry
+Page/AdminInvitesTest.elm|STK-4F2A-9C1D-XXXX|US-14.1.3 show-once: runtime data, not source copy — the sibling test proves the SAME literal renders from the create response, so the absence here cannot pass vacuously
 LIST
 )
 

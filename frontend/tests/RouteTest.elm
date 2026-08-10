@@ -171,6 +171,9 @@ routeLabel route =
         AdminSourceApproval ->
             "AdminSourceApproval"
 
+        AdminInvites ->
+            "AdminInvites"
+
         AdminScraperConfig ->
             "AdminScraperConfig"
 

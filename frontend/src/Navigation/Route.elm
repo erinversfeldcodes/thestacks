@@ -46,6 +46,7 @@ type Route
     | BlogEdit String
     | BlogPost String
     | AdminSourceApproval
+    | AdminInvites
     | AdminScraperConfig
     | AdminBookModeration
     | AdminRemovalRequests
@@ -99,6 +100,7 @@ parser =
         , Parser.map BlogPost (s "blog" </> string)
         , Parser.map BlogArchive (s "blog")
         , Parser.map AdminSourceApproval (s "admin" </> s "sources")
+        , Parser.map AdminInvites (s "admin" </> s "invites")
         , Parser.map AdminScraperConfig (s "admin" </> s "scrapers")
         , Parser.map AdminBookModeration (s "admin" </> s "book-moderation")
         , Parser.map AdminRemovalRequests (s "admin" </> s "removal-requests")
@@ -212,6 +214,9 @@ toPath route =
 
         AdminSourceApproval ->
             "/admin/sources"
+
+        AdminInvites ->
+            "/admin/invites"
 
         AdminScraperConfig ->
             "/admin/scrapers"

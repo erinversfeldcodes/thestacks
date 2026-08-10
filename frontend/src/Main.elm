@@ -64,6 +64,7 @@ import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSetti
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.About as AboutPage
 import Page.Admin.BookModeration as AdminBookModeration
+import Page.Admin.Invites as AdminInvites
 import Page.Admin.RemovalRequests as AdminRemovalRequests
 import Page.Admin.ScraperConfig as AdminScraperConfig
 import Page.Admin.Session as AdminSession
@@ -253,6 +254,7 @@ type Page
     | PageBlogEditor BlogEditor.Model
     | PageBlogPost BlogPostPage.Model
     | PageAdminSourceApproval AdminSourceApproval.Model
+    | PageAdminInvites AdminInvites.Model
     | PageAdminScraperConfig AdminScraperConfig.Model
     | PageAdminBookModeration AdminBookModeration.Model
     | PageAdminRemovalRequests AdminRemovalRequests.Model
@@ -1096,6 +1098,9 @@ isAdminRoute route =
         Route.AdminSourceApproval ->
             True
 
+        Route.AdminInvites ->
+            True
+
         Route.AdminScraperConfig ->
             True
 
@@ -1376,6 +1381,19 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
                         AdminSourceApproval.init adminToken
                 in
                 ( PageAdminSourceApproval subModel, Cmd.map AdminSourceApprovalMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminInvites ->
+            -- The owner widens the beta, nobody else (US-14.1.3) — same
+            -- owner-only shape as the data-correction surfaces.
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminInvites.init adminToken
+                in
+                ( PageAdminInvites subModel, Cmd.map AdminInvitesMsg subCmd )
 
             else
                 ( PageNotFound, Cmd.none )
@@ -1976,6 +1994,7 @@ type Msg
     | BlogEditorMsg BlogEditor.Msg
     | BlogPostMsg BlogPostPage.Msg
     | AdminSourceApprovalMsg AdminSourceApproval.Msg
+    | AdminInvitesMsg AdminInvites.Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminBookModerationMsg AdminBookModeration.Msg
     | AdminRemovalRequestsMsg AdminRemovalRequests.Msg
@@ -2802,6 +2821,27 @@ update msg model =
                             )
 
                         AdminSourceApproval.SessionExpired ->
+                            handleAdminSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminInvitesMsg subMsg ->
+            case model.page of
+                PageAdminInvites subModel ->
+                    let
+                        -- The ADMIN token, as every admin page's update must —
+                        -- see AdminSourceApprovalMsg's half-wiring note above.
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminInvites.update subMsg subModel (adminTokenFor model)
+                    in
+                    case outMsg of
+                        AdminInvites.NoOut ->
+                            ( { model | page = PageAdminInvites newSubModel }
+                            , Cmd.map AdminInvitesMsg subCmd
+                            )
+
+                        AdminInvites.SessionExpired ->
                             handleAdminSessionExpiry model
 
                 _ ->
@@ -3867,6 +3907,9 @@ pageTitle page =
         PageAdminSourceApproval _ ->
             titled "Source Approval"
 
+        PageAdminInvites _ ->
+            titled "Invitations"
+
         PageAdminScraperConfig _ ->
             titled "Scraper Health"
 
@@ -4403,6 +4446,9 @@ viewPage model =
 
         PageAdminSourceApproval subModel ->
             Html.map AdminSourceApprovalMsg (AdminSourceApproval.view subModel)
+
+        PageAdminInvites subModel ->
+            Html.map AdminInvitesMsg (AdminInvites.view subModel)
 
         PageAdminScraperConfig subModel ->
             Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel)

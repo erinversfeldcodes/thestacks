@@ -120,6 +120,10 @@ expectedAuth route =
         AdminSourceApproval ->
             True
 
+        AdminInvites ->
+            -- Owner-only (US-14.1.3), like every /admin surface.
+            True
+
         AdminScraperConfig ->
             True
 

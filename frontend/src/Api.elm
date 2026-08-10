@@ -2,6 +2,7 @@ module Api exposing
     ( AdminAuthError(..)
     , AdminBook
     , AdminBooksResponse
+    , AdminInvite
     , AdminMfaEnrolment
     , AdminSession
     , AdminSource
@@ -83,6 +84,7 @@ module Api exposing
     , confirmBook
     , confirmBookRequest
     , confirmResponseToResult
+    , createAdminInvite
     , createBlogPost
     , createComment
     , createGroup
@@ -98,6 +100,7 @@ module Api exposing
     , encodeProfileBody
     , foldProgress
     , forgotPassword
+    , getAdminInvites
     , getAdminSources
     , getAuditLog
     , getBlogPost
@@ -165,6 +168,7 @@ module Api exposing
     , resolveWhatever
     , restoreBook
     , retryAfterSeconds
+    , revokeAdminInvite
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
@@ -4226,6 +4230,121 @@ getRemovalRequests token toMsg =
         , body = Http.emptyBody
         , expect =
             Http.expectJson toMsg (Decode.field "requests" (Decode.list removalRequestDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| An invitation as the owner's list sees it (US-14.1.3): `codePrefix` only —
+the full code is unrecoverable after issue, and only `createAdminInvite`'s
+response ever carries it.
+-}
+type alias AdminInvite =
+    { id : String
+    , codePrefix : String
+    , note : Maybe String
+    , invitedEmail : Maybe String
+    , maxUses : Int
+    , useCount : Int
+    , expiresAt : Maybe String
+    , revokedAt : Maybe String
+    , redeemedAt : Maybe String
+    , redeemedByHandle : Maybe String
+    }
+
+
+
+-- Applicative helper for records past map8 — local, tiny, standard shape.
+
+
+andMap : Decoder a -> Decoder (a -> b) -> Decoder b
+andMap =
+    Decode.map2 (|>)
+
+
+adminInviteDecoder : Decoder AdminInvite
+adminInviteDecoder =
+    Decode.succeed AdminInvite
+        |> andMap (Decode.field "id" Decode.string)
+        |> andMap (Decode.field "code_prefix" Decode.string)
+        |> andMap (Decode.field "note" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "invited_email" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "max_uses" Decode.int)
+        |> andMap (Decode.field "use_count" Decode.int)
+        |> andMap (Decode.field "expires_at" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "revoked_at" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "redeemed_at" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "redeemed_by_handle" (Decode.nullable Decode.string))
+
+
+{-| GET /api/admin/invites — every invitation, newest first.
+-}
+getAdminInvites : String -> (Result Http.Error (List AdminInvite) -> msg) -> Cmd msg
+getAdminInvites token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/invites"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "invites" (Decode.list adminInviteDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/admin/invites — write an invitation. The `code` in this response
+is the ONLY time the full code exists in the clear.
+-}
+createAdminInvite :
+    String
+    -> { note : String, invitedEmail : String, maxUses : Int, expiresInDays : Maybe Int }
+    -> (Result Http.Error ( AdminInvite, String ) -> msg)
+    -> Cmd msg
+createAdminInvite token body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/invites"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    (List.filterMap identity
+                        [ blankAsAbsent "note" body.note
+                        , blankAsAbsent "invited_email" body.invitedEmail
+                        , Just ( "max_uses", Encode.int body.maxUses )
+                        , Maybe.map (\days -> ( "expires_in_days", Encode.int days )) body.expiresInDays
+                        ]
+                    )
+                )
+        , expect =
+            Http.expectJson toMsg
+                (Decode.field "invite"
+                    (Decode.map2 Tuple.pair adminInviteDecoder (Decode.field "code" Decode.string))
+                )
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+blankAsAbsent : String -> String -> Maybe ( String, Encode.Value )
+blankAsAbsent key value =
+    if String.trim value == "" then
+        Nothing
+
+    else
+        Just ( key, Encode.string (String.trim value) )
+
+
+{-| DELETE /api/admin/invites/:id — revoke. A timestamp, never a row delete.
+-}
+revokeAdminInvite : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+revokeAdminInvite token id toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/invites/" ++ id
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
         , timeout = standardTimeout
         , tracker = Nothing
         }
