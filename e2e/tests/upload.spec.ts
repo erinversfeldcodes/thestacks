@@ -2,6 +2,15 @@ import path from "path";
 import { test, expect, Page } from "@playwright/test";
 import { suiteAuthFile } from "./helpers";
 
+// ⚠️ THIS FILE DOES NOT RUN ROUTINELY (#397). The chromium project
+// `testIgnore`s `upload*.spec.ts` (Modal-GPU gating: playwright.config.ts),
+// so these specs execute only under the `upload` project — i.e. `just ci`'s
+// full-projects e2e phase, or an explicit `--project=upload`. That gap is how
+// eight assertions of the pre-#351 "Processing image..." copy sat stale for
+// weeks after the waiting-screen rework removed it. When reworking the upload
+// surface, run this project explicitly — a green chromium run says nothing
+// about this file.
+
 // The vision pipeline runs classify + extract on VisionModel (H100 GPU) then
 // resolves an ISBN via Open Library. Allow 5 minutes for cold-start + inference.
 const PIPELINE_TIMEOUT = 300_000;
@@ -29,8 +38,8 @@ test.describe("Upload pipeline — barcode pre-pass", () => {
         path.join(__dirname, "../../images/barcode_isbn_clean.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 30_000 }
       );
 
@@ -112,8 +121,8 @@ test.describe("Upload pipeline — non-book rejection", () => {
         path.join(__dirname, "../../images/not_a_book.jpg")
       );
 
-      await expect(page.getByTestId("upload-loading").locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 30_000 }
       );
 
@@ -318,8 +327,8 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_mixed_text.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 60_000 }
       );
 
@@ -388,8 +397,8 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_image_reversed_and_cut_off.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 60_000 }
       );
 
@@ -433,8 +442,8 @@ test.describe("Upload pipeline", () => {
         // the SSE stream. Wait for the page to leave the verify view (back to
         // the processing spinner) before looping.
         await page.getByRole("button", { name: /no, try again/i }).click();
-        await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-          "Processing image...",
+        await expect(page.getByTestId("upload-loading")).toContainText(
+          "Reading your photo...",
           { timeout: 30_000 }
         );
       }
@@ -455,8 +464,8 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_image_reversed.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 60_000 }
       );
 
@@ -489,8 +498,8 @@ test.describe("Upload pipeline", () => {
         path.join(__dirname, "../../images/screenshot_mildly_obscured.jpg")
       );
 
-      await expect(page.getByTestId('upload-loading').locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 60_000 }
       );
 
@@ -590,8 +599,8 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
         path.join(__dirname, "../../images/not_a_book.jpg")
       );
 
-      await expect(page.getByTestId("upload-loading").locator("p")).toHaveText(
-        "Processing image...",
+      await expect(page.getByTestId("upload-loading")).toContainText(
+        "Reading your photo...",
         { timeout: 30_000 }
       );
 
