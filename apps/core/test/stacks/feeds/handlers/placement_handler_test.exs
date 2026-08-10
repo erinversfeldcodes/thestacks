@@ -41,6 +41,41 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
       )
     end
 
+    test "stands down for goodreads_import-sourced placements (US-1.1.9 coalescing)" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      event = %{
+        event_type: "placement.created",
+        aggregate_id: placement.id,
+        payload: %{"bookshelf" => "library", "source" => "goodreads_import"}
+      }
+
+      assert :ok = PlacementHandler.handle_event(event)
+
+      # The import job enqueues ONE regeneration per bookshelf at finalize;
+      # a per-placement job here would make a 600-row import O(n²).
+      refute_enqueued(worker: RegenerateFeedJob)
+    end
+
+    test "a manual source still regenerates" do
+      user = insert(:user)
+      bookshelf = insert(:bookshelf, user: user, name: "library")
+      book = insert(:book)
+      placement = insert(:placement, bookshelf: bookshelf, book: book)
+
+      event = %{
+        event_type: "placement.created",
+        aggregate_id: placement.id,
+        payload: %{"bookshelf" => "library", "source" => "manual"}
+      }
+
+      assert :ok = PlacementHandler.handle_event(event)
+      assert_enqueued(worker: RegenerateFeedJob)
+    end
+
     test "extracts bookshelf name with atom keys in payload" do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "antilibrary")

@@ -338,6 +338,103 @@
         }
       }
     },
+    %{
+      proto_file: "stacks/common/v1/import.proto",
+      proto_message: "LibraryImport",
+      table_name: "library_imports",
+      schema_prefix: "op",
+      ecto_module: Stacks.Imports.LibraryImport,
+      ecto_path: "lib/stacks/gen/imports/library_import.ex",
+      dbt_path: "stg_library_imports.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      dbt_grant: true,
+      indexes: [
+        # The reader's list AND the one-import-at-a-time check.
+        %{
+          name: "library_imports_user_id_created_at_index",
+          columns: [:user_id, {:desc, :created_at}]
+        }
+      ],
+      field_overrides: %{
+        user_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :delete_all,
+          null: false
+        },
+        source: %{
+          default: "goodreads",
+          null: false,
+          dbt_tests: [{:accepted_values, ["goodreads"]}]
+        },
+        # The reader's filename often carries their own name — PII, kept out
+        # of the warehouse.
+        filename: %{dbt_exclude: true},
+        status: %{
+          default: "enqueued",
+          null: false,
+          dbt_tests: [{:accepted_values, ["enqueued", "running", "complete", "failed"]}]
+        },
+        row_count: %{default: 0, null: false},
+        processed_count: %{default: 0, null: false},
+        shelved_count: %{default: 0, null: false},
+        duplicate_count: %{default: 0, null: false},
+        unverified_count: %{default: 0, null: false},
+        unreadable_count: %{default: 0, null: false}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/import.proto",
+      proto_message: "LibraryImportRow",
+      table_name: "library_import_rows",
+      schema_prefix: "op",
+      ecto_module: Stacks.Imports.LibraryImportRow,
+      ecto_path: "lib/stacks/gen/imports/library_import_row.ex",
+      dbt_path: "stg_library_import_rows.sql",
+      timestamps: false,
+      migration_exists: true,
+      # ⛔ NO warehouse copy (US-1.1.9 §11): raw_review/raw_notes are the
+      # reader's own free text and `wh` has no erasure path. skip_dbt keeps the
+      # staging model AND the sources.yml entry from ever being generated.
+      dbt_grant: false,
+      skip_dbt: true,
+      indexes: [
+        # What makes an Oban batch retry idempotent.
+        %{
+          name: "library_import_rows_import_id_row_number_index",
+          columns: [:import_id, :row_number],
+          unique: true
+        },
+        # The filtered report (outcome=unverified etc.).
+        %{
+          name: "library_import_rows_import_id_outcome_index",
+          columns: [:import_id, :outcome]
+        }
+      ],
+      field_overrides: %{
+        import_id: %{
+          belongs_to: Stacks.Imports.LibraryImport,
+          references_table: :library_imports,
+          on_delete: :delete_all,
+          null: false
+        },
+        row_number: %{null: false},
+        raw_rating: %{default: 0, null: false},
+        raw_read_count: %{default: 0, null: false},
+        raw_owned_copies: %{default: 0, null: false},
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          references_table: :books,
+          on_delete: :nilify_all
+        },
+        placement_id: %{
+          belongs_to: Stacks.Shelving.Placement,
+          references_table: :bookshelf_placements,
+          on_delete: :nilify_all
+        }
+      }
+    },
 
     # -------------------------------------------------------------------------
     # Books
@@ -570,6 +667,14 @@
           dbt_tests: [{:relationships, "stg_book_editions"}]
         },
         formats: %{ecto_type: {:array, :string}, default: []},
+        # Provenance (US-1.1.9): which capture path shelved the book. The only
+        # way an import report's counts reconcile after its row detail is
+        # purged (30 days).
+        source: %{
+          default: "manual",
+          null: false,
+          dbt_tests: [{:accepted_values, ["manual", "upload", "goodreads_import"]}]
+        },
         visibility: %{default: "owner"},
         reading_status: %{
           dbt_tests: [

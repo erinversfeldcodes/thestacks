@@ -110,7 +110,20 @@ defmodule Stacks.FactoryProtoValidationTest do
     retrieval_log: {Stacks.WritingAssistant.RetrievalLog, ~w()a},
     user_book_content_access: {Stacks.WritingAssistant.UserBookContentAccess, ~w()a},
     embedding: {Stacks.WritingAssistant.Embedding, ~w()a},
-    book_content_chunk: {Stacks.WritingAssistant.BookContentChunk, ~w()a}
+    book_content_chunk: {Stacks.WritingAssistant.BookContentChunk, ~w()a},
+    # started_at/finished_at are stamped by the job lifecycle (mark_running /
+    # finalize) — a factory setting them would make every fixture import look
+    # already-run.
+    library_import: {Stacks.Imports.LibraryImport, ~w(started_at finished_at)a},
+    # The raw_* skips mirror a real Goodreads row: most cells are optional in
+    # the export (a row without a review, notes, or dates is the common case).
+    # outcome/reason are written only by GoodreadsImportJob as it processes —
+    # pre-populating them would make every fixture row look already-imported
+    # and get skipped by the job's idempotent-retry guard.
+    library_import_row:
+      {Stacks.Imports.LibraryImportRow,
+       ~w(raw_isbn raw_review raw_notes raw_binding raw_date_read raw_date_added
+          outcome reason)a}
   }
 
   # Schemas that are proto-generated but intentionally have no factory.

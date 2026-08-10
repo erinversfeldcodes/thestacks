@@ -104,7 +104,28 @@ defmodule Stacks.GDPRTest do
       assert {:error, _} = Export.export_user_data(Ecto.UUID.generate())
     end
 
-    test "payload contains all 12 documented keys" do
+    # ── US-1.1.9 ────────────────────────────────────────────────────────────
+    test "includes library imports with their raw rows while in retention" do
+      user = insert(:user)
+
+      csv =
+        "Title,Author,ISBN13,Exclusive Shelf,My Review,Private Notes\n" <>
+          "1984,George Orwell,\"=\"\"9780141036144\"\"\",read,my honest review,my private note\n"
+
+      {:ok, _} = Stacks.Imports.create_import(user.id, "export.csv", csv)
+
+      assert {:ok, export} = Export.export_user_data(user.id)
+      assert [import_export] = export.library_imports
+      assert import_export.filename == "export.csv"
+      assert import_export.row_count == 1
+
+      # The reader's own free text is portable while it exists.
+      assert [row] = import_export.rows
+      assert row.review == "my honest review"
+      assert row.private_notes == "my private note"
+    end
+
+    test "payload contains all 13 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -122,7 +143,9 @@ defmodule Stacks.GDPRTest do
                  :blog_posts,
                  :blog_comments,
                  # US-14.1.3: invitations the user redeemed (prefix-only).
-                 :invitations
+                 :invitations,
+                 # US-1.1.9: import summaries + raw rows still in retention.
+                 :library_imports
                ])
     end
 
@@ -353,6 +376,36 @@ defmodule Stacks.GDPRTest do
       )
 
       assert {:ok, _} = Deletion.delete_user_data(user.id)
+    end
+
+    # ── US-1.1.9 ──────────────────────────────────────────────────────────
+    test "erases library imports AND their raw rows — the reader's Goodreads free text" do
+      user = insert(:user)
+
+      csv =
+        "Title,Author,ISBN13,Exclusive Shelf,My Review,Private Notes\n" <>
+          "1984,George Orwell,\"=\"\"9780141036144\"\"\",read,my honest review,my private note\n"
+
+      {:ok, import} = Stacks.Imports.create_import(user.id, "export.csv", csv)
+
+      # The preview names the imports before they go (its query is independent
+      # of the deletion step, so the two cross-check each other).
+      assert {:ok, preview} = Deletion.preview_user_data(user.id)
+      assert preview.library_imports == 1
+
+      assert {:ok, result} = Deletion.delete_user_data(user.id)
+      assert result.delete_library_imports == 1
+
+      # Erasure is DOUBLY enforced: the explicit step above, and the user_id
+      # ON DELETE CASCADE FK (probed 2026-08-10 — either alone suffices).
+      assert nil == Repo.get(Stacks.Imports.LibraryImport, import.id)
+
+      # The rows went with the import (cascade), not merely lost their FK —
+      # free text must be deleted, never author-nulled.
+      assert [] ==
+               Repo.all(
+                 from(r in Stacks.Imports.LibraryImportRow, where: r.import_id == ^import.id)
+               )
     end
   end
 

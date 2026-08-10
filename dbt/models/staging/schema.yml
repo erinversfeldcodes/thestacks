@@ -270,6 +270,12 @@ models:
           - relationships:
               to: ref('stg_book_editions')
               field: id
+      - name: source
+        description: Source.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['manual', 'upload', 'goodreads_import']
       - name: created_at
         description: Timestamp when the record was created.
         tests:
@@ -1341,6 +1347,68 @@ models:
         description: Redeemed at.
       - name: revoked_at
         description: Revoked at.
+      - name: created_at
+        description: Timestamp when the record was created.
+        tests:
+          - not_null
+      - name: updated_at
+        description: Timestamp of the last modification to this record.
+        tests:
+          - not_null
+
+  - name: stg_library_imports
+    description: >
+      Proto-synced staging model for library_imports.
+    columns:
+      - name: id
+        description: Surrogate UUID primary key.
+        tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: User id.
+        tests:
+          - not_null
+      - name: source
+        description: Source.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['goodreads']
+      - name: status
+        description: Status.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['enqueued', 'running', 'complete', 'failed']
+      - name: row_count
+        description: Row count.
+        tests:
+          - not_null
+      - name: processed_count
+        description: Processed count.
+        tests:
+          - not_null
+      - name: shelved_count
+        description: Shelved count.
+        tests:
+          - not_null
+      - name: duplicate_count
+        description: Duplicate count.
+        tests:
+          - not_null
+      - name: unverified_count
+        description: Unverified count.
+        tests:
+          - not_null
+      - name: unreadable_count
+        description: Unreadable count.
+        tests:
+          - not_null
+      - name: started_at
+        description: Started at.
+      - name: finished_at
+        description: Finished at.
       - name: created_at
         description: Timestamp when the record was created.
         tests:

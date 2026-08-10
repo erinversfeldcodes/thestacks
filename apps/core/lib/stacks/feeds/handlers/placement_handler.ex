@@ -22,6 +22,28 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
   @impl true
   def handle_event(%{event_type: event_type, aggregate_id: aggregate_id, payload: payload})
       when event_type in @placement_events do
+    if import_sourced?(event_type, payload) do
+      # A Goodreads import creates hundreds of placements in minutes; one
+      # RegenerateFeedJob per placement is O(n²) feed rebuilds. The import job
+      # enqueues ONE regeneration per touched bookshelf at finalize
+      # (Stacks.Imports.finalize/2), so this handler stands down for those
+      # events rather than duplicating the work n times.
+      :ok
+    else
+      regenerate_for(event_type, aggregate_id, payload)
+    end
+  end
+
+  # Catch-all clause — ignore unrecognized events
+  def handle_event(_event), do: :ok
+
+  defp import_sourced?("placement.created", payload) do
+    (Map.get(payload, "source") || Map.get(payload, :source)) == "goodreads_import"
+  end
+
+  defp import_sourced?(_event_type, _payload), do: false
+
+  defp regenerate_for(event_type, aggregate_id, payload) do
     bookshelf_name = extract_bookshelf_name(event_type, payload)
 
     # For moved events, regenerate both source and destination feeds
@@ -43,9 +65,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
 
     :ok
   end
-
-  # Catch-all clause — ignore unrecognized events
-  def handle_event(_event), do: :ok
 
   defp enqueue_feed_regeneration(_user_id, nil), do: :ok
 

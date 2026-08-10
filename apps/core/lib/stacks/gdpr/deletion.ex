@@ -46,6 +46,7 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Events.EventLog
   alias Stacks.Feeds.FeedCacheEntry
   alias Stacks.GDPR.ImageRetention
+  alias Stacks.Imports.LibraryImport
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
@@ -78,6 +79,7 @@ defmodule Stacks.GDPR.Deletion do
              ),
            feed_cache: count(from fc in FeedCacheEntry, where: fc.bookshelf_id in ^bookshelf_ids),
            uploaded_images: count(from i in UploadedImage, where: i.user_id == ^user_id),
+           library_imports: count(from li in LibraryImport, where: li.user_id == ^user_id),
            comments_anonymised: count(from c in PostComment, where: c.author_id == ^user_id),
            event_log_rows_scrubbed: count(user_event_log_query(user_id)),
            sessions_revoked: session_row_count(Repo, user_id)
@@ -149,6 +151,17 @@ defmodule Stacks.GDPR.Deletion do
     end)
     |> Multi.run(:bookshelf_ids, fn _repo, %{bookshelves: bookshelves} ->
       {:ok, Enum.map(bookshelves, & &1.id)}
+    end)
+    |> Multi.run(:delete_library_imports, fn repo, _ ->
+      # Raw import rows (the reader's Goodreads reviews/private notes — the
+      # free-text end of US-1.1.9) go with their import via the import_id
+      # ON DELETE CASCADE FK; deleting the imports here takes both tables.
+      # Belt-and-suspenders: the user_id FK's own CASCADE (from :delete_user)
+      # would also take them — probed 2026-08-10, skipping this step still
+      # erases — so this step exists for the honest count it reports, mirroring
+      # :delete_uploaded_images above.
+      {count, _} = repo.delete_all(from li in LibraryImport, where: li.user_id == ^user_id)
+      {:ok, count}
     end)
     |> Multi.run(:delete_history, fn repo, %{bookshelf_ids: bookshelf_ids} ->
       # PlacementHistory has from_bookshelf/to_bookshelf UUIDs, not placement_id

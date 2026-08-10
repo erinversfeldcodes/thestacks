@@ -144,7 +144,7 @@ defmodule Stacks.DataCorrection.Column do
     regclass != nil
   end
 
-  defp query({table, column} = target, sql, params) do
+  defp query({table, _column} = target, sql, params) do
     if table_present?(table) and column_present?(target) do
       %{rows: rows} = Repo.query!(sql, params)
       Enum.map(rows, fn [id, value] -> {load_uuid(id), value} end)

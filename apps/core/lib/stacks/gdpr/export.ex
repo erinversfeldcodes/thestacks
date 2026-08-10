@@ -108,6 +108,18 @@ defmodule Stacks.GDPR.Export do
       })
       |> Repo.all()
 
+    # US-1.1.9: the user's library imports — the durable summary (filename,
+    # status, counts) AND any raw rows still inside their 30-day retention
+    # window. The raw rows are the reader's own Goodreads free text (reviews,
+    # private notes) — squarely portable while they exist; after the sweep the
+    # summary alone remains and the export says so via the counts.
+    library_imports =
+      Stacks.Imports.LibraryImport
+      |> where([li], li.user_id == ^user_id)
+      |> order_by([li], desc: li.created_at)
+      |> Repo.all()
+      |> Enum.map(&library_import_to_map/1)
+
     export = %{
       exported_at: DateTime.utc_now(),
       # Every personal / user-provided column on op.users is exported here.
@@ -155,12 +167,50 @@ defmodule Stacks.GDPR.Export do
       uploaded_images: uploaded_images,
       blog_posts: Enum.map(blog_posts, &blog_post_to_map/1),
       blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),
-      invitations: invitations
+      invitations: invitations,
+      library_imports: library_imports
     }
 
     {:ok, export}
   rescue
     error -> {:error, error}
+  end
+
+  defp library_import_to_map(import) do
+    rows =
+      Stacks.Imports.LibraryImportRow
+      |> where([r], r.import_id == ^import.id)
+      |> order_by([r], asc: r.row_number)
+      |> Repo.all()
+      |> Enum.map(
+        &%{
+          row_number: &1.row_number,
+          title: &1.raw_title,
+          author: &1.raw_author,
+          isbn13: &1.raw_isbn13,
+          goodreads_shelf: &1.goodreads_shelf,
+          rating: &1.raw_rating,
+          review: &1.raw_review,
+          private_notes: &1.raw_notes,
+          outcome: &1.outcome,
+          reason: &1.reason
+        }
+      )
+
+    %{
+      id: import.id,
+      source: import.source,
+      filename: import.filename,
+      status: import.status,
+      row_count: import.row_count,
+      shelved_count: import.shelved_count,
+      duplicate_count: import.duplicate_count,
+      unverified_count: import.unverified_count,
+      unreadable_count: import.unreadable_count,
+      created_at: import.created_at,
+      finished_at: import.finished_at,
+      rows: rows
+    }
   end
 
   defp bookshelf_to_map(bookshelf) do

@@ -76,7 +76,15 @@ defmodule Stacks.Events.PayloadContract do
     # path emits an empty payload (gdpr/image_retention.ex).
     "image.expired" => %{version: 1, keys: ~w(), optional: ~w(reason)},
     # ── shelving ──────────────────────────────────────────────────────────────
-    "placement.created" => %{version: 1, keys: ~w(book_id bookshelf visibility_tier)},
+    # `source` (US-1.1.9): capture provenance — manual / upload / goodreads_import.
+    # Optional because pre-import events lack it; readers default absent to
+    # "manual". PlacementHandler uses it to coalesce an import's feed
+    # regenerations (the import job enqueues one per bookshelf at finalize).
+    "placement.created" => %{
+      version: 1,
+      keys: ~w(book_id bookshelf visibility_tier),
+      optional: ~w(source)
+    },
     "placement.moved" => %{version: 1, keys: ~w(from_bookshelf to_bookshelf)},
     "placement.reread" => %{version: 1, keys: ~w(book_id to_bookshelf)},
     "placement.removed" => %{version: 1, keys: ~w(book_id)},
@@ -87,6 +95,16 @@ defmodule Stacks.Events.PayloadContract do
     "placement.restored" => %{version: 1, keys: ~w(book_id bookshelf)},
     "placement.reading_started" => %{version: 1, keys: ~w(book_id)},
     "placement.reading_completed" => %{version: 1, keys: ~w(book_id)},
+    # ── library imports (US-1.1.9) ────────────────────────────────────────────
+    # Counts ONLY — never row content. A raw import row is the reader's own free
+    # text (reviews, private notes) with a 30-day retention; an event payload is
+    # immutable. Any row detail on these events would outlive its erasure path.
+    "library_import.started" => %{version: 1, keys: ~w(user_id source row_count)},
+    "library_import.completed" => %{
+      version: 1,
+      keys:
+        ~w(user_id source status row_count shelved_count duplicate_count unverified_count unreadable_count)
+    },
     # ── accounts / user ───────────────────────────────────────────────────────
     "user.registered" => %{version: 1, keys: ~w(role)},
     "user.profile_updated" => %{version: 1, keys: ~w()},

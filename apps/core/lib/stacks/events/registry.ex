@@ -278,6 +278,18 @@ defmodule Stacks.Events.Registry do
     # code, no note, no address (email_bound is a boolean, never the address).
     "invite.issued",
     "invite.redeemed",
+
+    # ---- Library imports (US-1.1.9) ------------------------------------------
+    # Job-lifecycle records. Every placement the import creates emits its own
+    # placement.created — which already carries the DbtRefreshHandler
+    # subscription that keeps mart_community_read_count current — and
+    # stg_library_imports is a view, so a refresh handler here would map to no
+    # models. Feed regeneration is deliberately NOT event-driven for imports:
+    # the job coalesces it to one RegenerateFeedJob per touched bookshelf at
+    # finalize (see GoodreadsImportJob), which is why PlacementHandler stands
+    # down for goodreads_import-sourced created events.
+    "library_import.started",
+    "library_import.completed",
     "invite.revoked"
   ]
 

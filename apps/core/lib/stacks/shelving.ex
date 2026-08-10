@@ -57,7 +57,8 @@ defmodule Stacks.Shelving do
     :started_at,
     :finished_at,
     :shelf_id,
-    :book_edition_id
+    :book_edition_id,
+    :source
   ]
 
   # ── Changeset functions (moved from schema modules) ────────────────
@@ -403,8 +404,21 @@ defmodule Stacks.Shelving do
   a manual add) it falls back to the work's primary edition. Recording the scanned
   edition is #378: without it every placement pointed at the primary, so a reader
   who scanned a specific printing lost which one they own.
+
+  Options (the fifth argument):
+
+    * `:source` — provenance recorded on the placement AND carried on the
+      `placement.created` payload: `"manual"` (default), `"upload"`, or
+      `"goodreads_import"`. The payload copy is what lets
+      `Feeds.Handlers.PlacementHandler` coalesce an import's N placements into
+      one feed regeneration per bookshelf instead of N.
+    * `:attrs` — extra placement fields merged into the insert (rating, notes,
+      formats, reading progress — an import carrying the reader's Goodreads
+      history). Same changeset, same validations as any other write.
   """
-  def place_book(user_id, book_id, bookshelf_name, book_edition_id) do
+  def place_book(user_id, book_id, bookshelf_name, book_edition_id, opts \\ []) do
+    source = Keyword.get(opts, :source, "manual")
+    extra_attrs = Keyword.get(opts, :attrs, %{})
     bookshelf = get_or_create_bookshelf(user_id, bookshelf_name)
 
     default_shelf = get_or_create_default_shelf(bookshelf.id)
@@ -416,12 +430,16 @@ defmodule Stacks.Shelving do
     end)
     |> Multi.insert(
       :placement,
-      placement_changeset(%Placement{}, %{
-        book_id: book_id,
-        bookshelf_id: bookshelf.id,
-        shelf_id: default_shelf.id,
-        book_edition_id: book_edition_id || primary_edition_id(book_id)
-      })
+      placement_changeset(
+        %Placement{},
+        Map.merge(extra_attrs, %{
+          book_id: book_id,
+          bookshelf_id: bookshelf.id,
+          shelf_id: default_shelf.id,
+          book_edition_id: book_edition_id || primary_edition_id(book_id),
+          source: source
+        })
+      )
     )
     |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
       Events.emit_safe(%{
@@ -431,7 +449,8 @@ defmodule Stacks.Shelving do
         payload: %{
           book_id: book_id,
           bookshelf: bookshelf_name,
-          visibility_tier: visibility_tier
+          visibility_tier: visibility_tier,
+          source: source
         }
       })
 

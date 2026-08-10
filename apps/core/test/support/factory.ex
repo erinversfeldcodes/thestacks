@@ -764,4 +764,26 @@ defmodule Stacks.Factory do
       embedding: Pgvector.new(List.duplicate(0.1, 1024))
     }
   end
+
+  def library_import_factory do
+    %Stacks.Imports.LibraryImport{
+      user: build(:user),
+      source: "goodreads",
+      filename: "goodreads_library_export.csv",
+      status: "enqueued",
+      row_count: 0
+    }
+  end
+
+  def library_import_row_factory do
+    %Stacks.Imports.LibraryImportRow{
+      import: build(:library_import),
+      row_number: sequence(:library_import_row_number, & &1),
+      raw_title: "1984",
+      raw_author: "George Orwell",
+      raw_isbn13: "9780141036144",
+      goodreads_shelf: "read",
+      created_at: DateTime.utc_now()
+    }
+  end
 end

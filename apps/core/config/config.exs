@@ -48,6 +48,9 @@ config :core, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 * * *", Stacks.Workers.ImageRetentionJob},
+       # 30-day sweep of raw Goodreads import rows (US-1.1.9) — same retention
+       # posture as images: the free text serves the one-time report, then goes.
+       {"30 2 * * *", Stacks.Workers.LibraryImportRowRetentionJob},
        {"0 4 * * *", Stacks.Workers.TriggerPriceScrapeJob, args: %{batch: true}},
        {"0 6 * * *", Stacks.Workers.RefreshCostsJob},
        {"0 7 * * *", Stacks.Workers.FetchAuthorRSSJob},

@@ -227,6 +227,12 @@ defmodule CoreWeb.Router do
 
     get "/search", SearchController, :index
 
+    # Goodreads library import (US-1.1.9). Synchronous parse, async shelving.
+    post "/imports/goodreads", ImportController, :create
+    get "/imports", ImportController, :index
+    get "/imports/:id", ImportController, :show
+    get "/imports/:id/rows", ImportController, :rows
+
     post "/listings", ListingController, :create
     put "/listings/:id/activate", ListingController, :activate
     put "/listings/:id/deactivate", ListingController, :deactivate
