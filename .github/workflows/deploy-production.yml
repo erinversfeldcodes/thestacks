@@ -58,6 +58,12 @@ jobs:
       SECRET_KEY_BASE: ${{ secrets.SECRET_KEY_BASE }}
       CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
       SCRAPER_HMAC_SECRET: ${{ secrets.SCRAPER_HMAC_SECRET }}
+      # Launch posture (US-14.1.3 / #321 11d): the closed-beta invite gate.
+      # deploy-stack.sh sets this itself on PREVIEWS but only passes it
+      # through in prod — without this line a merge deploys prod with OPEN
+      # registration. In the workflow env (not a Fly secret) so the flag is
+      # reviewable, versioned, and flipped by a PR when the beta opens.
+      INVITE_ONLY_REGISTRATION: "true"
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
