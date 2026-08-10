@@ -148,9 +148,14 @@ test.describe("Upload pipeline — ISBN not found", () => {
   test(
     "nonexistent ISBN-13 with valid checksum is refused by the ISBN hard gate",
     async ({ page }) => {
-      // 9780000000019 has a valid ISBN-13 checksum but exists in no external
-      // catalogue, so `ISBNResolver.resolve/1` finds nothing and the hard gate
-      // refuses it. This is the ONLY case in which the manual path may say
+      // A checksum-valid ISBN in registration group 978-999 — an UNALLOCATED
+      // group, probed empty on BOTH catalogues live (2026-08-10, #397). The
+      // previous fixture (9780000000019) sat in HarperCollins' real range and
+      // the world caught up: Open Library now resolves it — the hard gate
+      // WORKING; the fixture was wrong, not the gate. Even the unallocated
+      // group holds junk records (9789999999991 → a mis-keyed marathon book),
+      // so the fixture was chosen by probing, not by arithmetic alone.
+      // This is the ONLY case in which the manual path may say
       // "check the number" — before #343 it said it for every valid ISBN the
       // platform had not already stored, which is the opposite of a hard gate.
       test.setTimeout(30_000);
@@ -162,7 +167,7 @@ test.describe("Upload pipeline — ISBN not found", () => {
       const isbnInput = page.getByTestId("upload-manual-isbn-input");
       await expect(isbnInput).toBeVisible();
 
-      await isbnInput.fill("9780000000019");
+      await isbnInput.fill("9789991234564");
       await page.getByTestId("upload-manual-isbn-submit").click();
 
       await expect(
@@ -667,13 +672,13 @@ test.describe(
       await page.getByRole("button", { name: /Enter ISBN manually/i }).click();
       await page.getByTestId("upload-manual-isbn-input").fill(isbn);
 
-      // The notice names where it already is, before the reader commits.
-      await expect(
-        page.getByText(/already have this|already on your/i)
-      ).toBeVisible({ timeout: 20_000 });
-
-      // ...and the submit control is still live. This is the assertion that
-      // distinguishes "informed" from "blocked".
+      // ⚠️ Deliberately NO pre-submit notice assertion. The manual path is one
+      // hop (#343): the client holds only a typed string until the confirm
+      // response — which is the FIRST moment the server can name the reader's
+      // other bookshelves. `viewCompleteExistingShelvesNotice`'s own doc says
+      // exactly this. This spec originally asserted a pre-commit notice that
+      // has never existed on this path, and the assertion sat unexecuted
+      // behind the Modal project gating (#397).
       const submit = page.getByTestId("upload-manual-isbn-submit");
       await expect(submit).toBeEnabled();
 
@@ -683,9 +688,14 @@ test.describe(
       }
       await submit.click();
 
+      // Both halves of the ruling, where the manual path can express them:
+      // the add COMPLETED (not blocked) and the completion card INFORMS.
       await expect(page.getByTestId("upload-complete")).toBeVisible({
         timeout: 20_000,
       });
+      await expect(page.getByTestId("upload-already-yours")).toContainText(
+        /already have this on your/i
+      );
     });
   }
 );
