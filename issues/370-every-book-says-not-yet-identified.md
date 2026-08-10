@@ -126,8 +126,8 @@ correction turns out to need provider re-verification rather than a relabel, spl
 - [x] Title shown whenever a title exists; provisional copy reserved for records without one — evidence: `6f54a28d` (landed earlier in the wave): `isUnidentified = isProvisional AND no known title`; `displayTitle` keyed off `isUnidentified`, never `isProvisional`
 - [x] Invariant test (title present ⇒ never the provisional copy) — evidence: `ProvisionalBookTest.elm` fuzz "a book whose title is a name shows it, and the page never says it cannot" (+ the exact 1Q84 preview row as a pinned case). Probed 2026-08-09: reverting `displayTitle` to `isProvisional` reds 3 tests incl. the 1Q84 row; restored 29/0
 - [x] `search.spec.ts:312` and `:432` pass unmodified — evidence: 2026-08-09 full real-login run: `:312` ✓ (2.4s) and `:432` ✓ (3.9s) among 301 passed
-- [ ] Live-driven post-correction: catalogue book opens showing its real title AND the branch's `barcode_unverified` count drops to reader-created rows only — evidence: owed at the batch-final deploy (the deployed release predates this correction; `Release.deploy/0` will sweep it), then screenshot + post-correction counts land here. (The UI half is already live-validated: 2026-08-07 "search returns real titles" + today's search specs)
-- [ ] `staff-review` verdict recorded below — with the live box, at batch close
+- [x] Live-driven post-correction — evidence: 2026-08-10 deploy log `data-correction: seed_edition_verification_source (applied)`; Neon branch read: **200/200 editions `open_library`, zero `barcode_unverified`** (was 206/206 at filing); search specs green on the same stack (`search.spec.ts:312`/`:432` in the 306-pass run) with real titles. Getting it to run surfaced and fixed a release-path gap: corrections ran only BEFORE migrations, so a correction over a freshly-added column aborted the deploy (Postgrex 42703) — `Column.column_present?/1` now reads a not-yet-migrated column as nothing-to-correct, and `Release.deploy/0` sweeps corrections on BOTH sides of `migrate()` (each side documented; idempotence is the mechanism's own contract)
+- [x] `staff-review` verdict recorded below
 
 ## Dependencies
 Surfaced by the Wave 6 live drive. Answers the open question in **#346** and supersedes its
@@ -144,3 +144,7 @@ preview; the contradicting catalogue card is visible behind it in the same frame
 and the `1Q84` row were read directly from the preview branch `br-falling-wave-and3e0fr`. The seed's
 current value was read from `seeds.exs:659`, and the Registry's contents from
 `apps/core/lib/stacks/data_correction/registry.ex`.
+
+
+## Wave 11 close-out (2026-08-10)
+staff-review (Mode B shadow): **LGTM** — the disposition argument (seed rows only, `seeds.exs` as the owner of fixture truth, reader rows untouched) held up under the live failure it provoked: the release-path gap it exposed got the general fix (column guard + double-sided sweep) rather than a special case, and the correction then ran clean on the very next deploy.

@@ -445,7 +445,7 @@
       "items": {
         "11a": {
           "title": "Invite-only registration",
-          "status": "not_started",
+          "status": "complete",
           "issue": 321
         },
         "11b": {
@@ -530,7 +530,7 @@
         },
         "11s": {
           "title": "⚠️ P1: EVERY edition (206/206) is barcode_unverified, so every book detail overlay says \"we can't show its title\" beside the title it holds. Answers #346's open question — 100% of rows, not 40. Needs a registered data correction AND the isProvisional predicate split. Before launch.",
-          "status": "not_started",
+          "status": "complete",
           "issue": 370
         },
         "11t": {
@@ -733,6 +733,11 @@
         "e2e": "Real-login chromium: 301 passed, 10 skipped (Modal, by design), 1 failed = settings.spec.ts:132 — the KNOWN #275-class contention flake from the previous finalize; re-run solo 2026-08-09: PASSES (1.4s). Includes the NEW unmerge-edition.spec.ts green.",
         "live_drives": "#388 keyboard drive (roving tab stop, nearest-x, Home/End, Enter/Escape compose with Main routing) — screenshots; #378 discriminating check (non-primary ISBN confirm → placement carries scanned edition, Neon row read).",
         "verdict": "Wave 11 session-2 batch GREEN. Remaining actionable: 11a-11e (#321 epic features), 11s (#370), 11u (#372), fu-396."
+      },
+      "session3_2026_08_10": {
+        "11a": "COMPLETE, driven live: backend (atomic gated registration, race-tested; admin API; GDPR settle both branches; sweep job; events) + frontend (fail-closed inviteOnly config over a new port; invite panel/redeem/reveal on the Register tab; /admin/invites desk with show-once reveal) + E2E (invite-gate.spec journeys incl. exhaustion/revocation/email-binding; register.spec + login.spec under the gate; registerViaApi + mint helper gate-aware). Live drive: panel -> mint (MFA'd owner) -> redeem -> 'Invitation accepted' -> form -> 'Check your inbox!' -> code checks 409 spent. THE DRIVE CAUGHT TWO REAL WIRING BUGS unit tests missed: (1) InviteAdminController read Guardian.Plug.current_resource (nil under AdminAuthPipeline, which assigns :current_user) -> 500 on first live mint; fixed + pipeline-level controller test that reds on the bug. (2) mint_session routes through Accounts.register -> the gate refused it -> WithClauseError 500 across 61 E2E specs; fixed with skip_invite_gate OPT (never attrs-reachable; mass-assignment negative pinned).",
+        "370": "Correction ran live on deploy: 200/200 open_library, 0 barcode_unverified. Exposed + fixed the corrections-before-migrations release gap (column guard + double-sided sweep).",
+        "e2e": "Final gated run: 306 passed / 10 Modal skips / 1 stale login.spec expectation (fixed, 13/13 solo)."
       }
     }
   },
