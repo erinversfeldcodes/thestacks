@@ -128,7 +128,7 @@ page arrangement production never produces.
 -}
 pageFor : Main.AppConfig -> Route -> Maybe Main.Auth -> Maybe String -> Page
 pageFor config route maybeAuth adminToken =
-    Main.initPage config route maybeAuth adminToken Nothing Login.Fresh
+    Main.initPage config route "https://thestacks.test" maybeAuth adminToken Nothing Login.Fresh
         |> Tuple.first
 
 

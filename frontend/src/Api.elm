@@ -59,6 +59,8 @@ module Api exposing
     , ShelfVisibilitySetting
     , SourceHealth
     , SubjectCount
+    , Syndication
+    , SyndicationExport
     , TransparencyEntry
     , TransparencyMetrics
     , UploadInit
@@ -102,6 +104,7 @@ module Api exposing
     , deleteShelf
     , dismissAssociation
     , encodeProfileBody
+    , fetchSyndicationExport
     , foldProgress
     , forgotPassword
     , getAdminInvites
@@ -157,6 +160,7 @@ module Api exposing
     , publicProfileSummaryDecoder
     , publishBlogPost
     , putFileToR2
+    , recordSyndication
     , refresh
     , register
     , rejectIdentification
@@ -181,6 +185,7 @@ module Api exposing
     , searchResponseDecoder
     , searchUsers
     , setBookAgeGate
+    , setPostSyndicated
     , soldListing
     , standardTimeout
     , streamEventDecoder
@@ -195,6 +200,7 @@ module Api exposing
     , updateProfileVisibility
     , updateProgress
     , updateShelfVisibility
+    , updateSyndicationUrl
     , uploadTimeout
     )
 
@@ -3425,6 +3431,132 @@ updateBlogPost postId postData token toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+
+-- SYNDICATION (US-6.2.1)
+
+
+{-| The paste-ready copy of a post for Substack's editor.
+-}
+type alias SyndicationExport =
+    { format : String
+    , canonicalUrl : String
+    , body : String
+    }
+
+
+{-| One recorded act of syndication. `syndicatedUrl` is Nothing until the
+writer pastes the live Substack URL back ("Also published at").
+-}
+type alias Syndication =
+    { id : String
+    , target : String
+    , method : String
+    , canonicalUrl : String
+    , syndicatedUrl : Maybe String
+    , createdAt : String
+    }
+
+
+syndicationDecoder : Decoder Syndication
+syndicationDecoder =
+    Decode.map6 Syndication
+        (Decode.field "id" Decode.string)
+        (Decode.field "target" Decode.string)
+        (Decode.field "method" Decode.string)
+        (Decode.field "canonical_url" Decode.string)
+        (Decode.field "syndicated_url" (Decode.nullable Decode.string))
+        (Decode.field "created_at" Decode.string)
+
+
+{-| `GET /api/blog/posts/:id/syndication?format=html|markdown`.
+-}
+fetchSyndicationExport :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error SyndicationExport -> msg)
+    -> Cmd msg
+fetchSyndicationExport token postId format toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndication?format=" ++ format
+        , body = Http.emptyBody
+        , expect =
+            Http.expectJson toMsg
+                (Decode.map3 SyndicationExport
+                    (Decode.field "format" Decode.string)
+                    (Decode.field "canonical_url" Decode.string)
+                    (Decode.field "body" Decode.string)
+                )
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `POST /api/blog/posts/:id/syndications` — record that a copy went out.
+-}
+recordSyndication :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error Syndication -> msg)
+    -> Cmd msg
+recordSyndication token postId method toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications"
+        , body = Http.jsonBody (Encode.object [ ( "method", Encode.string method ) ])
+        , expect = Http.expectJson toMsg (Decode.field "syndication" syndicationDecoder)
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `PUT /api/blog/posts/:id/syndications/:sid` — paste the live Substack URL
+back in, closing the POSSE loop.
+-}
+updateSyndicationUrl :
+    String
+    -> String
+    -> String
+    -> String
+    -> (Result Http.Error Syndication -> msg)
+    -> Cmd msg
+updateSyndicationUrl token postId sid url toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications/" ++ sid
+        , body = Http.jsonBody (Encode.object [ ( "syndicated_url", Encode.string url ) ])
+        , expect = Http.expectJson toMsg (Decode.field "syndication" syndicationDecoder)
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `PUT /api/blog/posts/:id` with ONLY `syndicated` — the per-post feed
+tickbox. Partial on purpose: title/body/visibility stay untouched.
+-}
+setPostSyndicated :
+    String
+    -> String
+    -> Bool
+    -> (Result Http.Error Bool -> msg)
+    -> Cmd msg
+setPostSyndicated token postId syndicated toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId
+        , body = Http.jsonBody (Encode.object [ ( "syndicated", Encode.bool syndicated ) ])
+        , expect = Http.expectJson toMsg (Decode.at [ "post", "syndicated" ] Decode.bool)
         , timeout = standardTimeout
         , tracker = Nothing
         }

@@ -123,7 +123,11 @@ defmodule Stacks.FactoryProtoValidationTest do
     library_import_row:
       {Stacks.Imports.LibraryImportRow,
        ~w(raw_isbn raw_review raw_notes raw_binding raw_date_read raw_date_added
-          outcome reason)a}
+          outcome reason)a},
+    # syndicated_url stays unset until the writer closes the POSSE loop by
+    # pasting the live Substack URL back — a factory pre-filling it would make
+    # every fixture look already-backlinked.
+    post_syndication: {Stacks.Blog.PostSyndication, ~w(syndicated_url)a}
   }
 
   # Schemas that are proto-generated but intentionally have no factory.

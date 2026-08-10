@@ -29,7 +29,14 @@ defmodule Stacks.Blog do
   @spec create_post(Stacks.Accounts.User.t(), map()) ::
           {:ok, Post.t()} | {:error, Ecto.Changeset.t() | atom()}
   def create_post(user, attrs) do
-    attrs = Map.put(attrs, :user_id, user.id)
+    attrs =
+      attrs
+      |> Map.put(:user_id, user.id)
+      # US-6.2.1: the writer's account-level preference decides a NEW post's
+      # feed inclusion unless the post says otherwise. Only meaningful once
+      # the post is public — the flag is inert below that tier.
+      |> Map.put_new(:syndicated, user.syndication_default)
+
     requested_visibility = Map.get(attrs, :visibility, "owner")
 
     with :ok <- validate_ceiling(requested_visibility, user.profile_visibility) do
@@ -491,7 +498,7 @@ defmodule Stacks.Blog do
   # ---------------------------------------------------------------------------
 
   @post_required_fields [:user_id, :title, :body]
-  @post_optional_fields [:visibility, :visibility_group_id, :published_at]
+  @post_optional_fields [:visibility, :visibility_group_id, :published_at, :syndicated]
 
   @doc "Changeset for creating or updating a blog post."
   def post_changeset(post, attrs) do

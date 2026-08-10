@@ -125,7 +125,7 @@ defmodule Stacks.GDPRTest do
       assert row.private_notes == "my private note"
     end
 
-    test "payload contains all 13 documented keys" do
+    test "payload contains all 14 documented keys" do
       user = insert(:user)
       assert {:ok, export} = Export.export_user_data(user.id)
 
@@ -145,7 +145,9 @@ defmodule Stacks.GDPRTest do
                  # US-14.1.3: invitations the user redeemed (prefix-only).
                  :invitations,
                  # US-1.1.9: import summaries + raw rows still in retention.
-                 :library_imports
+                 :library_imports,
+                 # US-6.2.1: where the user's posts went (ids + URLs, no text).
+                 :blog_syndications
                ])
     end
 

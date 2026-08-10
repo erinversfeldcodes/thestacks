@@ -28,6 +28,10 @@ enum BlogVisibility {
 
   // Visible to all platform users.
   BLOG_VISIBILITY_PLATFORM = 3;
+
+  // Visible to anyone, signed in or not — the top of the Audience ladder
+  // (ADR-018) and the only tier the syndication feed (US-6.2.1) can serve.
+  BLOG_VISIBILITY_PUBLIC = 4;
 }
 
 // BookAssociation links a blog post to a book.
@@ -125,6 +129,45 @@ message BlogPost {
   // not a stored column; sourced from the author's users.handle at serialize
   // time. Empty when the author association is not loaded.
   string author_handle = 14 [json_name = "author_handle"];
+
+  // US-6.2.1 (POSSE): whether this post is included in the author's public
+  // blog feed — the feed Substack's RSS import reads. Defaults true (see the
+  // story: publishing publicly is the consenting act; this is the per-post
+  // control). Only PUBLIC posts can actually reach the feed; the flag on a
+  // lower-visibility post is inert until the post is made public.
+  bool syndicated = 15 [json_name = "syndicated"];
+}
+
+// PostSyndication records one act of syndication for a post (US-6.2.1) —
+// which target, by which mechanism, and the canonical URL AS PUBLISHED at the
+// time (stored, not derived: if the host ever changes, a derived value would
+// silently rewrite what the third-party copy actually says).
+//
+// Matches BlogController.format_syndication/1:
+// {id, post_id, target, method, canonical_url, syndicated_url, created_at}
+message PostSyndication {
+  // UUID of the syndication record.
+  string id = 1 [json_name = "id"];
+
+  // UUID of the syndicated post.
+  string post_id = 2 [json_name = "post_id"];
+
+  // Where the copy went. Only "substack" today.
+  string target = 3 [json_name = "target"];
+
+  // How it got there: "rss" (feed import) or "export" (copy-paste).
+  string method = 4 [json_name = "method"];
+
+  // The canonical URL back to The Stacks, as it was when syndicated.
+  string canonical_url = 5 [json_name = "canonical_url"];
+
+  // The URL of the copy on the target, pasted back by the writer ("Also
+  // published at"). Empty until they close the POSSE loop.
+  string syndicated_url = 6 [json_name = "syndicated_url"];
+
+  // When the syndication was recorded (ISO 8601 string on the wire, matching
+  // the rest of this file).
+  string created_at = 7 [json_name = "created_at"];
 }
 
 // PostComment represents a user comment on a blog post.

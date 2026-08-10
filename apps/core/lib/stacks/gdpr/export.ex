@@ -93,6 +93,24 @@ defmodule Stacks.GDPR.Export do
       |> where([c], c.author_id == ^user_id)
       |> Repo.all()
 
+    # US-6.2.1: where the user's posts went. Ids, target, method and two URLs —
+    # the record of syndication, reached through the user's own posts.
+    blog_syndications =
+      Stacks.Blog.PostSyndication
+      |> join(:inner, [s], p in Post, on: s.post_id == p.id)
+      |> where([_s, p], p.user_id == ^user_id)
+      |> Repo.all()
+      |> Enum.map(
+        &%{
+          post_id: &1.post_id,
+          target: &1.target,
+          method: &1.method,
+          canonical_url: &1.canonical_url,
+          syndicated_url: &1.syndicated_url,
+          created_at: &1.created_at
+        }
+      )
+
     # US-14.1.3: invitations the user REDEEMED — their entry into the beta is
     # part of their record. Deliberately excluded: `code_hash` (a credential),
     # `note` (the OWNER's private writing about them, not their own data), and
@@ -148,6 +166,8 @@ defmodule Stacks.GDPR.Export do
         notify_marketplace: user.notify_marketplace,
         notify_group_invitations: user.notify_group_invitations,
         notify_event_matches: user.notify_event_matches,
+        # US-6.2.1: a preference like the notify_* flags above.
+        syndication_default: user.syndication_default,
         age_verified: user.age_verified,
         age_verified_at: user.age_verified_at,
         age_verification_provider: user.age_verification_provider,
@@ -168,7 +188,8 @@ defmodule Stacks.GDPR.Export do
       blog_posts: Enum.map(blog_posts, &blog_post_to_map/1),
       blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),
       invitations: invitations,
-      library_imports: library_imports
+      library_imports: library_imports,
+      blog_syndications: blog_syndications
     }
 
     {:ok, export}

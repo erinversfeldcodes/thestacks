@@ -45,6 +45,10 @@ defmodule Stacks.Events.PayloadContract do
     "blog.association_dismissed" => %{version: 1, keys: ~w(book_id post_id)},
     "blog.associations_suggested" => %{version: 1, keys: ~w(book_ids count)},
     "post.comment_created" => %{version: 1, keys: ~w(author_id comment_id)},
+    # US-6.2.1 — deliberately NO title, body, canonical URL or Substack URL: a
+    # URL containing a title-derived slug is title data by another name, and
+    # even the UUID-form canonical is derivable from aggregate_id.
+    "post.syndicated" => %{version: 1, keys: ~w(target method)},
     # ── books ─────────────────────────────────────────────────────────────────
     "book.created" => %{version: 1, keys: ~w(isbn title visibility_tier)},
     # `book_id` stays v1 rather than becoming v2: it was ADDED (#355), and an

@@ -235,6 +235,14 @@ defmodule Stacks.Events.Registry do
     "blog.association_confirmed",
     "blog.association_dismissed",
     "post.comment_created",
+    # US-6.2.1: the record that a syndication happened. The feed is generated
+    # per request behind an ETag (no cached artefact to invalidate — see the
+    # §6 warning in the story about op.feed_cache being the WRONG home for a
+    # blog-feed cache), and stg_post_syndications is a view, so a refresh
+    # handler would map to no models. The int_syndication_reach insights model
+    # is deferred with its US-12.x consumer — wiring a refresh for a model
+    # that doesn't exist yet is the "built but not wired" shape inverted.
+    "post.syndicated",
 
     # ---- Social and groups ---------------------------------------------------
     # Only group.invitation_sent needs a side effect (an email), and it has one.

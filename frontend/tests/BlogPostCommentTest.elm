@@ -39,6 +39,8 @@ testModel =
     , replyDraft = Nothing
     , commentSubmitting = False
     , blockModal = Nothing
+    , origin = "https://thestacks.test"
+    , syndication = Nothing
     }
 
 
@@ -272,6 +274,7 @@ suite =
                             , associations = []
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
+                            , syndicated = True
                             }
 
                         model =
@@ -309,6 +312,7 @@ suite =
                             , associations = []
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
+                            , syndicated = True
                             }
 
                         model =
@@ -364,6 +368,7 @@ postView { displayName, handle } =
             , associations = []
             , authorDisplayName = displayName
             , authorHandle = handle
+            , syndicated = True
             }
 
         model =
@@ -390,6 +395,7 @@ blockMenuView { authorName } =
             , associations = []
             , authorDisplayName = authorName
             , authorHandle = "fable_quill"
+            , syndicated = True
             }
 
         viewerModel =

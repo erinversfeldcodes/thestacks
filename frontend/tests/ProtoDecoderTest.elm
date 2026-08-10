@@ -736,6 +736,7 @@ userSuite =
                         , city = "London"
                         , consentAnalytics = False
                         , consentWritingAssistant = False
+                        , syndicationDefault = True
                         , ageVerified = True
                         , ageVerifiedAt = ""
                         , ageVerificationProvider = ""
@@ -1271,6 +1272,7 @@ responseSuite =
                             , city = "London"
                             , consentAnalytics = False
                             , consentWritingAssistant = False
+                            , syndicationDefault = True
                             , ageVerified = True
                             , ageVerifiedAt = ""
                             , ageVerificationProvider = ""
@@ -1470,6 +1472,7 @@ blogSuite =
                         , visibilityGroupId = ""
                         , authorDisplayName = "Fable Quill"
                         , authorHandle = "fable_quill"
+                        , syndicated = True
                         }
 
                     result =
@@ -1757,6 +1760,7 @@ blogResponseSuite =
                             , createdAt = "2026-03-20T00:00:00Z"
                             , updatedAt = "2026-03-21T01:00:00Z"
                             , visibilityGroupId = ""
+                            , syndicated = True
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             }

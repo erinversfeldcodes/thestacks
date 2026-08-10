@@ -334,6 +334,7 @@ theRouteIsWiredToTheArrival =
         \() ->
             Main.initPage { ageGatingEnabled = False, inviteOnly = False }
                 Navigation.Route.ResendConfirmation
+                "https://thestacks.test"
                 Nothing
                 Nothing
                 Nothing

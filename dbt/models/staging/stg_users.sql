@@ -26,6 +26,7 @@ select
     consent_writing_assistant,
     consent_writing_assistant_at,
     handle,
+    syndication_default,
     created_at,
     updated_at
 from {{ source('op', 'users') }}

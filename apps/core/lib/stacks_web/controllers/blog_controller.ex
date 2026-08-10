@@ -13,6 +13,7 @@ defmodule StacksWeb.BlogController do
 
   alias Stacks.Accounts.Guardian
   alias Stacks.Blog
+  alias Stacks.Blog.Syndication
   alias StacksWeb.ProtoJSON
 
   @doc "GET /api/blog/posts — list published posts for a user (query param: user_id)."
@@ -77,7 +78,7 @@ defmodule StacksWeb.BlogController do
 
     attrs =
       params
-      |> Map.take(["title", "body", "visibility"])
+      |> Map.take(["title", "body", "visibility", "syndicated"])
       |> atomize_keys()
 
     with {:ok, post} <- fetch_post(id),
@@ -106,6 +107,95 @@ defmodule StacksWeb.BlogController do
          {:ok, published_post} <- Blog.publish_post(post, user) do
       json(conn, %{post: ProtoJSON.blog_post(published_post)})
     end
+  end
+
+  @doc """
+  GET /api/blog/posts/:id/syndication?format=html|markdown — the canonical-
+  tagged, paste-ready copy for Substack (US-6.2.1).
+
+  Author-only, and only for a PUBLIC published post: the export is an
+  authoring tool, and syndicating a non-public post would carry it past its
+  own audience. 422 `not_public` names that refusal distinctly from 404.
+  """
+  @spec syndication(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def syndication(conn, %{"id" => id} = params) do
+    user = Guardian.Plug.current_resource(conn)
+    format = params["format"] || "html"
+
+    with {:ok, post} <- fetch_post(id),
+         :ok <- check_ownership(post, user),
+         :ok <- check_syndicable(post),
+         :ok <- check_format(format) do
+      json(conn, Syndication.export(post, format))
+    end
+  end
+
+  @doc "POST /api/blog/posts/:id/syndications — record an act of syndication."
+  @spec create_syndication(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def create_syndication(conn, %{"id" => id} = params) do
+    user = Guardian.Plug.current_resource(conn)
+
+    with {:ok, post} <- fetch_post(id),
+         :ok <- check_ownership(post, user),
+         :ok <- check_syndicable(post),
+         {:ok, syndication} <- Syndication.record(post, params["method"] || "export") do
+      conn
+      |> put_status(201)
+      |> json(%{syndication: format_syndication(syndication)})
+    end
+  end
+
+  @doc """
+  PUT /api/blog/posts/:id/syndications/:sid — the writer pastes the live
+  Substack URL back in ("Also published at"), closing the POSSE loop.
+  """
+  @spec update_syndication(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def update_syndication(conn, %{"id" => id, "sid" => sid, "syndicated_url" => url}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    with {:ok, post} <- fetch_post(id),
+         :ok <- check_ownership(post, user),
+         {:ok, syndication} <- fetch_syndication(post, sid) do
+      case Syndication.set_syndicated_url(syndication, url) do
+        {:ok, updated} ->
+          json(conn, %{syndication: format_syndication(updated)})
+
+        {:error, %Ecto.Changeset{}} ->
+          conn
+          |> put_status(422)
+          |> json(%{error: "invalid_url"})
+      end
+    end
+  end
+
+  defp check_syndicable(post) do
+    if post.visibility == "public" and not is_nil(post.published_at) do
+      :ok
+    else
+      {:error, :not_public}
+    end
+  end
+
+  defp check_format(format) when format in ["html", "markdown"], do: :ok
+  defp check_format(_), do: {:error, :bad_format}
+
+  defp fetch_syndication(post, sid) do
+    case Syndication.get_syndication(post, sid) do
+      nil -> {:error, :not_found}
+      syndication -> {:ok, syndication}
+    end
+  end
+
+  defp format_syndication(syndication) do
+    %{
+      id: syndication.id,
+      post_id: syndication.post_id,
+      target: syndication.target,
+      method: syndication.method,
+      canonical_url: syndication.canonical_url,
+      syndicated_url: syndication.syndicated_url,
+      created_at: DateTime.to_iso8601(syndication.created_at)
+    }
   end
 
   @doc "PUT /api/blog/posts/:post_id/associations/:id/confirm — confirm a book association."

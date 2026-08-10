@@ -49,4 +49,19 @@ defmodule CoreWeb.FallbackController do
     |> put_status(422)
     |> json(%{error: "placement not found"})
   end
+
+  # US-6.2.1: syndication asked of a post that is not public+published. Its own
+  # token, because "make it public first" and "post doesn't exist" ask
+  # different things of the writer.
+  def call(conn, {:error, :not_public}) do
+    conn
+    |> put_status(422)
+    |> json(%{error: "not_public"})
+  end
+
+  def call(conn, {:error, :bad_format}) do
+    conn
+    |> put_status(422)
+    |> json(%{error: "format must be html or markdown"})
+  end
 end

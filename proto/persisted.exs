@@ -275,6 +275,9 @@
         age_verified: %{default: false},
         consent_analytics: %{default: false},
         consent_writing_assistant: %{default: false},
+        # US-6.2.1: account-level default for new posts' `syndicated` flag.
+        # A preference like the notify_* flags, not personal data.
+        syndication_default: %{default: true, null: false},
         # generated_always: true suppresses default and cast — Postgres generates this column.
         onboarding_completed: %{generated_always: true},
         onboarding_steps: %{ecto_type: :map, default: %{}},
@@ -746,7 +749,8 @@
         :visibility_group_id,
         :published_at,
         :created_at,
-        :updated_at
+        :updated_at,
+        :syndicated
       ],
       associations: [
         {:has_many, :book_associations, Stacks.Blog.PostBookAssociation, foreign_key: :post_id}
@@ -756,6 +760,9 @@
         visibility: %{default: "owner"},
         visibility_group_id: %{belongs_to: Stacks.Social.Group},
         published_at: %{ecto_type: :utc_datetime_usec},
+        # US-6.2.1: per-post feed inclusion. Default TRUE — publishing publicly
+        # is the consenting act; the tickbox is the control (story §5).
+        syndicated: %{default: true, null: false},
         # API-only fields — no DB column, excluded from Ecto schema and dbt
         associations: %{api_only: true},
         # Denormalised projection of the author's users.display_name (block-user
@@ -796,6 +803,50 @@
         # API-only fields — no DB column, excluded from Ecto schema and dbt
         book_title: %{api_only: true},
         status: %{api_only: true}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/blog.proto",
+      proto_message: "PostSyndication",
+      table_name: "post_syndications",
+      schema_prefix: "op",
+      ecto_module: Stacks.Blog.PostSyndication,
+      ecto_path: "lib/stacks/gen/blog/post_syndication.ex",
+      dbt_path: "stg_post_syndications.sql",
+      timestamps: {:standard, updated_at: false},
+      migration_exists: true,
+      # Warehouse-safe by construction: ids, a target, a method, two URLs and a
+      # timestamp — no free text. The canonical URL embeds the post UUID, not a
+      # title-derived slug (story §11: a slug in the warehouse would be title
+      # text in the warehouse; revisit if slugs ever land).
+      dbt_grant: true,
+      indexes: [],
+      derive_jason: [
+        :id,
+        :post_id,
+        :target,
+        :method,
+        :canonical_url,
+        :syndicated_url,
+        :created_at
+      ],
+      field_overrides: %{
+        post_id: %{
+          belongs_to: Stacks.Blog.Post,
+          references_table: :blog_posts,
+          on_delete: :delete_all,
+          null: false
+        },
+        target: %{
+          default: "substack",
+          null: false,
+          dbt_tests: [{:accepted_values, ["substack"]}]
+        },
+        method: %{
+          null: false,
+          dbt_tests: [{:accepted_values, ["rss", "export"]}]
+        },
+        canonical_url: %{null: false}
       }
     },
     %{

@@ -324,6 +324,7 @@ consumedByABounce =
                 bouncedPage =
                     Main.initPage { ageGatingEnabled = False, inviteOnly = False }
                         Navigation.Route.Library
+                        "https://thestacks.test"
                         Nothing
                         Nothing
                         Nothing

@@ -113,7 +113,9 @@ defmodule Stacks.Accounts do
   @doc "Changeset for profile update (display_name, website_url)."
   def profile_changeset(user, attrs) do
     user
-    |> cast(attrs, [:display_name, :website_url, :handle])
+    # syndication_default (US-6.2.1): the writer's account-level default for
+    # new posts' feed inclusion — a preference like the notify_* flags.
+    |> cast(attrs, [:display_name, :website_url, :handle, :syndication_default])
     |> drop_blank_handle_change()
     |> validate_length(:website_url, max: 500)
     # No-op unless :handle is being changed — keeps other profile updates unaffected.

@@ -52,6 +52,7 @@ import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
 import Components.OnboardingOverlay as OnboardingOverlay
+import Components.Syndication as Syndication
 import Components.UserMenu as UserMenu
 import Components.ViewAsBar as ViewAsBar
 import Html exposing (Html, a, button, div, footer, h1, header, li, main_, nav, p, span, text, ul)
@@ -209,6 +210,19 @@ has to remember which way round the boolean goes.
 
 -}
 port connectivityChanged : (Bool -> msg) -> Sub msg
+
+
+{-| Clipboard write for the syndication panel (US-6.2.1) — the one place the
+project needs a clipboard port, because the Clipboard API has no Elm
+equivalent. The JS side MUST answer on `copyResult` whether the write
+succeeded or was refused — a port that swallows a rejection produces a copy
+button that appears to work and does not, which is exactly the "built but not
+wired" shape. The False answer is what makes the textarea fallback reachable.
+-}
+port copyToClipboard : String -> Cmd msg
+
+
+port copyResult : (Bool -> msg) -> Sub msg
 
 
 main : Program Decode.Value Model Msg
@@ -617,7 +631,7 @@ init flags url key =
             Route.fromUrl url
 
         ( page, cmd ) =
-            initPage config route maybeAuth Nothing Nothing arrival
+            initPage config route (originOf url) maybeAuth Nothing Nothing arrival
     in
     ( { key = key
       , url = url
@@ -872,6 +886,28 @@ isOwner maybeAuth =
             False
 
 
+{-| The browser origin (scheme://host[:port]) — what turns a post id into its
+canonical absolute address client-side (US-6.2.1).
+-}
+originOf : Url -> String
+originOf url =
+    let
+        scheme =
+            case url.protocol of
+                Url.Http ->
+                    "http://"
+
+                Url.Https ->
+                    "https://"
+
+        portPart =
+            url.port_
+                |> Maybe.map (\p -> ":" ++ String.fromInt p)
+                |> Maybe.withDefault ""
+    in
+    scheme ++ url.host ++ portPart
+
+
 requiresAuth : Route -> Bool
 requiresAuth route =
     case route of
@@ -1074,8 +1110,8 @@ card it lands on say WHY. Same bounce, two independent things the reader was
 previously not told.
 
 -}
-initPage : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
-initPage config route maybeAuth adminToken maybePreviousRoute arrival =
+initPage : AppConfig -> Route -> String -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
+initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
     if loginRedirectFor route maybeAuth /= Nothing then
         ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
@@ -1088,7 +1124,7 @@ initPage config route maybeAuth adminToken maybePreviousRoute arrival =
         ( PageAdminGate route AdminSession.init, Cmd.none )
 
     else
-        initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arrival
+        initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival
 
 
 {-| The routes behind the `:admin` pipeline. Exhaustive on purpose — a `_ -> False` catch-all would
@@ -1163,8 +1199,8 @@ initBookshelf config maybeAuth =
     ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
 
 
-initPageAuthenticated : AppConfig -> Route -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
-initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arrival =
+initPageAuthenticated : AppConfig -> Route -> String -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
+initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival =
     let
         maybeToken =
             Maybe.map .token maybeAuth
@@ -1375,7 +1411,7 @@ initPageAuthenticated config route maybeAuth adminToken maybePreviousRoute arriv
                         |> Maybe.withDefault False
 
                 ( postModel, postCmd ) =
-                    BlogPostPage.init postId maybeToken currentUserId writingAssistantConsent
+                    BlogPostPage.init postId maybeToken currentUserId writingAssistantConsent origin
             in
             ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
 
@@ -2066,6 +2102,7 @@ update msg model =
                 ( page, cmd ) =
                     initPage model.config
                         newRoute
+                        (originOf url)
                         (currentAuth model.auth)
                         (adminTokenFor model)
                         (Just model.route)
@@ -2821,6 +2858,17 @@ update msg model =
                             , Cmd.map BlogPostMsg subCmd
                             )
 
+                        BlogPostPage.RequestCopy payload ->
+                            -- The syndication panel's clipboard ask (US-6.2.1).
+                            -- The port's answer arrives via copyResult and is
+                            -- routed back to the page in subscriptions.
+                            ( { model | page = PageBlogPost newSubModel }
+                            , Cmd.batch
+                                [ Cmd.map BlogPostMsg subCmd
+                                , copyToClipboard payload
+                                ]
+                            )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -2951,6 +2999,7 @@ update msg model =
                                     -- remove. One way to obtain the admin token, everywhere.
                                     initPage model.config
                                         gatedRoute
+                                        (originOf model.url)
                                         (currentAuth model.auth)
                                         (adminTokenFor withToken)
                                         (Just model.route)
@@ -3297,6 +3346,7 @@ update msg model =
                     ( page, cmd ) =
                         initPage model.config
                             model.route
+                            (originOf model.url)
                             (currentAuth model.auth)
                             (adminTokenFor model)
                             (Just model.route)
@@ -3672,6 +3722,14 @@ subscriptions model =
                     -- costs one discarded message every two seconds.
                     Time.every (toFloat ImportPage.pollSeconds * 1000)
                         (\_ -> ImportPageMsg ImportPage.PollTick)
+
+                PageBlogPost _ ->
+                    -- The clipboard's verdict, back to the syndication panel.
+                    copyResult
+                        (BlogPostMsg
+                            << BlogPostPage.SyndicationMsg
+                            << Syndication.CopyOutcome
+                        )
 
                 PageMarketplaceCreate _ ->
                     gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)

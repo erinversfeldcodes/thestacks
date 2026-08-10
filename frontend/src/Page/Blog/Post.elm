@@ -10,6 +10,7 @@ module Page.Blog.Post exposing
 import Api
 import Components.BlockUserModal as BlockModal
 import Components.BookAssociations as BookAssociations
+import Components.Syndication as Syndication
 import Components.WritingAssistant as WritingAssistant
 import Html exposing (Html, a, button, div, h1, h2, p, pre, span, text, textarea)
 import Html.Attributes exposing (class, disabled, href, placeholder, value)
@@ -31,6 +32,8 @@ type alias Model =
     , replyDraft : Maybe { parentId : String, body : String }
     , commentSubmitting : Bool
     , blockModal : Maybe BlockModal.Model
+    , origin : String
+    , syndication : Maybe Syndication.Model
     }
 
 
@@ -49,6 +52,7 @@ type Msg
     | DeleteComment String
     | CommentDeleted (Result Http.Error ())
     | BlockModalMsg BlockModal.Msg
+    | SyndicationMsg Syndication.Msg
     | EscapePressed
 
 
@@ -58,10 +62,12 @@ type OutMsg
       -- Escape reached the page but no block surface was open to consume it, so
       -- the shell should fall through to its default Escape handling.
     | EscapeUnhandled
+      -- The syndication panel asked for a clipboard write; Main owns the port.
+    | RequestCopy String
 
 
-init : String -> Maybe String -> Maybe String -> Bool -> ( Model, Cmd Msg )
-init postId maybeToken currentUserId writingAssistantConsent =
+init : String -> Maybe String -> Maybe String -> Bool -> String -> ( Model, Cmd Msg )
+init postId maybeToken currentUserId writingAssistantConsent origin =
     ( { postId = postId
       , post = Loading
       , currentUserId = currentUserId
@@ -72,6 +78,8 @@ init postId maybeToken currentUserId writingAssistantConsent =
       , replyDraft = Nothing
       , commentSubmitting = False
       , blockModal = Nothing
+      , origin = origin
+      , syndication = Nothing
       }
     , Cmd.batch
         [ Api.getBlogPost postId maybeToken PostLoaded
@@ -86,7 +94,17 @@ update msg model maybeToken =
         PostLoaded result ->
             case result of
                 Ok post ->
-                    ( { model | post = Success post, blockModal = blockModalFor model.currentUserId post }
+                    ( { model
+                        | post = Success post
+                        , blockModal = blockModalFor model.currentUserId post
+                        , syndication =
+                            -- The panel exists only for the author.
+                            if model.currentUserId == Just post.userId then
+                                Just (Syndication.init post.id model.origin post.syndicated)
+
+                            else
+                                Nothing
+                      }
                     , Cmd.none
                     , NoOut
                     )
@@ -268,6 +286,45 @@ update msg model maybeToken =
                 Nothing ->
                     ( model, Cmd.none, NoOut )
 
+        SyndicationMsg subMsg ->
+            case model.syndication of
+                Just syndicationModel ->
+                    let
+                        ( newSyndication, subCmd, outMsg ) =
+                            Syndication.update subMsg syndicationModel maybeToken
+
+                        baseModel =
+                            { model | syndication = Just newSyndication }
+                    in
+                    case outMsg of
+                        Syndication.NoOut ->
+                            ( baseModel, Cmd.map SyndicationMsg subCmd, NoOut )
+
+                        Syndication.RequestCopy payload ->
+                            ( baseModel, Cmd.map SyndicationMsg subCmd, RequestCopy payload )
+
+                        Syndication.SyndicatedChanged syndicated ->
+                            -- Keep the page's copy of the post honest under
+                            -- the tickbox.
+                            ( { baseModel
+                                | post =
+                                    case baseModel.post of
+                                        Success post ->
+                                            Success { post | syndicated = syndicated }
+
+                                        other ->
+                                            other
+                              }
+                            , Cmd.map SyndicationMsg subCmd
+                            , NoOut
+                            )
+
+                        Syndication.AuthLost ->
+                            ( baseModel, Cmd.none, SessionExpired )
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
         EscapePressed ->
             -- Give the block affordance first dibs on Escape (close its menu /
             -- confirm modal); if nothing was open, tell the shell to fall
@@ -357,6 +414,17 @@ view model =
                 in
                 div []
                     [ viewPost post isOwner
+                    , case model.syndication of
+                        Just syndicationModel ->
+                            Html.map SyndicationMsg
+                                (Syndication.view
+                                    syndicationModel
+                                    post.authorHandle
+                                    (post.visibility == Types.BlogPost.Public && post.published)
+                                )
+
+                        Nothing ->
+                            text ""
                     , case model.blockModal of
                         Just blockModal ->
                             Html.map BlockModalMsg (BlockModal.view blockModal)

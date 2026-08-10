@@ -440,6 +440,15 @@ defmodule Stacks.Factory do
     }
   end
 
+  def post_syndication_factory do
+    %Stacks.Blog.PostSyndication{
+      post: build(:post),
+      target: "substack",
+      method: "export",
+      canonical_url: "https://thestacks.test/blog/00000000-0000-0000-0000-000000000000"
+    }
+  end
+
   def post_comment_factory do
     %PostComment{
       post: build(:post),

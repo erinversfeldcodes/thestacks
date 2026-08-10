@@ -24,6 +24,7 @@ type Visibility
     = Owner
     | Group
     | Platform
+    | Public
 
 
 type alias BlogPost =
@@ -37,6 +38,7 @@ type alias BlogPost =
     , associations : List BookAssociation
     , authorDisplayName : String
     , authorHandle : String
+    , syndicated : Bool
     }
 
 
@@ -119,6 +121,9 @@ visibilityToString v =
         Platform ->
             "platform"
 
+        Public ->
+            "public"
+
 
 
 -- MAPPING FROM PROTO
@@ -135,6 +140,9 @@ fromProtoVisibility pv =
 
         Proto.BlogVisibilityPlatform ->
             Platform
+
+        Proto.BlogVisibilityPublic ->
+            Public
 
         Proto.BlogVisibilityUnspecified ->
             Owner
@@ -187,6 +195,7 @@ fromProtoBlogPost pb =
     , associations = List.map fromProtoAssociation pb.associations
     , authorDisplayName = pb.authorDisplayName
     , authorHandle = pb.authorHandle
+    , syndicated = pb.syndicated
     }
 
 

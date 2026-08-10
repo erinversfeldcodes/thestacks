@@ -7890,3 +7890,97 @@ h4 {
     margin-top: var(--space-2);
     text-align: center;
 }
+
+/* ===== Syndication panel (US-6.2.1) ===== */
+
+/* Below the post body, set off by a hairline rule, typeset small with a
+ * subdued brass tint — the panel is reference material, not a call to action. */
+.post__syndication {
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+    border-top: 1px solid rgba(92, 58, 30, 0.25);
+    font-family: var(--font-body);
+    font-size: var(--size-sm);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.post__syndication-heading {
+    font-family: var(--font-heading);
+    font-size: var(--size-lg);
+    color: #8a6d3b;
+    margin: 0;
+}
+
+.post__syndication-canonical,
+.post__syndication-actions,
+.post__syndication-feed,
+.post__syndication-backlink,
+.post__syndication-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+.post__syndication-label {
+    font-weight: 700;
+    min-width: 9rem;
+}
+
+.post__syndication-url {
+    font-family: var(--font-mono);
+    font-size: var(--size-xs);
+    word-break: break-all;
+}
+
+.post__syndication-copy {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid rgba(92, 58, 30, 0.35);
+    border-radius: 3px;
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: var(--size-xs);
+    cursor: pointer;
+    color: inherit;
+}
+
+.post__syndication-note {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+}
+
+.post__syndication-error {
+    color: #a04434;
+    font-size: var(--size-xs);
+}
+
+.post__syndication-fallback textarea {
+    width: 100%;
+    min-height: 8rem;
+    font-family: var(--font-mono);
+    font-size: var(--size-xs);
+}
+
+.post__syndication-caption {
+    margin: 0;
+    font-size: var(--size-xs);
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.post__syndication-unavailable p {
+    margin: 0;
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.post__syndication-status {
+    min-height: 1.2em;
+    font-size: var(--size-xs);
+    color: var(--accent);
+}

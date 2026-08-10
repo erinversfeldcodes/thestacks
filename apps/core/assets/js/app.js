@@ -689,6 +689,36 @@ if (app.ports && app.ports.connectivityChanged) {
   window.addEventListener("offline", sendConnectivity);
   sendConnectivity();
 }
+
+// ---------------------------------------------------------------------------
+// Port: clipboard write for the syndication panel (US-6.2.1)
+//
+// MUST answer on copyResult in BOTH directions — a swallowed rejection
+// produces a copy button that appears to work and does not, and the False
+// answer is what makes Elm's textarea fallback reachable. No Clipboard API
+// at all (http, ancient browser) is the same False, not a crash.
+// ---------------------------------------------------------------------------
+if (app.ports && app.ports.copyToClipboard) {
+  app.ports.copyToClipboard.subscribe(function (text) {
+    var answer = function (ok) {
+      if (app.ports.copyResult) {
+        app.ports.copyResult.send(ok);
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () {
+          answer(true);
+        },
+        function () {
+          answer(false);
+        }
+      );
+    } else {
+      answer(false);
+    }
+  });
+}
 }
 
 // Boot immediately — the server config arrives asynchronously (see boot()).

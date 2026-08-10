@@ -25,7 +25,8 @@ defmodule StacksWeb.UserSettingsController do
           display_name: updated.display_name,
           website_url: updated.website_url,
           email: updated.email,
-          handle: updated.handle
+          handle: updated.handle,
+          syndication_default: updated.syndication_default
         })
 
       {:error, :invalid_password} ->

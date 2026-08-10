@@ -300,13 +300,13 @@ suite =
                     -- which needs a `typ: "admin_session"` token. Four surfaces were built, routed,
                     -- tested and unreachable — and nothing failed, because each page's own tests
                     -- passed a token straight into a mocked API.
-                    Main.initPage config AdminRemovalRequests (Just ownerAuth) Nothing Nothing Login.Fresh
+                    Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageAdminGate
                         |> Expect.equal True
             , test "with an admin token the real page loads" <|
                 \() ->
-                    Main.initPage config AdminRemovalRequests (Just ownerAuth) (Just "admin-tok") Nothing Login.Fresh
+                    Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) (Just "admin-tok") Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageAdminGate
                         |> Expect.equal False
@@ -318,14 +318,14 @@ suite =
                     [ AdminSourceApproval, AdminScraperConfig, AdminBookModeration, AdminRemovalRequests ]
                         |> List.map
                             (\r ->
-                                Main.initPage config r (Just ownerAuth) Nothing Nothing Login.Fresh
+                                Main.initPage config r "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
                                     |> Tuple.first
                                     |> isPageAdminGate
                             )
                         |> Expect.equal [ True, True, True, True ]
             , test "a non-admin route is unaffected by the admin token being absent" <|
                 \() ->
-                    Main.initPage config Library (Just ownerAuth) Nothing Nothing Login.Fresh
+                    Main.initPage config Library "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageAdminGate
                         |> Expect.equal False
@@ -333,19 +333,19 @@ suite =
         , describe "initPage redirect guard"
             [ test "a protected route with no auth renders the Login page (login-at-URL)" <|
                 \() ->
-                    Main.initPage config Upload Nothing Nothing Nothing Login.Fresh
+                    Main.initPage config Upload "https://thestacks.test" Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal True
             , test "a second protected route with no auth also renders Login" <|
                 \() ->
-                    Main.initPage config SettingsProfile Nothing Nothing Nothing Login.Fresh
+                    Main.initPage config SettingsProfile "https://thestacks.test" Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal True
             , test "a public route with no auth does NOT force the Login page" <|
                 \() ->
-                    Main.initPage config Home Nothing Nothing Nothing Login.Fresh
+                    Main.initPage config Home "https://thestacks.test" Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal False

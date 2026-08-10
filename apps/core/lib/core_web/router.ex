@@ -118,6 +118,17 @@ defmodule CoreWeb.Router do
   # is served to anyone, a `platform` one only to a signed-in reader — `platform` means "any
   # authenticated platform user, NOT visible to logged-out" on the Audience ladder, so serving it
   # anonymously would have contradicted the ladder's own definition. Owner decision 2026-07-29.
+  # The syndication feed (US-6.2.1) is in its OWN scope with NO :optional_auth —
+  # its consumer is an anonymous third-party fetcher that republishes what it
+  # reads, so there must be no authenticated branch at all (any token is
+  # ignored). ⚠️ Declared BEFORE the shelf-feed route, or :bookshelf_name
+  # swallows "blog" and the request becomes a lookup for a bookshelf named
+  # "blog" — a 404 that looks like a missing reader. Router test pins this.
+  scope "/api", StacksWeb do
+    pipe_through [:api, :rate_limit_public]
+    get "/feeds/u/:handle/blog", BlogFeedController, :show
+  end
+
   scope "/api", StacksWeb do
     pipe_through [:api, :optional_auth, :rate_limit_public]
     # Handle-addressed and canonical: a page showing someone's bookshelves knows their
@@ -292,6 +303,11 @@ defmodule CoreWeb.Router do
     put "/blog/posts/:id", BlogController, :update
     delete "/blog/posts/:id", BlogController, :delete
     post "/blog/posts/:id/publish", BlogController, :publish
+    # Syndication (US-6.2.1): author-only export + records. The public feed
+    # lives in the anonymous-only scope above.
+    get "/blog/posts/:id/syndication", BlogController, :syndication
+    post "/blog/posts/:id/syndications", BlogController, :create_syndication
+    put "/blog/posts/:id/syndications/:sid", BlogController, :update_syndication
     put "/blog/posts/:post_id/associations/:id/confirm", BlogController, :confirm_association
     put "/blog/posts/:post_id/associations/:id/dismiss", BlogController, :dismiss_association
 
