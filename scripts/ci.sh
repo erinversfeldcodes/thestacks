@@ -55,7 +55,16 @@ has_group() {
 FAILED=()
 
 if has_group elixir; then
-    if ! run_group "elixir: version-drift" bash scripts/check-version-drift.sh; then FAILED+=(elixir-version-drift); fi
+    if ! run_group "elixir: version-drift" bash scripts/check-version-drift.sh; then
+        # A drifted toolchain means every mix invocation below compiles _build
+        # with the WRONG Elixir/OTP — beams the pinned shell then cannot load
+        # (corrupt atom table, Regex struct mismatches). Abort before the first
+        # compile instead of failing seven gates and poisoning the tree.
+        echo -e "\n${RED}${BOLD}ABORT${RESET} elixir toolchain drifted — refusing to compile with it."
+        echo "      Run via the pinned shell (just run just ci ...) or fix PATH/direnv, then retry."
+        echo "      If mix already ran on the wrong toolchain: rm -rf _build and rebuild pinned."
+        exit 1
+    fi
 
     echo -e "\n${CYAN}${BOLD}=== elixir: deps ===${RESET}"
     mix deps.get
