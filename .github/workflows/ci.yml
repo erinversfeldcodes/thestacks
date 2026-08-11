@@ -189,9 +189,12 @@ jobs:
     needs: [changes, versions]
     if: needs.changes.outputs.elixir == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      MIX_ENV: test
+    # 20 rather than 15: the first run after the :dev switch rebuilds the
+    # dialyzer PLT from scratch before the cache warms.
+    timeout-minutes: 20
+    # No MIX_ENV override: dialyzer's contract is :dev, where test/support is
+    # not compiled and the empty ignore file is correct. Under :test it reports
+    # unresolvable ExUnit internals as errors.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -514,7 +517,9 @@ jobs:
       - name: Regenerate vision locks and fail on drift
         run: |
           set -euo pipefail
-          pip install --quiet --root-user-action=ignore pip-tools==7.5.3
+          # pip is pinned because the python:3.14-slim tag floats: a newer
+          # image's pip removed internals pip-tools imports (stdlib_pkgs).
+          pip install --quiet --root-user-action=ignore 'pip==25.1.1' pip-tools==7.5.3
           pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
             --output-file apps/vision/requirements.lock apps/vision/requirements.txt
           pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
