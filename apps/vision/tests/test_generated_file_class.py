@@ -95,6 +95,8 @@ class TestClassifier:
 
 class TestResolveDrift:
     def test_stale_gitignored_artefact_is_regenerated_not_failed(self) -> None:
+        # gen/ is gitignored, so a fresh CI checkout has no such directory
+        IGNORED_PROBE.parent.mkdir(parents=True, exist_ok=True)
         IGNORED_PROBE.write_text("# stale\n")
         try:
             fails_build = _resolve_drift(IGNORED_PROBE, "# fresh\n", "elixir", missing=False)
@@ -105,6 +107,7 @@ class TestResolveDrift:
             IGNORED_PROBE.unlink(missing_ok=True)
 
     def test_absent_gitignored_artefact_is_generated_not_failed(self) -> None:
+        IGNORED_PROBE.parent.mkdir(parents=True, exist_ok=True)
         IGNORED_PROBE.unlink(missing_ok=True)
         try:
             fails_build = _resolve_drift(IGNORED_PROBE, "# fresh\n", "elixir", missing=True)
