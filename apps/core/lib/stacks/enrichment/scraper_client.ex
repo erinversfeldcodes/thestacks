@@ -1,41 +1,16 @@
 defmodule Stacks.Enrichment.ScraperClient do
   @moduledoc """
-  HTTP client for calling the Rust scraper service.
+  HTTP client for the Rust scraper service. Wire contract:
+  `proto/stacks/internal/v1/scraper.proto`. Swappable via
+  `config :core, :scraper_client` (real vs mock). Auth: same HMAC scheme
+  as the vision service (`X-Internal-Token`, secret
+  `SCRAPER_HMAC_SECRET`).
 
-  Wire contract: `proto/stacks/internal/v1/scraper.proto`
-  (ScrapeRequest/Response, ConfigReloadResponse)
-
-  The actual implementation is swappable via Application env:
-    config :core, :scraper_client, Stacks.Enrichment.ScraperClient       # real HTTP
-    config :core, :scraper_client, Stacks.Enrichment.MockScraperClient  # tests
-
-  ## Service-to-Service Authentication
-
-  Requests use the same timestamp-based HMAC scheme as the vision service:
-    - Header: `X-Internal-Token`
-    - Value: `<unix_ts>.<HMAC-SHA256(secret, "<ts>.POST./scrape")>` (hex-encoded)
-    - Secret: `SCRAPER_HMAC_SECRET` env var
-
-  ## Circuit Breakers — two, covering different failure domains
-
-  Both are consulted before a request and either being open yields
-  `{:error, :circuit_open}`:
-
-  - **`:scraper_fuse`** — the *sidecar* is unreachable or rejecting us. Shared by
-    every store, which is right: if the service is down, no store can be scraped.
-    Melted on a transport failure or an HTTP 401.
-  - **`:scraper_store_fuse_<store>`** — *this shop* is failing: an upstream HTTP
-    error, a rate limit, a missing config, or an extractor that cannot parse its
-    pages. Melted on any other non-200, and on a
-    `SCRAPE_OUTCOME_EXTRACTOR_FAILED` response.
-
-  The split matters because the shared fuse opens for 15 minutes after 3 failures.
-  Previously every failure melted it, so one bad shop stopped price scraping for
-  all of them — repeatedly, since most causes recur on every attempt.
-
-  Note what does **not** melt anything: `NOT_STOCKED` and `ROBOTS_BLOCKED` are
-  determinations, not failures, and arrive as HTTP 200 (see
-  `ScrapeOutcome` in the proto).
+  Two fuses are consulted before every request, covering different
+  domains: `:scraper_fuse` (the sidecar itself — shared, service-wide) and
+  the per-store fuse from `CircuitBreakers.store_fuse/1` (one hostile or
+  broken shop must not stop scraping for the rest). Either open →
+  `{:error, :circuit_open}`.
   """
 
   @behaviour Stacks.Enrichment.ScraperClientBehaviour

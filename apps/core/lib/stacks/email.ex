@@ -73,29 +73,13 @@ defmodule Stacks.Email do
   end
 
   @doc """
-  Issues a FRESH confirmation link for `email` and enqueues the confirmation
-  email. Always returns `:ok` — see `StacksWeb.AuthController.resend_confirmation/2`
-  for why the caller may learn nothing from it.
-
-  Four cases, one return value:
-
-    * no account with that email — nothing happens
-    * the account is already confirmed — nothing happens (there is no link to
-      send; the reader can simply sign in)
-    * the account is unconfirmed but past
-      `Accounts.unverified_account_max_lifetime_seconds/0` — nothing happens; see
-      `Accounts.confirmation_resendable?/1` for why the renewal has a ceiling
-    * the account is unconfirmed and within the cap — a new token is signed,
-      stored, and delivered
-
-  Re-signing (rather than re-sending the stored token) is deliberate and is what
-  makes the affordance safe to offer: the new token carries a new `signed_at`, so
-  the link is good for another `Accounts.unverified_account_ttl_seconds/0` AND —
-  because `Accounts.expired_unverified_ids/1` keys the reaper off exactly that
-  token — the account behind it survives just as long. Asking for a new email is
-  the reader's signal that the signup was not abandoned, and it is honoured by
-  both clocks at once because there is only one. The previous link stops working,
-  which is the ordinary and safer behaviour for a re-issued credential.
+  Issues a FRESH confirmation link and enqueues the email. Always returns
+  `:ok` (anti-enumeration — see `AuthController.resend_confirmation/2`).
+  Nothing happens when: no such account, already confirmed, or past
+  `unverified_account_max_lifetime_seconds/0` (renewal has a ceiling; see
+  `confirmation_resendable?/1`). Otherwise a NEW token is signed and
+  stored — re-signing is what makes the affordance safe: the fresh
+  `signed_at` buys a full TTL, and the reaper honours it (373).
   """
   @spec send_confirmation_resend(String.t()) :: :ok
   def send_confirmation_resend(email) do

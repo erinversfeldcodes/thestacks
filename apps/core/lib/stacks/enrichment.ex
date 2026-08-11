@@ -167,36 +167,14 @@ defmodule Stacks.Enrichment do
   end
 
   @doc """
-  Lists third spaces with upcoming events preloaded.
-
-  ## Options
-
-    * `:lat`, `:lng`, `:radius_km` — spaces within a radius of a point
-    * `:north`, `:south`, `:east`, `:west` — spaces inside a viewport (the map's query)
-    * `:near_bookshop_km` — only spaces at most this far from a bookshop (US-3.1.1's
-      500 m rule is `near_bookshop_km: 0.5`)
-    * `:types` — restrict to these space types (the reader's category filter)
-    * `:limit` — max results (default 20)
-
-  ## What this used to do, and why the shape changed
-
-  Three defects, all of which a live `GET /api/third-spaces` was exposed to:
-
-  1. A space's position came from looking its **`city` string** up in a hardcoded
-     six-entry map, so anything outside those six cities was silently dropped and two
-     spaces in one city were treated as equidistant. The endpoint advertised
-     `lat`/`lng`/`radius_km` and could not honour them.
-  2. **`limit` was applied before filtering.** The query took the first 20 rows in
-     unspecified order and *then* filtered by radius, so the nearest space could be
-     invisible while a far one showed. Ordering now happens in SQL over the filtered
-     set, and the limit is applied last.
-  3. Opted-out spaces were returned. A business that asked to be delisted stayed on
-     the map (US-2.5.3).
-
-  Coordinates are now real columns, so filtering is a **bounding box in SQL** — indexed
-  by `idx_third_spaces_lat_lng` — with a Haversine refinement in memory over that
-  bounded set. A box is a superset of the circle it encloses, so refining afterwards is
-  exact, and it keeps the expensive trigonometry off every row in the table.
+  Lists third spaces with upcoming events preloaded. Options: `:lat`/
+  `:lng`/`:radius_km` (point search), `:north`/`:south`/`:east`/`:west`
+  (map viewport), `:near_bookshop_km` (US-3.1.1's 500m rule is `0.5`),
+  `:types`, `:limit` (default 20). Positions come from the STORED
+  `latitude`/`longitude` written at approval time — never from city-name
+  lookup — and `limit` is applied after all filters. Spaces without
+  coordinates are excluded from geo queries but returned by unfiltered
+  lists.
   """
   @spec list_third_spaces(keyword()) :: [ThirdSpace.t()]
   def list_third_spaces(opts \\ []) do

@@ -1,40 +1,15 @@
 defmodule Stacks.Enrichment.EventPages do
   @moduledoc """
-  Finds events that a shop publishes as **individual pages**, because that is how these shops
-  actually publish them.
+  Finds events published as INDIVIDUAL pages — how the scrapeable shops
+  actually publish (neither has a listing page; Wordsworth's signings are
+  single `/pages/...` slugs in its sitemap). Runs when `EventsPath`
+  correctly answers "no listing page".
 
-  ## Why this exists
-
-  #307 built polite discovery on the premise of an events *listing* page — one URL, many events.
-  Driven live (2026-08-04), the premise failed: neither scrapeable shop has one. What Wordsworth has
-  is `/pages/treive-nicholas-book-signing-at-our-sea-point-store` — **one event, as its own page** —
-  sitting in its sitemap between `/pages/careers-at-wordsworth-books` and `/pages/payment-logos`.
-  `EventsPath` is correct when it answers "no listing page"; this module is what runs on that answer.
-
-  ## The classifier, and why its negatives matter more than its positives
-
-  A slug is classified as an event only if it contains one of a short list of **event-shaped
-  phrases** (`book-signing`, `book-launch`, `author-evening`, …). The list is deliberately precise
-  rather than broad, because the failure modes are asymmetric: a missed event costs us one listing,
-  while a false positive *invents* an event — and a pipeline that invents records is harder to
-  notice and harder to undo than one that produces none (`parse_events/2` learned this the hard
-  way).
-
-  The ground truth is the shop's real page list: 45 slugs, exactly one event, and 44 negatives that
-  include every tempting near-miss — `halloween` (a themed shopping page), `mothers-day-promotion`,
-  `celebrate-our-birthday-with-us-chapter30`, `book-of-the-month-subscription`. None of them match,
-  and the test suite pins all 45.
-
-  ## What is stored, and what is refused
-
-  A candidate earns **one fetch** (through the compliant egress: robots, rate limit, the fuse). The
-  title comes from the page's own `<title>`; the date is extracted **only** if the page states one
-  unambiguously, and the real page states none — so most rows will be dateless, which is why
-  `event_date` became optional (#382, owner ruling). The URL stored is the shop's own page: the
-  reader follows it for the details we refuse to guess at.
-
-  At most `@max_candidates_per_run` pages are fetched per store per run, so a hostile or weird
-  sitemap cannot turn classification into a crawl.
+  The slug classifier matches a short list of event-shaped phrases
+  (`book-signing`, `book-launch`, …), deliberately precise over broad: a
+  false positive costs the shop a page render and pollutes the events
+  table, a false negative just waits for the phrase list to grow. Each
+  classified page costs one budgeted, compliant fetch.
   """
 
   alias Stacks.Enrichment.EventExtractor

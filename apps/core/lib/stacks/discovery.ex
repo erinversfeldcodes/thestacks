@@ -345,30 +345,14 @@ defmodule Stacks.Discovery do
   @type_for_source %{"community" => "community_centre", "event_source" => "cafe"}
 
   @doc """
-  Creates the `third_space` for a newly approved source.
-
-  ⚠️ **This is the only producer of `op.third_spaces`, deliberately.** These are real
-  businesses with real reputations, and listing one that no human has looked at is
-  precisely the harm US-2.5.3 exists to remedy — so approval is the gate, and there is no
-  discovery job that writes the table directly.
-
-  It also fixes a documentation lie: `implementation-mapping.md:2115` listed a
-  `DiscoverThirdSpacesJob` as "Scheduled (weekly)". No such module has ever existed,
-  which is why the table sat at zero rows while the docs asserted a running pipeline.
-
-  Geocoding happens **here, at approval**, not at render time:
-
-    * it is human-paced, so Nominatim's ~1 req/sec policy is honoured structurally;
-    * the nearest-bookshop distance is computed once and stored, so the 500 m filter is
-      a scalar comparison rather than a per-pan recomputation across the viewport.
-
-  A space that cannot be geocoded is still created, with null coordinates. That is a
-  real state and must stay visible to the owner: silently discarding it would lose an
-  approval the owner explicitly made, and `list_third_spaces/1` already excludes
-  unpositioned spaces from geo queries, so it cannot leak onto the map as if positioned.
-
-  Returns `:ok` regardless. A failure here must not roll back an approval the owner
-  performed — the source is approved either way, and a missing space can be retried.
+  Creates the `third_space` for a newly approved source — deliberately
+  the ONLY producer of `op.third_spaces`: these are real businesses with
+  real reputations, so a human approval is the gate; no discovery job
+  writes the table. (The documented `DiscoverThirdSpacesJob` never
+  existed — hence the table's historical zero rows.) Geocoding happens
+  here at approval (human-paced, honouring Nominatim's ~1 req/s) and the
+  nearest-bookshop distance is stored once, so the 500m filter is a scalar
+  comparison at render time.
   """
   @spec create_third_space(DiscoveredSource.t()) :: :ok
   def create_third_space(%DiscoveredSource{type: type} = source)

@@ -1,27 +1,11 @@
 defmodule Stacks.Discovery.Handlers.LocationUpdatedHandler do
   @moduledoc """
-  Event handler that triggers geographic source discovery when a user
-  updates their location.
-
-  On `user.location_updated`: the event payload is UUID-only (it carries no
-  PII — city/country_code are never written into `op.event_log`; see
-  `Stacks.Accounts.update_location/2` and `Stacks.Events`). The handler
-  resolves the user from the event's `aggregate_id`, reads the *current* `city`
-  and `country_code` off the user record, and enqueues a
-  `GeographicDiscoveryJob` for that area.
-
-  ## Semantic note
-
-  Because location is read from the live user record rather than an as-of-event
-  snapshot in the payload, a rapid sequence of location updates discovers
-  against the user's *latest* location, not each intermediate one. This is an
-  acceptable trade-off for discovery — we only ever want to search the user's
-  real, current area — and is the deliberate cost of keeping PII out of the
-  event log.
-
-  If the user no longer exists (e.g. GDPR erasure occurred between emit and
-  dispatch) or has no city/country set, the handler logs and returns `:ok`
-  without enqueuing — it never crashes the dispatch pipeline.
+  On `user.location_updated`, enqueues a `GeographicDiscoveryJob` for the
+  user's area. The payload is UUID-only (city/country never enter
+  `op.event_log`), so the handler reads the CURRENT city/country off the
+  user record — meaning rapid location changes discover against the latest
+  location only, the deliberate cost of keeping PII out of the event log.
+  A since-deleted user is a no-op success.
   """
 
   @behaviour Stacks.Events.Handler

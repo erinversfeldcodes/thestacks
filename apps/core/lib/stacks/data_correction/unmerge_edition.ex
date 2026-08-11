@@ -1,89 +1,16 @@
 defmodule Stacks.DataCorrection.UnmergeEdition do
   @moduledoc """
-  Splits a wrongly merged edition back off the work it was merged into (#376).
+  Splits a wrongly merged edition back off its work (376) —
+  `merge_edition/2` is otherwise a one-way door, and a wrong merge makes
+  the ISBN resolve to the wrong title for every reader who scans it.
+  Owner-side data correction, not public UI (2026-07-30 ruling).
 
-  `Stacks.Books.merge_edition/2` is a one-way door: it writes a second
-  `op.book_editions` row under an existing work, and nothing takes it back. When
-  the merge was wrong — the ISBN names a genuinely different book, not another
-  format of the same one — the work permanently claims a book it is not, the
-  ISBN permanently resolves to the wrong title for every reader who scans it
-  (`Stacks.Books.find_existing/1` looks the edition up and returns its *parent*),
-  and the only recourse was a `psql` session. The owner's 2026-07-30 ruling was
-  that this is an owner-side data correction, not public UI.
-
-  ## What it changes, and what it does not
-
-  Exactly two columns of exactly one row:
-
-    * `op.book_editions.book_id` — from the work the edition was merged into, to
-      a newly minted work that holds only this edition.
-    * `op.book_editions.is_primary` — to `true`. The split-out edition is the
-      only edition of its new work, and a work whose sole edition is
-      non-primary is a shape nothing else in the system produces.
-      `op.book_editions_one_primary_per_book` accepts it because the new work
-      has no other edition to conflict with.
-
-  The new work inherits **`visibility_tier`** from the work it leaves and
-  nothing else. That single inheritance is a safety property, not a
-  convenience: splitting an edition out of an `age_gated` work into a
-  default-`public` one would silently un-gate content, and a repair may not
-  widen an audience. Title is stated by the operator — the judgement that the
-  merge was wrong *is* the judgement about what the book actually is. Author is
-  left null rather than inherited, because inheriting it would assert something
-  the split has just decided is false; `Stacks.Workers.EnrichBookJob` is the
-  path that fills it in.
-
-  Everything keyed on the **edition** follows it for free — prices
-  (`op.price_history.book_edition_id`), partner inventory, uploaded images.
-  Everything keyed on the **work** stays where it is, which includes
-  `op.listings.book_id`. A listing for the split-out edition is left pointing at
-  the old work; that is a live-listing decision for the operator and not
-  something this correction should guess at.
-
-  ## Placements: follow the recorded edition, and only the recorded edition
-
-  This is the disposition decision #376 asked for, revised once by #396 when
-  #378 changed what the database records. The rule has two halves, and each is
-  driven by what a placement's `book_edition_id` actually says:
-
-  **A placement that names the edition being split moves with it** — its
-  `book_id` is rewritten to the newly minted work (#396). Post-#378,
-  `Stacks.Shelving.place_book/4` records the *scanned* edition, so such a
-  placement is row-level evidence that this reader's physical copy IS the
-  split-out book. Moving it is not a guess; it is reading the record. The
-  alternative (re-pointing it at the surviving work's primary edition) would
-  assert the reader owns an edition they never scanned — a structurally valid
-  but false row, the same class #378 itself repaired. It also keeps the row
-  internally consistent: without the move, the reparent would leave `book_id`
-  (old work) and `book_edition_id` (new work) naming different works. The new
-  work is minted by this very correction, so the move cannot collide with an
-  existing placement.
-
-  **Every other placement stays on the work it was made against.** For rows
-  that name the primary (or carry no edition), the pre-#378 argument still
-  governs: the database does not record who acquired the split-out edition,
-  and every rule for guessing guesses badly — "move them all" relocates
-  readers who own the original book and never touched this ISBN; "move the
-  ones created after the merge" catches everyone who added the original in
-  that window. A wrong reassignment is a second wrong merge, performed on user
-  data, and it is not undoable by the same argument that makes the merge
-  itself not undoable.
-
-  Both counts are stated in the plan's `:because`, before anything is written,
-  so the operator sees the blast radius — who follows the edition, who stays —
-  as part of the dry run.
-
-  ## Reading through Ecto rather than `Column`
-
-  `Stacks.DataCorrection.Column`'s moduledoc argues for raw SQL because a
-  correction usually runs where reality and the schema disagree, and the
-  changeset that normalises the bad value away is how a repair becomes a no-op.
-  That argument does not apply to the *reads* here: the edition row is entirely
-  valid, its wrongness is a relationship rather than a value, and no changeset
-  can normalise a foreign key away. This correction also never runs from the
-  pre-migration deploy path, so `Column`'s `to_regclass` guard has nothing to
-  protect. The **writes** still go through `Column.swap/4`, for the property that
-  matters: a row that moved between planning and applying is refused.
+  Changes exactly two columns of one row: `book_id` → a newly minted work
+  holding only this edition (title/author supplied by the operator), and
+  `is_primary` → true. Placements naming the split edition are re-pointed
+  to the new work in the same transaction. It does NOT touch the old
+  work's other editions, delete anything, or attempt provider re-vetting —
+  the new work is deliberately minimal and enriches like any other.
   """
 
   @behaviour Stacks.DataCorrection.Targeted

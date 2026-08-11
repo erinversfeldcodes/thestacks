@@ -1,22 +1,12 @@
 defmodule Stacks.Enrichment.EventExtractor do
   @moduledoc """
-  The structured tier of bookstore-event extraction (US-2.4.1 / #321 item 4):
-  schema.org `Event` objects from JSON-LD `<script type="application/ld+json">`
-  blocks — the shape Shopify event apps and most venue plugins actually emit,
-  and the one place a page STATES its events rather than styling them.
-
-  Sits in front of the text heuristics: a page that declares its events
-  structurally is believed over any regex, because the declaration carries the
-  pairing (this title WITH this date) that heading-block scoping can only
-  approximate.
-
-  The remaining tiers of the research doc's ladder are deliberately absent:
-
-    * **`.ics`** — neither reachable store links a calendar file today (#307's
-      enumeration); building the parser before any store emits the format
-      would be machinery in service of nothing. Add it when a store does.
-    * **LLM fallback** — extraction-by-model without an eval framework is the
-      vision-stack lesson (dfef1333) repeated; deferred with it.
+  The structured tier of bookstore-event extraction: schema.org `Event`
+  objects from JSON-LD blocks — the shape Shopify event apps actually emit,
+  and the one place a page STATES its events (title WITH date) rather than
+  styling them. Believed over the text heuristics. The ladder's other
+  tiers are deliberately absent: `.ics` (no reachable store links one —
+  build it when a store does) and LLM fallback (extraction-by-model
+  without an eval framework).
   """
 
   require Logger

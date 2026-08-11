@@ -1,58 +1,14 @@
 defmodule Stacks.Enrichment.EventsPath do
   @moduledoc """
-  Works out where a bookshop's events actually live, and remembers the answer.
-
-  ## Why this exists
-
-  `DiscoverBookstoreEventsJob` fetched one hardcoded path — `/events` — on every store, and it
-  **404s on every scrapeable store**. The events pipeline had therefore never written a row, and no
-  test noticed, because every test fed it a fixture body rather than a real shop.
-
-  Guessing harder is not the answer. A wrong guess costs the shop a full page render — a Shopify 404
-  is a *styled* page, measured at 249,540 bytes on 2026-07-29 — and there is no reason to think
-  `/whats-on` or `/diary` would fare better than `/events` did.
-
-  So the shop is asked instead of guessed at. robots.txt already declares its sitemap (read for
-  compliance on every request, so learning this costs nothing), the sitemap says which pages exist,
-  and one candidate is verified with one fetch.
-
-  ## The interface, and what it hides
-
-  One function, one argument, and the caller needs to know nothing about robots.txt, sitemap indexes,
-  child-sitemap classification, crawl budgets or candidate scoring:
-
-      EventsPath.resolve(store) :: {:ok, path} | {:error, reason}
-
-  Behind it: `ScraperClient.sitemap_urls/1` (which itself hides the walk), a keyword filter, one
-  verification fetch, and a write. The point of the module is that the *job* asking "where are this
-  shop's events?" gets an answer rather than a procedure.
-
-  ## Asked once, not once per run
-
-  Every outcome is persisted — `events_path` on success, `events_unresolved_reason` otherwise, and
-  `events_path_checked_at` either way. A shop that has no events page must cost us nothing on the
-  next run, and it must not cost the shop anything either.
-
-  ⚠️ **`events_path_checked_at` is what makes a negative verdict re-checkable rather than permanent.**
-  An empty `events_path` on its own cannot distinguish "we looked and there is none" from "we have
-  not looked yet", and treating the second as the first writes a shop off forever. A shop that adds
-  an events page next month should be found.
-
-  ## What is deliberately not treated as "no events page"
-
-  This is the distinction the whole design turns on, and getting it wrong produces a false negative
-  that never re-checks:
-
-  | Outcome | Means | Recorded as |
-  |---|---|---|
-  | Candidates found, one verified | we know where events are | `events_path` |
-  | Sitemap read, no candidate matched | the shop lists no events page | a *resolved* negative |
-  | `:no_sitemap_declared` | **we could not look** | unresolved, retry later |
-  | `truncated: true` | we ran out of budget mid-walk | unresolved, retry later |
-  | `{:rate_limited, _}` | the shop asked us to wait | unresolved, retry later |
-
-  Only the second row is a fact about the shop. The other three are facts about *our attempt*, and
-  banking them as "this shop has no events" is how a temporary condition becomes a permanent verdict.
+  Works out where a bookshop's events actually live, and remembers it.
+  The old pipeline hardcoded `/events`, which 404s on every scrapeable
+  store — zero rows, unnoticed, because tests fed fixture bodies. Guessing
+  harder costs the shop a full render (a Shopify 404 is ~250KB styled), so
+  the shop is ASKED: robots.txt declares the sitemap, the sitemap says
+  which pages exist, one candidate is verified with one fetch. The answer
+  is persisted on the store row (`events_path` / `events_path_checked_at`)
+  and re-checked only after `@recheck_after_days`. "No events page" is a
+  remembered answer too, not a retry.
   """
 
   import Ecto.Query

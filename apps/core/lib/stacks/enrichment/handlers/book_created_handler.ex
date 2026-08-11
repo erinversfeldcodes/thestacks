@@ -1,23 +1,12 @@
 defmodule Stacks.Enrichment.Handlers.BookCreatedHandler do
   @moduledoc """
-  Event handler for the enrichment a newly created book implies.
-
-  Listens for `book.created` events and enqueues the enrichment a new book implies:
-  a price scrape for its ISBN, and author-source discovery for a small number of
-  authors still missing theirs.
-
-  ## Why discovery is triggered here
-
-  `DiscoverAuthorSourcesJob`'s nightly batch was the only thing that ever ran it, and
-  `op.discovered_sources` has never held a row. That job *creates* rather than
-  refreshes, so a cron entry that may not fire — the platform scales to zero — means
-  the feature has never existed, not that it is stale.
-
-  A per-book enqueue is what the nightly batch originally replaced, because it
-  exhausted Brave Search's free tier within hours. That is no longer the same risk:
-  `BraveClient` now enforces a hard 200/day budget internally, so no trigger can
-  overspend it. The batch here is deliberately tiny anyway — work should arrive in
-  proportion to catalogue growth, which is what creates the need, rather than in bursts.
+  Handler for `book.created`: enqueues a price scrape for the ISBN and a
+  SMALL batch of author-source discovery. Discovery triggers here because
+  the nightly batch alone never ran on a scale-to-zero platform —
+  `op.discovered_sources` had never held a row. Per-book triggering used
+  to exhaust Brave's free tier, but `BraveClient` now enforces a hard
+  200/day budget internally, so no trigger can overspend; the batch is
+  tiny so work arrives in proportion to catalogue growth.
   """
 
   @behaviour Stacks.Events.Handler
