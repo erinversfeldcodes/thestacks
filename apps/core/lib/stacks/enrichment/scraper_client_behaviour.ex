@@ -12,19 +12,13 @@ defmodule Stacks.Enrichment.ScraperClientBehaviour do
               {:ok, non_neg_integer()} | {:error, term()}
 
   @doc """
-  Fetch one page from a configured store through the compliant egress.
-
-  The **only** sanctioned way to retrieve a store's page. Building an HTTP request to
-  a store directly bypasses robots.txt, the rate limiter and the circuit breakers —
-  which is precisely what `DiscoverBookstoreEventsJob` used to do.
-
-  `path` must be relative and begin with `/`. Only stores with a scraper config can be
-  fetched: no config means no declared crawl policy, and guessing one is how a hard
-  rule becomes advisory.
-
-  `{:error, {:robots_blocked, rule}}` is a determination, not a failure — the caller
-  must record it and stop rather than retry or fall back to another path. `rule` is the
-  `Disallow:` line responsible, so a narrow block can be told from a total one.
+  Fetch one page from a configured store through the compliant egress —
+  the ONLY sanctioned way to retrieve a store's page (direct HTTP bypasses
+  robots.txt, the rate limiter and the fuses). `path` must be relative,
+  starting `/`; stores without a scraper config cannot be fetched (no
+  declared crawl policy). `{:error, {:robots_blocked, rule}}` is a
+  determination, not a failure: record it and stop; `rule` is the
+  responsible `Disallow:` line.
   """
   @callback fetch_page(store_name :: String.t(), path :: String.t()) ::
               {:ok, %{status: integer(), body: String.t()}}
@@ -45,20 +39,13 @@ defmodule Stacks.Enrichment.ScraperClientBehaviour do
               {:ok, map()} | {:error, {:robots_blocked, String.t()} | term()}
 
   @doc """
-  The pages a store lists in its own sitemap.
-
-  The polite alternative to guessing at paths. A guess costs the shop a full page render — a Shopify
-  404 measured 249,540 bytes — whereas the sitemap index is ~10 KB and states which pages exist.
-
-  Bounded by a crawl budget in the sidecar (requests **and** bytes), and it never fetches a
-  catalogue-sized child sitemap. `skipped` reports what was deliberately not fetched, so
-  "found nothing" can be told from "declined to look".
-
-  ⚠️ `{:ok, %{urls: []}}` and `{:error, :no_sitemap_declared}` are different facts. The first means
-  the shop's index listed nothing usable; the second means it has no index at all. Recording either
-  as the other marks a shop as having no events page without that ever having been established.
-
-  `truncated: true` means the budget ended the walk early, so `urls` is incomplete.
+  The pages a store lists in its own sitemap — the polite alternative to
+  guessing paths (a Shopify 404 measured ~250KB; the sitemap index ~10KB).
+  Budget-bounded in the sidecar (requests and bytes); `skipped` reports what
+  was deliberately not fetched, `truncated: true` means the budget ended the
+  walk early. ⚠️ `{:ok, %{urls: []}}` (index listed nothing usable) and
+  `{:error, :no_sitemap_declared}` (no index at all) are different facts —
+  never record one as the other.
   """
   @callback sitemap_urls(store_name :: String.t()) ::
               {:ok,

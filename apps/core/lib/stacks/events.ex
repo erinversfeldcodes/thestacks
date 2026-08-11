@@ -27,23 +27,13 @@ defmodule Stacks.Events do
   @replay_batch_size 500
 
   @doc """
-  Emits an event by inserting a record into the event_log table and enqueuing
-  a `SubscriberWorker` job to dispatch the event to registered handlers.
-
-  Accepts a map with the following keys:
-  - `:event_type` (required) — e.g. "user.registered", "book.created"
-  - `:aggregate_type` (required) — e.g. "user", "book"
-  - `:aggregate_id` (required) — UUID of the aggregate
-  - `:payload` (optional) — map of event data (stored as jsonb)
-  - `:metadata` (optional) — map of metadata (stored as jsonb)
-  - `:schema_version` (optional) — integer schema version (defaults to 1)
-
-  Returns `{:error, :emit_failed}` if the row was not inserted.
-  The Oban enqueue is best-effort: if it fails, the event is still persisted
-  and a warning is logged.
-
-  See `proto/stacks/internal/v1/event_bus.proto` (`EventEnvelope`) for the
-  canonical field contract.
+  Emits an event: inserts into `event_log` and enqueues a
+  `SubscriberWorker` to dispatch to registered handlers. Required keys:
+  `:event_type`, `:aggregate_type`, `:aggregate_id`; optional `:payload`,
+  `:metadata`, `:schema_version` (default 1). Canonical field contract:
+  `EventEnvelope` in `proto/stacks/internal/v1/event_bus.proto`.
+  `{:error, :emit_failed}` if the insert failed; the Oban enqueue is
+  best-effort (event persists, warning logged).
   """
   @spec emit(%{
           required(:event_type) => String.t(),
@@ -132,21 +122,11 @@ defmodule Stacks.Events do
   end
 
   @doc """
-  Replays historical events of the given type to a single handler module.
-
-  Fetches events from `op.event_log` matching `event_type` and occurring at or
-  after `from_datetime`, applies `Stacks.Events.Upcaster.upcast/1` to each,
-  and dispatches to `handler_module.handle_event/1`.
-
-  Events are processed in batches of #{@replay_batch_size} to prevent memory
-  blowout on large event logs.
-
-  ## Use cases
-  - Backfilling a newly registered handler
-  - Recovering from handler failures
-  - Audit replay
-
-  Returns `{:ok, count}` where `count` is the total number of events replayed.
+  Replays historical events of a type to one handler: fetches
+  `op.event_log` rows at/after `from_datetime`, upcasts each
+  (`Upcaster.upcast/1`), dispatches to `handler_module.handle_event/1` in
+  batches of #{@replay_batch_size}. For backfilling new handlers, recovery,
+  and audit replay. Returns `{:ok, count}`.
   """
   @spec replay(String.t(), DateTime.t(), module()) :: {:ok, non_neg_integer()}
   def replay(event_type, %DateTime{} = from_datetime, handler_module)

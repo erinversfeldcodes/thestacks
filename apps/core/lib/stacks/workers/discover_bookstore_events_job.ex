@@ -1,32 +1,14 @@
 defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   @moduledoc """
-  Oban worker that discovers events at bookstores by scraping their websites.
+  Oban worker discovering bookstore events from their websites. Args:
+  `%{"store_id" => id}` or `%{"batch" => true}` (all stores with a
+  `website_url`). Parses the events page and links known authors by name.
 
-  Accepts `%{"store_id" => id}` for a single bookstore, or `%{"batch" => true}`
-  to process all bookstores with a `website_url` set.
-
-  For each store, fetches the events page, parses event data, and links to
-  known authors when an author name matches the event title or description.
-
-  ## Compliance
-
-  The page is fetched through `ScraperClient.fetch_page/2`, which is the scraper
-  service's single compliant egress: robots.txt is consulted first, then the rate
-  limiter, and both circuit breakers gate the call.
-
-  ⚠️ This job previously issued a **bare `Finch.build(:get, "\#{website_url}/events")`**
-  with no robots check, no rate limit and no fuse — a direct violation of the project's
-  hard rule that robots.txt stops a scrape. It was never scheduled, so nothing was
-  actually fetched non-compliantly, but the violation sat in the code waiting for
-  whoever wired the job up. Fixing the egress before that happened is the whole point:
-  the next person to schedule this will not think to check.
-
-  A robots disallow is recorded on the store (`Prices.record_robots_block/3`) and the
-  job **stops for that store** — it does not retry, and it does not try another path.
-  A later successful fetch clears the block, so a lifted disallow resumes by itself.
-
-  Only stores with a scraper config can be fetched at all, because the config supplies
-  the base URL and the rate limit. A store without one is skipped and says so.
+  Compliance: fetches ONLY through `ScraperClient.fetch_page/2` (robots.txt,
+  rate limiter, both fuses). This job once built a bare Finch GET with none
+  of those — never scheduled, but waiting for whoever wired it up. A robots
+  disallow is recorded as a determination and the store is skipped, not
+  retried.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -243,28 +225,13 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   @date_pattern ~r/(\d{4}-\d{2}-\d{2})/
 
   @doc """
-  Split a page into `{heading_text, block_html}` pairs, where a block runs from one heading to the
-  next.
-
-  ⚠️ **This replaces two independent scans whose results were paired by index**, which is the bug
-  worth understanding before touching this. The old code took the nth `<h2>` and the nth ISO date
-  found *anywhere in the document*. Those lists have no relationship: headings include site chrome
-  ("Subscribe", "Follow us", "Disclaimer" — measured on a real Shopify page) and dates appear in
-  footers, scripts and JSON-LD. So it manufactured confident, wrong records — an event titled
-  "Follow us" carrying a date from an unrelated part of the page.
-
-  That was then replaced by the opposite extreme: a date was used only if the *whole document*
-  contained exactly one distinct date, and nil otherwise. Honest, but it means **a normal listing
-  page — several events, several different dates — yields nothing at all**, which is how this
-  pipeline stayed at zero rows even once it was fetching a real page.
-
-  Block scoping is what makes pairing sound without a DOM parser: a date is used only if it appears
-  after its own heading and before the next one, so a date can never be borrowed from another event
-  or from page chrome. A heading whose block holds no date still gets `nil` — the strictness is kept
-  exactly where it was earned.
-
-  The final block stops at `<footer` when present, so a footer date cannot attach itself to the last
-  event on the page.
+  Split a page into `{heading_text, block_html}` pairs (a block runs
+  heading→next heading). Block scoping is what makes heading/date pairing
+  sound without a DOM parser: a date only counts when it appears in the SAME
+  block as its heading. The two prior designs both failed — pairing nth
+  heading with nth date anywhere in the document manufactured confident
+  wrong records ("Follow us" + a footer date); requiring one distinct date
+  per whole document yielded zero rows on any normal multi-event listing.
   """
   @spec heading_blocks(String.t()) :: [{String.t(), String.t()}]
   def heading_blocks(body) do

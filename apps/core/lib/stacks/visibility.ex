@@ -347,21 +347,13 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-  Batch-resolves placement visibility for a list of placements that share ONE
-  viewer — the public shelf-browse surface (`/u/:handle/bookshelves/:name`).
-
-  The (viewer, owner) block status and the viewer's age-verification are
-  identical for every placement of a given owner, so they are resolved ONCE here
-  (one block query per DISTINCT owner + one age-verification lookup for the
-  viewer) instead of once per placement. The per-request shared-gate query count
-  is therefore independent of the placement count. Each placement's decision is
-  identical to `resolve_visibility(placement, viewer)` — only the shared-gate
-  lookups are memoized, never the decision. Returns the visible placements,
-  input order preserved.
-
-  Callers that also need to BOUND the result (e.g. the public browse) should cap
-  the returned list; this function does not itself limit, so it stays reusable
-  for the owner's own full-shelf view.
+  Batch-resolves placement visibility for placements sharing ONE viewer
+  (the public shelf-browse surface). Block status and age-verification are
+  per-(viewer, owner), so they're resolved once (one block query per
+  distinct owner + one age lookup) — the shared-gate query count is
+  independent of placement count. Each decision is identical to
+  `resolve_visibility(placement, viewer)`; only lookups are memoized.
+  Returns visible placements, input order preserved, unbounded (callers cap).
   """
   @spec filter_visible_placements([Placement.t()], term()) :: [Placement.t()]
   def filter_visible_placements(placements, viewer) when is_list(placements) do
@@ -391,25 +383,15 @@ defmodule Stacks.Visibility do
   defp batch_viewer_id(_viewer), do: nil
 
   @doc """
-  Is `visibility` at least as exposed as `minimum` on the Audience ladder?
-
-  `owner < group < platform < public`, exposure ascending. Use this wherever a feature is
-  gated on "shared at least this widely" instead of writing an equality check.
-
-  ⚠️ **Added because an equality check silently inverted a gate.** `Stacks.Feeds` tested
-  `visibility != "platform"` to decide feed eligibility, so a bookshelf on the **most** shared
-  tier (`public`) was refused the feed a *less* shared `platform` one was served — exposure and
-  function running in opposite directions. An equality test against one rung of a ladder is
-  almost always this bug; it only looks right while that rung happens to be the top one in use.
-
-  An unknown visibility is treated as exposure 0 (the most private reading), matching
-  `validate_visibility_ceiling/3` — so a typo fails closed rather than opening a feed.
+  Is `visibility` at least as exposed as `minimum` on the Audience ladder
+  (`owner < group < platform < public`)? Use instead of equality checks —
+  `Feeds` once tested `!= "platform"` and refused a feed to the MORE-shared
+  `public` tier. Unknown visibility reads as exposure 0 (fails closed).
 
       iex> Stacks.Visibility.at_least?("public", "platform")
       true
       iex> Stacks.Visibility.at_least?("group", "platform")
       false
-
   """
   @spec at_least?(String.t(), String.t()) :: boolean()
   def at_least?(visibility, minimum) do

@@ -1,23 +1,13 @@
 defmodule Stacks.Moderation do
   @moduledoc """
-  Moderation pipeline for uploaded book images.
+  Moderation pipeline for uploaded book images: is_book? → extract_all →
+  store (resolve ISBNs, store each book as `public`). Age-gating is NOT
+  decided here — only a human marks a book adults-only (ADR-020).
 
-  Runs a 3-step pipeline:
-  1. is_book? — vision model checks if image contains a book
-  2. extract_all — vision model extracts all books from the image
-  3. store — resolves ISBNs/metadata and stores each book as `public`.
-     Age-gating is NOT decided here. A book becomes age-gated only when a
-     person marks it "adults only" (`Stacks.Books.set_visibility_tier/3`) or
-     the platform owner moderates it — never from automated classification.
-
-  Sidecar API contract:
-  - POST /classify  → %{"classification" => "CLASSIFICATION_RESULT_BOOK"|"CLASSIFICATION_RESULT_NOT_BOOK"|"CLASSIFICATION_RESULT_AMBIGUOUS", "confidence" => float, "model_used" => str}
-  - POST /extract   → %{"books" => [%{"title" => str|nil, "author" => str|nil, "potential_isbns" => [str], "raw_text" => str|nil, "confidence" => float}], "model_used" => str}
-
-  The pipeline accepts either `image_b64` (base64-encoded) or `image_url`
-  (presigned URL) in the context map. The `image_url` path is preferred for
-  new uploads stored in object storage; `image_b64` is retained for backwards
-  compatibility with in-flight jobs.
+  Sidecar contract: POST /classify → `{classification, confidence,
+  model_used}`; POST /extract → `{books: [{title, author, potential_isbns,
+  raw_text, confidence}], model_used}`. Context carries `image_url`
+  (preferred, presigned) or `image_b64` (legacy).
   """
 
   require Logger
@@ -68,19 +58,12 @@ defmodule Stacks.Moderation do
           | {:error, failure_reason()}
 
   @doc """
-  Runs the full moderation pipeline for an uploaded image.
-
-  Expects `context` to include one of:
-  - `image_url` — presigned URL to the image in object storage (preferred)
-  - `image_b64` — base64-encoded image bytes (legacy/backwards compat)
-
-  Plus `user_id`, `image_id` for logging/context.
-
-  Returns `{:ok, %{resolved: [Book.t()], rejected: [{candidate_id, reason}]}}`
-  on success (at least one book identified). The `rejected` list surfaces
-  candidates that failed to resolve in a multi-book image — callers should
-  emit observability events per entry. Returns `{:error, reason}` if no
-  candidates resolved or the image is not a book.
+  Runs the full pipeline for one image. `context` needs `image_url`
+  (preferred) or `image_b64`, plus `user_id`/`image_id` for logging.
+  Returns `{:ok, %{resolved: books, rejected: [{candidate_id, reason}]}}`
+  when at least one book resolved — `rejected` surfaces per-candidate
+  failures in multi-book images for observability — or `{:error, reason}`
+  when nothing resolved or the image is not a book.
   """
   @spec run_pipeline(map()) :: pipeline_result()
   def run_pipeline(%{image_url: image_url} = context) do

@@ -81,25 +81,12 @@ defmodule Stacks.Audit do
   end
 
   @doc """
-  Logs a deploy rollback event. Inserts an audit row (action `"system.rollback"`,
-  resource_type `"deploy"`) and, on successful insert, emits a
-  `[:stacks, :system, :rollback]` telemetry event with `%{count: 1}`.
-
-  `failed_sha` is the git SHA being rolled back **from** — i.e. the broken
-  deployment — not the target of the rollback. Because a git SHA is not a UUID,
-  it cannot live in the `resource_id` column; it is carried in metadata under
-  the atom key `:failed_sha`.
-
-  ## Allowed `triggered_by` values
-  - `"slo-gate"` — automatic rollback because a deploy SLO gate tripped
-  - `"manual"` — operator-initiated rollback
-  - `"step-failure"` — a deploy pipeline step failed
-  - `"migration-failure"` — a database migration failed during deploy
-
-  No runtime guard is enforced — the caller is trusted.
-
-  Telemetry is only emitted when the underlying audit insert succeeds, so a
-  rollback signal never fires for a rollback that was not recorded.
+  Logs a deploy rollback: audit row (action `"system.rollback"`, type
+  `"deploy"`) then a `[:stacks, :system, :rollback]` telemetry event — only
+  on successful insert, so a signal never fires for an unrecorded rollback.
+  `failed_sha` is the SHA rolled back FROM (not the target); it rides in
+  metadata because a git SHA is not a UUID. `triggered_by` ∈ "slo-gate",
+  "manual", "step-failure", "migration-failure" (caller-trusted, no guard).
   """
   @spec log_rollback(map()) :: {:ok, map()} | {:error, term()}
   def log_rollback(%{
@@ -135,25 +122,11 @@ defmodule Stacks.Audit do
   @max_per_page 100
 
   @doc """
-  Lists a single user's own audit-log entries, most recent first, paginated.
-
-  Read-only: this issues a single SELECT and never mutates the append-only
-  `audit.audit_log` table. Results are scoped to `user_id` — a caller can only
-  ever see their own rows.
-
-  For each entry the Cloak-encrypted `metadata` is decrypted via
-  `Stacks.Vault` and returned as a plain map for display. The hashed
-  `ip_address` column is **never selected** and therefore never surfaced.
-
-  Returns `{entries, total, page, per_page}` where:
-    * `entries` — list of maps with `:id`, `:action`, `:resource_type`,
-      `:resource_id`, `:occurred_at` (`%DateTime{}`) and decrypted `:metadata`
-    * `total` — total row count for the user (across all pages)
-    * `page` / `per_page` — the clamped pagination values actually applied
-
-  ## Options
-    * `:page` — 1-based page number (default 1, floored at 1)
-    * `:per_page` — items per page (default #{@default_per_page}, max #{@max_per_page})
+  Lists a user's own audit-log entries, newest first, paginated
+  (`:page`, `:per_page` — clamped, default #{@default_per_page}/max
+  #{@max_per_page}). Read-only and self-scoped. Cloak-encrypted `metadata`
+  is decrypted for display; the hashed `ip_address` column is never
+  selected. Returns `{entries, total, page, per_page}`.
   """
   @spec list_for_user(binary(), keyword()) ::
           {[map()], non_neg_integer(), pos_integer(), pos_integer()}

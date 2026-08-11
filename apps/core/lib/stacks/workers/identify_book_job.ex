@@ -1,31 +1,15 @@
 defmodule Stacks.Workers.IdentifyBookJob do
   @moduledoc """
-  Oban worker that processes an uploaded image through the Modal vision service
-  to identify and create/update a book record.
+  Oban worker running an uploaded image through the vision service to
+  identify books. New jobs carry a `storage_key` and presign at execution;
+  legacy in-flight `image_b64` jobs still match.
 
-  New jobs receive a `storage_key` in args and fetch a presigned URL at execution
-  time. Legacy in-flight jobs that still carry `image_b64` are handled via
-  backwards-compatible pattern matching.
-
-  ## The terminal guarantee
-
-  **No exit from this worker may leave the `uploaded_images` row `pending`.**
-  Every return, every raise, every throw, and an attempt that simply runs too
-  long, on every attempt, passes through `with_terminal_guarantee/3`; when the
-  job has no attempts left, the row is marked rejected and the reader's SSE
-  stream is closed with a real answer.
-
-  This is written as a wrapper and not as a fix to the branch that was known to
-  be broken, because the shape of the bug is what recurs. There were two live
-  instances of it when this was written and they looked nothing alike: a generic
-  `{:error, reason}` that retried to exhaustion and then simply stopped, and an
-  unrecognised `/analyze` body that raised `CaseClauseError` into a rescue. In
-  both, the reader watched a spinner until the SSE deadline expired, minutes
-  after the job was dead. A wrapper covers the branch nobody has written yet.
-
-  `Stacks.Uploads.reject_image/2` is idempotent and scoped to in-flight rows, so
-  applying it broadly is safe: a row that already reached `resolved` is not
-  touched, and a second call on a rejected row is a no-op.
+  The terminal guarantee: NO exit may leave the `uploaded_images` row
+  `pending`. Every return, raise, throw and overlong attempt passes through
+  `with_terminal_guarantee/3`; on the final attempt the row is marked
+  rejected and the reader's SSE stream closes with a real answer. Written as
+  a wrapper because the bug's SHAPE recurs — the two live instances it
+  replaced looked nothing alike.
   """
 
   use Oban.Worker, queue: :vision, max_attempts: 3
@@ -60,26 +44,14 @@ defmodule Stacks.Workers.IdentifyBookJob do
   def backoff(%Oban.Job{attempt: attempt}), do: 15 + Integer.pow(2, attempt)
 
   @doc """
-  Ceiling on ONE attempt, in milliseconds.
-
-  Composed from the bound each attempt is really waiting on rather than picked:
-  an attempt makes at most two sequential waits of `Stacks.AI.Client.receive_timeout_ms/0`
-  — the `/analyze` call, then the per-candidate resolution `Stacks.Moderation`
-  bounds by the same number — plus `#{@attempt_slack_ms}ms` for the surrounding
-  database work.
-
-  Note there is deliberately **no** `c:Oban.Worker.timeout/1`. Oban implements
-  that with `:timer.exit_after/2`, an asynchronous exit signal delivered to the
-  executing process; a `try/catch` cannot intercept one, so an attempt killed
-  that way would skip the terminal guarantee entirely and leave the row
-  `pending` — the exact bug this module exists to prevent, reintroduced by the
-  mechanism meant to bound it. `run_bounded/1` enforces the same ceiling from
-  inside instead, where a timeout is a value the wrapper handles.
-
-  `:identify_attempt_timeout_ms` overrides the derivation. It exists so the
-  timeout branch can be exercised in a test that finishes in milliseconds
-  rather than in minutes — a branch reachable only by waiting seven minutes is
-  a branch nobody ever checks, and this one is load-bearing.
+  Ceiling on ONE attempt, in ms — composed from what an attempt actually
+  waits on: two sequential `AI.Client.receive_timeout_ms/0` waits
+  (/analyze, then per-candidate resolution) plus `#{@attempt_slack_ms}ms`
+  slack. Deliberately NOT `c:Oban.Worker.timeout/1`: that delivers an async
+  exit a `try/catch` cannot intercept, which would skip the terminal
+  guarantee — the exact bug this module prevents. `run_bounded/1` enforces
+  the ceiling from inside. `:identify_attempt_timeout_ms` overrides for
+  fast tests.
   """
   @spec attempt_timeout_ms() :: pos_integer()
   def attempt_timeout_ms do

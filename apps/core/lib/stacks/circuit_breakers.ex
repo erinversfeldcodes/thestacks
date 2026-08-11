@@ -1,63 +1,13 @@
 defmodule Stacks.CircuitBreakers do
   @moduledoc """
-  Installs all Fuse circuit breakers at application startup, emits consistent
-  telemetry on every state change, and actively probes blown fuses so that
-  circuits close as soon as the underlying service recovers — without waiting
-  for the full `{:reset, Ms}` backstop timer.
+  Installs all Fuse circuit breakers at startup, emits telemetry on every
+  state change, and actively probes blown fuses so circuits close as soon
+  as the service recovers (instead of waiting out the full reset timer).
 
-  ## Managed fuses
-
-  | Fuse name           | Service                | Threshold        | Reset    |
-  |---------------------|------------------------|-----------------|----------|
-  | `:vision_fuse`      | Modal vision service   | 5 in 60 s       | 5 min    |
-  | `:together_ai_fuse` | Together AI LLM API    | 5 in 60 s       | 5 min    |
-  | `:open_library_fuse`| Open Library REST API  | 5 in 60 s       | 5 min    |
-  | `:google_books_fuse`| Google Books API       | 5 in 60 s       | 5 min    |
-  | `:scraper_fuse`     | Rust scraper service   | 3 in 60 s       | 15 min   |
-  | `:brave_fuse`       | Brave Search API       | 5 in 60 s       | 5 min    |
-  | `:searxng_fuse`     | SearXNG discovery      | 5 in 60 s       | 5 min    |
-  | `:r2_fuse`          | Cloudflare R2 storage  | 5 in 60 s       | 5 min    |
-
-  Plus one fuse **per bookstore** (`:scraper_store_fuse_<store>`, same thresholds as
-  `:scraper_fuse`), created on first use via `store_fuse/1`. `:scraper_fuse` covers
-  the sidecar being unreachable — genuinely service-wide — while a store fuse
-  covers *that shop* failing. Without the split, one bad shop stopped price
-  scraping for all twelve, and kept doing so, since most causes recur on every
-  attempt. Store fuses are **not probed**: the only way to probe a bookshop is to
-  request from it, which is what the open circuit exists to prevent, so they
-  recover on the `{:reset, Ms}` backstop.
-
-  ## Telemetry
-
-  Every call to `melt/1` emits one of:
-    - `[:stacks, :fuse, :melt]`         — circuit is still closed after the melt
-    - `[:stacks, :fuse, :blown]`        — the melt tipped the circuit open
-
-  When a probe runs:
-    - `[:stacks, :fuse, :recovered]`    — probe confirmed the service is up;
-      circuit has been reset.
-      Metadata: `%{fuse_name: atom(), recovered_via: :probe}`.
-    - `[:stacks, :fuse, :probe_failed]` — probe attempt failed; next probe
-      rescheduled. Metadata: `%{fuse_name: atom(), reason: term()}`.
-
-  All other events: Measurements: `%{}`. Metadata: `%{fuse_name: atom()}`.
-
-  ## Probe-Based Recovery
-
-  When a fuse blows, a `:telemetry` handler attached in `init/1` notifies this
-  GenServer, which schedules a `{:probe, fuse_name}` message after
-  `@probe_interval_ms` milliseconds. Each probe makes a lightweight HTTP health
-  check against the relevant service. On success the circuit is immediately reset;
-  on failure a `[:stacks, :fuse, :probe_failed]` event is emitted and the next
-  probe is rescheduled.
-
-  Duplicate probe loops are prevented: if a fuse blows multiple times while a
-  probe is already active for it (e.g. concurrent melts at the threshold), the
-  second `blown` event is a no-op — the GenServer tracks active probes in state
-  and only schedules one per fuse at a time.
-
-  The existing `{:reset, Ms}` timer remains as a backstop — if the service
-  never recovers, the circuit reopens after the configured window.
+  Fuses: `:vision_fuse`, `:together_ai_fuse`, `:open_library_fuse`,
+  `:google_books_fuse`, `:brave_fuse`, `:searxng_fuse`, `:r2_fuse`
+  (5 failures/60s, 5min reset) and `:scraper_fuse` (3/60s, 15min).
+  Per-store scraper fuses are installed lazily via `store_fuse/1`.
   """
 
   use GenServer
@@ -129,25 +79,12 @@ defmodule Stacks.CircuitBreakers do
   end
 
   @doc """
-  Fuse name for one bookstore's scraper circuit, installed on first use.
-
-  ## Why per-store
-
-  `:scraper_fuse` is shared by every store, and 3 failures open it for 15 minutes.
-  With twelve seeded shops that means **one bad shop stops price scraping for all
-  of them** — and since most causes recur on every attempt (a hostile site, a
-  broken selector, a rate limit), it would keep reopening. Store-scoped circuits
-  confine the damage to the store that caused it.
-
-  The two fuses cover different failure domains and both are consulted:
-
-  - `:scraper_fuse` — the sidecar itself is unreachable or rejecting us. Genuinely
-    service-wide, so keeping it shared is correct.
-  - this fuse — *this shop* is failing: an upstream HTTP error, a rate limit, a
-    missing config, or an extractor that cannot parse its pages.
-
-  Returns `:scraper_fuse` if `@max_store_fuses` distinct stores have already been
-  seen, so a pathological number of store rows cannot exhaust the atom table.
+  Fuse name for ONE bookstore's scraper circuit, installed on first use.
+  The shared `:scraper_fuse` covers the sidecar being down (service-wide);
+  this one confines a single hostile/broken shop, whose failures recur on
+  every attempt and would otherwise keep the shared fuse open for everyone.
+  Both are consulted. Falls back to `:scraper_fuse` past `@max_store_fuses`
+  distinct stores so store rows cannot exhaust the atom table.
   """
   @spec store_fuse(String.t() | atom() | nil) :: atom()
   def store_fuse(nil), do: :scraper_fuse

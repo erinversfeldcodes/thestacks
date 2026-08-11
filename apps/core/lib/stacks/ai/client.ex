@@ -1,52 +1,17 @@
 defmodule Stacks.AI.Client do
   @moduledoc """
-  HTTP client for calling the Modal vision service.
+  HTTP client for the Modal vision service. Wire contract:
+  `proto/stacks/internal/v1/vision.proto`. Swappable via
+  `config :core, :vision_client` (real vs `MockClient`); all callers go
+  through `call_vision/2`.
 
-  Wire contract: `proto/stacks/internal/v1/vision.proto`
-  (ClassifyRequest/Response, ExtractRequest/Response, AssociateRequest/Response/Callback)
+  Auth: timestamp-based HMAC in `X-Internal-Token` —
+  `<unix_ts>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>`, ±60s replay
+  window, secret in `VISION_HMAC_SECRET`.
 
-  The actual implementation is swappable via Application env:
-    config :core, :vision_client, Stacks.AI.Client      # real HTTP client
-    config :core, :vision_client, Stacks.AI.MockClient  # for tests
-
-  All callers go through `call_vision/2`, which delegates to the configured module.
-
-  ## Service-to-Service Authentication
-
-  Requests to the Modal vision service are authenticated using a timestamp-based HMAC scheme:
-
-    - Header: `X-Internal-Token`
-    - Value: `<unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>` (hex-encoded)
-    - Replay window: ±60 seconds (enforced by the Modal service)
-    - Secret: `VISION_HMAC_SECRET` env var (shared between core and Modal vision service)
-
-  ## Failure contract
-
-  `call_vision/2` fails with a member of `Stacks.AI.VisionError.t/0` — a closed
-  set, so a caller can ask whether the failure was a determination about the
-  image (never retry) or a fault (retry). Before that type existed, callers saw
-  `:circuit_open`, a raw `%Finch.Error{}`, and a `%{status: _, body: _}` map,
-  which is why every vision failure was retried three times on a GPU.
-
-  ## Circuit Breaker
-
-  Protected by `:vision_fuse` — managed by `Stacks.CircuitBreakers`.
-  When blown, `call_vision/2` returns `{:error, :circuit_open}`. Only transient
-  failures melt it: see `maybe_melt/1`.
-
-  ## Cost Tracking
-
-  Every Finch request to the vision service charges a fixed per-call cost to
-  `BudgetTracker` under the `:modal` provider key. The cost is incurred whether
-  the response is success, non-200, or transport error — Modal bills for GPU
-  time regardless of whether we end up using the result.
-
-  The per-call amount defaults to 1 cent and is configurable via
-  `config :core, :modal_cost_per_call_cents`. This is a coarse approximation;
-  precise per-call billing arrives via `RefreshCostsJob` reading the Modal
-  usage API. The BudgetTracker counter exists to enforce the daily/monthly
-  budget cap in real time and to surface a non-zero number on the cost
-  dashboard between RefreshCostsJob runs.
+  Failures are members of `Stacks.AI.VisionError.t/0` (closed set), so
+  callers can distinguish a determination about the image from a transient
+  fault.
   """
 
   alias Stacks.AI.BudgetTracker
@@ -78,68 +43,13 @@ defmodule Stacks.AI.Client do
   def modal_function_timeout_ms, do: @modal_function_timeout_ms
 
   @doc """
-  The ceiling on a single vision HTTP call, in milliseconds.
-
-  ## Why this is derived from the server's deadline, not from a percentile
-
-  Until Issue #350 this was `210_000`, under a comment claiming it "gives the
-  Modal service headroom beyond its own 300s inference timeout". 210 is less
-  than 300: it gave the service *less* time, and the client hung up on calls
-  Modal was still working on. The consequences compound rather than cancel — the
-  GPU work continues and is billed, `Stacks.AI.VisionError.from_transport/1`
-  classifies the give-up `:transient` (correctly; a lost answer says nothing
-  about the image), so `Stacks.Workers.IdentifyBookJob` retries, and the retry
-  queues a fresh cold start behind the same contended GPU. The inversion turned
-  "slow" into "slow, three times, at triple the cost" — under exactly the load
-  Modal's 300s was sized for.
-
-  So this is not a latency budget. There is nothing useful this client can do by
-  giving up while the server is still working, and only two worlds when the
-  timer fires:
-
-    * **before Modal's deadline** — an answer may still be coming. Abandoning it
-      buys nothing and costs a retry.
-    * **after Modal's deadline** — Modal has already given up, so no answer is
-      coming and the socket is genuinely dead. Retrying is right.
-
-  Only the second is worth acting on, which makes this a *transport liveness
-  backstop* — `modal_function_timeout_ms/0` plus slack — and not a quantile of
-  the latency distribution.
-
-  ## What #349's measurement did and did not settle
-
-  The first real distribution (n=36, one preview, ~7 minutes) put p50 at 8.4s,
-  warm calls entirely under 30s and cold starts under 60s: an order of magnitude
-  inside either timeout. It is tempting to read that as "both numbers are far
-  too large" and cut them. Two reasons not to:
-
-    * **every one of those samples is a call that finished.** A call that reaches
-      this deadline emits `[:stacks, :vision, :request, :exception]`, never
-      `:stop`, so it contributes no duration at all. That histogram is
-      conditional on having received a response and structurally cannot show
-      this tail — which is why the exception path is now *counted*, by
-      `reason_class/1` below.
-    * **the term that dominates Modal's budget was never exercised.** Most of its
-      300s is queue wait, up to ~120s when concurrent uploads serialise on one
-      A10G. 36 calls over 7 minutes against `max_containers: 10` never queued.
-      Cutting a timeout on evidence that is silent about the condition it was
-      sized for is removing a margin nobody measured.
-
-  Raise the client to meet the server; leave the server's own number to a
-  measurement that actually loads it.
-
-  ## Who else is bound by this
-
-  Two modules bind themselves by this function rather than restating it, after
-  each had written `210_000` into a comment saying "same as the client":
-  `Stacks.Moderation` bounds its per-candidate tasks, and
-  `Stacks.Workers.IdentifyBookJob` bounds a whole attempt and derives the
-  reader's SSE deadline from that bound. Three copies of a number that must
-  agree is three chances for it to stop agreeing — so raising this moves the SSE
-  ceiling with it, from a worst case of ~23 minutes to ~35. That ceiling is far
-  too long for a reader either way, and shortening *this* number is not the fix:
-  it buys a shorter wait by doing more GPU work, three times over. Issue #351
-  decouples the reader's wait from the job's lifetime.
+  Ceiling on a single vision HTTP call, in ms — DERIVED as Modal's own
+  300s inference deadline plus slack, never a smaller "latency budget".
+  Pre-350 this was 210s (< 300s): the client hung up on calls Modal was
+  still working on, the GPU work continued and was billed, the give-up was
+  classified `:transient`, and the retry queued a fresh cold start behind
+  the same contended GPU. Giving up before the server's deadline buys
+  nothing; after it, Modal has already answered 504.
   """
   @spec receive_timeout_ms() :: pos_integer()
   def receive_timeout_ms, do: @receive_timeout_ms
