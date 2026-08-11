@@ -1,32 +1,10 @@
-//! Reading a shop's sitemap, and the budget that keeps doing so polite.
-//!
-//! # Why this exists
-//!
-//! To find a shop's events page we used to fetch a guessed path — `/events` — on every store. It
-//! **404s on every scrapeable store**, and a guess is not cheap for the shop: a Shopify 404 is a
-//! *styled* page, measured at 249,540 bytes on 2026-07-29. Guessing our way to the right path would
-//! cost a quarter of a megabyte per wrong guess, forever, and still might never find it.
-//!
-//! A shop's sitemap is the opposite trade. It is declared in robots.txt (which we already fetch for
-//! compliance, so learning where it is costs nothing — see `RobotsPolicy::sitemaps`), and it states
-//! exactly which pages exist. The index for one target shop measured 10,334 bytes: roughly 25× less
-//! traffic than a *single* wrong guess, in exchange for the actual answer.
-//!
-//! # The part that matters: which children we refuse to fetch
-//!
-//! A sitemap index points at child sitemaps, and they are wildly uneven. A `pages` child lists the
-//! handful of editorial pages a bookshop has. A `products` child lists the entire catalogue and can
-//! run to tens of megabytes. We want the first and must never ask for the second — we are looking
-//! for an events page, and a shop's product catalogue cannot contain one.
-//!
-//! So `classify_child` sorts an index's children into three buckets, and only one of them is
-//! fetched. This is where nearly all of the politeness lives; the budget below is the backstop for
-//! when classification cannot tell.
-//!
-//! ⚠️ **The token lists are grounded in the documented Shopify and Yoast/WordPress sitemap layouts,
-//! not in measurement.** The attempt to measure both target shops' indexes is what turned up the 429
-//! behind #308, and continuing to probe would be exactly the discourtesy this module exists to
-//! avoid. Re-check the tokens against a real index once a cooldown has lapsed.
+//! Reading a shop's sitemap, under a budget that keeps it polite.
+//! Guessing paths costs the shop a full render per miss (a Shopify 404
+//! measured ~250KB); the sitemap is declared in robots.txt (already
+//! fetched for compliance), ~10KB, and states which pages exist. The walk
+//! never descends into catalogue-sized child sitemaps, reports what it
+//! skipped (so "found nothing" ≠ "declined to look"), and marks
+//! `truncated` when the budget ended it early.
 
 use std::time::Duration;
 
@@ -165,20 +143,12 @@ fn unescape(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// How much traffic one discovery run may cost a shop.
-///
-/// # Why this is a consumable value and not a config constant
-///
-/// The politeness of a multi-document walk cannot be a rule someone remembers at each call site;
-/// with three or four fetches in a loop, "remembered at each call site" means "eventually not". So
-/// the budget is a value that must be *spent*: `Engine::sitemap_urls` cannot issue a request without
-/// calling `spend`, because `spend` is what yields the permission to read a body at all.
-///
-/// # Why bytes as well as requests
-///
-/// A request cap alone bounds the wrong thing. Three requests sounds gentle right up until one of
-/// them is a 40 MB product sitemap — the transfer is what costs the shop, not the round trip. The
-/// byte ceiling is what makes an `Unlabelled` child safe to try: we hang up rather than let it run.
+/// How much traffic one discovery run may cost a shop — a consumable
+/// value, not a config constant: `sitemap_urls` cannot issue a request
+/// without `spend`ing from it, so politeness is structural rather than
+/// remembered at each call site. Caps both requests AND bytes — a request
+/// cap alone bounds the wrong thing when one child sitemap can be tens of
+/// megabytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CrawlBudget {
     requests_left: u32,

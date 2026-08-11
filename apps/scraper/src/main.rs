@@ -346,21 +346,11 @@ async fn catalogue_titles(
 }
 
 /// POST /fetch — retrieve one page for a configured store, compliantly.
-///
-/// Exists so that callers wanting a store's *page* rather than its price do not build
-/// their own HTTP request. `DiscoverBookstoreEventsJob` did exactly that — a bare
-/// `Finch.build(:get, "#{website_url}/events")` with no robots check, no rate limiter
-/// and no fuse — which is the compliance hole this closes.
-///
-/// Keyed by store, not URL: the config supplies the base URL and the rate limit, so a
-/// store with no scraper config cannot be fetched at all. That is deliberate — no
-/// config means no declared crawl policy, and guessing one turns a hard rule into an
-/// advisory one.
-///
-/// A robots disallow is **200 with `outcome: ROBOTS_BLOCKED`**, not an error status:
-/// it is a determination about the store, and the caller must record it and stop
-/// rather than retry. Returning 5xx here would melt the shared fuse on every attempt
-/// for a condition that recurs by definition — the same reasoning as `outcome_for_error`.
+/// Exists so page-wanting callers never build their own HTTP request (the
+/// events job once did: bare GET, no robots, no limiter, no fuse). Keyed
+/// by store, not URL — no scraper config means no declared crawl policy,
+/// so unconfigured stores cannot be fetched at all. A robots disallow
+/// returns the responsible rule so the caller can record a determination.
 async fn fetch_page(
     State(state): State<AppState>,
     Json(payload): Json<FetchPageRequest>,

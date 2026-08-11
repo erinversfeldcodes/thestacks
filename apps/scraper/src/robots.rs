@@ -106,25 +106,12 @@ impl RobotsChecker {
         }
     }
 
-    /// Resolve robots.txt policy for `path` on `base_url`.
-    ///
-    /// Fetches and caches robots.txt on first call per domain. Concurrent callers
-    /// for the same domain wait on the same OnceCell — no stampede.
-    ///
-    /// Outcomes, per RFC 9309 §2.3.1:
-    /// - **2xx** → parse and apply the rules.
-    /// - **4xx** → no robots.txt exists; allow all (§2.3.1.3).
-    /// - **5xx or transport error** → "unreachable"; §2.3.1.4 says treat as a
-    ///   *complete disallow*. We surface `RobotsFetchFailed` so the scrape stops
-    ///   with a reason. This is deliberately **not cached**: `get_or_try_init`
-    ///   does not store on `Err`, so a transient 503 blocks this attempt only and
-    ///   is retried, rather than poisoning the domain for the process lifetime.
-    ///   (`kalkbaybooks.co.za` returned 503 during target research, so this path
-    ///   is real, not hypothetical.)
-    ///
-    /// `default_retry_after_secs` is the store's configured `retry_after_seconds`, used when a
-    /// pacing response carries no usable `Retry-After`. Threaded in as a parameter rather than read
-    /// from a global so the value that a store's operator set is the value that applies to it.
+    /// Resolve robots.txt policy for `path` on `base_url`. Fetched and cached
+    /// once per domain (concurrent callers share the OnceCell — no stampede).
+    /// Per RFC 9309 §2.3.1: 2xx → parse and apply; 4xx → no robots.txt, allow
+    /// all; 5xx/transport error → complete disallow, surfaced as
+    /// `RobotsFetchFailed` and deliberately NOT cached (`get_or_try_init` skips
+    /// storing on Err), so a transient 503 blocks one attempt, not the domain.
     pub async fn policy(
         &self,
         base_url: &str,
@@ -212,26 +199,13 @@ enum StatusVerdict {
     Paced,
 }
 
-/// Split out from the fetch so the 4xx-vs-5xx distinction is testable without a
-/// network or a mock HTTP server. This decision is the whole difference between
-/// "no robots.txt exists, crawl freely" and "the server is broken, crawl nothing".
+/// Split from the fetch so the 4xx-vs-5xx decision — "no robots.txt,
+/// crawl freely" vs "server broken, crawl nothing" — is testable offline.
 ///
-/// ⚠️ **429 and 503 are a deliberate, documented deviation from the letter of RFC 9309.**
-/// The RFC classifies purely by range — §2.3.1.3 "Unavailable" is "status codes in the 400-499
-/// range", §2.3.1.4 "Unreachable" is "the 500-599 range" — and says nothing about 429 or 503
-/// specifically (checked against the published RFC text, not from memory). Followed literally,
-/// **429 lands in "Unavailable", which grants us permission to crawl anything.** So a shop
-/// answering "Too Many Requests" would have us drop all of its rules and carry on.
-///
-/// That is worse than a compliance nicety, because the 4xx result is *cached*: `RobotsDoc::Absent`
-/// goes into the domain's `OnceCell` and one transient 429 leaves us crawling that domain with no
-/// robots rules **for the rest of the process lifetime**. The module docs below already take pride
-/// in not caching the 5xx case for exactly this reason; the 429 door was standing open beside it.
-///
-/// Measured, not theoretical: a handful of probes from a single laptop during #307 design got
-/// `429` from both target shops on every path, `/robots.txt` included.
-///
-/// So `Paced` is returned instead, the caller records the cooldown, and nothing is cached.
+/// 429 and 503 are a deliberate deviation from RFC 9309's pure range
+/// classification: both mean "not now", and reading a rate-limit response
+/// as permission to crawl everything is the opposite of its meaning. Both
+/// are treated as unreachable (disallow).
 fn classify_status(status: u16) -> StatusVerdict {
     match status {
         200..=299 => StatusVerdict::Fetch,
@@ -251,21 +225,13 @@ fn evaluate(doc: &RobotsDoc, path: &str) -> RobotsPolicy {
     parse_and_apply(txt, path)
 }
 
-/// Parse robots.txt and decide whether `request_path` is allowed for our token.
-///
-/// Rules, per RFC 9309:
-/// - §2.2.1 Groups are selected by product token. **The most specific matching
-///   group wins**: a group naming us explicitly beats `User-agent: *`, and only
-///   the winning group's rules are evaluated. Consecutive `User-agent` lines head
-///   a single group.
-/// - §2.2.2 Longest matching pattern wins; `Allow` beats `Disallow` on equal length.
-/// - §2.2.3 `*` matches any sequence of characters; `$` anchors to end of path.
-/// - No matching rule → allowed.
-///
-/// `Crawl-delay` is returned rather than discarded. It is not part of the original
-/// standard but is widely deployed, and the owner's hard rule is to respect what
-/// robots.txt says — so the engine applies it whenever it is stricter than our own
-/// configured rate. (Exclusive Books declares `Crawl-delay: 10`.)
+/// Parse robots.txt and decide whether `request_path` is allowed for our
+/// token, per RFC 9309: most specific matching group wins (§2.2.1, an
+/// explicit naming beats `*`; consecutive User-agent lines head one group);
+/// longest matching pattern wins, Allow beats Disallow on ties (§2.2.2);
+/// `*` and `$` wildcards (§2.2.3); no matching rule → allowed.
+/// `Crawl-delay` is returned, not discarded — `document_spacing` honours it
+/// as a per-request spacing.
 fn parse_and_apply(txt: &str, request_path: &str) -> RobotsPolicy {
     let groups = parse_groups(txt);
     let sitemaps = parse_sitemaps(txt);

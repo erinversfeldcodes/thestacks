@@ -65,21 +65,12 @@ fn effective_rpm(policy: &crate::robots::RobotsPolicy, configured: u32) -> u32 {
     }
 }
 
-/// How long to wait between the documents of one walk.
-///
-/// ⚠️ **`Crawl-delay` is a SPACING, not a rate, and we were honouring only the rate.**
-/// `effective_rpm` turns `Crawl-delay: 10` into 6 requests/minute, and `check_and_record` enforces
-/// that with a sliding *window* — which happily permits all six inside two seconds and then nothing
-/// for the rest of the minute. That passes the limiter while doing precisely what the shop asked us
-/// not to: exclusivebooks.co.za declares `Crawl-delay: 10`, and a four-document walk at the old fixed
-/// 500 ms spacing would have burst all four at it in under two seconds.
-///
-/// `RateLimiter::min_delay` — the spacer this needs — already existed, had tests, and was **called by
-/// no production code at all**. Another built-and-not-wired instance; this is the call site it was
-/// waiting for.
-///
-/// Takes whichever is longer: our own courtesy floor, or what the shop asked for. Never shorter than
-/// the shop's request, because that is the whole point.
+/// How long to wait between the documents of one walk. `Crawl-delay` is
+/// a SPACING, not a rate: `effective_rpm` turns `Crawl-delay: 10` into
+/// 6 req/min, and a sliding window happily permits all six in two seconds —
+/// the burst the shop asked us not to send. This returns the declared
+/// delay as an actual inter-document sleep; the fixed default applies
+/// when no delay is declared.
 fn document_spacing(
     policy: &crate::robots::RobotsPolicy,
     effective_rpm: u32,
@@ -730,25 +721,12 @@ impl Engine {
         Ok(Capability::none())
     }
 
-    /// Fetch a path from a store, honouring robots.txt and the rate limit.
-    ///
-    /// The single compliant egress for anything this service requests from a shop.
-    /// Both the legacy selector path and the platform adapters go through it, so
-    /// there is one place that can be audited for the owner's robots.txt rule
-    /// rather than one per call site — which is how the events job ended up
-    /// scraping with no robots check at all.
-    ///
-    /// Returns the HTTP status alongside the body, because for the platform
-    /// adapters **404 is meaningful data** (`/products/<isbn>.js` returning 404 is
-    /// how a Shopify store says "we do not carry this ISBN"), not an error to
-    /// propagate.
-    /// Fetch one path through the compliant egress.
-    ///
-    /// Returns the status, the body, and the **`Sitemap:` URLs the shop declared** — the last of
-    /// which is free: robots.txt is already fetched here for compliance, so the declaration is
-    /// in hand. Returning it is what lets a caller find a real page instead of guessing at one,
-    /// and a guess is not cheap for the shop (a Shopify 404 is a *styled* page — measured at
-    /// 249,540 bytes — while a sitemap index is ~10 KB).
+    /// Fetch a path from a store, honouring robots.txt and the rate limit —
+    /// the single compliant egress for anything requested from a shop (legacy
+    /// selectors and platform adapters both), so robots compliance is audited
+    /// in one place, not per call site. Returns the status alongside the body:
+    /// 404 is meaningful data for the adapters (`/products/<isbn>.js` 404 =
+    /// "we do not carry this ISBN"), not an error.
     pub async fn fetch_path(
         &self,
         config: &ScraperConfig,

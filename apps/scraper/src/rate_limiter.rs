@@ -4,27 +4,11 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// A sliding-window, per-domain rate limiter — plus the shop's own say in the matter.
-///
-/// Each domain maintains a queue of timestamps of recent requests. A request is allowed if fewer
-/// than `limit` requests have been made within the last 60 seconds.
-///
-/// ⚠️ **The sliding window alone is self-certified politeness.** It encodes the pace *we* chose,
-/// measured by *our* clock, and for a long time it was the only pacing this service had — so a shop
-/// answering `429 Too Many Requests` with a `Retry-After` header was ignored, and we carried on at
-/// our configured rate. (Measured during #307: a handful of probes from one laptop got
-/// `429` on every path of both target shops, including `/robots.txt`.) `cooldowns` is the missing
-/// channel: the domain's own instruction, which outranks our configuration.
-///
-/// The cooldown is consulted **inside `check_and_record`** rather than exposed for callers to check.
-/// That is deliberate and is the whole design: every egress path already calls this one function, so
-/// the backoff cannot be bypassed by a caller who forgets it. A `should_i_wait()` helper would
-/// reproduce exactly the bug this exists to fix.
-///
-/// ⚠️ Both maps are per-process and in-memory, so a redeploy forgets an active cooldown. That is
-/// consistent with the rest of this service (the ISBN index has the same lifetime) but it is a real
-/// limitation, not an oversight: right after a deploy we may resume asking a shop that had told us
-/// to wait. Persisting it is a separate decision, deliberately not taken here.
+/// Sliding-window per-domain rate limiter, plus the shop's own say in the
+/// matter. The window alone is self-certified politeness (our pace, our
+/// clock) — a shop's `429 Retry-After` used to be ignored entirely. Now a
+/// pacing response records a cooldown: `check_and_record` refuses until it
+/// elapses, so the shop's explicit signal outranks our configured rate.
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
     /// Maps domain → deque of request timestamps.
@@ -103,22 +87,13 @@ impl RateLimiter {
         Ok(())
     }
 
-    /// How long to wait after a pacing response, from the shop's `Retry-After` header.
-    ///
-    /// RFC 9110 §10.2.3 allows two forms: delta-seconds, and an HTTP-date.
-    ///
-    /// ⚠️ **Only delta-seconds is parsed.** An HTTP-date needs a real calendar to turn into a
-    /// duration, and this service has no date crate — adding one to read a header that is
-    /// overwhelmingly sent as an integer on 429 is not a trade worth making. An HTTP-date therefore
-    /// takes the `fallback` path, which is the store's configured `retry_after_seconds`: a
-    /// conservative wait rather than no wait, so the failure mode is politeness, not a hammer.
-    ///
-    /// The result is clamped to `[1s, 1h]`:
-    /// - the floor, because `Retry-After: 0` immediately after a 429 is not an instruction worth
-    ///   obeying literally, and a zero cooldown would read as "no cooldown" at the call site;
-    /// - the ceiling, because a mistaken or hostile `Retry-After: 999999999` would otherwise park a
-    ///   domain for as long as the process lives. An hour is far longer than any real pacing signal
-    ///   and still recovers without a redeploy.
+    /// How long to wait after a pacing response, from `Retry-After`.
+    /// RFC 9110 allows delta-seconds and HTTP-date; only delta-seconds is
+    /// parsed — an HTTP-date needs a calendar crate to become a duration, and
+    /// the header is overwhelmingly an integer on 429. HTTP-dates take the
+    /// `fallback` (the store's configured `retry_after_seconds`): the failure
+    /// mode is extra politeness, not a hammer. Result clamped to a sane
+    /// ceiling so a hostile header can't park the scraper.
     pub fn retry_after(header: Option<&str>, fallback_secs: u64) -> Duration {
         const CEILING_SECS: u64 = 3600;
 
