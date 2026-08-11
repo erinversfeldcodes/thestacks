@@ -25,6 +25,7 @@ defmodule Stacks.Accounts do
   alias Stacks.Accounts.ReservedHandles
   alias Stacks.Accounts.User
   alias Stacks.Duration
+  alias Stacks.Email
   alias Stacks.Events
   alias Stacks.GDPR.Deletion
   alias Stacks.Social.UserBlock
@@ -482,8 +483,8 @@ defmodule Stacks.Accounts do
 
   @doc """
       Registers a new user; the platform's first user becomes `owner`. Created
-      unconfirmed with a confirmation token — the email is sent event-driven via
-      `EmailConfirmationHandler`, and the user cannot authenticate until confirmed.
+      unconfirmed with a confirmation token; the confirmation email is enqueued
+      directly, and the user cannot authenticate until confirmed.
       `opts` may carry consent attrs recorded atomically with the insert.
   """
   @spec register(map(), keyword()) ::
@@ -576,6 +577,7 @@ defmodule Stacks.Accounts do
     |> Repo.transaction()
     |> case do
       {:ok, %{set_confirmation: user}} ->
+        enqueue_confirmation_email(user)
         {:ok, user}
 
       {:error, :user, changeset, _} ->
@@ -587,6 +589,23 @@ defmodule Stacks.Accounts do
 
       {:error, _, reason, _} ->
         {:error, reason}
+    end
+  end
+
+  # Enqueued directly, not via the user.registered event: the confirmation
+  # email is the one email a registrant is actively waiting on, and routing it
+  # through the generic event fan-out put a whole dispatch chain (and its
+  # backlog) in front of it. A failed enqueue must not fail the registration —
+  # the reader still has the resend affordance.
+  defp enqueue_confirmation_email(user) do
+    case Email.send_registration_confirmation(user) do
+      {:ok, _user} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Accounts.register: could not enqueue confirmation email: #{inspect(reason)}"
+        )
     end
   end
 

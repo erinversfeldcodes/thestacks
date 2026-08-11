@@ -43,9 +43,6 @@ defmodule Stacks.Events.Registry do
     "user.location_updated" => [
       Stacks.Discovery.Handlers.LocationUpdatedHandler
     ],
-    "user.registered" => [
-      Stacks.Notifications.EmailConfirmationHandler
-    ],
     "placement.created" => [
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
@@ -94,6 +91,9 @@ defmodule Stacks.Events.Registry do
   }
 
   @unsubscribed [
+    # The confirmation email is enqueued directly at registration; the event
+    # remains for audit/replay but no longer carries the email.
+    "user.registered",
     "image.submitted",
     "image.rejected",
     "image.resolved",
