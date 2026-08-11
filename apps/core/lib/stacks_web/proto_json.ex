@@ -2,23 +2,10 @@ defmodule StacksWeb.ProtoJSON do
   @moduledoc """
   Shared proto-shaped JSON serializers for all controllers.
 
-  "Proto" here means that every function produces the exact map shape
-  defined by the corresponding `.proto` message in `proto/stacks/common/v1/`.
-  The maps are not Protobuf-encoded — they are plain Elixir maps that
-  Phoenix's `json/2` encodes to JSON matching the proto field names.
-
-  Each function converts an Ecto struct (or plain map) into the map shape
-  that Phoenix's `json/2` will encode.
-
-  ## Design
-
-  Controllers currently duplicate `format_book`, `format_edition`, etc.
-  This module provides a single source of truth so that #131e can replace
-  every inline `format_*` helper with a delegation to `ProtoJSON`.
-
-  Enum values are lowercase strings (`"public"`, `"age_gated"`) matching
-  current API output and Elm decoder expectations — NOT proto-convention
-  `SCREAMING_SNAKE_CASE`.
+  Every function produces the exact map shape of its `.proto` message in
+  `proto/stacks/common/v1/` (plain maps, JSON on the wire — not Protobuf
+  encoding). ⚠️ Take-lists here are wire ALLOWLISTS: a proto field absent from
+  one is silently dropped (see `blog_post/1`'s syndicated incident).
   """
 
   require Logger
@@ -40,15 +27,8 @@ defmodule StacksWeb.ProtoJSON do
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
 
   @doc """
-  Serializes a book (work) struct into the proto `Book` message shape.
-
-  Matches `BookController.format_book/2` — the richest book representation,
-  including all fields (description, language, subjects, bisac_codes,
-  community_read_count).
-
-  ## Options
-
-    * `:community_read_count` — integer, defaults to `0`.
+  Serializes a book (work) into the proto `Book` shape — the richest book
+  representation. Option `:community_read_count` (integer, default 0).
   """
   @spec book(map(), keyword()) :: map()
   def book(book, opts \\ []) do
@@ -120,19 +100,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-  Serializes a search result into the proto `SearchHit` shape (#285).
-
-  Wraps a book (via `search_book/1`) with optional discovery-source provenance.
-  `label` is a map that may carry `:source`, `:owner_handle`, `:price`, and
-  `:bookshelf_name`; each defaults to the empty string (proto3 string default)
-  when absent. The provenance labels (`:source`/`:owner_handle`/`:price`) are set
-  ONLY for discoverable-by-design platform hits (an always-visible
-  `looking_for_home` placement or an active marketplace listing).
-  `:bookshelf_name` is set ONLY for the viewer's own collection hits (the shelf
-  the book sits on) — platform hits leave it empty. `:snippet` is a
-  `ts_headline`-highlighted description excerpt set ONLY for a scope=deep hit
-  whose description matched (#284); every title-only hit leaves it empty. A plain
-  platform book passes `%{}` and carries none of them.
+  Serializes a search result into the proto `SearchHit` shape: a book plus
+  optional provenance labels (`:source`/`:owner_handle`/`:price`, empty-string
+  defaults) set ONLY for discoverable-by-design platform hits.
   """
   @spec search_hit(map(), map()) :: map()
   def search_hit(book, label \\ %{}) do
@@ -211,22 +181,9 @@ defmodule StacksWeb.ProtoJSON do
     do: Gen.author(author_struct) |> Map.take([:id, :name]) |> Map.put(:bio, nil)
 
   @doc """
-  Serializes a book edition struct.
-
-  Matches the `format_edition/1` used identically across BookController,
-  BookshelfController, SearchController, and CatalogueController.
-
-  `verification_source` is on the wire as of #344. It was DB-only when #335
-  added it, because nothing outside the platform needed the provenance; the SPA
-  now does. A book whose ISBN nothing external has confirmed carries an
-  `"ISBN 978…"` placeholder title, and the reader has to be able to tell that
-  from a book actually called that — which the client can only do if it is told
-  which one it has. Deriving it there from `title` starting with `"ISBN "` is the
-  guess this field exists to replace: it is wrong for a real title of that shape
-  and, worse, stops working the moment enrichment succeeds.
-
-  It is provenance, not personal data — which of two public catalogues answered
-  a public ISBN lookup — so serialising it exposes nothing about a reader.
+  Serializes a book edition — the shape shared by Book/Bookshelf/Search/
+  Catalogue controllers. `verification_source` is on the wire so the SPA can
+  distinguish an externally-confirmed ISBN from a placeholder.
   """
   @spec edition(map()) :: map()
   def edition(ed) do
@@ -280,15 +237,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-  Serializes a placement as the book-detail shape (user's placement for a book).
-
-  Matches `BookController.format_placement_or_nil/1`. Returns `nil` when
-  the placement is nil.
-
-  Emits `visibility` (the placement's own visibility) and `bookshelf_visibility`
-  (the parent bookshelf's visibility — the ceiling the #194 frontend greys
-  options against). When the bookshelf association is not loaded, both the
-  name and the ceiling default to `nil` rather than crashing.
+  Serializes a placement for book detail (nil-safe). Emits both `visibility`
+  (the placement's own) and `bookshelf_visibility` (the parent ceiling the
+  frontend greys options against); both nil when the association isn't loaded.
   """
   @spec book_placement(map() | nil) :: map() | nil
   def book_placement(nil), do: nil
@@ -349,14 +300,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-  Serializes a blog post struct.
-
-  Matches `BlogController.format_post/1`.
-
-  Emits `author_display_name` — a denormalised projection of the author's
-  `op.users.display_name` — so the block-user confirmation can name the person
-  ("Block <name>?"). When the `:user` association is not loaded, the field is
-  `nil` and the frontend falls back to a generic "the author" label.
+  Serializes a blog post. `author_display_name`/`author_handle` are
+  denormalised projections of the author row (nil when `:user` isn't loaded;
+  the frontend falls back to a generic label).
   """
   @spec blog_post(map()) :: map()
   def blog_post(post) do
@@ -513,18 +459,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-  Serializes a marketplace listing struct.
-
-  The ListingController passes the Listing struct directly to `json/2`,
-  which uses the `Jason.Encoder` derive on `Stacks.Marketplace.Listing`.
-  This function produces the identical shape for explicit serialization.
-
-  Derived fields: `book` is serialized via the Book `Jason.Encoder` derive
-  shape (id, title, description, language, subjects, bisac_codes,
-  visibility_tier, created_at, updated_at — no author/editions); `seller`
-  is serialized via the User `Jason.Encoder` derive shape (id, email,
-  display_name, role, profile_visibility, age_verified, consent_analytics,
-  created_at, updated_at).
+  Serializes a marketplace listing — identical to the struct's `Jason.Encoder`
+  derive shape. `seller` carries only id/display_name/handle; `book` the
+  derive shape without author/editions.
   """
   @spec listing(map()) :: map()
   def listing(l) do
@@ -552,14 +489,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-  Serializes a shelf with its placements, filtering by visibility.
-
-  Used by BookshelfController to build the `shelves` response shape.
-  Each shelf includes its position and the placements visible to the viewer.
-  `writing_book_ids` is any enumerable of book ids the owner has written about
-  (#287); it is normalised to a set internally, so the caller may pass a MapSet
-  (returned unchanged by `MapSet.new/1`) or a plain list. The default `[]` keeps
-  the ribbon flag off for callers that don't compute writing.
+  Serializes a shelf with its viewer-visible placements. `writing_book_ids`
+  (any enumerable; default `[]`) flags books the owner has written about for
+  the ribbon.
   """
   @spec shelf_with_placements(map(), term(), Enumerable.t()) :: map()
   def shelf_with_placements(shelf, viewer, writing_book_ids \\ []) do
@@ -578,14 +510,10 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-  Serializes a user's PUBLIC profile for `/u/:handle` (#213). Deliberately
-  REDACTED — only the fields a stranger may see (handle, display_name, website,
-  location) plus the viewer-visible bookshelf summaries. NEVER emit email,
-  consent flags, notification prefs, role, or any other account/PII field
-  (`ProtoJson.user/1` leaks all of those and MUST NOT be used here).
-
-  `shelves` is the already visibility-filtered list from
-  `Stacks.Visibility.viewable_shelves/2`.
+  Serializes a user's PUBLIC profile — deliberately REDACTED to handle,
+  display_name, website, location, and the already-filtered shelf summaries.
+  NEVER emit email, consent, notification, or role fields; `ProtoJSON.user/1`
+  leaks all of those and MUST NOT be used here.
   """
   @spec public_profile(map(), [map()]) :: map()
   def public_profile(user, shelves) do
@@ -601,14 +529,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-  Slim, shelf-less variant of `public_profile/2` for people-search result cards
-  (#217). Same REDACTED contract — only handle, display_name, and location; NEVER
-  email, consent, role, or any account/PII field. No bookshelves (search results
-  don't render shelf summaries).
-
-  Exclusion of ghost/blocked users is enforced upstream in
-  `Accounts.search_users/2` (SQL), never here — this serializer only shapes the
-  already-permitted rows.
+  Shelf-less `public_profile/2` variant for people-search cards. Same
+  REDACTED contract (handle/display_name/location only). Ghost/blocked
+  exclusion is enforced upstream in SQL, never here.
   """
   @spec public_profile_summary(map()) :: map()
   def public_profile_summary(user) do

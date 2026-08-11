@@ -1,17 +1,10 @@
 defmodule Stacks.Enrichment.Prices do
   @moduledoc """
-  Context for price enrichment — manages scraped price snapshots for editions
-  across bookstores.
+  Price enrichment — scraped price snapshots for editions across bookstores.
 
-  Price snapshots are keyed on `(book_edition_id, store_id)` and upserted on each
-  scrape run. `stale_isbns/1` identifies editions that need a fresh scrape.
-
-  ## Why the edition, not the work
-
-  A price is a fact about an *edition*. Shops stock whichever edition they stock,
-  at different prices — Exclusive Books carries six ISBNs of The Name of the Rose,
-  two of them Spanish, from R400 to R411. Keying on the work made those six
-  indistinguishable.
+  Snapshots are keyed on `(book_edition_id, store_id)` and upserted per scrape.
+  A price is a fact about an EDITION, not a work: shops stock specific ISBNs at
+  different prices, so all staleness and lookups are per edition.
   """
 
   import Ecto.Query
@@ -25,18 +18,11 @@ defmodule Stacks.Enrichment.Prices do
   alias Stacks.Workers.TriggerPriceScrapeJob
 
   @doc """
-  Inserts a new price snapshot or updates the existing one for the same
-  `(book_edition_id, store_id)` pair.
+  Upserts the snapshot for a `(book_edition_id, store_id)` pair.
 
-  `book_id` is **derived here** from the edition and must not be supplied by the
-  caller. The schema carries both columns because proto field numbers are forever
-  and `buf breaking` is FILE-strict, so `book_id` cannot be removed — but two
-  columns describing the same relationship can disagree, and deriving it at the
-  single write site is what makes disagreement unrepresentable rather than merely
-  discouraged.
-
-  Returns `{:ok, snapshot}`, `{:error, changeset}`, or `{:error, :unknown_edition}`
-  when `book_edition_id` names no edition.
+  `book_id` is derived here from the edition and must NOT be supplied: the
+  schema carries both columns (proto field numbers are forever), and deriving
+  at the single write site keeps them from disagreeing.
   """
   @spec upsert_snapshot(map()) ::
           {:ok, PriceSnapshot.t()} | {:error, Ecto.Changeset.t()} | {:error, :unknown_edition}
@@ -90,22 +76,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Prices for a work, refreshing any that are stale in the background.
-
-  This is the read path, and it is what replaces the nightly sweep. The sweep was
-  `stale_isbns(7) x all_stores()` with no cap — ~2,400 requests taking on the order
-  of 20 hours against eleven mostly one-person bookshops, for prices nobody may
-  ever look at. Fetching on read instead means outbound load tracks actual reader
-  interest rather than catalogue size times wall clock.
-
-  Returns immediately with whatever is already stored, stale or not: a price from
-  last week is far more useful than a spinner, and the refreshed value appears on
-  the next view. Enqueued work is deduplicated by Oban's `unique` option, so a
-  popular book being viewed a hundred times does not enqueue a hundred scrapes.
-
-  Rows carry the edition's ISBN and format and the store's name, not bare ids: the
-  page groups prices by edition and names the shop, and resolving those per row in
-  the view would be an N+1 the context can answer in one join.
+  Prices for a work, refreshing stale ones in the background — the read path
+  that replaced the nightly sweep, so outbound load tracks reader interest.
+  Returns held snapshots immediately; refreshes land on later reads.
   """
   @spec prices_for_work(String.t(), keyword()) :: [map()]
   def prices_for_work(book_id, opts \\ []) do
@@ -169,14 +142,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Returns editions that have not been priced in the last `days` days.
-
-  Returns a list of `%{isbn: isbn, book_id: book_id, book_edition_id: id}` maps.
-
-  The join is on `book_edition_id`, per edition. It used to join on `book_id`,
-  which meant a fresh snapshot for **one** edition made **every** edition of that
-  work look freshly scraped — so on a work with six editions, five could never be
-  priced at all. The staleness question is per edition because the price is.
+  Editions not priced in the last `days` days, as
+  `%{isbn:, book_id:, book_edition_id:}` maps. Staleness is judged PER
+  EDITION — a fresh snapshot for one edition must not mask its siblings.
   """
   @spec stale_isbns(non_neg_integer()) :: [
           %{isbn: String.t(), book_id: String.t(), book_edition_id: String.t()}
@@ -195,18 +163,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Record what a store was observed to be capable of.
-
-  Capability is **derived, never declared**. Bookshops replatform — WooCommerce to
-  Shopify, a theme change that moves the ISBN out of `sku` — and a hand-set platform
-  turns that into a silent outage indistinguishable from "we don't stock it". The
-  scraper reports what it observed on every response, so `capability_probed_at`
-  stays current without a separate probe schedule and a replatform surfaces on the
-  next scrape rather than the next sweep.
-
-  Writes only when something actually changed, so an unchanged observation does not
-  churn `updated_at` on every scrape. Returns `:ok` regardless: failing to record an
-  observation must never fail the scrape that produced it.
+  Records what a store was OBSERVED to be capable of. Capability is derived,
+  never declared: shops replatform, and the scraper reports observations on
+  every response so a replatform surfaces on the next scrape.
   """
   @spec record_capability(Bookstore.t(), map() | nil) :: :ok
   def record_capability(_store, nil), do: :ok
@@ -238,19 +197,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Record that robots.txt blocks `path` for this store, with the rule responsible.
-
-  A block is **observable state**, not a silent skip. Before this existed the column
-  was present and nothing wrote it, so a store forbidden by robots.txt looked
-  identical to one that simply had no prices yet — and an operator had no way to learn
-  which, or why.
-
-  Per the owner's rule the store's configuration is deliberately left in place, so if
-  the disallow is ever lifted the store resumes by itself. `robots_blocked_at` is what
-  makes that re-checkable: the block is a dated observation, not a verdict.
-
-  Returns `:ok` regardless — recording a block must never be what turns a handled
-  determination into a failure.
+  Records that robots.txt blocks `path`, with the responsible rule — a block
+  is observable state, not a silent skip. The store's configuration stays in
+  place so a lifted disallow resumes on its own (see `clear_robots_block/1`).
   """
   @spec record_robots_block(map(), String.t(), String.t()) :: :ok
   def record_robots_block(store, path, rule) do
@@ -271,15 +220,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Clear a store's robots block after a successful fetch.
-
-  The other half of `record_robots_block/3`, and the half that makes the block
-  self-healing: without it, a disallow lifted next month would leave the store
-  permanently marked as blocked, and "re-checked on the probe cadence" would be a
-  claim with nothing behind it.
-
-  A no-op when no block is recorded, so callers can call it unconditionally on success
-  rather than checking first — the error case is defined out of existence.
+  Clears a store's robots block after a successful fetch — the half that makes
+  blocks self-healing. No-op when none is recorded, so call it unconditionally
+  on success.
   """
   @spec clear_robots_block(map()) :: :ok
   def clear_robots_block(%{robots_blocked_path: nil}), do: :ok
@@ -330,21 +273,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Note that an ISBN priced successfully at this store, keeping it as the canary.
-
-  ## Why a canary at all
-
-  Capability detection notices a replatform only when the *detected* values change.
-  It cannot notice the subtler failure: the platform stays Shopify, the probe still
-  answers, but the shop's theme moves the ISBN out of `handle` for new products, or
-  re-slugs its catalogue. Detection reports the same capability while every lookup
-  quietly returns "not stocked".
-
-  A canary closes that: an ISBN we have *actually priced here* must keep resolving.
-  When it stops, the capability is suspect regardless of what detection says, so it
-  is cleared and re-derived on the next scrape rather than trusted.
-
-  Only set when absent or when it changes, so this costs no write on the common path.
+  Notes a successfully-priced ISBN as the store's canary. Capability detection
+  only notices when detected values CHANGE; the canary catches the subtler
+  failure where the platform looks the same but lookups quietly stop resolving.
   """
   @spec note_canary(Bookstore.t(), String.t()) :: :ok
   def note_canary(%{canary_isbn: isbn}, isbn), do: :ok
@@ -362,15 +293,9 @@ defmodule Stacks.Enrichment.Prices do
   def note_canary(_store, _isbn), do: :ok
 
   @doc """
-  React to the canary failing to resolve.
-
-  The store still answers and its platform still looks the same, but an ISBN we
-  previously priced here no longer resolves — so what we believe about this store is
-  no longer supported by evidence. Clearing the capability forces the next scrape to
-  re-derive it instead of continuing to use a mapping that has stopped working.
-
-  Deliberately does nothing when the ISBN is not the canary: an ordinary edition
-  going out of stock is normal and says nothing about the store.
+  Reacts to the canary no longer resolving: clears the derived capability so
+  the next scrape re-derives it. Does nothing for non-canary ISBNs — an
+  ordinary edition going out of stock is normal.
   """
   @spec canary_failed(Bookstore.t(), String.t()) :: :ok | :not_canary
   def canary_failed(%{canary_isbn: canary} = store, isbn)
@@ -438,24 +363,10 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Stores the scraper service can actually be asked about.
-
-  `scraper_module` is the scraper's **registry key** (`"za/exclusive_books"`), not a
-  label — it names a TOML config that supplies the base URL, the selectors and the rate
-  limit. A store without one cannot be addressed at all: the service answers
-  `404 store not found`, and there is no fallback that could work.
-
-  Exists because callers kept reaching for `all_stores/0` and then improvising. The
-  worst improvisation was `store.scraper_module || store.name` in
-  `TriggerPriceScrapeJob`, which substituted the **display name** ("Exclusive Books")
-  for a registry key that is path-derived ("za/exclusive_books"). Those never match, so
-  every ISBN × unconfigured-store pair produced a guaranteed 404 — and because the
-  client melts a fuse on a non-200, a store nobody had configured could open the
-  breaker for stores that were. The failure was silent in the sense that mattered:
-  it looked like the shop was down.
-
-  Filtering in the query rather than at each call site means a new caller gets this
-  right by default instead of having to know.
+  Stores the scraper service can actually be asked about — those with a
+  `scraper_module` registry key naming a TOML config (base URL, selectors,
+  rate limit). A store without one answers `404 store not found`; use this,
+  never `all_stores/0`, for anything that fetches.
   """
   @spec scrapeable_stores() :: [Bookstore.t()]
   def scrapeable_stores do

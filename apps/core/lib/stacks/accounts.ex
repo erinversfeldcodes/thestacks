@@ -313,40 +313,14 @@ defmodule Stacks.Accounts do
   def unverified_account_ttl_seconds, do: @unverified_account_ttl_seconds
 
   @doc """
-  IDs of accounts whose email-confirmation link is dead: never confirmed, and
-  holding no confirmation token that still verifies. Used by
-  `Stacks.Workers.ExpiredUnverifiedAccountsJob` to reap abandoned signups.
+  IDs of accounts whose email-confirmation LINK is dead — never confirmed
+  and holding no token that still verifies. Feeds
+  `ExpiredUnverifiedAccountsJob`.
 
-  ⛔ The reaper's clock is the LINK's clock, not `created_at` (Issue #373).
-
-  This used to be `created_at < now - ttl` alone, which was correct only because
-  registration was the sole issuer of a confirmation token — creation time and
-  issue time were the same instant, so one clock could stand in for the other.
-  `POST /api/auth/resend-confirmation` breaks that: a resend mints a freshly
-  signed `Phoenix.Token`, valid for a further `unverified_account_ttl_seconds/0`
-  from the moment it is signed. Against the old rule, a reader who lost their
-  email at hour 23, asked for another, and got a link good until hour 47 would
-  have had the account underneath it erased at hour 24 — a live link pointing at
-  nothing, which is strictly worse than never offering the button. Two clocks
-  that only agreed by accident are now one.
-
-  So the SQL is a cheap PREFILTER (nothing younger than the TTL can possibly hold
-  a dead link) and the decision is `Phoenix.Token.verify/4` — the very same call
-  `Stacks.Email.confirm_email/1` makes when the reader clicks. Whatever the reaper
-  erases, the link was already going to refuse; whatever the link still accepts,
-  the reaper leaves alone. A missing token (`nil`) is a dead link and is reaped,
-  as before.
-
-  Renewal is not unbounded: `confirmation_resendable?/1` stops new links being
-  issued past `unverified_account_max_lifetime_seconds/0`, so this query always
-  catches up with an account within one TTL of that ceiling. The bound is applied
-  at issue time rather than here precisely so that this function never has to
-  erase an account whose link is still live.
-
-  `now` is injectable and governs the prefilter. The token check deliberately runs
-  against wall-clock, because that is the clock the reader's link is judged by —
-  injecting a different one here would let the reaper and the confirmation
-  endpoint disagree, which is the exact defect this shape exists to prevent.
+  ⛔ The reaper's clock is the LINK's clock, not `created_at` (373): resend
+  mints a fresh token, so age alone would erase accounts under still-live
+  links. The SQL is only a prefilter; the decision is the same
+  `Phoenix.Token.verify/4` the confirm click makes.
   """
   @spec expired_unverified_ids(DateTime.t()) :: [binary()]
   def expired_unverified_ids(now \\ DateTime.utc_now()) do
@@ -427,19 +401,11 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-  People search for the discovery surface (US-10.5.4).
-
-  Returns up to #{20} users whose `display_name` matches `term` (case-insensitive
-  `ILIKE`), restricted to **discoverable** profiles (`profile_visibility =
-  "platform"`) and excluding any user blocked in **either** direction relative to
-  `viewer_id`.
-
-  The discoverability privacy rule is enforced **in SQL**, never by serializer
-  redaction: a ghost (`profile_visibility = "owner"`) or a blocked user never
-  enters the result set. When `viewer_id` is `nil` (unauthenticated) there is no
-  viewer to block against, so only the `platform` filter applies.
-
-  A blank/whitespace-only term returns `[]` (no query).
+  People search for discovery (US-10.5.4): up to 20 users matching `term` on
+  `display_name` (ILIKE), restricted to discoverable profiles
+  (`profile_visibility = "platform"`) and excluding blocks in either direction.
+  The privacy rule is enforced IN SQL, never by serializer redaction — a row
+  that shouldn't be seen is never selected.
   """
   @search_limit 20
   @spec search_users(String.t(), binary() | nil) :: [User.t()]
@@ -515,20 +481,10 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-  Registers a new user. The first user on the platform receives the `owner` role.
-
-  The user is created with `email_confirmed: false` and a confirmation token.
-  A confirmation email is sent via `EmailConfirmationHandler` (event-driven)
-  and the caller receives `{:ok, user}` where `user.email_confirmed == false`.
-  The user must confirm their email before they can authenticate.
-
-  `opts` may carry `skip_invite_gate: true` — ONLY for the flag-gated
-  `.test`-domain E2E mint helper (`TestHelperController.mint_session/2`),
-  which bypasses the confirmation ceremony for the same reason. Deliberately
-  an OPT and not an attrs key: `AuthController.register/2` passes raw request
-  params as attrs, so a params-reachable bypass would be a mass-assignment
-  hole in the beta gate. The public path calls `register/1` and can never
-  reach it.
+  Registers a new user; the platform's first user becomes `owner`. Created
+  unconfirmed with a confirmation token — the email is sent event-driven via
+  `EmailConfirmationHandler`, and the user cannot authenticate until confirmed.
+  `opts` may carry consent attrs recorded atomically with the insert.
   """
   @spec register(map(), keyword()) ::
           {:ok, User.t()}
@@ -642,24 +598,11 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-  Authenticates a user by email and password.
-
-  Returns `{:ok, user}` on success. On failure, returns one of:
-  - `{:error, :invalid_credentials}` — wrong email or password
-  - `{:error, :email_unconfirmed}` — valid credentials but email not confirmed
-  - `{:error, {:account_locked, retry_after_seconds}}` — per-account lockout active
-  - `{:error, :argon2_busy}` — Argon2 worker pool exhausted
-
-  Order of checks (Issue #161):
-  1. Look up user by email. Unknown email → constant-time dummy-hash branch
-     (`Argon2.no_user_verify/0`) so attackers cannot enumerate emails by timing.
-  2. If `locked_until` is in the future → return `:account_locked` immediately,
-     WITHOUT entering the ArgonPool. Locked attempts must not consume pool
-     slots or attacker-controllable Argon2 work.
-  3. Otherwise run the Argon2 verify. On failure, increment the per-account
-     failure counter (rolling window) and possibly set a new `locked_until`
-     with exponential backoff. On success, zero the counter and clear any
-     stale `locked_until`.
+  Authenticates by email and password. `{:ok, user}` or `{:error, reason}`
+  where reason is `:invalid_credentials`, `:email_unconfirmed`,
+  `{:account_locked, retry_after_seconds}`, or `:argon2_busy`. Runs a dummy
+  Argon2 verify on unknown emails so timing does not reveal existence, and
+  counts failures toward per-account lockout.
   """
   @spec authenticate(String.t(), String.t()) ::
           {:ok, User.t()}
@@ -1114,24 +1057,12 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-  Open a family at login, or advance a family's live token on refresh rotation.
-
-  At login the caller passes a freshly generated `family_id`, so the upsert is
-  a plain insert; the caller treats a failure as fatal — a token whose family
-  row did not persist would violate the invariant that every live access token
-  is tracked by exactly one family.
-
-  Idempotent upsert keyed on `family_id`: an existing family has its
-  `current_jti`, `previous_jti`, `rotated_at` (and `updated_at`) replaced —
-  `session_started_at`, `user_id` and `revoked_at` are preserved. A missing
-  family (a legacy session minted before families existed, or a direct-action
-  test path) is created lazily so the session becomes tracked from now rather
-  than locking the user out. This mirrors the Phase 1 `sst` policy of binding an
-  untracked session from the current moment instead of treating it as invalid.
-
-  The caller records the rotation grace metadata (Issue #180): `previous_jti` is
-  the jti being superseded (the OLD `current_jti`) and `rotated_at` is now, so
-  the reuse gate can honour the just-rotated old token for a short grace window.
+  Opens a token family at login, or advances its live token on refresh
+  rotation. Idempotent upsert on `family_id`: replaces `current_jti` /
+  `previous_jti` / `rotated_at`, preserves `session_started_at`, `user_id`,
+  `revoked_at`. A missing family (legacy session) is created lazily — bound
+  from now rather than locking the user out. `previous_jti` + `rotated_at`
+  give the reuse gate its rotation grace window (180).
   """
   def rotate_token_family(attrs) do
     %AuthTokenFamily{}
@@ -1143,25 +1074,13 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-  Reuse-detection gate for a family-bearing access token.
-
-  Called from `Stacks.Accounts.Guardian.verify_claims/2` on EVERY authenticated
-  request. Returns:
-
-    * `:ok` — the presented `jti` IS the family's live token (happy path).
-    * `{:error, :session_revoked}` — the family is missing (already reaped or
-      never opened) or has `revoked_at` set. Fail closed.
-    * `{:error, :token_reuse_detected}` — a NON-current `jti` was presented in a
-      still-live family. This is a superseded token being replayed (a stale tab,
-      or a stolen already-rotated token). Response: revoke the WHOLE family
-      (`revoked_at` + `destroy_by_sub` burns every one of the user's
-      `guardian_tokens` rows, killing the live token too) and reject.
-
-  The revoke on reuse is a WRITE performed inside verify_claims. It is
-  idempotent (a second call sees the now-revoked family and returns
-  `:session_revoked` without re-burning) and fails CLOSED: any DB error is
-  logged and mapped to `{:error, :family_check_failed}` (a 401), never a crash,
-  so a transient DB hiccup in the gate cannot 500 an authenticated request.
+  Reuse-detection gate, called on EVERY authenticated request
+  (`Guardian.verify_claims/2`). `:ok` when the `jti` is the family's live
+  token; `{:error, :session_revoked}` for a missing/revoked family;
+  `{:error, :token_reuse_detected}` for a superseded `jti` in a live family —
+  which revokes the WHOLE family and burns all the user's guardian tokens.
+  The revoke-on-reuse write is idempotent and fails CLOSED: DB errors map to
+  a 401 (`:family_check_failed`), never a crash.
   """
   @spec check_token_family(binary(), binary(), binary()) ::
           :ok | {:error, :session_revoked | :token_reuse_detected | :family_check_failed}

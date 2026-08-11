@@ -2,20 +2,10 @@ defmodule Stacks.Books do
   @moduledoc """
   Books context — book creation, discovery, and ISBN resolution.
 
-  In the works/editions model:
-  - A **book** (work) is the logical entity: "Circe" by Madeline Miller
-  - A **book_edition** is a specific ISBN/format: "Circe, Bloomsbury paperback, 9780316556347"
-
-  The ISBN hard gate is enforced here: every edition must have a verified ISBN.
-
-  Two neighbours were carved out of this module in #345, and what they are NOT
-  is part of this context's contract:
-
-    * `Stacks.Books.ISBN` — check digits and the ISBN-10 → ISBN-13 canonical
-      form. Pure string arithmetic; no repo.
-    * `Stacks.Uploads` — the `op.uploaded_images` row lifecycle. An image
-      becomes a book by way of `Stacks.Workers.IdentifyBookJob`, not by way of
-      this module.
+  A **book** (work) is the logical entity; a **book_edition** is one ISBN/format
+  of it. The ISBN hard gate is enforced here: every edition needs a verified
+  ISBN. Pure ISBN arithmetic lives in `Stacks.Books.ISBN`; upload-photo
+  lifecycle lives in `Stacks.Uploads` — neither is part of this contract.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -104,14 +94,11 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Returns the primary edition for a book, or the earliest-created edition as a
-  fallback.
+  Returns the primary edition, falling back to the earliest-created one.
 
-  The pick is deterministic: `is_primary` first, then the oldest `created_at`,
-  then the smallest `id`. The page-count ceiling (`Shelving`) leans on this
-  edition, so a book with no (or multiple) `is_primary` flag must resolve to the
-  same edition every time — both here (preloaded editions) and in the query
-  clause below.
+  Deterministic on purpose (`is_primary`, then oldest `created_at`, then
+  smallest `id`): callers like the page-count ceiling must resolve the same
+  edition every time, with or without preloads.
   """
   @spec primary_edition(Book.t()) :: BookEdition.t() | nil
   def primary_edition(%Book{editions: editions}) when is_list(editions) do
@@ -254,26 +241,12 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Sets a book's `visibility_tier` to `"public"` or `"age_gated"`.
+  Sets a book's `visibility_tier` to `"public"` or `"age_gated"` — a PERSON
+  marks a book, code never guesses.
 
-  This replaced the removed automatic subject→BISAC age-gate classifier: a
-  book is age-gated because a PERSON marked it, not because code guessed.
-
-  `opts`:
-    * `:source` — `:user` (default) | `:owner`. Only recorded on the
-      `[:stacks, :moderation, :tiering]` telemetry, never persisted.
-    * `:raise_only` — `true` (default). The safety rule for the USER path:
-      permit only `public → age_gated` (raising the gate). Attempting to
-      LOWER (`age_gated → public`) returns `{:error, :forbidden}` — only the
-      owner may un-gate, and the owner path passes `raise_only: false`.
-
-  Emits the `[:stacks, :moderation, :tiering]` counter (measurement
-  `%{count: 1}`, metadata `%{tier: :public | :age_gated, source: :user |
-  :owner}`) only on a successful CHANGE — a no-op (tier already matches) is
-  silent. Metadata is low-cardinality whitelisted atoms only (no ids/PII).
-
-  Accepts a `%Book{}` or a book id. Returns `{:ok, book}` or
-  `{:error, :not_found | :forbidden | Ecto.Changeset.t()}`.
+  Options: `:source` (`:user` default | `:owner`; telemetry-only), and
+  `:raise_only` (`true` default) — the user path may only RAISE the gate;
+  lowering returns `{:error, :forbidden}` and is owner-only.
   """
   @spec set_visibility_tier(Book.t() | binary(), String.t(), keyword()) ::
           {:ok, Book.t()} | {:error, :not_found | :forbidden | Ecto.Changeset.t()}
@@ -429,18 +402,10 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Returns a paginated list of all books (works) with optional search, subject filter,
-  and sort order. No ownership data is included — this powers the public
-  catalogue endpoint.
+  Paginated public catalogue of works — no ownership data.
 
-  ## Options
-
-    * `:search` — free-text search against `title_tsv` (optional)
-    * `:subject` — filter to books containing this subject (optional)
-    * `:sort` — one of `"title"`, `"author"`, `"recent"` (default `"title"`)
-    * `:page` — 1-based page number (default 1)
-    * `:per_page` — items per page (default 24, max 100)
-
+  Options: `:search` (title tsv), `:subject`, `:sort` (`"title"` default,
+  `"author"`, `"recent"`), `:page` (1-based), `:per_page` (24, max 100).
   Returns `{books, total_count}`.
   """
   @spec list_catalogue(keyword()) :: {[Book.t()], non_neg_integer()}
@@ -476,20 +441,10 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Lists books for the owner moderation surface (#118 owner age-gate override).
-
-  Unlike `list_catalogue/1`, this NEVER hides age-gated books — the platform
-  owner must see and act on every book regardless of tier. There is no viewer
-  filter here; the route is gated by the MFA-verified admin pipeline.
-
-  `opts`:
-    * `:search` — free-text search against `title_tsv` (optional)
-    * `:tier` — `"public"` | `"age_gated"` filter (optional)
-    * `:page` — 1-based page number (default 1)
-    * `:per_page` — items per page (default 50, max 100)
-
-  Returns `{books, total_count}`, each book preloaded with `:author` and
-  `:editions` so the caller can surface title/author/cover/isbn.
+  Lists books for the owner moderation surface. Unlike `list_catalogue/1` it
+  NEVER hides age-gated books — the owner must see every tier; the admin
+  pipeline gates the route. Options: `:search`, `:tier`, `:page`,
+  `:per_page` (50, max 100). Returns `{books, total_count}`.
   """
   @spec list_for_moderation(keyword()) :: {[Book.t()], non_neg_integer()}
   def list_for_moderation(opts \\ []) do
@@ -569,26 +524,9 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Full-text search on books using the stored tsvector columns.
-
-  Returns up to `limit` results (default 20).
-
-  ## Options
-
-    * `:limit` — max results (default 20)
-    * `:scope` — `:title` (default) matches `title_tsv` only; `:deep` (#284)
-      ALSO matches `description_tsv`, so a book whose description mentions the
-      query surfaces even when its title does not. Under `:deep`, title matches
-      are ordered ahead of description-only matches (a boolean title-match key,
-      DESC, then title ASC) so the most-relevant hits stay first; the default
-      title scope is unchanged.
-
-  In both scopes the raw query is passed straight to `plainto_tsquery` via the
-  bound param: injection-safety comes from Ecto param binding + `plainto_tsquery`
-  treating its input as plain text (proven by the #115 edge-case suite), NOT from
-  stripping characters. A prior `String.replace(~r/[^\w\s]/)` sanitiser was
-  lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" — which changed the
-  lexemes and dropped legitimate matches (#291).
+  Full-text search over the stored tsvector columns; up to `:limit` results
+  (default 20). `:scope` — `:title` (default) matches titles only; `:deep`
+  also matches descriptions, ranking title matches first.
   """
   @spec search_books(String.t(), keyword()) :: [Book.t()]
   def search_books(query, opts \\ []) do
@@ -628,15 +566,9 @@ defmodule Stacks.Books do
   defp search_scope_order(query_ast, _title, _query), do: query_ast
 
   @doc """
-  Builds `ts_headline` description snippets for a deep search (#284).
-
-  Given a list of `book_ids` and the raw `query`, returns a map
-  `%{book_id => snippet}` for every book in the list whose `description_tsv`
-  matches — the "why this matched" excerpt behind US-1.5.2. Books whose
-  description does NOT match (title-only hits) are absent from the map, so the
-  caller leaves their snippet empty. The excerpt wraps matched lexemes in
-  `<mark>…</mark>`. Same `plainto_tsquery` injection-safety rationale as
-  `search_books/2`.
+  Builds `ts_headline` description snippets for a deep search: returns
+  `%{book_id => snippet}` with matches wrapped in `<mark>…</mark>`. Books whose
+  description did not match (title-only hits) are ABSENT from the map.
   """
   @spec description_snippets([binary()], String.t()) :: %{binary() => String.t()}
   def description_snippets([], _query), do: %{}
@@ -762,22 +694,11 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Confirms a book by ISBN, creating the work, primary edition, and placing it
-  on a bookshelf for the given user.
-
-  If the ISBN already exists, returns `{:ok, existing_book}` without creating
-  a duplicate.
-
-  If a different ISBN resolves to a title+author that fuzzy-matches an existing
-  work (Jaro-Winkler score > 0.8), returns
-  `{:error, {:merge_required, existing_work_id}}`.
-
-  Otherwise creates the work + primary edition + placement and emits a
-  `books.confirmed` event, returning `{:ok, book}`.
-
-  ## Options
-
-    * `:shelf_name` in `attrs` — bookshelf to place on (default `"wishlist"`)
+  Confirms a book by ISBN: creates work + primary edition + placement and
+  emits `books.confirmed`. An existing ISBN returns `{:ok, existing_book}`;
+  a title+author fuzzy match to another work (Jaro-Winkler > 0.8) returns
+  `{:error, {:merge_required, work_id}}`. `attrs["shelf_name"]` picks the
+  bookshelf (default `"wishlist"`).
   """
   @spec confirm(binary(), map()) ::
           {:ok, :created, Book.t()}
@@ -845,15 +766,9 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Merges a new edition (ISBN) into an existing work.
-
-  Creates a non-primary `book_edition` row linked to `work_id`.
-
-  Returns `{:ok, edition}` on success.
-  Returns `{:error, :not_found}` when `work_id` does not exist.
-  Returns `{:error, :isbn_not_found}` when the upstreams do not know the ISBN.
-  Returns `{:error, :resolver_unavailable}` when they could not be asked.
-  Returns `{:error, changeset}` on validation failure (e.g. duplicate ISBN).
+  Merges a new edition (ISBN) into an existing work as a non-primary row.
+  Errors: `:not_found` (work), `:isbn_not_found` (upstreams rejected it),
+  `:resolver_unavailable` (upstreams unreachable), or a changeset.
   """
   @spec merge_edition(String.t(), map()) :: {:ok, BookEdition.t()} | {:error, term()}
   def merge_edition(work_id, attrs) do
@@ -910,15 +825,9 @@ defmodule Stacks.Books do
   end
 
   @doc """
-  Looks up an author row by exact `name`, inserting a new row if none
-  exists. Returns `{:ok, nil}` for nil or empty input — used during
-  enrichment, where Open Library / Google Books may legitimately not
-  carry an author. Returns `{:error, changeset}` only on insert failure
-  (e.g. row constraint).
-
-  Exposed (rather than kept private) so `Stacks.Workers.EnrichBookJob`
-  can link the resolver's author string to a real `op.authors` row when
-  filling in a placeholder book's `author_id`.
+  Finds an author by exact name, inserting if absent. `{:ok, nil}` for
+  nil/empty input (enrichment sources may carry no author). Public so
+  `EnrichBookJob` can link resolver author strings to `op.authors` rows.
   """
   @spec find_or_create_author(String.t() | nil) ::
           {:ok, Author.t() | nil} | {:error, Ecto.Changeset.t()}
@@ -985,18 +894,10 @@ defmodule Stacks.Books do
   def verification_sources, do: @verification_sources
 
   @doc """
-  Derives an edition's ISBN provenance from resolver metadata (#335 D1).
-
-  `Stacks.Books.ISBNResolver` races Open Library and Google Books and returns
-  whichever answered first, identified by which cross-reference id it carries —
-  `open_library_id` for Open Library, `google_books_id` for Google Books. When
-  neither is present nothing external confirmed the ISBN, so the answer is
-  `"barcode_unverified"`: the same conservative reading the backfill in
-  `20260730200000` uses, and the reason the moderation fast path (which resolves
-  no metadata at all) needs no special case here.
-
-  Accepts a map keyed by either atoms (resolver metadata) or strings (book
-  attrs), since both shapes reach the edition insert paths.
+  Derives an edition's ISBN provenance from resolver metadata: the
+  cross-reference id present names the confirming catalogue
+  (`open_library`/`google_books`); neither present means nothing external
+  confirmed it — `"barcode_unverified"`.
   """
   @spec verification_source_from(map()) :: String.t()
   def verification_source_from(metadata) when is_map(metadata) do
@@ -1010,26 +911,10 @@ defmodule Stacks.Books do
   defp present?(value), do: is_binary(value) and value != ""
 
   @doc """
-  Puts one raw `op.book_editions` row through the production changeset on its
-  way to `Repo.insert_all/3`, and returns it with the changeset's normalised
-  `isbn`. Raises `ArgumentError` if the row is one production could not write.
-
-  `insert_all/3` is the right tool for a fixture — deterministic ids, fixed
-  timestamps, one round trip — but it goes around
-  `book_edition_changeset/2` entirely, which is how `seeds.exs` shipped three
-  editions whose ISBN check digit was wrong and how those rows reached staging
-  (Issue #339). Nothing caught it: unit tests build editions through the
-  changeset, and the seed's own rows were never asked to satisfy it.
-
-  So the seed keeps `insert_all/3` and gains the validation it was missing. A
-  seed row that fails here fails loudly at seed time in every environment —
-  dev, CI, preview, staging — instead of becoming a row that only a CHECK
-  constraint years later discovers. That is the same bargain #329 struck for the
-  test factory: a fixture may only build states a real write path can produce.
-
-  `book_id` may be a dumped 16-byte UUID (what `Seeds.uuid/1` returns) or a
-  string; either is accepted. Keys outside the changeset's cast list —
-  `:id`, `:created_at`, `:updated_at` — are passed through untouched.
+  Vets one raw `op.book_editions` row through the production changeset before
+  `insert_all/3` (which bypasses changesets entirely), returning it with the
+  normalised `isbn`. Raises `ArgumentError` for a row production could not
+  write — seed fixtures must not be able to ship invalid ISBNs.
   """
   @spec vet_edition_row!(map()) :: map()
   def vet_edition_row!(row) when is_map(row) do

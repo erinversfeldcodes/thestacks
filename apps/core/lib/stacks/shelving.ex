@@ -126,24 +126,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  The subset of `book_ids` this user already has on one of their bookshelves.
-
-  `book_on_any_shelf?/2` answers the same question for one book, and the upload
-  inbox (#351) asks it about every candidate of every unfinished upload at once
-  — one query rather than one per book, because the inbox is rendered on every
-  page load that draws the navigation badge.
-
-  Returns a **list**, de-duplicated by the query. An empty input short-circuits without touching the
-  database.
-
-  ⚠️ It used to return a `MapSet` "so the caller's `member?` check is O(1)", and that is why
-  `just verify` went red under OTP 28: `MapSet.t/1` is an **opaque** type, and dialyzer's success
-  typing sees through this function's body to the structural `%MapSet{map: ...}`. Handing that across
-  a module boundary to `MapSet.member?/2` is `call_without_opaque` — the same class as b76fa3f3, and
-  the same fix: do not let an opaque value cross the boundary. The caller builds its own set from this
-  list, so `MapSet.new/1` and `MapSet.member?/2` sit in one module and the opacity never travels.
-
-  The O(1) lookup is unaffected — it moved, it did not go away.
+  The subset of `book_ids` already on one of the user's bookshelves — the
+  batch form of `book_on_any_shelf?/2` (one query for the upload inbox, which
+  renders on every page load). Returns a de-duplicated list.
   """
   @spec shelved_book_ids(binary(), [binary()]) :: [binary()]
   def shelved_book_ids(_user_id, []), do: []
@@ -201,31 +186,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Searches the viewer's own collection by book title (#285).
-
-  Returns up to `:limit` (default 20) `%{book: Book.t(), bookshelf_name: String.t()}`
-  entries — the distinct books the user has an ACTIVE (non-removed) placement of
-  whose title matches the query, each tagged with the bookshelf it sits on (the
-  "where" behind US-1.5.1's collection story). The raw query is passed straight
-  to `plainto_tsquery` via a bound param — injection safety comes from Ecto param
-  binding + `plainto_tsquery` treating its input as plain text (the #291/#296
-  rationale), NOT from stripping characters. `title_tsv`/`description_tsv` are
-  unqualified: only `op.books` carries those generated columns, so they resolve
-  unambiguously across the placement/bookshelf joins. When a book sits on more
-  than one shelf the alphabetically-first bookshelf name wins (deterministic via
-  the order_by). Author + editions are batch-preloaded for search-hit
-  serialization.
-
-  ## Options
-
-    * `:limit` — max distinct books (default 20)
-    * `:scope` — `:title` (default) matches `title_tsv` only; `:deep` (#284) ALSO
-      matches `description_tsv`, mirroring `Stacks.Books.search_books/2`, so a
-      collection book whose description mentions the query surfaces here too.
-      Under `:deep`, title matches are ordered ahead of description-only matches
-      (a boolean title-match key DESC, then title ASC, then bookshelf name ASC),
-      consistent with `search_books/2` (#298); the default title scope keeps its
-      plain alphabetical order.
+  Searches the viewer's own collection by title: up to `:limit` (default 20)
+  `%{book:, bookshelf_name:}` entries for ACTIVE placements. The query goes
+  through `plainto_tsquery` as a bound parameter — injection-safe.
   """
   @spec search_collection(binary(), String.t(), keyword()) :: [
           %{book: Book.t(), bookshelf_name: String.t()}
@@ -290,16 +253,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Builds "looking for a home" discovery labels for the given book ids (#285).
-
-  Returns a map `%{book_id => %{source: "looking_for_home", owner_handle: handle}}`
-  for every book with an always-visible `looking_for_home` placement — one whose
-  `listing_status` is `"active"` (the `Stacks.Visibility` marketplace exception,
-  the only shape that surfaces a placement regardless of its visibility). The
-  owner's public handle rides the existing public-handle exposure; no price is
-  attached (the LFH advert has no price — the marketplace listing carries that).
-  When several such placements exist for one book, the most recently placed wins.
-  Books with no active LFH placement are absent from the map.
+  Builds "looking for a home" discovery labels: `%{book_id => %{source:,
+  owner_handle:}}` for books with an always-visible active listing (the one
+  Visibility marketplace exception). First-placed owner wins for duplicates.
   """
   @spec looking_for_home_labels([binary()]) :: %{binary() => map()}
   def looking_for_home_labels([]), do: %{}
@@ -355,24 +311,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Places a book, recording a specific edition on the placement.
-
-  `book_edition_id` is the edition the reader actually scanned/selected; when it
-  is `nil` (every path that does not know an edition — the create flow, a reread,
-  a manual add) it falls back to the work's primary edition. Recording the scanned
-  edition is #378: without it every placement pointed at the primary, so a reader
-  who scanned a specific printing lost which one they own.
-
-  Options (the fifth argument):
-
-    * `:source` — provenance recorded on the placement AND carried on the
-      `placement.created` payload: `"manual"` (default), `"upload"`, or
-      `"goodreads_import"`. The payload copy is what lets
-      `Feeds.Handlers.PlacementHandler` coalesce an import's N placements into
-      one feed regeneration per bookshelf instead of N.
-    * `:attrs` — extra placement fields merged into the insert (rating, notes,
-      formats, reading progress — an import carrying the reader's Goodreads
-      history). Same changeset, same validations as any other write.
+  Places a book, recording the edition the reader actually scanned/selected;
+  `nil` falls back to the work's primary edition. Options: `:source`
+  (provenance, also carried on the `placement.created` payload so feed regen
+  can coalesce imports) and `:attrs` (extra placement fields, same changeset).
   """
   def place_book(user_id, book_id, bookshelf_name, book_edition_id, opts \\ []) do
     source = Keyword.get(opts, :source, "manual")
@@ -640,43 +582,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Reverses a removal by clearing `removed_at` on the **same placement row**
-  (US-1.6.4 undo extension, #375).
-
-  ⚠️ **The identity of the row is the whole point.** Re-placing the book with
-  `place_book/3` would look identical on the bookshelf and be a different thing:
-  a new UUID, so `op.bookshelf_placement_history` rows (which name bookshelves,
-  not placements — see `GDPR.Deletion`) no longer describe the placement the
-  reader is looking at; a fresh `placed_at`, so "on my shelf since March" becomes
-  today; and the row's `formats`, `personal_rating`, `notes`, `visibility`,
-  `reading_status`, `current_page`, `started_at`/`finished_at` and
-  `book_edition_id` all reset to defaults. An undo that silently discards the
-  reader's own annotations is not an undo. So this is an UPDATE of one row and
-  nothing else, and `restores_the_same_placement_row` asserts the id is unchanged.
-
-  ## The collision case — refused, not reconciled
-
-  `bookshelf_placements_book_active_idx` is `UNIQUE (book_id, bookshelf_id)
-  WHERE removed_at IS NULL`. If the reader re-added the same book to the same
-  bookshelf between the removal and the undo, clearing `removed_at` would give
-  that pair two active rows and the index would reject the write.
-
-  This refuses with `{:error, :already_shelved}` rather than reconciling the two
-  rows, because **the reader has already got what undo was going to give them** —
-  the book is on the shelf. Reconciling means picking one row to keep and one to
-  destroy, and every version of that choice loses data the reader entered without
-  asking: fold the new row into the old and the new row's rating/notes go; fold
-  the old into the new and the old row's do. A refusal costs nothing that is not
-  already recovered, and the removed row stays exactly where it is — still
-  exported by `GDPR.Export`, still erased by `GDPR.Deletion`.
-
-  The check runs inside the transaction AND the changeset carries the index's
-  `unique_constraint`, so a concurrent re-add loses the race with the same
-  `:already_shelved` answer rather than a 500.
-
-  Returns `{:ok, placement}` when the row was restored — and also when it was
-  never removed, mirroring `remove_book/2`'s documented idempotency: a repeated
-  undo is a no-op, not a 404.
+  Reverses a removal by clearing `removed_at` on the SAME row — identity is
+  the contract: a fresh `place_book/3` would mint a new UUID, orphaning
+  placement history and erasure scoping, and would re-stamp `placed_at`.
+  Restores into the original bookshelf; emits `placement.restored`.
   """
   @spec restore_placement(binary(), binary()) ::
           {:ok, Placement.t()}
@@ -785,27 +694,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Returns **all** of the user's active (non-removed) placements for a specific
-  book, each with its bookshelf preloaded. Returns `[]` when the book is not in
-  the user's collection.
-
-  A book may legally sit on several bookshelves at once (owner ruling,
-  2026-07-30) — Library *and* Wish List, say. What stays forbidden is two copies
-  of the same book on the **same** bookshelf, and that is enforced at rung 4 by
-  `bookshelf_placements_book_active_idx`
-  (`UNIQUE (book_id, bookshelf_id) WHERE removed_at IS NULL`), not here.
-
-  This replaces the singular `get_placement_for_book/2`, which ended in
-  `Repo.one()` and so *raised* `Ecto.MultipleResultsError` on the very state the
-  ruling legalised — a live 500 on `GET /api/books/:id` for the owner of a
-  double-placed book (#333). There is deliberately no singular variant left: a
-  function that can only carry one answer is exactly the shape that produced the
-  bug, and every caller has now stated which placement it wants and why.
-
-  Ordering is deterministic — oldest first (`created_at`, `id` breaking ties, so
-  two placements written inside the same microsecond still come back in a stable
-  order) — so "the first placement" means "the one the reader made first"
-  everywhere, and callers wanting the newest can `List.last/1`.
+  ALL of the user's active placements for a book, bookshelf preloaded; `[]`
+  when absent. A book may sit on several bookshelves (owner ruling) — only
+  same-bookshelf duplicates are forbidden, by partial unique index. Ordering
+  is deterministic (created_at, then id): "first" means first-placed.
   """
   @spec get_placements_for_book(binary(), binary()) :: [Placement.t()]
   def get_placements_for_book(user_id, book_id) do
@@ -938,15 +830,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-  Updates the reading progress for a placement. Verifies ownership.
-
-  Auto-sets `started_at` on the first transition to `:reading` (will not overwrite
-  if already set). Auto-sets `finished_at` on transition to `:completed`.
-
-  Emits `placement.reading_started` on the first `:reading` transition, and
-  `placement.reading_completed` on the `:completed` transition.
-
-  Returns `{:ok, placement}` or `{:error, :unauthorized | :not_found | changeset}`.
+  Updates reading progress (ownership-checked). Auto-stamps `started_at` on
+  the first `:reading` transition and `finished_at` on `:completed`; emits
+  `placement.reading_started`/`.reading_completed` accordingly.
   """
   @spec update_reading_progress(binary(), binary(), map()) ::
           {:ok, Placement.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
