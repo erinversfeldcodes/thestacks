@@ -1,37 +1,16 @@
 defmodule Stacks.Books.Handlers.CacheInvalidationHandler do
   @moduledoc """
-  Evicts `BookDetailCache` entries when the thing that cache holds changes.
-
-  What it holds is `Stacks.Books.get_book_detail/1` — an `%Book{}` with its
-  `:author` and `:editions` preloaded — keyed by **work id**. So the only
-  question this handler ever asks of an event is *which work did that change?*,
-  and the answer is not always `aggregate_id`.
-
-  Handles `book.created`, `book.cover_confirmed`, `books.edition_merged`,
-  `book.visibility_tier_changed`, `book.enriched` and
+  Evicts `BookDetailCache` entries (keyed by WORK id) when what they hold
+  changes. Handles `book.created`, `book.cover_confirmed`,
+  `books.edition_merged`, `book.visibility_tier_changed`, `book.enriched`,
   `blog.associations_suggested`.
 
-  ## Where the work id comes from, and why it differs per event
-
-  `book.created` aggregates the work, so `aggregate_id` IS the cache key.
-
-  `book.visibility_tier_changed` and `book.enriched` also aggregate the work, so
-  `aggregate_id` would happen to work for them — and they still read the payload,
-  because "the aggregate happens to be the cache key" is exactly the assumption
-  described below.
-
-  The other three aggregate something else — an edition, an edition, a blog post
-  — and carry the work id in the payload. Reading `aggregate_id` for those is a
-  key that can never be in the cache, so the eviction silently does nothing:
-  exactly the `book.cover_confirmed` defect found while fixing #355, where the
-  handler evicted under an *edition* id and a confirmed cover stayed invisible
-  for the full 5-minute TTL. The handler's own test passed throughout, because
-  it built the event by hand with a book id in `aggregate_id` — a shape
-  `confirm_cover_association/2` has never emitted.
-
-  Payload keys arrive as strings in production (the event is read back out of
-  `event_log`'s jsonb by `SubscriberWorker`) and as atoms when a handler is
-  called directly, so every lookup accepts both.
+  The only question asked of an event is "which work changed?" — and the
+  answer is NOT always `aggregate_id`: three of these events aggregate
+  something else (an edition, a blog post), so every handler reads the work
+  id from the payload, even where the aggregate happens to coincide.
+  `books.edition_merged` evicts BOTH works (the merged-away one may still
+  be cached).
   """
 
   @behaviour Stacks.Events.Handler

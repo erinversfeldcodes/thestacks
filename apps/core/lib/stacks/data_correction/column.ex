@@ -1,39 +1,15 @@
 defmodule Stacks.DataCorrection.Column do
   @moduledoc """
-  The write shared by every correction that changes one column of one row.
+  The shared write for corrections changing one column of one row (lifted
+  from the isbn-only 339 shape — a repair mechanism for one column is a
+  repair for one incident). Deliberately raw SQL, not the schema: a
+  correction runs because reality and the schema disagree, and reading
+  broken rows through the changeset normalises the bad value away.
 
-  #339 built this against `op.book_editions.isbn` and only that column. #340
-  lifted the column out, because the second and third real corrections do not
-  touch `isbn`: #370 has to rewrite `verification_source` on the same table, and
-  an un-merge rewrites a placement's `book_id`. A repair mechanism that can only
-  repair one column is a repair for one incident.
-
-  Deliberately raw SQL rather than the Ecto schema. A correction runs because
-  reality and the schema disagree, and reading the broken rows through the schema
-  that describes the world as it *should* be is how a repair quietly becomes a
-  no-op — the changeset normalises the bad value away before you ever see it.
-
-  Three properties are load-bearing:
-
-    * **The `IS NOT DISTINCT FROM` clause on the old value.** A row that moved
-      between planning and applying is refused, not overwritten. `IS NOT
-      DISTINCT FROM` rather than `=` so a correction whose `from` is `NULL` — a
-      backfill — is expressible without a second code path.
-    * **Identifiers are matched against `@identifier` before they reach SQL.**
-      They come from a compiled correction module rather than from a request, so
-      this is a belt on top of braces; the brace is that
-      `Stacks.DataCorrection.Registry` is the only way to name a correction, and
-      it is an explicit list.
-    * **Every read is guarded by `to_regclass`.** Corrections run *before*
-      migrations (the repair has to land ahead of the constraint that would
-      reject the row), so on a database that has never been migrated the table
-      simply is not there yet — and a brand-new database has nothing to correct.
-      Without the guard, bringing up a fresh environment would abort on a repair
-      for data that cannot exist.
-
-  A correction names its target as `{"op.some_table", "some_column"}`. The table
-  is assumed to carry `id` and `updated_at`, which every table in this schema
-  does (UUID PKs + TIMESTAMPTZ is a project convention).
+  Load-bearing: `IS NOT DISTINCT FROM` on the old value (a row that moved
+  between plan and apply is refused, and NULL compares usefully); the audit
+  insert in the SAME transaction (no audit, no change); `updated_at`
+  untouched (the repair is not an edit by the owner).
   """
 
   alias Core.Repo

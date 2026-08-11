@@ -1,22 +1,10 @@
 defmodule Stacks.AI.TogetherClient do
   @moduledoc """
-  HTTP client for calling the Together AI LLM API to generate review summaries.
-
-  The actual implementation is swappable via Application env:
-
-      config :core, :together_client, Stacks.AI.TogetherClient         # real HTTP
-      config :core, :together_client, Stacks.AI.MockTogetherClient     # tests
-
-  ## Authentication
-
-  Together AI uses Bearer token auth (NOT HMAC):
-
-      Authorization: Bearer <VISION_TOGETHER_API_KEY>
-
-  ## Circuit Breaker
-
-  Protected by `:together_ai_fuse` — managed by `Stacks.CircuitBreakers`.
-  When blown, callers should persist snapshots without a summary.
+  HTTP client for the Together AI LLM API (review summaries). Swappable
+  via `config :core, :together_client` (real vs mock). Auth is
+  `Authorization: Bearer <VISION_TOGETHER_API_KEY>` (not HMAC). Protected
+  by `:together_ai_fuse` — when blown, callers persist snapshots without a
+  summary.
   """
 
   @model "meta-llama/Llama-3.3-70B-Instruct-Turbo"

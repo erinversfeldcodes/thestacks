@@ -1,53 +1,13 @@
 defmodule Stacks.DataCorrection.StaleSeedEditionIsbn do
   @moduledoc """
-  Re-syncs three seeded editions to the ISBN `seeds.exs` now declares for them
-  (Issue #339).
-
-  ## What these rows are
-
-  Staging carries three editions whose ISBN is thirteen digits with the wrong
-  EAN-13 check digit. Unlike the ISBN-10s that
-  `Stacks.DataCorrection.NormaliseEditionIsbn10` repairs, a wrong check digit
-  means one of the thirteen digits is wrong and the row itself cannot say which
-  — there is no arithmetic that recovers the intended value, and recomputing the
-  check digit in general would mint a syntactically valid ISBN identifying some
-  *other* book. That would be fabrication, not repair.
-
-  These three are the exception, and only because their provenance is not in
-  doubt:
-
-    * their ids are `Seeds.uuid(3000 + index)` values — deterministic fixture
-      UUIDs that no production write path can produce;
-    * `created_at` is `2026-01-01T00:00:00Z`, the seed's `jan_01` constant;
-    * `open_library_id` and `google_books_id` are both NULL, so nothing was ever
-      resolved against an external catalogue;
-    * `git log -S` places each of the three literals in `seeds.exs` from the
-      works/editions restructure until Issue #335 corrected them in place.
-
-  For a fixture row, `seeds.exs` **is** the correct value, and it already states
-  one. So this is not a guess about a book; it is a stale fixture catching up
-  with the file that owns it. The `from` values are pinned so the correction can
-  only ever touch a row that still holds the exact pre-#335 literal.
-
-  ## Why not delete them
-
-  Deleting was the obvious alternative and is wrong here: on staging all three
-  are their work's only edition and carry live placements (1, 2 and 1
-  respectively). Dropping them would empty a seeded reader's shelf and remove
-  three works from the catalogue to fix a check digit. Re-seeding does not help
-  either — `seeds.exs` inserts with `on_conflict: :nothing` keyed on the fixture
-  UUID, so the corrected literal can never overwrite the row already there.
-
-  ## One-way
-
-  There is no inverse: the previous value was not a valid ISBN, so nothing
-  should ever restore it. The audit row records it if the history is ever needed.
-
-  ## Scope
-
-  Exactly the three enumerated `(id, from)` pairs. The ids do not exist in
-  production, so this correction is a no-op there and cannot reach a row a
-  reader created.
+  Re-syncs three seeded editions to the ISBN `seeds.exs` now declares
+  (339). A wrong EAN-13 check digit means one of thirteen digits is wrong
+  and the row cannot say which — recomputing the digit would mint a valid
+  ISBN naming some OTHER book: fabrication, not repair. These three are
+  repairable only because provenance is not in doubt (deterministic seed
+  UUIDs, the seed's `jan_01` timestamp, no provider ids) and `seeds.exs`
+  declares the intended value. Plan matches id AND stale ISBN, so a row
+  that drifts is refused.
   """
 
   @behaviour Stacks.DataCorrection

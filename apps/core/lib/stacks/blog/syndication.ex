@@ -1,28 +1,15 @@
 defmodule Stacks.Blog.Syndication do
   @moduledoc """
-  POSSE (US-6.2.1): the post on The Stacks is the canonical original; the
-  Substack copy is a copy and says so.
+  POSSE (US-6.2.1): the post here is canonical; the Substack copy says so.
+  Substack has no write API, so the only honest mechanisms are the two
+  built here: the public blog Atom feed (`feed_xml/1`, polled by Substack's
+  RSS import) and a canonical-tagged export (`export/2`, paste-ready
+  HTML/Markdown with the canonical link baked in). Nothing here sends a
+  request to Substack and the platform never holds a Substack credential.
 
-  Substack has **no official write API**, so the honest mechanisms are the two
-  built here and nothing else:
-
-    * the writer's public blog **Atom feed** (`feed_xml/1`), which Substack's
-      own RSS import polls — set up once, every future public post arrives as
-      a draft;
-    * a **canonical-tagged export** (`export/2`) — the post as paste-ready
-      HTML or Markdown with the canonical link and the "Originally published
-      on The Stacks" line already in it.
-
-  Nothing in this module sends a request to Substack, and the platform never
-  holds a Substack credential. The one inbound external actor is Substack's
-  feed fetcher — an anonymous HTTP client, treated as one.
-
-  ⛔ The feed is **anonymous-only by design** (story §4): its consumer is a
-  third-party fetcher that will republish whatever it reads, so there is no
-  viewer parameter and therefore no branch through which a `platform` post
-  could be served. `feed_posts/1` selects `visibility == "public" AND
-  syndicated AND published_at IS NOT NULL` — a lower-visibility post can reach
-  the feed by no code path.
+  ⛔ The feed is anonymous-only by design: its consumer is a third-party
+  fetcher that republishes whatever it reads, so it must only ever contain
+  what an anonymous viewer could see.
   """
 
   import Ecto.Query

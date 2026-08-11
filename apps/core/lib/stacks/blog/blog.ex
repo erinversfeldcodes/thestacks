@@ -354,19 +354,11 @@ defmodule Stacks.Blog do
   end
 
   @doc """
-  Returns the subset of `book_ids` that `user_id` has written about — i.e. has at
-  least one visible book association authored by them (the "has user writing"
-  signal the spine bookmark ribbon renders, #287).
-
-  Same association semantics as `list_posts_for_book_by_user/2` (visible
-  association authored by the user, drafts included), but batched: one query for a
-  whole shelf so rendering N spines costs no N+1 lookups. An empty `book_ids`
-  short-circuits to an empty list without a query.
-
-  Returns a distinct list rather than a `MapSet` — opaque `MapSet.t()` in a
-  cross-module contract trips dialyzer's opacity check on OTP 28 (the same
-  false-positive `shelf_with_placements/3` shed in 22dcd53f); the sole consumer
-  normalises via `MapSet.new/1` anyway.
+  The subset of `book_ids` that `user_id` has written about (visible
+  association authored by them, drafts included) — the spine bookmark-ribbon
+  signal (287), batched to one query per shelf. Empty input short-circuits.
+  Returns a distinct list, not a `MapSet` — opaque `MapSet.t()` in a
+  cross-module contract trips dialyzer's opacity check on OTP 28.
   """
   @spec book_ids_with_user_writing(String.t(), [String.t()]) :: [String.t()]
   def book_ids_with_user_writing(_user_id, []), do: []

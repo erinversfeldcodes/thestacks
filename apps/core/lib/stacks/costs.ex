@@ -247,19 +247,12 @@ defmodule Stacks.Costs do
   end
 
   @doc """
-  Seeds the 5 static current-month platform cost line items so preview/local
-  deploys always have current-period data for the `/costs` page E2E.
-
-  The daily `Stacks.Workers.RefreshCostsJob` cron only runs at `"0 6 * * *"`, so
-  a fresh preview has no cost data until it fires. This fixture reuses the shared
-  `build_cost_items/3` builder with **Modal fixed at 0 inferences**
-  (`vision_jobs: 0` → `amount_cents: 0`), summing to 1168 cents — the same list
-  the cron produces, guaranteeing seed and cron can't diverge.
-
-  Uses the same current-calendar-month window as `current_period_costs/0` and
-  the same `[:service, :period_start, :period_end]` conflict target as
-  `upsert_cost/1`, so the daily cron updates these rows in place rather than
-  duplicating them. Idempotent. Returns `:ok`.
+  Seeds the 5 static current-month cost line items so fresh previews have
+  data before the daily `RefreshCostsJob` cron (06:00) first fires. Reuses
+  `build_cost_items/3` with Modal fixed at 0 inferences (1168 cents total)
+  — the same list the cron produces, so seed and cron cannot diverge — and
+  the same period window + conflict target, so the cron updates these rows
+  in place. Idempotent; returns `:ok`.
   """
   @spec seed_current_period_costs() :: :ok
   def seed_current_period_costs do

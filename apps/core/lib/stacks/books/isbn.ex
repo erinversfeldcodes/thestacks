@@ -65,23 +65,14 @@ defmodule Stacks.Books.ISBN do
   end
 
   @doc """
-  Canonical ISBN-13 comparison form of `isbn`.
-
-  Strips hyphens/whitespace and upcases, then converts a checksum-valid
-  ISBN-10 (including an `X` check digit) to its ISBN-13 equivalent:
-  `"978"` + the first nine digits + a recomputed EAN-13 (mod-10) check
-  digit over those twelve. The ISBN-10 check digit is discarded — it
-  does not carry into the 13 form. Anything else (13-digit strings,
-  checksum-invalid 10s, garbage, `""`) is returned in the stripped and
-  upcased form otherwise unchanged; non-binary input (incl. `nil`)
-  returns `nil`.
-
-  Two ISBN strings identify the same edition iff their canonical forms
-  are equal, regardless of 10/13 form or hyphenation. Use this on BOTH
-  sides of any ISBN comparison (cache invalidation, rejection-retry
-  exclusions): OL/GB search docs often carry only the ISBN-10 form
-  while `book_editions.isbn` always stores ISBN-13, so bare
-  hyphen-stripped equality silently misses cross-form matches.
+  Canonical ISBN-13 comparison form: strips hyphens/whitespace, upcases,
+  and converts a checksum-valid ISBN-10 (incl. `X`) to ISBN-13 (`978` +
+  nine digits + recomputed EAN-13 check digit; the ISBN-10 check digit
+  does not carry). Anything else returns stripped/upcased unchanged;
+  non-binary returns `nil`. Two strings identify the same edition iff
+  canonical forms are equal — use on BOTH sides of any comparison: OL/GB
+  docs often carry only ISBN-10 while `book_editions.isbn` is always 13,
+  so bare stripped equality misses cross-form matches.
   """
   @spec canonical_isbn13(term()) :: String.t() | nil
   def canonical_isbn13(isbn) when is_binary(isbn) do
