@@ -1,21 +1,10 @@
 defmodule Stacks.AuthSecurityTelemetryTest do
   @moduledoc """
-  Firing tests for the auth/session-security counters added in Issue #237
-  (epic #231):
-
-    * refresh-token REUSE detected — `[:stacks, :auth, :refresh, :reuse_detected]`
-      on the family-burn branch of `Accounts.check_token_family/3`
-    * MFA verify outcome — `[:stacks, :auth, :mfa, :verify]` with
-      `outcome: :success | :failure` from both `MFA.verify_totp/2` and
-      `MFA.verify_recovery_code/2`
-
-  The session absolute-cap emit (`[:stacks, :auth, :session, :expired]`) fires
-  from the AuthController and is covered by a firing test in
-  `auth_controller_test.exs` (it needs the controller/conn path).
-
-  Metadata tags are whitelisted atoms only — never a token, jti, user-id, code,
-  or secret (GDPR: telemetry is a warehouse-adjacent sink). Follows the
-  attach → exercise → assert_receive pattern of `moderation_telemetry_test.exs`.
+  Firing tests for the 237 auth-security counters: refresh-token reuse
+  (`[:stacks, :auth, :refresh, :reuse_detected]` on the family-burn
+  branch) and MFA verify outcome (`[:stacks, :auth, :mfa, :verify]` from
+  both TOTP and recovery-code paths). The session absolute-cap emit is
+  covered in the AuthController's own tests.
   """
 
   use Core.DataCase, async: false

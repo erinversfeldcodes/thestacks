@@ -1,32 +1,11 @@
 defmodule Core.PromEx.DashboardLabelValidationTest do
   @moduledoc """
-  Offline label-key drift guard for the ops dashboards (epic #231, Wave 2).
-
-  `Core.PromEx.DashboardDriftTest` proves every `stacks_*` metric a panel
-  queries is a *registered metric family*. It does NOT look at the LABELS a
-  panel filters or groups on. A panel that filters `{outcom="x"}` (typo'd
-  label key) or groups `by (sourc)` (typo) — where the metric never carries
-  that label — is metric-name-correct, so the drift test is green, yet it
-  renders a permanently-empty panel in Grafana (Prometheus silently matches
-  no series). This is the classic "green test, blank dashboard" trap.
-
-  This test closes that gap with zero infrastructure: it derives each
-  registered family's *allowed label keys* from the PromEx plugin at runtime
-  (never hard-coded) and asserts that every inline label-matcher key — and,
-  where unambiguous, every `by (...)`/`without (...)` grouping key — a panel
-  uses is one the metric actually exports. It is pure JSON + plugin-
-  registration analysis: no Prometheus, no Grafana, no scrape, no network,
-  fully deterministic, and runs inside `mix test` (hence `just verify`).
-
-  Derivation mirrors `DashboardDriftTest.registered_families/0`: the exported
-  Prometheus family name for a `Telemetry.Metrics` metric is its `name` list
-  joined by `_` (TelemetryMetricsPrometheus.Core.Exporter.format_name/1), and
-  a metric's allowed tag keys are its `:tags` (a list of atoms). Distribution
-  families export `_bucket`/`_sum`/`_count` suffixes and carry an implicit
-  `le` bucket-bound label on `_bucket`, so `le` is an allowed key on any
-  distribution family, and a `..._milliseconds_bucket` selector is normalised
-  back to its registered `..._milliseconds` family for the tag lookup. `app`
-  (the `$app` Grafana template variable) is always an allowed key.
+  Offline LABEL-key drift guard for the ops dashboards (epic 231): the
+  drift tests validate metric NAMES, but a typo'd label key
+  (`{outcom="x"}`, `by (sourc)`) is name-correct and still renders a
+  permanently-empty panel — Prometheus silently matches no series. Parses
+  every panel's PromQL selectors/groupings and asserts each label key is
+  one the metric actually carries (from the plugin's tag definitions).
   """
 
   use ExUnit.Case, async: true

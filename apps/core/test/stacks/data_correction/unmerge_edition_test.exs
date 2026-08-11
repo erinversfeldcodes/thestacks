@@ -1,20 +1,10 @@
 defmodule Stacks.DataCorrection.UnmergeEditionTest do
   @moduledoc """
-  Issue #376 — the inverse of `Stacks.Books.merge_edition/2`, and the
-  parameterised sibling to `Stacks.DataCorrection.run/2` that #340 said it would
-  need.
-
-  The centrepiece is `describe "placements"`. #376's hard question is not the row
-  split, it is what happens to the readers, and the answer here is *nothing* —
-  so the assertion has to be one that fails if the code moves them, not one that
-  passes whatever happens. Both directions are asserted: the placements on the
-  work that keeps its identity are still there, and the new work has none.
-
-  `describe "a correction that cannot be recorded"` is copied from #340's test
-  of the same name, deliberately: the targeted path must share that guarantee
-  rather than reimplement it, and the way to show it shares it is to show it
-  fails the same way — `{:error, {row_id, cause}}`, a shape only an
-  audit-in-the-same-transaction can produce.
+  376 — un-merge, the inverse of `merge_edition/2`. The centrepiece is
+  `describe "placements"`: the hard question is what happens to readers,
+  and the answer must be provably "nothing" — asserted in both directions
+  (the old work keeps its placements; the new work starts with none),
+  shaped to fail if the code ever moves them.
   """
   use Core.DataCase, async: false
 

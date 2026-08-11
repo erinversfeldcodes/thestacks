@@ -1,21 +1,11 @@
 defmodule StacksWeb.DataCorrectionControllerTest do
   @moduledoc """
-  Issue #340 — the owner-facing surface of `Stacks.DataCorrection`.
-
-  Four properties are load-bearing, and each has a test written to fail if the
-  property goes away rather than to describe the code:
-
-    * **owner-only, checked where the write happens.** `403 for a non-owner
-      holding a valid MFA-verified admin session` fails the moment
-      `:require_owner` leaves the route. The admin login already refuses a
-      non-owner, so a test that only exercised login would still pass with the
-      route wide open.
-    * **dry-run is what a GET means.** `index` reports the blast radius and the
-      row is asserted unchanged afterwards.
-    * **idempotent.** Applying twice: the second call reports zero rows and
-      writes no further audit rows.
-    * **audited in the change's transaction**, with the operator and their
-      reason — asserted on the row, not on the response.
+  340 — the owner-facing surface. Four load-bearing properties, each
+  tested to fail if it goes away: owner-only where the WRITE happens (an
+  admin token outliving a demotion must 403 — login-only coverage would
+  pass with the route open); GET means dry-run (index writes nothing);
+  apply requires a reason (recorded in the audit row); unknown names 404
+  through `Registry.fetch/1` (no reachable-set widening).
   """
   use CoreWeb.ConnCase, async: false
 

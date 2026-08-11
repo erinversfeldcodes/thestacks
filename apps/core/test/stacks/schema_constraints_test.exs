@@ -1,20 +1,11 @@
 defmodule Stacks.SchemaConstraintsTest do
   @moduledoc """
-  Issue #335 — the four invariants that moved from code-that-remembers into the
-  schema.
-
-  Every test here writes AROUND the application: raw `Repo.insert_all/3` and raw
-  SQL, never a changeset. That is deliberate and it is the whole point. Each of
-  these rules already had an application-level guard, and each guard already
-  worked; what none of them could do was constrain a writer that does not call
-  them — a seed script, a `psql` session, a future bulk importer, a test factory.
-  Proving the rule through `Books.book_edition_changeset/2` would prove the
-  changeset, not the constraint, and would stay green if the constraint were
-  dropped tomorrow.
-
-  Where a `describe` block names a constraint, deleting that constraint from its
-  migration turns the block red — that is the mutation probe each one is written
-  to satisfy.
+  335 — the four invariants that moved from code-that-remembers into the
+  schema. Every test writes AROUND the application (raw `insert_all`/SQL,
+  never a changeset) — deliberately: each rule already had a working
+  app-level guard, and what none could do was constrain a writer that
+  does not call them (seeds, psql, importers, factories). The database
+  refusing is the property under test.
   """
   use Core.DataCase, async: false
 

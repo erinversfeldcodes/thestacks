@@ -1,22 +1,11 @@
 defmodule Stacks.Feeds.PlacementToFeedCacheChainTest do
   @moduledoc """
-  End-to-end guarantee for the placement → feed chain:
-
-      Events.emit("placement.created")
-        → SubscriberWorker (queue :events)
-          → Stacks.Feeds.Handlers.PlacementHandler
-            → RegenerateFeedJob (queue :default)
-              → op.feed_cache row
-
-  Every link in this chain already had its own passing tests, and the chain had
-  **never produced a single `feed_cache` row in any environment**. Each unit test
-  asserted its own link and stopped: the handler test asserted a job was
-  enqueued, the job test asserted a row was written when the job was performed
-  directly. Nothing asserted that emitting the event actually reaches the row.
-
-  That gap is why this file exists and why it drives the real Oban queues via
-  `Oban.drain_queue/2` instead of `perform_job/2` — `perform_job` bypasses the
-  dispatch that was the missing link.
+  End-to-end guarantee for placement → SubscriberWorker →
+  PlacementHandler → RegenerateFeedJob → `op.feed_cache` row. Every link
+  had its own green test while the chain had never produced a single row
+  in any environment — each unit test stopped at its own seam. This one
+  drains both Oban queues and asserts the ROW, so any future seam break
+  (queue rename, handler unregistered, job arg shape) fails here.
   """
 
   use Core.DataCase, async: false

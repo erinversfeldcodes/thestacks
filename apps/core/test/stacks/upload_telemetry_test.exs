@@ -10,22 +10,10 @@ end
 
 defmodule Stacks.UploadTelemetryTest do
   @moduledoc """
-  Suite 11 — Metrics & Telemetry tests for the upload pipeline (Issue #111).
-
-  Verifies that telemetry events are emitted correctly during upload pipeline
-  flows: handler errors in SubscriberWorker, Oban job lifecycle, BudgetTracker
-  state changes, Phoenix request telemetry for all upload-related endpoints,
-  circuit breaker behaviour, and cost tracking.
-
-  User stories covered:
-  - US-1.1.1: Upload photo -> classify -> extract -> resolve -> place
-  - US-1.1.2: ISBN hard gate rejection
-  - US-1.1.3: Non-book rejection
-  - US-1.1.4: Age-gated content
-  - US-1.1.5: Manual ISBN entry
-  - US-1.1.6: Duplicate detection
-  - US-1.1.7: Multi-book extraction
-  - US-1.1.8: Multi-format merge
+  Suite 11 — telemetry for the upload pipeline (111): SubscriberWorker
+  handler errors, Oban job lifecycle, BudgetTracker state changes,
+  Phoenix request telemetry on upload endpoints, circuit-breaker
+  behaviour, and cost tracking, across the 111 upload user stories.
   """
 
   use CoreWeb.ConnCase, async: false

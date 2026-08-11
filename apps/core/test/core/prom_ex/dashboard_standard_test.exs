@@ -1,20 +1,10 @@
 defmodule Core.PromEx.DashboardStandardTest do
   @moduledoc """
-  Enforces the "every panel teaches" dashboard standard (Issue #233,
-  `docs/agents/standards/dashboards.md`) across **every** ops dashboard.
-
-  Unlike `Core.PromEx.DashboardDriftTest` — which guards metric ↔ panel
-  lock-step for the single #230 moderation/age-gate dashboard — this test
-  reads the dashboard list from `Core.PromEx.dashboards/0` at runtime and
-  asserts that **every** registered dashboard's data panels carry a
-  non-trivial teaching description. New dashboards (#236–#240) inherit the
-  rule the moment they are added to `dashboards/0`, with no edit here.
-
-  A "data panel" is any panel that renders a series; Grafana `row`
-  separators are layout-only and exempt. A description must be long enough
-  to carry the four teaching elements (what · how · means · spike/drop);
-  the same `< 40` chars threshold used by `DashboardDriftTest` treats a
-  stub as missing.
+  Enforces the "every panel teaches" standard (233,
+  `docs/agents/standards/dashboards.md`) across EVERY dashboard read from
+  `Core.PromEx.dashboards/0` at runtime: each data panel must carry a
+  non-trivial teaching description. New dashboards inherit the rule the
+  moment they are registered.
   """
 
   use ExUnit.Case, async: true

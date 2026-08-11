@@ -1,19 +1,10 @@
 defmodule Stacks.DiscoveryTelemetryTest do
   @moduledoc """
-  Firing tests for the discovery / profiles / people-search observability
-  counters added in Issue #239 (Wave 2 of the #231 observability epic).
-
-  Verifies that telemetry events fire with the right measurements and
-  bounded-atom metadata for:
-  - people-search outcome (`:hit` / `:zero_result` on an empty result list)
-  - public-profile resolution outcome (`:ok` / `:not_found` on BOTH the absent
-    handle and the ghost/block 404 branch)
-  - public shelf browse-cap hits (ONLY when the #221 cap truncated rows)
-  - handle claims (ONLY when the profile update actually changed `:handle`)
-
-  Metadata tags are whitelisted atoms only — the search query string, handles,
-  user-ids and IPs are NEVER passed as a telemetry tag (unbounded cardinality +
-  PII; telemetry is warehouse-adjacent).
+  Firing tests for the 239 discovery/profiles counters: people-search
+  outcome (:hit/:zero_result), public-profile resolution (:ok/:not_found
+  on both the absent-handle and ghost/block branches), browse-cap hits
+  (only when the 221 cap truncated), and handle claims. Metadata is
+  bounded atoms only.
   """
 
   use CoreWeb.ConnCase, async: false

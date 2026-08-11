@@ -1,22 +1,9 @@
 defmodule Core.DbtRunnerConfigTest do
   @moduledoc """
-  Drift guard for `DbtRunner`'s dbt project directory (Issue #282).
-
-  `DbtRunner.dbt_dir/0` once defaulted to `Path.join(File.cwd!(), "../../dbt")`,
-  which assumes the BEAM's cwd is `apps/core`. Dev starts `mix phx.server`
-  (`just dev`) from the repo root, so the default resolved to `<repo>/../../dbt`
-  — a nonexistent path — and every event-triggered `DbtRefreshJob` failed with
-  `spawn: Could not cd to …/../../dbt`. Sibling of the #278 watcher-cwd defect.
-
-  `mix test` happens to run each umbrella app with cwd = `apps/core`, where the
-  broken `File.cwd!()` default *coincidentally* resolves to `<repo>/dbt` — so a
-  test that trusts the ambient cwd can't catch the bug. This test instead
-  resolves `dbt_dir/0` from a neutral cwd and asserts it still points at a real
-  dbt project directory: it fails against the cwd-relative default and passes
-  only when the default is anchored to the module's source location, cwd-free.
-
-  It is `async: false` because it briefly changes the process working directory
-  (`File.cd!/2` restores it on the way out, including on failure).
+  Drift guard for `DbtRunner.dbt_dir/0` (282): a cwd-relative default
+  (`../../dbt`) worked under `mix test` (cwd = apps/core) but broke under
+  `just dev` (cwd = repo root), failing every `DbtRefreshJob`. Asserts the
+  resolved dir is anchored to the repo root regardless of cwd.
   """
 
   use ExUnit.Case, async: false

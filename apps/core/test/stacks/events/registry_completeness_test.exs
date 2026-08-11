@@ -1,18 +1,11 @@
 defmodule Stacks.Events.RegistryCompletenessTest do
   @moduledoc """
-  Pins `Stacks.Events.Registry.all_event_types/0` to what the codebase actually emits.
-
-  The registry's moduledoc claimed to be "the complete catalog … surfaced by
-  `all_event_types/0` for replay/diagnostics" while listing 22 of the 54 emitted
-  types. Nothing caught that, because a catalog that is merely *incomplete* breaks
-  no caller — replay tooling just quietly does less than you think it does.
-
-  This test reads the source of `apps/core/lib` for `event_type: "..."` emit sites
-  and asserts every one of them is catalogued. It is a grep, and grepping source is
-  ordinarily a poor substitute for a behavioural test — but here the property under
-  test *is* a property of the source: "every event type this codebase can emit is
-  named in one of two lists". There is no runtime moment at which all emitters have
-  run, so there is nothing else to observe.
+  Pins `Registry.all_event_types/0` to what the codebase actually emits.
+  The registry once claimed completeness while listing 22 of 54 types —
+  an incomplete catalog breaks no caller; replay just quietly does less.
+  Greps `apps/core/lib` for `event_type: "..."` emit sites and asserts
+  every one is catalogued, so adding an emitter without registering it
+  fails here.
   """
 
   use ExUnit.Case, async: true

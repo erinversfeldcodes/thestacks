@@ -1,21 +1,10 @@
 defmodule StacksWeb.Plugs.RouteGroupTest do
   @moduledoc """
-  Tests for the route-grouping plug (Issue #136 Phase 1, DoD #1).
-
-  The plug inspects `conn.request_path` and assigns a `:route_group` tag that
-  flows through into `phoenix.router_dispatch.stop.duration` telemetry metadata,
-  so SLO thresholds can be computed per feature group.
-
-  Groups:
-    * `:auth`         — /api/auth/*
-    * `:catalogue`    — /api/catalogue, /api/books/*
-    * `:bookshelves`  — /api/bookshelves/*, /api/placements/*
-    * `:upload`       — /api/upload*
-    * `:gdpr`         — /api/gdpr/*
-    * `:settings`     — /api/settings/*
-    * `:health`       — /api/health
-    * `:metrics`      — /internal/metrics
-    * `:other`        — anything else
+  Route-grouping plug tests (136): `request_path` → `:route_group` tag
+  (:auth, :catalogue, :bookshelves, :upload, :gdpr, :settings, :health,
+  :metrics, :other) flowing into router-dispatch telemetry metadata for
+  per-group SLO thresholds. Asserts each mapping and the three conn
+  locations the tag is written to.
   """
 
   use CoreWeb.ConnCase, async: false

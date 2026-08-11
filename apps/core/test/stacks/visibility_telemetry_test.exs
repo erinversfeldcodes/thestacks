@@ -1,21 +1,9 @@
 defmodule Stacks.VisibilityTelemetryTest do
   @moduledoc """
-  Firing tests for the visibility/social observability counters added in
-  Issue #197 (punch #20 of the #122 privacy/visibility epic).
-
-  Verifies that telemetry events fire with the right measurements and
-  metadata for:
-  - profile-visibility change by direction (tighten / loosen / same)
-  - visibility recap outcome + cap counts (bookshelves / placements / posts)
-  - block / unblock counts
-  - block error rates (cannot_block_self, already_blocked)
-  - `:rate_limit_social` (generic rate-limit) hit counts by bucket
-  - ViewAs usage + error counts by perspective
-  - visibility ceiling-rejection counts by resource_type
-  - robots.txt / crawler fetch counts
-
-  Metadata tags are whitelisted atoms only — no raw user input (uuids,
-  perspective strings) is ever passed as a telemetry tag.
+  Firing tests for the 197 visibility/social counters:
+  profile-visibility change by direction, recap outcome + cap counts,
+  block/unblock, block error rates, social rate-limit hits by bucket, and
+  ViewAs usage/errors. Bounded-atom metadata throughout.
   """
 
   use CoreWeb.ConnCase, async: false

@@ -1,24 +1,10 @@
 defmodule Core.PromEx.VisibilitySocialDriftTest do
   @moduledoc """
-  Drift guard for the visibility / social / ViewAs dashboard-as-code (Issue
-  #236, epic #231). Mirrors `Core.PromEx.AuthSecurityDriftTest` (the #237 guard)
-  but scoped to `grafana/visibility_social.json`.
-
-  Proves the dashboard stays in lock-step with the metrics the code actually
-  registers, so CI fails on either kind of drift:
-
-    * a panel that queries a metric name **not registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * a **new #236 visibility/social/ViewAs family** (profile-change, ceiling-
-      rejection, recap + capped sums, block/unblock/block_error, view_as
-      usage/error) with **no panel** (an invisible metric).
-
-  Registered names are read from the plugin at runtime (never hard-coded): the
-  exported Prometheus family name for a `Telemetry.Metrics` metric is its
-  `name` list joined by `_`, exactly how the plugin's `[:stacks, :visibility,
-  :profile_change, :count, :total]` becomes
-  `stacks_visibility_profile_change_count_total`.
+  Drift guard for the visibility/social/ViewAs dashboard-as-code (236, epic 231; grafana/visibility_social.json):
+  panels may only query metric families registered by
+  `Core.PromEx.Plugins.Stacks`, and every registered 236 visibility/social family must have
+  a panel. Either direction of drift — a renamed metric silently blanking
+  a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true

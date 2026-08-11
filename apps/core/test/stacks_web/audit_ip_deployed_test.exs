@@ -1,36 +1,11 @@
 defmodule StacksWeb.AuditIpDeployedTest do
   @moduledoc """
-  LIVE-STACK audit-provenance validation (Issue #176, B2).
-
-  The audit-log IP is stamped from the TRUSTED `fly-client-ip` header, which Fly
-  injects/overwrites at its edge — a real client cannot set it. The spoofable
-  `x-forwarded-for` must NEVER be recorded as provenance.
-
-  Local unit/integration tests (`auth_controller_test.exs`) set `fly-client-ip`
-  and `x-forwarded-for` by hand, which is impossible on a real Fly deployment.
-  This test closes that gap: it drives the PUBLIC register endpoint through the
-  real Fly-fronted preview carrying a spoofed `x-forwarded-for`, then reads the
-  durable side effect — the `audit.audit_log` row — from the preview DB and
-  asserts the spoofed value was NOT trusted.
-
-  Runs only under the deployed target (`@moduletag :deployed_only`, excluded by
-  test_helper.exs). Invoke via:
-
-      TEST_TARGET=deployed BASE_URL=https://<preview>.fly.dev \\
-        DATABASE_URL=postgres://…<preview neon> \\
-        mix test --only deployed_only test/stacks_web/audit_ip_deployed_test.exs
-
-  NOTE: `Core.Repo` is NOT usable here. `apps/core/config/test.exs` hardcodes
-  Core.Repo to `hostname: "localhost"` / `stacks_test`, and there is no deployed
-  runtime override — so `DATABASE_URL=<preview>` does NOT repoint Core.Repo, and
-  a Repo.query would read the local test DB (where the live-registered user does
-  not exist). Instead we open a DIRECT Postgrex connection straight to
-  `DATABASE_URL` (the preview Neon URL the runner passes) and read the row the
-  live app actually committed there.
-
-  ONE register request → does not meaningfully load the per-IP `:auth` bucket
-  (well under the 60/60s limit), so it is safe to run alongside other deployed
-  tests. The saturating flood lives in the Playwright `ratelimit` project.
+  LIVE-STACK audit-provenance validation (176): the audit IP is stamped
+  from Fly's trusted `fly-client-ip` (injected/overwritten at the edge),
+  never the spoofable `x-forwarded-for`. Local tests set both headers by
+  hand, which a real deployment makes impossible — this drives the real
+  Fly-fronted preview with a spoofed XFF and reads the audit row back to
+  prove the trusted header won. Skips locally (no deployed stack).
   """
 
   use ExUnit.Case, async: false

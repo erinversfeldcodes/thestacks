@@ -1,23 +1,11 @@
 defmodule Stacks.DataCorrectionTest.RelabelVerificationSource do
   @moduledoc """
-  A correction over a column that is not `isbn` — defined here, deliberately not
-  registered — to prove #340's mechanism generalises past the one column #339
-  needed.
-
-  It is shaped after Issue #370, where 206 of 206 `book_editions` rows carry
-  `verification_source = "barcode_unverified"` and every book detail page
-  therefore tells the reader it cannot show a title, beside the title it is
-  holding. #370's real correction needs a disposition decision that is not a
-  test's to make — blanket-relabelling to `open_library` would assert a
-  verification that never happened — so this stands in for its *shape* and
-  nothing else. It exists to prove three things a `publisher` fixture could not:
-
-    * a target that is not `isbn` reads and writes correctly;
-    * `Column.holding/2` selects rows by an exact value rather than a regex,
-      which is how #370's predicate is expressed;
-    * `op.book_editions_verification_source_check` accepts the write, so the
-      only open question for #370 is *which* of the three enumerated values a
-      given row deserves — which is exactly the decision being left to it.
+  Exercises 340's mechanism through a correction over a NON-isbn column,
+  defined here and deliberately unregistered — proving the machinery
+  generalises past the one column 339 needed (shaped after 370's
+  `verification_source` repair, whose real disposition decision is not a
+  test's to make). Covers dry-run, apply, audit-in-transaction, and the
+  moved-row refusal.
   """
   @behaviour Stacks.DataCorrection
 

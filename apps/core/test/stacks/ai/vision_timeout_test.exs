@@ -1,42 +1,11 @@
 defmodule Stacks.AI.VisionTimeoutTest do
   @moduledoc """
-  Issue #350 — the vision client used to give up 90 seconds BEFORE Modal did.
-
-  `Stacks.AI.Client` waited 210s; `apps/vision/modal_app.py` allows its function
-  300s. Under the load Modal's number was sized for — cold start, then queue wait
-  on a contended A10G — core hung up on calls the GPU was still working on. The
-  cost was not a lost result but a multiplied one: the GPU work continued and was
-  billed, the give-up was classified `:transient` (rightly — a lost answer says
-  nothing about the image), the job retried, and the retry queued a fresh cold
-  start behind the same contended GPU. A mis-set timeout became a retry
-  amplifier.
-
-  It survived because the constant's own comment stated the intent backwards
-  ("210s gives the Modal service headroom beyond its own 300s inference
-  timeout"), and nothing but a reader comparing two numbers in two languages
-  could have noticed. So the fix is not only a new value. This suite makes the
-  relationship checkable:
-
-    1. **The direction.** The client must outlast the service, and must do so by
-       construction (`modal + slack`) rather than by two literals that happen to
-       be ordered correctly today.
-    2. **The mirror.** `@modal_function_timeout_ms` claims to reflect a Python
-       decorator. That claim is read out of `modal_app.py` here, so editing
-       `timeout=300` without the Elixir side reddens `mix test` instead of
-       silently re-inverting the pair.
-    3. **The falsifiability.** A give-up emits no duration — a call that reaches
-       the deadline leaves via `[:stacks, :vision, :request, :exception]`, never
-       `:stop` — so the latency histogram from #349 structurally cannot show the
-       tail this timeout governs. Without a counter on that path, "330s" would be
-       a number nobody could ever check. The counter is asserted attached, not
-       merely defined.
-
-  The fourth consequence of moving this deadline — that the #349 histogram's top
-  finite bucket must move with it, or `+Inf` becomes reachable and the p95 falls
-  back to a fabricated `2 x max_finite_bucket` — is owned by
-  `Core.PromEx.VisionLatencyTest` and deliberately not restated here.
-
-  `async: false` — the export assertions read global PromEx state.
+  350 — the vision client gave up 90s BEFORE Modal's own 300s deadline,
+  so core hung up on calls the GPU was still (billably) working on, then
+  retried into the same contention. Proves the client ceiling is DERIVED
+  as the server deadline + slack (never below it), that the derivation
+  reads the sidecar's constant, and that the timeout branch classifies
+  `:transient`.
   """
 
   use ExUnit.Case, async: false

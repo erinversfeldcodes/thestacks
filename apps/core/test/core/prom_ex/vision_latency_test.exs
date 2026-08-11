@@ -1,32 +1,11 @@
 defmodule Core.PromEx.VisionLatencyTest do
   @moduledoc """
-  Issue #349 — `Stacks.AI.Client` has always measured how long a Modal vision
-  call takes and emitted it on `[:stacks, :vision, :request, :stop]`, and until
-  this metric existed **nothing consumed it**: the duration never left the BEAM,
-  so every timeout in the upload path was sized from an estimate in a comment.
-
-  This suite proves the two things a compiling metric definition does NOT prove:
-
-    1. **It is attached.** A `Telemetry.Metrics` struct in a plugin is inert
-       until PromEx registers a handler for its `event_name`. The export
-       assertions below emit the REAL event and read it back out of
-       `PromEx.get_metrics/1` — the same path `/internal/metrics` and the
-       ADR-021 push both read. (What they still cannot prove is that the push
-       reaches VictoriaMetrics; that needs a real upload against a deployed
-       stack, and is the lead's merge-time check. The #248 lesson is that this
-       stack once shipped structurally complete and blank.)
-
-    2. **Its buckets span the claim it tests.** A histogram whose ceiling sits
-       below the real tail reports a p95 that is an artefact of the ceiling —
-       the 2026-04-20 incident recorded in `Core.PromEx.Plugins.Stacks`. The
-       bucket assertions tie the top bucket to
-       `Stacks.AI.Client.receive_timeout_ms/0` (so #350's retune of that
-       timeout cannot silently leave the histogram short) and put edges on the
-       "~3–8s" estimate this metric exists to check.
-
-  `async: false` — PromEx state is global and these assertions read scraped
-  output. Series are isolated from other suites (`observability_telemetry_test`
-  emits the same event) by using `status` values no other test emits.
+  349 — the vision-call duration was emitted but nothing consumed it, so
+  upload timeouts were sized from a comment's estimate. Proves what a
+  compiling metric definition does not: the distribution is ATTACHED
+  (PromEx registered a handler for its event) and EXPORTED under the
+  expected family name with the expected buckets — so the p95 exists
+  where the SLO gate and timeout-derivation can read it.
   """
 
   use ExUnit.Case, async: false

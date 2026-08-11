@@ -1,26 +1,11 @@
 defmodule StacksWeb.Plugs.MetricsAuthTest do
   @moduledoc """
-  Tests for the /internal/metrics auth plug (Issue #136 Phase 1, DoD #4).
-
-  Public requests to /internal/metrics are rejected with 401 unless the
-  request carries `authorization: Bearer <METRICS_SCRAPE_TOKEN>` matching the
-  configured token.
-
-  The one exception (Issue #232) is Fly's managed-Prometheus scrape, which
-  hits the machine directly over 6PN and cannot present the bearer. That
-  path is allowed WITHOUT a token — but only when it is provably internal:
-  a `fdaa::/16` remote_ip AND the absence of the `fly-client-ip` header that
-  fly-proxy stamps on every public-edge request. A bare 6PN remote_ip is NOT
-  enough on its own (public HTTPS re-originates over 6PN too), so we assert
-  that a 6PN request *with* `fly-client-ip` (a proxied public caller) still
-  gets 401. See the plug's `@moduledoc` for the full rationale.
-
-  We exercise the plug in two ways:
-
-    1. Unit: call `MetricsAuth.call/2` directly with synthesised conns and
-       verify the plug halts (401) or passes through.
-    2. Integration: GET /internal/metrics via the endpoint and check the
-       status code — 200 for authorised callers, 401 for unauthorised.
+  `/internal/*` auth plug tests (136): 401 without the matching
+  `Bearer <METRICS_SCRAPE_TOKEN>`. The one exception (232) is Fly's
+  managed-Prometheus scrape over 6PN, allowed WITHOUT a token only when
+  provably internal: `fdaa::/16` remote_ip AND no `fly-client-ip` header
+  (which the edge always adds to public traffic) — both conditions
+  asserted, including the spoof case.
   """
 
   use CoreWeb.ConnCase, async: false

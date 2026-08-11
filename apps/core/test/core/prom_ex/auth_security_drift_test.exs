@@ -1,24 +1,10 @@
 defmodule Core.PromEx.AuthSecurityDriftTest do
   @moduledoc """
-  Drift guard for the auth & session-security dashboard-as-code (Issue #237,
-  epic #231). Mirrors `Core.PromEx.DashboardDriftTest` (the #230
-  moderation/age-gate guard) but scoped to `grafana/auth_security.json`.
-
-  Proves the dashboard stays in lock-step with the metrics the code actually
-  registers, so CI fails on either kind of drift:
-
-    * a panel that queries a metric name **not registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * a **new #237 auth-security family** (refresh-reuse-detected, session
-      absolute-cap expiry, MFA verify) with **no panel** (an invisible
-      security-critical metric).
-
-  Registered names are read from the plugin at runtime (never hard-coded): the
-  exported Prometheus family name for a `Telemetry.Metrics` metric is its
-  `name` list joined by `_`, exactly how the plugin's `[:stacks, :auth,
-  :refresh, :reuse_detected, :count, :total]` becomes
-  `stacks_auth_refresh_reuse_detected_count_total`.
+  Drift guard for the auth & session-security dashboard-as-code (237, epic 231; grafana/auth_security.json):
+  panels may only query metric families registered by
+  `Core.PromEx.Plugins.Stacks`, and every registered 237 auth-security family must have
+  a panel. Either direction of drift — a renamed metric silently blanking
+  a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true

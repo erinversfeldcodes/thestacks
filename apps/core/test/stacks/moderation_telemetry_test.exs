@@ -1,22 +1,10 @@
 defmodule Stacks.ModerationTelemetryTest do
   @moduledoc """
-  Firing tests for the moderation-funnel operational counters added in
-  Issue #228 (US-4.1 §13, epic #118).
-
-  Verifies each step of the moderation pipeline emits a `[:stacks,
-  :moderation, …]` telemetry event with the right measurements and
-  metadata:
-
-  - step 1 classification outcome — `:book` / `:not_a_book` / `:ambiguous`
-  - step 2 ISBN resolution outcome — `:resolved` / `:isbn_not_found`
-  - step 3 age-gate tiering — `:public` / `:age_gated`
-  - compound-title expansion — split frequency + parts
-
-  Metadata tags are whitelisted atoms only — never a raw ISBN, title, or
-  any other user input (GDPR: telemetry is a warehouse-adjacent sink).
-
-  Follows the attach → exercise → assert_receive pattern of
-  `upload_telemetry_test.exs` / `visibility_telemetry_test.exs`.
+  Firing tests for the 228 moderation-funnel counters: classification
+  outcome (:book/:not_a_book/:ambiguous), ISBN resolution
+  (:resolved/:isbn_not_found), age-gate tiering (:public/:age_gated),
+  and compound-title expansion. Metadata tags are whitelisted atoms —
+  Prometheus label cardinality depends on it.
   """
 
   use Core.DataCase, async: false

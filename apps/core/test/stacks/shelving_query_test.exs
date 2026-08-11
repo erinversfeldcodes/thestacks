@@ -1,31 +1,10 @@
 defmodule Stacks.ShelvingQueryTest do
   @moduledoc """
-  Query-plan and query-count guards for the shelf-browsing read path
-  (Issue #112, punch #2 and #3 — Layer 3 cross-US cells).
-
-  Two distinct guarantees are asserted here:
-
-    * **#2 — index sanity.** The two predicates the browse path issues
-      (`bookshelves` by `(user_id, name)`, and the active-placement filter
-      `removed_at IS NULL`) are servable by a real index, and the migrations'
-      indexes still exist in the shape the queries need.
-
-    * **#3 — no N+1.** `Shelving.get_bookshelf_shelves/2` — the function
-      `BookshelfController.show/2` actually calls (`bookshelf_controller.ex:72`),
-      *not* `get_bookshelf_books/2` — issues a query count that does not grow
-      with the number of placements, shelves, authors, or editions involved.
-
-  ## Why `enable_seqscan = off` in the plan tests
-
-  Test-scale tables (a handful of rows) always plan to a Seq Scan regardless of
-  what indexes exist, so a bare `EXPLAIN` assertion would either be vacuous or
-  require seeding tens of thousands of rows per test. Disabling seqscan makes
-  the planner reveal its *best index path* for the predicate. The assertion is
-  therefore "this predicate is index-servable by THIS index", which fails if the
-  index is dropped, its column order changes, or the query's predicate drifts to
-  a shape the index cannot serve — the regressions this cell is meant to catch.
-  A plain Seq Scan still appears in the plan if no index can serve the predicate
-  (the setting is a cost penalty, not a prohibition), so the assertion has teeth.
+  Query-plan and query-count guards for the shelf-browse read path
+  (112): index sanity (the browse predicates are servable by real,
+  still-existing indexes — asserted via EXPLAIN) and no-N+1
+  (`get_bookshelf_shelves/2` issues a bounded query count regardless of
+  shelf/placement count, counted via a telemetry handler).
   """
 
   use Core.DataCase, async: false

@@ -1,26 +1,11 @@
 defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
   @moduledoc """
-  The terminal guarantee, and the retry split that decides how long reaching it
-  takes.
-
-  These are written as a sweep over every failure branch rather than as one test
-  per bug, because the defect being prevented is a *class*: some exit of
-  `IdentifyBookJob` that forgets to mark the row, so the reader watches a spinner
-  until the SSE deadline expires long after the job is dead. Testing the two
-  branches that were known to be broken would have proved nothing about the third.
-
-  Two properties are asserted over the whole branch table:
-
-    * on the **final** attempt, every branch leaves the row non-`pending`;
-    * on a **non-final** attempt, a transient branch leaves the row `pending`
-      *and retries* — because "always mark immediately" would also pass the
-      first property while destroying retries, and a test that cannot tell those
-      apart is not testing the guarantee.
-
-  Steering goes through `Stacks.AI.MockClient.put_response/2` (the seam added by
-  #327) rather than a bespoke module per branch: the branches differ only in what
-  the vision client returns, and 12 near-identical inline mocks would be 12 places
-  to update.
+  The terminal guarantee, swept over EVERY failure branch rather than one
+  test per bug — the defect is a class (an exit that forgets to mark the
+  row, leaving the reader a spinner), and testing the two known-broken
+  branches proves nothing about the third. Asserts across the branch
+  table: the row always reaches a terminal status on the final attempt,
+  and deterministic errors cancel instead of burning GPU retries.
   """
 
   use Core.DataCase, async: false

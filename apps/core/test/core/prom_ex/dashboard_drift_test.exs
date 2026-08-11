@@ -1,24 +1,10 @@
 defmodule Core.PromEx.DashboardDriftTest do
   @moduledoc """
-  Drift guard for the moderation + age-gate dashboard-as-code (Issue #230).
-
-  The dashboard JSON checked into `apps/core/priv/grafana/` visualises the
-  #228 moderation-funnel and age-gate counters. This test proves the
-  dashboard stays in lock-step with the metrics the code actually
-  registers, so CI fails on either kind of drift:
-
-    * a panel that queries a metric name **no longer registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * a #228 moderation/age-gate metric family with **no panel** (an
-      invisible metric).
-
-  The registered names are read from the plugin at runtime (never
-  hard-coded) so this test cannot itself drift: the exported Prometheus
-  family name for a `Telemetry.Metrics` metric is its `name` list joined by
-  `_` (see TelemetryMetricsPrometheus.Core.Exporter.format_name/1), which
-  is exactly how the plugin's `[:stacks, :moderation, :classification,
-  :count, :total]` becomes `stacks_moderation_classification_count_total`.
+  Drift guard for the moderation + age-gate dashboard-as-code (230; priv/grafana):
+  panels may only query metric families registered by
+  `Core.PromEx.Plugins.Stacks`, and every registered 228 moderation/age-gate family must have
+  a panel. Either direction of drift — a renamed metric silently blanking
+  a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true

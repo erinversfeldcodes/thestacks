@@ -1,27 +1,10 @@
 defmodule Stacks.GDPR.DeletionTest do
   @moduledoc """
-  Tests for `Stacks.GDPR.Deletion.delete_user_data/1` — Issue #138 Phase 1
-  additions only.
-
-  Phase 1 wires a `Multi.run` step into the existing erasure transaction
-  that issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before any audit
-  modification. Two invariants:
-
-    1. The GUC is set inside the same transaction the audit cleanup runs in
-       — proven indirectly by issuing an audit-row UPDATE inside the same
-       Multi and asserting it succeeds (i.e. the trigger from Phase 1's
-       append-only migration permits it).
-    2. The GUC is scoped to the transaction (SET LOCAL, not SET) — proven by
-       asserting a subsequent raw UPDATE on `audit.audit_log` fails after
-       the multi commits.
-
-  Until Phase 1's implementation lands, the GUC is never set, so the audit
-  trigger blocks any cleanup the multi attempts and the deletion fails.
-
-  Also covers Issue #121: the erasure audit-row invariants and the
-  `op.event_log` GDPR-scrub invariant — the erased user's own event rows are
-  preserved (immutability: never deleted) but their PII-bearing payload and
-  metadata are redacted in place, while unrelated rows are left untouched.
+  138 Phase 1: erasure must be able to modify the append-only audit log.
+  A `Multi.run` issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before
+  audit cleanup; asserts the GUC works inside the transaction (an
+  audit-row UPDATE succeeds under the trigger) and is LOCAL (the same
+  UPDATE outside the transaction is still refused).
   """
   use Core.DataCase, async: false
 

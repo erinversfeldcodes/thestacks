@@ -1,23 +1,10 @@
 defmodule Core.PromEx.DiscoveryDriftTest do
   @moduledoc """
-  Drift guard for the discovery & profiles dashboard-as-code (Issue #239,
-  epic #231). Mirrors `Core.PromEx.AuthSecurityDriftTest` (the #237 guard) but
-  scoped to `grafana/discovery.json`.
-
-  Proves the dashboard stays in lock-step with the metrics the code actually
-  registers, so CI fails on either kind of drift:
-
-    * a panel that queries a metric name **not registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * a **new #239 discovery family** (people-search outcome, profile-view
-      outcome, shelf browse-capped, handle-claimed) with **no panel** (an
-      invisible metric).
-
-  Registered names are read from the plugin at runtime (never hard-coded): the
-  exported Prometheus family name for a `Telemetry.Metrics` metric is its
-  `name` list joined by `_`, exactly how the plugin's `[:stacks, :search,
-  :people, :count, :total]` becomes `stacks_search_people_count_total`.
+  Drift guard for the discovery & profiles dashboard-as-code (239, epic 231; grafana/discovery.json):
+  panels may only query metric families registered by
+  `Core.PromEx.Plugins.Stacks`, and every registered 239 discovery family must have
+  a panel. Either direction of drift — a renamed metric silently blanking
+  a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true

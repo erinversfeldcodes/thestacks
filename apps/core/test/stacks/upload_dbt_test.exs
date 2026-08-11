@@ -1,32 +1,11 @@
 defmodule Stacks.UploadDbtTest do
   @moduledoc """
-  Suite 9: Verifies that upload-pipeline events trigger the correct dbt
-  refresh jobs via DbtRefreshHandler, AND verifies that the underlying
-  database records (which dbt staging views expose) are correct after
-  each upload-flow scenario.
-
-  Covers all 8 user stories from Issue #111:
-    US-1.1.1  Upload photo -> book created -> placed on shelf
-    US-1.1.2  ISBN hard gate — book rejected, no ISBN found
-    US-1.1.3  Non-book rejection
-    US-1.1.4  Age-gated content flagging
-    US-1.1.5  Manual ISBN entry
-    US-1.1.6  Duplicate book detection
-    US-1.1.7  Bulk upload (multi-book from single image)
-    US-1.1.8  Multi-format book merging
-
-  ## Untestable paths (require `dbt run` against a live warehouse)
-
-  - mart_community_read_count aggregation: requires `dbt run` after data
-    insertion to materialise the mart view; only testable in deployed
-    environment with `TEST_TARGET=deployed`.
-  - mart_platform_searchable refresh: same — the mart is a dbt model, not
-    a raw Postgres view.
-  - stg_* view queries (e.g. `SELECT * FROM wh.stg_books`): require the
-    `wh` schema and dbt source configuration present only after `dbt run`.
-  - int_book_engagement placement_count: intermediate model materialised
-    by dbt, not queryable from raw op tables.
-  - mart_cost_tracking: requires dbt role grant and platform_costs table.
+  Suite 9: upload-pipeline events trigger the right dbt refresh jobs via
+  `DbtRefreshHandler`, and the underlying records the staging views
+  expose are correct after each upload-flow scenario — all 8 user stories
+  of 111 (upload/hard-gate/non-book/age-gate/manual-ISBN/duplicate/
+  multi-book/SSE), each asserting both the enqueued refresh and the row
+  state dbt would read.
   """
 
   use Core.DataCase, async: false

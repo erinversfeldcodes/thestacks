@@ -1,33 +1,10 @@
 defmodule StacksWeb.GuardianJwtDeployedTest do
   @moduledoc """
-  LIVE-STACK JWT-at-rest invariant (Issue #174).
-
-  Why live-stack (not just the local integration test): the fix is a DB-level
-  `BEFORE INSERT OR UPDATE` trigger on `op.guardian_tokens` that forces
-  `NEW.jwt = NULL`. The local test proves the trigger fires on the local Postgres
-  used by the test sandbox, but the *actual* protected asset is the raw JWT store
-  on the real Neon topology behind the Fly-fronted preview. Playwright cannot read
-  the DB, and the local test uses local Postgres — only a direct read of the
-  preview Neon DB after a real login through the real stack proves the trigger is
-  actually installed there and holds when the app persists a token over HTTP.
-
-  This drives the PUBLIC login endpoint the way a user does (the seeded owner
-  account, the same creds the E2E harness uses — see e2e/tests/helpers.ts:
-  owner@thestacks.app / dev-password-123), then reads the durable side effect: the
-  `op.guardian_tokens` row(s) for that user, asserting `jwt IS NULL`.
-
-  Runs only under the deployed target (`@moduletag :deployed_only`, excluded by
-  test_helper.exs). Needs the preview DATABASE_URL + BASE_URL. Invoke via:
-
-      TEST_TARGET=deployed BASE_URL=https://<preview>.fly.dev \\
-        DATABASE_URL=postgres://…<preview neon> \\
-        mix test --only deployed_only test/stacks_web/guardian_jwt_deployed_test.exs
-
-  NOTE: `Core.Repo` is NOT usable here. `apps/core/config/test.exs` hardcodes
-  Core.Repo to `localhost/stacks_test` with no deployed override, so
-  `DATABASE_URL=<preview>` does NOT repoint it — a Repo.query would read the local
-  test DB. We open a DIRECT `Postgrex` connection to the preview `DATABASE_URL`
-  (the URL the runner passes) and read the row the live app actually committed.
+  LIVE-STACK JWT-at-rest invariant (174): the fix is a DB trigger forcing
+  `guardian_tokens.jwt = NULL`, and the protected asset is the REAL Neon
+  DB behind the preview — the local test only proves the trigger on the
+  sandbox Postgres. Logs in via the real API, then reads the preview DB
+  directly to assert no row holds a raw JWT. Skips locally.
   """
 
   use ExUnit.Case, async: false

@@ -1,27 +1,10 @@
 defmodule Stacks.Accounts.GuardianDbJwtTest do
   @moduledoc """
-  Issue #174 — the raw signed bearer token must never persist in
-  `op.guardian_tokens.jwt`.
-
-  Guardian.DB tracks every issued "access" token in `op.guardian_tokens` so that
-  logout/revoke and per-request verification work server-side (Issue #124, A2).
-  The `jwt` column, however, stores the FULL signed bearer token even though the
-  verify/revoke/purge path never reads it (verify is by `jti` PK + `aud`, purge is
-  by `exp`). A SELECT-capable compromise of that table therefore yields directly
-  replayable sessions.
-
-  The fix (a LATER step) installs a `BEFORE INSERT OR UPDATE` trigger on
-  `op.guardian_tokens` that forces `NEW.jwt = NULL`, plus a one-time scrub of
-  existing rows. These tests pin that invariant at the DB layer:
-
-    * tests 1 & 2 are the RED signal — they fail against the current code because
-      the app still persists the raw token (INSERT) and a raw UPDATE value sticks;
-    * test 3 is a regression guard — the four Guardian.DB hooks must keep working
-      with `jwt` nulled (they already do today, since none of them read `jwt`).
-
-  Raw-table access is schemaless (`Repo.insert_all` / `Repo.all(from … in
-  "guardian_tokens" …, prefix: "op")`) because the project owns no Ecto schema for
-  this Guardian.DB-backed table — mirroring `guardian_token_sweep_job_test.exs`.
+  174 — the raw signed bearer must never persist in
+  `op.guardian_tokens.jwt`: Guardian.DB stores the full token though
+  verify/revoke/purge never read it (verify is jti+aud, purge is exp), so
+  a SELECT-capable compromise would yield replayable sessions. Asserts
+  the column is stored redacted and the auth flows still work without it.
   """
 
   use Core.DataCase, async: false

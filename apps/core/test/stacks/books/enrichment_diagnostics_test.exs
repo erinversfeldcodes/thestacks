@@ -1,24 +1,10 @@
 defmodule Stacks.Books.EnrichmentDiagnosticsTest do
   @moduledoc """
-  Diagnostic tests for the EnrichBookJob / ISBNResolver path.
-
-  Each test reproduces one of four failure modes that have been
-  observed (or hypothesised) for the
-  `upload.spec.ts:12 — identifies The Name of the Rose from barcode_isbn_clean.jpg`
-  E2E test, and asserts the Tier-2 telemetry events fire so the
-  signature of any future failure is in the logs.
-
-  | # | Scenario                         | Fingerprint                                                                 |
-  |---|----------------------------------|-----------------------------------------------------------------------------|
-  | 1 | Negative cache poison            | `[:stacks, :isbn_resolver_cache, :negative_stored]` → repeated `:not_found` |
-  | 2 | OL + GB fuses both blown         | `[:stacks, :enrichment, :resolver, :outcome]` outcome=`:circuit_open`       |
-  | 3 | Transport storm exhausts retries | `[:stacks, :enrichment, :resolver, :outcome]` outcome=`:transport_error` ×5 |
-  | 4 | apply_metadata edge cases        | Worker never raises — graceful `:ok` / `{:error, _}` on every input         |
-
-  `async: false` because each test mutates global Application env
-  (cache toggle, HTTP client) and global fuse / ETS state. Setup/
-  teardown in each describe block keeps them isolated; running them
-  in parallel would race on the cache toggle.
+  Diagnostics for the EnrichBookJob/ISBNResolver path: reproduces four
+  observed/hypothesised failure modes of the barcode-upload E2E and
+  asserts the Tier-2 telemetry fires for each, so any future failure
+  leaves its fingerprint in the logs (cache-poisoned negative, provider
+  outage, fuse open, placeholder-never-enriched).
   """
 
   use Core.DataCase, async: false

@@ -1,26 +1,11 @@
 defmodule Stacks.BookshelfTelemetryTest do
   @moduledoc """
-  Layer 11 (Metrics & Telemetry) for the shelf-browsing read path
-  (Issue #112, punch #25).
-
-  `upload_telemetry_test.exs` Suite 11 covers **POST**
-  `/api/bookshelves/:name/placements`; the **GET** that every shelf browse
-  issues had no telemetry-firing test at all. This module supplies it.
-
-  Two separate things are asserted, because they are wired by two separate
-  mechanisms and either can break without the other noticing:
-
-    * Phoenix's native `[:phoenix, :router_dispatch, :stop]` fires with a
-      duration and the `StacksWeb.BookshelfController` plug.
-
-    * `[:stacks, :router_dispatch, :stop]` — re-emitted by
-      `CoreWeb.Telemetry.handle_router_dispatch_stop/4`
-      (`core_web/telemetry.ex:428-433`) — carries `route_group: :bookshelves`.
-      The tag comes from the **path-prefix plug**
-      `StacksWeb.Plugs.RouteGroup` installed at the endpoint
-      (`core_web/endpoint.ex:60`), NOT from a router declaration, so it only
-      holds for paths matching the `/api/bookshelves/` prefix rule. This is
-      the metadata `scripts/check-slo-gate.sh` groups p95 by.
+  Layer 11 telemetry for the shelf-browse READ path (112) — the POST is
+  covered by `upload_telemetry_test.exs`; the GET had no firing test.
+  Asserts both mechanisms separately, since either can break alone:
+  Phoenix's `[:phoenix, :router_dispatch, :stop]` fires with the
+  controller's metadata, and the RouteGroup handler stamps
+  `route_group: :bookshelves` into that metadata at emit time.
   """
 
   use CoreWeb.ConnCase, async: false

@@ -1,22 +1,10 @@
 defmodule Stacks.GDPRTelemetryTest do
   @moduledoc """
-  Firing tests for GDPR-specific telemetry (Issue #121, Phase 4;
-  technical-architecture "Observability & Metrics" — GDPR signals).
-
-  Each test attaches a real `:telemetry` handler, exercises the GDPR flow,
-  and asserts the exact `[:stacks, :gdpr, ...]` event name, measurement keys,
-  and metadata. These assertions are non-vacuous: removing any emitter makes
-  the corresponding `assert_receive` time out and the test fail.
-
-  Covered signals:
-    * `[:stacks, :gdpr, :export]`            — DataExportJob outcome
-    * `[:stacks, :gdpr, :deletion]`          — AccountDeletionJob outcome + failed-step id
-    * `[:stacks, :gdpr, :consent, :grant]`   — consent grant count
-    * `[:stacks, :gdpr, :consent, :revoke]`  — consent revoke count
-    * `[:stacks, :gdpr, :image, :expired]`   — expired count + expired-by-reason
-    * `[:stacks, :gdpr, :image, :stuck]`     — stuck count
-    * `[:stacks, :gdpr, :image, :orphan]`    — orphan count
-    * `[:stacks, :gdpr, :audit, :write]`     — audit-log write throughput
+  Firing tests for `[:stacks, :gdpr, ...]` telemetry (121 Phase 4):
+  export, deletion, and consent signals. Each test attaches a real
+  handler, drives the flow, and asserts exact event name, measurement
+  keys, and metadata — non-vacuous: removing an emitter times out the
+  `assert_receive`.
   """
 
   use Core.DataCase, async: false

@@ -1,31 +1,10 @@
 defmodule Core.PromEx.GdprDataRightsDriftTest do
   @moduledoc """
-  Drift guard for the GDPR data-rights dashboard-as-code (Issue #238, epic
-  #231). Mirrors `Core.PromEx.AuthSecurityDriftTest` (the #237 guard) but
-  scoped to `grafana/gdpr_data_rights.json`.
-
-  Proves the dashboard stays in lock-step with the metrics the code actually
-  registers, so CI fails on either kind of drift:
-
-    * a panel that queries a metric name **not registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * a registered **GDPR family** (export/deletion outcomes + the new latency
-      distributions, consent grant/revoke, image expired/stuck/orphan, audit
-      write + the new audit-read counter) with **no panel** (an invisible
-      metric).
-
-  Registered names are read from the plugin at runtime (never hard-coded): the
-  exported Prometheus family name for a `Telemetry.Metrics` metric is its
-  `name` list joined by `_`, exactly how the plugin's `[:stacks, :gdpr, :audit,
-  :read, :count, :total]` becomes `stacks_gdpr_audit_read_count_total`.
-
-  Distributions differ from counters on the wire: a `distribution` named
-  `[:stacks, :gdpr, :export, :duration, :milliseconds]` is exported by
-  TelemetryMetricsPrometheus as three series suffixed `_bucket` / `_sum` /
-  `_count` under the base name `stacks_gdpr_export_duration_milliseconds`.
-  Panels query the `_bucket` variant (for `histogram_quantile`), so referenced
-  names are normalised back to that registered base before comparison.
+  Drift guard for the GDPR data-rights dashboard-as-code (238, epic 231; grafana/gdpr_data_rights.json):
+  panels may only query metric families registered by
+  `Core.PromEx.Plugins.Stacks`, and every registered GDPR family must have
+  a panel. Either direction of drift — a renamed metric silently blanking
+  a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true

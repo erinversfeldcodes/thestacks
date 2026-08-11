@@ -1,32 +1,11 @@
 defmodule Stacks.VisibilityTierCharacterizationTest do
   @moduledoc """
-  GOLDEN-MASTER characterization of how a Book's `visibility_tier` resolves
-  through `Stacks.Visibility.resolve_visibility/2` **today**, BEFORE the #209
-  decomposition of `visibility_tier` into the orthogonal (Audience,
-  Discoverability, AgeGate) axes (ADR-018).
-
-  Every row below pins the CURRENT composite `:visible | :hidden` decision. The
-  decomposition (Phase 2/5) must reproduce this table EXACTLY — a green table is
-  the exit criterion. Any change to a row is a deliberate, reviewed behaviour
-  change, never a silent side effect of the refactor.
-
-  ## The finding this table freezes (corrected by the test itself)
-
-  The DB column is a Postgres ENUM: `CREATE TYPE op.visibility_tier AS ENUM
-  ('public', 'age_gated')` (`20260305000004_create_books.exs`). The proto
-  `VisibilityTier` enum ALSO declares `unlisted` and `private`, but those were
-  never added to the DB type — they are **impossible to store** (an insert of
-  `"private"` raises `invalid input value for enum visibility_tier`). So for the
-  #209 decomposition there are only TWO live values to account for, and ZERO rows
-  of `unlisted`/`private` to migrate.
-
-  At resolution time the resolver coerces every book to `"public"` at the
-  resource-visibility level (`get_resource_visibility/1`) and honours ONLY
-  `age_gated` (via `check_age_gate/2`); books have no `user_id`, so no owner match
-  or profile ceiling applies. The decomposition is therefore simply: extract the
-  `age_gated` boolean into an AgeGate axis; `public` == not-age-gated. The proto's
-  `unlisted`/`private` (Discoverability / owner-only) are aspirational — any future
-  use is a NEW feature, not a migration of existing data, and would add rows here.
+  GOLDEN-MASTER characterisation of `visibility_tier` resolution through
+  `resolve_visibility/2` TODAY, before the 209 decomposition into
+  (Audience, Discoverability, AgeGate) (ADR-018). Every row pins the
+  current composite :visible/:hidden decision; the decomposition must
+  reproduce this table exactly — a changed row is a reviewed behaviour
+  change, never a silent side effect.
   """
   use Core.DataCase, async: true
 

@@ -1,47 +1,11 @@
 defmodule Core.PromEx.PlatformOpsDriftTest do
   @moduledoc """
-  Drift guard for the platform / ops dashboard-as-code (Issue #240, epic
-  #231). Mirrors `Core.PromEx.GdprDataRightsDriftTest` (the #238 guard) but
-  scoped to `grafana/platform_ops.json`.
-
-  Unlike the single-domain dashboards (#237/#238/#239), this one visualises
-  families across MANY prefixes — `stacks_rate_limit_`, `stacks_events_`,
-  `stacks_fuse_`, `stacks_repo_`, `stacks_router_`, `stacks_upload_` — so the
-  lock-step is asserted against the FULL registered set (like
-  `Core.PromEx.DashboardDriftTest` derives `registered_families`), NOT a narrow
-  prefix. CI fails on either kind of drift:
-
-    * a panel that queries a `stacks_*` metric name **not registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * the NEW #240 `stacks_rate_limit_client_ip` trusted-client-IP-source
-      family with **no panel** (an invisible metric — the whole point of the
-      issue).
-
-  This intentionally does NOT assert the reverse "every registered family has a
-  panel" direction: the registered set spans auth/gdpr/moderation/etc. families
-  that live on OTHER dashboards, so a full-reverse lock-step here would be
-  wrong. `Core.PromEx.DashboardDriftTest` (#228) owns the moderation/age-gate
-  reverse lock-step and is left untouched.
-
-  PromEx-builtin metrics (Ecto/Phoenix/Beam/Oban plugins) are non-`stacks_`
-  names; the `stacks_[a-zA-Z0-9_]+` panel-scan regex below naturally EXCLUDES
-  them, so they are out of the lock-step (they are not in the Stacks plugin's
-  registered set). This dashboard queries only `stacks_*` families, so no
-  builtin exclusion list is needed.
-
-  Registered names are read from the plugin at runtime (never hard-coded): the
-  exported Prometheus family name for a `Telemetry.Metrics` metric is its
-  `name` list joined by `_`, exactly how the plugin's `[:stacks, :rate_limit,
-  :client_ip, :count, :total]` becomes
-  `stacks_rate_limit_client_ip_count_total`.
-
-  Distributions differ from counters on the wire: a `distribution` named
-  `[:stacks, :repo, :query, :duration, :milliseconds]` is exported by
-  TelemetryMetricsPrometheus as three series suffixed `_bucket` / `_sum` /
-  `_count` under the base name `stacks_repo_query_duration_milliseconds`.
-  Panels query the `_bucket` variant (for `histogram_quantile`), so referenced
-  names are normalised back to that registered base before comparison.
+  Drift guard for the platform/ops dashboard-as-code (240, epic 231;
+  grafana/platform_ops.json). Unlike the single-domain dashboards, this
+  one spans many prefixes (`stacks_rate_limit_`, `stacks_events_`,
+  `stacks_fuse_`, `stacks_repo_`, `stacks_router_`, `stacks_upload_`), so
+  lock-step is asserted against the FULL registered set. Renames blanking
+  panels or new ops families shipping invisible both fail CI.
   """
 
   use ExUnit.Case, async: true
