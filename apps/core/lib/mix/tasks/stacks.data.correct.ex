@@ -2,34 +2,12 @@ defmodule Mix.Tasks.Stacks.Data.Correct do
   @shortdoc "Dry-run (or apply) the registered data corrections"
 
   @moduledoc """
-  Runs the corrections in `Stacks.DataCorrection.Registry` against the
-  configured database.
-
-  **Dry-run by default.** Without `--apply` this prints exactly which rows each
-  correction would change and to what, and writes nothing. That report is the
-  blast radius; read it before applying.
-
-  ## Usage (from `apps/core/`)
-
-      mix stacks.data.correct                 # dry-run everything
-      mix stacks.data.correct --apply         # apply everything
-      mix stacks.data.correct --only normalise_edition_isbn10
-
-  On a deployed stack there is no `mix`; use the release entry point instead:
-
-      /app/bin/core eval 'Stacks.Release.correct_data()'          # dry-run
-      /app/bin/core eval 'Stacks.Release.correct_data(apply: true)'
-
-  ## Options
-
-    * `--apply` — write the changes. Each applied change is recorded in
-      `audit.audit_log` in the same transaction as the change itself.
-    * `--only NAME` — restrict to one correction by its `name/0`. Repeatable.
-
-  ## Exit code
-
-  Non-zero when a correction failed, so a script can gate on it. A dry-run that
-  finds rows still exits zero — finding work to do is not an error.
+  Runs the corrections in `DataCorrection.Registry`. DRY-RUN BY DEFAULT —
+  without `--apply` it prints the blast radius and writes nothing. `--only
+  NAME` restricts (repeatable). Applied changes are audited in the same
+  transaction. On a deployed stack use
+  `/app/bin/core eval 'Stacks.Release.correct_data(apply: true)'`.
+  Exit is non-zero when any correction errors, so CI/deploy can gate on it.
   """
 
   use Mix.Task

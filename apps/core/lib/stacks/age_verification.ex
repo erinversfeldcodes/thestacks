@@ -1,26 +1,12 @@
 defmodule Stacks.AgeVerification do
   @moduledoc """
-  Provider-sourced age verification (ADR-020).
-
-  This is the **sole writer** of the `age_verified` / `age_verified_at` /
-  `age_verification_provider` columns. Self-declaration was removed as an
-  unacceptable assurance mechanism; a viewer becomes age-verified only when a
-  real identity/KYC provider says so.
-
-  ## STUB
-
-  `record_verification/3` is the stable entry point a future KYC-provider
-  callback (Smile ID / Yoti / Sumsub) will call once a provider is integrated —
-  the provider's webhook resolves the local user and calls this function with its
-  own name and verification timestamp. Today it is exercised only by tests and
-  the `STACKS_E2E_TEST_HELPERS`-gated E2E helper, so the full age-gate behaviour
-  stays validated even though production has no provider and no verified users
-  (age-gating is shipped dark — see `Stacks.FeatureFlags.age_gating_enabled?/0`).
-
-  On every write it emits the `[:stacks, :age_verification]` telemetry family
-  (repointed here from the deleted self-declared settings endpoint) with a
-  whitelisted `:outcome` atom (`:success` / `:error`) and no PII — so the #230
-  Grafana panel and the dashboard-drift guard stay green.
+  Provider-sourced age verification (ADR-020) — the SOLE writer of
+  `age_verified`/`age_verified_at`/`age_verification_provider`.
+  Self-declaration was removed; only a real KYC provider verifies.
+  `record_verification/3` is the stable entry point a future provider
+  webhook will call; today only tests and the flag-gated E2E helper
+  exercise it (age-gating ships dark; production has no provider and no
+  verified users). Every write emits `[:stacks, :age_verification]`.
   """
 
   require Logger

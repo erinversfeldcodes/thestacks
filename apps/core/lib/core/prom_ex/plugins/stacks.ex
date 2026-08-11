@@ -1,27 +1,13 @@
 defmodule Core.PromEx.Plugins.Stacks do
   @moduledoc """
-  PromEx plugin that exports The Stacks' custom `[:stacks, ...]` telemetry
-  events to Prometheus.
-
-  Without this plugin, the `Telemetry.Metrics` entries declared by
-  `CoreWeb.Telemetry.metrics/0` have no reporter — PromEx only consumes
-  metrics returned by its registered plugins. The SLO gate scraper
-  (`scripts/check-slo-gate.sh`) reads `/internal/metrics` and expects
-  three Stacks-namespaced metric families to exist at these exact names:
-
-    * `stacks_upload_terminal_count_total` — upload pipeline outcomes
-    * `stacks_router_dispatch_stop_duration_milliseconds_{bucket,sum,count}`
-      — route-dispatch latency, tagged by `:route_group`
-    * `stacks_fuse_state_state` — circuit breaker state gauge
-
-  Because `TelemetryMetricsPrometheus.Core` does not append `_total` to
-  counters automatically, the counter metric path below ends in
-  `[:count, :total]` so the exported series name matches what the gate
-  parser reads. The distribution path ends in `[:duration, :milliseconds]`
-  so the `_bucket`/`_sum`/`_count` triple is produced under the expected
-  base name.
-
-  See Issue #139 for background.
+  PromEx plugin exporting the custom `[:stacks, ...]` telemetry events —
+  without it the `CoreWeb.Telemetry.metrics/0` entries have no reporter.
+  The SLO gate (`scripts/check-slo-gate.sh`) reads `/internal/metrics` and
+  expects exactly: `stacks_upload_terminal_count_total`,
+  `stacks_router_dispatch_stop_duration_milliseconds_*`, and
+  `stacks_fuse_state_state`. Metric paths end in `[:count, :total]` /
+  `[:duration, :milliseconds]` because the Prometheus core reporter does
+  not append suffixes — renaming a path here breaks the gate parser.
   """
 
   use PromEx.Plugin

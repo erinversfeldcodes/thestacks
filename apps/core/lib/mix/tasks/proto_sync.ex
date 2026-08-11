@@ -1,25 +1,11 @@
 defmodule Mix.Tasks.Proto.Sync do
   @moduledoc """
-  Generates Ecto schemas, dbt staging models, and migrations from Protobuf descriptors.
-
-  Uses `buf build` to produce a JSON FileDescriptorSet, then maps proto fields
-  to Ecto types and dbt columns based on the manifest in `proto/persisted.exs`.
-
-  ## Usage
-
-      mix proto.sync          # Generate all files
-      mix proto.sync --check  # Check for drift without writing
-
-  ## How it works
-
-  1. Loads the manifest from `proto/persisted.exs`
-  2. Runs `buf build` to get the proto descriptor as JSON
-  3. For each table in the manifest, extracts the proto message fields
-  4. Generates an Ecto schema module (read-only, no changeset)
-  5. Generates a dbt staging SQL view
-  6. For new tables (`migration_exists: false`), generates a CREATE TABLE migration
-  7. For existing tables, detects new proto fields and generates ADD COLUMN migrations
-  8. In `--check` mode, compares generated output and detects migration gaps
+  Generates Ecto schemas, dbt staging models, and migrations from proto
+  descriptors: `buf build` → JSON FileDescriptorSet, mapped per the
+  `proto/persisted.exs` manifest. New tables get CREATE TABLE migrations;
+  new proto fields on existing tables get ADD COLUMN. `--check` compares
+  output and detects migration gaps without writing (runs in CI; drift
+  fails the build).
   """
 
   use Mix.Task

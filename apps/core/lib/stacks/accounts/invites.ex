@@ -1,27 +1,15 @@
 defmodule Stacks.Accounts.Invites do
   @moduledoc """
-  Invitations to the closed beta (US-14.1.3).
+  Closed-beta invitations (US-14.1.3). The code is a bearer secret:
+  128 random bits in Crockford base32, shown ONCE; only its SHA-256
+  (`code_hash`, the redemption lookup) and a display prefix survive.
+  SHA-256 not Argon2 because the row must be FOUND by code — and the code
+  is high-entropy and never reused, so a fast hash is right.
 
-  The code is a bearer secret: `:crypto.strong_rand_bytes(16)` (128 bits)
-  rendered as Crockford base32 — no ambiguous glyphs — and shown ONCE at issue
-  time. Only its SHA-256 (`code_hash`, the indexed redemption lookup) and a
-  short display prefix survive. SHA-256 rather than Argon2 because the row must
-  be FOUND by its code and Argon2's per-row salt makes lookup impossible; the
-  code is high-entropy, machine-generated and never reused, so a fast hash is
-  the right trade.
-
-  Redemption happens INSIDE the registration `Ecto.Multi` (`redeem_steps/3`),
-  never in a plug: a plug would validate against a row another request could
-  consume before the insert lands. The `SELECT … FOR UPDATE` in `:lock_invite`
-  is what makes single-use real — without it two concurrent registrations both
-  read `use_count = 0`.
-
-  `note` and `invited_email` are personal data about someone who may never
-  become a user: scrubbed by `Stacks.GDPR.Deletion`, excluded from the
-  warehouse (persisted.exs `dbt_exclude`), never written to `event_log`, and —
-  for invitations that expire unredeemed — dropped on a clock by
-  `Stacks.Workers.ExpiredInvitesSweepJob`, because nobody can exercise erasure
-  for data about a person who never registered.
+  Redemption runs INSIDE the registration `Ecto.Multi` (`redeem_steps/3`),
+  never a plug, with `SELECT … FOR UPDATE` making single-use real under
+  concurrency. `note`/`invited_email` are personal data about a possible
+  never-user: scrubbed by `GDPR.Deletion`, excluded from export.
   """
 
   import Ecto.Query

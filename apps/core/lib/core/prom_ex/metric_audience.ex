@@ -1,39 +1,12 @@
 defmodule Core.PromEx.MetricAudience do
   @moduledoc """
-  Per-metric AUDIENCE classification (ADR-021 §4) — the fail-closed privacy
-  boundary for observability.
-
-  A metric is PUBLIC iff it is explicitly listed here as `:public`. Anything not
-  listed is `:unclassified`, which is treated as **not public** everywhere
-  (fail-closed): a newly-added metric family cannot reach the public transparency
-  page (#241) or the anonymous public Grafana until it is consciously classified.
-  This is the posture ADR-021 mandates precisely because PII-bearing metrics
-  (e.g. blog engagement) are coming — a new metric must never leak by default.
-
-  ## Audiences (ADR-021 §4)
-
-    * `:public`      — everyone; aggregate, non-PII, non-de-anonymisable. Rendered
-      on the public transparency page + the anonymous public Grafana.
-    * `:own`         — the PRODUCING user only; the #242 personal-inference surface.
-      A per-user axis, never an aggregate dashboard. (Route value; no per-user
-      metric family exists yet.)
-    * `:break_glass` — admin, rare/logged elevated access (#138); NOT a routine
-      dashboard. For a future aggregate-but-de-anon-risky metric. (Route value.)
-
-  ## Gating rule (ADR-021 §4)
-
-  An operational metric is `:public` UNLESS it contains PII or can be
-  de-anonymised. "Might reveal security posture" is NOT a reason to withhold.
-  Every one of the current families is an aggregate keyed only on bounded
-  whitelisted atoms (no user-id / handle / IP / email / free-text — see the #249
-  metric audit), so **all current families are `:public`**.
-
-  `Core.PromEx.MetricAudienceTest` enforces that EVERY registered family
-  (`Core.PromEx.Plugins.Stacks`) is classified here: adding a metric without
-  classifying it fails the build, so nothing is ever silently
-  measured-but-undisplayed. Keys are the registered family name —
-  `metric.name |> Enum.join("_")` — matching `DashboardDriftTest` /
-  `DashboardLabelValidationTest`.
+  Per-metric AUDIENCE classification (ADR-021 §4) — the fail-closed
+  privacy boundary for observability. A metric is public iff explicitly
+  listed `:public` here; anything unlisted is `:unclassified` and treated as
+  NOT public everywhere, so a new metric family can never reach the public
+  transparency page or anonymous Grafana by default. Other audiences:
+  `:own` (producing user only), `:break_glass` (admin, logged), `:internal`
+  (operators). Classify consciously; PII-bearing metrics are coming.
   """
 
   @audience %{

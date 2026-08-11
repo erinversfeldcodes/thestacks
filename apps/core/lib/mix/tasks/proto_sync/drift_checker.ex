@@ -1,18 +1,11 @@
 defmodule Mix.Tasks.ProtoSync.DriftChecker do
   @moduledoc """
-  Compares generated file content against disk for drift detection.
-
-  Drift means one of two entirely different things, and the caller must be told
-  which (Issue #354):
-
-    * the file is **tracked** — a committed artefact has diverged from its
-      `.proto` source. A real defect; must fail the build.
-    * the file is **gitignored** — it can only ever be locally stale, since CI
-      generates it from scratch on every run. Nothing is wrong with the tree;
-      the right answer is to regenerate it and carry on.
-
-  Given `repo_root`, this module resolves the second case itself and reports
-  `{:regenerated, path}`. Without it, every drift fails — the safe direction.
+  Compares generated content against disk. Drift means two different
+  things (354): a TRACKED file diverging from its `.proto` source is a real
+  defect and fails the build; a GITIGNORED file can only be locally stale
+  (CI regenerates from scratch), so given `repo_root` it is regenerated and
+  reported `{:regenerated, path}`. Without `repo_root`, every drift fails —
+  the safe direction.
   """
 
   @doc """
