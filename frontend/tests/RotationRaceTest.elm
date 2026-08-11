@@ -1,28 +1,11 @@
 module RotationRaceTest exposing (suite)
 
-{-| Tests for Phase 2 — cross-tab token propagation + re-check-before-
-logout net.
-
-
-## What this covers
-
-Backend Phase 1 added a rotation grace so an in-flight just-rotated token no
-longer burns the refresh-token family. Phase 2 stops the _multi-tab_ spurious
-logout: when tab A renews (rotates `T0 -> T1`, writing localStorage `stacks-auth`)
-while tab B still holds `T0` in memory, tab B must ADOPT `T1` rather than logging
-every tab out on its next 401.
-
-The decision is centralised in one PURE, key-free helper — `Main.adoptExternalAuth`
-— so it is unit-testable even though `Main` itself is a `Browser.application`
-(unconstructable `Nav.Key`; see `SessionExpiryTest`'s seam note). The same helper
-backs BOTH:
-
-  - the cross-tab `storage`-event path (`AuthChangedExternally`), and
-  - the 401 re-check-before-logout net (`GotStoredAuth`).
-
-The Main-level wiring (ports, subscriptions, redirect) is E2E-covered by
-`e2e/tests/rotation-race.spec.ts`.
-
+{-| Cross-tab token propagation + re-check-before-logout. The backend
+grace stops an in-flight just-rotated token burning the family; this
+stops the multi-tab spurious logout: tab A rotates and writes
+localStorage, tab B (holding the stale token) adopts the sibling's
+newer credential via the storage event — and before any forced logout,
+re-checks storage once in case the write raced.
 -}
 
 import Expect

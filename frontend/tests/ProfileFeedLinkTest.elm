@@ -1,20 +1,11 @@
 module ProfileFeedLinkTest exposing (suite)
 
-{-| Tests the Atom subscribe link on a reader's public profile.
-
-The feature was "built but not reachable" in an unusual way: the server, the cache and the
-Atom rendering were all finished and tested, but `Api.elm` contained no call — because
-profiles are addressed by **handle** everywhere while the feed endpoint was keyed only by
-**user\_id**. A page listing someone's bookshelves had their handle, not their UUID, so it
-could not construct a feed URL at all. The chain was broken at the _contract_, one layer
-below the missing call.
-
-So these tests guard three things, in order of what would actually hurt:
-
-1.  a subscribe link appears for a bookshelf that has a feed;
-2.  it does **not** appear for one that does not — a link that 403s is worse than none;
-3.  the URL is the handle form, because the UUID form is unbuildable from this page.
-
+{-| Tests the Atom subscribe link on a public profile. Built-but-
+unreachable in an unusual way: server, cache and rendering were all
+finished, but `Api.elm` had no call — profiles are addressed by handle
+while the feed endpoint was keyed by user\_id, and no page had both.
+Pins the handle-keyed call and the link rendering only when the server
+says the feed exists.
 -}
 
 import Api exposing (ProfileShelfSummary)

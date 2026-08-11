@@ -135,30 +135,11 @@ rovingTabindexSuite =
         ]
 
 
-{-| ⛔ **`Loading` and `Success []` must not render the same page.**
-
-This suite replaced a single test that asserted the loading view has a
-`.bookcase` — which is true in `Loading`, in `Success []`, and in
-`Success [book]` alike. It passed for as long as the defect existed and would
-have passed after any repair, so it reported nothing. The bug it could not see:
-`Loading` shared `NotAsked`'s branch (an empty bookcase), so navigating to a
-shelf with no connection told the reader their library was empty.
-
-Each test below is therefore written to be **false in the other state**, and
-every negative assertion is paired with the positive control that proves the
-selector is real:
-
-  - `bookshelf_loading_shows_a_loading_state` — the loading marks are present
-    while loading; `bookshelf_empty_is_not_the_loading_state` shows the same
-    marks are absent once an empty response lands (so `ensureViewHasNot` there
-    is not vacuous).
-  - `bookshelf_loading_is_not_the_empty_state` — the empty state's marks are
-    absent while loading; `bookshelfEmptyState` below is the control proving
-    those marks do appear on `Success []`.
-
-Mutation probe: restore `Loading -> viewBookshelfFromShelves model []` in
-`Page/Bookshelf.elm` and all three redden.
-
+{-| ⛔ `Loading` and `Success []` must not render the same page. The test
+this suite replaced asserted the loading view has a `.bookcase` — true
+in every state, so it passed with the defect and would pass after any
+repair. These assertions distinguish the placeholder skeleton from a
+genuinely empty shelf from a populated one.
 -}
 bookshelfLoadingState : Test
 bookshelfLoadingState =

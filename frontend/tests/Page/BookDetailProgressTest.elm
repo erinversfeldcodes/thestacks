@@ -1,37 +1,10 @@
 module Page.BookDetailProgressTest exposing (suite)
 
-{-| Program tests for the reading-progress UI mounted on the BookDetail overlay
-(, Phase 2).
-
-The progress card is mounted whenever the placement sits on a readable bookshelf
-(reading\_pile, library). Opening it and saving drives
-PUT /api/placements/:id/progress and folds the returned progress in place. The
-"record this read?" bridge is a Reading Pile affordance only — a Finished
-transition surfaces it on a reading\_pile placement but NOT on a library one (no
-library→library move offer). A failed save keeps the form open with the draft.
-
-
-## Where progress can and cannot come from
-
-`GET /api/books/:id` cannot carry reading progress. Its placement object is
-`StacksWeb.ProtoJSON.book_placement/1`
-(`apps/core/lib/stacks_web/proto_json.ex:311-322`), whose allow-list is
-`id`, `book_id`, `personal_rating`, `notes`, `bookshelf_name`, `formats`,
-`visibility`, `bookshelf_visibility` — no `reading_status`, no `current_page`,
-no `started_at`, no `finished_at`.
-
-So on page load the card ALWAYS opens at its `Maybe.withDefault ToRead` default
-with no page count, and progress can only reach the view one way: the user
-saves, and `PUT /api/placements/:id/progress` answers with
-`ProtoJSON.reading_progress/1` (`proto_json.ex:688-696`), which does carry the
-quartet. Every test below therefore starts from "To Read, no pages" and drives
-progress in through the form — the only path a real reader has.
-
-Until the fixture injected the quartet into the book-detail
-response, so two of these tests asserted a rendering the server can never
-produce (a live "p. 40 / 371" badge on load, and a page field pre-seeded to
-"40"). Whether the contract SHOULD carry progress here is question; faking it in a fixture is not an answer to it.
-
+{-| Program tests for the reading-progress UI on the BookDetail overlay.
+The card mounts when the placement sits on a readable bookshelf;
+saving drives PUT /api/placements/:id/progress and folds the returned
+progress in place. Covers the mount predicate, the request lifecycle,
+and the completed-read bridge into the Reading Pile flow.
 -}
 
 import Dict

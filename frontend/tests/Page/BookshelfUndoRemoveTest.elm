@@ -1,28 +1,9 @@
 module Page.BookshelfUndoRemoveTest exposing (suite)
 
-{-| Program tests for the "Removed — Undo" toast (extension,).
-
-A reader who removes a book is returned to the shelf they came from, and that
-shelf offers — for a few seconds — to put it back. The undo restores the SAME
-placement row (`POST /api/placements/:id/restore` clears `removed_at`), so the
-book comes back with its `placed_at`, formats, rating and notes intact.
-
-Three things this file is careful about, because each has bitten this codebase:
-
-1.  **No wall-clock waits.** The toast auto-dismisses, which makes it a race if
-    a test sleeps. Every assertion here is on the model or on the request log,
-    and the expiry is driven by dispatching `ToastExpired` — the message the
-    timer would deliver — rather than by advancing real time.
-
-2.  **Absence is asserted only after presence.** A "the toast is gone" assertion
-    passes trivially against a toast that never appeared, which is this
-    project's documented wait-for-absence defect class. Every disappearance test
-    below opens with `ensureViewHas`.
-
-3.  **Every negative has a positive control.** The read-only SECURITY assertions
-    are worth exactly what `owner_undo_is_observable` proves: that this harness
-    reports the restore POST when one is made.
-
+{-| Program tests for the "Removed — Undo" toast. The undo restores the
+SAME placement row (`POST /api/placements/:id/restore`), so ratings,
+notes and `placed_at` survive. Covers the toast render, the restore
+request, expiry, and the read-only inertness of a synthetic undo.
 -}
 
 import Expect
@@ -255,20 +236,11 @@ readOnlyUndoIsInert =
                 ()
 
 
-{-| The same guarantee through the whole program, since a page is more than its
-update function: a synthetic `UndoRemove` delivered to a running read-only browse
-must leave the request log untouched.
-
-Paired with `ownerUndoIsObservable`, which proves this harness reports the POST
-when one is made.
-
-⚠️ **The model assertion is not decoration.** `TestHelpers.libraryEffects` reads
-`Bookshelf.mutationToken` itself — deliberately, so the harness cannot disagree
-with production about the guard — which means the request count alone would stay
-at zero even if `Page.Bookshelf` regressed to `model.token`. Probed: it does.
-`undoToast` is production state that only `Page.Bookshelf.update` writes, so a
-page that took the mutating branch moves to `ToastRestoring` and is caught here.
-
+{-| The same guarantee through the whole program: a synthetic `UndoRemove`
+delivered to a running read-only browse leaves the request log
+untouched. Paired with `ownerUndoIsObservable` (the positive control).
+The model assertion matters: `libraryEffects` reads `mutationToken`
+itself, so the enforcement point under test is the real one.
 -}
 readOnlySyntheticUndoMsg : Test
 readOnlySyntheticUndoMsg =

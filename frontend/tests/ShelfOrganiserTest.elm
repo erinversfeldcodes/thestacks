@@ -1,19 +1,10 @@
 module ShelfOrganiserTest exposing (suite)
 
-{-| Tests shelf organisation.
-
-The backend has had 35 tests and 90 seeded rows for months with **no client call at all**,
-so this is the reachability half. Two things are worth guarding:
-
-1.  **The reorder arithmetic.** An off-by-one puts a shelf one place from where the reader
-    put it, which looks like a flickering glitch rather than a bug and ships easily. The
-    downward-move case is the one that gets it wrong, because removing the item first
-    shifts every later index down by one.
-
-2.  **Both affordances exist.** The decision was drag _and_ explicit controls, and the
-    explicit ones are the keyboard path. A regression that quietly drops the buttons would
-    leave the feature unusable without a mouse while still looking finished.
-
+{-| Tests shelf organisation — the reachability half (the backend had 35
+tests and 90 seeded rows with no client call at all). Guards the
+reorder arithmetic (an off-by-one reads as a flickering glitch and
+ships unnoticed) and the drag lifecycle messages staying inert where
+they must be.
 -}
 
 import Components.ShelfOrganiser as Organiser

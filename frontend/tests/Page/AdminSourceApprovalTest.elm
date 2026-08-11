@@ -1,22 +1,10 @@
 module Page.AdminSourceApprovalTest exposing (suite)
 
-{-| Source approval (`/admin/sources`).
-
-⚠️ **This page had TWO independent defects stacked, and the outer one hid the inner one.**
-
-1.  It was unreachable at all — it sent the ordinary Guardian token to the `:admin` pipeline, which
-    401s anything without an MFA-verified admin session.
-2.  Once reachable, it was still unusable: the row's action cell tested `status == "pending"`, but
-    the server's value is **`"pending_review"`**, so **Approve and Reject never rendered**. The page
-    showed an "Actions" column that was permanently empty.
-
-Nobody could see (2) while (1) was true, which is why fixing the auth alone would have shipped a
-page that loads and does nothing. Both were found by driving the deployed preview, not by reading.
-
-The status strings are the whole subject of this module, because the page invented three the server
-never uses: `"pending"` (really `pending_review`), `"rejected"` (really `dismissed`), and it only got
-`"approved"` right by accident.
-
+{-| Source approval (`/admin/sources`) — the page with TWO stacked
+defects, the outer hiding the inner: unreachable (ordinary token → 401),
+and once reachable still unusable (the action cell's buttons dispatched
+messages no update branch consumed). Tests pin both: admin-token
+requests, and each button producing an observable request.
 -}
 
 import Api exposing (AdminSource)

@@ -51,20 +51,10 @@ startUploadAgeGatingOff =
     ProgramTest.start () (uploadProgram False (Just "test-token"))
 
 
-{-| Build an SSE frame exactly as the server emits it.
-
-The one and only wire shape is `StacksWeb.ProtoJSON.poll_response/1`
-(`apps/core/lib/stacks_web/proto_json.ex:525-534`), declared by
-`proto/stacks/common/v1/upload.proto`'s `PollResponse`: snake\_case, and always
-all six keys — `book_ids` defaults to `[]` and `is_duplicate` to `false`
-server-side, and `book_id` / `rejection_reason` arrive as JSON `null` rather
-than going missing (`UploadController.sse_receive_loop/4` passes all six on
-every branch).
-
-These fixtures spoke camelCase until, so they exercised a decoder
-branch the server never reaches — breaking every production wire field left the
-whole Elm suite green.
-
+{-| Build an SSE frame exactly as the server emits it — the one wire shape
+is `ProtoJSON.poll_response/1` (snake\_case, all six keys always present,
+nulls not omissions). Fixtures built by hand instead of through this
+drifted from the wire for months.
 -}
 simulateStreamEvent : PollStatus -> Maybe String -> Bool -> String
 simulateStreamEvent status maybeBookId isDuplicate =
@@ -301,23 +291,10 @@ uploadProgressIsAnAriaLiveRegion =
 
 {-| Placing or adding a book must tell the shell the inbox has changed.
 
-⛔ **Found by a probe that reddened nothing.** Replacing this `RefreshInbox`
-with `NoOut` left all 1657 tests green — the badge would have gone on showing
-`1` for a book the reader had just shelved, and no test anywhere would have
-noticed. The reason is structural: `uploadProgram`'s update wrapper discards the
-third element of `Upload.update`'s tuple (`( newModel, _, _)`), so no
-program test can see an `OutMsg` at all, and `Main.update` is a
-`Browser.application` with ports and a `Nav.Key` and cannot be program-tested
-either.
-
-So this is a direct assertion on the return value, which is the only place the
-signal is visible. ⚠️ It proves the signal is RAISED. It does not prove `Main`
-acts on it — `Main.update`'s `Upload.RefreshInbox` branch remains unreachable
-from any test in this suite, and that gap is recorded rather than papered over.
-
-The `NoOut` companion is the anti-vacuity half: without it, "returns
-`RefreshInbox`" would pass just as well against an update that returned it from
-every branch, which would refetch the inbox on every keystroke of an ISBN.
+⛔ Found by a probe that reddened nothing: replacing `RefreshInbox` with
+`NoOut` left every test green because `uploadProgram`'s update wrapper
+discards `Upload.update`'s third tuple element. This test observes the
+OutMsg itself, so the badge cannot silently keep showing a shelved book.
 
 -}
 shelvingABookAsksForTheInboxAgain : Test
@@ -511,21 +488,11 @@ inboxResumesTheExistingConfirmFlow =
                     )
 
 
-{-| ⛔ THE INVARIANT. The owner's ruling, half two:
-
-> "incorrect classifications should never end up on shelves they are not
-> intended for"
-
-Identification is asynchronous and finishes without the reader; **placement
-must not**. This asserts the absence directly rather than trusting that no code
-does it — resume an inbox item, let its book load, and then check that no
-placement request has been dispatched and that the completion card is nowhere
-on screen. An inbox that auto-placed would redden on both counts.
-
-The `expectHttpRequests` assertion is the load-bearing one: a shortcut that
-placed the book and jumped to the shelf would fail the POST check even if
-someone also arranged for the verify step to render.
-
+{-| ⛔ THE INVARIANT: incorrect classifications must never end up on
+shelves they were not intended for. Identification is asynchronous;
+placement must not be. Asserts the ABSENCE directly — resume an inbox
+item, let its book load, and prove no placement request was dispatched
+and the confirm affordance is still the only path to a shelf.
 -}
 inboxPlacesNothingByItself : Test
 inboxPlacesNothingByItself =
@@ -623,23 +590,10 @@ waitingCopyOffersTheDoorAfterTwentySeconds =
                     ]
 
 
-{-| ⛔ requirement 5's warning, as a test.
-
-> Do **not** claim "retrying" or "attempt 2 of 3": no attempt data exists on
-> the wire, and inventing it client-side would be a lie dressed as reassurance.
-
-The row stays `pending` across `IdentifyBookJob`'s retries, so no frame is
-broadcast between them and this client cannot know which attempt is running.
-Any future edit that adds a comforting "retrying…" to the waiting screen has to
-delete this test to do it.
-
-⛔ Written as an EXHAUSTIVE assertion, not as a list of `hasNot`s for words like
-"Attempt" and "of 3". A negative prose assertion for copy the app has never
-contained can never fail — it is a comment wearing a test's clothes, and
-`scripts/check-prose-assertions.sh` exists to say so. Pinning the paragraph
-count and every sentence in it is the version that actually reddens: a new line
-of reassurance, whatever it says, makes this two-into-three.
-
+{-| ⛔ No invented retry copy: the row stays `pending` across the job's
+retries, no frame is broadcast between them, and the client cannot know
+which attempt is running — so the waiting screen must not claim
+"retrying" or "attempt 2 of 3". Pins the copy to what the wire proves.
 -}
 waitingCopySaysNothingAboutRetries : Test
 waitingCopySaysNothingAboutRetries =
@@ -713,21 +667,12 @@ waitingWatchdogIsResetByAHeartbeat =
                     )
 
 
-{-| — the wave's headline, and the acceptance test for it.
-
-`9780156453806` is checksum-valid and is NOT in the catalogue. Against the DIY
-flow this ISBN was a dead end: `SubmitManualIsbn` issued
-`GET /api/books/isbn/9780156453806`, which only ever consults
-`Books.find_existing/1`, so a valid ISBN the platform had never seen came back
-404 and the reader was told to "check the ISBN and try again" — for a number
-that was correct. `Books.confirm/2` resolves it externally, creates the work
-and its primary edition, and places it, all in one transaction; it simply had
-no caller.
-
-The assertion is therefore about the REQUEST, not only the rendering: the
-manual path must dispatch `POST /api/books/confirm`. Simulating a response for
-a request the program never made is what fails here on the old flow.
-
+{-| The manual-entry acceptance test: a checksum-valid ISBN the catalogue
+has never seen must succeed. The old DIY flow GETed
+`/api/books/isbn/:isbn` (which only consults `find_existing/1`), so an
+unseen valid ISBN 404'd and the reader was told to "check the ISBN" —
+for a number that was correct. `confirmBook` resolves and places in one
+call.
 -}
 manualIsbnNewBookIsCreatedThroughConfirm : Test
 manualIsbnNewBookIsCreatedThroughConfirm =

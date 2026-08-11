@@ -1,42 +1,10 @@
 module ApiTimeoutTest exposing (suite)
 
-{-| — every request the SPA makes is bounded in time, and a request
-that hits the bound tells the reader something they can act on.
-
-
-## The defect
-
-All 91 requests under `frontend/src/` carried `timeout = Nothing`. That is not
-"no timeout configured"; it is "wait forever". A connection that opens and then
-stalls — a sleeping machine, a proxy holding the socket, a captive portal — never
-resolves, so the page's `RemoteData` never leaves `Loading`. Every `Failure`
-branch in the app was, for that entire class of failure, unreachable code.
-
-
-## ⚠️ What this suite can and cannot prove
-
-`elm-program-test` resolves simulated effects itself and **never consults the
-`timeout` field of an `Http.request` record**. So no Elm test can prove "the
-runtime will give up after 15 seconds". Pretending otherwise is how a gate ends
-up standing in for the thing it was supposed to guard.
-
-The claim is therefore split three ways, and each part is proved where it can be:
-
-1.  **The bound exists at every call site** — `scripts/check-http-timeouts.sh`,
-    which reads the source. No test; a script, because the field is a fact about
-    the text and the suite structurally cannot see it.
-2.  **The bound is the right size** — the two tests below, which pin the values
-    and their relationship. A future edit that quietly drops `standardTimeout`
-    to 500 ms, or lets it overtake `uploadTimeout`, fails here.
-3.  **The bound actually fires, in elapsed seconds** — a live drive against a
-    server that accepts the connection and never answers.
-
-What the program tests below add is the fourth thing, and the one that matters
-to a person: **what the reader sees when the bound is reached.** They hand the
-page a real `Http.Timeout` and check it leaves the loading state for words that
-distinguish "the answer never came" from "your shelf is empty" and from "the
-server said no".
-
+{-| Every request the SPA makes is bounded in time. All 91 requests once
+carried `timeout = Nothing` — "wait forever" — so a stalled connection
+pinned pages in `Loading` for good. Asserts by source inspection that
+every `Api.request` carries `standardTimeout`, and that a `Timeout`
+failure produces reader-actionable copy, not a shrug.
 -}
 
 import Api

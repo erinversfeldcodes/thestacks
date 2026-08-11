@@ -1,35 +1,10 @@
 module SessionExpiryTest exposing (suite)
 
-{-| Tests for Phase 2 — global session-expiry interceptor + proactive
-silent renewal.
-
-
-## Seam note (read before extending)
-
-`Main.elm` is a `Browser.application` with a real `Nav.Key` and real ports plus
-real `Api.*` `Cmd`s. As documented in `MainNavTest`, its full update loop cannot
-be driven by `elm-program-test` (effects are opaque `Cmd Msg`), and any function
-taking `Main.Model` cannot be unit-tested because `Model` embeds an
-unconstructable `Nav.Key`. So the interceptor is tested at the seams that ARE
-reachable:
-
-  - **Page precondition (Scenario 1):** an authenticated 401 must stop being
-    swallowed as `NoOut` and bubble a distinct `OutMsg` to `Main`. Asserted as
-    `OutMsg /= NoOut` on the two representative authed pages.
-  - **Exclusion (Scenario 2):** a login 401 stays local (invalid-credentials, no
-    global notice / redirect).
-  - **Renewal (Scenarios 3 & 4):** driven through a `POST /api/auth/refresh`
-    `SimulatedEffect` harness whose success path calls the real key-free
-    `Main.renewAuthToken`; success adopts the new token (no logout), failure
-    clears auth (the `sessionExpired` fall-through).
-  - **Notice + scheduling:** a card built with the `SessionExpired` arrival
-    renders the distinct notice (the visible outcome of the expiry path — since
-    that is an `Arrival` constructor, not a boolean), and
-    `Main.loginEffects` includes `ScheduleRenewal` (renewal is armed on login).
-
-`Main.sessionExpired`'s full redirect + `clearAuth` port (needs `Nav.Key`) is
-covered by the deployed E2E gate (`e2e/tests/auth.spec.ts`).
-
+{-| Global session-expiry interceptor + proactive silent renewal. Main's
+full update loop cannot be program-tested (real Nav.Key, opaque Cmds),
+so the seam is tested pure: the interceptor claims authed 401s, expiry
+stashes the current route for the post-login return, and renewal fires
+ahead of the deadline without user-visible state changes.
 -}
 
 import Api

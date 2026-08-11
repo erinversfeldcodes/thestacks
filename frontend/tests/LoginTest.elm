@@ -411,23 +411,10 @@ suite =
         ]
 
 
-{-| ⛔ requirement 2 / requirement 5, as tests.
-
-The catch-all was `"The door remains shut. Invalid email or password."` for every
-status this function does not list — so a 502 from a node restarting mid-deploy
-told the reader their credentials were wrong. The reader's move is then to retype
-details that are already correct, fail again, and conclude the account is gone.
-
-The assertions are written as inequalities against that exact sentence rather
-than as equalities against the new one, because the requirement is a prohibition:
-"never claim a credential problem the server did not report". Copy may be reworded
-later; the prohibition may not be relaxed, and an equality test would go green
-against a reworded lie.
-
-The 401 case below is the positive control. Without it, `httpErrorMessage` could
-answer "we cannot say why" to EVERYTHING and every inequality above would pass
-while the one status that really does mean "wrong password" stopped saying so.
-
+{-| ⛔ Failure copy may only claim what the status proves. The catch-all
+said "Invalid email or password" for every unlisted status, so a
+mid-deploy 502 told the reader their correct credentials were wrong.
+Only 401 blames credentials; unknown statuses get honest retry copy.
 -}
 unknownStatusClaimsNothing : Test
 unknownStatusClaimsNothing =

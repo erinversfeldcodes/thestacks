@@ -13,21 +13,11 @@ import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
 
 
-{-| An SSE frame exactly as the server emits it.
-
-The one and only wire shape is `StacksWeb.ProtoJSON.poll_response/1`
-(`apps/core/lib/stacks_web/proto_json.ex:525-534`), declared by
-`proto/stacks/common/v1/upload.proto`'s `PollResponse`. It is snake\_case, and
-`UploadController.sse_receive_loop/4` passes all six keys on every branch —
-`book_ids` defaults to `[]` and `is_duplicate` to `false` server-side, and
-`book_id` / `rejection_reason` are serialized as JSON `null` rather than
-omitted. Building every fixture through here means a wire rename has exactly
-one place to be wrong, and it is the place that fails.
-
-Until these frames were written by hand in camelCase — a shape the
-server has never emitted — so breaking any production wire field left the suite
-green.
-
+{-| An SSE frame exactly as the server emits it — the one wire shape is
+`ProtoJSON.poll_response/1` (snake\_case, all six keys on every branch,
+nulls not omissions). Fixtures are built through this helper so a
+decoder change that survives these tests is one that survives the real
+wire.
 -}
 serverFrame : String -> Maybe String -> List String -> Maybe String -> String
 serverFrame status bookId bookIds rejectionReason =

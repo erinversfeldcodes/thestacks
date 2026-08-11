@@ -1,19 +1,10 @@
 module GridNavTest exposing (suite)
 
-{-| — the roving-tabindex navigation state machine, as pure decisions
-over packed rows.
-
-The grid under test (widths include the packer's gap):
-
-    row 0:  A B C     centers: A=50  B=125 C=250
-    row 1:  D E            centers: D=150 E=320
-    row 2:  F                   centers: F=45
-
-Vertical moves are NEAREST-X (owner decision): ↓ from C (center 250) lands on
-E (center 320, distance 70) rather than D (150, distance 100) — an
-index-based model would give the opposite answer, so these cases fail against
-any regression to "same column index".
-
+{-| The roving-tabindex navigation state machine, as pure decisions over
+packed rows. The fixture grid has ragged rows at known centers;
+vertical moves are NEAREST-X (owner decision), horizontal moves clamp
+at row ends, and focus follows the roving index. Pure decision tests —
+DOM focus is the browser's job.
 -}
 
 import Expect

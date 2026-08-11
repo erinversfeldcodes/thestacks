@@ -1,46 +1,11 @@
 module PersistFirstLoginTest exposing (suite)
 
-{-| — the login credential must never be downstream of an animation.
-
-
-## The defect
-
-`Main` used to park a successful login in `pendingAuthResponse`, start the door
-dolly-shot over a JS port, and write the token to localStorage only when the
-browser reported the animation finished. The report comes from a
-`requestAnimationFrame` callback resolving Web Animations `finished` promises,
-and **neither runs while the window is occluded or backgrounded**. Driven live
-on 2026-07-30: three logins returning `200`, nothing in localStorage, ten frozen
-300 ms transitions, zero WAAPI animations, no follow-up request.
-
-
-## Why this harness is the occlusion repro
-
-The bug is not "the animation is slow", it is "the completion signal never
-arrives". This harness reproduces that condition exactly and by construction:
-**there is no way to deliver the animation-finished signal to it.** The harness
-has no `ArrivalSettled`, subscribes to no port, and never advances a timer — the
-same situation the browser leaves the app in when the window is covered. Every
-assertion below therefore holds in the state the occluded browser is actually
-in, not merely "before the animation would have finished".
-
-What the harness stands in for: `Main.loginEffectCmd` turns each `LoginEffect`
-into an opaque `Cmd Msg` (`saveAuth`, `Nav.pushUrl`, …) that elm-test cannot
-observe — `Main.Model` embeds an unconstructable `Nav.Key`, the seam documented
-in `SessionExpiryTest`. So the harness realises the effects itself, recording
-what each one means. The parts that matter come from production and not from the
-harness: the real `Login.update` decodes the real `200`, the real
-`Main.completeLogin` decides the state and the effects, and the real
-`Main.loginEffects` supplies their ORDER. That `PersistAuth` maps to a
-`saveAuth` port call is proved on the wire by the deployed occluded-login E2E
-(`e2e/tests/auth.spec.ts`), which reads localStorage in a hidden tab.
-
-
-## Mutation probe
-
-Removing `PersistAuth` from `Main.loginEffects` — "skip saveAuth" — reddens
-`persist_first_no_animation_signal` and `persist_first_before_any_animation`.
-
+{-| The login credential must never be downstream of an animation. Login
+used to park the auth response, play the door dolly-shot, and persist
+only when the browser reported the animation done — a report an
+occluded window never sends (rAF doesn't fire), leaving the reader
+authenticated in memory and anonymous on disk. Persistence now happens
+on the same update that decodes the 200; the animation is decoration.
 -}
 
 import Expect

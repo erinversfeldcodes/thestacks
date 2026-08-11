@@ -580,30 +580,11 @@ simulateBookDetailResponse bookId book =
         json
 
 
-{-| An HTTP response for `GET /api/books/:id` carrying a placement.
-
-The placement object is exactly what `StacksWeb.ProtoJSON.book_placement/1`
-emits (`apps/core/lib/stacks_web/proto_json.ex:311-322`): a `Map.take` of
-`[:id,:book_id,:personal_rating,:notes]` off the placement, merged with
-`bookshelf_name`, `formats`, `visibility` and `bookshelf_visibility`. That
-allow-list is the whole contract — nothing else can reach the client on this
-endpoint. (`bookshelf_visibility` is the ceiling and has its own fixture,
-`simulateBookDetailResponseWithVisibility`, which sets both visibility keys
-explicitly; here they stay at the "bookshelf association not loaded" value the
-serializer emits, `null`.)
-
-In particular the reading-progress quartet — `reading_status`, `current_page`,
-`started_at`, `finished_at` — is NOT emitted here. This fixture used to send it
-anyway, which made `Components.PlacementCard` look like it renders a live
-progress badge on page load when in production the card always opens at its
-"To Read" default with no page count. Those four keys only ever arrive from
-`PUT /api/placements/:id/progress` via `ProtoJSON.reading_progress/1`
-(`proto_json.ex:688-696`) — fold them in from a progress response, never from
-here.
-
-`position` and `placed_at` are likewise outside the allow-list: they belong to
-the bookshelf payload's `PlacementDetail`, not to `book_placement/1`.
-
+{-| An HTTP response for `GET /api/books/:id` carrying a placement,
+matching `ProtoJSON.book_placement/1` exactly: the take-list of
+id/book\_id/personal\_rating/notes plus bookshelf\_name, formats,
+visibility, bookshelf\_visibility. That allow-list is the whole
+contract — fixtures must not invent keys the wire can never carry.
 -}
 simulateBookDetailResponseWithPlacement : String -> Book -> Placement -> Http.Response String
 simulateBookDetailResponseWithPlacement bookId book placement =
@@ -1091,27 +1072,11 @@ uploadEffects msg model maybeToken =
 
 {-| Translate Bookshelf page Cmds into SimulatedEffects.
 
-⚠️ **This used to be `case msg of _ -> SimulatedEffect.Cmd.none`** — a total
-black hole. Every bookshelf harness (owner _and_ read-only) shared it, so no
-`Bookshelf.Msg` could produce any request in any bookshelf program test. That
-silently disarmed `BookshelfReadOnlyTest`'s `no_mutating_request` assertion,
-which is labelled a SECURITY guarantee: it counted POSTs in a harness where the
-count was structurally pinned at zero, and would have kept passing had the
-read-only view started firing mutations on every render.
-
-It now mirrors `Page.Bookshelf.update`'s real effects, computed — as production
-does — from the **pre-update** model. `BookshelfProgramTest`'s
-`token_fires_one_request` is the pattern: an assertion that something does _not_
-happen is only worth the positive control that proves the harness can see it
-happening at all.
-
-⚠️ **The organiser branches read `Bookshelf.mutationToken`, not `model.token`** —
-production's own read-only guard, _called_, not re-implemented. A
-mirror of a guard is a second place for it to be wrong, and the whole reason this
-translator needed rewriting was a harness quietly disagreeing with the page. The
-guard's own falsifiability does not rest here either way: `BookshelfReadOnlyTest`'s
-`read_only_organiser_is_inert_SECURITY` asserts on the `Cmd` that
-`Page.Bookshelf.update` actually returns, with no translator in the path.
+⚠️ This used to be `case msg of _ -> Cmd.none` — a total black hole
+shared by every bookshelf harness, which silently disarmed the
+read-only SECURITY assertion (it counted POSTs the harness could never
+produce). Every mutating Msg must be translated here or its tests
+assert against nothing.
 
 -}
 libraryEffects : Bookshelf.Msg -> Bookshelf.Model -> SimulatedEffect Bookshelf.Msg

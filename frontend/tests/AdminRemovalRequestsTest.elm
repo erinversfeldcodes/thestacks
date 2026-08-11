@@ -1,20 +1,10 @@
 module AdminRemovalRequestsTest exposing (suite)
 
-{-| Tests the removal-request review queue.
-
-The queue's server half shipped first and was invisible in practice — the endpoints existed,
-were tested, and nothing rendered them. So the assertions here are about **reachability and
-safety**, not about list rendering:
-
-1.  **The two decisions cannot be confused.** `/admin/sources` has an Approve button that
-    _publishes_ a listing; this page has one that _takes a listing down_. Same row, opposite
-    effects. Nothing here may be labelled "approve", and removal must not be a single click.
-2.  **A pending request is never presented as already handled.** Every listing in this queue
-    is still live, and the page has to say so — otherwise the reviewer assumes the backlog is
-    smaller than it is.
-3.  **An empty queue reads as good news**, not as a failed load. Those two states look
-    identical if only one of them is styled, and the reviewer would go looking for a bug.
-
+{-| Tests the removal-request review queue — reachability and safety, not
+list rendering (the server half shipped first and nothing rendered it):
+approve and dismiss cannot be confused, both hit the admin endpoints
+with the admin token, and a lapsed admin session surfaces the admin
+notice rather than signing the operator out of the product.
 -}
 
 import Api exposing (RemovalRequest)

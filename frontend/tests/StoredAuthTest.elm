@@ -1,48 +1,12 @@
 module StoredAuthTest exposing (suite)
 
-{-| — a boot has three outcomes, and the app must be able to say which.
-
-
-## The defect
-
-`decodeFlags: Decode.Value -> Maybe Auth` folded three outcomes into two.
-"Nothing was stored" and "something was stored and would not decode" both
-arrived as `Nothing`, and `init` treated both as an ordinary signed-out boot.
-
-That is not hypothetical. The blob is written by `saveAuth` and read back
-through the same decoder, so a mismatch means something else wrote it — a
-truncated write, a shape from an older release, or the nested-under-`user` blob
-the SPA auth-injection recipe warns about: _"`stacks-auth` must be a FLAT blob;
-nesting under `user` fails silently and looks exactly like logged-out"_. Looking
-exactly like logged-out **is** the defect. The reader is put back at the door
-with no explanation, and `Result.toMaybe` discarded the decoder's account of why
-at the moment of maximum information.
-
-
-## What is asserted here
-
-The full chain a boot actually walks — raw flags → `decodeFlags` →
-`arrivalForBoot` → `Login.init` → rendered card — so a corrupt blob is proved to
-reach the reader as words on a page, not merely as a different constructor.
-`Main.init` itself needs a `Nav.Key` and is unreachable from elm-test; every
-link in that chain except the `Nav.Key` is production code.
-
-
-## Why these assertions are not vacuous
-
-`readerIsSignedOut` (the negative) is paired with `validBlobSignsThemIn` (the
-positive control) — a corrupt blob must not authenticate, and a good one must,
-or "not signed in" would be satisfied by an app that can never sign anyone in.
-The notice assertions are paired the same way in `ArrivalTest`.
-
-
-## Mutation probe
-
-Returning `NoStoredAuth` instead of `CorruptStoredAuth` on a decode failure —
-the pre-behaviour, `Result.toMaybe` in one line — reddens
-`nested_blob_is_corrupt`, `partial_blob_is_corrupt`,
-`corrupt_blob_reaches_the_reader` and `corrupt_reason_survives_to_the_page`.
-
+{-| A boot has three outcomes and the app must say which: nothing stored,
+valid auth, or a blob that would not decode. The old `Maybe Auth`
+folded the last two into `Nothing` — but the blob is written by
+`saveAuth` and read by the same decoder, so a decode failure means
+something rewrote it (half-write, old release, flat-vs-nested drift).
+`CorruptAuth` clears the bad blob and says why instead of silently
+signing out.
 -}
 
 import Expect

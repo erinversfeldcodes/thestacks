@@ -1,38 +1,11 @@
 module DoorArrivalTest exposing (suite)
 
-{-| — the login door dolly-shot plays again, driven from the shell.
-
-`Main.viewArrivalDoor` renders the door scene layers over the destination page
-for exactly the `Arriving` window, and nothing at either end of it. That is what
-gives `Arriving` an observable job: navigated away from the login scene on
-the same update that decoded the `200`, so the port had no elements left to
-animate (`animationsStarted=0`). Rendering the layers from the shell puts the
-ids the port targets back on screen — over the page the reader just landed on —
-without ever putting the credential downstream of the animation.
-
-⚠️ This is a SEPARATE harness from `PersistFirstLoginTest` on purpose. That
-suite has no animation-finished message by design — its absence IS the
-occluded-window simulation — so a door-render test must not be smuggled into it. The persist-first guarantee and the door's
-presence are proved independently.
-
-
-## Why these assertions are not vacuous
-
-The `Arriving` positive is paired with a `Authenticated`/`Anonymous` negative
-control in the same suite: a bare "the door is absent" passes just as happily
-when the view crashed to `text ""` or the class was renamed. And `Arriving`
-asserts the actual dolly target (`#bookshelf`, the layer `app.js` scales up and
-fades) is present, not merely the wrapper — a wrapper with no layers would
-animate nothing and still satisfy a class-only check.
-
-
-## Mutation probe
-
-Making `viewArrivalDoor` ignore its argument (`viewArrivalDoor _ = text ""`)
-reddens `door_renders_while_arriving`. Making it render the door for every state
-(`viewArrivalDoor _ = <the Arriving branch>`) reddens both
-`no_door_once_authenticated` and `no_door_while_anonymous`.
-
+{-| The login door dolly-shot plays again, driven from the SHELL.
+Navigating away from the login scene on the same update that decodes
+the 200 unmounts the page's layers before the animation port's rAF
+callback runs — zero animations started. `Main.viewArrivalDoor` renders
+the scene over the destination for exactly the `Arriving` window;
+these tests pin that window at both ends.
 -}
 
 import Html.Attributes as Attr

@@ -1,20 +1,9 @@
 module Page.ForgotPasswordNoticeTest exposing (suite)
 
-{-| The forgot-password acknowledgement.
-
-Asking for a reset link is a request whose whole outcome is a sentence: the
-reader's inbox is somewhere else, and the endpoint deliberately answers the same
-way whether or not the address is registered, so this line is the only evidence
-anything happened.
-
-It was rendered as `p [ class "login-card__subtitle" ]` — the same class as the
-"Enter your email and we'll send you a link" helper text two elements above it,
-in no live region at all. A screen-reader user pressed the button and was told
-nothing; a sighted one got a line of helper text where a confirmation belonged.
-
-Driven through the real card: switch to reset mode, type an address, press the
-button, answer the request.
-
+{-| The forgot-password acknowledgement — the request's whole outcome is
+one sentence, and it rendered in the same class as the instruction
+copy, so nothing visibly changed on success. Pins the distinct notice
+element and its copy.
 -}
 
 import Api exposing (RequestError)
@@ -124,22 +113,10 @@ throttled headers =
         ""
 
 
-{-| ⛔ The double-send.
-
-Modelled on resend guard and true for the same reason:
-`expectHttpRequests` counts requests still AWAITING a response, so the zero below
-means "the second press started nothing", not "nothing ever happened". The first
-press is proved by the `simulateHttpOk` above it, which fails outright if there
-was no matching request in flight to answer.
-
-The second press arrives as a message rather than a click because that is the
-case the guard has to survive: `disabled` is a hint, and a keyboard, a screen
-reader or two clicks landing in one frame all deliver `ForgotSubmitted` anyway.
-
-Before this, the button re-armed the instant the 200 arrived and still read "Send
-reset link", so a reader who pressed twice queued a second reset mail — which
-invalidates the link in the first.
-
+{-| ⛔ The double-send. `expectHttpRequests` counts requests still AWAITING
+a response, so the zero below means "the second press started nothing";
+the first press is proved by the `simulateHttpOk` above it, which fails
+outright if no request was in flight.
 -}
 doubleSendIsImpossible : Test
 doubleSendIsImpossible =
@@ -177,20 +154,10 @@ forgotFailureReopensTheButton =
 
 
 {-| ⛔ The disabled state may not depend on whether the address exists.
-
-`AuthController.forgot_password/2` answers 200 with ONE literal body for every
-address — that uniformity is the whole of its no-enumeration property, and the
-SPA is the half of it the server cannot enforce. A card that behaved differently
-for a registered address (a different label, a control that stayed live, a notice
-that said "sent" rather than "if that email is registered") would rebuild the
-account-existence oracle in the browser, out of an API that refuses to be one.
-
-Written the way `no_enumeration` test is written: drive both addresses
-through the IDENTICAL response the server always sends, then assert the two
-control states are equal **to each other**. The second case is the anti-vacuity
-guard — `( False, NotAsked)` compares equal to itself too, so the value being
-compared is pinned to what a completed send actually produces.
-
+The endpoint answers 200 with one literal body for every address — the
+no-enumeration property — and the SPA is the half the server cannot
+enforce: identical card behaviour for registered and unregistered
+addresses alike.
 -}
 disabledStateIsAddressIndependent : Test
 disabledStateIsAddressIndependent =

@@ -1,39 +1,10 @@
 module PageTitleTest exposing (suite)
 
-{-| — the document title is derived from the page, not from the route.
-
-
-## The defect
-
-`view` called `pageTitle model.route`. A route is what the reader ASKED for; a
-`Page` is what the shell BUILT. They differ by design at six sites — every one
-of them a place where the shell deliberately shows something other than the
-route's page — so the tab, the browser history entry and the screen reader's
-navigation announcement all named a page the reader was not looking at.
-
-Six drift sites, one per test below:
-
-1.  the protected-route bounce (the URL is deliberately left alone),
-2.  the `/admin/*` MFA gate,
-3.  an owner-guard refusal (`PageNotFound`),
-4.  the ADR-020 age-gating refusal (`PageNotFound`),
-5.  sign-out, which swaps the page before the URL,
-6.  `handleAdminSessionExpiry`, which re-gates **without touching the URL at
-    all** — so its title stayed wrong for as long as the operator stayed.
-
-
-## Why these assertions are not vacuous
-
-Each drift test asserts BOTH what the title now says AND that it no longer says
-the thing that was wrong — a negative assertion always paired with its positive
-control, because `expectViewHasNot`-shaped checks pass just as happily when the
-subject does not exist at all.
-
-
-## Mutation probe
-
-Changing `PageAdminGate`'s branch to name the gated route — the pre-behaviour — reddens `drift_2_admin_gate` and `drift_6_admin_reauth`.
-
+{-| The document title is derived from the PAGE, not the route. The two
+differ by design wherever the shell shows something other than the
+route's page (protected-route bounce, admin gate, invalid routes) — a
+signed-out reader at /upload sat in a tab titled "Add a Book". One case
+per divergence site, each failing if title derivation reverts to route.
 -}
 
 import Expect

@@ -1,19 +1,10 @@
 module MainNavTest exposing (suite)
 
-{-| Tests for Main.elm navigation chrome and flag decoding.
-
-Main.elm uses Browser.application with ports and a Browser.Navigation.Key, so
-the full update loop cannot be program-tested. Following the pattern in
-NavigationProgramTest, we test the pure surfaces directly:
-
-1.  `viewNav` renders the correct nav for authenticated vs unauthenticated state
-2.  the Elm-owned disclosures (TR-1): a menu's contents are in the DOM only
-    when its `NavMenu` is open, `aria-expanded` reflects that, "Add Book" is a
-    persistent primary action, and the active highlight follows child routes
-3.  `decodeFlags` restores a `StoredAuth` from localStorage-shaped flags (the
-    corrupt and unreadable outcomes have their own suite, `StoredAuthTest`)
-4.  `shouldShowOnboarding` encodes the onboarding display condition
-
+{-| Tests for Main.elm navigation chrome and flag decoding. Main is a
+`Browser.application` with ports and a real `Nav.Key`, so the full
+update loop cannot be program-tested; the pure surfaces are tested
+directly — `viewNav` per auth state, active-route marking, and
+`decodeFlags` outcomes.
 -}
 
 import Api

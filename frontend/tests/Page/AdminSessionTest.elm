@@ -2,22 +2,11 @@ module Page.AdminSessionTest exposing (suite)
 
 {-| The admin sign-in gate.
 
-⚠️ **The four admin pages each had passing tests while being completely unreachable**, because every
-one of them fed a token straight into a mocked API. None went through the code that _chooses_ the
-token, so a page handed the ordinary Guardian token — which the `:admin` pipeline rejects with 401 —
-looked perfectly healthy. This module tests the choosing.
-
-What is worth guarding here:
-
-1.  **The step machine cannot reach an impossible state.** A code can only be submitted against a
-    session id that exists, and the password is dropped as soon as it is spent.
-2.  **`Authenticated` is the only way a token escapes.** Main holds it in memory; if this module
-    ever stored or leaked it the in-memory decision (Design) would be quietly undone.
-3.  **Every failure keeps its own remedy.** A wrong password, a non-owner account, a missing factor
-    and a stale code are four different next actions. Collapsing them into "something went wrong"
-    is the failure mode that makes operator tooling unusable.
-4.  **`enrolmentSecret` reads the URI the way the endpoint expects** — base32, unmodified. The
-    endpoint used to demand base64 and no client could satisfy it; this pins the direction.
+⚠️ The four admin pages each had passing tests while being completely
+unreachable: every test fed a token straight into a mocked API, and none
+went through the code that CHOOSES the token. These tests drive the
+choosing — password → challenge, TOTP → admin token, and the admin
+token (never the ordinary one) on every admin request.
 
 -}
 

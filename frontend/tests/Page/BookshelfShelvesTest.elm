@@ -107,21 +107,11 @@ suite =
         ]
 
 
-{-| Per-shelf ordering must survive the auto-flow flattening.
-
-`Shelving.list_shelves/1` orders shelves by `s.position` (`shelving.ex:712`),
-and the frontend preserves that order only because
-`List.concatMap.placements shelves` is order-preserving
-(`Page/Bookshelf.elm:333,380,396`). Auto-flow re-groups placements into rows
-that fill the bookcase width, which discards the _shelf boundaries_ — it must
-not discard the _sequence_.
-
-Nothing else asserts this at any layer: the two tests that covered it
-(`shelves_rendered_in_order`, `each_shelf_is_distinct_row`) were deleted in
-`989d86ab` along with the per-shelf DOM element they queried, and the ordering
-half was never carried anywhere else. This restores that guard against the DOM
-the page renders today.
-
+{-| Per-shelf ordering must survive the auto-flow flattening: the server
+orders shelves by position, and the frontend preserves it only because
+`List.concatMap .placements shelves` is order-preserving while auto-flow
+regroups into width-filling rows. Pins the flattened order so a
+refactor to any non-order-preserving grouping fails here.
 -}
 shelfOrderIsPreserved : Test
 shelfOrderIsPreserved =

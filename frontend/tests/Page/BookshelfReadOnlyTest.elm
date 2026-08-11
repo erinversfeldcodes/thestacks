@@ -1,37 +1,10 @@
 module Page.BookshelfReadOnlyTest exposing (suite)
 
-{-| Program tests for read-only shelf browsing.
-
-A viewer browsing `/u/:handle/:bookshelf_name` sees the target reader's shelf
-rendered read-only:
-
-  - the fetch targets the profile endpoint (`/api/u/:handle/bookshelves/:name`),
-    NOT the viewer's own `/api/bookshelves/:name`;
-  - the received placements render as spines;
-  - NO mutating affordance is exposed (no "Add shelf" button), so no mutating
-    request can be issued through the UI — a SECURITY guarantee;
-  - **and no organiser message can mutate even if it bypasses the UI entirely**;
-  - a failed load (hidden shelf / ghost / bad name → 404) shows a neutral
-    "not available" state, not the owner's "could not load your library" error.
-
-⚠️ **Scope of the SECURITY guarantee, measured — and then moved.**
-Until it held at the VIEW layer only: `Page.Bookshelf.handleOrganiser`
-matched on `( ShelfOrganiser.AddShelf, Just token, _)` with no `config.readOnly`
-check, so a synthetic `OrganiserMsg` dispatched into a read-only model still
-issued `POST /api/bookshelves/:apiName/shelves` — confirmed by probe by,
-which found this file's negative assertion unfalsifiable and could not fix the
-production side under its own scope lock. The blast radius was always bounded
-(the request carries the _viewer's_ token, so the server scoped the write to the
-viewer's own bookshelf of that name, not the owner's) — the defect was that the
-guarantee lived in a convention rather than in the code that enforces it.
-
-`handleOrganiser` now dispatches on `Bookshelf.mutationToken`, which is `Nothing`
-under `readOnly`, so the mutating branches are not selectable at all.
-`read_only_organiser_is_inert_SECURITY` below asserts that against the `Cmd` that
-`Page.Bookshelf.update` actually returns — no effect translator in the path — and
-`owner_organiser_drive_is_observable` runs the identical drive under the owner
-config to prove those assertions can fail.
-
+{-| Program tests for read-only shelf browsing (`/u/:handle/:name`): the
+fetch targets the profile endpoint (never the viewer's own), placements
+render as spines, and NO mutating affordance is exposed — with the
+negative half backed by a positive control proving the harness can
+observe mutations at all.
 -}
 
 import Components.ShelfOrganiser as ShelfOrganiser
@@ -246,20 +219,11 @@ noShelfOrganiserPanel =
                     ]
 
 
-{-| ⚠️ **POSITIVE CONTROL for `noMutatingRequestOnLoad` below.**
-
-The negative assertion is only worth what this test proves: that the harness can
-observe a shelf mutation at all. Until the shared effect translator
-(`TestHelpers.libraryEffects`) was `case msg of _ -> Cmd.none`, so _no_
-`Bookshelf.Msg` could produce a request in _any_ bookshelf harness — the
-SECURITY assertion below counted POSTs in a world where the count was pinned at
-zero by construction, and would have kept passing had the read-only view started
-firing mutations on every render.
-
-Same page module, same translator, owner config: clicking the organiser's real
-"Add a shelf" button must issue exactly one POST. If this goes red the negative
-assertion below has stopped meaning anything.
-
+{-| ⚠️ POSITIVE CONTROL for `noMutatingRequestOnLoad` below. The negative
+assertion is only worth what this proves: the shared effect translator
+was once `case msg of _ -> Cmd.none`, so the SECURITY assertion counted
+POSTs in a world where the counter could never tick. This test fails if
+the harness ever goes blind again.
 -}
 ownerMutationIsObservable : Test
 ownerMutationIsObservable =

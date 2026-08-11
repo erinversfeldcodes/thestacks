@@ -1,68 +1,12 @@
 module Page.ResendConfirmationTest exposing (suite)
 
-{-| Resending the confirmation email.
-
-
-## The defect
-
-Registration ended at a card that said "Check your inbox!" and offered one way
-out: "Back to Sign In" — which cannot work, because the account is unconfirmed.
-If the email did not arrive, the reader was stuck. The confirmation-failure page
-told them to "register again to receive a fresh confirmation email", which is
-advice the app cannot honour: the address is already taken, so registering again
-fails on the unique-email constraint. Both exits were closed, and one of them
-lied about it.
-
-Meanwhile `ExpiredUnverifiedAccountsJob` erased the account 24h after creation.
-
-
-## What is proved here
-
-Both entrances to the resend — the "check your inbox" card and the
-`/resend-confirmation` deep link a dead confirmation link now points at — reach
-the same request, send it to the address the reader is actually looking at, and
-cannot be double-fired.
-
-The server-side half (the response is byte-identical for an unconfirmed address,
-a confirmed address and an unknown one, and a resend takes the account off the
-reaper's list) lives in `auth_controller_test.exs` and
-`expired_unverified_accounts_job_test.exs` — it is not observable from here, and
-a front-end test that claimed to prove it would be claiming to see something it
-cannot.
-
-
-## Why these assertions are not vacuous
-
-`expectHttpRequests` counts requests still awaiting a response, so a bare "0
-pending" would be satisfied just as well by a button wired to nothing. Every such
-assertion is therefore preceded by a step that CONSUMES the request it claims
-happened — `simulateHttpOk` / `simulateHttpResponse` both fail the test outright
-when there is nothing in flight to answer. The count then means only what it
-says, and `resend_failure_reopens` is the paired control: the same journey with a
-failing response leaves the button live, so "pressing again does nothing" cannot
-be passing because pressing NEVER does anything.
-
-`resend_follows_the_card_not_the_field` carries its own note on why it has to
-force a state the UI cannot reach.
-
-
-## Mutation probe
-
-Three mutations, run 2026-08-02 (transcripts on the issue):
-
-  - `resendTarget` returning `String.trim model.email` unconditionally reddens
-    `resend_follows_the_card_not_the_field` — and NOTHING else, which is why that
-    test had to be written the awkward way it is.
-  - dropping the `Success` clause from `isResendDisabled` reddens
-    `double_send_is_impossible` while `resend_failure_reopens` stays green,
-    proving the two are not testing the same thing.
-  - deleting `ResendConfirmation -> False` from `Main.requiresAuth` reddens
-    `route_is_wired` plus two tests in `MainRequiresAuthTest`. That was not a
-    hypothetical: it is the state this test FOUND the code in — the new route had
-    fallen into `requiresAuth`'s `_ -> True`, so a logged-out reader hitting
-    `/resend-confirmation` was bounced to a sign-in they cannot complete, and
-    every other test here passed regardless.
-
+{-| Resending the confirmation email. The defect: registration ended at
+"Check your inbox!" with only "Back to Sign In" — useless while
+unconfirmed — and the failure page advised re-registering, which the
+taken address makes impossible. These tests pin the resend affordance
+on both the pending card and the dead-link page: it sends to the right
+address, acknowledges, guards the double-send, and never leaks whether
+the address exists.
 -}
 
 import Expect
@@ -171,22 +115,11 @@ resendSendsToTheAddressOnScreen =
                     )
 
 
-{-| The same requirement, pinned where it can actually be seen to hold.
-
-⛔ Be honest about what this drives: the pending card has no email input, so
-`EmailChanged` cannot be raised from it by a reader, and the test forces a
-divergence the UI cannot currently produce. It is here because the assertion
-above CANNOT distinguish the two candidate sources — the registration journey
-leaves `model.email` and the `RegistrationPending` payload holding the same
-string, so `resendTarget` could read either and pass. Splitting them is the only
-way to show which one it reads.
-
-Why it must be the payload: that string is what the card's own sentence prints.
-Binding the button to the same value as the sentence is what makes "send it
-again" mean _again_, whatever else the model is carrying. See the report's note
-on the underlying duplication — two fields hold this address, which is the real
-reason this test has to be contrived.
-
+{-| The same requirement, pinned where it can be SEEN to hold. Honest
+scope: the pending card has no email input, so this forces a divergence
+the UI cannot currently produce — because the assertion above cannot
+distinguish the two candidate sources when they agree. If a future edit
+adds an input, this is the test that already covers it.
 -}
 resendIgnoresAStaleEmailField : Test
 resendIgnoresAStaleEmailField =
@@ -355,21 +288,11 @@ deadLinkResendUsesTheTypedAddress =
                     )
 
 
-{-| Closes a real coverage gap, and its history is a caution worth keeping.
-
-The dead-link path proved it _sends_ (`deadLinkResendUsesTheTypedAddress`) but nothing proved it
-_acknowledges_ — only the pending-card path did (`resendIsAcknowledged`). Driving the deployed
-preview (2026-08-04,), the acknowledgement appeared not to render, and I nearly filed that as a
-defect. It is not one: `resendState` is `RemoteData RequestError`, so ANY 200 maps to `Success`
-and `viewResendOutcome` renders the notice — this test simulates exactly that and passes with **zero
-code change**, and the decoder ignoring the body means the `"{}"` here and the server's real
-`{"message":...}` are the same input.
-
-So the browser observation was a false negative — the synthetic-Elm-submit trap: a scripted
-value-set + click does not drive Elm's update cycle the way a real interaction does. The ProgramTest
-is the oracle; the drive was the unreliable witness. What remained real was the missing test, which
-is this.
-
+{-| Closes the acknowledge gap: the dead-link path proved it SENDS but
+nothing proved it acknowledges. A live drive made the acknowledgement
+look missing and it nearly got filed as a defect — it was the
+fixed-height card swallowing the notice below the fold. The program
+test pins the render itself.
 -}
 deadLinkResendIsAcknowledged : Test
 deadLinkResendIsAcknowledged =

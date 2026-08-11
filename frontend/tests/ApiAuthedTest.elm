@@ -1,30 +1,11 @@
 module ApiAuthedTest exposing (suite)
 
-{-| — the authed-request wrapper: a 401 on a request that definitely
-carried a credential is claimed before the endpoint's own resolver sees it.
-
-
-## What is under test, and why it is reachable
-
-`Api.interpretAuthed` is the whole decision, extracted as a pure function of the
-`Http.Response`. The alternative — asserting through a `SimulatedEffect` — is the
-shape that has twice passed vacuously here: the harness hand-writes
-its own copy of the request and then agrees with itself. There is no copy below.
-`Api.interpretAuthed`, `Api.resolveWhatever` and `Api.resolveProfile` are the
-production functions, wired the same way `Api.updatePassword` wires them.
-
-The `msg` type is a local `Outcome`, so "did the 401 reach the result handler?"
-is a value comparison rather than a claim about a `Cmd` nobody can open.
-
-
-## Mutation probes (run 2026-08-01, both RED)
-
-  - `metadata.statusCode == 401` → `== 403` in `Api.interpretAuthed`:
-    reddens `expired_401_never_reaches_the_result_handler` and
-    `expired_401_on_a_json_endpoint`.
-  - deleting the `Http.BadStatus_` branch (fall through to `_ ->`):
-    reddens the same two.
-
+{-| The authed-request wrapper: a 401 on a request that definitely carried
+a credential is claimed before the endpoint's own resolver sees it.
+`Api.interpretAuthed` is the whole decision, extracted pure so the
+policy is testable without a harness: 401-with-credential → the
+session-expiry msg; everything else → the endpoint's own handler,
+untouched.
 -}
 
 import Api

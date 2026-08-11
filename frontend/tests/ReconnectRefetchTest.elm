@@ -1,23 +1,11 @@
 module ReconnectRefetchTest exposing (suite)
 
-{-| — the scoped reconnect-refetch decision.
-
-The drive proved the defect live: the app cleared its own offline
-banner on reconnect and left the shelf reading "unreachable … try again" on a
-working connection. The fix is Main's `reconnectShouldRefetch`, gated three
-ways (owner-decided scope), and each gate has a test that is FALSE without it:
-
-  - only the offline→online TRANSITION (not a repeated `online`, not going
-    offline);
-  - only the CURRENTLY routed page;
-  - only a `NetworkError` loss — `Timeout` and 5xx keep distinct
-    treatment, because reconnecting is not what fixes those.
-
-Verified by unit rather than live drive: `navigator.onLine` cannot be forced
-from the driver (the filing's own harness note), so the pure decision is
-pinned here and the wiring runs through the same `initPage` path every
-navigation exercises.
-
+{-| The scoped reconnect-refetch decision. Live drive: the app cleared its
+own offline banner on reconnect and left the shelf saying "unreachable"
+on a working connection. `Main.reconnectShouldRefetch` is gated three
+ways (owner-decided scope) and each gate has a test that is FALSE
+without it: only on offline→online, only for connectivity-shaped
+failures, only for the shelf surfaces in scope.
 -}
 
 import Components.BookList as BookList

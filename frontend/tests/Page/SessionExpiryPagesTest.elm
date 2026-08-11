@@ -1,45 +1,10 @@
 module Page.SessionExpiryPagesTest exposing (suite)
 
-{-| Tests for Phase 1 — extend the global session-expiry 401
-interceptor to the six remaining authed pages (three Settings pages, three
-Admin pages).
-
-Page-seam contract (mirrors `SessionExpiryTest` Scenario 1):
-
-  - An authenticated 401 from any authed-request `Err` branch must bubble the
-    distinct `SessionExpired` `OutMsg` to `Main` instead of being swallowed
-    locally.
-  - A non-401 error (network failure) and a success must stay LOCAL (`NoOut`)
-    so the interceptor never over-captures.
-
-Before the conversion these modules return 2-tuples with no `OutMsg` type, so
-this suite fails to compile (RED). After the conversion each page returns a
-`( Model, Cmd Msg, OutMsg)` and these assertions pass (GREEN).
-
-
-## ⚠️ This list does not prove coverage — `check-session-expiry-coverage.sh` does
-
-Read the imports above: eight pages, chosen by hand in. Three settings
-write-forms that make authed calls are absent, and stayed absent for four
-months while this suite was green — `Password`, `Profile` and `Notifications`
-each answered a mid-form 401 with "Please try again". A hand-written
-roster of covered pages cannot report what is missing from it; that is what it
-is missing. `scripts/check-session-expiry-coverage.sh` derives the roster from
-`Api.elm` and `src/Page/` instead, so a page added tomorrow is checked without
-anyone editing a list.
-
-What this suite is still for: the per-page behaviour the source-level gate
-cannot see — that the 401 signal produces `SessionExpired` and that a non-401
-does not.
-
-
-## The pages
-
-For the three converted pages the 401 no longer arrives as an `Err` at all:
-`Api.authed` claims it and emits the page's `SessionExpiryDetected` (proved in
-`ApiAuthedTest`). So the assertions below drive that message, and pair it with
-the `Err`/`Ok` controls that must stay local.
-
+{-| Extends the global session-expiry 401 interceptor to the six remaining
+authed pages (three Settings, three Admin). Page-seam contract: an
+authenticated 401 bubbles the distinct `SessionExpired` OutMsg instead
+of being rendered as a generic error; each page's every authed `Err`
+branch is driven to prove no branch swallows it.
 -}
 
 import Api

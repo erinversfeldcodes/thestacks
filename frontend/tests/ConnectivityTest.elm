@@ -1,52 +1,10 @@
 module ConnectivityTest exposing (suite)
 
-{-| — the shell tells the reader when the browser has no connection.
-
-
-## The defect
-
-Nothing in the app said anything. The page that most needed to was the one
-saying least: a shelf fetched with no connection sat in `Loading` and rendered
-an empty bookcase, so the reader was told their library was empty. Inferring it
-per-page from `Http.NetworkError` would copy the same decision N times, could
-only speak AFTER a request had already failed, and would say nothing at all on a
-page that happened not to be fetching. So it is answered once, in the shell, on
-the `handleSessionExpiry` pattern.
-
-
-## The seam these tests are aimed at
-
-`Main` is a `Browser.application` whose `Model` embeds an unconstructable
-`Nav.Key`, so `update` cannot be driven here (the seam documented in
-`SessionExpiryTest`). The chain is:
-
-    window "offline"  →  app.js  →  connectivityChanged port
-                      →  ConnectivityChanged Bool
-                      →  connectivityFromOnline
-                      →  model.connectivity
-                      →  viewConnectivity
-
-`port_boundary_to_banner` is the one assertion written in the terms `app.js`
-actually speaks: a `navigator.onLine` boolean in, a rendered banner out. It is
-not stronger than the two single-end tests — flipping either end reddens those
-too — but it is the only one that reads like the contract, so a future change to
-what the port's payload MEANS has a place to fail that is about the meaning
-rather than about a constructor.
-
-⚠️ **Two hops in that chain are not proved by any test in this file, and saying
-so is the point.** A suite that implied otherwise would be worse than a smaller
-one:
-
-  - `update` writes the field `view` reads — one line; the compiler types both
-    sides, and nothing here exercises it.
-  - The JS port name matches the Elm port name. A typo makes `app.ports.…`
-    undefined and the `if (app.ports && …)` guard in `app.js` skips the whole
-    block **silently**. No Elm test can see this; it is the "built but not
-    wired" defect class.
-
-Both are proved by the live drive recorded in issue Progress Notes: the
-browser was taken offline, the banner appeared, and it cleared on reconnect.
-
+{-| The shell tells the reader when the browser has no connection —
+previously nothing did, and an offline shelf rendered as an empty
+library. Covers the port wiring (boot send included, so a tab opened
+offline knows), the banner's presence exactly while offline, and the
+reconnect clearing it.
 -}
 
 import Expect

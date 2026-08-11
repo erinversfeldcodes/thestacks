@@ -1,47 +1,10 @@
 module ArrivalTest exposing (suite)
 
-{-| — one `Arrival` replaces six booleans, five inits and two view
-predicates.
-
-
-## The defect
-
-"Why is this reader standing at the login door" was six independent booleans —
-`sessionExpired`, `draftSaved`, `accountDeleted` on `Login.Model`, shadowed by
-`sessionExpiredNotice`, `draftSavedNotice`, `accountDeletedNotice` on
-`Main.Model` — raised by five separate inits and read by two view predicates
-that could not see each other.
-
-The reasons are mutually exclusive in life and were independently settable in
-code. `{ sessionExpired = True, accountDeleted = True }` type-checked and
-rendered both notices stacked; `draftSaved = True` with no expiry claimed a
-listing had been saved when nothing had. And because `Main` and `Login` held
-separate copies, they could disagree.
-
-
-## What is now unrepresentable
-
-Two arrival reasons at once, and a saved-draft flag detached from the expiry it
-describes — `draftSaved` lives inside the `SessionExpired` constructor. Neither
-is a test below, because neither compiles. See the probe transcript on the
-issue.
-
-
-## Why these assertions are not vacuous
-
-Every "does not show X" assertion is paired with a positive control that shows X
-under some other arrival, in the same suite. A bare negative passes just as
-happily when the notice has been deleted, when the selector is wrong, or when
-the view crashed to `text ""`.
-
-
-## Mutation probe
-
-Making `Login.init` ignore its argument (`init _ = init Fresh`) reddens
-`expiry_shows_expiry_notice`, `draft_expiry_reassures`, `deletion_says_goodbye`,
-`unreadable_tells_the_reader`, `unreadable_carries_the_reason` and
-`forgot_opens_the_reset_form`.
-
+{-| One `Arrival` replaces six booleans, five inits and two view
+predicates for "why is this reader at the login door". The booleans
+could all be true at once (stacked notices) and each init raised its
+own; the type admits one reason. Covers each constructor's notice, the
+suppression rule, and the expiry arrival preserving the return route.
 -}
 
 import Expect

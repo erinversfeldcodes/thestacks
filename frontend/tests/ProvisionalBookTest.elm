@@ -1,20 +1,10 @@
 module ProvisionalBookTest exposing (suite)
 
-{-| A book whose ISBN nothing has identified yet must read as unidentified.
-
-The server's stand-in title for such a book is the string `"ISBN 978…"`. Rendered
-where a title goes it reads as a book actually NAMED after a number, and the
-reader cannot tell a bug from a rare book from a lookup still in flight.
-
-Two things are under test, and the second matters as much as the first:
-
-1.  the treatment fires, and is driven by `verificationSource` — never by whether
-    the title happens to start with `"ISBN "`. The title is a guess about the
-    state; the field IS the state, and the guess is wrong in both directions.
-2.  it INFORMS and stops. A provisional book is a legal state — the ISBN gate
-    passed and only the catalogue lookup is outstanding — so nothing may be
-    disabled or skipped because of it (standing owner ruling).
-
+{-| A book whose ISBN nothing has identified yet must read as
+unidentified, not as a book named "ISBN 978…". Two things under test,
+the second mattering more: the stand-in detection itself, and that
+every surface rendering a title routes through it — a new surface
+reading `.title` directly reintroduces the bug.
 -}
 
 import Expect
