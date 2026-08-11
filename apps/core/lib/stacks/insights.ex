@@ -1,23 +1,12 @@
 defmodule Stacks.Insights do
   @moduledoc """
-  Personal inference & de-anonymisation education (Issue #242, ADR-019 §3a).
-
-  Computes, **on the fly and strictly own-only**, a display payload teaching a
-  signed-in user (a) what can be inferred about them from their own shelf
-  behaviour and (b) how they could be de-anonymised even though the platform
-  keeps no PII.
-
-  ## Invariants (the point of the feature)
-
-  - **Strict own-only.** Every read is hard-scoped to the given `user.id`.
-    There is no parameter or code path that can select another user's data.
-  - **Ephemeral — NEVER persisted.** Nothing here writes an inference, profile,
-    or rarity row to `op.*` / `wh.*`. Persisting derived sensitive inferences
-    would create a new special-category PII store needing its own
-    erasure/export/consent — precisely what we must avoid. Compute and return.
-  - **Honestly labelled.** Real facts (top subjects, counts) are shown as fact;
-    `risk_inferences` are labelled illustrations of what a third party *could*
-    infer, never asserted or stored, and are gated behind an explicit reveal.
+  Personal inference & de-anonymisation education (242, ADR-019 §3a):
+  computes, on the fly, what can be inferred about a user from their own
+  shelf behaviour. Invariants (the point of the feature): STRICT own-only
+  (every read hard-scoped to `user.id`); EPHEMERAL (nothing persisted —
+  a stored inference would be a new special-category PII store needing its
+  own erasure/export/consent); honestly labelled (facts as facts,
+  inferences as guesses with their limits stated).
   """
 
   import Ecto.Query

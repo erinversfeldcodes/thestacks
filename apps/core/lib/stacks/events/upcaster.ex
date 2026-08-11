@@ -1,18 +1,10 @@
 defmodule Stacks.Events.Upcaster do
   @moduledoc """
-  Transforms events from older schema versions to the current version.
-
-  Each event in `op.event_log` has a `schema_version` (integer, default 1).
-  When the shape of an event's payload changes, add a new pattern-match clause
-  here to migrate old payloads forward.
-
-  ## Adding an upcast
-
-  1. Add a clause matching `%{event_type: "the.type", schema_version: old_version}`.
-  2. Transform the payload and bump `schema_version` to the new version.
-  3. Document the migration reason in a comment above the clause.
-
-  Unknown versions pass through unchanged (forward compatibility).
+  Migrates events from older `schema_version`s forward. To add an upcast:
+  match `%{event_type: ..., schema_version: old}`, transform the payload,
+  bump the version. Unknown versions pass through unchanged (forward
+  compatibility). Every `PayloadContract` entry with `version > 1` must
+  have a clause here — enforced by test.
   """
 
   @doc """

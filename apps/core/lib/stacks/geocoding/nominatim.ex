@@ -1,34 +1,12 @@
 defmodule Stacks.Geocoding.Nominatim do
   @moduledoc """
-  Geocoding via Nominatim (OpenStreetMap).
-
-  Chosen because it is free, needs no key, and US-3.1.1's category taxonomy is already
-  OSM tags — so the place vocabulary matches the one the story specifies rather than
-  needing a translation layer.
-
-  ## Honouring the usage policy
-
-  Nominatim's public instance is a donated service with a published policy, and the two
-  requirements that bind us are:
-
-  1. **A genuine, identifying `User-Agent`.** A generic or absent one is grounds for
-     being blocked. `@user_agent` carries the project and a contact URL.
-  2. **At most ~1 request per second, no heavy bulk use.** This is honoured
-     *structurally* rather than by hoping: geocoding happens at **approval time**, which
-     is a human clicking a button, so the natural pace is far below the limit. There is
-     deliberately **no batch geocoding entry point** — adding one would need a throttle,
-     and the absence of the function is a cheaper guarantee than a rate limiter nobody
-     tests.
-
-  A self-hosted Nominatim removes both constraints and is a config change
-  (`:nominatim_base_url`), not a code change — which is much of the point of choosing it.
-
-  ## Failure behaviour
-
-  Guarded by the shared `:nominatim_fuse`. A `429` is reported as `:rate_limited` rather
-  than a generic HTTP error and **melts the fuse**, because continuing to hammer a
-  service that has just asked us to stop is how an IP gets blocked — the breaker is the
-  thing that makes backing off automatic.
+  Geocoding via Nominatim (OpenStreetMap) — free, keyless, and OSM tags
+  match US-3.1.1's category taxonomy. The public instance's policy binds
+  us to: a genuine identifying `User-Agent` (`@user_agent` carries project
+  + contact URL) and ~1 req/s max — honoured STRUCTURALLY: geocoding runs
+  at human-paced approval time and there is deliberately no batch entry
+  point (one would need a real throttle). Failures return
+  `{:error, reason}` and leave coordinates nil; approval still succeeds.
   """
 
   @behaviour Stacks.Geocoding

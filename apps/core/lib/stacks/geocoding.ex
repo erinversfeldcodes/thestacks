@@ -1,43 +1,14 @@
 defmodule Stacks.Geocoding do
   @moduledoc """
-  Turns a place description into coordinates.
+  Turns a place description into coordinates, behind a provider seam:
+  callers depend on this module, `:core, :geocoder` picks the adapter
+  (default `Nominatim` — free, no key, and US-3.1.1's taxonomy is already
+  OSM tags). The seam mirrors `:isbn_http_client`/`:scraper_client`.
 
-  ## Why a behaviour rather than one module
-
-  The provider is expected to change. Nominatim (OpenStreetMap) is the right choice
-  *now* — free, no key, and US-3.1.1's category taxonomy is already OSM tags, so the
-  vocabularies match — but its accuracy on business names is weaker than Google's, and
-  the day that matters the swap should be a config line, not a refactor.
-
-  So callers depend on this module, never on a provider. `Stacks.Geocoding.Nominatim` is
-  the default; point `:core, :geocoder` at another adapter to switch. The seam mirrors
-  `:isbn_http_client` and `:scraper_client`, which is the project's existing idiom for
-  exactly this.
-
-  ⚠️ **Google Geocoding cannot be swapped in for this story — see ADR 022.** Not for the
-  reason an earlier version of this comment gave (which was circular), and not because of
-  the caching terms (which permit indefinite lat/lng storage for end-user-facing features
-  like ours). The actual chain, each link verified 2026-07-28:
-
-      Google Geocoding → its policy requires results *displayed on a map* to be shown on a
-      **Google map** → Google Maps JS requires **`'unsafe-eval'`** in `script-src`, even in
-      Google's own recommended strict CSP → `unsafe-eval` is forbidden outright
-      (`CLAUDE.md:144`, `security.md:139`); the live policy is `script-src 'self'`.
-
-  Google Geocoding *is* usable where results are **not displayed on a map** — attribution
-  suffices there. So this seam is genuinely provider-agnostic for a list or an admin queue;
-  it is the map that forecloses Google, not the geocoding.
-
-  ## The contract
-
-  `geocode/1` takes a free-text description ("The Book Lounge, Cape Town") and returns a
-  point or an error. It deliberately does **not** take a struct: geocoding a bookshop and
-  geocoding a third space are the same operation, and a shared interface keeps one
-  provider integration instead of two.
-
-  Returning `{:error, :not_found}` for "no match" separately from a transport failure
-  matters to callers: a space that cannot be geocoded is a real, visible state the owner
-  must be able to see, whereas a transport failure should be retried.
+  ⚠️ Google Geocoding cannot be swapped in for this story (ADR-022):
+  Google's ToS forbid storing geocodes beyond a 30-day cache, and the
+  stored-coordinates design (write once at approval) is load-bearing for
+  the 500m filter. Any replacement must permit indefinite storage.
   """
 
   @typedoc "A geocoded point, decimal degrees, WGS 84."

@@ -1,36 +1,13 @@
 defmodule Stacks.Events.PayloadContract do
   @moduledoc """
-  The declared, versioned shape of every `op.event_log` payload — the schema that
-  `buf` cannot provide.
-
-  Event payloads are `google.protobuf.Struct` (opaque JSON), so `buf breaking`
-  is blind to their internal shape, and `schema_version` + `Stacks.Events.Upcaster`
-  were honour-system. This module makes the payload shape a **declared contract**
-  that three guards enforce (see `Stacks.Events.PayloadContractTest`):
-
-    1. **Shape drift** — `Stacks.Events.emit/1` validates each payload against this
-       contract in non-prod envs (`validate/1`); the existing test suite drives most
-       emitters, so a payload whose keys/version drift from the contract fails a test.
-    2. **Version ↔ upcaster** — every entry with `version > 1` must have an
-       `Upcaster` clause migrating older versions forward.
-    3. **PII-lint** — every payload key must be non-personal-shaped, or listed in
-       `free_text_allowlist/0` with a justification (the guard that would have caught
-       the blog-title free-text leak at write time).
-
-  ## Changing an event payload
-  1. Update the emitter, and this contract entry (keys and, for a breaking change,
-     `version`).
-  2. If `version` changed, add a `Stacks.Events.Upcaster` clause for the old version.
-  3. If a new key is personal-shaped but genuinely non-PII, add it to
-     `free_text_allowlist/0` with a one-line justification.
-
-  Each entry is `%{version:, keys:, optional: []}` — `keys` are always present;
-  `optional` keys may be present or absent (a payload whose shape varies by branch,
-  e.g. `image.rejected` carries `isbn` only on the mismatch path). Both `keys` and
-  `optional` are PII-linted.
-
-  Contract is the single reviewable diff for any event-shape change — like
-  `proto/persisted.exs` is for the DB schema.
+  The declared, versioned shape of every `op.event_log` payload — the
+  schema `buf` cannot provide, since payloads are opaque
+  `google.protobuf.Struct` JSON. Three guards enforce it
+  (`PayloadContractTest`): shape drift (`emit/1` validates in non-prod
+  envs, so drifting emitters fail tests), version ↔ upcaster (every
+  `version > 1` entry needs an `Upcaster` clause), and PII-lint (every
+  payload key must be non-personal-shaped or explicitly allowlisted with a
+  justification — UUID-only is the rule).
   """
 
   @contract %{

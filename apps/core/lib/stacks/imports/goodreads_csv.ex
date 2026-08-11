@@ -1,24 +1,12 @@
 defmodule Stacks.Imports.GoodreadsCsv do
   @moduledoc """
-  Parses `goodreads_library_export.csv` (US-1.1.9) into row attrs for
-  `op.library_import_rows`.
-
-  Two Goodreads-specific facts live here and nowhere else:
-
-    * **The `="…"` Excel escape.** Goodreads wraps ISBNs as `="0439023483"` so
-      spreadsheets keep the leading zero. The naive parse yields a 13-character
-      string that is not an ISBN, every row fails the hard gate, and the whole
-      import reports unverified — so the unwrap happens at parse time, before
-      anything downstream sees the value.
-    * **Header-addressed columns.** Goodreads has reordered its export before;
-      positional parsing would silently shift every field. Columns are read by
-      header name, and a file missing the three load-bearing headers (`Title`,
-      `Author`, `ISBN13`) is rejected as `unrecognised_format` — answered at
-      upload time, not minutes later as a failed job.
-
-  A row that cannot be read (wrong column count, quoting broken mid-row) is
-  kept as `outcome: "unreadable"` with its row number, so the reader can find
-  it in their own file. The parser never drops a row silently.
+  Parses `goodreads_library_export.csv` into `op.library_import_rows`
+  attrs. Two Goodreads facts live here and nowhere else: the `="…"` Excel
+  escape around ISBNs (unwrapped at parse time — the naive parse fails the
+  hard gate on every row), and header-addressed columns (Goodreads has
+  reordered its export before; a file missing `Title`/`Author`/`ISBN13`
+  is rejected as `unrecognised_format` at upload time, not minutes later
+  as a failed job).
   """
 
   alias NimbleCSV.RFC4180, as: CSV

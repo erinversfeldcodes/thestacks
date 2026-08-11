@@ -1,23 +1,15 @@
 defmodule Stacks.Imports do
   @moduledoc """
-  Library imports (US-1.1.9): a reader hands over their `goodreads_library_export.csv`
-  and their shelves arrive here — through the same ISBN hard gate as every other
-  capture source. Import is a *source*, not a bypass: a row whose ISBN cannot be
-  verified against Open Library / Google Books does not enter the system, it
-  enters the per-row report.
-
-  The shape: `create_import/3` parses the file synchronously (format errors are
-  answered at upload time), persists the import + every row, and enqueues
-  `Stacks.Workers.GoodreadsImportJob`, which works through the rows in batches
-  and writes each row's `outcome` (`shelved` / `duplicate` / `unverified` /
-  `unreadable`). Raw rows are the reader's own free text (reviews, private
-  notes) — they never reach the warehouse (`skip_dbt`) and are swept after
-  30 days by `LibraryImportRowRetentionJob`; the counts on the import
-  survive as the durable summary.
-
-  One import at a time per user: the job walks rows by number and dedups against
-  live placements, so two concurrent imports of overlapping libraries would race
-  their dedup checks. `{:error, :import_in_progress}` is the API's 409.
+  Library imports (US-1.1.9): Goodreads CSV in, shelves out — through
+  the same ISBN hard gate as every capture source. Import is a source, not
+  a bypass: unverifiable rows land in the per-row report, not the system.
+  `create_import/3` parses synchronously (format errors answered at upload
+  time), persists import + rows, and enqueues `GoodreadsImportJob`, which
+  writes each row's outcome (`shelved`/`duplicate`/`unverified`/
+  `unreadable`). Raw rows are the reader's own free text: never in the
+  warehouse (`skip_dbt`), swept after 30 days
+  (`LibraryImportRowRetentionJob`); the import's counts survive as the
+  durable summary. Rows are erasure-covered and export-included.
   """
 
   # Ecto.Multi's opaque internals trip dialyzer's call_without_opaque on every

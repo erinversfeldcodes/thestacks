@@ -1,32 +1,14 @@
 defmodule Stacks.GDPR.Deletion do
   @moduledoc """
-  GDPR right-to-erasure. Deletes all operational data for a user.
-
-  All operations run in a single `Ecto.Multi` transaction to ensure atomicity.
-  A deletion record is inserted into the audit_log after all data is removed.
-
-  `op.event_log` rows are preserved (the event stream is immutable — events are
-  never deleted, including during erasure), but the erased user's own rows are
-  scrubbed in place: their `payload` and `metadata` are redacted to `{}` so no
-  PII survives. Current `user.*` emitters are UUID-only, so this only bites
-  legacy rows written before Issue #121 — but it runs unconditionally as a
-  safety net. `op.event_log` has no append-only trigger (unlike
-  `audit.audit_log`), so the scrub is a plain UPDATE needing no GUC.
-
-  Uploaded images (`op.uploaded_images`) are erased both ways: the R2 storage
-  objects are deleted via `Stacks.GDPR.ImageRetention.delete_storage_objects/1`
-  (before the rows go — the rows are the only pointer to the storage keys),
-  then the rows themselves, backed by an ON DELETE CASCADE FK to `op.users`
-  (Issue #353, migration `20260805100000`). Before #353 the `user_id` column
-  carried no FK, so `repo.delete(user)` left the rows and their storage keys
-  behind and the schema-guard stayed blind to it.
-
-  Auth session state (`op.auth_token_families`, `op.guardian_tokens`) is erased
-  by the DATABASE, not by this module: both now carry an ON DELETE CASCADE
-  foreign key to `op.users` (Issue #335 D3, migration `20260730200200`), so
-  `repo.delete(user)` takes them — from any path that deletes a user, not just
-  this one. `:revoke_sessions` no longer deletes anything; it asserts the
-  cascade fired and fails the erasure if it did not.
+  GDPR right-to-erasure: deletes all of a user's operational data in one
+  `Ecto.Multi` transaction, then writes an audit record. `op.event_log`
+  rows are preserved (immutable stream) but the user's own rows have
+  `payload`/`metadata` scrubbed to `{}` in place — current emitters are
+  UUID-only, so this is a safety net for pre-121 legacy rows. Uploaded
+  images are erased both ways: R2 objects deleted, DB rows cascade.
+  A schema-guard test walks every table naming `user_id` and fails when a
+  new one is not covered here — free-text must be deleted/anonymised,
+  never just author-nulled.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the

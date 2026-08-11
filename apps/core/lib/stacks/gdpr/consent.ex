@@ -1,19 +1,11 @@
 defmodule Stacks.GDPR.Consent do
   @moduledoc """
-  GDPR consent management. Handles granting, revoking, and checking user consent
-  for a bounded set of features. Consent timestamps are always recorded.
-
-  Two features are supported today:
-
-    * `"analytics"`          — anonymised usage analytics (default feature).
-    * `"writing_assistant"`  — the AI writing assistant (Issue #184). Revoking it
-      enqueues `WritingAssistantDataPurgeWorker`, which erases the user's AI
-      session history + embeddings (the personal data collected under the grant).
-
-  The `feature` string is treated as a bounded label: callers MUST pass one of
-  the known values. `emit_consent/3` fires it as a `:telemetry` metadata tag, so
-  an unbounded user-supplied string would blow up Prometheus label cardinality —
-  the HTTP boundary (`StacksWeb.GDPRController`) whitelists it before we get here.
+  GDPR consent: grant, revoke, check — always with timestamps. Features:
+  `"analytics"` and `"writing_assistant"` (revoking the latter enqueues
+  `WritingAssistantDataPurgeWorker` to erase AI session history +
+  embeddings). `feature` must be one of the known labels — it becomes a
+  telemetry tag, and an unbounded string would blow up Prometheus label
+  cardinality; `GDPRController` whitelists before it reaches here.
   """
 
   alias Core.Repo
