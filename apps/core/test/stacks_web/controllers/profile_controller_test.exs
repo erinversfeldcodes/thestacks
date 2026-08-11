@@ -1,12 +1,12 @@
 defmodule StacksWeb.ProfileControllerTest do
   @moduledoc """
-    Tests for the public profile read surfaces:
-    GET /api/u/:handle and GET /api/u/:handle/bookshelves/:bookshelf_name.
+      Tests for the public profile read surfaces:
+      GET /api/u/:handle and GET /api/u/:handle/bookshelves/:bookshelf_name.
 
-    These assert the ENDPOINTS wire the correct (viewer, target) through the
-    already-unit-tested visibility resolver — ghost/block → 404, redaction, and
-    viewer-visible shelf/placement filtering. The full combinatoric matrix lives in
-    the resolver unit tests + the E2E.
+      These assert the ENDPOINTS wire the correct (viewer, target) through the
+      already-unit-tested visibility resolver — ghost/block → 404, redaction, and
+      viewer-visible shelf/placement filtering. The full combinatoric matrix lives in
+      the resolver unit tests + the E2E.
   """
   use CoreWeb.ConnCase, async: true
 

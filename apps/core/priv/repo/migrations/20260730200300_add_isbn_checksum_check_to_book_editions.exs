@@ -1,11 +1,11 @@
 defmodule Core.Repo.Migrations.AddIsbnChecksumCheckToBookEditions do
   @moduledoc """
-    The ISBN hard gate as a database fact: a CHECK restating the
-    changeset's EAN-13 rule (13 digits, weighted checksum), so writers that
-    bypass changesets — seeds, psql, bulk importers, factories — can no
-    longer store a non-ISBN. Added `NOT VALID` (no full-table scan under an
-    ACCESS EXCLUSIVE lock); validated in `20260730200350` after the two
-    data repairs land.
+      The ISBN hard gate as a database fact: a CHECK restating the
+      changeset's EAN-13 rule (13 digits, weighted checksum), so writers that
+      bypass changesets — seeds, psql, bulk importers, factories — can no
+      longer store a non-ISBN. Added `NOT VALID` (no full-table scan under an
+      ACCESS EXCLUSIVE lock); validated in `20260730200350` after the two
+      data repairs land.
   """
   use Ecto.Migration
 

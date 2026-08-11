@@ -1,14 +1,14 @@
 defmodule Stacks.Workers.AccountDeletionJobTest do
   @moduledoc """
-    Tests for Stacks.Workers.AccountDeletionJob.
+      Tests for Stacks.Workers.AccountDeletionJob.
 
-    The worker calls GDPR.Deletion.delete_user_data/1:
-    - Returns:ok when user exists and all data is deleted.
-    - Returns {:error, _} when user does not exist (Ecto.NoResultsError raised
-      inside the Multi at the:delete_user step, causing the transaction to fail).
+      The worker calls GDPR.Deletion.delete_user_data/1:
+      - Returns:ok when user exists and all data is deleted.
+      - Returns {:error, _} when user does not exist (Ecto.NoResultsError raised
+        inside the Multi at the:delete_user step, causing the transaction to fail).
 
-    Deletion is NOT idempotent — calling it a second time after the user is
-    already deleted will fail because Repo.get!/1 raises for the missing user.
+      Deletion is NOT idempotent — calling it a second time after the user is
+      already deleted will fail because Repo.get!/1 raises for the missing user.
   """
 
   use Core.DataCase, async: true

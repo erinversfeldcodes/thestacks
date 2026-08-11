@@ -4,7 +4,7 @@ import * as path from "path";
 import { mintSession, injectSession, uniqueEmail, type MintedSession } from "./helpers";
 
 /**
- * The Goodreads library import journey (US-1.1.9, wave 11b): choose the export
+ * The Goodreads library import journey: choose the export
  * CSV on /import, watch the server's own progress counters, read the per-row
  * report, and find the shelved books on the real bookshelves afterwards.
  *

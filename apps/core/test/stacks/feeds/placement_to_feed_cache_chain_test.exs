@@ -1,11 +1,11 @@
 defmodule Stacks.Feeds.PlacementToFeedCacheChainTest do
   @moduledoc """
-    End-to-end guarantee for placement → SubscriberWorker →
-    PlacementHandler → RegenerateFeedJob → `op.feed_cache` row. Every link
-    had its own green test while the chain had never produced a single row
-    in any environment — each unit test stopped at its own seam. This one
-    drains both Oban queues and asserts the ROW, so any future seam break
-    (queue rename, handler unregistered, job arg shape) fails here.
+      End-to-end guarantee for placement → SubscriberWorker →
+      PlacementHandler → RegenerateFeedJob → `op.feed_cache` row. Every link
+      had its own green test while the chain had never produced a single row
+      in any environment — each unit test stopped at its own seam. This one
+      drains both Oban queues and asserts the ROW, so any future seam break
+      (queue rename, handler unregistered, job arg shape) fails here.
   """
 
   use Core.DataCase, async: false

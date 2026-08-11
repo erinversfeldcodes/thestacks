@@ -1,10 +1,10 @@
 defmodule Stacks.Enrichment.PricePipeline do
   @moduledoc """
-    Broadway pipeline for batched persistence of scraped price data.
+      Broadway pipeline for batched persistence of scraped price data.
 
-    Messages are pushed from `TriggerPriceScrapeJob` via `Broadway.push_messages/2`.
-    The processor validates each price datum and the batcher bulk-inserts them
-    into `op.price_snapshots`.
+      Messages are pushed from `TriggerPriceScrapeJob` via `Broadway.push_messages/2`.
+      The processor validates each price datum and the batcher bulk-inserts them
+      into `op.price_snapshots`.
   """
 
   use Broadway

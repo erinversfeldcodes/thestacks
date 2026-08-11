@@ -1,8 +1,8 @@
 defmodule Stacks.Enrichment.EventsPathTest do
   @moduledoc """
-    ⚠️ The assertions that matter here are the ones separating **"this shop has no events page"** from
-    **"we were unable to look"**. Both produce no path, and conflating them writes a shop off with a
-    verdict that never re-checks — the false negative the whole module is shaped around.
+      ⚠️ The assertions that matter here are the ones separating **"this shop has no events page"** from
+      **"we were unable to look"**. Both produce no path, and conflating them writes a shop off with a
+      verdict that never re-checks — the false negative the whole module is shaped around.
   """
   use Core.DataCase, async: true
 

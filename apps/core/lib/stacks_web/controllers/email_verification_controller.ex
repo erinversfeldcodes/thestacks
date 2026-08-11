@@ -6,10 +6,10 @@ defmodule StacksWeb.EmailVerificationController do
   alias Stacks.Email
 
   @doc """
-    GET /api/auth/confirm/:token — verify email confirmation token.
+      GET /api/auth/confirm/:token — verify email confirmation token.
 
-    Redirects to the frontend confirmation page rather than returning JSON,
-    so users clicking the link from their email client see a proper UI.
+      Redirects to the frontend confirmation page rather than returning JSON,
+      so users clicking the link from their email client see a proper UI.
   """
   def confirm(conn, %{"token" => token}) do
     base_url = CoreWeb.Endpoint.url()

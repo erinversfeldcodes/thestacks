@@ -1,14 +1,14 @@
 defmodule StacksWeb.Plugs.MetricsAuth do
   @moduledoc """
-    Bearer-token auth for every `/internal/*` route (non-internal paths
-    pass through, so it installs at the endpoint). Allowed iff
-    `authorization: Bearer <token>` matches `:metrics_scrape_token`. Guards
-    `/internal/metrics` (PromEx exposition, read by the SLO gate — VM gets
-    metrics by push, not via this route) and `/internal/deps-check`. One
-    shared token: the only caller is the SLO gate, and per-route tokens
-    would complicate rotation without real isolation. Required because the
-    public edge terminates at the Fly proxy — without it these routes are
-    internet-reachable. Compares via `Plug.Crypto.secure_compare/2`.
+      Bearer-token auth for every `/internal/*` route (non-internal paths
+      pass through, so it installs at the endpoint). Allowed iff
+      `authorization: Bearer <token>` matches `:metrics_scrape_token`. Guards
+      `/internal/metrics` (PromEx exposition, read by the SLO gate — VM gets
+      metrics by push, not via this route) and `/internal/deps-check`. One
+      shared token: the only caller is the SLO gate, and per-route tokens
+      would complicate rotation without real isolation. Required because the
+      public edge terminates at the Fly proxy — without it these routes are
+      internet-reachable. Compares via `Plug.Crypto.secure_compare/2`.
   """
 
   @behaviour Plug

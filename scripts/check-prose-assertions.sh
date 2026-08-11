@@ -8,18 +8,18 @@ MODE="${1:-check}"
 ALLOWLIST=$(cat <<'LIST'
 NavigationProgramTest.elm|The Power of Habit|fixture book title, not an affordance — renders only if the bug returns
 Page/ProfileTest.elm|Ada Lovelace|fixture author name, not an affordance
-MainViewTest.elm|View Antilibrary|deliberate "stays deleted" guard for pre-#235 copy — matches nothing BY DESIGN
-MainViewTest.elm|Add a Book|deliberate "stays deleted" guard for pre-#235 copy
+MainViewTest.elm|View Antilibrary|deliberate "stays deleted" guard for retired landing copy — matches nothing BY DESIGN
+MainViewTest.elm|Add a Book|deliberate "stays deleted" guard for retired landing copy
 MainNavTest.elm|Antilibrary|renders Main.viewNav ALONE; "In your Antilibrary" is bookshelf-page copy
 MainNavTest.elm|Reading Pile|renders Main.viewNav ALONE; "In your Reading Pile" is bookshelf-page copy
 MainNavTest.elm|Sign In|renders Main.viewNav ALONE; "Back to Sign In" is login-card copy
-MainNavTest.elm|Admin|renders Main.viewNav ALONE; "Admin sign-in" is the #303 gate, a different view
+MainNavTest.elm|Admin|renders Main.viewNav ALONE; "Admin sign-in" is the admin gate, a different view
 Page/SettingsHubTest.elm|Notifications|renders the settings hub; "Notifications — The Stacks" is a <title>
 AdminRemovalRequestsTest.elm|Approve|renders the queue ALONE; "Approved" is SourceApproval's filter tab
 SessionExpiryTest.elm|closed your session|supersets are ALL expiry-banner variants; matching any is the intent
 Page/BookshelfReadOnlyTest.elm|Could not load your|supersets are ALL owner-error variants; matching any is intended
-Page/ForgotPasswordNoticeTest.elm|60 seconds|#374: the superset "wait 60 seconds" is EXACTLY the copy being guarded against — a retry-after the response did not carry
-Page/AdminInvitesTest.elm|STK-4F2A-9C1D-XXXX|US-14.1.3 show-once: runtime data, not source copy — the sibling test proves the SAME literal renders from the create response, so the absence here cannot pass vacuously
+Page/ForgotPasswordNoticeTest.elm|60 seconds|the superset "wait 60 seconds" is EXACTLY the copy being guarded against — a retry-after the response did not carry
+Page/AdminInvitesTest.elm|STK-4F2A-9C1D-XXXX|show-once code: runtime data, not source copy — the sibling test proves the SAME literal renders from the create response, so the absence here cannot pass vacuously
 Page/BookshelfProgramTest.elm|Fetching your Library…|copy is concatenated at render — Fetching plus whose plus label — so no single source literal exists; the sibling ensureViewHas proves the exact text renders, so the absence cannot pass vacuously
 LIST
 )

@@ -1,14 +1,14 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Browser E2E for the public transparency page (Issue #235, ADR-019):
+ * Browser E2E for the public transparency page:
  *   /metrics  →  GET /api/transparency/metrics
  *
- * Public + unauthenticated. Renders #241's curated payload: durable anonymised
+ * Public + unauthenticated. Renders curated payload: durable anonymised
  * aggregates (from public-safe marts) plus a live signals section that degrades
  * gracefully to "unavailable" when Fly Prometheus is unconfigured (as on a
  * preview without the read token) — never an error. Every panel carries a
- * what/how/why teaching expander (#233 standard), a costs widget is featured,
+ * what/how/why teaching expander, a costs widget is featured,
  * and the page links one hop to the GDPR data-rights surfaces.
  *
  * No auth: this deliberately runs with no storage state so it also proves the

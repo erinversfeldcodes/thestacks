@@ -1,8 +1,8 @@
 defmodule Stacks.Acceptance.UploadBookTest do
   @moduledoc """
-    Acceptance test for user story: Upload → Identify → Place on bookshelf.
-    Uses mocked vision client (Stacks.AI.MockClient) which is configured in test.exs.
-    Oban is in:manual mode so jobs are enqueued but not executed inline.
+      Acceptance test for user story: Upload → Identify → Place on bookshelf.
+      Uses mocked vision client (Stacks.AI.MockClient) which is configured in test.exs.
+      Oban is in:manual mode so jobs are enqueued but not executed inline.
   """
 
   use Core.DataCase, async: true

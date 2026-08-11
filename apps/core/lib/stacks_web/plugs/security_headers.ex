@@ -1,7 +1,7 @@
 defmodule StacksWeb.Plugs.SecurityHeaders do
   @moduledoc """
-    Sets security-related HTTP response headers on every request.
-    Headers follow OWASP recommendations and the project security standards doc.
+      Sets security-related HTTP response headers on every request.
+      Headers follow OWASP recommendations and the project security standards doc.
   """
 
   import Plug.Conn

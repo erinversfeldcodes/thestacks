@@ -1,17 +1,17 @@
 defmodule CoreWeb.RobotsTxtTest do
   @moduledoc """
-    Asserts the crawl policy that is **served**, not the one in the repository.
+      Asserts the crawl policy that is **served**, not the one in the repository.
 
-    Campaign finding E2 (2026-07-28): the site served no AI-training-crawler policy
-    at all, while the repository root declared one for the source code. The two are
-    different documents about different subjects, so nothing was mis-wired — but the
-    site's omission was invisible because `robots.txt` is a static asset with no
-    test, and `CrawlerTelemetry` counts fetches without inspecting the response.
+      Campaign finding E2 (2026-07-28): the site served no AI-training-crawler policy
+      at all, while the repository root declared one for the source code. The two are
+      different documents about different subjects, so nothing was mis-wired — but the
+      site's omission was invisible because `robots.txt` is a static asset with no
+      test, and `CrawlerTelemetry` counts fetches without inspecting the response.
 
-    These tests go through the endpoint so that `Plug.Static`'s `only:` allowlist is
-    exercised. A file present in `priv/static` but absent from that list falls
-    through to the SPA catch-all (`router.ex`) and answers with `index.html` and a
-    200 — which is why asserting on file contents would prove nothing.
+      These tests go through the endpoint so that `Plug.Static`'s `only:` allowlist is
+      exercised. A file present in `priv/static` but absent from that list falls
+      through to the SPA catch-all (`router.ex`) and answers with `index.html` and a
+      200 — which is why asserting on file contents would prove nothing.
   """
   use CoreWeb.ConnCase, async: true
 

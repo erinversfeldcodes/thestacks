@@ -1,14 +1,14 @@
 defmodule Stacks.Workers.GoodreadsImportJob do
   @moduledoc """
-    Works through a library import's rows in batches of 25, writing each
-    row's outcome, then re-enqueues itself — a 600-row library is 24 short
-    jobs, so a crash loses at most a batch. Retry safety: rows with an
-    outcome are skipped on re-run (and `[import_id, row_number]` is unique),
-    while a resolver outage fails the WHOLE batch for Oban backoff — an
-    upstream that did not answer said nothing about the book, so the row
-    must never be marked `unverified` (that word is reserved for "both
-    catalogues answered and neither knows it"). Terminal completion stamps
-    the import and emits `import.completed`.
+      Works through a library import's rows in batches of 25, writing each
+      row's outcome, then re-enqueues itself — a 600-row library is 24 short
+      jobs, so a crash loses at most a batch. Retry safety: rows with an
+      outcome are skipped on re-run (and `[import_id, row_number]` is unique),
+      while a resolver outage fails the WHOLE batch for Oban backoff — an
+      upstream that did not answer said nothing about the book, so the row
+      must never be marked `unverified` (that word is reserved for "both
+      catalogues answered and neither knows it"). Terminal completion stamps
+      the import and emits `import.completed`.
   """
 
   use Oban.Worker,

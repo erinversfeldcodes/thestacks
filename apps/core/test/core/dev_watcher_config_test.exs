@@ -1,10 +1,10 @@
 defmodule Core.DevWatcherConfigTest do
   @moduledoc """
-    Drift guard for the dev asset watcher's cwd: a doubled
-    `Path.expand` once pointed it at `apps/core/apps/core/assets`,
-    crash-looping the watcher and silently killing hot-rebuild. Dev config
-    never loads in:test, so this reads `config/dev.exs` via
-    `Config.Reader.read!/1` and asserts the watcher `cd` exists.
+      Drift guard for the dev asset watcher's cwd: a doubled
+      `Path.expand` once pointed it at `apps/core/apps/core/assets`,
+      crash-looping the watcher and silently killing hot-rebuild. Dev config
+      never loads in:test, so this reads `config/dev.exs` via
+      `Config.Reader.read!/1` and asserts the watcher `cd` exists.
   """
 
   use ExUnit.Case, async: true
@@ -28,7 +28,7 @@ defmodule Core.DevWatcherConfigTest do
 
       assert File.dir?(cd),
              "watcher #{inspect(command)} cd does not exist: #{cd} " <>
-               "(regression of Issue #278 — doubled apps/core path?)"
+               "(regression: doubled apps/core path?)"
 
       assert File.exists?(Path.join(cd, "build.js")),
              "watcher #{inspect(command)} cd exists but has no build.js: #{cd}"

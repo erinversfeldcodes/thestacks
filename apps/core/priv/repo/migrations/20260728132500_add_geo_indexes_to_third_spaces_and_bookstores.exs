@@ -1,11 +1,11 @@
 defmodule Core.Repo.Migrations.AddGeoIndexesToThirdSpacesAndBookstores do
   @moduledoc """
-    Bounding-box indexes for the third-spaces map: the map's
-    primary query is a viewport (both coordinates range predicates;
-    latitude leads as the more selective). Bookstores get the same index
-    for the 500m nearest-shop scan. Hand-written because both tables
-    pre-exist: persisted.exs declares the indexes for fresh databases; this
-    adds them to existing ones.
+      Bounding-box indexes for the third-spaces map: the map's
+      primary query is a viewport (both coordinates range predicates;
+      latitude leads as the more selective). Bookstores get the same index
+      for the 500m nearest-shop scan. Hand-written because both tables
+      pre-exist: persisted.exs declares the indexes for fresh databases; this
+      adds them to existing ones.
   """
   use Ecto.Migration
 

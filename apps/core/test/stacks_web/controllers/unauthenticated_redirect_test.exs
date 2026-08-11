@@ -1,9 +1,9 @@
 defmodule StacksWeb.Controllers.UnauthenticatedRedirectTest do
   @moduledoc """
-    Confirms that routes in the:authenticated pipeline return 401
-    for unauthenticated requests rather than leaking user data.
+      Confirms that routes in the:authenticated pipeline return 401
+      for unauthenticated requests rather than leaking user data.
 
-    Anti-scraping + auth enforcement requirement from.
+      Anti-scraping + auth enforcement requirement from.
   """
 
   use CoreWeb.ConnCase, async: true

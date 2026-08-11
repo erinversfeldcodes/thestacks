@@ -3,8 +3,8 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
 import { mintSession, injectSession, assertSeedOrSkip } from "./helpers";
 
 /**
- * Issue #116 Phase 5 — the reading-journey lifecycle, driven in a real browser
- * against a live stack (US-1.6.1–US-1.6.6).
+ * Phase 5 — the reading-journey lifecycle, driven in a real browser
+ * against a live stack.
  *
  * Every test in this file mints its OWN isolated, confirmed user via
  * POST /api/test/session (STACKS_E2E_TEST_HELPERS=1 only) and injects the

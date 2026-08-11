@@ -1,12 +1,12 @@
 defmodule Stacks.Geocoding.Nominatim do
   @moduledoc """
-    Geocoding via Nominatim (OpenStreetMap) — free, keyless, and OSM tags
-    match taxonomy. The public instance's policy binds
-    us to: a genuine identifying `User-Agent` (`@user_agent` carries project
-    + contact URL) and ~1 req/s max — honoured STRUCTURALLY: geocoding runs
-    at human-paced approval time and there is deliberately no batch entry
-    point (one would need a real throttle). Failures return
-    `{:error, reason}` and leave coordinates nil; approval still succeeds.
+      Geocoding via Nominatim (OpenStreetMap) — free, keyless, and OSM tags
+      match taxonomy. The public instance's policy binds
+      us to: a genuine identifying `User-Agent` (`@user_agent` carries project
+      + contact URL) and ~1 req/s max — honoured STRUCTURALLY: geocoding runs
+      at human-paced approval time and there is deliberately no batch entry
+      point (one would need a real throttle). Failures return
+      `{:error, reason}` and leave coordinates nil; approval still succeeds.
   """
 
   @behaviour Stacks.Geocoding

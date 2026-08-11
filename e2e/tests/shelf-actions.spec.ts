@@ -12,13 +12,13 @@ import { provisionBookOnShelf, assertSeedOrSkip } from "./helpers";
  * normal placement API (provisionBookOnShelf). Previously the suite shared one
  * seeded user and its real move/remove tests drained that user's library shelf
  * on every local run without restoring it, flaking repeated local iteration
- * (#294 — CI/preview reseed per run so it bit local only). Per-test provisioning
+ *. Per-test provisioning
  * makes the suite self-restoring: each test builds the exact shelf state it
- * asserts against, so runs are deterministic and independent — the #113
+ * asserts against, so runs are deterministic and independent — the
  * spine-rendering pattern applied here. Isolated users make the specs safe to
  * run fully parallel.
  *
- * The mutation-failure describe (#114) mints+provisions the same way but mocks
+ * The mutation-failure describe mints+provisions the same way but mocks
  * only the mutation request, exercising the genuine failure-copy branches a
  * healthy API never produces.
  */

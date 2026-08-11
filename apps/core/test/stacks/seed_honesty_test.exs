@@ -1,16 +1,16 @@
 defmodule Stacks.SeedHonestyTest do
   @moduledoc """
-    — the seed may only write editions a production write path could.
+      — the seed may only write editions a production write path could.
 
-    The sibling of `factory_honesty_test.exs`. The seed is the *other*
-    fixture that goes around every changeset: it writes editions with
-    `Repo.insert_all/3` for deterministic ids and fixed timestamps, and bought a
-    bypass of every ISBN validation along with them. Three editions with wrong
-    EAN-13 check digits reached staging that way and were only discovered when a
-    CHECK constraint tried to validate — months later, mid-deploy.
+      The sibling of `factory_honesty_test.exs`. The seed is the *other*
+      fixture that goes around every changeset: it writes editions with
+      `Repo.insert_all/3` for deterministic ids and fixed timestamps, and bought a
+      bypass of every ISBN validation along with them. Three editions with wrong
+      EAN-13 check digits reached staging that way and were only discovered when a
+      CHECK constraint tried to validate — months later, mid-deploy.
 
-    Two guards, because the owner's ruling had two halves: the values in the file
-    must be right, and the path must be unable to write wrong ones.
+      Two guards, because the owner's ruling had two halves: the values in the file
+      must be right, and the path must be unable to write wrong ones.
   """
   use Core.DataCase, async: true
 

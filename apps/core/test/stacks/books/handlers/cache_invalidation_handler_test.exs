@@ -22,7 +22,7 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
     assert {:ok, _} = BookDetailCache.get(id2)
   end
 
-  @tag stories: ["US-1.1.7"], suite: :cache
+  @tag suite: :cache
   test "two book.created events each invalidate their own cache entry", %{id1: id1, id2: id2} do
     assert {:ok, _} = BookDetailCache.get(id1)
     assert {:ok, _} = BookDetailCache.get(id2)

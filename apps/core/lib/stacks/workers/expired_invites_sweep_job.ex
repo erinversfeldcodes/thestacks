@@ -1,17 +1,17 @@
 defmodule Stacks.Workers.ExpiredInvitesSweepJob do
   @moduledoc """
-    Daily Oban worker that deletes invitations which expired more than 90 days
-    ago AND were never redeemed.
+      Daily Oban worker that deletes invitations which expired more than 90 days
+      ago AND were never redeemed.
 
-    An unredeemed expired invitation still holds the owner's note and possibly
-    an invitee's email address — data about a person who never became a user and
-    therefore can never exercise erasure. Nobody can ask for it to go, so the
-    platform drops it on a clock — the same reasoning as the 30-day image
-    retention sweep. Redeemed invitations are kept (their PII is settled by the
-    redeemer's own erasure path) as the beta's issue history.
+      An unredeemed expired invitation still holds the owner's note and possibly
+      an invitee's email address — data about a person who never became a user and
+      therefore can never exercise erasure. Nobody can ask for it to go, so the
+      platform drops it on a clock — the same reasoning as the 30-day image
+      retention sweep. Redeemed invitations are kept (their PII is settled by the
+      redeemer's own erasure path) as the beta's issue history.
 
-    Idempotent; standard Oban retry on failure. Scheduled via the crontab in
-    `config/config.exs`.
+      Idempotent; standard Oban retry on failure. Scheduled via the crontab in
+      `config/config.exs`.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

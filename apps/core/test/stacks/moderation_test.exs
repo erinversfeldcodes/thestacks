@@ -1,13 +1,13 @@
 defmodule Stacks.ModerationTest do
   @moduledoc """
-    Tests for Stacks.Moderation pipeline.
+      Tests for Stacks.Moderation pipeline.
 
-    The vision client is configured to Stacks.AI.MockClient in test.exs, so all
-    calls to AIClient.call_vision/2 use the mock without hitting the network.
+      The vision client is configured to Stacks.AI.MockClient in test.exs, so all
+      calls to AIClient.call_vision/2 use the mock without hitting the network.
 
-    ISBN resolution (Books.resolve_isbn) would otherwise make real HTTP calls to
-    Open Library; the pipeline handles a resolution failure gracefully (empty
-    subjects/bisac_codes), so no HTTP mocking is needed here.
+      ISBN resolution (Books.resolve_isbn) would otherwise make real HTTP calls to
+      Open Library; the pipeline handles a resolution failure gracefully (empty
+      subjects/bisac_codes), so no HTTP mocking is needed here.
   """
 
   use Core.DataCase, async: false

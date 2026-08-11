@@ -461,7 +461,7 @@ message ThirdSpace {
   // `double`, not a geography type: a viewport IS a bounding box, so the primary
   // query is two `between` clauses, and the 500 m rule is a Haversine expression
   // that `Enrichment.haversine_km/4` already implements. PostGIS buys nothing
-  // until real geometry is needed (US-3.1.1 §5).
+  // until real geometry is needed.
   // Decimal degrees, WGS 84. Null until geocoded.
   double latitude = 16 [json_name = "latitude"];
   // Decimal degrees, WGS 84. Null until geocoded. Range -180..180, so a viewport that
@@ -480,7 +480,7 @@ message ThirdSpace {
   // rather than silently vanishing from the queue.
   double nearest_bookshop_km = 18 [json_name = "nearest_bookshop_km"];
 
-  // ── Curation (US-3.1.1 §4) ───────────────────────────────────────────────
+  // ── Curation ───────────────────────────────────────────────
   //
   // Owner-marked as worth recommending. This is what "well-regarded" means here: no
   // stars, no scores, no third-party ratings API — the cork board shows "a handful",

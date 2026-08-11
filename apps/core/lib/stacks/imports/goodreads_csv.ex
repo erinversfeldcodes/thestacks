@@ -1,12 +1,12 @@
 defmodule Stacks.Imports.GoodreadsCsv do
   @moduledoc """
-    Parses `goodreads_library_export.csv` into `op.library_import_rows`
-    attrs. Two Goodreads facts live here and nowhere else: the `="…"` Excel
-    escape around ISBNs (unwrapped at parse time — the naive parse fails the
-    hard gate on every row), and header-addressed columns (Goodreads has
-    reordered its export before; a file missing `Title`/`Author`/`ISBN13`
-    is rejected as `unrecognised_format` at upload time, not minutes later
-    as a failed job).
+      Parses `goodreads_library_export.csv` into `op.library_import_rows`
+      attrs. Two Goodreads facts live here and nowhere else: the `="…"` Excel
+      escape around ISBNs (unwrapped at parse time — the naive parse fails the
+      hard gate on every row), and header-addressed columns (Goodreads has
+      reordered its export before; a file missing `Title`/`Author`/`ISBN13`
+      is rejected as `unrecognised_format` at upload time, not minutes later
+      as a failed job).
   """
 
   alias NimbleCSV.RFC4180, as: CSV
@@ -14,9 +14,9 @@ defmodule Stacks.Imports.GoodreadsCsv do
   @required_headers ["Title", "Author", "ISBN13"]
 
   @doc """
-    Parses the CSV binary. Returns `{:ok, rows}` (attr maps ready for insert,
-    1-based `row_number`s, unreadable rows pre-marked) or
-    `{:error,:unrecognised_format, found_headers}` / `{:error,:no_rows}`.
+      Parses the CSV binary. Returns `{:ok, rows}` (attr maps ready for insert,
+      1-based `row_number`s, unreadable rows pre-marked) or
+      `{:error,:unrecognised_format, found_headers}` / `{:error,:no_rows}`.
   """
   @spec parse(binary()) ::
           {:ok, [map()]}
@@ -86,7 +86,7 @@ defmodule Stacks.Imports.GoodreadsCsv do
   end
 
   @doc """
-    Strips Goodreads' `="…"` wrapper and surrounding quotes from an ISBN cell.
+      Strips Goodreads' `="…"` wrapper and surrounding quotes from an ISBN cell.
   """
   @spec unwrap_isbn(String.t() | nil) :: String.t()
   def unwrap_isbn(nil), do: ""
@@ -107,8 +107,8 @@ defmodule Stacks.Imports.GoodreadsCsv do
   end
 
   @doc """
-    The destination bookshelf for a row (mapping): Goodreads' own
-    owned-copies flag is what tells the antilibrary from the wishlist.
+      The destination bookshelf for a row (mapping): Goodreads' own
+      owned-copies flag is what tells the antilibrary from the wishlist.
   """
   @spec destination_bookshelf(map()) :: String.t() | nil
   def destination_bookshelf(%{goodreads_shelf: shelf} = row) do
@@ -121,8 +121,8 @@ defmodule Stacks.Imports.GoodreadsCsv do
   end
 
   @doc """
-    Goodreads bindings mapped onto the platform's format vocabulary; anything
-    unrecognised is left off rather than guessed.
+      Goodreads bindings mapped onto the platform's format vocabulary; anything
+      unrecognised is left off rather than guessed.
   """
   @spec format_for(String.t()) :: String.t() | nil
   def format_for(binding) do

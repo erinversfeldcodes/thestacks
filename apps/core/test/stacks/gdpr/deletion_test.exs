@@ -1,10 +1,10 @@
 defmodule Stacks.GDPR.DeletionTest do
   @moduledoc """
-    138 Phase 1: erasure must be able to modify the append-only audit log.
-    A `Multi.run` issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before
-    audit cleanup; asserts the GUC works inside the transaction (an
-    audit-row UPDATE succeeds under the trigger) and is LOCAL (the same
-    UPDATE outside the transaction is still refused).
+      138 Phase 1: erasure must be able to modify the append-only audit log.
+      A `Multi.run` issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before
+      audit cleanup; asserts the GUC works inside the transaction (an
+      audit-row UPDATE succeeds under the trigger) and is LOCAL (the same
+      UPDATE outside the transaction is still refused).
   """
   use Core.DataCase, async: false
 
@@ -517,10 +517,10 @@ end
 
 defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
   @moduledoc """
-    Test-local storage backend that records every `delete/1` call by sending
-    `{:storage_delete, key}` to the process that ran the deletion. `delete/1`
-    runs synchronously inside `delete_user_data/1`'s erasure transaction, so
-    `self` is the test process and the message lands in its mailbox.
+      Test-local storage backend that records every `delete/1` call by sending
+      `{:storage_delete, key}` to the process that ran the deletion. `delete/1`
+      runs synchronously inside `delete_user_data/1`'s erasure transaction, so
+      `self` is the test process and the message lands in its mailbox.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour

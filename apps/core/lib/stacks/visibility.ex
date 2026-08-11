@@ -15,7 +15,7 @@ defmodule Stacks.Visibility do
   @audience_levels ~w(owner group platform public)
 
   # Audience levels settable on a USER PROFILE — owner / platform / public. `group`
-  # ("friends-only") profiles are deferred to #224 (need a chosen-group FK), so the
+  # ("friends-only") profiles are deferred to (need a chosen-group FK), so the
   # rung is not offered here yet. Used by BOTH profile registration and
   # settings-update, keeping them consistent.
   @profile_audience_levels ~w(owner platform public)
@@ -23,18 +23,18 @@ defmodule Stacks.Visibility do
   @ceiling_resource_types [:bookshelf, :placement, :post]
 
   @doc """
-    Resolves whether a resource is visible to a viewer.
+      Resolves whether a resource is visible to a viewer.
 
-    Viewer types:
-    - `:unauthenticated` — not logged in
-    - `{:platform_user, user_id}` — logged-in platform user
-    - `:platform_preview` — a generic authenticated platform user with NO identity
-      (never the owner, in no groups, no block relationship). Used by the ViewAs
-      `platform` perspective so a resource owner previewing "as a platform user"
-      does not see their own owner-only content.
+      Viewer types:
+      - `:unauthenticated` — not logged in
+      - `{:platform_user, user_id}` — logged-in platform user
+      - `:platform_preview` — a generic authenticated platform user with NO identity
+        (never the owner, in no groups, no block relationship). Used by the ViewAs
+        `platform` perspective so a resource owner previewing "as a platform user"
+        does not see their own owner-only content.
 
-    Returns `:visible` or `:hidden`. Always returns `:hidden` on nil resource
-    or unknown viewer types — never raises.
+      Returns `:visible` or `:hidden`. Always returns `:hidden` on nil resource
+      or unknown viewer types — never raises.
   """
   @spec resolve_visibility(term(), term()) :: :visible | :hidden
   def resolve_visibility(nil, _viewer), do: :hidden
@@ -297,18 +297,18 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-    Returns true if the viewer can see the resource, false otherwise.
+      Returns true if the viewer can see the resource, false otherwise.
   """
   @spec can_view?(term(), term()) :: boolean()
   def can_view?(resource, viewer), do: resolve_visibility(resource, viewer) == :visible
 
   @doc """
-    Whether a user's PROFILE (the hub page at `/u/:handle`) is visible to `viewer`.
-    Visible when the viewer is the owner, OR the owner is not a ghost
-    (`profile_visibility != "owner"`) and there is no block between them. Ghosts and
-    blocked pairs → not visible (the controller renders 404, not 403). Distinct from
-    `resolve_visibility/2`, which gates a RESOURCE — the hub itself is not a resource,
-    so it needs an explicit gate that single-sources the profile-ceiling rule.
+      Whether a user's PROFILE (the hub page at `/u/:handle`) is visible to `viewer`.
+      Visible when the viewer is the owner, OR the owner is not a ghost
+      (`profile_visibility != "owner"`) and there is no block between them. Ghosts and
+      blocked pairs → not visible (the controller renders 404, not 403). Distinct from
+      `resolve_visibility/2`, which gates a RESOURCE — the hub itself is not a resource,
+      so it needs an explicit gate that single-sources the profile-ceiling rule.
   """
   @spec profile_visible?(map(), term()) :: boolean()
   def profile_visible?(%{id: owner_id, profile_visibility: pv}, {:platform_user, viewer_id}) do
@@ -325,7 +325,7 @@ defmodule Stacks.Visibility do
   def profile_visible?(_, _), do: false
 
   @doc """
-    Returns all bookshelves for the given user_id that are visible to the viewer.
+      Returns all bookshelves for the given user_id that are visible to the viewer.
   """
   @spec viewable_shelves(String.t(), term()) :: [Bookshelf.t()]
   def viewable_shelves(user_id, viewer) do
@@ -336,7 +336,7 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-    Returns all placements for the given bookshelf_id that are visible to the viewer.
+      Returns all placements for the given bookshelf_id that are visible to the viewer.
   """
   @spec viewable_placements(String.t(), term()) :: [Placement.t()]
   def viewable_placements(shelf_id, viewer) do
@@ -347,13 +347,13 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-    Batch-resolves placement visibility for placements sharing ONE viewer
-    (the public shelf-browse surface). Block status and age-verification are
-    per-(viewer, owner), so they're resolved once (one block query per
-    distinct owner + one age lookup) — the shared-gate query count is
-    independent of placement count. Each decision is identical to
-    `resolve_visibility(placement, viewer)`; only lookups are memoized.
-    Returns visible placements, input order preserved, unbounded (callers cap).
+      Batch-resolves placement visibility for placements sharing ONE viewer
+      (the public shelf-browse surface). Block status and age-verification are
+      per-(viewer, owner), so they're resolved once (one block query per
+      distinct owner + one age lookup) — the shared-gate query count is
+      independent of placement count. Each decision is identical to
+      `resolve_visibility(placement, viewer)`; only lookups are memoized.
+      Returns visible placements, input order preserved, unbounded (callers cap).
   """
   @spec filter_visible_placements([Placement.t()], term()) :: [Placement.t()]
   def filter_visible_placements(placements, viewer) when is_list(placements) do
@@ -383,15 +383,15 @@ defmodule Stacks.Visibility do
   defp batch_viewer_id(_viewer), do: nil
 
   @doc """
-    Is `visibility` at least as exposed as `minimum` on the Audience ladder
-    (`owner < group < platform < public`)? Use instead of equality checks —
-    `Feeds` once tested `!= "platform"` and refused a feed to the MORE-shared
-    `public` tier. Unknown visibility reads as exposure 0 (fails closed).
+      Is `visibility` at least as exposed as `minimum` on the Audience ladder
+      (`owner < group < platform < public`)? Use instead of equality checks —
+      `Feeds` once tested `!= "platform"` and refused a feed to the MORE-shared
+      `public` tier. Unknown visibility reads as exposure 0 (fails closed).
 
-        iex> Stacks.Visibility.at_least?("public", "platform")
-        true
-        iex> Stacks.Visibility.at_least?("group", "platform")
-        false
+          iex> Stacks.Visibility.at_least?("public", "platform")
+          true
+          iex> Stacks.Visibility.at_least?("group", "platform")
+          false
   """
   @spec at_least?(String.t(), String.t()) :: boolean()
   def at_least?(visibility, minimum) do
@@ -399,13 +399,13 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-    Validates that a child resource visibility is not MORE EXPOSED than its parent
-    (the ceiling rule). On the Audience ladder
-    `owner < group < platform < public` (exposure ascending), the child's exposure
-    must be `<=` the parent's.
+      Validates that a child resource visibility is not MORE EXPOSED than its parent
+      (the ceiling rule). On the Audience ladder
+      `owner < group < platform < public` (exposure ascending), the child's exposure
+      must be `<=` the parent's.
 
-    Returns `:ok` if valid, or `{:error, reason}` if the child would expose
-    more than the parent allows.
+      Returns `:ok` if valid, or `{:error, reason}` if the child would expose
+      more than the parent allows.
   """
   @spec validate_visibility_ceiling(String.t(), String.t(), atom()) ::
           :ok | {:error, String.t()}
@@ -422,9 +422,9 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-    The canonical stored Audience levels (`owner`, `group`, `platform`). Use this
-    as the single source of truth for `validate_inclusion` on visibility fields
-    rather than re-declaring the list per context (ADR-018).
+      The canonical stored Audience levels (`owner`, `group`, `platform`). Use this
+      as the single source of truth for `validate_inclusion` on visibility fields
+      rather than re-declaring the list per context.
   """
   @spec audience_levels() :: [String.t()]
   def audience_levels, do: @audience_levels
@@ -434,22 +434,22 @@ defmodule Stacks.Visibility do
   def valid_audience_level?(value), do: value in @audience_levels
 
   @doc """
-    The Audience levels settable on a user PROFILE (`owner`, `platform`). Narrower
-    than `audience_levels/0` — `group` is reserved (a group profile is not yet
-    enforced). Used by both registration and settings so the two agree.
+      The Audience levels settable on a user PROFILE (`owner`, `platform`). Narrower
+      than `audience_levels/0` — `group` is reserved (a group profile is not yet
+      enforced). Used by both registration and settings so the two agree.
   """
   @spec profile_audience_levels() :: [String.t()]
   def profile_audience_levels, do: @profile_audience_levels
 
   @doc """
-    Classifies a visibility change by movement along the Audience ladder
-    (`owner < group < platform < public`, exposure ascending). Uses the single
-    `@audience_exposure` map — `"group"` sits between `owner` and `platform`, so a
-    group→platform change is correctly a `:loosen` and platform→group a `:tighten`.
+      Classifies a visibility change by movement along the Audience ladder
+      (`owner < group < platform < public`, exposure ascending). Uses the single
+      `@audience_exposure` map — `"group"` sits between `owner` and `platform`, so a
+      group→platform change is correctly a `:loosen` and platform→group a `:tighten`.
 
-    - `:tighten` — the new value is LESS exposed (more restrictive)
-    - `:loosen` — the new value is MORE exposed (less restrictive)
-    - `:same` — no change in exposure
+      - `:tighten` — the new value is LESS exposed (more restrictive)
+      - `:loosen` — the new value is MORE exposed (less restrictive)
+      - `:same` — no change in exposure
   """
   @spec classify_visibility_direction(String.t(), String.t()) :: :tighten | :loosen | :same
   def classify_visibility_direction(old_visibility, new_visibility) do
@@ -464,8 +464,8 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-    Emits the `[:stacks,:visibility,:profile_change]` counter, tagged by the
-    change `:direction` (`:tighten` / `:loosen` / `:same`). Returns the direction.
+      Emits the `[:stacks,:visibility,:profile_change]` counter, tagged by the
+      change `:direction` (`:tighten` / `:loosen` / `:same`). Returns the direction.
   """
   @spec emit_profile_visibility_change(String.t(), String.t()) :: :tighten | :loosen | :same
   def emit_profile_visibility_change(old_visibility, new_visibility) do
@@ -481,14 +481,14 @@ defmodule Stacks.Visibility do
   end
 
   @doc """
-    Emits the `[:stacks,:visibility,:ceiling_rejection]` counter when a
-    mutation is rejected for exceeding its parent's visibility ceiling. The
-    `resource_type` tag is whitelisted (`:bookshelf` / `:placement` / `:post`);
-    any other value is coerced to `:other`.
+      Emits the `[:stacks,:visibility,:ceiling_rejection]` counter when a
+      mutation is rejected for exceeding its parent's visibility ceiling. The
+      `resource_type` tag is whitelisted (`:bookshelf` / `:placement` / `:post`);
+      any other value is coerced to `:other`.
 
-    Call this from the genuine user-facing rejection sites (shelf/placement/blog
-    mutation error branches) — NOT from the batch-tighten filter path, which
-    expects and caps violations rather than rejecting them.
+      Call this from the genuine user-facing rejection sites (shelf/placement/blog
+      mutation error branches) — NOT from the batch-tighten filter path, which
+      expects and caps violations rather than rejecting them.
   """
   @spec emit_ceiling_rejection(atom()) :: :ok
   def emit_ceiling_rejection(resource_type) do

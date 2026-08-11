@@ -1,10 +1,10 @@
 defmodule Stacks.Enrichment do
   @moduledoc """
-    Unified context for enrichment changeset functions.
+      Unified context for enrichment changeset functions.
 
-    Changeset logic lives here rather than in the schema modules so that
-    schemas can be replaced by auto-generated code while validation rules
-    remain hand-written and testable.
+      Changeset logic lives here rather than in the schema modules so that
+      schemas can be replaced by auto-generated code while validation rules
+      remain hand-written and testable.
   """
 
   import Ecto.Changeset
@@ -167,14 +167,14 @@ defmodule Stacks.Enrichment do
   end
 
   @doc """
-    Lists third spaces with upcoming events preloaded. Options: `:lat`/
-    `:lng`/`:radius_km` (point search), `:north`/`:south`/`:east`/`:west`
-    (map viewport), `:near_bookshop_km` (rule is `0.5`),
-    `:types`, `:limit` (default 20). Positions come from the STORED
-    `latitude`/`longitude` written at approval time — never from city-name
-    lookup — and `limit` is applied after all filters. Spaces without
-    coordinates are excluded from geo queries but returned by unfiltered
-    lists.
+      Lists third spaces with upcoming events preloaded. Options: `:lat`/
+      `:lng`/`:radius_km` (point search), `:north`/`:south`/`:east`/`:west`
+      (map viewport), `:near_bookshop_km` (rule is `0.5`),
+      `:types`, `:limit` (default 20). Positions come from the STORED
+      `latitude`/`longitude` written at approval time — never from city-name
+      lookup — and `limit` is applied after all filters. Spaces without
+      coordinates are excluded from geo queries but returned by unfiltered
+      lists.
   """
   @spec list_third_spaces(keyword()) :: [ThirdSpace.t()]
   def list_third_spaces(opts \\ []) do
@@ -212,10 +212,10 @@ defmodule Stacks.Enrichment do
   end
 
   @doc """
-    The outer bound for curated spaces beyond the primary radius.
+      The outer bound for curated spaces beyond the primary radius.
 
-    Exposed so the rule is inspectable rather than a number buried in a query — and so a
-    test can assert it is finite, which is what stops "curated" quietly meaning "anywhere".
+      Exposed so the rule is inspectable rather than a number buried in a query — and so a
+      test can assert it is finite, which is what stops "curated" quietly meaning "anywhere".
   """
   @spec curated_within_km() :: float()
   def curated_within_km, do: @curated_within_km
@@ -303,12 +303,12 @@ defmodule Stacks.Enrichment do
   @earth_radius_km 6371.0
 
   @doc """
-    Great-circle distance in kilometres between two points.
+      Great-circle distance in kilometres between two points.
 
-    Public because two contexts need it: the map's radius refinement here, and
-    `Discovery.create_third_space/1`'s nearest-bookshop pairing. It was private and unused
-    for months while `within_radius?/4` fed it coordinates from a hardcoded six-entry city
-    map — the function was correct all along; only its inputs were wrong.
+      Public because two contexts need it: the map's radius refinement here, and
+      `Discovery.create_third_space/1`'s nearest-bookshop pairing. It was private and unused
+      for months while `within_radius?/4` fed it coordinates from a hardcoded six-entry city
+      map — the function was correct all along; only its inputs were wrong.
   """
   @spec haversine_km(number(), number(), number(), number()) :: float()
   def haversine_km(lat1, lng1, lat2, lng2) do
@@ -328,8 +328,8 @@ defmodule Stacks.Enrichment do
   defp deg_to_rad(deg), do: deg * :math.pi() / 180.0
 
   @doc """
-    Returns partner inventory for all editions of a book where quantity > 0
-    and the partner is approved.
+      Returns partner inventory for all editions of a book where quantity > 0
+      and the partner is approved.
   """
   @spec book_availability(binary()) :: [map()]
   def book_availability(book_id) do

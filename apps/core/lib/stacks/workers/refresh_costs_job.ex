@@ -1,13 +1,13 @@
 defmodule Stacks.Workers.RefreshCostsJob do
   @moduledoc """
-    Daily Oban worker that refreshes platform cost data.
+      Daily Oban worker that refreshes platform cost data.
 
-    Computes costs from known infrastructure pricing and actual usage metrics.
-    Pricing is derived from published rate cards (Fly.io, Modal, Neon) and the
-    actual VM specs in `deploy/fly.core.toml`. Usage-proportional costs (Modal
-    inference) are estimated from the number of vision jobs this month.
+      Computes costs from known infrastructure pricing and actual usage metrics.
+      Pricing is derived from published rate cards (Fly.io, Modal, Neon) and the
+      actual VM specs in `deploy/fly.core.toml`. Usage-proportional costs (Modal
+      inference) are estimated from the number of vision jobs this month.
 
-    The worker emits a `costs.refreshed` event on success.
+      The worker emits a `costs.refreshed` event on success.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

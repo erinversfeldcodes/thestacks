@@ -69,7 +69,7 @@ message PollResponse {
 }
 
 // UploadInboxItem is one upload the reader started and has not finished with
-// (GET /api/uploads/inbox, Issue #351).
+// (GET /api/uploads/inbox,).
 //
 // Identification is asynchronous: the reader may close the tab the moment the
 // photo is accepted, and IdentifyBookJob still runs to a terminal row. This is

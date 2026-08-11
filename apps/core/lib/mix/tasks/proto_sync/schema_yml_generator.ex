@@ -4,15 +4,15 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   alias Mix.Tasks.ProtoSync.TypeMapper
 
   @doc """
-    Generates a YAML model block for a proto-backed dbt staging model.
+      Generates a YAML model block for a proto-backed dbt staging model.
 
-    The block includes:
-    - Model name: `stg_<table_name>`
-    - Column entries for `id` (PK), proto fields by number, and timestamps
-    - `not_null` test on columns with `null: false` in field_overrides
-    - `unique` test on the `id` column
-    - `accepted_values` test on enum fields (values from the proto enum definition)
-    - `relationships` test on fields with `:binary_id` type override and `_id` suffix
+      The block includes:
+      - Model name: `stg_<table_name>`
+      - Column entries for `id` (PK), proto fields by number, and timestamps
+      - `not_null` test on columns with `null: false` in field_overrides
+      - `unique` test on the `id` column
+      - `accepted_values` test on enum fields (values from the proto enum definition)
+      - `relationships` test on fields with `:binary_id` type override and `_id` suffix
   """
   @spec generate(map(), list(), map()) :: String.t()
   def generate(table, fields, descriptor) do
@@ -46,11 +46,11 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   end
 
   @doc """
-    Merges generated model blocks into the existing schema.yml content.
+      Merges generated model blocks into the existing schema.yml content.
 
-    Proto-backed model entries (identified by matching `stg_<table_name>`) are
-    replaced with the generated version. All other entries are preserved as-is.
-    Separators (blank lines, comment blocks) between models are preserved.
+      Proto-backed model entries (identified by matching `stg_<table_name>`) are
+      replaced with the generated version. All other entries are preserved as-is.
+      Separators (blank lines, comment blocks) between models are preserved.
   """
   @spec merge(String.t(), map()) :: String.t()
   def merge(existing_content, generated_blocks) do
@@ -63,8 +63,8 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   end
 
   @doc """
-    Checks whether the proto-backed model blocks in schema.yml match the
-    generated output. Returns `:ok` or `{:drift, path, diff}`.
+      Checks whether the proto-backed model blocks in schema.yml match the
+      generated output. Returns `:ok` or `{:drift, path, diff}`.
   """
   @spec check_drift(String.t(), map()) :: :ok | {:drift, String.t(), String.t()}
   def check_drift(schema_yml_path, generated_blocks) do

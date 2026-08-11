@@ -9,7 +9,7 @@ import {
 
 /**
  * The subject here is password RESET, not registration — so the throwaway user
- * each test resets is minted via POST /api/test/session (Issue #280), outside
+ * each test resets is minted via POST /api/test/session, outside
  * the `:auth` rate bucket, rather than through the register→confirm dance. The
  * reset flow proper (forgot form → emailed link → new password → sign in) stays
  * a real end-to-end journey. `mintOrSkip` skips cleanly where the helper is off.

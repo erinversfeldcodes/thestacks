@@ -3,7 +3,7 @@ import type { FullConfig } from "@playwright/test";
 /**
  * Playwright globalSetup — warm the deployed preview before any project runs.
  *
- * Issue #175: the preview core app runs with auto_stop_machines = true and can
+ * the preview core app runs with auto_stop_machines = true and can
  * go cold between the deploy warmup and the `setup` project's first login,
  * yielding an HTTP 502 that fails the whole E2E gate. When BASE_URL points at a
  * remote deployment we poll its health endpoint until it returns 200 before any

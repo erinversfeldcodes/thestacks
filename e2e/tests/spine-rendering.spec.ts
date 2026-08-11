@@ -8,8 +8,8 @@ import {
 } from "./helpers";
 
 /**
- * Issue #113 Phase 3 — the spine-rendering flagship Playwright suite (US-1.3.1
- * spine thickness, US-1.3.2 spine wear at the aria level), driven in a real
+ * Phase 3 — the spine-rendering flagship Playwright suite (
+ * spine thickness, spine wear at the aria level), driven in a real
  * browser against a live stack.
  *
  * Each test mints its OWN isolated, confirmed user via POST /api/test/session
@@ -28,7 +28,7 @@ import {
  * mirrored here (`expectedSpineWidth`) is Components.Spine.spineWidth:57-59.
  *
  * WEAR reaches only the aria-label suffix (", well-loved" for Softened; nothing
- * for Pristine — Spine.elm:264-270); visual wear CSS is de-scoped to #288. A
+ * for Pristine — Spine.elm:264-270); visual wear CSS is de-scoped to. A
  * minted user's placements are owner-private by default, so the spine also
  * appends ", hidden (only visible to you)" (Spine.elm:272-277) AFTER the wear
  * suffix. We therefore assert wear by robust substring (`toContain(", well-loved")`

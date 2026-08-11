@@ -1,7 +1,7 @@
 defmodule StacksWeb.PartnerAuthPlug do
   @moduledoc """
-    Authenticates partner API requests via `Authorization: Bearer sk_partner_...` header.
-    Sets `conn.assigns[:current_partner]` on success. Halts with 401 on failure.
+      Authenticates partner API requests via `Authorization: Bearer sk_partner_...` header.
+      Sets `conn.assigns[:current_partner]` on success. Halts with 401 on failure.
   """
 
   import Plug.Conn

@@ -1,13 +1,13 @@
 defmodule Stacks.Books.MockHttpClient do
   @moduledoc """
-  Mock HTTP client for ISBNResolver tests. Responses live in the process
-  dictionary keyed by URL substring (isolated, `async: true`-safe); the
-  most recently registered matching pattern wins.
+    Mock HTTP client for ISBNResolver tests. Responses live in the process
+    dictionary keyed by URL substring (isolated, `async: true`-safe); the
+    most recently registered matching pattern wins.
 
-      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => [...]}})
-      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [...]}})
+        MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => [...]}})
+        MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [...]}})
 
-  An unmatched URL returns `{:error, :not_found}`.
+    An unmatched URL returns `{:error,:not_found}`.
   """
 
   @behaviour Stacks.Books.HttpClientBehaviour
@@ -46,13 +46,13 @@ defmodule Stacks.Books.MockHttpClient do
   end
 
   @doc """
-    Capture every requested URL by sending `{Stacks.Books.MockHttpClient,
+      Capture every requested URL by sending `{Stacks.Books.MockHttpClient,
   :request, url}` to the calling (test) process. Uses the same
-    `$callers`-walking process-dictionary mechanism as `put_response/2`,
-    so requests made from Tasks spawned by the code under test are
-    captured too. Lets tests assert on the exact query the resolver
-    built (e.g. that a corrupted keyword or `inauthor:null` never goes
-    out on the wire).
+      `$callers`-walking process-dictionary mechanism as `put_response/2`,
+      so requests made from Tasks spawned by the code under test are
+      captured too. Lets tests assert on the exact query the resolver
+      built (e.g. that a corrupted keyword or `inauthor:null` never goes
+      out on the wire).
   """
   def capture_requests do
     Process.put(@capture_key, self())

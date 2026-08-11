@@ -1,13 +1,13 @@
 defmodule Core.PromEx.Plugins.Stacks do
   @moduledoc """
-    PromEx plugin exporting the custom `[:stacks,...]` telemetry events —
-    without it the `CoreWeb.Telemetry.metrics/0` entries have no reporter.
-    The SLO gate (`scripts/check-slo-gate.sh`) reads `/internal/metrics` and
-    expects exactly: `stacks_upload_terminal_count_total`,
-    `stacks_router_dispatch_stop_duration_milliseconds_*`, and
-    `stacks_fuse_state_state`. Metric paths end in `[:count,:total]` /
-    `[:duration,:milliseconds]` because the Prometheus core reporter does
-    not append suffixes — renaming a path here breaks the gate parser.
+      PromEx plugin exporting the custom `[:stacks,...]` telemetry events —
+      without it the `CoreWeb.Telemetry.metrics/0` entries have no reporter.
+      The SLO gate (`scripts/check-slo-gate.sh`) reads `/internal/metrics` and
+      expects exactly: `stacks_upload_terminal_count_total`,
+      `stacks_router_dispatch_stop_duration_milliseconds_*`, and
+      `stacks_fuse_state_state`. Metric paths end in `[:count,:total]` /
+      `[:duration,:milliseconds]` because the Prometheus core reporter does
+      not append suffixes — renaming a path here breaks the gate parser.
   """
 
   use PromEx.Plugin
@@ -100,7 +100,7 @@ defmodule Core.PromEx.Plugins.Stacks do
         # `Stacks.AI.Client.make_vision_request/2` on both the 200 and the
         # non-200 path — and, until now, consumed by nothing: the duration was
         # measured and never left the BEAM, so every timeout in the upload path
-        # was sized from an estimate in a comment (Issues #350, #351).
+        # was sized from an estimate in a comment.
         #
         # `endpoint` ∈ is_book|extract_isbn|analyze|associate (the fixed set
         # `Stacks.AI.Client.endpoint_path/1` accepts — an unknown value raises
@@ -323,10 +323,10 @@ defmodule Core.PromEx.Plugins.Stacks do
         ),
 
         # ── Visibility / Social / ViewAs counters () ────────
-        # These families are EMITTED by #197 (profile-visibility changes,
+        # These families are EMITTED by (profile-visibility changes,
         # ceiling rejections, the recap job, user block/unblock, and the ViewAs
         # owner-preview plug) but were never registered here, so they were absent
-        # from `/internal/metrics` until #236. No new instrumentation is added —
+        # from `/internal/metrics` until. No new instrumentation is added —
         # this is registration only. Every tag below is a bounded, whitelisted
         # atom set at the emit site (never a handle/email/user-id — GDPR:
         # telemetry is warehouse-adjacent).
@@ -400,7 +400,7 @@ defmodule Core.PromEx.Plugins.Stacks do
         ),
 
         # ── Discovery / profiles / people-search counters () ────
-        # Instrumentation of the public discovery surfaces (#210–#217, #221).
+        # Instrumentation of the public discovery surfaces.
         # Every tag below is a bounded, whitelisted atom set at the emit site —
         # NEVER the search query string, a handle, a user-id, or an IP (those are
         # unbounded cardinality + PII; telemetry is warehouse-adjacent).

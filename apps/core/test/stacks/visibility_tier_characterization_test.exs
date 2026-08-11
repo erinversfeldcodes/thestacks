@@ -1,11 +1,11 @@
 defmodule Stacks.VisibilityTierCharacterizationTest do
   @moduledoc """
-    GOLDEN-MASTER characterisation of `visibility_tier` resolution through
-    `resolve_visibility/2` TODAY, before the 209 decomposition into
-    (Audience, Discoverability, AgeGate) (ADR-018). Every row pins the
-    current composite:visible/:hidden decision; the decomposition must
-    reproduce this table exactly — a changed row is a reviewed behaviour
-    change, never a silent side effect.
+      GOLDEN-MASTER characterisation of `visibility_tier` resolution through
+      `resolve_visibility/2` TODAY, before the 209 decomposition into
+      (Audience, Discoverability, AgeGate). Every row pins the
+      current composite:visible/:hidden decision; the decomposition must
+      reproduce this table exactly — a changed row is a reviewed behaviour
+      change, never a silent side effect.
   """
   use Core.DataCase, async: true
 

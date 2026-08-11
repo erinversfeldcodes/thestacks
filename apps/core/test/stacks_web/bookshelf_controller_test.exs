@@ -1,6 +1,6 @@
 defmodule StacksWeb.BookshelfControllerTest do
   @moduledoc """
-    Tests for GET /api/bookshelves/:bookshelf_name.
+      Tests for GET /api/bookshelves/:bookshelf_name.
   """
 
   use CoreWeb.ConnCase, async: true

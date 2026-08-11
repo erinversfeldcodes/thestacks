@@ -1,14 +1,14 @@
 defmodule Stacks.DiscoveryRemovalReviewTest do
   @moduledoc """
-    The removal-request review queue.
+      The removal-request review queue.
 
-    A request whose contact address does not match the listing's domain parks with
-    `exclusion_requested_at` set and `status` untouched — that pair *is* the pending state.
+      A request whose contact address does not match the listing's domain parks with
+      `exclusion_requested_at` set and `status` untouched — that pair *is* the pending state.
 
-    ⚠️ **It was invisible.** `serialize_source/1` did not carry `exclusion_requested_at`, so
-    a business whose request could not be auto-verified waited on a human who had no way to
-    know they were waiting. A queue nobody can see is indistinguishable from a request that
-    was silently refused, which is the outcome exists to prevent.
+      ⚠️ **It was invisible.** `serialize_source/1` did not carry `exclusion_requested_at`, so
+      a business whose request could not be auto-verified waited on a human who had no way to
+      know they were waiting. A queue nobody can see is indistinguishable from a request that
+      was silently refused, which is the outcome exists to prevent.
   """
 
   use Core.DataCase, async: true

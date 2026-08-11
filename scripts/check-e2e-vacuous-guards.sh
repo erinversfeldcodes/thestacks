@@ -37,7 +37,7 @@ done < <(find e2e/tests -name '*.spec.ts' -type f | sort)
 if [ "$violations" -ne 0 ]; then
   cat >&2 <<'EOF'
 
-✗ Vacuous assertion guard(s) found in E2E specs (Issue #275).
+✗ Vacuous assertion guard(s) found in E2E specs.
 
   An `if ((await …count()) > 0)` block or `test.skip((await …count()) === 0)`
   passes when its target is ABSENT, so the wrapped assertion can never fail.
@@ -54,4 +54,4 @@ EOF
   exit 1
 fi
 
-echo "✓ No vacuous E2E assertion guards (Issue #275)."
+echo "✓ No vacuous E2E assertion guards."

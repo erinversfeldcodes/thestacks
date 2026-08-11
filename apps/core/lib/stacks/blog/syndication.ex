@@ -1,15 +1,15 @@
 defmodule Stacks.Blog.Syndication do
   @moduledoc """
-    POSSE: the post here is canonical; the Substack copy says so.
-    Substack has no write API, so the only honest mechanisms are the two
-    built here: the public blog Atom feed (`feed_xml/1`, polled by Substack's
-    RSS import) and a canonical-tagged export (`export/2`, paste-ready
-    HTML/Markdown with the canonical link baked in). Nothing here sends a
-    request to Substack and the platform never holds a Substack credential.
+      POSSE: the post here is canonical; the Substack copy says so.
+      Substack has no write API, so the only honest mechanisms are the two
+      built here: the public blog Atom feed (`feed_xml/1`, polled by Substack's
+      RSS import) and a canonical-tagged export (`export/2`, paste-ready
+      HTML/Markdown with the canonical link baked in). Nothing here sends a
+      request to Substack and the platform never holds a Substack credential.
 
-    ⛔ The feed is anonymous-only by design: its consumer is a third-party
-    fetcher that republishes whatever it reads, so it must only ever contain
-    what an anonymous viewer could see.
+      ⛔ The feed is anonymous-only by design: its consumer is a third-party
+      fetcher that republishes whatever it reads, so it must only ever contain
+      what an anonymous viewer could see.
   """
 
   import Ecto.Query
@@ -26,9 +26,9 @@ defmodule Stacks.Blog.Syndication do
   @valid_url_schemes ~w(http https)
 
   @doc """
-    The posts the syndication feed serves: public AND syndicated AND published,
-    newest first, capped at #{@feed_limit}. Served by the partial index
-    `blog_posts_user_public_published_idx`.
+      The posts the syndication feed serves: public AND syndicated AND published,
+      newest first, capped at #{@feed_limit}. Served by the partial index
+      `blog_posts_user_public_published_idx`.
   """
   @spec feed_posts(binary()) :: [Post.t()]
   def feed_posts(user_id) do
@@ -44,10 +44,10 @@ defmodule Stacks.Blog.Syndication do
   end
 
   @doc """
-    Renders the writer's blog feed as Atom 1.0. Returns `{xml, etag}`.
+      Renders the writer's blog feed as Atom 1.0. Returns `{xml, etag}`.
 
-    An empty feed is a valid, empty Atom document — HTTP 200, never 404, because
-    a 404 makes Substack drop the subscription (story sad-paths).
+      An empty feed is a valid, empty Atom document — HTTP 200, never 404, because
+      a 404 makes Substack drop the subscription (story sad-paths).
   """
   @spec feed_xml(Stacks.Accounts.User.t()) :: {String.t(), String.t()}
   def feed_xml(user) do
@@ -104,9 +104,9 @@ defmodule Stacks.Blog.Syndication do
   end
 
   @doc """
-    The paste-ready copy for Substack's editor: the post's body wrapped in the
-    canonical framing. The opening and closing lines are the POSSE claim — they
-    are the artefact, not decoration.
+      The paste-ready copy for Substack's editor: the post's body wrapped in the
+      canonical framing. The opening and closing lines are the POSSE claim — they
+      are the artefact, not decoration.
   """
   @spec export(Post.t(), String.t()) :: %{
           format: String.t(),
@@ -143,10 +143,10 @@ defmodule Stacks.Blog.Syndication do
   end
 
   @doc """
-    Records one act of syndication, storing the canonical URL AS IT IS NOW —
-    stored rather than derived, so a future host change cannot silently rewrite
-    what the third-party copy actually says. Emits `post.syndicated` (no title,
-    no body, no URL — a slug derived from a title is title data by another name).
+      Records one act of syndication, storing the canonical URL AS IT IS NOW —
+      stored rather than derived, so a future host change cannot silently rewrite
+      what the third-party copy actually says. Emits `post.syndicated` (no title,
+      no body, no URL — a slug derived from a title is title data by another name).
   """
   @spec record(Post.t(), String.t()) ::
           {:ok, PostSyndication.t()} | {:error, Ecto.Changeset.t()}
@@ -176,9 +176,9 @@ defmodule Stacks.Blog.Syndication do
   end
 
   @doc """
-    Closes the POSSE loop: the writer pastes the live Substack URL back in
-    ("Also published at"). Only `http`/`https` — the value is a user-supplied
-    outbound link and is rendered with `rel="nofollow noopener"` client-side.
+      Closes the POSSE loop: the writer pastes the live Substack URL back in
+      ("Also published at"). Only `http`/`https` — the value is a user-supplied
+      outbound link and is rendered with `rel="nofollow noopener"` client-side.
   """
   @spec set_syndicated_url(PostSyndication.t(), String.t()) ::
           {:ok, PostSyndication.t()} | {:error, Ecto.Changeset.t()}
@@ -232,11 +232,11 @@ defmodule Stacks.Blog.Syndication do
   end
 
   @doc """
-    The post's permanent address: `<host>/blog/<uuid>`. The UUID form is ugly
-    and it is PERMANENT, which is the POSSE requirement — slugs are deferred
-    deliberately (story §12: a slug adds a uniqueness surface, a redirect
-    obligation, and a second address for the same post — three ways to break a
-    canonical link).
+      The post's permanent address: `<host>/blog/<uuid>`. The UUID form is ugly
+      and it is PERMANENT, which is the POSSE requirement — slugs are deferred
+      deliberately (story §12: a slug adds a uniqueness surface, a redirect
+      obligation, and a second address for the same post — three ways to break a
+      canonical link).
   """
   @spec canonical_url(Post.t()) :: String.t()
   def canonical_url(%Post{id: id}), do: "#{host_url()}/blog/#{id}"

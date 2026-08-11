@@ -1,17 +1,17 @@
 defmodule Stacks.WritingAssistant.BookContentChunk do
   @moduledoc """
-    Ecto schema for op.book_content_chunks — the shared book text corpus used as
-    retrieval context.
+      Ecto schema for op.book_content_chunks — the shared book text corpus used as
+      retrieval context.
 
-    HAND-WRITTEN, not proto.sync-generated: it carries the pgvector
-    `field:embedding, Pgvector.Ecto.Vector` column that proto cannot express.
-    The matching manifest entry (proto/persisted.exs) uses `skip_ecto: true`, so
-    proto.sync neither generates nor drift-checks this file. The scalar columns
-    mirror the `BookContentChunk` proto message.
+      HAND-WRITTEN, not proto.sync-generated: it carries the pgvector
+      `field:embedding, Pgvector.Ecto.Vector` column that proto cannot express.
+      The matching manifest entry (proto/persisted.exs) uses `skip_ecto: true`, so
+      proto.sync neither generates nor drift-checks this file. The scalar columns
+      mirror the `BookContentChunk` proto message.
 
-    GDPR: SHARED, NON-personal. There is deliberately NO user_id column, so GDPR
-    erasure PRESERVES this table (load-bearing invariant for). The book_id FK
-    is ON DELETE CASCADE — chunks follow the book, never a user.
+      GDPR: SHARED, NON-personal. There is deliberately NO user_id column, so GDPR
+      erasure PRESERVES this table (load-bearing invariant for). The book_id FK
+      is ON DELETE CASCADE — chunks follow the book, never a user.
   """
 
   use Ecto.Schema

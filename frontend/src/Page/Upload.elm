@@ -1492,7 +1492,7 @@ viewProvisionalNoticeIfNeeded book =
 
 
 {-| Render an in-flow age-gate notice when the resolved book is
-age-gated AND age-gating is enabled (ADR-020). Per the upload
+age-gated AND age-gating is enabled. Per the upload
 flow proceeds normally for the identification step, but the user is
 informed that the book is age-restricted. There is no self-serve
 "verify age" action anymore (verification is provider-sourced, shipped

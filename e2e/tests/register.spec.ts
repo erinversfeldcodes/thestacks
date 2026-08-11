@@ -3,7 +3,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import { ownerAdminToken, suiteEmail, uniqueEmail } from "./helpers";
 
 /**
- * Registration under the closed-beta gate (US-14.1.3).
+ * Registration under the closed-beta gate.
  *
  * The preview stack runs with INVITE_ONLY_REGISTRATION=true — the launch
  * posture — so the Register tab opens on the invite-only panel and every

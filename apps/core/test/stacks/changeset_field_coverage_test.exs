@@ -1,11 +1,11 @@
 defmodule Stacks.ChangesetFieldCoverageTest do
   @moduledoc """
-    Every proto-generated schema field must be castable by its changeset
-    or explicitly skip-listed with a reason. Changesets are hand-written
-    (so validation survives regeneration), which sets a trap: `mix
-    proto.sync` adds the column to the schema but NOT the cast list, and
-    writes to the new field drop in complete silence. This walks every
-    persisted schema's fields against its changeset's cast set.
+      Every proto-generated schema field must be castable by its changeset
+      or explicitly skip-listed with a reason. Changesets are hand-written
+      (so validation survives regeneration), which sets a trap: `mix
+      proto.sync` adds the column to the schema but NOT the cast list, and
+      writes to the new field drop in complete silence. This walks every
+      persisted schema's fields against its changeset's cast set.
   """
 
   use ExUnit.Case, async: true

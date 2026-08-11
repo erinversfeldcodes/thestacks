@@ -1,13 +1,13 @@
 defmodule Stacks.Transparency do
   @moduledoc """
-    Public, curated, anonymised transparency data layer (ADR-019) for
-    the public `/metrics` page: live ops signals + durable aggregates, never
-    a per-user value. The privacy boundary is structural: live signals come
-    ONLY from `@allowlist` (fixed, code-defined PromQL — `run_signal/1`
-    accepts an allowlist KEY, no function takes a query string), and every
-    family used must be classified `:public` in `Core.PromEx.MetricAudience`
-    (enforced by test, fail-closed). Degrades to `:unavailable` when the
-    metrics store is unreachable — public page, no errors, no leaks.
+      Public, curated, anonymised transparency data layer for
+      the public `/metrics` page: live ops signals + durable aggregates, never
+      a per-user value. The privacy boundary is structural: live signals come
+      ONLY from `@allowlist` (fixed, code-defined PromQL — `run_signal/1`
+      accepts an allowlist KEY, no function takes a query string), and every
+      family used must be classified `:public` in `Core.PromEx.MetricAudience`
+      (enforced by test, fail-closed). Degrades to `:unavailable` when the
+      metrics store is unreachable — public page, no errors, no leaks.
   """
 
   import Ecto.Query
@@ -97,16 +97,16 @@ defmodule Stacks.Transparency do
   @entry_public_keys [:key, :label, :what, :how, :why, :unit, :value]
 
   @doc """
-    Builds the full public transparency payload:
+      Builds the full public transparency payload:
 
-        %{
-          live: [entry] |:unavailable,
-          durable: [entry],
-          generated_at: DateTime.t,
-          cache_ttl: pos_integer
-        }
+          %{
+            live: [entry] |:unavailable,
+            durable: [entry],
+            generated_at: DateTime.t,
+            cache_ttl: pos_integer
+          }
 
-    where each entry is `%{key, label, what, how, why, unit, value}`.
+      where each entry is `%{key, label, what, how, why, unit, value}`.
   """
   @spec metrics() :: %{
           live: [map()] | :unavailable,
@@ -128,18 +128,18 @@ defmodule Stacks.Transparency do
   def allowlist_keys, do: Enum.map(@allowlist, & &1.key)
 
   @doc """
-    The raw PromQL of every allowlisted live signal. For introspection/tests only —
-    e.g. proving every metric the public page exposes is `MetricAudience` `:public`.
+      The raw PromQL of every allowlisted live signal. For introspection/tests only —
+      e.g. proving every metric the public page exposes is `MetricAudience` `:public`.
   """
   @spec allowlist_queries() :: [String.t()]
   def allowlist_queries, do: Enum.map(@allowlist, & &1.query)
 
   @doc """
-    Runs a single allowlisted live signal by KEY.
+      Runs a single allowlisted live signal by KEY.
 
-    Accepts only a allowlist key (atom) — never a raw/user-supplied PromQL string.
-    Returns `{:error,:not_allowlisted}` for any key not in the fixed allowlist,
-    so there is no path to run an arbitrary or injected query.
+      Accepts only a allowlist key (atom) — never a raw/user-supplied PromQL string.
+      Returns `{:error,:not_allowlisted}` for any key not in the fixed allowlist,
+      so there is no path to run an arbitrary or injected query.
   """
   @spec run_signal(atom()) :: {:ok, number()} | {:error, term()}
   def run_signal(key) when is_atom(key) do
@@ -150,8 +150,8 @@ defmodule Stacks.Transparency do
   end
 
   @doc """
-    Public-safe durable aggregates read from op-data. All are corpus/cost totals —
-    no per-user rows, no de-anonymisable or linked-account dimension.
+      Public-safe durable aggregates read from op-data. All are corpus/cost totals —
+      no per-user rows, no de-anonymisable or linked-account dimension.
   """
   @spec durable_stats() :: [map()]
   def durable_stats do

@@ -350,7 +350,7 @@ suite =
                     Main.decodeFlags (Encode.object [])
                         |> Expect.equal Main.NoStoredAuth
             ]
-        , describe "decodeConfig (server-config channel — ADR-020)"
+        , describe "decodeConfig (server-config channel"
             [ test "decodes ageGatingEnabled: true" <|
                 \() ->
                     Main.decodeConfig

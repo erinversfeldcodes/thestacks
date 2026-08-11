@@ -11,7 +11,7 @@ module Page.Metrics exposing
 Renders the curated payload — live ops signals and durable anonymised
 aggregates — each panel showing its value plus a teaching expander with the
 plain-language _what / how / why_ (the public analogue of the self-explanatory-dashboard standard). A featured costs widget makes the
-platform-cost figure the flagship example (ADR-019), and the "what we observe"
+platform-cost figure the flagship example, and the "what we observe"
 area links one hop to the GDPR data-rights surfaces.
 
 No new backend: this consumes `Api.getTransparencyMetrics` only. It renders
@@ -194,7 +194,7 @@ viewObserveSection =
         ]
 
 
-{-| The public, read-only Grafana instance (ADR-021) — a single fixed
+{-| The public, read-only Grafana instance — a single fixed
 public URL, so it is a constant rather than server-config. Anonymous access; the
 metrics store behind it is never exposed (Grafana proxies queries server-side).
 -}

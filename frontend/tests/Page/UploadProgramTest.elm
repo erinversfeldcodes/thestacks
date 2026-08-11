@@ -34,8 +34,7 @@ import TestHelpers
 import Types.RemoteData
 
 
-{-| Helper to start an upload program with an auth token and age-gating ON
-(ADR-020). Most flows are age-gating-agnostic; the flag-off behaviour is
+{-| Helper to start an upload program with an auth token and age-gating ON. Most flows are age-gating-agnostic; the flag-off behaviour is
 covered explicitly by `uploadAdultsOnlyHiddenWhenFlagOff`.
 -}
 startUpload : ProgramTest.ProgramTest Upload.Model Upload.Msg (ProgramTest.SimulatedEffect Upload.Msg)
@@ -1507,7 +1506,7 @@ uploadAdultsOnly =
                     [ Selector.text "Adding to shelf..." ]
 
 
-{-| ADR-020 — age-gating shipped dark. With the server config flag OFF (the
+{-| age-gating shipped dark. With the server config flag OFF (the
 production default) the "adults only" checkbox must NOT render on the shelf
 picker, even though every other step of the flow is identical.
 -}

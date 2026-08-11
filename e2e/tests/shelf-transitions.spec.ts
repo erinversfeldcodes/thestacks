@@ -1,5 +1,5 @@
 /**
- * US-1.2.5 — Bookshelf navigation transitions (issue #277, #112 punch #21).
+ * — Bookshelf navigation transitions (issue, punch).
  *
  * WHY THIS SPEC ASSERTS COMPUTED STYLE, NOT CLASS PRESENCE
  * -------------------------------------------------------
@@ -7,7 +7,7 @@
  * was applied to `main.app__main` on every navigation, but the CSS rule was empty
  * (`.fade-through-dark-in {}`), so the computed style was `animation-name: none;
  * animation-duration: 0s`. A test asserting only "the transition class is present"
- * passed against that broken feature for months — the #270 live drive is what
+ * passed against that broken feature for months — the live drive is what
  * finally caught it.
  *
  * So every assertion here reads `getComputedStyle`. A class name alone proves
@@ -40,7 +40,7 @@
  * navigations pile up inside one frame; the class gets swapped mid-flight
  * instead of removed and re-added, and the recorded sequence varies run to run.
  * That is precisely what made this spec non-deterministic against a deployed
- * preview while passing locally (issue #277).
+ * preview while passing locally (issue).
  *
  * So every wait-for-cleared must be preceded by a wait for the class to have
  * been *applied* (`recordedTransitions`). Applied-then-cleared is the invariant;
@@ -173,7 +173,7 @@ async function gotoShelf(page: Page, path: string): Promise<void> {
 }
 
 async function clickShelf(page: Page, href: string): Promise<void> {
-  // Wave 8 (#318 TR-1) moved the five shelf links INSIDE a "Bookshelves"
+  // Wave 8 moved the five shelf links INSIDE a "Bookshelves"
   // disclosure — a real <button aria-haspopup> whose menu is absent from the
   // DOM until it is clicked open. So the navigation step is now: open the
   // disclosure, then click the shelf link. Opening the disclosure only toggles

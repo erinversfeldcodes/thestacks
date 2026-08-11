@@ -1,6 +1,6 @@
 defmodule Stacks.FeedsTest do
   @moduledoc """
-    Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
+      Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
   """
 
   use Core.DataCase, async: false

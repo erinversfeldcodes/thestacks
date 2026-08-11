@@ -1,13 +1,13 @@
 defmodule Stacks.Workers.GuardianTokenSweepJobTest do
   @moduledoc """
-    Reaper for the server-side JWT store.
+      Reaper for the server-side JWT store.
 
-    `Guardian.revoke/1` deletes a token row on logout, but an access token that
-    simply *expires* (its 8h ttl elapses without an explicit logout) leaves a dead
-    row behind in `op.guardian_tokens`. Without a periodic sweep the table grows
-    unbounded — every session ever issued becomes a permanent tombstone. This job
-    runs `Guardian.DB.Token.purge_expired_tokens/0` (a single indexed range delete
-    on `exp`) to reclaim them.
+      `Guardian.revoke/1` deletes a token row on logout, but an access token that
+      simply *expires* (its 8h ttl elapses without an explicit logout) leaves a dead
+      row behind in `op.guardian_tokens`. Without a periodic sweep the table grows
+      unbounded — every session ever issued becomes a permanent tombstone. This job
+      runs `Guardian.DB.Token.purge_expired_tokens/0` (a single indexed range delete
+      on `exp`) to reclaim them.
   """
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo

@@ -25,7 +25,7 @@ async function attemptLogin(
  * Is the `:auth` limiter expected to be ON for the target under test?
  *
  * ⚠️ **This must be decided from the ENVIRONMENT, never from the observation.**
- * Until Issue #330 the spec ended its flood loop with
+ * Until the spec ended its flood loop with
  * `test.skip(!sawRateLimit, "…rate limiting appears disabled")` — it skipped
  * *precisely when the limiter failed to fire*, which is the one outcome it
  * exists to catch. A regression that silently disabled the `:auth` bucket on the

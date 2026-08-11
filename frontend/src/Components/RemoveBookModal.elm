@@ -52,7 +52,7 @@ removeBookModal config =
             ]
             [ h2 [ class "modal__title", id titleId ] [ text "Remove Book" ]
             , p [ class "modal__message" ]
-                -- ⚠️ This said "This cannot be undone." until #375, when it stopped
+                -- ⚠️ This said "This cannot be undone." until, when it stopped
                 -- being true: the shelf the reader lands on offers an Undo for a
                 -- few seconds. Copy that overstates the stakes is not harmlessly
                 -- cautious — it is the sentence that makes someone abandon a

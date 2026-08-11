@@ -253,7 +253,7 @@ defmodule Stacks.GDPRTest do
     end
 
     test "every personal user-schema field appears in the export (schema-sweep guard, )" do
-      # Mirrors the erasure schema-level guard (#185): a future column added to
+      # Mirrors the erasure schema-level guard: a future column added to
       # op.users fails this test until it is either exported by
       # Export.export_user_data/2 or added to @export_excluded_fields WITH a
       # written rationale. Prevents a new personal field silently escaping export.

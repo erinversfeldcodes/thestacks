@@ -1,9 +1,9 @@
 defmodule Stacks.VisibilityTelemetryTest do
   @moduledoc """
-    Firing tests for the 197 visibility/social counters:
-    profile-visibility change by direction, recap outcome + cap counts,
-    block/unblock, block error rates, social rate-limit hits by bucket, and
-    ViewAs usage/errors. Bounded-atom metadata throughout.
+      Firing tests for the 197 visibility/social counters:
+      profile-visibility change by direction, recap outcome + cap counts,
+      block/unblock, block error rates, social rate-limit hits by bucket, and
+      ViewAs usage/errors. Bounded-atom metadata throughout.
   """
 
   use CoreWeb.ConnCase, async: false

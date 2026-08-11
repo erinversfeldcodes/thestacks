@@ -1,9 +1,9 @@
 defmodule StacksWeb.RobotsTest do
   @moduledoc """
-    Verifies that robots.txt exists in priv/static and contains the correct
-    directives to block crawlers from user-generated-content paths.
+      Verifies that robots.txt exists in priv/static and contains the correct
+      directives to block crawlers from user-generated-content paths.
 
-    Anti-scraping requirement from.
+      Anti-scraping requirement from.
   """
 
   use ExUnit.Case, async: true

@@ -1,12 +1,12 @@
 defmodule Stacks.Insights do
   @moduledoc """
-    Personal inference & de-anonymisation education (ADR-019 §3a):
-    computes, on the fly, what can be inferred about a user from their own
-    shelf behaviour. Invariants (the point of the feature): STRICT own-only
-    (every read hard-scoped to `user.id`); EPHEMERAL (nothing persisted —
-    a stored inference would be a new special-category PII store needing its
-    own erasure/export/consent); honestly labelled (facts as facts,
-    inferences as guesses with their limits stated).
+      Personal inference & de-anonymisation education:
+      computes, on the fly, what can be inferred about a user from their own
+      shelf behaviour. Invariants (the point of the feature): STRICT own-only
+      (every read hard-scoped to `user.id`); EPHEMERAL (nothing persisted —
+      a stored inference would be a new special-category PII store needing its
+      own erasure/export/consent); honestly labelled (facts as facts,
+      inferences as guesses with their limits stated).
   """
 
   import Ecto.Query
@@ -24,13 +24,13 @@ defmodule Stacks.Insights do
   @risk_illustration_count 3
 
   @doc """
-    Builds the personal-inference payload for `user`, own-only.
+      Builds the personal-inference payload for `user`, own-only.
 
-    Options:
+      Options:
 
-      * `:reveal_risk` (boolean, default `false`) — when `true`, includes the
-        `:risk_inferences` section (the consent-gated "what could be inferred"
-        illustrations). When `false`, that key is omitted entirely.
+        * `:reveal_risk` (boolean, default `false`) — when `true`, includes the
+          `:risk_inferences` section (the consent-gated "what could be inferred"
+          illustrations). When `false`, that key is omitted entirely.
   """
   @spec personal_inferences(User.t(), keyword()) :: map()
   def personal_inferences(%User{id: user_id}, opts \\ []) do

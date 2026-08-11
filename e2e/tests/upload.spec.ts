@@ -442,7 +442,7 @@ test.describe("Upload pipeline", () => {
   );
 });
 
-test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, () => {
+test.describe("Upload pipeline — manual ISBN entry", () => {
   test("invalid ISBN shows checksum error", async ({ page }) => {
     test.setTimeout(15_000);
 
@@ -529,7 +529,7 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
   );
 });
 
-// The duplicate notice (#343/#333) — the last moment before a reader files a
+// The duplicate notice — the last moment before a reader files a
 // second copy. It has Elm program-test coverage on both paths, and had NO
 // end-to-end coverage until this block: nothing drove it through a browser
 // against a real server, which is exactly how three surfaces in this project
@@ -541,7 +541,6 @@ test.describe("Upload pipeline — manual ISBN entry", { tag: ["@US-1.1.5"] }, (
 // would pass just as happily against a flow that had been wedged shut.
 test.describe(
   "Upload pipeline — duplicate awareness",
-  { tag: ["@US-1.1.6"] },
   () => {
     test("manual entry of a book already shelved informs, and still lets the reader add it", async ({
       page,
@@ -569,12 +568,12 @@ test.describe(
       await page.getByTestId("upload-manual-isbn-input").fill(isbn);
 
       // ⚠️ Deliberately NO pre-submit notice assertion. The manual path is one
-      // hop (#343): the client holds only a typed string until the confirm
+      // hop: the client holds only a typed string until the confirm
       // response — which is the FIRST moment the server can name the reader's
       // other bookshelves. `viewCompleteExistingShelvesNotice`'s own doc says
       // exactly this. This spec originally asserted a pre-commit notice that
       // has never existed on this path, and the assertion sat unexecuted
-      // behind the Modal project gating (#397).
+      // behind the Modal project gating.
       const submit = page.getByTestId("upload-manual-isbn-submit");
       await expect(submit).toBeEnabled();
 

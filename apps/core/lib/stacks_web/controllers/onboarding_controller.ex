@@ -1,10 +1,10 @@
 defmodule StacksWeb.OnboardingController do
   @moduledoc """
-    Handles onboarding step tracking endpoints.
+      Handles onboarding step tracking endpoints.
 
-    - GET  /api/onboarding/status      — returns current step completion map
-    - PUT  /api/onboarding/step/:step  — marks a step as complete
-    - POST /api/onboarding/reset       — resets all steps (for re-entry from Settings)
+      - GET  /api/onboarding/status      — returns current step completion map
+      - PUT  /api/onboarding/step/:step  — marks a step as complete
+      - POST /api/onboarding/reset       — resets all steps (for re-entry from Settings)
   """
 
   use CoreWeb, :controller

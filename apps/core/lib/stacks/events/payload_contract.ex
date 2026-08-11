@@ -1,13 +1,13 @@
 defmodule Stacks.Events.PayloadContract do
   @moduledoc """
-    The declared, versioned shape of every `op.event_log` payload — the
-    schema `buf` cannot provide, since payloads are opaque
-    `google.protobuf.Struct` JSON. Three guards enforce it
-    (`PayloadContractTest`): shape drift (`emit/1` validates in non-prod
-    envs, so drifting emitters fail tests), version ↔ upcaster (every
-    `version > 1` entry needs an `Upcaster` clause), and PII-lint (every
-    payload key must be non-personal-shaped or explicitly allowlisted with a
-    justification — UUID-only is the rule).
+      The declared, versioned shape of every `op.event_log` payload — the
+      schema `buf` cannot provide, since payloads are opaque
+      `google.protobuf.Struct` JSON. Three guards enforce it
+      (`PayloadContractTest`): shape drift (`emit/1` validates in non-prod
+      envs, so drifting emitters fail tests), version ↔ upcaster (every
+      `version > 1` entry needs an `Upcaster` clause), and PII-lint (every
+      payload key must be non-personal-shaped or explicitly allowlisted with a
+      justification — UUID-only is the rule).
   """
 
   @contract %{
@@ -127,12 +127,12 @@ defmodule Stacks.Events.PayloadContract do
   def pii_shaped, do: @pii_shaped
 
   @doc """
-    Validate an emitted event map against the contract.
+      Validate an emitted event map against the contract.
 
-    Returns `:ok` when the payload keys and `schema_version` match the declared
-    contract for that `event_type`, or when the event_type is not in the contract
-    (unknown types are the coverage test's concern, not a runtime crash). Returns
-    `{:error, reason}` on a shape/version mismatch for a known type.
+      Returns `:ok` when the payload keys and `schema_version` match the declared
+      contract for that `event_type`, or when the event_type is not in the contract
+      (unknown types are the coverage test's concern, not a runtime crash). Returns
+      `{:error, reason}` on a shape/version mismatch for a known type.
   """
   @spec validate(map()) :: :ok | {:error, String.t()}
   def validate(%{event_type: type} = event) do
@@ -178,9 +178,9 @@ defmodule Stacks.Events.PayloadContract do
   def validate(_), do: :ok
 
   @doc """
-    Like `validate/1` but raises `Stacks.Events.PayloadContract.Violation` on a
-    mismatch. Called from `Stacks.Events.emit/1` in non-prod envs so a contract
-    drift fails the test that emitted it.
+      Like `validate/1` but raises `Stacks.Events.PayloadContract.Violation` on a
+      mismatch. Called from `Stacks.Events.emit/1` in non-prod envs so a contract
+      drift fails the test that emitted it.
   """
   @spec validate!(map()) :: :ok
   def validate!(event) do

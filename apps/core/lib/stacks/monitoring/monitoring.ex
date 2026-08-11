@@ -1,14 +1,14 @@
 defmodule Stacks.Monitoring do
   @moduledoc """
-    Context for monitoring features: source health checks.
+      Context for monitoring features: source health checks.
 
-    Tracks the operational health of external data sources (scrapers, review
-    sources, RSS feeds, event sources, LLM outputs) by recording successes and
-    failures. Status is auto-computed from consecutive failure count:
+      Tracks the operational health of external data sources (scrapers, review
+      sources, RSS feeds, event sources, LLM outputs) by recording successes and
+      failures. Status is auto-computed from consecutive failure count:
 
-    - 0-2 consecutive failures: `healthy`
-    - 3-6 consecutive failures: `degraded`
-    - 7+ consecutive failures: `broken`
+      - 0-2 consecutive failures: `healthy`
+      - 3-6 consecutive failures: `degraded`
+      - 7+ consecutive failures: `broken`
   """
 
   require Logger
@@ -45,13 +45,13 @@ defmodule Stacks.Monitoring do
   end
 
   @doc """
-    Records a successful check for the given source.
+      Records a successful check for the given source.
 
-    Upserts by `source_name`: resets `consecutive_failures` to 0, increments
-    `total_successes`, sets `last_success_at` to now, and marks status as
-    `"healthy"`.
+      Upserts by `source_name`: resets `consecutive_failures` to 0, increments
+      `total_successes`, sets `last_success_at` to now, and marks status as
+      `"healthy"`.
 
-    Emits a `source_health.recorded` event after persisting.
+      Emits a `source_health.recorded` event after persisting.
   """
   @spec record_success(String.t(), String.t()) ::
           {:ok, SourceHealthCheck.t()} | {:error, Ecto.Changeset.t()}
@@ -83,13 +83,13 @@ defmodule Stacks.Monitoring do
   end
 
   @doc """
-    Records a failed check for the given source.
+      Records a failed check for the given source.
 
-    Upserts by `source_name`: increments `consecutive_failures` and
-    `total_failures`, sets `last_failure_at` and `last_failure_reason`,
-    and auto-computes status based on the new consecutive failure count.
+      Upserts by `source_name`: increments `consecutive_failures` and
+      `total_failures`, sets `last_failure_at` and `last_failure_reason`,
+      and auto-computes status based on the new consecutive failure count.
 
-    Emits a `source_health.recorded` event after persisting.
+      Emits a `source_health.recorded` event after persisting.
   """
   @spec record_failure(String.t(), String.t(), String.t()) ::
           {:ok, SourceHealthCheck.t()} | {:error, Ecto.Changeset.t()}
@@ -124,8 +124,8 @@ defmodule Stacks.Monitoring do
   end
 
   @doc """
-    Finds a source health check by `source_name` or creates one with healthy
-    defaults.
+      Finds a source health check by `source_name` or creates one with healthy
+      defaults.
   """
   @spec get_or_create(String.t(), String.t()) ::
           {:ok, SourceHealthCheck.t()} | {:error, Ecto.Changeset.t()}
@@ -154,11 +154,11 @@ defmodule Stacks.Monitoring do
   end
 
   @doc """
-    Lists all source health checks in the wire shape the admin scraper-health
-    page (`Api.getSourceHealth`) consumes:
-    `{name, source_type, status, consecutive_failures, last_success_at, last_failure_at}`
-    with plain-string `source_type`/`status` and ISO8601-or-nil timestamps.
-    `source_name` is remapped to the `name` key the decoder reads.
+      Lists all source health checks in the wire shape the admin scraper-health
+      page (`Api.getSourceHealth`) consumes:
+      `{name, source_type, status, consecutive_failures, last_success_at, last_failure_at}`
+      with plain-string `source_type`/`status` and ISO8601-or-nil timestamps.
+      `source_name` is remapped to the `name` key the decoder reads.
   """
   @spec list_source_health() :: [map()]
   def list_source_health do
@@ -169,11 +169,11 @@ defmodule Stacks.Monitoring do
   end
 
   @doc """
-    Computes the health status from the consecutive failure count.
+      Computes the health status from the consecutive failure count.
 
-    - 0-2: `"healthy"`
-    - 3-6: `"degraded"`
-    - 7+:  `"broken"`
+      - 0-2: `"healthy"`
+      - 3-6: `"degraded"`
+      - 7+:  `"broken"`
   """
   @spec compute_status(non_neg_integer()) :: String.t()
   def compute_status(consecutive_failures) when consecutive_failures <= 2, do: "healthy"

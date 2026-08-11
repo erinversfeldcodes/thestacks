@@ -1,12 +1,12 @@
 defmodule Stacks.Workers.TriggerPriceScrapeJob do
   @moduledoc """
-    Triggers price scraping for an ISBN across bookstores. Modes: single
-    ISBN (`%{isbn:...}`, optional `book_edition_id`) or `%{batch: true}`
-    (all stale editions). Prices record against the EDITION — an ISBN names
-    an edition, and shops stock specific editions at different prices.
-    Results flow to `PricePipeline` (Broadway) for batched persistence;
-    `:circuit_open` from `ScraperClient` is treated as any other scrape
-    failure.
+      Triggers price scraping for an ISBN across bookstores. Modes: single
+      ISBN (`%{isbn:...}`, optional `book_edition_id`) or `%{batch: true}`
+      (all stale editions). Prices record against the EDITION — an ISBN names
+      an edition, and shops stock specific editions at different prices.
+      Results flow to `PricePipeline` (Broadway) for batched persistence;
+      `:circuit_open` from `ScraperClient` is treated as any other scrape
+      failure.
   """
 
   use Oban.Worker, queue: :scraper, max_attempts: 3

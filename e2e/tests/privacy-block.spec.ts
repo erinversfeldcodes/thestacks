@@ -8,8 +8,8 @@ import {
 } from "./helpers";
 
 /**
- * Browser E2E for the user-blocking journey — US-10.1.2, Issue #122 punch #14
- * (child issue #199). Drives the REAL preview stack (no mocking): the ⋯
+ * Browser E2E for the user-blocking journey —, punch
+ * (child issue). Drives the REAL preview stack (no mocking): the ⋯
  * overflow → confirmation-modal → block flow on a blog post, and the reverse
  * unblock from Settings → Privacy → Blocked Users.
  *
@@ -22,7 +22,7 @@ import {
  *     reader). B never touches the browser — API only.
  *   - BLOCKER (A): registered via API + confirmed, then drives the browser.
  *
- * Both users are minted via POST /api/test/session (Issue #280) — one call that
+ * Both users are minted via POST /api/test/session — one call that
  * creates a confirmed user AND returns its session token, outside the `:auth`
  * rate bucket. This replaces the register→confirm→login dance (and its
  * 429-backoff), so this non-auth-testing spec no longer competes with the

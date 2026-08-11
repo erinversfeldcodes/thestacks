@@ -120,7 +120,7 @@ async function mockUploadAccept(page: Page) {
 }
 
 /**
- * Fail the upload at the init step, with a 500. Since #374 the page names the
+ * Fail the upload at the init step, with a 500. Since the page names the
  * failure it was given rather than rendering one "Upload failed. Please try
  * again." for everything — a 500 is unrecognised, so the card says so.
  * Keeping the failure on the very first step is the simplest path for the
@@ -225,8 +225,8 @@ async function mockPollPending(page: Page) {
  * as "ignore, stay put" so heartbeats do not disturb the page.
  *
  * This mock sent `null`, so the frame never arrived: the page sat on its
- * spinner and the test waited out its timeout. Found while driving #374 against
- * a local stack; it is the same wire-contract drift #328 removed from the Elm
+ * spinner and the test waited out its timeout. Found while driving against
+ * a local stack; it is the same wire-contract drift removed from the Elm
  * fixtures, surviving here in the Playwright ones.
  */
 async function mockPollRejected(page: Page) {
@@ -418,7 +418,7 @@ async function triggerDragAndDrop(page: Page) {
   await dropZone.dispatchEvent("drop", { dataTransfer });
 }
 
-test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
+test.describe("Happy paths", () => {
   test("single photo drag-and-drop: drop -> processing -> verify -> shelf pick -> success", async ({
     page,
   }) => {
@@ -584,8 +584,8 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
   });
 });
 
-test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () => {
-  test("upload HTTP failure (500) -> error -> retry", { tag: ["@US-1.1.1"] }, async ({ page }) => {
+test.describe("Sad paths", () => {
+  test("upload HTTP failure (500) -> error -> retry", async ({ page }) => {
     await mockUploadFailure(page);
 
     await page.goto("/upload");
@@ -616,7 +616,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     await expect(page.getByTestId("upload-drop-zone")).toBeVisible();
   });
 
-  test("stream error -> the lost connection is named -> manual ISBN / retry", { tag: ["@US-1.1.1"] }, async ({
+  test("stream error -> the lost connection is named -> manual ISBN / retry", async ({
     page,
   }) => {
     await mockUploadAccept(page);
@@ -646,7 +646,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     ).toBeVisible();
   });
 
-  test("ISBN not found (hard gate) -> rejection -> manual ISBN / retry", { tag: ["@US-1.1.2"] }, async ({
+  test("ISBN not found (hard gate) -> rejection -> manual ISBN / retry", async ({
     page,
   }) => {
     await mockUploadAccept(page);
@@ -674,7 +674,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     ).toBeVisible();
   });
 
-  test("non-book rejection -> Doesn't Look Like a Book -> retry", { tag: ["@US-1.1.3"] }, async ({
+  test("non-book rejection -> Doesn't Look Like a Book -> retry", async ({
     page,
   }) => {
     await mockUploadAccept(page);
@@ -695,7 +695,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     ).toBeVisible();
   });
 
-  test("placement API failure (422) -> error -> retry", { tag: ["@US-1.1.1"] }, async ({ page }) => {
+  test("placement API failure (422) -> error -> retry", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page);
     await mockGetBook(page);
@@ -733,7 +733,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     });
   });
 
-  test("poll returns HTTP 500 -> IdentificationFailed error view shown -> retry available", { tag: ["@US-1.1.1"] }, async ({
+  test("poll returns HTTP 500 -> IdentificationFailed error view shown -> retry available", async ({
     page,
   }) => {
     await mockUploadAccept(page);
@@ -757,7 +757,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     ).toBeVisible();
   });
 
-  test("unauthenticated -> shows auth gate or redirects", { tag: ["@US-1.1.1"] }, async ({
+  test("unauthenticated -> shows auth gate or redirects", async ({
     browser,
     baseURL,
   }) => {
@@ -778,7 +778,7 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
   });
 });
 
-test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
+test.describe("Duplicate detection", () => {
   async function setupDuplicateFlow(page: Page) {
     await mockUploadAccept(page);
     await mockPollResolved(page, { isDuplicate: true });
@@ -872,7 +872,7 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
   });
 });
 
-test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
+test.describe("Multi-format merge", () => {
   test("merge success names the added edition", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page, { isDuplicate: true });
@@ -938,7 +938,7 @@ test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
   });
 });
 
-test.describe("Multi-book extraction", { tag: ["@US-1.1.7"] }, () => {
+test.describe("Multi-book extraction", () => {
   test("multi-book: one book returns 500 -> remaining books still shown", async ({
     page,
   }) => {
@@ -988,7 +988,7 @@ test.describe("Multi-book extraction", { tag: ["@US-1.1.7"] }, () => {
   });
 });
 
-test.describe("Age-gated content", { tag: ["@US-1.1.4"] }, () => {
+test.describe("Age-gated content", () => {
   test("age-gated book flows through upload normally — gating happens on book detail", async ({
     page,
   }) => {
@@ -1039,7 +1039,7 @@ test.describe("Age-gated content", { tag: ["@US-1.1.4"] }, () => {
   });
 });
 
-test.describe("ARIA and accessibility", { tag: ["@US-1.1.1"] }, () => {
+test.describe("ARIA and accessibility", () => {
   test("aria-live='polite' on status region", async ({ page }) => {
     await page.goto("/upload");
 
@@ -1126,7 +1126,6 @@ const FAILURE_BUDGET_MS = 5_000;
 
 test.describe(
   "Failure copy names its cause, quickly",
-  { tag: ["@US-16.2.1", "@US-1.1.2"] },
   () => {
     const cases = [
       {

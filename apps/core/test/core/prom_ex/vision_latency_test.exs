@@ -1,11 +1,11 @@
 defmodule Core.PromEx.VisionLatencyTest do
   @moduledoc """
-    349 — the vision-call duration was emitted but nothing consumed it, so
-    upload timeouts were sized from a comment's estimate. Proves what a
-    compiling metric definition does not: the distribution is ATTACHED
-    (PromEx registered a handler for its event) and EXPORTED under the
-    expected family name with the expected buckets — so the p95 exists
-    where the SLO gate and timeout-derivation can read it.
+      349 — the vision-call duration was emitted but nothing consumed it, so
+      upload timeouts were sized from a comment's estimate. Proves what a
+      compiling metric definition does not: the distribution is ATTACHED
+      (PromEx registered a handler for its event) and EXPORTED under the
+      expected family name with the expected buckets — so the p95 exists
+      where the SLO gate and timeout-derivation can read it.
   """
 
   use ExUnit.Case, async: false
@@ -108,7 +108,7 @@ defmodule Core.PromEx.VisionLatencyTest do
                "(#{ceiling}ms). A :stop event can never carry a longer duration — a slower " <>
                "call exits via the :exception path — so a ceiling AT the deadline makes +Inf " <>
                "structurally unreachable and no quantile can be the '2 × max_finite_bucket' " <>
-               "fallback. Buckets: #{inspect(buckets())}. If the timeout moved (Issue #350), " <>
+               "fallback. Buckets: #{inspect(buckets())}. If the timeout moved, " <>
                "move the top bucket with it."
     end
 

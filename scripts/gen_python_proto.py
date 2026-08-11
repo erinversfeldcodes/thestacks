@@ -805,7 +805,7 @@ GENERATORS = {
 
 
 def classify(path: Path) -> str:
-    """Classify a generated artefact as tracked / ignored / untracked (Issue #354).
+    """Classify a generated artefact as tracked / ignored / untracked.
 
     Delegates to scripts/generated-file-class.sh so the tracked-vs-gitignored
     policy has exactly one implementation, shared by this generator, the Elm

@@ -1,16 +1,16 @@
 defmodule CoreWeb.MetricsEndpointTest do
   @moduledoc """
-    Tests that the /internal/metrics Prometheus endpoint returns Prometheus
-    text format when authenticated. Auth is enforced by
-    `StacksWeb.Plugs.MetricsAuth`.
+      Tests that the /internal/metrics Prometheus endpoint returns Prometheus
+      text format when authenticated. Auth is enforced by
+      `StacksWeb.Plugs.MetricsAuth`.
 
-    The `live exposure` describe block proves the
-    registered→scrapeable path end-to-end: after the moderation funnel and
-    age-gate paths run through their real code, the `stacks_moderation_*`
-    / `stacks_age_gate_*` / `stacks_age_verification_*` families appear at
-    `GET /internal/metrics` with samples. The firing tests prove the
-    events fire; this proves PromEx actually exposes them on the scrape
-    endpoint the dashboard queries.
+      The `live exposure` describe block proves the
+      registered→scrapeable path end-to-end: after the moderation funnel and
+      age-gate paths run through their real code, the `stacks_moderation_*`
+      / `stacks_age_gate_*` / `stacks_age_verification_*` families appear at
+      `GET /internal/metrics` with samples. The firing tests prove the
+      events fire; this proves PromEx actually exposes them on the scrape
+      endpoint the dashboard queries.
   """
 
   use CoreWeb.ConnCase, async: false

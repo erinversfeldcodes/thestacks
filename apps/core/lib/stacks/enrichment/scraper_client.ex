@@ -1,16 +1,16 @@
 defmodule Stacks.Enrichment.ScraperClient do
   @moduledoc """
-    HTTP client for the Rust scraper service. Wire contract:
-    `proto/stacks/internal/v1/scraper.proto`. Swappable via
-    `config:core,:scraper_client` (real vs mock). Auth: same HMAC scheme
-    as the vision service (`X-Internal-Token`, secret
-    `SCRAPER_HMAC_SECRET`).
+      HTTP client for the Rust scraper service. Wire contract:
+      `proto/stacks/internal/v1/scraper.proto`. Swappable via
+      `config:core,:scraper_client` (real vs mock). Auth: same HMAC scheme
+      as the vision service (`X-Internal-Token`, secret
+      `SCRAPER_HMAC_SECRET`).
 
-    Two fuses are consulted before every request, covering different
-    domains: `:scraper_fuse` (the sidecar itself — shared, service-wide) and
-    the per-store fuse from `CircuitBreakers.store_fuse/1` (one hostile or
-    broken shop must not stop scraping for the rest). Either open →
-    `{:error,:circuit_open}`.
+      Two fuses are consulted before every request, covering different
+      domains: `:scraper_fuse` (the sidecar itself — shared, service-wide) and
+      the per-store fuse from `CircuitBreakers.store_fuse/1` (one hostile or
+      broken shop must not stop scraping for the rest). Either open →
+      `{:error,:circuit_open}`.
   """
 
   @behaviour Stacks.Enrichment.ScraperClientBehaviour
@@ -215,10 +215,10 @@ defmodule Stacks.Enrichment.ScraperClient do
   end
 
   @doc """
-    Maps a `/sitemap-urls` response body onto a result, without side effects.
+      Maps a `/sitemap-urls` response body onto a result, without side effects.
 
-    Public for the same reason as `classify_fetch_body/2`: tests swap this whole module out, so these
-    branches are otherwise unreachable. `{:unexpected, _}` is the only return that melts a fuse.
+      Public for the same reason as `classify_fetch_body/2`: tests swap this whole module out, so these
+      branches are otherwise unreachable. `{:unexpected, _}` is the only return that melts a fuse.
   """
   @spec classify_sitemap_body(String.t(), String.t()) ::
           {:ok, map()} | {:error, term()} | {:unexpected, term()}
@@ -293,17 +293,17 @@ defmodule Stacks.Enrichment.ScraperClient do
   end
 
   @doc """
-    Maps a `/fetch` response body onto a result, without side effects.
+      Maps a `/fetch` response body onto a result, without side effects.
 
-    Public and separate from `handle_fetch_response/3` **so the outcome branches can be tested at
-    all.** Tests swap the whole module out for `MockScraperClient`, and there is no Finch stub in this
-    project, so every branch below was unreachable from a test — including the one deciding whether a
-    shop's answer melts the fuse shared by every other shop.
+      Public and separate from `handle_fetch_response/3` **so the outcome branches can be tested at
+      all.** Tests swap the whole module out for `MockScraperClient`, and there is no Finch stub in this
+      project, so every branch below was unreachable from a test — including the one deciding whether a
+      shop's answer melts the fuse shared by every other shop.
 
-    Returns `{:unexpected, decoded}` rather than melting anything itself: which fuse an unrecognised
-    outcome should melt is the caller's business, and keeping the classification pure is what makes it
-    assertable. **`{:unexpected, _}` is the only return that melts a fuse** — so a test that a given
-    outcome is *not* `{:unexpected, _}` is a test that it does not melt one.
+      Returns `{:unexpected, decoded}` rather than melting anything itself: which fuse an unrecognised
+      outcome should melt is the caller's business, and keeping the classification pure is what makes it
+      assertable. **`{:unexpected, _}` is the only return that melts a fuse** — so a test that a given
+      outcome is *not* `{:unexpected, _}` is a test that it does not melt one.
   """
   @spec classify_fetch_body(String.t(), String.t()) ::
           {:ok, map()} | {:error, term()} | {:unexpected, term()}

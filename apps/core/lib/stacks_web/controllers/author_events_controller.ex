@@ -1,12 +1,12 @@
 defmodule StacksWeb.AuthorEventsController do
   @moduledoc """
-    Public read for an author's bookstore events (item 4: "surface
-    events" — the book-detail author card's "Events coming soon" placeholder
-    finally has something to say).
+      Public read for an author's bookstore events (item 4: "surface
+      events" — the book-detail author card's "Events coming soon" placeholder
+      finally has something to say).
 
-    Public because the data is: these are events scraped from bookshops' own
-    public pages, carrying nothing about any reader. Dateless events are listed
-    last and never counted as "upcoming" — the shop's own page has the details.
+      Public because the data is: these are events scraped from bookshops' own
+      public pages, carrying nothing about any reader. Dateless events are listed
+      last and never counted as "upcoming" — the shop's own page has the details.
   """
 
   use CoreWeb, :controller

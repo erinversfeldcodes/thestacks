@@ -18,15 +18,15 @@ defmodule StacksWeb.UploadController do
   alias StacksWeb.ProtoJSON
 
   @doc """
-    POST /api/upload/init — first step of the presigned-URL upload flow.
+      POST /api/upload/init — first step of the presigned-URL upload flow.
 
-    Body: `{content_type: "image/jpeg"}` (optional, defaults to image/jpeg).
+      Body: `{content_type: "image/jpeg"}` (optional, defaults to image/jpeg).
 
-    Returns: `{image_id, upload_url, expires_in}`. Client PUTs the image
-    bytes directly to `upload_url` (R2), then calls
-    `POST /api/upload/:id/commit` to signal completion. Phoenix never
-    sees the bytes — the POST here is a lightweight DB insert + local
-    SigV4 signing operation (~50ms typical).
+      Returns: `{image_id, upload_url, expires_in}`. Client PUTs the image
+      bytes directly to `upload_url` (R2), then calls
+      `POST /api/upload/:id/commit` to signal completion. Phoenix never
+      sees the bytes — the POST here is a lightweight DB insert + local
+      SigV4 signing operation (~50ms typical).
   """
   @spec init(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def init(conn, params) do
@@ -47,11 +47,11 @@ defmodule StacksWeb.UploadController do
   end
 
   @doc """
-    POST /api/upload/:image_id/commit — second step of the presigned-URL
-    flow. Verifies that the client's direct PUT to R2 landed (HEAD),
-    flips the row from `awaiting_upload` to `pending`, and enqueues
-    `IdentifyBookJob`. The SSE stream endpoint works against the
-    resulting row exactly as before.
+      POST /api/upload/:image_id/commit — second step of the presigned-URL
+      flow. Verifies that the client's direct PUT to R2 landed (HEAD),
+      flips the row from `awaiting_upload` to `pending`, and enqueues
+      `IdentifyBookJob`. The SSE stream endpoint works against the
+      resulting row exactly as before.
   """
   @spec commit(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def commit(conn, %{"image_id" => image_id}) do
@@ -81,11 +81,11 @@ defmodule StacksWeb.UploadController do
   end
 
   @doc """
-    PUT /api/upload/:image_id/data — receive file bytes for the init/commit upload flow.
+      PUT /api/upload/:image_id/data — receive file bytes for the init/commit upload flow.
 
-    No authentication: the image_id UUID (128-bit random) is effectively unguessable,
-    and `commit_upload` verifies ownership before enqueuing work. Phoenix stores the
-    bytes via the configured storage backend (R2 in production, Local in dev/preview).
+      No authentication: the image_id UUID (128-bit random) is effectively unguessable,
+      and `commit_upload` verifies ownership before enqueuing work. Phoenix stores the
+      bytes via the configured storage backend (R2 in production, Local in dev/preview).
   """
   @spec upload_data(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def upload_data(conn, %{"image_id" => image_id}) do
@@ -105,18 +105,18 @@ defmodule StacksWeb.UploadController do
   end
 
   @doc """
-    GET /api/uploads/inbox — the uploads this reader has not finished with.
+      GET /api/uploads/inbox — the uploads this reader has not finished with.
 
-    Read-only, and scoped to the caller by `Stacks.Uploads.list_awaiting_attention/1`'s
-    `user_id` clause — there is no id in the path to tamper with, so the only
-    upload rows this can ever return are the ones belonging to the token holder.
+      Read-only, and scoped to the caller by `Stacks.Uploads.list_awaiting_attention/1`'s
+      `user_id` clause — there is no id in the path to tamper with, so the only
+      upload rows this can ever return are the ones belonging to the token holder.
 
-    Returns 200 `{items: [...]}`, newest first. An empty inbox is `{items: []}`,
-    never a 404: "nothing to do" is a successful answer to the question.
+      Returns 200 `{items: [...]}`, newest first. An empty inbox is `{items: []}`,
+      never a 404: "nothing to do" is a successful answer to the question.
 
-    ⚠️ **Nothing here places a book.** The response carries candidate ids; the
-    reader still walks confirm → choose-shelf → place. See the module doc on
-    `Stacks.Uploads.list_awaiting_attention/1`.
+      ⚠️ **Nothing here places a book.** The response carries candidate ids; the
+      reader still walks confirm → choose-shelf → place. See the module doc on
+      `Stacks.Uploads.list_awaiting_attention/1`.
   """
   @spec inbox(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def inbox(conn, _params) do
@@ -126,14 +126,14 @@ defmodule StacksWeb.UploadController do
   end
 
   @doc """
-    POST /api/upload/:image_id/reject-identification — "No, try again" on
-    the model's guess. Takes a CUMULATIVE `rejected_book_ids` list (frontend
-    keeps state). Verifies ownership; resolves each id to "Title by Author"
-    + its edition ISBNs (empty resolved list → 422); soft-removes any active
-    placement so the retry can re-place; invalidates `TitleSearchCache` for
-    EVERY edition ISBN of each rejected book (the memoised wrong answer must
-    not survive into round one of the retry); re-enqueues `IdentifyBookJob`
-    with the rejected descriptors and `excluded_isbns`.
+      POST /api/upload/:image_id/reject-identification — "No, try again" on
+      the model's guess. Takes a CUMULATIVE `rejected_book_ids` list (frontend
+      keeps state). Verifies ownership; resolves each id to "Title by Author"
+      + its edition ISBNs (empty resolved list → 422); soft-removes any active
+      placement so the retry can re-place; invalidates `TitleSearchCache` for
+      EVERY edition ISBN of each rejected book (the memoised wrong answer must
+      not survive into round one of the retry); re-enqueues `IdentifyBookJob`
+      with the rejected descriptors and `excluded_isbns`.
   """
   @spec reject_identification(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def reject_identification(conn, %{"image_id" => image_id} = params) do
@@ -266,7 +266,7 @@ defmodule StacksWeb.UploadController do
 
   defp extract_edition_isbns(_), do: []
 
-  # Decision (#333): undo exactly ONE placement — the most recent — not all of
+  # Decision: undo exactly ONE placement — the most recent — not all of
   # them.
   #
   # This is the reject-identification path: the reader is saying "that book was
@@ -280,7 +280,7 @@ defmodule StacksWeb.UploadController do
   # "Newest" is a heuristic, not provenance: if the reader shelved the book by
   # hand in the seconds between identification and rejection, the newest is
   # theirs. The honest fix is a provenance column on the placement, which is
-  # #335's scope (`verification_source`) — until then, undoing one placement is
+  # scope (`verification_source`) — until then, undoing one placement is
   # the conservative error: an extra shelf entry the reader can remove beats a
   # deliberate one we deleted for them.
   defp remove_placements_for_books(user_id, book_ids) do

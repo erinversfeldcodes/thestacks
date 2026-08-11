@@ -1,7 +1,7 @@
 defmodule Stacks.EnrichmentThirdSpacesTest do
   @moduledoc """
-    Tests for Stacks.Enrichment.list_third_spaces/1 and
-    Stacks.Enrichment.book_availability/1.
+      Tests for Stacks.Enrichment.list_third_spaces/1 and
+      Stacks.Enrichment.book_availability/1.
   """
 
   use Core.DataCase, async: true

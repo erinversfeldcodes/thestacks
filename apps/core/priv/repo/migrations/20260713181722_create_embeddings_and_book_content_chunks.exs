@@ -1,11 +1,11 @@
 defmodule Core.Repo.Migrations.CreateEmbeddingsAndBookContentChunks do
   @moduledoc """
-    Hand-written migration for the two pgvector tables (ADR-017):
-    proto.sync cannot express `vector(1024)`, so both are
-    `migration_exists: true` + `skip_ecto: true` in persisted.exs (scalar
-    columns still checked against the proto). GDPR: `op.embeddings` is
-    PERSONAL (user-scoped, purged on consent revocation);
-    `op.book_content_chunks` is the shared non-personal corpus.
+      Hand-written migration for the two pgvector tables:
+      proto.sync cannot express `vector(1024)`, so both are
+      `migration_exists: true` + `skip_ecto: true` in persisted.exs (scalar
+      columns still checked against the proto). GDPR: `op.embeddings` is
+      PERSONAL (user-scoped, purged on consent revocation);
+      `op.book_content_chunks` is the shared non-personal corpus.
   """
 
   use Ecto.Migration

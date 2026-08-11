@@ -902,7 +902,7 @@ jobs:
             fi
           done
           wait
-          # Deterministic POST-path readiness (Issue #269 stability finding #2).
+          # Deterministic POST-path readiness (stability finding #2).
           # The parallel bursts above wake the machine, but a boundary cold-start
           # can still leave the first login POST 502ing while fly-proxy finishes
           # the wake — and auth.setup.ts's first action is a login POST. Poll

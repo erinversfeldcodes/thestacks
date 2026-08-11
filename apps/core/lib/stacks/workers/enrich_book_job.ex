@@ -1,12 +1,12 @@
 defmodule Stacks.Workers.EnrichBookJob do
   @moduledoc """
-    Fills in external-registry metadata for a book stored with placeholder
-    fields — the async half of the fast path where `Moderation.store_book/3`
-    skips the synchronous OL/GB lookup (~400ms off the upload hot path).
-    Looks up by ISBN, not ID (the pipeline dedups via `find_existing/1`, so
-    a prior run may already have enriched the row); calls
-    `Books.resolve_isbn/1` (cached, parallel); overwrites placeholders
-    in place. Emits `book.enriched` so caches invalidate.
+      Fills in external-registry metadata for a book stored with placeholder
+      fields — the async half of the fast path where `Moderation.store_book/3`
+      skips the synchronous OL/GB lookup (~400ms off the upload hot path).
+      Looks up by ISBN, not ID (the pipeline dedups via `find_existing/1`, so
+      a prior run may already have enriched the row); calls
+      `Books.resolve_isbn/1` (cached, parallel); overwrites placeholders
+      in place. Emits `book.enriched` so caches invalidate.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 5

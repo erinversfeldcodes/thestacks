@@ -3,7 +3,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import { mintSession, injectSession, assertSeedOrSkip } from "./helpers";
 
 /**
- * Issue #276 — the 50-book Reading Pile cap is enforced at the write path.
+ * — the 50-book Reading Pile cap is enforced at the write path.
  *
  * A user whose pile already holds 50 books attempts to move a 51st book onto
  * it from the Library and must see the specific full-pile message (not the

@@ -1,15 +1,15 @@
 defmodule Stacks.DataCorrection.Column do
   @moduledoc """
-    The shared write for corrections changing one column of one row (lifted
-    from the isbn-only 339 shape — a repair mechanism for one column is a
-    repair for one incident). Deliberately raw SQL, not the schema: a
-    correction runs because reality and the schema disagree, and reading
-    broken rows through the changeset normalises the bad value away.
+      The shared write for corrections changing one column of one row (lifted
+      from the isbn-only 339 shape — a repair mechanism for one column is a
+      repair for one incident). Deliberately raw SQL, not the schema: a
+      correction runs because reality and the schema disagree, and reading
+      broken rows through the changeset normalises the bad value away.
 
-    Load-bearing: `IS NOT DISTINCT FROM` on the old value (a row that moved
-    between plan and apply is refused, and NULL compares usefully); the audit
-    insert in the SAME transaction (no audit, no change); `updated_at`
-    untouched (the repair is not an edit by the owner).
+      Load-bearing: `IS NOT DISTINCT FROM` on the old value (a row that moved
+      between plan and apply is refused, and NULL compares usefully); the audit
+      insert in the SAME transaction (no audit, no change); `updated_at`
+      untouched (the repair is not an edit by the owner).
   """
 
   alias Core.Repo
@@ -20,11 +20,11 @@ defmodule Stacks.DataCorrection.Column do
   @identifier ~r/\A[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?\z/
 
   @doc """
-    Rewrites one row's `column`, provided the row still holds `from`.
+      Rewrites one row's `column`, provided the row still holds `from`.
 
-    Returns `{:error, {:row_no_longer_matches, id, from}}` when it does not — the
-    plan was built against a row that has since moved, and guessing which of the
-    two values is the intended one is not this function's decision to make.
+      Returns `{:error, {:row_no_longer_matches, id, from}}` when it does not — the
+      plan was built against a row that has since moved, and guessing which of the
+      two values is the intended one is not this function's decision to make.
   """
   @spec swap(target(), String.t(), term(), term()) :: :ok | {:error, term()}
   def swap({table, column} = target, id, from, to) do
@@ -43,8 +43,8 @@ defmodule Stacks.DataCorrection.Column do
   end
 
   @doc """
-    Rows whose `column` matches `pattern` (a POSIX regex), as `{id, value}` with
-    the id already loaded to its string form. Empty when the table does not exist.
+      Rows whose `column` matches `pattern` (a POSIX regex), as `{id, value}` with
+      the id already loaded to its string form. Empty when the table does not exist.
   """
   @spec matching(target(), String.t()) :: [{String.t(), term()}]
   def matching({table, column} = target, pattern) do
@@ -58,9 +58,9 @@ defmodule Stacks.DataCorrection.Column do
   end
 
   @doc """
-    Rows whose `column` is exactly `value`, as `{id, value}`. `nil` selects the
-    rows holding SQL NULL, so a backfill can plan the rows it is about to fill.
-    Empty when the table does not exist.
+      Rows whose `column` is exactly `value`, as `{id, value}`. `nil` selects the
+      rows holding SQL NULL, so a backfill can plan the rows it is about to fill.
+      Empty when the table does not exist.
   """
   @spec holding(target(), term()) :: [{String.t(), term()}]
   def holding({table, column} = target, value) do
@@ -74,9 +74,9 @@ defmodule Stacks.DataCorrection.Column do
   end
 
   @doc """
-    The current `column` value of each id in `ids`, as a map keyed by id string.
-    Ids absent from the table are absent from the map. Empty when the table does
-    not exist.
+      The current `column` value of each id in `ids`, as a map keyed by id string.
+      Ids absent from the table are absent from the map. Empty when the table does
+      not exist.
   """
   @spec by_ids(target(), [String.t()]) :: %{optional(String.t()) => term()}
   def by_ids({table, column} = target, ids) do
@@ -90,11 +90,11 @@ defmodule Stacks.DataCorrection.Column do
   end
 
   @doc """
-    Whether any other row already holds `value` in `column`.
+      Whether any other row already holds `value` in `column`.
 
-    A correction over a uniquely-indexed column asks this before writing, because
-    the index would reject the write and a repair that collides with real data is
-    a decision for a human, not a retry.
+      A correction over a uniquely-indexed column asks this before writing, because
+      the index would reject the write and a repair that collides with real data is
+      a decision for a human, not a retry.
   """
   @spec taken_by_another?(target(), String.t(), term()) :: boolean()
   def taken_by_another?({table, column} = target, id, value) do
@@ -126,15 +126,15 @@ defmodule Stacks.DataCorrection.Column do
   end
 
   @doc """
-    False on a database whose migrations have not added `column` yet.
+      False on a database whose migrations have not added `column` yet.
 
-    The `to_regclass` guard above covers a table that does not exist; this covers
-    the OTHER pre-migration shape — the table exists but the correction's column
-    is newer than the branch. Both read as "nothing to correct yet": corrections
-    run BEFORE migrations, so on a fresh fork of an older database the sweep must
-    come up empty rather than abort the release (the exact failure the
-    `seed_edition_verification_source` sweep hit on a staging fork, 2026-08-10:
-    Postgrex 42703 in the release command, core deploy dead on both attempts).
+      The `to_regclass` guard above covers a table that does not exist; this covers
+      the OTHER pre-migration shape — the table exists but the correction's column
+      is newer than the branch. Both read as "nothing to correct yet": corrections
+      run BEFORE migrations, so on a fresh fork of an older database the sweep must
+      come up empty rather than abort the release (the exact failure the
+      `seed_edition_verification_source` sweep hit on a staging fork, 2026-08-10:
+      Postgrex 42703 in the release command, core deploy dead on both attempts).
   """
   @spec column_present?(target()) :: boolean()
   def column_present?({table, column}) do

@@ -2,12 +2,12 @@ import { test, expect } from "@playwright/test";
 import { mintOrSkip, injectSession, uniqueEmail } from "./helpers";
 
 /**
- * Onboarding overlay (Issue #124, punch #10 — E2E leg).
+ * Onboarding overlay (, punch — E2E leg).
  *
  * The overlay only renders for an authenticated user who is BOTH confirmed AND
  * has zero placements (`shouldShowOnboarding`). Every seeded user — including
  * the "auth" suite user — is given placements, so we mint a fresh confirmed,
- * placement-free user at test time via POST /api/test/session (Issue #280) and
+ * placement-free user at test time via POST /api/test/session and
  * inject its session. Minting is outside the `:auth` rate bucket, so this
  * overlay spec (whose subject is onboarding, NOT registration) no longer draws
  * on the shared budget; a placement-free authenticated user is exactly the

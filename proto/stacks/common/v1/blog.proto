@@ -30,7 +30,7 @@ enum BlogVisibility {
   BLOG_VISIBILITY_PLATFORM = 3;
 
   // Visible to anyone, signed in or not — the top of the Audience ladder
-  // (ADR-018) and the only tier the syndication feed (US-6.2.1) can serve.
+  // and the only tier the syndication feed can serve.
   BLOG_VISIBILITY_PUBLIC = 4;
 }
 
@@ -130,7 +130,7 @@ message BlogPost {
   // time. Empty when the author association is not loaded.
   string author_handle = 14 [json_name = "author_handle"];
 
-  // US-6.2.1 (POSSE): whether this post is included in the author's public
+  // (POSSE): whether this post is included in the author's public
   // blog feed — the feed Substack's RSS import reads. Defaults true (see the
   // story: publishing publicly is the consenting act; this is the per-post
   // control). Only PUBLIC posts can actually reach the feed; the flag on a
@@ -138,7 +138,7 @@ message BlogPost {
   bool syndicated = 15 [json_name = "syndicated"];
 }
 
-// PostSyndication records one act of syndication for a post (US-6.2.1) —
+// PostSyndication records one act of syndication for a post —
 // which target, by which mechanism, and the canonical URL AS PUBLISHED at the
 // time (stored, not derived: if the host ever changes, a derived value would
 // silently rewrite what the third-party copy actually says).

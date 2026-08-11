@@ -33,7 +33,7 @@ else
     #   2. `HEAD` (two-dot)  — staged AND unstaged changes to tracked files.
     #   3. `ls-files --others` — untracked files git has never seen. A freshly
     #                          generated migration lives here until `git add`,
-    #                          and this is the case #337 was filed for.
+    #                          and this is the case was filed for.
     #
     # (2) and (3) are what make the gate useful in the order people actually
     # work: write the migration, run the gate, then commit. Note the deliberate
@@ -43,7 +43,7 @@ else
     #
     # If the base ref is missing (shallow clone, no remote) we drop leg 1 and
     # keep legs 2 and 3, saying so. The previous fallback linted ALL migrations,
-    # which surfaced 35 pre-existing violations (#339) — a wall of red about
+    # which surfaced 35 pre-existing violations — a wall of red about
     # code that shipped months ago, and the fastest way to teach everyone that
     # this gate is noise. `E2E_SQUAWK_ALL=1` remains the deliberate door to
     # lint history; it should not be walked through by accident.

@@ -1,10 +1,10 @@
 defmodule Core.PromEx.MetricAudienceTest do
   @moduledoc """
-    Enforces the ADR-021 §4 audience gate: every registered `stacks_*` family is
-    consciously classified (measured ⊆ classified), the default is fail-closed
-    (a new/unknown metric is NOT public until promoted), and there are no stale
-    entries. Derives the registered family list from the plugin the same way as
-    `DashboardDriftTest` / `DashboardLabelValidationTest` — never hard-coded.
+      Enforces the audience gate: every registered `stacks_*` family is
+      consciously classified (measured ⊆ classified), the default is fail-closed
+      (a new/unknown metric is NOT public until promoted), and there are no stale
+      entries. Derives the registered family list from the plugin the same way as
+      `DashboardDriftTest` / `DashboardLabelValidationTest` — never hard-coded.
   """
   use ExUnit.Case, async: true
 

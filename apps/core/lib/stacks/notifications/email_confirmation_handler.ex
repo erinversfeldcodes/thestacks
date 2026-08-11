@@ -1,10 +1,10 @@
 defmodule Stacks.Notifications.EmailConfirmationHandler do
   @moduledoc """
-    Event handler that enqueues a registration confirmation email when a new
-    user registers.
+      Event handler that enqueues a registration confirmation email when a new
+      user registers.
 
-    Implements `Stacks.Events.Handler` and is registered in
-    `Stacks.Events.Registry` for the `"user.registered"` event type.
+      Implements `Stacks.Events.Handler` and is registered in
+      `Stacks.Events.Registry` for the `"user.registered"` event type.
   """
 
   @behaviour Stacks.Events.Handler

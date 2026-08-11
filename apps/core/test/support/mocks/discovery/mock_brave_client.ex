@@ -1,13 +1,13 @@
 defmodule Stacks.Discovery.MockBraveClient do
   @moduledoc """
-    Mock Brave Search client for tests.
+      Mock Brave Search client for tests.
 
-    Responses are stored in the process dictionary so each test process is
-    isolated and tests can run with `async: true`.
+      Responses are stored in the process dictionary so each test process is
+      isolated and tests can run with `async: true`.
 
-    ## Usage
+      ## Usage
 
-        MockBraveClient.put_response({:ok, [%{title: "Author Blog", url: "https://author.com", description: "..."}]})
+          MockBraveClient.put_response({:ok, [%{title: "Author Blog", url: "https://author.com", description: "..."}]})
 
   """
 

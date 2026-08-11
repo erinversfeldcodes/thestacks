@@ -1,9 +1,9 @@
 defmodule Stacks.Shelving do
   @moduledoc """
-    Shelving context — manages bookshelves, placements, and the history of
-    book movements between bookshelves.
+      Shelving context — manages bookshelves, placements, and the history of
+      book movements between bookshelves.
 
-    All multi-step operations use `Ecto.Multi` to guarantee atomicity.
+      All multi-step operations use `Ecto.Multi` to guarantee atomicity.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -111,9 +111,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Returns true if the user has at least one active (non-removed) placement for
-    the given book on any of their bookshelves. Used for duplicate detection
-    during the upload identification flow.
+      Returns true if the user has at least one active (non-removed) placement for
+      the given book on any of their bookshelves. Used for duplicate detection
+      during the upload identification flow.
   """
   @spec book_on_any_shelf?(binary(), binary()) :: boolean()
   def book_on_any_shelf?(user_id, book_id) do
@@ -126,9 +126,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    The subset of `book_ids` already on one of the user's bookshelves — the
-    batch form of `book_on_any_shelf?/2` (one query for the upload inbox, which
-    renders on every page load). Returns a de-duplicated list.
+      The subset of `book_ids` already on one of the user's bookshelves — the
+      batch form of `book_on_any_shelf?/2` (one query for the upload inbox, which
+      renders on every page load). Returns a de-duplicated list.
   """
   @spec shelved_book_ids(binary(), [binary()]) :: [binary()]
   def shelved_book_ids(_user_id, []), do: []
@@ -144,8 +144,8 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Returns the bookshelf struct for the given user and bookshelf name, with the
-    user association preloaded. Returns `nil` if the bookshelf does not exist.
+      Returns the bookshelf struct for the given user and bookshelf name, with the
+      user association preloaded. Returns `nil` if the bookshelf does not exist.
   """
   @spec get_bookshelf(binary(), String.t()) :: Bookshelf.t() | nil
   def get_bookshelf(user_id, bookshelf_name) do
@@ -156,9 +156,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Returns all of a user's bookshelves ordered by name, each as a `%{name, visibility}`
-    map. Used by the privacy settings screen to seed the current per-shelf visibility
-    so a returning user sees their saved values rather than defaults.
+      Returns all of a user's bookshelves ordered by name, each as a `%{name, visibility}`
+      map. Used by the privacy settings screen to seed the current per-shelf visibility
+      so a returning user sees their saved values rather than defaults.
   """
   @spec list_user_bookshelves(binary()) :: [%{name: String.t(), visibility: String.t()}]
   def list_user_bookshelves(user_id) do
@@ -170,8 +170,8 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Returns all active (non-removed) placements for a user on the named bookshelf,
-    with books preloaded.
+      Returns all active (non-removed) placements for a user on the named bookshelf,
+      with books preloaded.
   """
   @spec get_bookshelf_books(binary(), String.t()) :: [Placement.t()]
   def get_bookshelf_books(user_id, bookshelf_name) do
@@ -186,9 +186,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Searches the viewer's own collection by title: up to `:limit` (default 20)
-    `%{book:, bookshelf_name:}` entries for ACTIVE placements. The query goes
-    through `plainto_tsquery` as a bound parameter — injection-safe.
+      Searches the viewer's own collection by title: up to `:limit` (default 20)
+      `%{book:, bookshelf_name:}` entries for ACTIVE placements. The query goes
+      through `plainto_tsquery` as a bound parameter — injection-safe.
   """
   @spec search_collection(binary(), String.t(), keyword()) :: [
           %{book: Book.t(), bookshelf_name: String.t()}
@@ -253,9 +253,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Builds "looking for a home" discovery labels: `%{book_id => %{source:,
-    owner_handle:}}` for books with an always-visible active listing (the one
-    Visibility marketplace exception). First-placed owner wins for duplicates.
+      Builds "looking for a home" discovery labels: `%{book_id => %{source:,
+      owner_handle:}}` for books with an always-visible active listing (the one
+      Visibility marketplace exception). First-placed owner wins for duplicates.
   """
   @spec looking_for_home_labels([binary()]) :: %{binary() => map()}
   def looking_for_home_labels([]), do: %{}
@@ -292,17 +292,17 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Returns the maximum number of active placements allowed on a `reading_pile`
-    bookshelf. Defined once here — the write path enforces it; views must
-    not truncate to it.
+      Returns the maximum number of active placements allowed on a `reading_pile`
+      bookshelf. Defined once here — the write path enforces it; views must
+      not truncate to it.
   """
   @spec reading_pile_limit() :: pos_integer()
   def reading_pile_limit, do: @reading_pile_limit
 
   @doc """
-    Places a book on a bookshelf for a user. Creates the bookshelf if it doesn't exist.
-    Returns `{:ok, placement}`, `{:error, changeset}`, or `{:error,:reading_pile_full}`
-    when the placement would take the reading pile past #{@reading_pile_limit} books.
+      Places a book on a bookshelf for a user. Creates the bookshelf if it doesn't exist.
+      Returns `{:ok, placement}`, `{:error, changeset}`, or `{:error,:reading_pile_full}`
+      when the placement would take the reading pile past #{@reading_pile_limit} books.
   """
   @spec place_book(binary(), binary(), String.t()) ::
           {:ok, Placement.t()} | {:error, Ecto.Changeset.t() | :reading_pile_full}
@@ -311,10 +311,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Places a book, recording the edition the reader actually scanned/selected;
-    `nil` falls back to the work's primary edition. Options: `:source`
-    (provenance, also carried on the `placement.created` payload so feed regen
-    can coalesce imports) and `:attrs` (extra placement fields, same changeset).
+      Places a book, recording the edition the reader actually scanned/selected;
+      `nil` falls back to the work's primary edition. Options: `:source`
+      (provenance, also carried on the `placement.created` payload so feed regen
+      can coalesce imports) and `:attrs` (extra placement fields, same changeset).
   """
   def place_book(user_id, book_id, bookshelf_name, book_edition_id, opts \\ []) do
     source = Keyword.get(opts, :source, "manual")
@@ -372,10 +372,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Moves a book placement to a new bookshelf. Verifies ownership.
-    Creates a PlacementHistory record. Uses Ecto.Multi for atomicity.
-    A move into a full reading pile fails with
-    `{:error,:reading_pile_capacity,:reading_pile_full, _}`.
+      Moves a book placement to a new bookshelf. Verifies ownership.
+      Creates a PlacementHistory record. Uses Ecto.Multi for atomicity.
+      A move into a full reading pile fails with
+      `{:error,:reading_pile_capacity,:reading_pile_full, _}`.
   """
   @spec move_book(binary(), binary(), String.t()) ::
           {:ok, map()}
@@ -445,7 +445,7 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Moves a book to the "looking_for_home" bookshelf (abandon flow).
+      Moves a book to the "looking_for_home" bookshelf (abandon flow).
   """
   @spec abandon_book(binary(), binary()) ::
           {:ok, map()}
@@ -456,10 +456,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Adds the book to the library bookshelf again (re-read flow).
-    Creates a new placement rather than reusing the old one, and writes a
-    PlacementHistory record capturing the move from the original bookshelf to
-    the library bookshelf.
+      Adds the book to the library bookshelf again (re-read flow).
+      Creates a new placement rather than reusing the old one, and writes a
+      PlacementHistory record capturing the move from the original bookshelf to
+      the library bookshelf.
   """
   @spec reread_book(binary(), binary()) ::
           {:ok, Placement.t()}
@@ -529,8 +529,8 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Soft-deletes a placement by setting `removed_at` to now.
-    Emits an event and logs an audit entry.
+      Soft-deletes a placement by setting `removed_at` to now.
+      Emits an event and logs an audit entry.
   """
   @spec remove_book(binary(), binary()) ::
           {:ok, Placement.t()}
@@ -582,10 +582,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Reverses a removal by clearing `removed_at` on the SAME row — identity is
-    the contract: a fresh `place_book/3` would mint a new UUID, orphaning
-    placement history and erasure scoping, and would re-stamp `placed_at`.
-    Restores into the original bookshelf; emits `placement.restored`.
+      Reverses a removal by clearing `removed_at` on the SAME row — identity is
+      the contract: a fresh `place_book/3` would mint a new UUID, orphaning
+      placement history and erasure scoping, and would re-stamp `placed_at`.
+      Restores into the original bookshelf; emits `placement.restored`.
   """
   @spec restore_placement(binary(), binary()) ::
           {:ok, Placement.t()}
@@ -666,10 +666,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Updates the formats list for a placement. Verifies ownership.
-    Returns `{:ok, placement}` or `{:error,:unauthorized}` or `{:error, changeset}`.
+      Updates the formats list for a placement. Verifies ownership.
+      Returns `{:ok, placement}` or `{:error,:unauthorized}` or `{:error, changeset}`.
 
-    Deprecated: prefer `Books.merge_edition/2` for new code. Kept for Elm frontend compatibility.
+      Deprecated: prefer `Books.merge_edition/2` for new code. Kept for Elm frontend compatibility.
   """
   @spec update_placement_formats(binary(), binary(), [String.t()]) ::
           {:ok, Placement.t()}
@@ -694,10 +694,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    ALL of the user's active placements for a book, bookshelf preloaded; `[]`
-    when absent. A book may sit on several bookshelves (owner ruling) — only
-    same-bookshelf duplicates are forbidden, by partial unique index. Ordering
-    is deterministic (created_at, then id): "first" means first-placed.
+      ALL of the user's active placements for a book, bookshelf preloaded; `[]`
+      when absent. A book may sit on several bookshelves (owner ruling) — only
+      same-bookshelf duplicates are forbidden, by partial unique index. Ordering
+      is deterministic (created_at, then id): "first" means first-placed.
   """
   @spec get_placements_for_book(binary(), binary()) :: [Placement.t()]
   def get_placements_for_book(user_id, book_id) do
@@ -710,8 +710,8 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Returns a lightweight summary of all active placements for a user:
-    each entry contains the book_id and the bookshelf name.
+      Returns a lightweight summary of all active placements for a user:
+      each entry contains the book_id and the bookshelf name.
   """
   @spec get_user_placements_summary(binary()) :: [map()]
   def get_user_placements_summary(user_id) do
@@ -724,8 +724,8 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Updates the visibility of a bookshelf. Verifies ownership.
-    Returns `{:ok, bookshelf}`, `{:error,:unauthorized}`, or `{:error,:not_found}`.
+      Updates the visibility of a bookshelf. Verifies ownership.
+      Returns `{:ok, bookshelf}`, `{:error,:unauthorized}`, or `{:error,:not_found}`.
   """
   @spec update_bookshelf_visibility(binary(), binary(), String.t()) ::
           {:ok, Bookshelf.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
@@ -746,10 +746,10 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Sets the visibility of a user's named bookshelf, resolving (and lazily
-    creating) it by name. This is the UI/API path: the Elm settings page and the
-    `PUT /api/bookshelves/:bookshelf_name/visibility` route identify shelves by
-    their canonical name, never by UUID. Enforces the profile-visibility ceiling exactly as `update_bookshelf_visibility/3` does.
+      Sets the visibility of a user's named bookshelf, resolving (and lazily
+      creating) it by name. This is the UI/API path: the Elm settings page and the
+      `PUT /api/bookshelves/:bookshelf_name/visibility` route identify shelves by
+      their canonical name, never by UUID. Enforces the profile-visibility ceiling exactly as `update_bookshelf_visibility/3` does.
   """
   @spec set_bookshelf_visibility(binary(), String.t(), String.t()) ::
           {:ok, Bookshelf.t()} | {:error, Ecto.Changeset.t()}
@@ -788,10 +788,10 @@ defmodule Stacks.Shelving do
   defp validate_bookshelf_profile_ceiling(changeset, _user_id, _visibility), do: changeset
 
   @doc """
-    Updates the visibility of a placement. Verifies ownership and enforces that
-    placement visibility is not less restrictive than the parent bookshelf.
-    Returns `{:ok, placement}`, `{:error,:unauthorized}`, `{:error,:not_found}`,
-    or `{:error, reason_string}` if the ceiling rule is violated.
+      Updates the visibility of a placement. Verifies ownership and enforces that
+      placement visibility is not less restrictive than the parent bookshelf.
+      Returns `{:ok, placement}`, `{:error,:unauthorized}`, `{:error,:not_found}`,
+      or `{:error, reason_string}` if the ceiling rule is violated.
   """
   @spec update_placement_visibility(binary(), binary(), String.t()) ::
           {:ok, Placement.t()}
@@ -829,9 +829,9 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Updates reading progress (ownership-checked). Auto-stamps `started_at` on
-    the first `:reading` transition and `finished_at` on `:completed`; emits
-    `placement.reading_started`/`.reading_completed` accordingly.
+      Updates reading progress (ownership-checked). Auto-stamps `started_at` on
+      the first `:reading` transition and `finished_at` on `:completed`; emits
+      `placement.reading_started`/`.reading_completed` accordingly.
   """
   @spec update_reading_progress(binary(), binary(), map()) ::
           {:ok, Placement.t()} | {:error, :unauthorized | :not_found | Ecto.Changeset.t()}
@@ -929,8 +929,8 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Returns all active placements for a user with `reading_status = 'reading'`,
-    ordered by `updated_at DESC`.
+      Returns all active placements for a user with `reading_status = 'reading'`,
+      ordered by `updated_at DESC`.
   """
   @spec list_in_progress(binary()) :: [Placement.t()]
   def list_in_progress(user_id) do
@@ -975,7 +975,7 @@ defmodule Stacks.Shelving do
     end
   end
 
-  @doc "Deletes a shelf if empty. Returns :not_empty if it has active placements."
+  @doc "Deletes a shelf if empty. Returns:not_empty if it has active placements."
   @spec delete_shelf(binary(), binary()) ::
           :ok | {:error, :unauthorized | :not_found | :not_empty}
   def delete_shelf(shelf_id, user_id) do
@@ -1059,12 +1059,12 @@ defmodule Stacks.Shelving do
   end
 
   @doc """
-    Changeset for creating a shelf. Declares the `(bookshelf_id, position)` unique
-    constraint (DB index `shelves_bookshelf_id_position_index`, migration
-    20260330130609) so a duplicate insert surfaces as `{:error, changeset}` instead
-    of raising `Ecto.ConstraintError`. `get_or_create_default_shelf/1` depends on
-    this: its race fallback (`{:error, _} -> get_by!`) only fires when the losing
-    concurrent insert returns an error tuple rather than raising.
+      Changeset for creating a shelf. Declares the `(bookshelf_id, position)` unique
+      constraint (DB index `shelves_bookshelf_id_position_index`, migration
+      20260330130609) so a duplicate insert surfaces as `{:error, changeset}` instead
+      of raising `Ecto.ConstraintError`. `get_or_create_default_shelf/1` depends on
+      this: its race fallback (`{:error, _} -> get_by!`) only fires when the losing
+      concurrent insert returns an error tuple rather than raising.
   """
   @spec shelf_changeset(Shelf.t(), map()) :: Ecto.Changeset.t()
   def shelf_changeset(shelf, attrs) do
@@ -1168,7 +1168,7 @@ defmodule Stacks.Shelving do
     )
   end
 
-  # Enforces the reading-pile cap (#276) inside the write transaction.
+  # Enforces the reading-pile cap inside the write transaction.
   #
   # Concurrency decision: a count-check inside the Ecto.Multi transaction,
   # preceded by `SELECT ... FOR UPDATE` on the bookshelf row. A bare count

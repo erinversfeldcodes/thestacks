@@ -1,15 +1,15 @@
 defmodule Stacks.Enrichment.EventPages do
   @moduledoc """
-    Finds events published as INDIVIDUAL pages — how the scrapeable shops
-    actually publish (neither has a listing page; Wordsworth's signings are
-    single `/pages/...` slugs in its sitemap). Runs when `EventsPath`
-    correctly answers "no listing page".
+      Finds events published as INDIVIDUAL pages — how the scrapeable shops
+      actually publish (neither has a listing page; Wordsworth's signings are
+      single `/pages/...` slugs in its sitemap). Runs when `EventsPath`
+      correctly answers "no listing page".
 
-    The slug classifier matches a short list of event-shaped phrases
-    (`book-signing`, `book-launch`, …), deliberately precise over broad: a
-    false positive costs the shop a page render and pollutes the events
-    table, a false negative just waits for the phrase list to grow. Each
-    classified page costs one budgeted, compliant fetch.
+      The slug classifier matches a short list of event-shaped phrases
+      (`book-signing`, `book-launch`, …), deliberately precise over broad: a
+      false positive costs the shop a page render and pollutes the events
+      table, a false negative just waits for the phrase list to grow. Each
+      classified page costs one budgeted, compliant fetch.
   """
 
   alias Stacks.Enrichment.EventExtractor
@@ -19,11 +19,11 @@ defmodule Stacks.Enrichment.EventPages do
   require Logger
 
   @doc """
-    Phrases that mark a page slug as an event, checked as substrings of the URL's last path segment.
+      Phrases that mark a page slug as an event, checked as substrings of the URL's last path segment.
 
-    Multi-word and specific on purpose — `signing` alone would match a hypothetical
-    `/pages/sign-up-for-signings-newsletter`, but the hyphenated forms a slug actually takes
-    (`book-signing`, `author-signing`) do not. Public so the tests enumerate the real list.
+      Multi-word and specific on purpose — `signing` alone would match a hypothetical
+      `/pages/sign-up-for-signings-newsletter`, but the hyphenated forms a slug actually takes
+      (`book-signing`, `author-signing`) do not. Public so the tests enumerate the real list.
   """
   @event_phrases ~w(
     book-signing author-signing book-launch author-evening author-event
@@ -35,9 +35,9 @@ defmodule Stacks.Enrichment.EventPages do
   @max_candidates_per_run 5
 
   @doc """
-    Classify a page URL: does its slug name an event?
+      Classify a page URL: does its slug name an event?
 
-    Pure, so the 45-slug ground truth is testable without a network.
+      Pure, so the 45-slug ground truth is testable without a network.
   """
   @spec event_page?(String.t()) :: boolean()
   def event_page?(url) do
@@ -55,10 +55,10 @@ defmodule Stacks.Enrichment.EventPages do
   end
 
   @doc """
-    Classify `urls`, fetch the candidates, and store one event per page that yields one.
+      Classify `urls`, fetch the candidates, and store one event per page that yields one.
 
-    Returns `{:ok, {:events, n}}` with the number stored, or `{:ok,:no_events_page}` when nothing
-    classified as an event — the same vocabulary the job's batch summary already tallies.
+      Returns `{:ok, {:events, n}}` with the number stored, or `{:ok,:no_events_page}` when nothing
+      classified as an event — the same vocabulary the job's batch summary already tallies.
   """
   @spec discover_and_store([String.t()], map()) ::
           {:ok, {:events, non_neg_integer()}} | {:ok, :no_events_page}
@@ -129,12 +129,12 @@ defmodule Stacks.Enrichment.EventPages do
   end
 
   @doc """
-    The event's title, from the page's own `<title>` element.
+      The event's title, from the page's own `<title>` element.
 
-    Shopify titles carry the shop as a suffix — `"Treive Nicholas book signing at our Sea Point
-    store — Wordsworth Books"` — so everything from the last em/en dash separator is dropped. Falls
-    back to the slug, humanised, because a page whose `<title>` is missing still has a name in its
-    URL and "Untitled" would be an invented fact.
+      Shopify titles carry the shop as a suffix — `"Treive Nicholas book signing at our Sea Point
+      store — Wordsworth Books"` — so everything from the last em/en dash separator is dropped. Falls
+      back to the slug, humanised, because a page whose `<title>` is missing still has a name in its
+      URL and "Untitled" would be an invented fact.
   """
   @spec title_of(String.t(), String.t()) :: String.t()
   def title_of(body, url) do
@@ -161,12 +161,12 @@ defmodule Stacks.Enrichment.EventPages do
   end
 
   @doc """
-    The event's date, only when the page states exactly one distinct ISO date.
+      The event's date, only when the page states exactly one distinct ISO date.
 
-    The same rule `parse_events/2` earned: several different dates cannot be attributed without the
-    surrounding DOM, and attributing one anyway manufactures a confident, wrong record. One page, one
-    distinct date, is the only unambiguous case. Returns `nil` otherwise — including for the real
-    page, which states no date at all.
+      The same rule `parse_events/2` earned: several different dates cannot be attributed without the
+      surrounding DOM, and attributing one anyway manufactures a confident, wrong record. One page, one
+      distinct date, is the only unambiguous case. Returns `nil` otherwise — including for the real
+      page, which states no date at all.
   """
   @spec date_of(String.t()) :: DateTime.t() | nil
   def date_of(body) do

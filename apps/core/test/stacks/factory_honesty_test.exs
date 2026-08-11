@@ -1,12 +1,12 @@
 defmodule Stacks.FactoryHonestyTest do
   @moduledoc """
-    — the factory may only build states production can produce.
+      — the factory may only build states production can produce.
 
-    Each test here is an *impossibility probe*: it takes the invalid state the
-    factory used to hand out for free and shows that the factory no longer
-    reaches it. These are the guard rails for `test/support/factory.ex`; if one
-    fails, a factory has started manufacturing rows no write path can create and
-    every test downstream of it is asserting on fiction.
+      Each test here is an *impossibility probe*: it takes the invalid state the
+      factory used to hand out for free and shows that the factory no longer
+      reaches it. These are the guard rails for `test/support/factory.ex`; if one
+      fails, a factory has started manufacturing rows no write path can create and
+      every test downstream of it is asserting on fiction.
   """
   use Core.DataCase, async: true
 

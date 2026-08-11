@@ -1,9 +1,9 @@
 defmodule Stacks.Accounts do
   @moduledoc """
-    Accounts context — user registration, authentication, and retrieval.
+      Accounts context — user registration, authentication, and retrieval.
 
-    The first user registered on the platform automatically receives the `owner` role.
-    Passwords are hashed with Argon2. Authentication returns a Guardian JWT token.
+      The first user registered on the platform automatically receives the `owner` role.
+      Passwords are hashed with Argon2. Authentication returns a Guardian JWT token.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -73,9 +73,9 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Changeset for provider-sourced age verification (ADR-020). Writes all three
-    age-verification fields together — the ONLY path that may set `:age_verified`.
-    Never fed by direct user input; called by `Stacks.AgeVerification`.
+      Changeset for provider-sourced age verification. Writes all three
+      age-verification fields together — the ONLY path that may set `:age_verified`.
+      Never fed by direct user input; called by `Stacks.AgeVerification`.
   """
   def verification_changeset(user, attrs) do
     user
@@ -189,9 +189,9 @@ defmodule Stacks.Accounts do
   @handle_format ~r/^[a-z0-9_]{3,30}$/
 
   @doc """
-    Validates/normalises the `:handle` field: force-lowercase, format
-    (`[a-z0-9_]{3,30}`), not reserved, and case-insensitively unique. Shared by
-    registration and the settings profile update.
+      Validates/normalises the `:handle` field: force-lowercase, format
+      (`[a-z0-9_]{3,30}`), not reserved, and case-insensitively unique. Shared by
+      registration and the settings profile update.
   """
   def validate_handle(changeset) do
     changeset
@@ -228,11 +228,11 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Generates a likely-unique handle from a display name: a slug of the name
-    (≤20 chars, non-alphanumerics collapsed to `_`, `reader` when empty) plus a
-    6-char random suffix. The random suffix makes a collision astronomically
-    unlikely; `unique_constraint(:handle)` is the backstop. Mirrors the SQL backfill
-    in `20260714200500_backfill_and_constrain_user_handles`.
+      Generates a likely-unique handle from a display name: a slug of the name
+      (≤20 chars, non-alphanumerics collapsed to `_`, `reader` when empty) plus a
+      6-char random suffix. The random suffix makes a collision astronomically
+      unlikely; `unique_constraint(:handle)` is the backstop. Mirrors the SQL backfill
+      in `20260714200500_backfill_and_constrain_user_handles`.
   """
   @spec generate_handle(String.t() | nil) :: String.t()
   def generate_handle(display_name) do
@@ -257,19 +257,19 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Returns a user by ID, or nil if not found.
+      Returns a user by ID, or nil if not found.
   """
   @spec get_user(binary()) :: User.t() | nil
   def get_user(id), do: Repo.get(User, id)
 
   @doc """
-    Returns a user by ID, raising if not found.
+      Returns a user by ID, raising if not found.
   """
   @spec get_user!(binary()) :: User.t()
   def get_user!(id), do: Repo.get!(User, id)
 
   @doc """
-    Returns a user by email address, or nil if not found.
+      Returns a user by email address, or nil if not found.
   """
   @spec get_user_by_email(String.t()) :: User.t() | nil
   def get_user_by_email(email) do
@@ -277,12 +277,12 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Returns ALL users whose email matches case-insensitively — the lookup used to
-    resolve an email to `user_id`(s) for GDPR erasure. Unlike `get_user_by_email/1`
-    (an exact, downcased match that a mixed-case stored email can slip past), this
-    folds case on both sides so every candidate surfaces. Returns a list precisely
-    because an email is NOT a guaranteed-unique key (only `user_id` is) — the
-    operator disambiguates, and the erasure itself takes a `user_id`.
+      Returns ALL users whose email matches case-insensitively — the lookup used to
+      resolve an email to `user_id`(s) for GDPR erasure. Unlike `get_user_by_email/1`
+      (an exact, downcased match that a mixed-case stored email can slip past), this
+      folds case on both sides so every candidate surfaces. Returns a list precisely
+      because an email is NOT a guaranteed-unique key (only `user_id` is) — the
+      operator disambiguates, and the erasure itself takes a `user_id`.
   """
   @spec find_users_by_email(String.t()) :: [User.t()]
   def find_users_by_email(email) when is_binary(email) do
@@ -293,8 +293,8 @@ defmodule Stacks.Accounts do
   def find_users_by_email(_), do: []
 
   @doc """
-    Returns a user by public handle (case-insensitive), or nil if not found.
-    Keys the public profile at `/u/:handle`.
+      Returns a user by public handle (case-insensitive), or nil if not found.
+      Keys the public profile at `/u/:handle`.
   """
   @spec get_user_by_handle(String.t()) :: User.t() | nil
   def get_user_by_handle(handle) when is_binary(handle) do
@@ -305,22 +305,22 @@ defmodule Stacks.Accounts do
   def get_user_by_handle(_), do: nil
 
   @doc """
-    Seconds an email-confirmation link (and the unverified account behind it) stays
-    valid after the link was issued. The confirmation token's `max_age`, the resend
-    path, and the expired-account reaper all key off this one value.
+      Seconds an email-confirmation link (and the unverified account behind it) stays
+      valid after the link was issued. The confirmation token's `max_age`, the resend
+      path, and the expired-account reaper all key off this one value.
   """
   @spec unverified_account_ttl_seconds() :: pos_integer()
   def unverified_account_ttl_seconds, do: @unverified_account_ttl_seconds
 
   @doc """
-    IDs of accounts whose email-confirmation LINK is dead — never confirmed
-    and holding no token that still verifies. Feeds
-    `ExpiredUnverifiedAccountsJob`.
+      IDs of accounts whose email-confirmation LINK is dead — never confirmed
+      and holding no token that still verifies. Feeds
+      `ExpiredUnverifiedAccountsJob`.
 
-    ⛔ The reaper's clock is the LINK's clock, not `created_at`: resend
-    mints a fresh token, so age alone would erase accounts under still-live
-    links. The SQL is only a prefilter; the decision is the same
-    `Phoenix.Token.verify/4` the confirm click makes.
+      ⛔ The reaper's clock is the LINK's clock, not `created_at`: resend
+      mints a fresh token, so age alone would erase accounts under still-live
+      links. The SQL is only a prefilter; the decision is the same
+      `Phoenix.Token.verify/4` the confirm click makes.
   """
   @spec expired_unverified_ids(DateTime.t()) :: [binary()]
   def expired_unverified_ids(now \\ DateTime.utc_now()) do
@@ -337,13 +337,13 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Verify a confirmation token and return the user id it was signed over.
+      Verify a confirmation token and return the user id it was signed over.
 
-    The ONE place the `"email_confirm"` salt and its `max_age` are spoken. Both
-    readers of a confirmation link go through here — `Stacks.Email.confirm_email/1`
-    when the reader clicks it, and `confirmation_link_live?/1` when the reaper asks
-    whether that click would still work — so the two cannot drift into disagreeing
-    about which links are alive.
+      The ONE place the `"email_confirm"` salt and its `max_age` are spoken. Both
+      readers of a confirmation link go through here — `Stacks.Email.confirm_email/1`
+      when the reader clicks it, and `confirmation_link_live?/1` when the reaper asks
+      whether that click would still work — so the two cannot drift into disagreeing
+      about which links are alive.
   """
   @spec verify_confirmation_token(String.t() | nil) :: {:ok, binary()} | :error
   def verify_confirmation_token(token) when is_binary(token) do
@@ -358,9 +358,9 @@ defmodule Stacks.Accounts do
   def verify_confirmation_token(_token), do: :error
 
   @doc """
-    Sign a fresh confirmation link for `user_id`, valid for
-    `unverified_account_ttl_seconds/0` from now. Issuing a link is also what keeps
-    the account alive — see `expired_unverified_ids/1`.
+      Sign a fresh confirmation link for `user_id`, valid for
+      `unverified_account_ttl_seconds/0` from now. Issuing a link is also what keeps
+      the account alive — see `expired_unverified_ids/1`.
   """
   @spec sign_confirmation_token(binary()) :: String.t()
   def sign_confirmation_token(user_id) do
@@ -368,19 +368,19 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    The ceiling on an unconfirmed account's life, however often a link is resent.
-    See `@unverified_account_max_lifetime_seconds`.
+      The ceiling on an unconfirmed account's life, however often a link is resent.
+      See `@unverified_account_max_lifetime_seconds`.
   """
   @spec unverified_account_max_lifetime_seconds() :: pos_integer()
   def unverified_account_max_lifetime_seconds, do: @unverified_account_max_lifetime_seconds
 
   @doc """
-    Whether a fresh confirmation link may still be issued for `user`.
+      Whether a fresh confirmation link may still be issued for `user`.
 
-    False once the account has passed `unverified_account_max_lifetime_seconds/0`,
-    which is what stops an anonymous caller renewing a stranger's signup forever.
-    A refusal is invisible from outside — the endpoint's response does not depend
-    on it — so this cannot become an account-age oracle.
+      False once the account has passed `unverified_account_max_lifetime_seconds/0`,
+      which is what stops an anonymous caller renewing a stranger's signup forever.
+      A refusal is invisible from outside — the endpoint's response does not depend
+      on it — so this cannot become an account-age oracle.
   """
   @spec confirmation_resendable?(User.t()) :: boolean()
   def confirmation_resendable?(user), do: confirmation_resendable?(user, DateTime.utc_now())
@@ -391,9 +391,9 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Whether a stored `email_confirmation_token` would still be accepted if the
-    reader clicked it right now. The single predicate behind "may the reaper erase
-    the account behind this link".
+      Whether a stored `email_confirmation_token` would still be accepted if the
+      reader clicked it right now. The single predicate behind "may the reaper erase
+      the account behind this link".
   """
   @spec confirmation_link_live?(String.t() | nil) :: boolean()
   def confirmation_link_live?(token) do
@@ -401,11 +401,11 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    People search for discovery: up to 20 users matching `term` on
-    `display_name` (ILIKE), restricted to discoverable profiles
-    (`profile_visibility = "platform"`) and excluding blocks in either direction.
-    The privacy rule is enforced IN SQL, never by serializer redaction — a row
-    that shouldn't be seen is never selected.
+      People search for discovery: up to 20 users matching `term` on
+      `display_name` (ILIKE), restricted to discoverable profiles
+      (`profile_visibility = "platform"`) and excluding blocks in either direction.
+      The privacy rule is enforced IN SQL, never by serializer redaction — a row
+      that shouldn't be seen is never selected.
   """
   @search_limit 20
   @spec search_users(String.t(), binary() | nil) :: [User.t()]
@@ -462,13 +462,13 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Marks a user's email as confirmed, clearing any pending confirmation token.
+      Marks a user's email as confirmed, clearing any pending confirmation token.
 
-    Used by the token-based confirmation flow (`Stacks.Email.confirm_email/1`)
-    and by trusted programmatic flows that bypass email verification
-    (`Stacks.Release.seed_prod/0`). Any future confirmation side effects
-    (audit, events, token cleanup across related channels) should be added
-    here so every caller picks them up automatically.
+      Used by the token-based confirmation flow (`Stacks.Email.confirm_email/1`)
+      and by trusted programmatic flows that bypass email verification
+      (`Stacks.Release.seed_prod/0`). Any future confirmation side effects
+      (audit, events, token cleanup across related channels) should be added
+      here so every caller picks them up automatically.
   """
   @spec mark_confirmed(User.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def mark_confirmed(%User{} = user) do
@@ -481,10 +481,10 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Registers a new user; the platform's first user becomes `owner`. Created
-    unconfirmed with a confirmation token — the email is sent event-driven via
-    `EmailConfirmationHandler`, and the user cannot authenticate until confirmed.
-    `opts` may carry consent attrs recorded atomically with the insert.
+      Registers a new user; the platform's first user becomes `owner`. Created
+      unconfirmed with a confirmation token — the email is sent event-driven via
+      `EmailConfirmationHandler`, and the user cannot authenticate until confirmed.
+      `opts` may carry consent attrs recorded atomically with the insert.
   """
   @spec register(map(), keyword()) ::
           {:ok, User.t()}
@@ -598,11 +598,11 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Authenticates by email and password. `{:ok, user}` or `{:error, reason}`
-    where reason is `:invalid_credentials`, `:email_unconfirmed`,
-    `{:account_locked, retry_after_seconds}`, or `:argon2_busy`. Runs a dummy
-    Argon2 verify on unknown emails so timing does not reveal existence, and
-    counts failures toward per-account lockout.
+      Authenticates by email and password. `{:ok, user}` or `{:error, reason}`
+      where reason is `:invalid_credentials`, `:email_unconfirmed`,
+      `{:account_locked, retry_after_seconds}`, or `:argon2_busy`. Runs a dummy
+      Argon2 verify on unknown emails so timing does not reveal existence, and
+      counts failures toward per-account lockout.
   """
   @spec authenticate(String.t(), String.t()) ::
           {:ok, User.t()}
@@ -786,8 +786,8 @@ defmodule Stacks.Accounts do
   defp check_email_confirmed(%User{}), do: {:error, :email_unconfirmed}
 
   @doc """
-    Updates the profile_visibility setting for a user.
-    Accepts "platform" or "owner". Returns {:error, changeset} for invalid values.
+      Updates the profile_visibility setting for a user.
+      Accepts "platform" or "owner". Returns {:error, changeset} for invalid values.
   """
   @spec update_profile_visibility(binary(), String.t()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()}
@@ -823,9 +823,9 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Updates the display_name and website_url for a user.
-    To change email, supply `email:` and `current_password:` — the current password
-    is verified before the email is updated.
+      Updates the display_name and website_url for a user.
+      To change email, supply `email:` and `current_password:` — the current password
+      is verified before the email is updated.
   """
   @spec update_profile(User.t(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t() | :invalid_password | :argon2_busy}
@@ -905,10 +905,10 @@ defmodule Stacks.Accounts do
   defp tap_emit_profile_updated(error), do: error
 
   @doc """
-    Updates the country_code and city for a user. Emits `user.location_updated`
-    event with a UUID-only payload — the city/country_code are PII and are read
-    back from the user record by consumers (see
-    `Stacks.Discovery.Handlers.LocationUpdatedHandler`).
+      Updates the country_code and city for a user. Emits `user.location_updated`
+      event with a UUID-only payload — the city/country_code are PII and are read
+      back from the user record by consumers (see
+      `Stacks.Discovery.Handlers.LocationUpdatedHandler`).
   """
   @spec update_location(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def update_location(%User{} = user, attrs) do
@@ -934,8 +934,8 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Changes the password for a user. Verifies `current_password` with Argon2 before
-    applying the new password. Returns `{:error,:invalid_password}` on mismatch.
+      Changes the password for a user. Verifies `current_password` with Argon2 before
+      applying the new password. Returns `{:error,:invalid_password}` on mismatch.
   """
   @spec change_password(User.t(), String.t(), String.t()) ::
           {:ok, User.t()}
@@ -969,7 +969,7 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Updates notification preferences for a user.
+      Updates notification preferences for a user.
   """
   @spec update_notifications(User.t(), map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def update_notifications(%User{} = user, attrs) do
@@ -995,10 +995,10 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Returns the current onboarding status for a user.
+      Returns the current onboarding status for a user.
 
-    Returns `%{steps: %{profile: bool, privacy: bool},
-                completed: bool, next_step: step_name | nil}`.
+      Returns `%{steps: %{profile: bool, privacy: bool},
+                  completed: bool, next_step: step_name | nil}`.
   """
   @spec onboarding_status(binary()) :: map()
   def onboarding_status(user_id) do
@@ -1015,10 +1015,10 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Marks a single onboarding step as completed for a user. Idempotent — completing
-    an already-completed step is a no-op and returns `{:ok, user}`.
+      Marks a single onboarding step as completed for a user. Idempotent — completing
+      an already-completed step is a no-op and returns `{:ok, user}`.
 
-    Returns `{:ok, user}` or `{:error,:invalid_step}`.
+      Returns `{:ok, user}` or `{:error,:invalid_step}`.
   """
   @spec complete_onboarding_step(binary(), String.t()) ::
           {:ok, User.t()} | {:error, :invalid_step}
@@ -1038,10 +1038,10 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Resets all onboarding steps to false, allowing the user to re-enter the
-    onboarding flow from Settings.
+      Resets all onboarding steps to false, allowing the user to re-enter the
+      onboarding flow from Settings.
 
-    Returns `{:ok, user}`.
+      Returns `{:ok, user}`.
   """
   @spec reset_onboarding(binary()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def reset_onboarding(user_id) do
@@ -1057,12 +1057,12 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Opens a token family at login, or advances its live token on refresh
-    rotation. Idempotent upsert on `family_id`: replaces `current_jti` /
-    `previous_jti` / `rotated_at`, preserves `session_started_at`, `user_id`,
-    `revoked_at`. A missing family (legacy session) is created lazily — bound
-    from now rather than locking the user out. `previous_jti` + `rotated_at`
-    give the reuse gate its rotation grace window.
+      Opens a token family at login, or advances its live token on refresh
+      rotation. Idempotent upsert on `family_id`: replaces `current_jti` /
+      `previous_jti` / `rotated_at`, preserves `session_started_at`, `user_id`,
+      `revoked_at`. A missing family (legacy session) is created lazily — bound
+      from now rather than locking the user out. `previous_jti` + `rotated_at`
+      give the reuse gate its rotation grace window.
   """
   def rotate_token_family(attrs) do
     %AuthTokenFamily{}
@@ -1074,13 +1074,13 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Reuse-detection gate, called on EVERY authenticated request
-    (`Guardian.verify_claims/2`). `:ok` when the `jti` is the family's live
-    token; `{:error,:session_revoked}` for a missing/revoked family;
-    `{:error,:token_reuse_detected}` for a superseded `jti` in a live family —
-    which revokes the WHOLE family and burns all the user's guardian tokens.
-    The revoke-on-reuse write is idempotent and fails CLOSED: DB errors map to
-    a 401 (`:family_check_failed`), never a crash.
+      Reuse-detection gate, called on EVERY authenticated request
+      (`Guardian.verify_claims/2`). `:ok` when the `jti` is the family's live
+      token; `{:error,:session_revoked}` for a missing/revoked family;
+      `{:error,:token_reuse_detected}` for a superseded `jti` in a live family —
+      which revokes the WHOLE family and burns all the user's guardian tokens.
+      The revoke-on-reuse write is idempotent and fails CLOSED: DB errors map to
+      a 401 (`:family_check_failed`), never a crash.
   """
   @spec check_token_family(binary(), binary(), binary()) ::
           :ok | {:error, :session_revoked | :token_reuse_detected | :family_check_failed}
@@ -1125,11 +1125,11 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Revoke a single token family by marking `revoked_at` (idempotent).
+      Revoke a single token family by marking `revoked_at` (idempotent).
 
-    Used by logout: any token sharing this `family_id` — including an attacker's
-    already-rotated chain — is rejected at the `verify_claims` gate on next use.
-    Returns `{:ok, revoked_count}` where the count is 0 if it was already revoked.
+      Used by logout: any token sharing this `family_id` — including an attacker's
+      already-rotated chain — is rejected at the `verify_claims` gate on next use.
+      Returns `{:ok, revoked_count}` where the count is 0 if it was already revoked.
   """
   @spec revoke_token_family(binary()) :: {:ok, non_neg_integer()}
   def revoke_token_family(family_id) when is_binary(family_id) do
@@ -1143,11 +1143,11 @@ defmodule Stacks.Accounts do
   end
 
   @doc """
-    Revoke ALL of a user's sessions ("log out everywhere").
+      Revoke ALL of a user's sessions ("log out everywhere").
 
-    Marks every live family of the user `revoked_at` AND deletes every one of the
-    user's `guardian_tokens` rows (`destroy_by_sub`), so no existing access token
-    survives. Used on password change. Idempotent.
+      Marks every live family of the user `revoked_at` AND deletes every one of the
+      user's `guardian_tokens` rows (`destroy_by_sub`), so no existing access token
+      survives. Used on password change. Idempotent.
   """
   @spec revoke_all_user_sessions(binary()) :: :ok
   def revoke_all_user_sessions(user_id) do

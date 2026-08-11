@@ -1,8 +1,8 @@
 defmodule Stacks.Workers.ExpiredUnverifiedAccountsJobTest do
   @moduledoc """
-    The daily reaper for abandoned signups: accounts that never confirmed their
-    email and whose 24h confirmation link has expired are erased via the full
-    GDPR path; everything else is left alone.
+      The daily reaper for abandoned signups: accounts that never confirmed their
+      email and whose 24h confirmation link has expired are erased via the full
+      GDPR path; everything else is left alone.
   """
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo

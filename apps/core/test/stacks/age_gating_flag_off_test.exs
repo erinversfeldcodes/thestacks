@@ -1,14 +1,14 @@
 defmodule Stacks.AgeGatingFlagOffTest do
   @moduledoc """
-    Shipped-dark behaviour (ADR-020): with `:age_gating_enabled` OFF, all three
-    enforcement points are no-ops — age-gated content behaves exactly like public.
+      Shipped-dark behaviour: with `:age_gating_enabled` OFF, all three
+      enforcement points are no-ops — age-gated content behaves exactly like public.
 
-    The test env defaults the flag ON (so the enforcement suite keeps exercising
-    the gate); these tests temporarily flip it OFF and restore it. `async: false`
-    because the flag is a process-global Application env value.
+      The test env defaults the flag ON (so the enforcement suite keeps exercising
+      the gate); these tests temporarily flip it OFF and restore it. `async: false`
+      because the flag is a process-global Application env value.
 
-    The flag-ON counterparts live in `StacksWeb.Plugs.AgeGateTest`,
-    `Stacks.VisibilityTest`, and `StacksWeb.CatalogueControllerTest`.
+      The flag-ON counterparts live in `StacksWeb.Plugs.AgeGateTest`,
+      `Stacks.VisibilityTest`, and `StacksWeb.CatalogueControllerTest`.
   """
 
   use CoreWeb.ConnCase, async: false

@@ -1,11 +1,11 @@
 defmodule StacksWeb.DataCorrectionControllerTest do
   @moduledoc """
-    340 — the owner-facing surface. Four load-bearing properties, each
-    tested to fail if it goes away: owner-only where the WRITE happens (an
-    admin token outliving a demotion must 403 — login-only coverage would
-    pass with the route open); GET means dry-run (index writes nothing);
-    apply requires a reason (recorded in the audit row); unknown names 404
-    through `Registry.fetch/1` (no reachable-set widening).
+      340 — the owner-facing surface. Four load-bearing properties, each
+      tested to fail if it goes away: owner-only where the WRITE happens (an
+      admin token outliving a demotion must 403 — login-only coverage would
+      pass with the route open); GET means dry-run (index writes nothing);
+      apply requires a reason (recorded in the audit row); unknown names 404
+      through `Registry.fetch/1` (no reachable-set widening).
   """
   use CoreWeb.ConnCase, async: false
 

@@ -7,7 +7,7 @@ import {
 } from "./helpers";
 
 /**
- * The admin sign-in gate (#303) — the spec that makes an entire defect class regression-proof.
+ * The admin sign-in gate — the spec that makes an entire defect class regression-proof.
  *
  * ⚠️ **Four admin surfaces were built, routed, unit-tested and unreachable.** They passed the
  * ordinary Guardian token to `/api/admin/*`, which sits behind an MFA-verified admin session
@@ -24,7 +24,7 @@ import {
  */
 
 /**
- * ⚠️ **Nothing in this file may enrol a second factor.** (Issue #371.)
+ * ⚠️ **Nothing in this file may enrol a second factor.** (.)
  *
  * The owner is one shared account with exactly ONE stored TOTP factor
  * (`op.user_mfa` is upserted on `user_id`), so enrolling is a mutation of state
@@ -68,7 +68,7 @@ async function signInOrdinary(page: Page, request: APIRequestContext) {
  * credential or code fails here, named, in about a second. Without it the only
  * signal is a gate that is still visible 15 s later, which is exactly what a
  * broken admin token, a wrong status literal or a half-wired `initPage` also look
- * like — and what a replaced MFA factor (#371) used to look like. A comment is not
+ * like — and what a replaced MFA factor used to look like. A comment is not
  * a guard: this is the assertion that keeps the shared factor from ever again
  * degrading into an ambiguous timeout.
  */
@@ -101,8 +101,8 @@ async function passTheGate(page: Page, secret: string) {
  *
  * Losing to the banner turns a rejection into an immediate failure that quotes the
  * message the operator would have read, instead of 15 s of "element still visible"
- * with no cause attached — the ambiguity that made a replaced MFA factor (#371)
- * indistinguishable from the four real #303 defects.
+ * with no cause attached — the ambiguity that made a replaced MFA factor
+ * indistinguishable from the four real defects.
  */
 async function gateAdvances(page: Page, advanced: Promise<unknown>, what: string) {
   const banner = page.getByTestId("admin-gate-error");

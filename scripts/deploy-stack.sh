@@ -136,7 +136,7 @@ if [[ -z "$BRANCH" ]]; then
     BRANCH="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
 fi
 
-# Shared derivation (Issue #170 C): honours the optional PREVIEW_SUFFIX env
+# Shared derivation (C): honours the optional PREVIEW_SUFFIX env
 # var so CI runs get run-unique names that can't collide with local `just ci`
 # previews of the same branch. Behaviour is byte-identical to the old inline
 # derivation when PREVIEW_SUFFIX is unset.
@@ -151,7 +151,7 @@ if [[ "$PROD_MODE" -eq 1 ]]; then
     PHX_HOST_VALUE="${PROD_PHX_HOST:-readinginthestacks.com}"
     NEON_STAGING_API_KEY=""
     STACKS_E2E_TEST_HELPERS=""
-    # Age-gating ships DARK in production (ADR-020): the enforcement + verification
+    # Age-gating ships DARK in production: the enforcement + verification
     # machinery is built and tested but inert until a real age-verification provider
     # (Smile ID / Yoti / Sumsub) is integrated. Force the flag empty here so no stale
     # shell/.env export can promote it onto the prod app — production must launch with
@@ -250,7 +250,7 @@ if [[ -n "${NEON_STAGING_API_KEY:-}" ]]; then
                 echo "    WARNING: branch did not answer in ~30s; migrations may race its cold start."
             fi
         else
-            echo "    WARNING: psql not found, skipping branch warm-up (Issue #305)."
+            echo "    WARNING: psql not found, skipping branch warm-up."
         fi
     fi
     if [[ -n "$NEON_CONNECTION_URI" ]]; then
@@ -450,7 +450,7 @@ fi
 # `:econnrefused`, then falls back to IPv4 (`inet4: true` is its default), where
 # the AAAA-only 6PN name yields `:nxdomain` — so the logged error named DNS while
 # the real fault was connectivity. Prod had logged
-# `MetricsPusher: push failed: nxdomain` every 15s since the ADR-021 cutover,
+# `MetricsPusher: push failed: nxdomain` every 15s since the metrics-push cutover,
 # with no metrics ingested at all. Verified on the live node before the fix:
 # `getent hosts` resolved, `:inet.getaddr(h, :inet6)` returned the VM's 6PN
 # address, `:inet.getaddr(h, :inet)` returned nxdomain, and
@@ -501,7 +501,7 @@ else
 fi
 
 # ── Deploy Grafana (PROD public + PREVIEW render-check) ──────────────────────
-# Human-facing dashboards (ADR-021 / Epic #249 #254). Anonymous, read-only;
+# Human-facing dashboards. Anonymous, read-only;
 # dashboards + datasource are file-provisioned (baked into deploy/grafana/Dockerfile
 # from the app's dashboard JSON). The datasource URL is env-driven (STACKS_VM_URL):
 #   • PROD    — always-on public dashboards at thestacks-grafana, → the prod VM.
@@ -570,7 +570,7 @@ fly ips allocate-v4 --shared --app "${CORE_APP}" 2>&1 || true
 #            DATABASE_URL directly in the environment (from a GitHub secret in CI,
 #            or an operator export for local prod-mode use).
 #
-# EMAIL_FROM (REQUIRED for working prod email, Issue #323): the transactional
+# EMAIL_FROM (REQUIRED for working prod email,): the transactional
 # sender address. The in-code default is Resend's `onboarding@resend.dev`
 # stopgap, which CANNOT deliver to real users (apps/core/config/config.exs) —
 # setting EMAIL_FROM to a verified-domain address (e.g. noreply@thestacks.app)
@@ -894,7 +894,7 @@ else
     echo "FAIL deploy: no running machine — migrations and seeds did NOT run." >&2
     echo "       The stack is PARTIAL: on a preview it may still serve 200s, because the Neon branch" >&2
     echo "       inherits staging's schema and data. Do not use it. Tear down and redeploy" >&2
-    echo "       (scripts/deploy-preview.sh tears down by default — Issue #305)." >&2
+    echo "       (scripts/deploy-preview.sh tears down by default)." >&2
     exit 1
 fi
 

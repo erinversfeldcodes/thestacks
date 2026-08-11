@@ -10,8 +10,8 @@ import {
 
 /**
  * Browser E2E for the GDPR self-service journeys on Settings → Privacy:
- *   - Export My Data  (US-8.1, issue #187)
- *   - Delete My Data  (US-8.2, issue #188)
+ *   - Export My Data
+ *   - Delete My Data
  *
  * Previously only covered by elm-program-test, which stubs the HTTP boundary —
  * the real UI → deployed backend → session-teardown path was never observed
@@ -26,7 +26,7 @@ import {
  * clicks everywhere, incl. settings); placing a book satisfies the onboarding
  * check before we drive the UI.
  *
- * Users are minted via POST /api/test/session (Issue #192) — one call that
+ * Users are minted via POST /api/test/session — one call that
  * creates a confirmed user AND returns its session token, outside the `:auth`
  * rate bucket. This replaces the register→confirmation-token→confirm→login
  * dance (and its 429-backoff retry): the whole parallel suite shares the

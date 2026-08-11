@@ -1,12 +1,12 @@
 defmodule StacksWeb.Plugs.DepsCheck do
   @moduledoc """
-    Synthetic dependency probe for the SLO gate: `GET /internal/deps-check`
-    (handled at the endpoint, before the router) synchronously exercises
-    in-cluster deps with no other synthetic coverage — today SearXNG, whose
-    fuse sits in its healthy initial state on a fresh deploy whether or not
-    SearXNG works (the cold-start blind spot this closes). Assumes
-    `MetricsAuth` has already passed upstream. JSON body always; the status
-    code carries the aggregate (200 all-ok / 503 any-failed).
+      Synthetic dependency probe for the SLO gate: `GET /internal/deps-check`
+      (handled at the endpoint, before the router) synchronously exercises
+      in-cluster deps with no other synthetic coverage — today SearXNG, whose
+      fuse sits in its healthy initial state on a fresh deploy whether or not
+      SearXNG works (the cold-start blind spot this closes). Assumes
+      `MetricsAuth` has already passed upstream. JSON body always; the status
+      code carries the aggregate (200 all-ok / 503 any-failed).
   """
 
   @behaviour Plug

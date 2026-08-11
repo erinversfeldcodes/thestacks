@@ -1,9 +1,9 @@
 defmodule StacksWeb.CatalogueControllerTest do
   @moduledoc """
-    Tests for GET /api/catalogue — the public book catalogue endpoint.
+      Tests for GET /api/catalogue — the public book catalogue endpoint.
 
-    Verifies pagination, search, subject filtering, sort, and most
-    importantly that no ownership data is ever exposed.
+      Verifies pagination, search, subject filtering, sort, and most
+      importantly that no ownership data is ever exposed.
   """
 
   use CoreWeb.ConnCase, async: true

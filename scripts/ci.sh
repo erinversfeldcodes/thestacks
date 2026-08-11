@@ -160,7 +160,7 @@ fi
 
 if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]]; then
     _branch="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
-    # Shared derivation (Issue #170 C): honours the optional PREVIEW_SUFFIX
+    # Shared derivation (C): honours the optional PREVIEW_SUFFIX
     # env var (set by CI, unset locally) so this block and the deploy/cleanup
     # scripts always agree on the preview resource names.
     # shellcheck source=scripts/lib/preview-names.sh

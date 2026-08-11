@@ -1,7 +1,7 @@
 defmodule Stacks.InsightsTest do
   @moduledoc """
-    Tests for the own-only, ephemeral personal-inference derivations. Load-bearing invariants: own-only scoping,
-    no-persistence, derivation correctness, and the de-anon rarity score.
+      Tests for the own-only, ephemeral personal-inference derivations. Load-bearing invariants: own-only scoping,
+      no-persistence, derivation correctness, and the de-anon rarity score.
   """
 
   use CoreWeb.ConnCase, async: true

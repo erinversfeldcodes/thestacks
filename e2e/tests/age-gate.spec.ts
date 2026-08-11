@@ -2,19 +2,19 @@ import { test, expect } from "@playwright/test";
 import { suiteAuthFile, suiteEmail, apiCallFromPage } from "./helpers";
 
 /**
- * Age-gated content — DETERMINISTIC browser drive (#226 item 3, extended #229).
+ * Age-gated content — DETERMINISTIC browser drive.
  *
  * The old single assertion (`.age-gate` OR `.book-detail`) proved nothing: it
  * passed whatever the seeded user's `age_verified` state happened to be. This
  * spec instead OWNS that state — it drives the age-gate suite user through both
  * sides of the gate by setting `age_verified` via the test helper and reloading:
  *
- *   unverified → the book is HIDDEN from the catalogue listing (#229) AND a
+ *   unverified → the book is HIDDEN from the catalogue listing AND a
  *                direct URL shows the `.age-gate` block with content suppressed;
  *   verified   → the book APPEARS in the catalogue listing AND the same direct
  *                URL renders its content with the gate gone.
  *
- * ADR-020: age-verification is now PROVIDER-sourced, not self-declared — the old
+ * age-verification is now PROVIDER-sourced, not self-declared — the old
  * `PUT /api/settings/age_verification` endpoint is gone. The suite instead flips
  * the suite user's `age_verified` via the STACKS_E2E_TEST_HELPERS-gated helper
  * `PUT /api/test/age-verification {email, verified}` (→ record_verification/3,

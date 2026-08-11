@@ -1,12 +1,12 @@
 defmodule Stacks.Enrichment.Handlers.BookCreatedHandler do
   @moduledoc """
-    Handler for `book.created`: enqueues a price scrape for the ISBN and a
-    SMALL batch of author-source discovery. Discovery triggers here because
-    the nightly batch alone never ran on a scale-to-zero platform —
-    `op.discovered_sources` had never held a row. Per-book triggering used
-    to exhaust Brave's free tier, but `BraveClient` now enforces a hard
-    200/day budget internally, so no trigger can overspend; the batch is
-    tiny so work arrives in proportion to catalogue growth.
+      Handler for `book.created`: enqueues a price scrape for the ISBN and a
+      SMALL batch of author-source discovery. Discovery triggers here because
+      the nightly batch alone never ran on a scale-to-zero platform —
+      `op.discovered_sources` had never held a row. Per-book triggering used
+      to exhaust Brave's free tier, but `BraveClient` now enforces a hard
+      200/day budget internally, so no trigger can overspend; the batch is
+      tiny so work arrives in proportion to catalogue growth.
   """
 
   @behaviour Stacks.Events.Handler

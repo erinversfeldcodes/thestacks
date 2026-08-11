@@ -1,10 +1,10 @@
 defmodule StacksWeb.TransparencyControllerTest do
   @moduledoc """
-    Tests for the public transparency metrics endpoint.
+      Tests for the public transparency metrics endpoint.
 
-    `GET /api/transparency/metrics` is unauthenticated and curated: it returns
-    `{live, durable, generated_at, cache_ttl}` with teaching metadata per entry,
-    and never exposes PII or a de-anonymisable dimension.
+      `GET /api/transparency/metrics` is unauthenticated and curated: it returns
+      `{live, durable, generated_at, cache_ttl}` with teaching metadata per entry,
+      and never exposes PII or a de-anonymisable dimension.
   """
 
   use CoreWeb.ConnCase, async: false

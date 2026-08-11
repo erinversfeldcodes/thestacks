@@ -1,14 +1,14 @@
 defmodule StacksWeb.TestHelperControllerTest do
   @moduledoc """
-    Guards the test-only confirmation-token endpoint.
+      Guards the test-only confirmation-token endpoint.
 
-    This endpoint leaks an account-activation token, so the security-critical
-    property under test is that it is *disabled* unless the server env flag
-    `STACKS_E2E_TEST_HELPERS == "1"` is set. In production the flag is never
-    set, so the route returns 404 for every request.
+      This endpoint leaks an account-activation token, so the security-critical
+      property under test is that it is *disabled* unless the server env flag
+      `STACKS_E2E_TEST_HELPERS == "1"` is set. In production the flag is never
+      set, so the route returns 404 for every request.
 
-    `async: false` because the tests mutate a process-global environment
-    variable; running serially keeps them from leaking into async tests.
+      `async: false` because the tests mutate a process-global environment
+      variable; running serially keeps them from leaking into async tests.
   """
   use CoreWeb.ConnCase, async: false
 

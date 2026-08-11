@@ -1,8 +1,8 @@
 /**
- * #384 — the merge → unmerge round trip, driven end to end (chromium project,
+ * — the merge → unmerge round trip, driven end to end (chromium project,
  * NOT Modal-gated).
  *
- * The owner un-merge (#376) splits a wrongly-merged edition back onto its own
+ * The owner un-merge splits a wrongly-merged edition back onto its own
  * work. Its unit behaviour is exhaustively covered (41 tests) and it was driven
  * live once by hand — but nothing repeatable drove the loop, and that absence
  * was load-bearing: it let a reviewer assert a non-existent limitation about
@@ -28,9 +28,9 @@
  * (= not yet catalogued) before use, and skips with a reason when the pool is
  * exhausted on a long-lived preview — recreate the preview or extend the pool.
  *
- * ## MFA (#371)
+ * ## MFA
  * The owner factor is enrolled ONCE by auth.setup.ts; this spec only READS the
- * shared secret (readOwnerMfaSecret) and derives codes with freshTotp (#394).
+ * shared secret (readOwnerMfaSecret) and derives codes with freshTotp.
  * Enrolling here would replace the secret under the admin-session specs.
  */
 import { test, expect, type APIRequestContext } from "@playwright/test";

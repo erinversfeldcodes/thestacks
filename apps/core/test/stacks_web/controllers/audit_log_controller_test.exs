@@ -1,11 +1,11 @@
 defmodule StacksWeb.AuditLogControllerTest do
   @moduledoc """
-    Tests for the read-only GDPR audit-log endpoint
-    (`GET /api/settings/audit-log`).
+      Tests for the read-only GDPR audit-log endpoint
+      (`GET /api/settings/audit-log`).
 
-    The endpoint returns ONLY the authenticated user's own audit rows,
-    paginated, with `metadata` decrypted for display and hashed IPs never
-    exposed.
+      The endpoint returns ONLY the authenticated user's own audit rows,
+      paginated, with `metadata` decrypted for display and hashed IPs never
+      exposed.
   """
 
   use CoreWeb.ConnCase, async: true

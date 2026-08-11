@@ -1,11 +1,11 @@
 defmodule Stacks.SchemaConstraintsTest do
   @moduledoc """
-    335 — the four invariants that moved from code-that-remembers into the
-    schema. Every test writes AROUND the application (raw `insert_all`/SQL,
-    never a changeset) — deliberately: each rule already had a working
-    app-level guard, and what none could do was constrain a writer that
-    does not call them (seeds, psql, importers, factories). The database
-    refusing is the property under test.
+      335 — the four invariants that moved from code-that-remembers into the
+      schema. Every test writes AROUND the application (raw `insert_all`/SQL,
+      never a changeset) — deliberately: each rule already had a working
+      app-level guard, and what none could do was constrain a writer that
+      does not call them (seeds, psql, importers, factories). The database
+      refusing is the property under test.
   """
   use Core.DataCase, async: false
 

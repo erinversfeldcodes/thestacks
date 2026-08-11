@@ -1,7 +1,7 @@
 defmodule Stacks.ShelvingShelfTest do
   @moduledoc """
-    Tests for physical shelf management within bookshelves.
-    These functions do not exist yet — tests are expected to fail.
+      Tests for physical shelf management within bookshelves.
+      These functions do not exist yet — tests are expected to fail.
   """
 
   use Core.DataCase, async: true

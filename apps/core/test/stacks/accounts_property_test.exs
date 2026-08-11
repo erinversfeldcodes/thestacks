@@ -1,9 +1,9 @@
 defmodule Stacks.AccountsPropertyTest do
   @moduledoc """
-    StreamData property-based tests for User changesets that parse untrusted input.
+      StreamData property-based tests for User changesets that parse untrusted input.
 
-    Verifies that changesets never crash on arbitrary strings and always return
-    a well-formed `%Ecto.Changeset{}` — whether valid or with errors.
+      Verifies that changesets never crash on arbitrary strings and always return
+      a well-formed `%Ecto.Changeset{}` — whether valid or with errors.
   """
 
   use Core.DataCase, async: false

@@ -1,11 +1,11 @@
 defmodule Stacks.Workers.FetchAuthorRSSJob do
   @moduledoc """
-    Daily Oban cron worker that polls RSS feeds for all authors with an rss_feed_url.
+      Daily Oban cron worker that polls RSS feeds for all authors with an rss_feed_url.
 
-    Fetches each feed, parses entries from the last 24 hours, and emits an
-    `enrichment.author_updated` event with the new entries in the payload.
+      Fetches each feed, parses entries from the last 24 hours, and emits an
+      `enrichment.author_updated` event with the new entries in the payload.
 
-    On feed parse failure: logs a warning and skips the author (does not crash).
+      On feed parse failure: logs a warning and skips the author (does not crash).
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

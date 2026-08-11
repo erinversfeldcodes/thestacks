@@ -1,13 +1,13 @@
 defmodule Stacks.Moderation do
   @moduledoc """
-    Moderation pipeline for uploaded book images: is_book? → extract_all →
-    store (resolve ISBNs, store each book as `public`). Age-gating is NOT
-    decided here — only a human marks a book adults-only (ADR-020).
+      Moderation pipeline for uploaded book images: is_book? → extract_all →
+      store (resolve ISBNs, store each book as `public`). Age-gating is NOT
+      decided here — only a human marks a book adults-only.
 
-    Sidecar contract: POST /classify → `{classification, confidence,
-    model_used}`; POST /extract → `{books: [{title, author, potential_isbns,
-    raw_text, confidence}], model_used}`. Context carries `image_url`
-    (preferred, presigned) or `image_b64` (legacy).
+      Sidecar contract: POST /classify → `{classification, confidence,
+      model_used}`; POST /extract → `{books: [{title, author, potential_isbns,
+      raw_text, confidence}], model_used}`. Context carries `image_url`
+      (preferred, presigned) or `image_b64` (legacy).
   """
 
   require Logger
@@ -58,12 +58,12 @@ defmodule Stacks.Moderation do
           | {:error, failure_reason()}
 
   @doc """
-    Runs the full pipeline for one image. `context` needs `image_url`
-    (preferred) or `image_b64`, plus `user_id`/`image_id` for logging.
-    Returns `{:ok, %{resolved: books, rejected: [{candidate_id, reason}]}}`
-    when at least one book resolved — `rejected` surfaces per-candidate
-    failures in multi-book images for observability — or `{:error, reason}`
-    when nothing resolved or the image is not a book.
+      Runs the full pipeline for one image. `context` needs `image_url`
+      (preferred) or `image_b64`, plus `user_id`/`image_id` for logging.
+      Returns `{:ok, %{resolved: books, rejected: [{candidate_id, reason}]}}`
+      when at least one book resolved — `rejected` surfaces per-candidate
+      failures in multi-book images for observability — or `{:error, reason}`
+      when nothing resolved or the image is not a book.
   """
   @spec run_pipeline(map()) :: pipeline_result()
   def run_pipeline(%{image_url: image_url} = context) do

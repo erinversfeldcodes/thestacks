@@ -127,7 +127,7 @@ defmodule Core.Repo.Migrations.CreateMarketplaceAndMonitoringTables do
 
       # Soft reference to offer_threads.id — nullable because not all transactions originate
       # from an offer thread (e.g. direct buy). No FK enforced; referential integrity handled
-      # at application layer. Revisit in #052 if marketplace context requires hard FK.
+      # at application layer. Revisit in if marketplace context requires hard FK.
       add :offer_id, :binary_id
       add :buyer_id, references(:users, type: :binary_id, prefix: "op", on_delete: :nilify_all)
       add :seller_id, references(:users, type: :binary_id, prefix: "op", on_delete: :nilify_all)

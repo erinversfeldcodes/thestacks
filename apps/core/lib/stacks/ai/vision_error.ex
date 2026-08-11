@@ -1,12 +1,12 @@
 defmodule Stacks.AI.VisionError do
   @moduledoc """
-    The closed set of vision-service failures, answering the two questions
-    every caller has: retry? and what do we tell the reader? A
-    `:deterministic` error is a conclusion about the INPUT — repeating the
-    request repeats the conclusion; `:transient` is a statement about the
-    SERVICE — the next attempt may succeed. (Pre-split, `IdentifyBookJob`
-    retried undecodable images on a GPU three times.) Mirrors
-    `TriggerPriceScrapeJob.interpret/2`.
+      The closed set of vision-service failures, answering the two questions
+      every caller has: retry? and what do we tell the reader? A
+      `:deterministic` error is a conclusion about the INPUT — repeating the
+      request repeats the conclusion; `:transient` is a statement about the
+      SERVICE — the next attempt may succeed. (Pre-split, `IdentifyBookJob`
+      retried undecodable images on a GPU three times.) Mirrors
+      `TriggerPriceScrapeJob.interpret/2`.
   """
 
   require Logger
@@ -43,11 +43,11 @@ defmodule Stacks.AI.VisionError do
           | {:transport, term()}
 
   @doc """
-    True when `reason` is a member of `t/0`.
+      True when `reason` is a member of `t/0`.
 
-    Callers that receive failures from more than one source (the worker also sees
-    storage presign errors and raised exceptions) use this to decide whether the
-    vocabulary in this module applies, instead of assuming it does.
+      Callers that receive failures from more than one source (the worker also sees
+      storage presign errors and raised exceptions) use this to decide whether the
+      vocabulary in this module applies, instead of assuming it does.
   """
   @spec vision_error?(term()) :: boolean()
   def vision_error?(:circuit_open), do: true
@@ -58,12 +58,12 @@ defmodule Stacks.AI.VisionError do
   def vision_error?(_other), do: false
 
   @doc """
-    Whether repeating the identical request could produce a different answer:
-    `:deterministic` → cancel, `:transient` → retry. Decided by the LABELLED
-    error code, never the raw HTTP status — an unlabelled 4xx could be deploy
-    skew between core and the sidecar, and permanently rejecting an upload on
-    that is worse than three cheap retries (deterministic rejections happen in
-    the sidecar's validation layer, before any GPU is allocated).
+      Whether repeating the identical request could produce a different answer:
+      `:deterministic` → cancel, `:transient` → retry. Decided by the LABELLED
+      error code, never the raw HTTP status — an unlabelled 4xx could be deploy
+      skew between core and the sidecar, and permanently rejecting an upload on
+      that is worse than three cheap retries (deterministic rejections happen in
+      the sidecar's validation layer, before any GPU is allocated).
   """
   @spec determination(t()) :: :deterministic | :transient
   def determination({:undecodable_image, _token}), do: :deterministic
@@ -73,12 +73,12 @@ defmodule Stacks.AI.VisionError do
   def determination({:transport, _reason}), do: :transient
 
   @doc """
-    The stable token written to `uploaded_images.rejection_reason` when this error
-    ends the upload.
+      The stable token written to `uploaded_images.rejection_reason` when this error
+      ends the upload.
 
-    These strings are a wire contract with the SPA (`Page.Upload` matches
-    `"not_a_book"` by name and renders everything else as a generic failure), so
-    they are snake_case identifiers rather than prose, and they do not change.
+      These strings are a wire contract with the SPA (`Page.Upload` matches
+      `"not_a_book"` by name and renders everything else as a generic failure), so
+      they are snake_case identifiers rather than prose, and they do not change.
   """
   @spec reason_token(t()) :: String.t()
   def reason_token({:undecodable_image, token}), do: token
@@ -88,8 +88,8 @@ defmodule Stacks.AI.VisionError do
   def reason_token({:transport, _reason}), do: "vision_unavailable"
 
   @doc """
-    A sentence for the operator: the `{:cancel, reason}` Oban records, and the log
-    line. Not shown to readers — the SPA renders its own copy off `reason_token/1`.
+      A sentence for the operator: the `{:cancel, reason}` Oban records, and the log
+      line. Not shown to readers — the SPA renders its own copy off `reason_token/1`.
   """
   @spec message(t()) :: String.t()
   def message({:undecodable_image, "undecodable_image"}),
@@ -114,13 +114,13 @@ defmodule Stacks.AI.VisionError do
   def message({:transport, reason}), do: "vision service unreachable: #{inspect(reason)}"
 
   @doc """
-    Interpret a non-200 from the vision service. A body carrying a
-    `VisionError` is a determination about the input; anything else is a fault.
-    The catch-all cannot swallow quietly: a new `VisionErrorCode` fails the
-    build (`scripts/check-enum-coverage.py`), an unrecognised code (sidecar
-    deployed ahead of core) is logged + counted on `[:stacks,:vision,:error]`,
-    and the result is still terminal for the reader via `IdentifyBookJob`'s
-    final-attempt wrapper — slower failure, never an eternal spinner.
+      Interpret a non-200 from the vision service. A body carrying a
+      `VisionError` is a determination about the input; anything else is a fault.
+      The catch-all cannot swallow quietly: a new `VisionErrorCode` fails the
+      build (`scripts/check-enum-coverage.py`), an unrecognised code (sidecar
+      deployed ahead of core) is logged + counted on `[:stacks,:vision,:error]`,
+      and the result is still terminal for the reader via `IdentifyBookJob`'s
+      final-attempt wrapper — slower failure, never an eternal spinner.
   """
   @spec from_http_error(non_neg_integer(), binary()) :: t()
   def from_http_error(status, body) when is_integer(status) and is_binary(body) do
@@ -131,7 +131,7 @@ defmodule Stacks.AI.VisionError do
   end
 
   @doc """
-    Interpret a transport-level failure (no usable answer arrived).
+      Interpret a transport-level failure (no usable answer arrived).
   """
   @spec from_transport(term()) :: t()
   def from_transport(reason), do: emit(:transport, {:transport, reason})

@@ -1,12 +1,12 @@
 defmodule Stacks.DataCorrection.StaleSeedEditionIsbn do
   @moduledoc """
-    Re-syncs three seeded editions to the ISBN `seeds.exs` now declares. A wrong EAN-13 check digit means one of thirteen digits is wrong
-    and the row cannot say which — recomputing the digit would mint a valid
-    ISBN naming some OTHER book: fabrication, not repair. These three are
-    repairable only because provenance is not in doubt (deterministic seed
-    UUIDs, the seed's `jan_01` timestamp, no provider ids) and `seeds.exs`
-    declares the intended value. Plan matches id AND stale ISBN, so a row
-    that drifts is refused.
+      Re-syncs three seeded editions to the ISBN `seeds.exs` now declares. A wrong EAN-13 check digit means one of thirteen digits is wrong
+      and the row cannot say which — recomputing the digit would mint a valid
+      ISBN naming some OTHER book: fabrication, not repair. These three are
+      repairable only because provenance is not in doubt (deterministic seed
+      UUIDs, the seed's `jan_01` timestamp, no provider ids) and `seeds.exs`
+      declares the intended value. Plan matches id AND stale ISBN, so a row
+      that drifts is refused.
   """
 
   @behaviour Stacks.DataCorrection

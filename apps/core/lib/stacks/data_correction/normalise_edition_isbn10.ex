@@ -1,12 +1,12 @@
 defmodule Stacks.DataCorrection.NormaliseEditionIsbn10 do
   @moduledoc """
-    Rewrites editions still holding an ISBN-10 into the ISBN-13 the column
-    has always meant. The changeset has normalised on write only since
-    2026-05-15; older rows kept whatever form the caller supplied, invisible
-    because 13-form lookups simply return nothing. Conversion is arithmetic
-    (`ISBN.canonical_isbn13/1` — the same function `find_existing/1`
-    compares with, so repaired rows become findable). Plan selects only
-    checksum-valid ISBN-10s; anything else is left for a human.
+      Rewrites editions still holding an ISBN-10 into the ISBN-13 the column
+      has always meant. The changeset has normalised on write only since
+      2026-05-15; older rows kept whatever form the caller supplied, invisible
+      because 13-form lookups simply return nothing. Conversion is arithmetic
+      (`ISBN.canonical_isbn13/1` — the same function `find_existing/1`
+      compares with, so repaired rows become findable). Plan selects only
+      checksum-valid ISBN-10s; anything else is left for a human.
   """
 
   @behaviour Stacks.DataCorrection

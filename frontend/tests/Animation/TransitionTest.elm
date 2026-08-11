@@ -151,7 +151,7 @@ transitionClassSuite =
                 \_ ->
                     transitionClass Library Search
                         |> Expect.equal RoomTransition.fadeThroughDarkIn
-            , test "BookDetail is an overlay (ADR-005), never a UrlChanged route, so it fades" <|
+            , test "BookDetail is an overlay, never a UrlChanged route, so it fades" <|
                 \_ ->
                     transitionClass Library (BookDetail "book-1")
                         |> Expect.equal RoomTransition.fadeThroughDarkIn

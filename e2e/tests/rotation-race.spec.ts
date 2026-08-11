@@ -4,7 +4,7 @@ const DEV_EMAIL = "owner@thestacks.app";
 const DEV_PASSWORD = "dev-password-123";
 
 /**
- * Issue #180 Phase 2 — cross-tab token-rotation race.
+ * Phase 2 — cross-tab token-rotation race.
  *
  * Two tabs (pages) in ONE browser context share the same localStorage, so a
  * `stacks-auth` write in one tab fires a `storage` event in the other. This

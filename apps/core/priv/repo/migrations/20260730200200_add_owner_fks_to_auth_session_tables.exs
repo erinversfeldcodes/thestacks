@@ -1,12 +1,12 @@
 defmodule Core.Repo.Migrations.AddOwnerFksToAuthSessionTables do
   @moduledoc """
-    Adds the two FKs GDPR erasure was compensating for in application code: `auth_token_families.user_id` and `guardian_tokens.sub` named
-    users with no FK, so `repo.delete(user)` left live session state behind
-    and only the hand-rolled `:revoke_sessions` step cleaned it. Now the
-    database owns it — any delete path takes the sessions along.
-    `guardian_tokens` needs a generated uuid column over `sub` (guardian_db
-    owns that column's text type); added `NOT VALID`, validated in
-    `20260730200350`.
+      Adds the two FKs GDPR erasure was compensating for in application code: `auth_token_families.user_id` and `guardian_tokens.sub` named
+      users with no FK, so `repo.delete(user)` left live session state behind
+      and only the hand-rolled `:revoke_sessions` step cleaned it. Now the
+      database owns it — any delete path takes the sessions along.
+      `guardian_tokens` needs a generated uuid column over `sub` (guardian_db
+      owns that column's text type); added `NOT VALID`, validated in
+      `20260730200350`.
   """
   use Ecto.Migration
 

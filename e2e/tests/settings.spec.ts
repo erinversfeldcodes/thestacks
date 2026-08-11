@@ -12,7 +12,7 @@ test.use({ storageState: suiteAuthFile("settings") });
 
 /**
  * The password path hashes with Argon2, serialised through a bounded NimblePool
- * (Issue #166, shipped: apps/core/lib/stacks/accounts/argon_pool.ex). Under
+ * (, shipped: apps/core/lib/stacks/accounts/argon_pool.ex). Under
  * saturation the API now returns 503 + Retry-After: 5 — NOT the old preview-VM
  * OOM 502 that a `test.skip(status === 502)` guard used to swallow (a guard that
  * made the test unable to fail). Honour the shipped back-pressure contract
@@ -145,7 +145,7 @@ test.describe("Settings — Privacy & Consent", () => {
 });
 
 /**
- * API-level auth guards for the GDPR endpoints (Issue #121, Phase 5).
+ * API-level auth guards for the GDPR endpoints (, Phase 5).
  *
  * These run against the real server via fetch() inside page.evaluate() with NO
  * Authorization header. All three routes live under the `:authenticated`
@@ -185,7 +185,7 @@ test.describe("GDPR — auth guards", () => {
 });
 
 /**
- * API-level smoke tests for settings endpoints added in Issue #048.
+ * API-level smoke tests for settings endpoints added in.
  * These run against the real server via fetch() inside page.evaluate()
  * so they are independent of whether the Elm settings pages are built.
  */
@@ -375,7 +375,7 @@ test.describe("Settings — Profile & Account API", () => {
  * Password-change happy path — ISOLATED from the shared suite token.
  *
  * A SUCCESSFUL password change calls Accounts.revoke_all_user_sessions/1
- * (Issue #178/#179/#180 — correct security behaviour: changing your password
+ * (— correct security behaviour: changing your password
  * invalidates every existing session). If this test used the shared
  * `suiteAuthFile("settings")` token, that revocation would destroy the token
  * for EVERY other settings test. Under `fullyParallel: true` the tests race, so
@@ -447,7 +447,7 @@ async function dismissOnboarding(page: Page): Promise<void> {
 }
 
 /**
- * Settings hub layout + sidebar navigation (US-17.1.1, auth-guard punch #2).
+ * Settings hub layout + sidebar navigation.
  * Uses the shared seeded `settings` suite user — it carries placements, so no
  * onboarding overlay intervenes (unlike the minted users the mutating flows
  * below rely on). These tests are read-only navigation; they mutate nothing.
@@ -529,7 +529,7 @@ test.describe("Settings — Hub layout & navigation", () => {
 });
 
 /**
- * Auth guard (US-17.1.1, punch #2). Every settings route requires auth
+ * Auth guard. Every settings route requires auth
  * (Main.elm `requiresAuth _ -> True`); initPage returns the Login page when
  * there is no session, WITHOUT changing the URL. Anonymous context, no token.
  */
@@ -551,7 +551,7 @@ test.describe("Settings — Auth guard (UI)", () => {
 });
 
 /**
- * Profile UI flow (US-17.2.1) — including the CG-1 payoff: email changes work
+ * Profile UI flow — including the CG-1 payoff: email changes work
  * from the UI. Each test mints its OWN fresh user (isolated: an email change
  * mutates the account, so it must never touch the shared suite user, whose login
  * identity later runs depend on).
@@ -593,7 +593,7 @@ test.describe("Settings — Profile UI flow", () => {
 });
 
 /**
- * Location UI flow (US-17.2.2). Minted user; a location save mutates only this
+ * Location UI flow. Minted user; a location save mutates only this
  * throwaway account.
  */
 test.describe("Settings — Location UI flow", () => {
@@ -618,8 +618,8 @@ test.describe("Settings — Location UI flow", () => {
 });
 
 /**
- * Password UI flow (US-17.2.3). Minted user. A SUCCESSFUL change revokes all of
- * the user's sessions (#178/#179), so it is the LAST action in its test.
+ * Password UI flow. Minted user. A SUCCESSFUL change revokes all of
+ * the user's sessions, so it is the LAST action in its test.
  */
 test.describe("Settings — Password UI flow", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
@@ -707,7 +707,7 @@ test.describe("Settings — Password UI flow", () => {
 });
 
 /**
- * Notifications UI flow (US-17.3.1) — the CG-2 payoff. A freshly minted user's
+ * Notifications UI flow — the CG-2 payoff. A freshly minted user's
  * stored defaults are notify_marketplace=true and notify_group_invitations=true
  * (others false), so the toggles must HYDRATE from the server, not render an
  * all-off default: New Reviews (→notify_marketplace) and Author Updates

@@ -1,15 +1,15 @@
 defmodule Stacks.Workers.GeocodeBookstoresJobTest do
   @moduledoc """
-    Guards the bookshop geocoding backfill, and specifically its **throttle**.
+      Guards the bookshop geocoding backfill, and specifically its **throttle**.
 
-    This job is the batch entry point whose *absence* `Stacks.Geocoding.Nominatim` previously
-    cited as the structural guarantee that Nominatim's ~1 req/sec usage policy was honoured.
-    Adding it means the guarantee has to be asserted instead of assumed — otherwise the policy
-    is protected by a comment.
+      This job is the batch entry point whose *absence* `Stacks.Geocoding.Nominatim` previously
+      cited as the structural guarantee that Nominatim's ~1 req/sec usage policy was honoured.
+      Adding it means the guarantee has to be asserted instead of assumed — otherwise the policy
+      is protected by a comment.
 
-    The tests override the delay to 0 so the suite stays usable, and assert the **documented
-    default** separately. That way lowering the real throttle is a visible, test-breaking act
-    rather than a silent one.
+      The tests override the delay to 0 so the suite stays usable, and assert the **documented
+      default** separately. That way lowering the real throttle is a visible, test-breaking act
+      rather than a silent one.
   """
 
   use Core.DataCase, async: false

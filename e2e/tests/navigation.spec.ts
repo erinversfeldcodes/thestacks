@@ -3,7 +3,7 @@ import { suiteAuthFile } from "./helpers";
 
 /**
  * Open a top-level nav disclosure (Bookshelves / Marketplace / Admin) by its
- * label (#318 TR-1). The Wave 8 nav replaced the CSS `:hover`/`:focus-within`
+ * label. The Wave 8 nav replaced the CSS `:hover`/`:focus-within`
  * reveal — which was unreachable by touch — with a real
  * `<button class="app-nav__disclosure" aria-haspopup aria-expanded>` whose menu
  * is in the DOM ONLY once it is clicked open. Idempotent: a navigation does NOT
@@ -293,7 +293,7 @@ test.describe("Marketplace dropdown — authenticated", () => {
     await page.goto("/library");
     await page.waitForSelector(".app-nav__link", { timeout: 10000 });
 
-    // The Marketplace primary is a disclosure BUTTON now (#318 TR-1) — clicked
+    // The Marketplace primary is a disclosure BUTTON now — clicked
     // open, not hovered; its sub-links are absent from the DOM until then.
     await openNavDisclosure(page, "Marketplace");
 

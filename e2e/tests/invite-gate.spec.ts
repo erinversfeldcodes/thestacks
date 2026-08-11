@@ -3,7 +3,7 @@ import type { APIRequestContext } from "@playwright/test";
 import { ownerAdminToken, uniqueEmail } from "./helpers";
 
 /**
- * The closed-beta gate itself (US-14.1.3), driven against the real stack with
+ * The closed-beta gate itself, driven against the real stack with
  * INVITE_ONLY_REGISTRATION=true — the launch posture. register.spec.ts covers
  * registration once the door is open; this file covers the DOOR: uninvited
  * refusal, the code lifecycle, revocation, and single use.

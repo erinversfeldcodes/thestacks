@@ -772,7 +772,6 @@ defmodule Stacks.BooksTest do
       :verification_source
     ]
 
-    @tag stories: ["US-1.1.5"]
     test "the confirmed path writes every edition column the direct path writes (Google Books)" do
       confirmed_isbn = "9780451524935"
 
@@ -825,7 +824,6 @@ defmodule Stacks.BooksTest do
       refute is_nil(confirmed.author_id)
     end
 
-    @tag stories: ["US-1.1.5"]
     test "the confirmed path writes every edition column the direct path writes (Open Library)" do
       confirmed_isbn = "9780451524935"
 
@@ -869,7 +867,6 @@ defmodule Stacks.BooksTest do
       end
     end
 
-    @tag stories: ["US-1.1.5"]
     test "the confirmed path keeps the google_books_id the resolver returned" do
       isbn = "9780451524935"
       MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
@@ -882,7 +879,6 @@ defmodule Stacks.BooksTest do
              "the resolver returned a Google Books id and the create transaction dropped it"
     end
 
-    @tag stories: ["US-1.1.5"]
     test "verification_source is google_books when Google Books answered the confirm" do
       isbn = "9780451524935"
       MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
@@ -893,7 +889,6 @@ defmodule Stacks.BooksTest do
       assert hd(book.editions).verification_source == "google_books"
     end
 
-    @tag stories: ["US-1.1.5"]
     test "verification_source is open_library when Open Library answered the confirm" do
       isbn = "9780743273565"
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
@@ -1029,7 +1024,6 @@ defmodule Stacks.BooksTest do
       assert event_count("books.edition_merged") == before_count + 1
     end
 
-    @tag stories: ["US-1.1.8"]
     test "keeps the metadata it just resolved instead of discarding it" do
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
       merged_isbn = "9780316769174"
@@ -1062,7 +1056,6 @@ defmodule Stacks.BooksTest do
       assert edition.verification_source == "open_library"
     end
 
-    @tag stories: ["US-1.1.8"]
     test "the caller's format_label wins; the rest of the row comes from the resolver" do
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
 
@@ -1087,7 +1080,7 @@ defmodule Stacks.BooksTest do
              "a caller-supplied google_books_id reached the row — that column records provenance"
     end
 
-    @tag stories: ["US-1.1.8"], suite: :events
+    @tag suite: :events
     test "books.edition_merged event aggregate_id matches the new edition's id" do
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
 

@@ -1,9 +1,9 @@
 defmodule Stacks.Books.HttpClientBehaviour do
   @moduledoc """
-    Behaviour for the Books HTTP client — allows test mocking via Application env
-    (`:isbn_http_client`). Covers ISBN-resolver JSON fetches (`get/1`) and the
-    cover-image binary fetch (`get_binary/1`, a). Reusing one seam keeps every
-    outbound Books request mockable through a single config key.
+      Behaviour for the Books HTTP client — allows test mocking via Application env
+      (`:isbn_http_client`). Covers ISBN-resolver JSON fetches (`get/1`) and the
+      cover-image binary fetch (`get_binary/1`, a). Reusing one seam keeps every
+      outbound Books request mockable through a single config key.
   """
 
   @typedoc """
@@ -20,10 +20,10 @@ defmodule Stacks.Books.HttpClientBehaviour do
   @callback get(url :: String.t()) :: {:ok, map()} | {:error, error_reason()}
 
   @doc """
-    Fetches raw bytes (a cover image), rather than decoding JSON (a). Same
-    closed error set as `get/1`. Seamed so `Books.download_cover/1` cannot dial a
-    third party during tests — the assertion there was previously green only
-    because a real request to `example.com` happened to return non-200.
+      Fetches raw bytes (a cover image), rather than decoding JSON (a). Same
+      closed error set as `get/1`. Seamed so `Books.download_cover/1` cannot dial a
+      third party during tests — the assertion there was previously green only
+      because a real request to `example.com` happened to return non-200.
   """
   @callback get_binary(url :: String.t()) :: {:ok, binary()} | {:error, error_reason()}
 end

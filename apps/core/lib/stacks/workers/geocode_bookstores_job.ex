@@ -1,16 +1,16 @@
 defmodule Stacks.Workers.GeocodeBookstoresJob do
   @moduledoc """
-    Fills in coordinates for bookshops that have none. rule
-    needs coordinates on BOTH sides; `op.bookstores` gained lat/lng columns
-    that nothing populated, so the nearest-bookshop scan always returned
-    `[]` — every unit test passed (each seeded its own coordinates); the
-    zero-row sweep found it.
+      Fills in coordinates for bookshops that have none. rule
+      needs coordinates on BOTH sides; `op.bookstores` gained lat/lng columns
+      that nothing populated, so the nearest-bookshop scan always returned
+      `[]` — every unit test passed (each seeded its own coordinates); the
+      zero-row sweep found it.
 
-    ⚠️ The throttle is load-bearing: `Nominatim`'s policy (~1 req/s) was
-    previously honoured by the ABSENCE of a batch entry point. This module
-    is that entry point, so it sleeps `@throttle_ms` between geocodes and
-    processes a bounded batch per run — remove either and the policy
-    guarantee is gone. Failures leave coordinates nil for the next run.
+      ⚠️ The throttle is load-bearing: `Nominatim`'s policy (~1 req/s) was
+      previously honoured by the ABSENCE of a batch entry point. This module
+      is that entry point, so it sleeps `@throttle_ms` between geocodes and
+      processes a bounded batch per run — remove either and the policy
+      guarantee is gone. Failures leave coordinates nil for the next run.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

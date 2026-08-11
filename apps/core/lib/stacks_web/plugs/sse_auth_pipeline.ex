@@ -1,13 +1,13 @@
 defmodule StacksWeb.Plugs.SSEAuthPipeline do
   @moduledoc """
-    Guardian authentication plug for SSE endpoints.
+      Guardian authentication plug for SSE endpoints.
 
-    Reads JWT from the `?token=` query parameter instead of the `Authorization`
-    header, since browser `EventSource` API cannot set custom request headers.
+      Reads JWT from the `?token=` query parameter instead of the `Authorization`
+      header, since browser `EventSource` API cannot set custom request headers.
 
-    Security tradeoff: tokens in query parameters appear in server access logs
-    and browser history. Mitigations: tokens are short-lived (Guardian TTL applies),
-    and the SSE endpoint is read-only (no state mutation on auth alone).
+      Security tradeoff: tokens in query parameters appear in server access logs
+      and browser history. Mitigations: tokens are short-lived (Guardian TTL applies),
+      and the SSE endpoint is read-only (no state mutation on auth alone).
   """
 
   import Plug.Conn

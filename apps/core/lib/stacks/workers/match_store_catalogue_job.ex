@@ -1,13 +1,13 @@
 defmodule Stacks.Workers.MatchStoreCatalogueJob do
   @moduledoc """
-    Prices books at the no-ISBN shops (Ike's Books, Love Books) by title
-    matching: `StoreMatcher` matches the shop's titles against our editions
-    and each match is spent immediately on a price fetch. No pointer table —
-    a persisted match would be a third thing to keep fresh (re-slugging,
-    catalogue changes, threshold retuning) for only two shops whose prices
-    carry a TTL anyway; persist when a third shop appears. A separate job
-    because the title sweep waits minutes on the shop's rate limit and must
-    not sit inside the ordinary scrape path.
+      Prices books at the no-ISBN shops (Ike's Books, Love Books) by title
+      matching: `StoreMatcher` matches the shop's titles against our editions
+      and each match is spent immediately on a price fetch. No pointer table —
+      a persisted match would be a third thing to keep fresh (re-slugging,
+      catalogue changes, threshold retuning) for only two shops whose prices
+      carry a TTL anyway; persist when a third shop appears. A separate job
+      because the title sweep waits minutes on the shop's rate limit and must
+      not sit inside the ordinary scrape path.
   """
 
   use Oban.Worker, queue: :scraper, max_attempts: 2

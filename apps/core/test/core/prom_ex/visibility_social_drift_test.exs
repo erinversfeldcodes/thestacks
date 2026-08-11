@@ -1,10 +1,10 @@
 defmodule Core.PromEx.VisibilitySocialDriftTest do
   @moduledoc """
-    Drift guard for the visibility/social/ViewAs dashboard-as-code (236,; grafana/visibility_social.json):
-    panels may only query metric families registered by
-    `Core.PromEx.Plugins.Stacks`, and every registered 236 visibility/social family must have
-    a panel. Either direction of drift — a renamed metric silently blanking
-    a panel, or a new family shipping invisible — fails CI.
+      Drift guard for the visibility/social/ViewAs dashboard-as-code (236,; grafana/visibility_social.json):
+      panels may only query metric families registered by
+      `Core.PromEx.Plugins.Stacks`, and every registered 236 visibility/social family must have
+      a panel. Either direction of drift — a renamed metric silently blanking
+      a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true

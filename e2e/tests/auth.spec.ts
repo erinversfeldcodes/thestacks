@@ -96,7 +96,7 @@ test.describe("Owner-only admin navigation", () => {
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
 
-    // Admin is a disclosure BUTTON now (#318 TR-1), not a hover-revealed
+    // Admin is a disclosure BUTTON now, not a hover-revealed
     // dropdown link: a real <button class="app-nav__disclosure" aria-haspopup>
     // whose Sources/Scrapers/… sub-links are absent from the DOM until it is
     // clicked open. The CSS :hover reveal is gone (it was unreachable on touch).
@@ -198,7 +198,7 @@ test.describe("Unauthenticated access to protected pages", () => {
 });
 
 /**
- * Issue #359 — the credential must land regardless of the door animation.
+ * — the credential must land regardless of the door animation.
  *
  * The defect these two tests exist for: the app persisted the auth token only
  * when the browser reported the WAAPI door animation finished. That report comes
@@ -248,7 +248,7 @@ test.describe("Unauthenticated access to protected pages", () => {
  *      fires, which reproduces the other half of the live evidence (frozen
  *      transitions, zero completed animations).
  *
- * Under the pre-#359 code both hang until timeout: the token is never written.
+ * Under the pre-code both hang until timeout: the token is never written.
  */
 test.describe("Login is not downstream of the door animation", () => {
   /** Poll localStorage until the auth token appears; return how long it took. */
@@ -370,19 +370,19 @@ test.describe("Login is not downstream of the door animation", () => {
 });
 
 /**
- * Issue #364 — the login door dolly-shot plays again, driven from the shell.
+ * — the login door dolly-shot plays again, driven from the shell.
  *
- * #359 moved the credential off the animation frame by navigating away from the
+ * moved the credential off the animation frame by navigating away from the
  * login scene on the update that decoded the 200 — which unmounted the door
  * before the port's `requestAnimationFrame` callback could animate it. Measured
- * live 2026-07-31: `animationsStarted=0`. #364 renders the door scene layers
+ * live 2026-07-31: `animationsStarted=0`. renders the door scene layers
  * from the SHELL while `AuthState` is `Arriving`, over the destination page, so
  * the ids the port targets are on screen again — without moving the credential
  * back behind the animation.
  *
- * A literal occluded-window drive is NOT achievable under Playwright — #359
+ * A literal occluded-window drive is NOT achievable under Playwright —
  * measured that across three launch modes x two page-open methods: the page
- * always reports `"visible"` and rAF keeps firing. So these reuse #359's
+ * always reports `"visible"` and rAF keeps firing. So these reuse
  * technique rather than rediscovering it: instrument WAAPI to count the door's
  * own animations, and for the counterfactual freeze the real timeline at the
  * browser level (CDP `Animation.setPlaybackRate: 0`), asserting the stall took
@@ -440,7 +440,7 @@ test.describe("The arrival door plays from the shell", () => {
   /**
    * Does a freshly-started animation refuse to finish? Run before the frozen
    * test's real assertions so a harness that quietly stops stalling animations
-   * FAILS rather than passes for the wrong reason (the #359 pattern).
+   * FAILS rather than passes for the wrong reason (the pattern).
    */
   async function stallProof(page): Promise<boolean> {
     return page.evaluate(() => {

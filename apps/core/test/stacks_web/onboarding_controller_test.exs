@@ -1,9 +1,9 @@
 defmodule StacksWeb.OnboardingControllerTest do
   @moduledoc """
-    Tests for:
-    - GET  /api/onboarding/status
-    - PUT  /api/onboarding/step/:step
-    - POST /api/onboarding/reset
+      Tests for:
+      - GET  /api/onboarding/status
+      - PUT  /api/onboarding/step/:step
+      - POST /api/onboarding/reset
   """
 
   use CoreWeb.ConnCase, async: true

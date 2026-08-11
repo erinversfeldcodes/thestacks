@@ -1,10 +1,10 @@
 defmodule StacksWeb.Plugs.ConsentCheck do
   @moduledoc """
-    Plug that halts with 403 if the current user has not granted consent
-    for the specified feature. Defaults to checking analytics consent.
+      Plug that halts with 403 if the current user has not granted consent
+      for the specified feature. Defaults to checking analytics consent.
 
-    Usage:
-      plug StacksWeb.Plugs.ConsentCheck, feature: "analytics"
+      Usage:
+        plug StacksWeb.Plugs.ConsentCheck, feature: "analytics"
   """
 
   import Plug.Conn

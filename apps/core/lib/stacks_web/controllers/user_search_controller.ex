@@ -1,14 +1,14 @@
 defmodule StacksWeb.UserSearchController do
   @moduledoc """
-    People search for the discovery surface.
+      People search for the discovery surface.
 
-    `GET /api/search/users?q=<term>` runs under `:optional_auth`. Results are the
-    redacted `public_profile_summary` shape (handle + display_name + location) —
-    never email, consent, or role.
+      `GET /api/search/users?q=<term>` runs under `:optional_auth`. Results are the
+      redacted `public_profile_summary` shape (handle + display_name + location) —
+      never email, consent, or role.
 
-    The discoverability privacy rule (platform-only, block-excluded in both
-    directions) is enforced **in SQL** by `Accounts.search_users/2`, never by
-    redacting here — a ghost or blocked user never enters the result set.
+      The discoverability privacy rule (platform-only, block-excluded in both
+      directions) is enforced **in SQL** by `Accounts.search_users/2`, never by
+      redacting here — a ghost or blocked user never enters the result set.
   """
   use CoreWeb, :controller
 

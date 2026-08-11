@@ -1,11 +1,11 @@
 defmodule Core.PromExCustomMetricsTest do
   @moduledoc """
-    Regression for 139: custom `stacks_*` telemetry must be exported via
-    PromEx so the SLO gate sees real values at `/internal/metrics`. The
-    parser expects exactly `stacks_upload_terminal_count_total`,
-    `stacks_router_dispatch_stop_duration_milliseconds_{bucket,sum,count}`
-    and `stacks_fuse_state_state` — fires each event and asserts the family
-    appears in the exposition.
+      Regression for 139: custom `stacks_*` telemetry must be exported via
+      PromEx so the SLO gate sees real values at `/internal/metrics`. The
+      parser expects exactly `stacks_upload_terminal_count_total`,
+      `stacks_router_dispatch_stop_duration_milliseconds_{bucket,sum,count}`
+      and `stacks_fuse_state_state` — fires each event and asserts the family
+      appears in the exposition.
   """
 
   use ExUnit.Case, async: false

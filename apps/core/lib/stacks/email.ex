@@ -1,10 +1,10 @@
 defmodule Stacks.Email do
   @moduledoc """
-    Email context — handles transactional email flows for registration confirmation,
-    password reset, and other notification types.
+      Email context — handles transactional email flows for registration confirmation,
+      password reset, and other notification types.
 
-    Emails are never sent synchronously; they are enqueued as Oban jobs in the
-    `notifications` queue and delivered by `Stacks.Workers.EmailDeliveryJob`.
+      Emails are never sent synchronously; they are enqueued as Oban jobs in the
+      `notifications` queue and delivered by `Stacks.Workers.EmailDeliveryJob`.
   """
 
   import Ecto.Query, warn: false
@@ -18,12 +18,12 @@ defmodule Stacks.Email do
   @global_hourly_limit 100
 
   @doc """
-    Generates a signed email confirmation token, stores it on the user, and
-    enqueues a registration confirmation email.
+      Generates a signed email confirmation token, stores it on the user, and
+      enqueues a registration confirmation email.
 
-    Rate limit is checked before any DB writes. Token storage and job enqueue
-    are wrapped in a single transaction — if the job insert fails, the token
-    write is rolled back too.
+      Rate limit is checked before any DB writes. Token storage and job enqueue
+      are wrapped in a single transaction — if the job insert fails, the token
+      write is rolled back too.
   """
   @spec send_registration_confirmation(User.t()) :: {:ok, User.t()} | {:error, term()}
   def send_registration_confirmation(user) do
@@ -46,8 +46,8 @@ defmodule Stacks.Email do
   end
 
   @doc """
-    Looks up a user by email and enqueues a password reset email.
-    Always returns `:ok` — no enumeration of registered email addresses.
+      Looks up a user by email and enqueues a password reset email.
+      Always returns `:ok` — no enumeration of registered email addresses.
   """
   @spec send_password_reset(String.t()) :: :ok
   def send_password_reset(email) do
@@ -57,8 +57,8 @@ defmodule Stacks.Email do
   end
 
   @doc """
-    Verifies the email confirmation token and marks the user as confirmed.
-    Returns `{:ok, user}` or `{:error,:invalid}`.
+      Verifies the email confirmation token and marks the user as confirmed.
+      Returns `{:ok, user}` or `{:error,:invalid}`.
   """
   @spec confirm_email(String.t()) :: {:ok, User.t()} | {:error, :invalid}
   def confirm_email(token) do
@@ -73,13 +73,13 @@ defmodule Stacks.Email do
   end
 
   @doc """
-    Issues a FRESH confirmation link and enqueues the email. Always returns
-    `:ok` (anti-enumeration — see `AuthController.resend_confirmation/2`).
-    Nothing happens when: no such account, already confirmed, or past
-    `unverified_account_max_lifetime_seconds/0` (renewal has a ceiling; see
-    `confirmation_resendable?/1`). Otherwise a NEW token is signed and
-    stored — re-signing is what makes the affordance safe: the fresh
-    `signed_at` buys a full TTL, and the reaper honours it.
+      Issues a FRESH confirmation link and enqueues the email. Always returns
+      `:ok` (anti-enumeration — see `AuthController.resend_confirmation/2`).
+      Nothing happens when: no such account, already confirmed, or past
+      `unverified_account_max_lifetime_seconds/0` (renewal has a ceiling; see
+      `confirmation_resendable?/1`). Otherwise a NEW token is signed and
+      stored — re-signing is what makes the affordance safe: the fresh
+      `signed_at` buys a full TTL, and the reaper honours it.
   """
   @spec send_confirmation_resend(String.t()) :: :ok
   def send_confirmation_resend(email) do
@@ -91,8 +91,8 @@ defmodule Stacks.Email do
   end
 
   @doc """
-    Verifies the password reset token and updates the user's password.
-    Returns `{:ok, user}`, `{:error,:invalid}`, or `{:error,:expired}`.
+      Verifies the password reset token and updates the user's password.
+      Returns `{:ok, user}`, `{:error,:invalid}`, or `{:error,:expired}`.
   """
   @spec reset_password(String.t(), String.t()) ::
           {:ok, User.t()} | {:error, :invalid | :expired | Ecto.Changeset.t()}

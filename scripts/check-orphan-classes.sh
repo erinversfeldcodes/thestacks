@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-orphan-classes.sh — Elm class literals with no CSS rule behind them (Issue #301).
+# check-orphan-classes.sh — Elm class literals with no CSS rule behind them.
 #
 # WHY THIS EXISTS
 #
@@ -17,7 +17,7 @@
 # A class used in `frontend/src/**/*.elm` with no matching selector in main.css. EVERY orphan is a
 # defect now, and the budget sits at its floor of 0.
 #
-# ⚠️ There is NO test-hook exemption any more (#310), and its history is the argument for its absence.
+# ⚠️ There is NO test-hook exemption any more, and its history is the argument for its absence.
 # The gate once exempted a class "verified" as a test selector. That verification was a substring
 # match and handed out 14 bogus exemptions (`.success` was exempt because `successCopy` appears in a
 # test — while rendering unstyled in five Settings surfaces). Tightened to real selector syntax, it

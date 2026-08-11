@@ -1,11 +1,11 @@
 defmodule Core.Repo.Migrations.DowncaseUserEmails do
   @moduledoc """
-    Downcases every stored email so the case-insensitive unique index in
-    `20260730200500` has nothing to trip over. The old exact-match
-    index allowed two accounts on one address — and since
-    `get_user_by_email/1` downcases before matching, an account stored with
-    any upper-case character was unreachable by login. This repairs those;
-    the index stops new ones.
+      Downcases every stored email so the case-insensitive unique index in
+      `20260730200500` has nothing to trip over. The old exact-match
+      index allowed two accounts on one address — and since
+      `get_user_by_email/1` downcases before matching, an account stored with
+      any upper-case character was unreachable by login. This repairs those;
+      the index stops new ones.
   """
   use Ecto.Migration
 

@@ -1,11 +1,11 @@
 defmodule Stacks.Transparency.Prometheus do
   @moduledoc """
-    Read-only client for self-hosted VictoriaMetrics: one instant query
-    against `<base>/api/v1/query` (VM speaks the Prometheus API), returning
-    one scalar. `<base>` is the 6PN-internal URL, unreachable publicly, so
-    no token. Configured via `:metrics_query_url`; when unset (local/test)
-    returns `{:error,:not_configured}` and Transparency degrades to
-    `:unavailable` — never breaks boot. Only allowlist queries reach here.
+      Read-only client for self-hosted VictoriaMetrics: one instant query
+      against `<base>/api/v1/query` (VM speaks the Prometheus API), returning
+      one scalar. `<base>` is the 6PN-internal URL, unreachable publicly, so
+      no token. Configured via `:metrics_query_url`; when unset (local/test)
+      returns `{:error,:not_configured}` and Transparency degrades to
+      `:unavailable` — never breaks boot. Only allowlist queries reach here.
   """
 
   @behaviour Stacks.Transparency.PrometheusClient

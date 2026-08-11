@@ -1,15 +1,15 @@
 defmodule Stacks.Transparency.Cache do
   @moduledoc """
-    Short-TTL ETS cache for the transparency live signals.
+      Short-TTL ETS cache for the transparency live signals.
 
-    Public `/api/transparency/metrics` page-loads must not each fan out to Fly's
-    Prometheus. Successful live-signal computations are cached for a short TTL
-    (see `Stacks.Transparency`) so bursts of page-loads are served from memory;
-    errored computations are NOT cached, so the next request retries (with the
-    context serving the last good value stale-on-error where one exists).
+      Public `/api/transparency/metrics` page-loads must not each fan out to Fly's
+      Prometheus. Successful live-signal computations are cached for a short TTL
+      (see `Stacks.Transparency`) so bursts of page-loads are served from memory;
+      errored computations are NOT cached, so the next request retries (with the
+      context serving the last good value stale-on-error where one exists).
 
-    ETS+TTL wrapper rather than Cachex — Cachex is not a dependency; this mirrors
-    the pattern in `Stacks.Books.BookDetailCache`.
+      ETS+TTL wrapper rather than Cachex — Cachex is not a dependency; this mirrors
+      the pattern in `Stacks.Books.BookDetailCache`.
   """
 
   use GenServer
@@ -22,8 +22,8 @@ defmodule Stacks.Transparency.Cache do
   end
 
   @doc """
-    Fetch a cached value by key. Returns `{:ok, value}` when a fresh entry exists
-    (younger than `ttl_ms`), otherwise `:miss`.
+      Fetch a cached value by key. Returns `{:ok, value}` when a fresh entry exists
+      (younger than `ttl_ms`), otherwise `:miss`.
   """
   @spec get(term(), non_neg_integer()) :: {:ok, term()} | :miss
   def get(key, ttl_ms) do
@@ -36,9 +36,9 @@ defmodule Stacks.Transparency.Cache do
   end
 
   @doc """
-    Fetch the last cached value for `key` regardless of age. Used for
-    stale-on-error reads (serve the last good value when a fresh computation
-    fails). Returns `{:ok, value}` when any entry exists, otherwise `:miss`.
+      Fetch the last cached value for `key` regardless of age. Used for
+      stale-on-error reads (serve the last good value when a fresh computation
+      fails). Returns `{:ok, value}` when any entry exists, otherwise `:miss`.
   """
   @spec get_stale(term()) :: {:ok, term()} | :miss
   def get_stale(key) do

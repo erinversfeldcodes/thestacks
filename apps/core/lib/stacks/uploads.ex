@@ -1,14 +1,14 @@
 defmodule Stacks.Uploads do
   @moduledoc """
-    The uploaded-image lifecycle: `op.uploaded_images` from creation to a
-    terminal state (`awaiting_upload → pending → resolved | rejected`).
+      The uploaded-image lifecycle: `op.uploaded_images` from creation to a
+      terminal state (`awaiting_upload → pending → resolved | rejected`).
 
-    Boundary: this module owns the image ROW and its BYTES — minting,
-    proving the bytes landed, enqueueing identify, marking terminal. It does
-    NOT own the proto-generated `Stacks.Books.UploadedImage` schema, what the
-    pipeline decides (`IdentifyBookJob`/`Moderation`/`Books`), or
-    retention/erasure (`GDPR.ImageRetention` + FK cascade). Nothing here knows
-    what a book is.
+      Boundary: this module owns the image ROW and its BYTES — minting,
+      proving the bytes landed, enqueueing identify, marking terminal. It does
+      NOT own the proto-generated `Stacks.Books.UploadedImage` schema, what the
+      pipeline decides (`IdentifyBookJob`/`Moderation`/`Books`), or
+      retention/erasure (`GDPR.ImageRetention` + FK cascade). Nothing here knows
+      what a book is.
   """
 
   require Logger
@@ -38,13 +38,13 @@ defmodule Stacks.Uploads do
   @min_image_bytes 1_024
 
   @doc """
-    Reads an uploaded file, stores it in object storage, inserts an `UploadedImage`
-    record with the `storage_path` set, and returns the record.
+      Reads an uploaded file, stores it in object storage, inserts an `UploadedImage`
+      record with the `storage_path` set, and returns the record.
 
-    Returns `{:ok, uploaded_image}` or `{:error, reason}`.
+      Returns `{:ok, uploaded_image}` or `{:error, reason}`.
 
-    The storage key is persisted on the record so any machine can retrieve the
-    image via a presigned URL — no shared filesystem or base64 in job args needed.
+      The storage key is persisted on the record so any machine can retrieve the
+      image via a presigned URL — no shared filesystem or base64 in job args needed.
   """
   @spec store_upload(binary(), Plug.Upload.t()) ::
           {:ok, UploadedImage.t()} | {:error, term()}
@@ -71,10 +71,10 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-    Store raw image bytes for an upload initiated via `init_upload/2`.
+      Store raw image bytes for an upload initiated via `init_upload/2`.
 
-    Called by `UploadController.upload_data/2` when the browser PUTs file bytes
-    to the Phoenix-proxied upload endpoint. Returns `:ok` on success.
+      Called by `UploadController.upload_data/2` when the browser PUTs file bytes
+      to the Phoenix-proxied upload endpoint. Returns `:ok` on success.
   """
   @spec store_upload_bytes(binary(), binary()) :: :ok | {:error, term()}
   def store_upload_bytes(image_id, bytes) when is_binary(bytes) do
@@ -99,14 +99,14 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-    Init step of the presigned-URL flow: allocates `image_id`, reserves the
-    R2 key, inserts the row as `"awaiting_upload"`, returns a short-lived
-    presigned PUT URL. Bytes never touch Phoenix — the client PUTs straight to
-    R2, then calls `commit_upload/2`.
+      Init step of the presigned-URL flow: allocates `image_id`, reserves the
+      R2 key, inserts the row as `"awaiting_upload"`, returns a short-lived
+      presigned PUT URL. Bytes never touch Phoenix — the client PUTs straight to
+      R2, then calls `commit_upload/2`.
 
-    Options: `:content_type` (client MUST send the matching header on its PUT
-    or R2 rejects the signature) and `:ttl_seconds` (default 900).
-    `{:ok, %{image_id, upload_url, expires_in}}` or `{:error, reason}`.
+      Options: `:content_type` (client MUST send the matching header on its PUT
+      or R2 rejects the signature) and `:ttl_seconds` (default 900).
+      `{:ok, %{image_id, upload_url, expires_in}}` or `{:error, reason}`.
   """
   @spec init_upload(binary(), keyword()) ::
           {:ok, %{image_id: binary(), upload_url: String.t(), expires_in: pos_integer()}}
@@ -125,13 +125,13 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-    Commit step: HEAD-verifies the client's PUT actually landed (no vision
-    work against a missing object), flips the row to `"pending"`, enqueues
-    `IdentifyBookJob`. Errors: `:not_found` (no row / not owner),
-    `:not_yet_uploaded` (R2 HEAD 404 — racing or failed PUT),
-    `:already_committed` (idempotent, no re-enqueue), `:image_too_small`
-    (under `#{@min_image_bytes}` bytes → rejected via the pipeline's own
-    machinery so SSE reports it normally).
+      Commit step: HEAD-verifies the client's PUT actually landed (no vision
+      work against a missing object), flips the row to `"pending"`, enqueues
+      `IdentifyBookJob`. Errors: `:not_found` (no row / not owner),
+      `:not_yet_uploaded` (R2 HEAD 404 — racing or failed PUT),
+      `:already_committed` (idempotent, no re-enqueue), `:image_too_small`
+      (under `#{@min_image_bytes}` bytes → rejected via the pipeline's own
+      machinery so SSE reports it normally).
   """
   @spec commit_upload(binary(), binary()) ::
           {:ok, %{image_id: binary(), job_id: binary()}} | {:error, term()}
@@ -159,16 +159,16 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-    Marks an in-flight uploaded image (`awaiting_upload` or `pending`) as
-    rejected: sets the terminal row state, fires the upload-terminal
-    telemetry counter, notifies the SSE stream via PubSub, and emits the
-    `image.rejected` event.
+      Marks an in-flight uploaded image (`awaiting_upload` or `pending`) as
+      rejected: sets the terminal row state, fires the upload-terminal
+      telemetry counter, notifies the SSE stream via PubSub, and emits the
+      `image.rejected` event.
 
-    This is THE rejection path — `IdentifyBookJob` delegates here for
-    pipeline rejections, and `commit_upload/2` uses it for undersized
-    objects — so every rejection is observable the same way. Scoped to
-    in-flight statuses so a retry that re-enters after a successful
-    rejection cannot re-emit `[:stacks,:upload,:terminal]`.
+      This is THE rejection path — `IdentifyBookJob` delegates here for
+      pipeline rejections, and `commit_upload/2` uses it for undersized
+      objects — so every rejection is observable the same way. Scoped to
+      in-flight statuses so a retry that re-enters after a successful
+      rejection cannot re-emit `[:stacks,:upload,:terminal]`.
   """
   @spec reject_image(binary(), String.t()) :: :ok
   def reject_image(image_id, reason) do
@@ -251,16 +251,16 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-    The uploads this reader started and has not finished with: owned,
-    terminal (`resolved`/`rejected` — in-flight rows await the pipeline, not
-    the reader), not yet claimed by the 30-day sweep, and still actionable:
+      The uploads this reader started and has not finished with: owned,
+      terminal (`resolved`/`rejected` — in-flight rows await the pipeline, not
+      the reader), not yet claimed by the 30-day sweep, and still actionable:
 
-    * `resolved` with unshelved candidates → `:awaiting_confirmation`
-      (carrying exactly those candidates);
-    * `resolved` with every candidate already shelved → dropped (the work is
-      done; an inbox that keeps asking is a nag);
-    * `resolved` with none, or `rejected` → `:failed` — surfaced because a
-      rejection the reader never witnessed is lost work too.
+      * `resolved` with unshelved candidates → `:awaiting_confirmation`
+        (carrying exactly those candidates);
+      * `resolved` with every candidate already shelved → dropped (the work is
+        done; an inbox that keeps asking is a nag);
+      * `resolved` with none, or `rejected` → `:failed` — surfaced because a
+        rejection the reader never witnessed is lost work too.
   """
   @spec list_awaiting_attention(binary()) :: [map()]
   def list_awaiting_attention(user_id) when is_binary(user_id) do
@@ -324,12 +324,12 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-    Enqueues a vision-model identification job for an uploaded image.
+      Enqueues a vision-model identification job for an uploaded image.
 
-    The `storage_key` is included in the job args so the worker can fetch a
-    presigned URL at execution time — no base64 blob in the job payload.
+      The `storage_key` is included in the job args so the worker can fetch a
+      presigned URL at execution time — no base64 blob in the job payload.
 
-    Returns `{:ok, job}` immediately; the job resolves ISBN and creates the book asynchronously.
+      Returns `{:ok, job}` immediately; the job resolves ISBN and creates the book asynchronously.
   """
   @spec upload_and_identify(binary(), binary(), String.t()) ::
           {:ok, Oban.Job.t()} | {:error, term()}

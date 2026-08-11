@@ -1,14 +1,14 @@
 defmodule Stacks.GDPR.Deletion do
   @moduledoc """
-    GDPR right-to-erasure: deletes all of a user's operational data in one
-    `Ecto.Multi` transaction, then writes an audit record. `op.event_log`
-    rows are preserved (immutable stream) but the user's own rows have
-    `payload`/`metadata` scrubbed to `{}` in place — current emitters are
-    UUID-only, so this is a safety net for pre-121 legacy rows. Uploaded
-    images are erased both ways: R2 objects deleted, DB rows cascade.
-    A schema-guard test walks every table naming `user_id` and fails when a
-    new one is not covered here — free-text must be deleted/anonymised,
-    never just author-nulled.
+      GDPR right-to-erasure: deletes all of a user's operational data in one
+      `Ecto.Multi` transaction, then writes an audit record. `op.event_log`
+      rows are preserved (immutable stream) but the user's own rows have
+      `payload`/`metadata` scrubbed to `{}` in place — current emitters are
+      UUID-only, so this is a safety net for pre-121 legacy rows. Uploaded
+      images are erased both ways: R2 objects deleted, DB rows cascade.
+      A schema-guard test walks every table naming `user_id` and fails when a
+      new one is not covered here — free-text must be deleted/anonymised,
+      never just author-nulled.
   """
 
   # Ecto.Multi uses an opaque MapSet internally; dialyzer cannot resolve the
@@ -32,13 +32,13 @@ defmodule Stacks.GDPR.Deletion do
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
   @doc """
-    Previews what `delete_user_data/2` would erase for a user WITHOUT mutating
-    anything — the read-only counterpart used by the operator dry-run
-    (`Stacks.Release.gdpr_erase_user/1`).
+      Previews what `delete_user_data/2` would erase for a user WITHOUT mutating
+      anything — the read-only counterpart used by the operator dry-run
+      (`Stacks.Release.gdpr_erase_user/1`).
 
-    Returns `{:ok, counts}` with a per-target row count (using the exact same
-    scopes the erasure uses, so the preview cannot drift from the real thing), or
-    `{:error,:user_not_found}` if no user has that id.
+      Returns `{:ok, counts}` with a per-target row count (using the exact same
+      scopes the erasure uses, so the preview cannot drift from the real thing), or
+      `{:error,:user_not_found}` if no user has that id.
   """
   @spec preview_user_data(binary()) :: {:ok, map()} | {:error, :user_not_found}
   def preview_user_data(user_id) do
@@ -97,13 +97,13 @@ defmodule Stacks.GDPR.Deletion do
   end
 
   @doc """
-    Deletes all operational data for a user.
+      Deletes all operational data for a user.
 
-    `opts` may carry `:reason` (operator justification — recorded, encrypted, in
-    the `user.data_deleted` audit row's metadata; do NOT put the data subject's
-    personal data in it) and `:actor` (who initiated the erasure).
+      `opts` may carry `:reason` (operator justification — recorded, encrypted, in
+      the `user.data_deleted` audit row's metadata; do NOT put the data subject's
+      personal data in it) and `:actor` (who initiated the erasure).
 
-    Returns `{:ok, map}` on success.
+      Returns `{:ok, map}` on success.
   """
   @spec delete_user_data(binary(), keyword()) :: {:ok, map()} | {:error, atom(), term(), map()}
   def delete_user_data(user_id, opts \\ []) do

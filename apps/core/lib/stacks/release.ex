@@ -1,13 +1,13 @@
 defmodule Stacks.Release do
   @moduledoc """
-    Release tasks, run via the compiled binary:
+      Release tasks, run via the compiled binary:
 
-        /app/bin/core eval 'Stacks.Release.migrate'
-        /app/bin/core rpc  'Stacks.Release.seed_live'
+          /app/bin/core eval 'Stacks.Release.migrate'
+          /app/bin/core rpc  'Stacks.Release.seed_live'
 
-    `seed/0` is gated behind `ALLOW_SEEDS=true`; `seed_live/0` is prod-guarded by
-    `STACKS_E2E_TEST_HELPERS`. Prefer `rpc` on the 512MB preview VM — `eval`
-    spawns a second BEAM and OOMs it.
+      `seed/0` is gated behind `ALLOW_SEEDS=true`; `seed_live/0` is prod-guarded by
+      `STACKS_E2E_TEST_HELPERS`. Prefer `rpc` on the 512MB preview VM — `eval`
+      spawns a second BEAM and OOMs it.
   """
 
   alias Core.Repo
@@ -27,10 +27,10 @@ defmodule Stacks.Release do
   end
 
   @doc """
-    The deploy entry point (`release_command` in fly.core.toml): corrections,
-    migrate, corrections again. Order matters — a migration adding a constraint
-    is a claim about existing data, so repairs run before it; the second sweep
-    covers corrections whose target column the migration just added.
+      The deploy entry point (`release_command` in fly.core.toml): corrections,
+      migrate, corrections again. Order matters — a migration adding a constraint
+      is a claim about existing data, so repairs run before it; the second sweep
+      covers corrections whose target column the migration just added.
   """
   @spec deploy() :: :ok
   def deploy do
@@ -44,9 +44,9 @@ defmodule Stacks.Release do
   end
 
   @doc """
-    Runs the registered data corrections. Dry-run by default (prints, writes
-    nothing); pass `apply: true` to write. Release-side twin of
-    `mix stacks.data.correct`.
+      Runs the registered data corrections. Dry-run by default (prints, writes
+      nothing); pass `apply: true` to write. Release-side twin of
+      `mix stacks.data.correct`.
   """
   @spec correct_data(keyword()) :: :ok
   def correct_data(opts \\ []) do
@@ -74,9 +74,9 @@ defmodule Stacks.Release do
   end
 
   @doc """
-    Prints applied migration versions (`APPLIED_VERSION <v>` lines) for
-    deploy-stack.sh's integrity guard, which fails the deploy if the repo holds
-    a migration the DB never ran — catching a false "already up".
+      Prints applied migration versions (`APPLIED_VERSION <v>` lines) for
+      deploy-stack.sh's integrity guard, which fails the deploy if the repo holds
+      a migration the DB never ran — catching a false "already up".
   """
   def print_applied_versions do
     load_app()
@@ -105,10 +105,10 @@ defmodule Stacks.Release do
   end
 
   @doc """
-    Seeds dev/preview fixtures INSIDE the running node — invoke via
-    `bin/core rpc`, never `eval` (a second BEAM OOMs the 512MB preview VM).
-    Prod-guarded by `STACKS_E2E_TEST_HELPERS`; assumes app + repos already
-    started.
+      Seeds dev/preview fixtures INSIDE the running node — invoke via
+      `bin/core rpc`, never `eval` (a second BEAM OOMs the 512MB preview VM).
+      Prod-guarded by `STACKS_E2E_TEST_HELPERS`; assumes app + repos already
+      started.
   """
   @spec seed_live() :: term()
   def seed_live do
@@ -116,10 +116,10 @@ defmodule Stacks.Release do
   end
 
   @doc """
-    Operator-run GDPR erasure for ONE user, by `user_id` only, driven by the
-    `gdpr-erase-user` workflow. The argument is Base64(JSON) so arbitrary reason
-    text crosses the rpc boundary with no shell/Elixir injection surface.
-    Decoded: `%{"user_id" =>, "reason" =>, "actor" =>, "dry_run" =>}`.
+      Operator-run GDPR erasure for ONE user, by `user_id` only, driven by the
+      `gdpr-erase-user` workflow. The argument is Base64(JSON) so arbitrary reason
+      text crosses the rpc boundary with no shell/Elixir injection surface.
+      Decoded: `%{"user_id" =>, "reason" =>, "actor" =>, "dry_run" =>}`.
   """
   @spec gdpr_erase_user(binary()) :: :ok
   def gdpr_erase_user(params_b64) when is_binary(params_b64) do
@@ -166,10 +166,10 @@ defmodule Stacks.Release do
   end
 
   @doc """
-    Read-only companion to `gdpr_erase_user/1` (the `gdpr-lookup-user`
-    workflow): resolves Base64(JSON) `%{"query" => email-or-handle}` to
-    user_id rows. Emails match case-insensitively and may return several rows;
-    handles are unique.
+      Read-only companion to `gdpr_erase_user/1` (the `gdpr-lookup-user`
+      workflow): resolves Base64(JSON) `%{"query" => email-or-handle}` to
+      user_id rows. Emails match case-insensitively and may return several rows;
+      handles are unique.
   """
   @spec gdpr_lookup_user(binary()) :: :ok
   def gdpr_lookup_user(params_b64) when is_binary(params_b64) do
@@ -228,9 +228,9 @@ defmodule Stacks.Release do
   end
 
   @doc """
-    Creates exactly one owner user from `PROD_OWNER_EMAIL`/`PROD_OWNER_PASSWORD`.
-    Idempotent (existing email → log + `:ok`). Raises on missing env or invalid
-    attrs so `release eval` exits non-zero and the deploy fails loudly.
+      Creates exactly one owner user from `PROD_OWNER_EMAIL`/`PROD_OWNER_PASSWORD`.
+      Idempotent (existing email → log + `:ok`). Raises on missing env or invalid
+      attrs so `release eval` exits non-zero and the deploy fails loudly.
   """
   @spec seed_prod() :: :ok
   def seed_prod do
@@ -250,9 +250,9 @@ defmodule Stacks.Release do
   end
 
   @doc """
-    Creates exactly one probe user from `STACKS_PROBER_EMAIL`/`_PASSWORD` with
-    role `"user"` — probe credentials never carry owner privileges. Idempotent;
-    raises on missing env or failed creation.
+      Creates exactly one probe user from `STACKS_PROBER_EMAIL`/`_PASSWORD` with
+      role `"user"` — probe credentials never carry owner privileges. Idempotent;
+      raises on missing env or failed creation.
   """
   @spec seed_prober() :: :ok
   def seed_prober do

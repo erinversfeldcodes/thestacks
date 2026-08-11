@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test/platform/e2e_warmup_guard_test.sh
 #
-# Issue #175: warm the preview app before E2E setup.
+# warm the preview app before E2E setup.
 #
 # The deployed-preview E2E gate intermittently fails at Playwright's `setup`
 # project with HTTP 502 because the preview core app has

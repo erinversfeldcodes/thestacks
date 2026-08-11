@@ -346,7 +346,7 @@ export async function mintSession(
 /**
  * Seed a VISIBLE blog-post→book association for a minted `.test`-domain user via
  * POST /api/test/book-writing (STACKS_E2E_TEST_HELPERS=1 only), so a spec can
- * drive the spine bookmark ribbon (#287) deterministically. The production path
+ * drive the spine bookmark ribbon deterministically. The production path
  * associates books via an async LLM worker on publish, which is non-deterministic
  * for a browser test; this helper writes the same end state (visible manual
  * association) directly. Asserts 201 — the caller has already minted a session,
@@ -409,7 +409,7 @@ export const SESSION_HELPER_SKIP =
 
 /**
  * mintSession + `test.skip` guard in one call, for specs that mint one or more
- * fresh users where registration/confirmation is NOT the subject (Issue #280).
+ * fresh users where registration/confirmation is NOT the subject.
  * When the helper endpoint is unavailable (prod-shaped targets), `test.skip`
  * aborts the test cleanly BEFORE this returns, so callers get a guaranteed
  * non-null session with no null check — the same clean-skip contract as the
@@ -426,7 +426,7 @@ export async function mintOrSkip(
 }
 
 /**
- * Seed-data guarantee gate (Issue #280, PE P3-5). A spec that needs specific
+ * Seed-data guarantee gate (, PE P3-5). A spec that needs specific
  * seeded catalogue data (e.g. ≥51 books for the reading-pile cap, or a book
  * with page_count ≥ 10 for the progress journey) normally skips loudly when the
  * target lacks it — correct for prod-shaped or thin targets. But a stack that
@@ -453,7 +453,7 @@ export function assertSeedOrSkip(sufficient: boolean, message: string): void {
  * Because the user is brand-new, the ONLY active placement in their collection
  * is the one created here — a mutation test (move/remove) can drain it without
  * touching the shared suite seed, so repeated local runs stay deterministic
- * (#294). Mirrors the per-test provisioning in spine-rendering.spec.ts (#113):
+ *. Mirrors the per-test provisioning in spine-rendering.spec.ts:
  * build the exact shelf state the test asserts against instead of consuming a
  * shared seed. Skips cleanly when the session helper is off (mintOrSkip) or the
  * catalogue is empty (assertSeedOrSkip).
@@ -523,14 +523,14 @@ export function totp(secretBase32: string, atMs: number = Date.now()): string {
 
 /**
  * A TOTP code guaranteed to still be inside its 30-second validity window when
- * the server checks it (#394).
+ * the server checks it.
  *
  * The server validates with a bare `NimbleTOTP.valid?` — EXACTLY the current
  * 30s step, no ±1-step allowance (`Stacks.MFA` confirm_enrollment/verify_totp).
  * A code computed from the local clock in the last moments of a step is
  * therefore rejected when validation lands in the next step — an intermittent
  * 422 whose per-run probability is (latency + clock skew)/30s, i.e. "passes one
- * run, fails the next at identical code". Root cause of the #394 flake.
+ * run, fails the next at identical code". Root cause of the flake.
  *
  * Deterministic fix, not a retry: when the (server-adjusted) clock is inside
  * the guard band before a step boundary, wait the boundary out, then compute.
@@ -562,8 +562,8 @@ export async function freshTotp(secretBase32: string, skewMs = 0): Promise<strin
  * enrolling REPLACES whatever factor was there. Called per-test at the shipped
  * worker count (`workers: CI ? 2 : 4`), spec A enrols S₁, spec B replaces it with
  * S₂, and A's `totp(S₁)` is then rejected — surfacing as a gate that never opens,
- * which is indistinguishable from the four real #303 defects `admin-session.spec.ts`
- * exists to catch (Issue #371). Doing it once, in the `setup` project every other
+ * which is indistinguishable from the four real defects `admin-session.spec.ts`
+ * exists to catch. Doing it once, in the `setup` project every other
  * project depends on, leaves the factor immutable for the whole parallel phase: the
  * tests only ever READ it.
  *
@@ -615,9 +615,9 @@ export async function enrolOwnerMfa(request: APIRequestContext): Promise<string>
 }
 
 /**
- * An MFA-verified owner ADMIN token (US-14.1.3 / #384): login, then verify
+ * An MFA-verified owner ADMIN token: login, then verify
  * with a fresh TOTP from the run's shared factor (enrolled once by
- * auth.setup.ts — never re-enrol here, #371).
+ * auth.setup.ts — never re-enrol here,).
  */
 export async function ownerAdminToken(request: APIRequestContext): Promise<string> {
   const login = await request.post("/api/admin/auth/login", {

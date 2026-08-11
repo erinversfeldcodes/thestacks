@@ -1,9 +1,9 @@
 defmodule StacksWeb.BookshelfPlacementControllerTest do
   @moduledoc """
-    Tests for:
-    - POST /api/bookshelves/:bookshelf_name/placements
-    - PUT  /api/placements/:id/move
-    - DELETE /api/placements/:id
+      Tests for:
+      - POST /api/bookshelves/:bookshelf_name/placements
+      - PUT  /api/placements/:id/move
+      - DELETE /api/placements/:id
   """
 
   use CoreWeb.ConnCase, async: true

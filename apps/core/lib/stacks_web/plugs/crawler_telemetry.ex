@@ -1,14 +1,14 @@
 defmodule StacksWeb.Plugs.CrawlerTelemetry do
   @moduledoc """
-    Emits a telemetry counter for `robots.txt` fetches.
+      Emits a telemetry counter for `robots.txt` fetches.
 
-    `robots.txt` is served by `Plug.Static` in the endpoint, which halts the conn
-    and sends the file before any controller runs — so this plug must be mounted
-    **before** `Plug.Static` in `CoreWeb.Endpoint` to observe the request.
+      `robots.txt` is served by `Plug.Static` in the endpoint, which halts the conn
+      and sends the file before any controller runs — so this plug must be mounted
+      **before** `Plug.Static` in `CoreWeb.Endpoint` to observe the request.
 
-    Emits `[:stacks,:crawler,:robots_fetch]` with `%{count: 1}` and empty
-    metadata when the request path is `/robots.txt`. No request attributes are
-    tagged, so there is no cardinality or user-input leakage concern.
+      Emits `[:stacks,:crawler,:robots_fetch]` with `%{count: 1}` and empty
+      metadata when the request path is `/robots.txt`. No request attributes are
+      tagged, so there is no cardinality or user-input leakage concern.
   """
 
   @behaviour Plug

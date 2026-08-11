@@ -1,9 +1,9 @@
 defmodule Stacks.GDPR.ImageRetentionTest do
   @moduledoc """
-    Tests for Stacks.GDPR.ImageRetention.
+      Tests for Stacks.GDPR.ImageRetention.
 
-    Verifies that expired/stuck images are deleted and that an `image.expired`
-    event is emitted for each deleted record.
+      Verifies that expired/stuck images are deleted and that an `image.expired`
+      event is emitted for each deleted record.
   """
 
   use Core.DataCase, async: true
@@ -116,10 +116,10 @@ end
 
 defmodule Stacks.GDPR.ImageRetentionTest.RecordingStorage do
   @moduledoc """
-    Test-local storage backend that records every `delete/1` call by sending
-    `{:storage_delete, key}` to the process that ran the cleanup. Because
-    `ImageRetention.delete_storage_objects/1` runs synchronously in the caller,
-    `self` here is the test process, so the message lands in its mailbox.
+      Test-local storage backend that records every `delete/1` call by sending
+      `{:storage_delete, key}` to the process that ran the cleanup. Because
+      `ImageRetention.delete_storage_objects/1` runs synchronously in the caller,
+      `self` here is the test process, so the message lands in its mailbox.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour
@@ -145,8 +145,8 @@ end
 
 defmodule Stacks.GDPR.ImageRetentionTest.FailingStorage do
   @moduledoc """
-    Test-local storage backend whose `delete/1` always fails. Proves that a
-    storage-layer failure is logged but never blocks DB cleanup.
+      Test-local storage backend whose `delete/1` always fails. Proves that a
+      storage-layer failure is logged but never blocks DB cleanup.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour
@@ -169,8 +169,8 @@ end
 
 defmodule Stacks.GDPR.ImageRetentionStorageTest do
   @moduledoc """
-    Storage-side assertions for the 30-day image-deletion promise. These swap the globally-configured `:storage` backend, so the
-    module runs `async: false` and restores `Stacks.Storage.Mock` on exit.
+      Storage-side assertions for the 30-day image-deletion promise. These swap the globally-configured `:storage` backend, so the
+      module runs `async: false` and restores `Stacks.Storage.Mock` on exit.
   """
 
   use Core.DataCase, async: false

@@ -1,14 +1,14 @@
 defmodule Stacks.DiscoveryThirdSpaceProductionTest do
   @moduledoc """
-    Approval is the only thing that may create a `third_space`.
+      Approval is the only thing that may create a `third_space`.
 
-    The table sat at **zero rows** while `implementation-mapping.md:2115` documented a
-    `DiscoverThirdSpacesJob` as "Scheduled (weekly)" that has never existed. So these tests
-    guard two things at once: that approval now produces a row, and that nothing else does.
+      The table sat at **zero rows** while `implementation-mapping.md:2115` documented a
+      `DiscoverThirdSpacesJob` as "Scheduled (weekly)" that has never existed. So these tests
+      guard two things at once: that approval now produces a row, and that nothing else does.
 
-    Geocoding happens at approval rather than at render time — human-paced, so Nominatim's
-    ~1 req/sec policy is honoured structurally, and the nearest-bookshop distance is
-    computed once instead of per pan.
+      Geocoding happens at approval rather than at render time — human-paced, so Nominatim's
+      ~1 req/sec policy is honoured structurally, and the nearest-bookshop distance is
+      computed once instead of per pan.
   """
 
   use Core.DataCase, async: true
@@ -174,8 +174,8 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
       assert writers == ["discovery.ex"],
              "op.third_spaces gained another producer: #{inspect(writers)}. " <>
-               "US-3.1.1 §4 makes approval the only path — these are real businesses, " <>
-               "and listing one no human reviewed is the harm US-2.5.3 exists to remedy."
+               "Approval is the only path — these are real businesses, " <>
+               "and listing one no human reviewed is the harm this gate exists to remedy."
     end
   end
 

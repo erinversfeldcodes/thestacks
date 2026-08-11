@@ -1,15 +1,15 @@
 defmodule Stacks.AI.MockClient do
   @moduledoc """
-  Mock vision client (`Stacks.AI.ClientBehaviour`). Responses are steered
-  per endpoint through the process dictionary (isolated, `async: true`-safe);
-  unregistered endpoints fall back to the canned default.
+    Mock vision client (`Stacks.AI.ClientBehaviour`). Responses are steered
+    per endpoint through the process dictionary (isolated, `async: true`-safe);
+    unregistered endpoints fall back to the canned default.
 
-      MockClient.put_response("extract_isbn", {:error, :service_unavailable})
-      MockClient.put_response(:any, {:error, :circuit_open})
+        MockClient.put_response("extract_isbn", {:error,:service_unavailable})
+        MockClient.put_response(:any, {:error,:circuit_open})
 
-  `:any` steers every endpoint; a specific endpoint registration wins over
-  it. Response shapes come from `Stacks.Testing.VisionFixtures` — do not
-  hand-write them.
+    `:any` steers every endpoint; a specific endpoint registration wins over
+    it. Response shapes come from `Stacks.Testing.VisionFixtures` — do not
+    hand-write them.
   """
 
   @behaviour Stacks.AI.ClientBehaviour
@@ -26,11 +26,11 @@ defmodule Stacks.AI.MockClient do
   end
 
   @doc """
-    Register `response` for `endpoint` in the current process.
+      Register `response` for `endpoint` in the current process.
 
-    Later registrations take priority. `endpoint` is a logical endpoint string
-    (`"is_book"`, `"extract_isbn"`, `"analyze"`, `"associate"`) or `:any` to
-    match every endpoint that has no exact registration.
+      Later registrations take priority. `endpoint` is a logical endpoint string
+      (`"is_book"`, `"extract_isbn"`, `"analyze"`, `"associate"`) or `:any` to
+      match every endpoint that has no exact registration.
   """
   def put_response(endpoint, response) do
     Process.put(__MODULE__, [{endpoint, response} | Process.get(__MODULE__, [])])

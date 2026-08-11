@@ -1,13 +1,13 @@
 defmodule Stacks.AI.VisionErrorTest do
   @moduledoc """
-    The closed error set, and the half of the sidecar contract that lives in
-    Elixir.
+      The closed error set, and the half of the sidecar contract that lives in
+      Elixir.
 
-    The point of the type is that a caller can ask "should I try this again?" and
-    get an answer that is about the failure's *kind*, not its shape. So the tests
-    that matter are the ones that would catch the set quietly reopening: a code the
-    sidecar can send that this module does not name, or a catch-all that turns an
-    unrecognised answer into silence.
+      The point of the type is that a caller can ask "should I try this again?" and
+      get an answer that is about the failure's *kind*, not its shape. So the tests
+      that matter are the ones that would catch the set quietly reopening: a code the
+      sidecar can send that this module does not name, or a catch-all that turns an
+      unrecognised answer into silence.
   """
 
   use ExUnit.Case, async: true

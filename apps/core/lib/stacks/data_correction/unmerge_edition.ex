@@ -1,16 +1,16 @@
 defmodule Stacks.DataCorrection.UnmergeEdition do
   @moduledoc """
-    Splits a wrongly merged edition back off its work —
-    `merge_edition/2` is otherwise a one-way door, and a wrong merge makes
-    the ISBN resolve to the wrong title for every reader who scans it.
-    Owner-side data correction, not public UI (2026-07-30 ruling).
+      Splits a wrongly merged edition back off its work —
+      `merge_edition/2` is otherwise a one-way door, and a wrong merge makes
+      the ISBN resolve to the wrong title for every reader who scans it.
+      Owner-side data correction, not public UI (2026-07-30 ruling).
 
-    Changes exactly two columns of one row: `book_id` → a newly minted work
-    holding only this edition (title/author supplied by the operator), and
-    `is_primary` → true. Placements naming the split edition are re-pointed
-    to the new work in the same transaction. It does NOT touch the old
-    work's other editions, delete anything, or attempt provider re-vetting —
-    the new work is deliberately minimal and enriches like any other.
+      Changes exactly two columns of one row: `book_id` → a newly minted work
+      holding only this edition (title/author supplied by the operator), and
+      `is_primary` → true. Placements naming the split edition are re-pointed
+      to the new work in the same transaction. It does NOT touch the old
+      work's other editions, delete anything, or attempt provider re-vetting —
+      the new work is deliberately minimal and enriches like any other.
   """
 
   @behaviour Stacks.DataCorrection.Targeted

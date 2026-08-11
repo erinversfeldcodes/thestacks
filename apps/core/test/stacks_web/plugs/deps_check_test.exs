@@ -1,10 +1,10 @@
 defmodule StacksWeb.Plugs.DepsCheckTest do
   @moduledoc """
-    `DepsCheck` probe tests: bearer auth is enforced upstream (an
-    integration request without the token must 401 — unit-calling the plug
-    would bypass `MetricsAuth`), and the result shape is stable (the SLO
-    gate treats any non-200 as dep-down; per-dep entries carry ok/error and
-    a duration).
+      `DepsCheck` probe tests: bearer auth is enforced upstream (an
+      integration request without the token must 401 — unit-calling the plug
+      would bypass `MetricsAuth`), and the result shape is stable (the SLO
+      gate treats any non-200 as dep-down; per-dep entries carry ok/error and
+      a duration).
   """
 
   use CoreWeb.ConnCase, async: true

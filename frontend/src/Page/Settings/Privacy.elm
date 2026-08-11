@@ -329,7 +329,7 @@ update msg model maybeToken =
                         | profileVisibility = settings.profileVisibility
                         , shelfVisibilities = seedShelves settings.shelves
 
-                        -- #367: hydrate consent from the SERVER, overwriting the
+                        -- hydrate consent from the SERVER, overwriting the
                         -- login-blob seed. The blob is written only at login /
                         -- token renewal, so a consent change made in a prior
                         -- session (or on another device) left the toggles showing

@@ -1,11 +1,11 @@
 defmodule StacksWeb.UserSearchControllerTest do
   @moduledoc """
-    Tests for the people-search endpoint: GET /api/search/users?q=<term>.
+      Tests for the people-search endpoint: GET /api/search/users?q=<term>.
 
-    Runs under `:optional_auth`. Asserts the endpoint returns the redacted
-    `public_profile_summary` shape and that ghost/blocked exclusion (enforced in
-    `Accounts.search_users/2` SQL) reaches the wire — a ghost or blocked user
-    never appears in the JSON result set.
+      Runs under `:optional_auth`. Asserts the endpoint returns the redacted
+      `public_profile_summary` shape and that ghost/blocked exclusion (enforced in
+      `Accounts.search_users/2` SQL) reaches the wire — a ghost or blocked user
+      never appears in the JSON result set.
   """
   use CoreWeb.ConnCase, async: true
 

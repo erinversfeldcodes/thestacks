@@ -1,11 +1,11 @@
 defmodule StacksWeb.AuditIpDeployedTest do
   @moduledoc """
-    LIVE-STACK audit-provenance validation: the audit IP is stamped
-    from Fly's trusted `fly-client-ip` (injected/overwritten at the edge),
-    never the spoofable `x-forwarded-for`. Local tests set both headers by
-    hand, which a real deployment makes impossible — this drives the real
-    Fly-fronted preview with a spoofed XFF and reads the audit row back to
-    prove the trusted header won. Skips locally (no deployed stack).
+      LIVE-STACK audit-provenance validation: the audit IP is stamped
+      from Fly's trusted `fly-client-ip` (injected/overwritten at the edge),
+      never the spoofable `x-forwarded-for`. Local tests set both headers by
+      hand, which a real deployment makes impossible — this drives the real
+      Fly-fronted preview with a spoofed XFF and reads the audit row back to
+      prove the trusted header won. Skips locally (no deployed stack).
   """
 
   use ExUnit.Case, async: false

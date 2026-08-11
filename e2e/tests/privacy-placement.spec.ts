@@ -9,26 +9,26 @@ import {
 
 /**
  * Browser E2E for per-placement visibility on the book-detail overlay
- * (US-10.2.2 "Override Placement Visibility", Issue #122 punch #16).
+ *.
  *
  * Covers the placement-visibility surface shipped by:
- *   - #194 frontend  — the "Who can see this book" dropdown + ceiling greying,
+ *   - frontend  — the "Who can see this book" dropdown + ceiling greying,
  *                      and the faint/hidden owner-only spine on the shelf.
- *   - #201 serializer — `visibility` + `bookshelf_visibility` on the placement
+ *   - serializer — `visibility` + `bookshelf_visibility` on the placement
  *                       payload, which seed the select's current value + ceiling.
- *   - #202 polish    — the "Members" label (wire value stays `platform`), the
+ *   - polish    — the "Members" label (wire value stays `platform`), the
  *                      ceiling HELPER TEXT below the select (not a per-option
  *                      tooltip — browsers don't render `title` on disabled
  *                      <option>s), and optimistic rollback on a failed save.
  *
  * Server-side visibility enforcement is well-covered at the Elixir layer
  * (visibility_test.exs + controller tests); this fills the browser-flow gap the
- * #122 audit flagged: a UI regression that renders a hidden placement, drops the
+ * audit flagged: a UI regression that renders a hidden placement, drops the
  * "Members" relabel, or greys the wrong option would slip every current test.
  *
  * REAL API — no route mocking. Assertions are driven against the live stack.
  *
- * ISOLATED THROWAWAY USER (Issue #208): a fresh user per test. These flows mutate
+ * ISOLATED THROWAWAY USER: a fresh user per test. These flows mutate
  * profile + shelf + placement visibility, and `privacy.spec` / `settings.spec`
  * mutate the SAME state on the seeded `settings` user in parallel — that race
  * (a concurrent spec tightening the profile to `owner` forces every shelf to
@@ -45,7 +45,7 @@ const SHELF = "library";
 
 /**
  * Mint an isolated, confirmed throwaway user via POST /api/test/session
- * (Issue #280) and inject its session so `page` holds a live session — outside
+ * and inject its session so `page` holds a live session — outside
  * the `:auth` rate bucket, so this non-auth-testing spec no longer competes with
  * the parallel suite. `test.skip`s cleanly when the helper is off
  * (STACKS_E2E_TEST_HELPERS).

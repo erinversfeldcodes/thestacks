@@ -9,15 +9,15 @@ import {
 } from "./helpers";
 
 /**
- * Browser E2E for the public-profile epic (#210) — the reader-facing half of the
+ * Browser E2E for the public-profile epic — the reader-facing half of the
  * visibility model. Drives the REAL preview stack (no mocking) across the
  * viewer perspective the visibility matrix cares about:
  *
- *   US-10.5.2 (view profile)  — /u/:handle renders the reader's identity + only
+ *   (view profile)  — /u/:handle renders the reader's identity + only
  *                               the bookshelves the viewer may see.
- *   US-10.5.3 (browse shelf)  — /u/:handle/:name renders the shelf read-only:
+ *   (browse shelf)  — /u/:handle/:name renders the shelf read-only:
  *                               visible spines, NO owner controls.
- *   US-10.5.4 (discover)      — people search surfaces a discoverable reader and
+ *   (discover)      — people search surfaces a discoverable reader and
  *                               links to their profile.
  *   Ghost gate                — an unknown/ghost handle is "Reader not found"
  *                               (indistinguishable from absent, by design).
@@ -30,12 +30,12 @@ import {
  *     B never touches the browser — API only.
  *   - VIEWER (A): drives the browser as a second signed-in reader.
  *
- * Every fixture is minted via POST /api/test/session (Issue #280) — one call
+ * Every fixture is minted via POST /api/test/session — one call
  * that creates a confirmed user AND returns its session token/user id, OUTSIDE
  * the `:auth` rate bucket. This replaces the register→confirmation-token→confirm
  * →login dance (and its 429-backoff): the parallel suite shares the `:auth`
  * budget (60/60s per IP), and this spec's back-to-back fresh-user creation under
- * #116's consolidated preview gate was the proven 429 source (PE P2-1). Browser
+ * consolidated preview gate was the proven 429 source (PE P2-1). Browser
  * fixtures inject the minted session directly; API-only fixtures use the token.
  * `mintOrSkip` skips cleanly where the helper is unavailable, matching
  * gdpr/reading-journey.

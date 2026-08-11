@@ -1,9 +1,9 @@
 defmodule Stacks.DataCorrection.SeedEditionVerificationSourceTest do
   @moduledoc """
-    data half: seed-fixture editions the backfill labelled
-    `barcode_unverified` are restored to the provenance `seeds.exs` declares —
-    and NOTHING else is. The scope cut is the whole correction: a reader-created
-    `barcode_unverified` edition is telling the truth and must keep its label.
+      data half: seed-fixture editions the backfill labelled
+      `barcode_unverified` are restored to the provenance `seeds.exs` declares —
+      and NOTHING else is. The scope cut is the whole correction: a reader-created
+      `barcode_unverified` edition is telling the truth and must keep its label.
   """
 
   use Core.DataCase, async: false

@@ -460,12 +460,12 @@ slis.append(http_entry)
 # retrieval -> OCR -> VLM fallback) collapses common-case resolution to
 # 1-3 s; (2) reclassify the stream route into its own group so this SLI
 # measures request latency again — then restore a 2000-3000 ms threshold.
-# See ADR 015 section "Future work: experimental framework for model
+# See section "Future work: experimental framework for model
 # comparison".
 # `bookshelves_p95_ms` threshold is 500 ms. The `:bookshelves` route group
 # serves the shelf-browse read path (GET /api/bookshelves/:name → a bounded
 # query with `book: [:author, :editions]` preloads; no N+1 — guarded by
-# apps/core/test/stacks/shelving_query_test.exs). Issue #273 measured p95 on a
+# apps/core/test/stacks/shelving_query_test.exs). measured p95 on a
 # healthy deployed preview (stacks-core-pr-feat-e2e-112, 2026-07-22, 100
 # authenticated requests across all five shelves, all HTTP 200): server-side
 # router-dispatch p95 <= 100 ms (72/100 under 50 ms, 99/100 under 100 ms). 500

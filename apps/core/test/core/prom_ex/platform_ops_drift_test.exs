@@ -1,11 +1,11 @@
 defmodule Core.PromEx.PlatformOpsDriftTest do
   @moduledoc """
-    Drift guard for the platform/ops dashboard-as-code (240,;
-    grafana/platform_ops.json). Unlike the single-domain dashboards, this
-    one spans many prefixes (`stacks_rate_limit_`, `stacks_events_`,
-    `stacks_fuse_`, `stacks_repo_`, `stacks_router_`, `stacks_upload_`), so
-    lock-step is asserted against the FULL registered set. Renames blanking
-    panels or new ops families shipping invisible both fail CI.
+      Drift guard for the platform/ops dashboard-as-code (240,;
+      grafana/platform_ops.json). Unlike the single-domain dashboards, this
+      one spans many prefixes (`stacks_rate_limit_`, `stacks_events_`,
+      `stacks_fuse_`, `stacks_repo_`, `stacks_router_`, `stacks_upload_`), so
+      lock-step is asserted against the FULL registered set. Renames blanking
+      panels or new ops families shipping invisible both fail CI.
   """
 
   use ExUnit.Case, async: true

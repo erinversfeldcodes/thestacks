@@ -1,14 +1,14 @@
 defmodule Stacks.Enrichment.EventsPath do
   @moduledoc """
-    Works out where a bookshop's events actually live, and remembers it.
-    The old pipeline hardcoded `/events`, which 404s on every scrapeable
-    store — zero rows, unnoticed, because tests fed fixture bodies. Guessing
-    harder costs the shop a full render (a Shopify 404 is ~250KB styled), so
-    the shop is ASKED: robots.txt declares the sitemap, the sitemap says
-    which pages exist, one candidate is verified with one fetch. The answer
-    is persisted on the store row (`events_path` / `events_path_checked_at`)
-    and re-checked only after `@recheck_after_days`. "No events page" is a
-    remembered answer too, not a retry.
+      Works out where a bookshop's events actually live, and remembers it.
+      The old pipeline hardcoded `/events`, which 404s on every scrapeable
+      store — zero rows, unnoticed, because tests fed fixture bodies. Guessing
+      harder costs the shop a full render (a Shopify 404 is ~250KB styled), so
+      the shop is ASKED: robots.txt declares the sitemap, the sitemap says
+      which pages exist, one candidate is verified with one fetch. The answer
+      is persisted on the store row (`events_path` / `events_path_checked_at`)
+      and re-checked only after `@recheck_after_days`. "No events page" is a
+      remembered answer too, not a retry.
   """
 
   import Ecto.Query
@@ -20,39 +20,39 @@ defmodule Stacks.Enrichment.EventsPath do
   require Logger
 
   @doc """
-    Words that mark a URL as a plausible events page, best first.
+      Words that mark a URL as a plausible events page, best first.
 
-    Ordered, and the order is the scoring: `events` beats `whats-on` beats `calendar`, so a shop with
-    both `/pages/events` and `/pages/calendar` gets the one more likely to be a listing rather than an
-    opening-hours page.
+      Ordered, and the order is the scoring: `events` beats `whats-on` beats `calendar`, so a shop with
+      both `/pages/events` and `/pages/calendar` gets the one more likely to be a listing rather than an
+      opening-hours page.
 
-    Public so a test can enumerate them rather than restating the list — a duplicated list drifts, and
-    the drift is silent.
+      Public so a test can enumerate them rather than restating the list — a duplicated list drifts, and
+      the drift is silent.
   """
   @candidate_tokens ~w(events whats-on what-s-on whatson calendar diary programme program happenings)
   def candidate_tokens, do: @candidate_tokens
 
   @doc """
-    How long a verdict — positive or negative — is trusted before it is checked again.
+      How long a verdict — positive or negative — is trusted before it is checked again.
 
-    This is what `events_path_checked_at` is *for*. Without a window the timestamp is written and never
-    read, which is where this module started: it documented at length that a stale check should be
-    revisited, and then nothing revisited anything.
+      This is what `events_path_checked_at` is *for*. Without a window the timestamp is written and never
+      read, which is where this module started: it documented at length that a stale check should be
+      revisited, and then nothing revisited anything.
 
-    Thirty days is chosen from what the verdicts are about. A bookshop that adds an events page should
-    be found within a month; a resolved path that quietly dies — a 500, or a redirect to the homepage,
-    neither of which the job's 404 branch catches — should not persist for longer than that. One request
-    per store per month is not a cost worth optimising away.
+      Thirty days is chosen from what the verdicts are about. A bookshop that adds an events page should
+      be found within a month; a resolved path that quietly dies — a 500, or a redirect to the homepage,
+      neither of which the job's 404 branch catches — should not persist for longer than that. One request
+      per store per month is not a cost worth optimising away.
   """
   @recheck_after_days 30
   def recheck_after_days, do: @recheck_after_days
 
   @doc """
-    Resolve and persist this store's events path.
+      Resolve and persist this store's events path.
 
-    Returns `{:ok, path}` when a candidate was found and verified, or `{:error, reason}`. Every outcome
-    is written to the store, so this is safe (and cheap) to call on every run — a store that already
-    has an `events_path` short-circuits without touching the network at all.
+      Returns `{:ok, path}` when a candidate was found and verified, or `{:error, reason}`. Every outcome
+      is written to the store, so this is safe (and cheap) to call on every run — a store that already
+      has an `events_path` short-circuits without touching the network at all.
   """
   @spec resolve(Bookstore.t()) :: {:ok, String.t()} | {:error, term()}
   def resolve(%Bookstore{events_path: path} = store) when is_binary(path) and path != "" do
@@ -133,14 +133,14 @@ defmodule Stacks.Enrichment.EventsPath do
   end
 
   @doc """
-    Pick the most plausible events URL from a list of page URLs.
+      Pick the most plausible events URL from a list of page URLs.
 
-    Pure, and separated from the fetching for the usual reason: this is the part with a judgement in it,
-    and a judgement that cannot be tested without a network is a judgement nobody checks.
+      Pure, and separated from the fetching for the usual reason: this is the part with a judgement in it,
+      and a judgement that cannot be tested without a network is a judgement nobody checks.
 
-    Scored by `@candidate_tokens` order, then by path depth — `/pages/events` beats
-    `/pages/events/2024-archive`, because the shallower path is the listing and the deeper one is a
-    page within it.
+      Scored by `@candidate_tokens` order, then by path depth — `/pages/events` beats
+      `/pages/events/2024-archive`, because the shallower path is the listing and the deeper one is a
+      page within it.
   """
   @spec best_candidate([String.t()]) :: String.t() | nil
   def best_candidate(urls) do
@@ -191,15 +191,15 @@ defmodule Stacks.Enrichment.EventsPath do
   end
 
   @doc """
-    Store the cache validators a fetch came back with, so the next one can be conditional.
+      Store the cache validators a fetch came back with, so the next one can be conditional.
 
-    Written on a 200 *and* on a 304: an origin may rotate an ETag alongside a 304, and keeping the stale
-    one would make every subsequent request unconditional again — the saving would quietly stop without
-    anything failing.
+      Written on a 200 *and* on a 304: an origin may rotate an ETag alongside a 304, and keeping the stale
+      one would make every subsequent request unconditional again — the saving would quietly stop without
+      anything failing.
 
-    Absent validators are stored as absent rather than skipped. If a shop stops sending an ETag, holding
-    the old one means sending `If-None-Match` for a validator the origin no longer recognises, which at
-    best does nothing and at worst gets a 200 the shop had no need to render.
+      Absent validators are stored as absent rather than skipped. If a shop stops sending an ETag, holding
+      the old one means sending `If-None-Match` for a validator the origin no longer recognises, which at
+      best does nothing and at worst gets a 200 the shop had no need to render.
   """
   @spec remember_validators(Bookstore.t(), map()) :: :ok
   def remember_validators(%Bookstore{} = store, response) do
@@ -210,16 +210,16 @@ defmodule Stacks.Enrichment.EventsPath do
   end
 
   @doc """
-    Forget a resolved path, so the next run re-resolves it.
+      Forget a resolved path, so the next run re-resolves it.
 
-    Called when a previously-working path stops serving. `resolve/1` deliberately does **not**
-    re-verify a known path on every run — that would restore the per-store-per-run request cost this
-    module exists to remove — so the recheck has to be triggered from where the failure actually
-    appears, which is the fetch in `DiscoverBookstoreEventsJob`.
+      Called when a previously-working path stops serving. `resolve/1` deliberately does **not**
+      re-verify a known path on every run — that would restore the per-store-per-run request cost this
+      module exists to remove — so the recheck has to be triggered from where the failure actually
+      appears, which is the fetch in `DiscoverBookstoreEventsJob`.
 
-    The reason is recorded rather than the field merely nulled: a path that vanished is a different
-    situation from one that was never found, and an operator seeing an empty `events_path` with no
-    explanation cannot tell which.
+      The reason is recorded rather than the field merely nulled: a path that vanished is a different
+      situation from one that was never found, and an operator seeing an empty `events_path` with no
+      explanation cannot tell which.
   """
   @spec forget(Bookstore.t()) :: :ok
   def forget(%Bookstore{} = store) do
@@ -228,11 +228,11 @@ defmodule Stacks.Enrichment.EventsPath do
   end
 
   @doc """
-    The path part of an absolute URL — what the compliant egress takes.
+      The path part of an absolute URL — what the compliant egress takes.
 
-    `/` for a bare host, so a caller never builds `nil` into a request. Note the egress resolves this
-    against the store's *configured* base URL, which is why only the path travels: a full URL would let
-    a sitemap steer our requests at another host.
+      `/` for a bare host, so a caller never builds `nil` into a request. Note the egress resolves this
+      against the store's *configured* base URL, which is why only the path travels: a full URL would let
+      a sitemap steer our requests at another host.
   """
   @spec path_of(String.t()) :: String.t()
   def path_of(url) do

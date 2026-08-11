@@ -1,11 +1,11 @@
 defmodule Stacks.Marketplace.ListingExpiryReadTimeTest do
   @moduledoc """
-    A listing past `expires_at` must read as expired whether or not anything has written
-    that down.
+      A listing past `expires_at` must read as expired whether or not anything has written
+      that down.
 
-    `ListingExpiryJob` used to be the only thing that made it so, which made a cron entry
-    load-bearing for correctness: with the platform scaling to zero the job may not fire,
-    and an expired listing then showed as available and could still be bought.
+      `ListingExpiryJob` used to be the only thing that made it so, which made a cron entry
+      load-bearing for correctness: with the platform scaling to zero the job may not fire,
+      and an expired listing then showed as available and could still be bought.
   """
 
   use Core.DataCase, async: true

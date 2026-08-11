@@ -1,12 +1,12 @@
 defmodule Stacks.Events.Registry do
   @moduledoc """
-    Compile-time dispatch table for event types, plus the hand-maintained
-    list of types known to have no subscriber. `@registry` maps event type →
-    handler modules (`handlers_for/1`); `@unsubscribed` names real emitted
-    types nothing listens to. `all_event_types/0` returns BOTH — replay and
-    diagnostics want the whole vocabulary, and a registry-only answer once
-    silently hid 32 of 54 emitted types. A test derives the emitted set from
-    the codebase and fails when either list goes stale.
+      Compile-time dispatch table for event types, plus the hand-maintained
+      list of types known to have no subscriber. `@registry` maps event type →
+      handler modules (`handlers_for/1`); `@unsubscribed` names real emitted
+      types nothing listens to. `all_event_types/0` returns BOTH — replay and
+      diagnostics want the whole vocabulary, and a registry-only answer once
+      silently hid 32 of 54 emitted types. A test derives the emitted set from
+      the codebase and fails when either list goes stale.
   """
 
   @registry %{
@@ -58,7 +58,7 @@ defmodule Stacks.Events.Registry do
       Stacks.Feeds.Handlers.PlacementHandler,
       Stacks.Workers.DbtRefreshHandler
     ],
-    # placement.restored (#375) — the undo of the above, so it needs exactly the
+    # placement.restored — the undo of the above, so it needs exactly the
     # wiring the above needs. The feed regains an entry and
     # mart_community_read_count regains a read; leaving this unsubscribed would
     # make "remove then undo" a state the warehouse and the RSS feed never
@@ -166,9 +166,9 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-    Returns the list of handler modules registered for the given event type.
+      Returns the list of handler modules registered for the given event type.
 
-    Returns an empty list if no handlers are registered.
+      Returns an empty list if no handlers are registered.
   """
   @spec handlers_for(String.t()) :: [module()]
   def handlers_for(event_type) when is_binary(event_type) do
@@ -181,12 +181,12 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-    Returns every event type this module catalogues, sorted — subscribed or not.
+      Returns every event type this module catalogues, sorted — subscribed or not.
 
-    The vocabulary for replay tooling and diagnostics, so it deliberately includes
-    types with no handler. It is the union of two hand-maintained lists, not a derived
-    fact about the codebase: absence here means "not catalogued", not "never emitted"
-    (see the moduledoc). Use `handlers_for/1` to ask what will actually run.
+      The vocabulary for replay tooling and diagnostics, so it deliberately includes
+      types with no handler. It is the union of two hand-maintained lists, not a derived
+      fact about the codebase: absence here means "not catalogued", not "never emitted"
+      (see the moduledoc). Use `handlers_for/1` to ask what will actually run.
   """
   @spec all_event_types() :: [String.t()]
   def all_event_types do
@@ -194,16 +194,16 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-    Returns the event types that are emitted but have no subscriber.
+      Returns the event types that are emitted but have no subscriber.
 
-    The standing inventory of what this system announces and nothing acts on.
+      The standing inventory of what this system announces and nothing acts on.
   """
   @spec unsubscribed_event_types() :: [String.t()]
   def unsubscribed_event_types, do: @unsubscribed
 
   @doc """
-    Catalogued event types with no emitter yet, mapped to the reason each one's
-    consumer-side wiring is kept. See `@pending`.
+      Catalogued event types with no emitter yet, mapped to the reason each one's
+      consumer-side wiring is kept. See `@pending`.
   """
   @spec pending_event_types() :: %{String.t() => String.t()}
   def pending_event_types, do: @pending

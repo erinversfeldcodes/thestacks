@@ -1,8 +1,8 @@
 defmodule Stacks.WritingAssistant.GdprDataModelTest do
   @moduledoc """
-    — GDPR data-model foundation. Proves the writing-assistant /
-    embeddings tables exist with the correct ownership + FK-cascade behaviour and
-    the personal-vs-shared erasure invariant that depends on.
+      — GDPR data-model foundation. Proves the writing-assistant /
+      embeddings tables exist with the correct ownership + FK-cascade behaviour and
+      the personal-vs-shared erasure invariant that depends on.
   """
   use Core.DataCase, async: false
 

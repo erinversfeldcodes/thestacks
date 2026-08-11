@@ -175,7 +175,7 @@ port requestStoredAuth : () -> Cmd msg
 port gotStoredAuth : (Decode.Value -> msg) -> Sub msg
 
 
-{-| Server-config channel (ADR-020). Elm boots immediately with age-gating OFF
+{-| Server-config channel. Elm boots immediately with age-gating OFF
 (the fail-safe production default); `GET /api/config` is fetched in the
 background by `app.js` and its result is delivered here a beat after boot, so a
 network round-trip never blocks first paint. The payload is the resolved
@@ -465,7 +465,7 @@ type alias Model =
 
 
 {-| Server-provided runtime configuration, delivered in the boot flags from
-`GET /api/config` (ADR-020). The frontend's first global config channel —
+`GET /api/config`. The frontend's first global config channel —
 extend this record as new server-driven flags land.
 -}
 type alias AppConfig =
@@ -933,7 +933,7 @@ initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
         ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
     else if isAdminRoute route && adminToken == Nothing then
-        -- ⛔ The gate that makes #303's four surfaces reachable. `/api/admin/*` needs an
+        -- ⛔ The gate that makes four surfaces reachable. `/api/admin/*` needs an
         -- MFA-verified admin-session token, NOT the ordinary Guardian one; the pages were handed
         -- the latter and every request 401'd, so all four had never loaded for anyone. Rather than
         -- let a page render and fail, the route resolves to the sign-in gate until a real admin
@@ -2409,7 +2409,7 @@ update msg model =
                             -- Persist the draft and run the deferred expiry path,
                             -- remembering (via the parked intent) to raise the
                             -- draft-saved login notice IF the re-check ends in a
-                            -- logout (#182 + #180 Phase 2).
+                            -- logout.
                             handleSessionExpiryWithDraft draft model
 
                         CreateListing.ClearDraft ->

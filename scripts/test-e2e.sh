@@ -51,7 +51,7 @@ port_open() {
 }
 
 # warm_remote_preview
-# Guard against cold-start 502s on the deployed preview (Issue #175). The preview
+# Guard against cold-start 502s on the deployed preview. The preview
 # core app runs with auto_stop_machines = true and can go cold between the deploy
 # warmup and Playwright's `setup` project (auth.setup.ts) making its first login —
 # yielding an HTTP 502 that fails the whole E2E gate.
@@ -72,7 +72,7 @@ warm_remote_preview() {
 
     # A passing GET /api/health does NOT prove the POST path is warm. On a
     # boundary cold-start the machine can answer health while the first login
-    # POST still 502s as fly-proxy finishes waking it (Issue #269 stability
+    # POST still 502s as fly-proxy finishes waking it (stability
     # finding #2 — a plain health warm was insufficient). auth.setup.ts's very
     # first action is a login POST, so warm THAT path here: poll
     # /api/auth/login until it returns any non-502 status (200 or 401 both mean

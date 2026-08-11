@@ -1,8 +1,8 @@
 defmodule StacksWeb.UserSettingsControllerTest do
   @moduledoc """
-    Tests for the user-settings endpoints (profile, location, password,
-    notifications, profile visibility). Age verification is no longer a user
-    setting (ADR-020) — self-declaration was removed.
+      Tests for the user-settings endpoints (profile, location, password,
+      notifications, profile visibility). Age verification is no longer a user
+      setting — self-declaration was removed.
   """
 
   use CoreWeb.ConnCase, async: true

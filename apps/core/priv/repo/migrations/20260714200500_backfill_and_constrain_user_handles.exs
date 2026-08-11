@@ -1,16 +1,16 @@
 defmodule Core.Repo.Migrations.BackfillAndConstrainUserHandles do
   @moduledoc """
-    Companion to the proto-generated `add:handle` migration. Backfills a
-    handle for every existing user and makes the column NOT NULL so every user
-    always has a reachable `/u/:handle`. The case-insensitive uniqueness index is
-    built separately and CONCURRENTLY in `20260714200520` so it never holds a
-    write-blocking lock on `op.users` (the auth hot-path table).
+      Companion to the proto-generated `add:handle` migration. Backfills a
+      handle for every existing user and makes the column NOT NULL so every user
+      always has a reachable `/u/:handle`. The case-insensitive uniqueness index is
+      built separately and CONCURRENTLY in `20260714200520` so it never holds a
+      write-blocking lock on `op.users` (the auth hot-path table).
 
-    Backfill = slug(display_name, ≤20 chars, non-alnum→'_', trimmed; 'reader' when
-    empty) + '_' + 6 hex chars keyed by md5(random || id). The random suffix makes a
-    collision astronomically unlikely, so no dedupe pass is needed; the unique index
-    is the backstop. This mirrors `Stacks.Accounts.generate_handle/1` used at
-    registration.
+      Backfill = slug(display_name, ≤20 chars, non-alnum→'_', trimmed; 'reader' when
+      empty) + '_' + 6 hex chars keyed by md5(random || id). The random suffix makes a
+      collision astronomically unlikely, so no dedupe pass is needed; the unique index
+      is the backstop. This mirrors `Stacks.Accounts.generate_handle/1` used at
+      registration.
   """
   use Ecto.Migration
 

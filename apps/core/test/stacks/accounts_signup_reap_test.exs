@@ -1,11 +1,11 @@
 defmodule Stacks.AccountsSignupReapTest do
   @moduledoc """
-    Registration reaps abandoned signups, so erasing them does not depend on a nightly job.
+      Registration reaps abandoned signups, so erasing them does not depend on a nightly job.
 
-    `ExpiredUnverifiedAccountsJob` was the only thing doing this, which made a cron entry
-    the sole guarantee for a retention obligation — and nothing user-triggered could
-    substitute, because whoever abandoned a signup never comes back. With the platform
-    scaling to zero that job may not fire at all.
+      `ExpiredUnverifiedAccountsJob` was the only thing doing this, which made a cron entry
+      the sole guarantee for a retention obligation — and nothing user-triggered could
+      substitute, because whoever abandoned a signup never comes back. With the platform
+      scaling to zero that job may not fire at all.
   """
 
   use Core.DataCase, async: false

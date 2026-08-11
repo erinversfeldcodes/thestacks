@@ -8,7 +8,7 @@ import {
 } from "./helpers";
 
 /**
- * Browser E2E for the read-only GDPR audit-log surface (US-8.5, page #189):
+ * Browser E2E for the read-only GDPR audit-log surface:
  *   /settings/audit-log  →  GET /api/settings/audit-log
  *
  * Previously covered only at the controller/program-test layer. This drives the
@@ -20,7 +20,7 @@ import {
  *   - the "renders entries" case owns a THROWAWAY user (single-owner fixture) and
  *     places a book, which both suppresses the onboarding overlay AND writes a
  *     deterministic `placement.created` audit entry to assert against;
- *   - the user is minted via POST /api/test/session (Issue #280) rather than the
+ *   - the user is minted via POST /api/test/session rather than the
  *     register→confirm→login dance, so this non-auth-testing spec no longer draws
  *     on the shared `:auth` rate bucket;
  *   - the helper endpoint is gated behind STACKS_E2E_TEST_HELPERS=1, so the

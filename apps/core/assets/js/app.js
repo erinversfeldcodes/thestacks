@@ -146,7 +146,7 @@ function boot() {
     flags.storedAuthUnreadable = storedAuthUnreadable;
   }
   flags.ageGatingEnabled = false;
-  // Fail CLOSED (US-14.1.3): registration stays invite-gated until the real
+  // Fail CLOSED: registration stays invite-gated until the real
   // config arrives; a fetch failure must not reopen public sign-ups.
   flags.inviteOnly = true;
 
@@ -507,7 +507,7 @@ if (app.ports && app.ports.ageGatingConfig) {
 }
 
 // ---------------------------------------------------------------------------
-// Port: browser connectivity (Issue #362)
+// Port: browser connectivity
 //
 // The `online`/`offline` window events are the browser telling us its own
 // answer to a question the app otherwise has to guess at from a failed request

@@ -146,7 +146,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   end
 
   describe "perform/1 — storage_path preservation" do
-    @tag stories: ["US-1.1.2", "US-1.1.3"], suite: :storage
+    @tag suite: :storage
     test "storage_path is preserved when image is rejected", %{user: user} do
       image =
         insert(:uploaded_image,
@@ -168,7 +168,7 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   end
 
   describe "perform/1 — default public tier (classifier removed)" do
-    @tag stories: ["US-1.1.4"], suite: :jobs
+    @tag suite: :jobs
     test "pipeline creates a public book even for subjects that previously gated", %{user: user} do
       :fuse.reset(:open_library_fuse)
       :fuse.reset(:google_books_fuse)

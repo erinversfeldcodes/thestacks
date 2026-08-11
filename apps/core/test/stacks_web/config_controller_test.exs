@@ -1,9 +1,9 @@
 defmodule StacksWeb.ConfigControllerTest do
   @moduledoc """
-    Tests for GET /api/config — the public frontend feature-flag channel (ADR-020).
+      Tests for GET /api/config — the public frontend feature-flag channel.
 
-    `async: false` because the age-gating flag test toggles the process-global
-    `:age_gating_enabled` Application env and restores it.
+      `async: false` because the age-gating flag test toggles the process-global
+      `:age_gating_enabled` Application env and restores it.
   """
 
   use CoreWeb.ConnCase, async: false

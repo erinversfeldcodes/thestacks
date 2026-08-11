@@ -3,7 +3,7 @@ import { mintSession, injectSession, uniqueEmail, type MintedSession } from "./h
 import type { Page } from "@playwright/test";
 
 /**
- * POSSE syndication (US-6.2.1, wave 11c): a public post's syndication panel,
+ * POSSE syndication: a public post's syndication panel,
  * the canonical-tagged export, the anonymous-only blog feed, and the loop
  * closing via "Also published at".
  *

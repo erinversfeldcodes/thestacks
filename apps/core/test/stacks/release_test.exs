@@ -1,10 +1,10 @@
 defmodule Stacks.ReleaseTest do
   @moduledoc """
-    Tests for `Stacks.Release.seed_prod/0` — the production owner-user seed.
+      Tests for `Stacks.Release.seed_prod/0` — the production owner-user seed.
 
-    These tests manipulate `PROD_OWNER_EMAIL` and `PROD_OWNER_PASSWORD` via
-    `System.put_env/2`/`System.delete_env/1`. Each test snapshots and restores
-    prior env var values via `on_exit/1` so tests stay independent.
+      These tests manipulate `PROD_OWNER_EMAIL` and `PROD_OWNER_PASSWORD` via
+      `System.put_env/2`/`System.delete_env/1`. Each test snapshots and restores
+      prior env var values via `on_exit/1` so tests stay independent.
   """
   use Core.DataCase, async: false
 

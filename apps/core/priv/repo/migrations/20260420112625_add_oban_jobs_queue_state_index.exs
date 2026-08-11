@@ -1,10 +1,10 @@
 defmodule Core.Repo.Migrations.AddObanJobsQueueStateIndex do
   @moduledoc """
-    Partial index on `oban_jobs(queue, state)` for non-final states.
-    PromEx's Oban plugin polls `SELECT queue, state, COUNT(id) … GROUP BY`
-    every 10s from a saturated pool (~75ms each, caught by slow-query
-    telemetry). The index makes it an index-only scan; the partial WHERE
-    keeps completed/cancelled/discarded rows (the vast majority) out.
+      Partial index on `oban_jobs(queue, state)` for non-final states.
+      PromEx's Oban plugin polls `SELECT queue, state, COUNT(id) … GROUP BY`
+      every 10s from a saturated pool (~75ms each, caught by slow-query
+      telemetry). The index makes it an index-only scan; the partial WHERE
+      keeps completed/cancelled/discarded rows (the vast majority) out.
   """
 
   use Ecto.Migration

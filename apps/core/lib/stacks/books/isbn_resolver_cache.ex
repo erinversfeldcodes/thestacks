@@ -1,12 +1,12 @@
 defmodule Stacks.Books.ISBNResolverCache do
   @moduledoc """
-    Two-level cache for ISBN → metadata lookups. L1 is ETS (per-node,
-    monotonic TTL, microsecond reads) — but Fly's `auto_stop_machines` wipes
-    it and multi-machine balancing caps its hit rate, so L2 is Postgres
-    (`cache.isbn_resolver_cache`): shared, deploy-surviving, ~1–3ms.
-    `put/2` writes both; an ETS miss reads the DB and back-fills ETS. Entries
-    are `{isbn, result, expires_at_monotonic}` with `result` either
-    `{:ok, metadata}` or `{:error,:not_found}`.
+      Two-level cache for ISBN → metadata lookups. L1 is ETS (per-node,
+      monotonic TTL, microsecond reads) — but Fly's `auto_stop_machines` wipes
+      it and multi-machine balancing caps its hit rate, so L2 is Postgres
+      (`cache.isbn_resolver_cache`): shared, deploy-surviving, ~1–3ms.
+      `put/2` writes both; an ETS miss reads the DB and back-fills ETS. Entries
+      are `{isbn, result, expires_at_monotonic}` with `result` either
+      `{:ok, metadata}` or `{:error,:not_found}`.
   """
 
   use GenServer
@@ -38,9 +38,9 @@ defmodule Stacks.Books.ISBNResolverCache do
   end
 
   @doc """
-    Look up a cached ISBN resolution. Returns `{:ok, cached}` where `cached`
-    is the memoised `resolve/1` return value, or `:miss` if absent/expired
-    in both tiers.
+      Look up a cached ISBN resolution. Returns `{:ok, cached}` where `cached`
+      is the memoised `resolve/1` return value, or `:miss` if absent/expired
+      in both tiers.
   """
   @spec get(String.t()) :: {:ok, {:ok, map()} | {:error, :not_found}} | :miss
   def get(isbn) when is_binary(isbn) do
@@ -65,13 +65,13 @@ defmodule Stacks.Books.ISBNResolverCache do
   end
 
   @doc """
-    Store a resolution result. `{:ok, meta}` caches 24h; `{:error,
+      Store a resolution result. `{:ok, meta}` caches 24h; `{:error,
   :not_found}` caches 1h (the one error worth memoising — a valid ISBN
-    missing from both catalogues won't appear within the hour). ALL other
-    errors are NOT cached: they're transient (429/5xx, timeout, blown fuse)
-    and memoising one poisons enrichment retries for the negative TTL. Skips
-    emit `[:stacks,:books,:isbn_resolver_cache,:put_skipped]` so the
-    refused-to-poison path is observable. Writes ETS + Postgres.
+      missing from both catalogues won't appear within the hour). ALL other
+      errors are NOT cached: they're transient (429/5xx, timeout, blown fuse)
+      and memoising one poisons enrichment retries for the negative TTL. Skips
+      emit `[:stacks,:books,:isbn_resolver_cache,:put_skipped]` so the
+      refused-to-poison path is observable. Writes ETS + Postgres.
   """
   @spec put(String.t(), term()) :: :ok
   def put(isbn, {:ok, _metadata} = result) when is_binary(isbn) do
@@ -130,12 +130,12 @@ defmodule Stacks.Books.ISBNResolverCache do
   end
 
   @doc """
-    Test-only: await in-flight async L2 writes from `CacheWriteSupervisor`
-    before asserting on DB effects. Requires `Core.DataCase, async: false`
-    (shared sandbox mode) — an `async: true` test raises
-    `DBConnection.OwnershipError` inside the task. Snapshot semantics: tasks
-    spawned AFTER the call are not awaited, so put→await→put→assert patterns
-    need a second await.
+      Test-only: await in-flight async L2 writes from `CacheWriteSupervisor`
+      before asserting on DB effects. Requires `Core.DataCase, async: false`
+      (shared sandbox mode) — an `async: true` test raises
+      `DBConnection.OwnershipError` inside the task. Snapshot semantics: tasks
+      spawned AFTER the call are not awaited, so put→await→put→assert patterns
+      need a second await.
   """
   @spec await_pending_writes(timeout()) :: :ok
   def await_pending_writes(timeout \\ 500) do

@@ -1,11 +1,11 @@
 defmodule StacksWeb.InviteAdminControllerTest do
   @moduledoc """
-    — the owner's invitation endpoints, driven through the REAL admin
-    pipeline. That last part is the lesson this file records: the unit tests
-    called `Invites.issue/2` with a user in hand, so the controller reading the
-    wrong conn key (`Guardian.Plug.current_resource/1`, nil under
-    `AdminAuthPipeline`, which assigns `:current_user`) shipped green and 500'd
-    on the first live mint (2026-08-10).
+      — the owner's invitation endpoints, driven through the REAL admin
+      pipeline. That last part is the lesson this file records: the unit tests
+      called `Invites.issue/2` with a user in hand, so the controller reading the
+      wrong conn key (`Guardian.Plug.current_resource/1`, nil under
+      `AdminAuthPipeline`, which assigns `:current_user`) shipped green and 500'd
+      on the first live mint (2026-08-10).
   """
   use CoreWeb.ConnCase, async: false
 

@@ -1,12 +1,12 @@
 defmodule StacksWeb.GDPRControllerTest do
   @moduledoc """
-    Tests for GDPR routes:
-    - POST   /api/gdpr/export
-    - DELETE /api/gdpr/account
-    - POST   /api/gdpr/consent
+      Tests for GDPR routes:
+      - POST   /api/gdpr/export
+      - DELETE /api/gdpr/account
+      - POST   /api/gdpr/consent
 
-    Oban is in:manual testing mode (configured in test.exs), so jobs are asserted
-    via Oban.Testing helpers without actually being executed.
+      Oban is in:manual testing mode (configured in test.exs), so jobs are asserted
+      via Oban.Testing helpers without actually being executed.
   """
 
   use CoreWeb.ConnCase, async: true

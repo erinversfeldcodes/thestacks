@@ -45,16 +45,16 @@ defmodule StacksWeb.BookController do
   end
 
   @doc """
-    POST /api/books/confirm — second step of the interactive two-step upload flow.
+      POST /api/books/confirm — second step of the interactive two-step upload flow.
 
-    Accepts `{"isbn": "...", "shelf_name": "..."}` (shelf_name is optional).
-    Looks up or creates the book (work + edition) for the given ISBN.
+      Accepts `{"isbn": "...", "shelf_name": "..."}` (shelf_name is optional).
+      Looks up or creates the book (work + edition) for the given ISBN.
 
-    Returns:
-    - 200 `{book:...}` when the book is found or created successfully.
-    - 409 `{error: "merge_required", work_id: "..."}` when the ISBN metadata matches
-      an existing work that does not yet have this edition.
-    - 422 on validation errors or missing `isbn` param.
+      Returns:
+      - 200 `{book:...}` when the book is found or created successfully.
+      - 409 `{error: "merge_required", work_id: "..."}` when the ISBN metadata matches
+        an existing work that does not yet have this edition.
+      - 422 on validation errors or missing `isbn` param.
   """
   @spec confirm(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def confirm(conn, params) do
@@ -111,16 +111,16 @@ defmodule StacksWeb.BookController do
   end
 
   @doc """
-    POST /api/books/:id/merge-format — add a new edition (ISBN/format) to an existing book (work).
+      POST /api/books/:id/merge-format — add a new edition (ISBN/format) to an existing book (work).
 
-    Accepts `{"isbn": "...", "format_label": "..."}` (format_label is optional).
-    Merges the given edition into the book identified by `:id`.
+      Accepts `{"isbn": "...", "format_label": "..."}` (format_label is optional).
+      Merges the given edition into the book identified by `:id`.
 
-    Returns:
-    - 200 `{edition:...}` on success.
-    - 404 when the book `:id` does not exist.
-    - 422 `{error: "duplicate_isbn"}` when the ISBN is already registered to any edition.
-    - 422 on other validation failures.
+      Returns:
+      - 200 `{edition:...}` on success.
+      - 404 when the book `:id` does not exist.
+      - 422 `{error: "duplicate_isbn"}` when the ISBN is already registered to any edition.
+      - 422 on other validation failures.
   """
   @spec merge_format(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def merge_format(conn, %{"id" => book_id} = params) do
@@ -154,17 +154,17 @@ defmodule StacksWeb.BookController do
   end
 
   @doc """
-    PUT /api/books/:id/age-gate — the person who added a book raises its age
-    gate (marks it "adults only"). Body: `{"adults_only": true}` (also accepts
-    `{"age_gated": true}`).
+      PUT /api/books/:id/age-gate — the person who added a book raises its age
+      gate (marks it "adults only"). Body: `{"adults_only": true}` (also accepts
+      `{"age_gated": true}`).
 
-    Raise-only (user path): a user may only RAISE the gate (`public →
-    age_gated`); attempting to lower it (`age_gated → public`) returns 403 —
-    only the platform owner may un-gate. `visibility_tier` is not PII; no new
-    personal data is introduced.
+      Raise-only (user path): a user may only RAISE the gate (`public →
+      age_gated`); attempting to lower it (`age_gated → public`) returns 403 —
+      only the platform owner may un-gate. `visibility_tier` is not PII; no new
+      personal data is introduced.
 
-    Returns 200 with the updated book JSON, 403 on a raise-only violation,
-    404 when the book is missing.
+      Returns 200 with the updated book JSON, 403 on a raise-only violation,
+      404 when the book is missing.
   """
   @spec set_age_gate(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def set_age_gate(conn, %{"id" => id} = params) do
@@ -260,14 +260,14 @@ defmodule StacksWeb.BookController do
   end
 
   @doc """
-    GET /api/books/isbn/:isbn — retrieve a book by ISBN.
+      GET /api/books/isbn/:isbn — retrieve a book by ISBN.
 
-    This is the manual-ISBN entry path. It carries the viewer's existing
-    placements so the client can tell them the book is already in their
-    collection, and on which bookshelves, *before* they place it again. The
-    photo path has had that awareness since the SSE payload's `is_duplicate`;
-    this is its manual-path equivalent. It is purely informational — nothing
-    here refuses the lookup or the placement that follows.
+      This is the manual-ISBN entry path. It carries the viewer's existing
+      placements so the client can tell them the book is already in their
+      collection, and on which bookshelves, *before* they place it again. The
+      photo path has had that awareness since the SSE payload's `is_duplicate`;
+      this is its manual-path equivalent. It is purely informational — nothing
+      here refuses the lookup or the placement that follows.
   """
   def show_by_isbn(conn, %{"isbn" => isbn}) do
     case Books.find_existing(isbn) do

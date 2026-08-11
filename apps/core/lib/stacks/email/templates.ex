@@ -51,7 +51,7 @@ defmodule Stacks.Email.Templates do
     """
   end
 
-  @doc "Marketplace sale notification — role is :seller or :buyer."
+  @doc "Marketplace sale notification — role is:seller or:buyer."
   def marketplace_sale(role, book_title) do
     message =
       case role do

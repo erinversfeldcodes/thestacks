@@ -1,10 +1,10 @@
 defmodule StacksWeb.Plugs.RequireConfirmedEmailTest do
   @moduledoc """
-    Tests for `StacksWeb.Plugs.RequireConfirmedEmail`.
+      Tests for `StacksWeb.Plugs.RequireConfirmedEmail`.
 
-    The plug is a defence-in-depth gate in the authenticated pipeline: even if a
-    JWT is issued for a user whose email is not confirmed, every protected request
-    must be rejected with 403 until the address is confirmed.
+      The plug is a defence-in-depth gate in the authenticated pipeline: even if a
+      JWT is issued for a user whose email is not confirmed, every protected request
+      must be rejected with 403 until the address is confirmed.
   """
 
   use CoreWeb.ConnCase, async: false

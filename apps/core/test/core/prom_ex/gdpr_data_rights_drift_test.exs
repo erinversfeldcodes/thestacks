@@ -1,10 +1,10 @@
 defmodule Core.PromEx.GdprDataRightsDriftTest do
   @moduledoc """
-    Drift guard for the GDPR data-rights dashboard-as-code (238,; grafana/gdpr_data_rights.json):
-    panels may only query metric families registered by
-    `Core.PromEx.Plugins.Stacks`, and every registered GDPR family must have
-    a panel. Either direction of drift — a renamed metric silently blanking
-    a panel, or a new family shipping invisible — fails CI.
+      Drift guard for the GDPR data-rights dashboard-as-code (238,; grafana/gdpr_data_rights.json):
+      panels may only query metric families registered by
+      `Core.PromEx.Plugins.Stacks`, and every registered GDPR family must have
+      a panel. Either direction of drift — a renamed metric silently blanking
+      a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true

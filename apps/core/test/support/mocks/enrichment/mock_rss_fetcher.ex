@@ -1,14 +1,14 @@
 defmodule Stacks.Enrichment.MockRssFetcher do
   @moduledoc """
-    Mock RSS fetcher for tests.
+      Mock RSS fetcher for tests.
 
-    Responses are stored in the process dictionary so each test process is
-    isolated and tests can run with `async: true`.
+      Responses are stored in the process dictionary so each test process is
+      isolated and tests can run with `async: true`.
 
-    ## Usage
+      ## Usage
 
-        MockRssFetcher.put_response({:ok, %{entries: [%{title: "New Post",...}]}})
-        MockRssFetcher.put_probe_response({:ok, "https://example.test/feed"})
+          MockRssFetcher.put_response({:ok, %{entries: [%{title: "New Post",...}]}})
+          MockRssFetcher.put_probe_response({:ok, "https://example.test/feed"})
 
   """
 
@@ -24,9 +24,9 @@ defmodule Stacks.Enrichment.MockRssFetcher do
   end
 
   @doc """
-    Stand-in for the HEAD feed probe. Defaults to `{:error,:not_found}` so a
-    test that has not opted in discovers no feed — and, crucially, reaches no
-    real host.
+      Stand-in for the HEAD feed probe. Defaults to `{:error,:not_found}` so a
+      test that has not opted in discovers no feed — and, crucially, reaches no
+      real host.
   """
   @spec probe(String.t()) :: {:ok, String.t()} | {:error, term()}
   @impl true

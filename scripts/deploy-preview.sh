@@ -31,7 +31,7 @@ if [[ "$REUSE" -eq 1 ]]; then
     echo "==> --reuse: skipping teardown, redeploying onto the existing stack."
     echo "    (If this deploy behaves strangely, tear down and retry before debugging the app.)"
 else
-    echo "==> Tearing down any existing preview stack first (Issue #305; use --reuse to skip)..."
+    echo "==> Tearing down any existing preview stack first (use --reuse to skip)..."
     bash "${REPO_ROOT}/scripts/cleanup-preview.sh" ${BRANCH_ARG} || {
         echo "FAIL deploy: teardown failed; not deploying onto an unknown stack state" >&2
         exit 1

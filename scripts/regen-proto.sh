@@ -2,7 +2,7 @@
 #
 # scripts/regen-proto.sh — regenerate every proto codegen target, then prove it.
 #
-# WHY THIS EXISTS (Issue #354)
+# WHY THIS EXISTS
 # ----------------------------
 # After merging a branch that touched a `.proto` file, a checkout's generated
 # artefacts are stale. Most of them are gitignored, so `git status` is clean and

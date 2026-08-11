@@ -3,13 +3,13 @@ import type { Browser, Page } from "@playwright/test";
 import { suiteAuthFile, apiCallFromPage } from "./helpers";
 
 /**
- * Browser + API E2E for per-shelf Atom RSS feeds (US-6.1, Issue #119 §1/§3).
+ * Browser + API E2E for per-shelf Atom RSS feeds.
  *
  * Covers the two halves of the feature that landed on feat/119-e2e:
- *   - #263: the RSS affordance is driven from the shelf's REAL visibility
+ *   - the RSS affordance is driven from the shelf's REAL visibility
  *     (previously hardcoded "platform"), so the icon appears only for a
  *     platform-visible bookshelf and is hidden otherwise.
- *   - #264: the feed is served from op.feed_cache with event-driven regen; the
+ *   - the feed is served from op.feed_cache with event-driven regen; the
  *     public FeedController returns Atom 1.0 with ETag / 304 / Cache-Control.
  *
  * These drive REAL API responses — no page.route() mocking (project E2E rule).
@@ -31,7 +31,7 @@ test.describe.configure({ mode: "serial" });
  * Raise/lower the suite user's PROFILE visibility.
  *
  * The `bookshelf` suite user is seeded with `profile_visibility = "owner"`,
- * which is a HARD ceiling (#195, `validate_bookshelf_profile_ceiling/3`): a
+ * which is a HARD ceiling: a
  * shelf may not be more visible than the profile, so an "owner" profile forces
  * every shelf to "owner" and a `PUT …/visibility -> platform` is rejected 422
  * ("less restrictive than the profile visibility ceiling"). These specs flip

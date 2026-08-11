@@ -1,12 +1,12 @@
 defmodule Core.Repo.Migrations.ExtendSpaceTypeForThirdSpacesMap do
   @moduledoc """
-    Adds ten place categories to `op.space_type`. The enum was
-    an events-and-venues taxonomy (reading_group, cafe, bookshop, festival,
-    market — written for the discovery stories); needs
-    places-you-can-sit-and-read (garden, park, library, …; only `cafe`
-    overlaps), so the map's category filter was unbuildable until Postgres
-    refused `type: "garden"` in a test. Enum additions are one-way —
-    `ALTER TYPE … ADD VALUE` has no DROP — so `down` is a no-op.
+      Adds ten place categories to `op.space_type`. The enum was
+      an events-and-venues taxonomy (reading_group, cafe, bookshop, festival,
+      market — written for the discovery stories); needs
+      places-you-can-sit-and-read (garden, park, library, …; only `cafe`
+      overlaps), so the map's category filter was unbuildable until Postgres
+      refused `type: "garden"` in a test. Enum additions are one-way —
+      `ALTER TYPE … ADD VALUE` has no DROP — so `down` is a no-op.
   """
   use Ecto.Migration
 

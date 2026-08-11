@@ -1,27 +1,27 @@
 defmodule Stacks.Audit do
   @moduledoc """
-    Audit logging context. Provides INSERT-only access to the audit_log table.
+      Audit logging context. Provides INSERT-only access to the audit_log table.
 
-    All significant user actions are recorded here with hashed IP addresses
-    and encrypted metadata. The audit_log has no inserted_at/updated_at —
-    it uses occurred_at for timing.
+      All significant user actions are recorded here with hashed IP addresses
+      and encrypted metadata. The audit_log has no inserted_at/updated_at —
+      it uses occurred_at for timing.
   """
 
   alias Core.Repo
 
   @doc """
-    Logs an audit entry. This function only ever INSERTs — never updates or deletes.
+      Logs an audit entry. This function only ever INSERTs — never updates or deletes.
 
-    ## Options
-    - `:resource_type` — type of the resource being acted on (e.g. "book", "user")
-    - `:resource_id` — UUID of the resource
-    - `:ip` — raw IP string (will be hashed via SHA-256 before storage)
-    - `:metadata` — arbitrary map stored as jsonb
-    - `:endpoint` — API endpoint for admin calls (e.g. "/api/admin/users/by_email")
-    - `:latency_ms` — round-trip latency in milliseconds for admin calls
-    - `:success` — whether the admin call succeeded
-    - `:row_count` — rows returned or affected by the admin call
-    - `:operator_session_id` — UUID of the admin session issuing the call
+      ## Options
+      - `:resource_type` — type of the resource being acted on (e.g. "book", "user")
+      - `:resource_id` — UUID of the resource
+      - `:ip` — raw IP string (will be hashed via SHA-256 before storage)
+      - `:metadata` — arbitrary map stored as jsonb
+      - `:endpoint` — API endpoint for admin calls (e.g. "/api/admin/users/by_email")
+      - `:latency_ms` — round-trip latency in milliseconds for admin calls
+      - `:success` — whether the admin call succeeded
+      - `:row_count` — rows returned or affected by the admin call
+      - `:operator_session_id` — UUID of the admin session issuing the call
   """
   @spec log(binary() | nil, String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def log(user_id, action, opts \\ []) do
@@ -81,12 +81,12 @@ defmodule Stacks.Audit do
   end
 
   @doc """
-    Logs a deploy rollback: audit row (action `"system.rollback"`, type
-    `"deploy"`) then a `[:stacks,:system,:rollback]` telemetry event — only
-    on successful insert, so a signal never fires for an unrecorded rollback.
-    `failed_sha` is the SHA rolled back FROM (not the target); it rides in
-    metadata because a git SHA is not a UUID. `triggered_by` ∈ "slo-gate",
-    "manual", "step-failure", "migration-failure" (caller-trusted, no guard).
+      Logs a deploy rollback: audit row (action `"system.rollback"`, type
+      `"deploy"`) then a `[:stacks,:system,:rollback]` telemetry event — only
+      on successful insert, so a signal never fires for an unrecorded rollback.
+      `failed_sha` is the SHA rolled back FROM (not the target); it rides in
+      metadata because a git SHA is not a UUID. `triggered_by` ∈ "slo-gate",
+      "manual", "step-failure", "migration-failure" (caller-trusted, no guard).
   """
   @spec log_rollback(map()) :: {:ok, map()} | {:error, term()}
   def log_rollback(%{
@@ -122,11 +122,11 @@ defmodule Stacks.Audit do
   @max_per_page 100
 
   @doc """
-    Lists a user's own audit-log entries, newest first, paginated
-    (`:page`, `:per_page` — clamped, default #{@default_per_page}/max
-    #{@max_per_page}). Read-only and self-scoped. Cloak-encrypted `metadata`
-    is decrypted for display; the hashed `ip_address` column is never
-    selected. Returns `{entries, total, page, per_page}`.
+      Lists a user's own audit-log entries, newest first, paginated
+      (`:page`, `:per_page` — clamped, default #{@default_per_page}/max
+      #{@max_per_page}). Read-only and self-scoped. Cloak-encrypted `metadata`
+      is decrypted for display; the hashed `ip_address` column is never
+      selected. Returns `{entries, total, page, per_page}`.
   """
   @spec list_for_user(binary(), keyword()) ::
           {[map()], non_neg_integer(), pos_integer(), pos_integer()}

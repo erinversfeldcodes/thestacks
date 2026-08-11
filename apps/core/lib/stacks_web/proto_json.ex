@@ -1,11 +1,11 @@
 defmodule StacksWeb.ProtoJSON do
   @moduledoc """
-    Shared proto-shaped JSON serializers for all controllers.
+      Shared proto-shaped JSON serializers for all controllers.
 
-    Every function produces the exact map shape of its `.proto` message in
-    `proto/stacks/common/v1/` (plain maps, JSON on the wire — not Protobuf
-    encoding). ⚠️ Take-lists here are wire ALLOWLISTS: a proto field absent from
-    one is silently dropped (see `blog_post/1`'s syndicated incident).
+      Every function produces the exact map shape of its `.proto` message in
+      `proto/stacks/common/v1/` (plain maps, JSON on the wire — not Protobuf
+      encoding). ⚠️ Take-lists here are wire ALLOWLISTS: a proto field absent from
+      one is silently dropped (see `blog_post/1`'s syndicated incident).
   """
 
   require Logger
@@ -27,8 +27,8 @@ defmodule StacksWeb.ProtoJSON do
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
 
   @doc """
-    Serializes a book (work) into the proto `Book` shape — the richest book
-    representation. Option `:community_read_count` (integer, default 0).
+      Serializes a book (work) into the proto `Book` shape — the richest book
+      representation. Option `:community_read_count` (integer, default 0).
   """
   @spec book(map(), keyword()) :: map()
   def book(book, opts \\ []) do
@@ -56,11 +56,11 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a book for catalogue listing.
+      Serializes a book for catalogue listing.
 
-    Matches `CatalogueController.format_catalogue_book/1` — includes
-    subjects but omits description, language, bisac_codes, and
-    community_read_count. Author is the slim `{id, name}` shape.
+      Matches `CatalogueController.format_catalogue_book/1` — includes
+      subjects but omits description, language, bisac_codes, and
+      community_read_count. Author is the slim `{id, name}` shape.
   """
   @spec catalogue_book(map()) :: map()
   def catalogue_book(book) do
@@ -78,11 +78,11 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a book for search results.
+      Serializes a book for search results.
 
-    Matches `SearchController.format_book/1` — omits description, language,
-    subjects, bisac_codes, and community_read_count. Author is the slim
-    `{id, name}` shape.
+      Matches `SearchController.format_book/1` — omits description, language,
+      subjects, bisac_codes, and community_read_count. Author is the slim
+      `{id, name}` shape.
   """
   @spec search_book(map()) :: map()
   def search_book(book) do
@@ -100,9 +100,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a search result into the proto `SearchHit` shape: a book plus
-    optional provenance labels (`:source`/`:owner_handle`/`:price`, empty-string
-    defaults) set ONLY for discoverable-by-design platform hits.
+      Serializes a search result into the proto `SearchHit` shape: a book plus
+      optional provenance labels (`:source`/`:owner_handle`/`:price`, empty-string
+      defaults) set ONLY for discoverable-by-design platform hits.
   """
   @spec search_hit(map(), map()) :: map()
   def search_hit(book, label \\ %{}) do
@@ -118,12 +118,12 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes the embedded book inside a bookshelf placement.
+      Serializes the embedded book inside a bookshelf placement.
 
-    Matches the inline book map in `BookshelfController.format_placement/1` —
-    includes description and visibility_tier but omits language, subjects,
-    bisac_codes, and community_read_count. Author uses the bookshelf shape
-    `{id, name, bio: nil}`.
+      Matches the inline book map in `BookshelfController.format_placement/1` —
+      includes description and visibility_tier but omits language, subjects,
+      bisac_codes, and community_read_count. Author uses the bookshelf shape
+      `{id, name, bio: nil}`.
   """
   @spec bookshelf_book(map()) :: map() | nil
   def bookshelf_book(%Ecto.Association.NotLoaded{}), do: nil
@@ -144,9 +144,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes an author struct — the full shape with `{id, name, bio, website}`.
+      Serializes an author struct — the full shape with `{id, name, bio, website}`.
 
-    Matches `BookController.format_author/1`.
+      Matches `BookController.format_author/1`.
   """
   @spec author(map() | nil) :: map() | nil
   def author(%Ecto.Association.NotLoaded{}), do: nil
@@ -157,9 +157,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes an author as the slim `{id, name}` shape.
+      Serializes an author as the slim `{id, name}` shape.
 
-    Matches `SearchController.format_book/1` and `CatalogueController.format_author/1`.
+      Matches `SearchController.format_book/1` and `CatalogueController.format_author/1`.
   """
   @spec author_slim(map() | nil) :: map() | nil
   def author_slim(%Ecto.Association.NotLoaded{}), do: nil
@@ -167,11 +167,11 @@ defmodule StacksWeb.ProtoJSON do
   def author_slim(author_struct), do: Gen.author(author_struct) |> Map.take([:id, :name])
 
   @doc """
-    Serializes an author as the bookshelf shape `{id, name, bio: nil}`.
+      Serializes an author as the bookshelf shape `{id, name, bio: nil}`.
 
-    The `bio` field is intentionally hardcoded to `nil` to match the
-    `BookshelfController.format_author/1` contract — bookshelf views never
-    expose author bios, regardless of whether one exists on the struct.
+      The `bio` field is intentionally hardcoded to `nil` to match the
+      `BookshelfController.format_author/1` contract — bookshelf views never
+      expose author bios, regardless of whether one exists on the struct.
   """
   @spec author_bookshelf(map() | nil) :: map() | nil
   def author_bookshelf(%Ecto.Association.NotLoaded{}), do: nil
@@ -181,9 +181,9 @@ defmodule StacksWeb.ProtoJSON do
     do: Gen.author(author_struct) |> Map.take([:id, :name]) |> Map.put(:bio, nil)
 
   @doc """
-    Serializes a book edition — the shape shared by Book/Bookshelf/Search/
-    Catalogue controllers. `verification_source` is on the wire so the SPA can
-    distinguish an externally-confirmed ISBN from a placeholder.
+      Serializes a book edition — the shape shared by Book/Bookshelf/Search/
+      Catalogue controllers. `verification_source` is on the wire so the SPA can
+      distinguish an externally-confirmed ISBN from a placeholder.
   """
   @spec edition(map()) :: map()
   def edition(ed) do
@@ -202,9 +202,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a placement with embedded book — the rich shape for bookshelf views.
+      Serializes a placement with embedded book — the rich shape for bookshelf views.
 
-    Matches `BookshelfController.format_placement/1`.
+      Matches `BookshelfController.format_placement/1`.
   """
   @spec placement_detail(map()) :: map()
   def placement_detail(placement) do
@@ -226,9 +226,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a placement as the slim ref shape for create/move operations.
+      Serializes a placement as the slim ref shape for create/move operations.
 
-    Matches `BookshelfPlacementController.format_placement/1`.
+      Matches `BookshelfPlacementController.format_placement/1`.
   """
   @spec placement_ref(map()) :: map()
   def placement_ref(placement) do
@@ -237,9 +237,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a placement for book detail (nil-safe). Emits both `visibility`
-    (the placement's own) and `bookshelf_visibility` (the parent ceiling the
-    frontend greys options against); both nil when the association isn't loaded.
+      Serializes a placement for book detail (nil-safe). Emits both `visibility`
+      (the placement's own) and `bookshelf_visibility` (the parent ceiling the
+      frontend greys options against); both nil when the association isn't loaded.
   """
   @spec book_placement(map() | nil) :: map() | nil
   def book_placement(nil), do: nil
@@ -271,9 +271,9 @@ defmodule StacksWeb.ProtoJSON do
   defp loaded_bookshelf(bookshelf), do: bookshelf
 
   @doc """
-    Serializes a user struct for auth responses.
+      Serializes a user struct for auth responses.
 
-    Matches `AuthController.format_user/1`.
+      Matches `AuthController.format_user/1`.
   """
   @spec user(map()) :: map()
   def user(user_struct) do
@@ -290,9 +290,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes the onboarding status map from `Accounts.onboarding_status/1`.
+      Serializes the onboarding status map from `Accounts.onboarding_status/1`.
 
-    Returns `%{steps: %{...}, completed: bool, next_step: step | nil}`.
+      Returns `%{steps: %{...}, completed: bool, next_step: step | nil}`.
   """
   @spec onboarding_status(map()) :: map()
   def onboarding_status(%{steps: steps, completed: completed, next_step: next_step}) do
@@ -300,9 +300,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a blog post. `author_display_name`/`author_handle` are
-    denormalised projections of the author row (nil when `:user` isn't loaded;
-    the frontend falls back to a generic label).
+      Serializes a blog post. `author_display_name`/`author_handle` are
+      denormalised projections of the author row (nil when `:user` isn't loaded;
+      the frontend falls back to a generic label).
   """
   @spec blog_post(map()) :: map()
   def blog_post(post) do
@@ -331,10 +331,10 @@ defmodule StacksWeb.ProtoJSON do
   defp author_handle(_post), do: nil
 
   @doc """
-    Serializes a blog post-book association.
+      Serializes a blog post-book association.
 
-    Matches `BlogController.serialize_association/2`. When `is_owner` is true,
-    the `reasoning` field is included.
+      Matches `BlogController.serialize_association/2`. When `is_owner` is true,
+      the `reasoning` field is included.
   """
   @spec blog_association(map(), boolean()) :: map()
   def blog_association(assoc, is_owner) do
@@ -349,9 +349,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a blog post comment.
+      Serializes a blog post comment.
 
-    Handles the virtual `:replies` key added by `Blog.list_comments/2`.
+      Handles the virtual `:replies` key added by `Blog.list_comments/2`.
   """
   @spec comment(map()) :: map()
   def comment(comment) do
@@ -367,7 +367,7 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a group struct.
+      Serializes a group struct.
   """
   @spec group(map()) :: map()
   def group(g) do
@@ -383,7 +383,7 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a group invitation struct.
+      Serializes a group invitation struct.
   """
   @spec group_invitation(map()) :: map()
   def group_invitation(invitation) do
@@ -399,7 +399,7 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a visibility grant struct.
+      Serializes a visibility grant struct.
   """
   @spec visibility_grant(map()) :: map()
   def visibility_grant(grant) do
@@ -414,10 +414,10 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Builds the poll response map for upload status polling.
+      Builds the poll response map for upload status polling.
 
-    Matches `UploadController.render_status/3` output shape. Accepts a map
-    with string or atom keys for the required fields.
+      Matches `UploadController.render_status/3` output shape. Accepts a map
+      with string or atom keys for the required fields.
   """
   @spec poll_response(map()) :: map()
   def poll_response(attrs) do
@@ -432,12 +432,12 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Builds the upload-inbox response — `stacks.common.v1.UploadInbox`.
+      Builds the upload-inbox response — `stacks.common.v1.UploadInbox`.
 
-    There is no count field, and that is the point: the navigation badge counts
-    the `awaiting_confirmation` entries of this same list, so the number and the
-    surface it points at cannot drift apart. A second, separately-derived count
-    on the wire would be one more thing that can be wrong.
+      There is no count field, and that is the point: the navigation badge counts
+      the `awaiting_confirmation` entries of this same list, so the number and the
+      surface it points at cannot drift apart. A second, separately-derived count
+      on the wire would be one more thing that can be wrong.
   """
   @spec upload_inbox([map()]) :: map()
   def upload_inbox(items) when is_list(items) do
@@ -445,7 +445,7 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes one `stacks.common.v1.UploadInboxItem`.
+      Serializes one `stacks.common.v1.UploadInboxItem`.
   """
   @spec upload_inbox_item(map()) :: map()
   def upload_inbox_item(item) do
@@ -459,9 +459,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a marketplace listing — identical to the struct's `Jason.Encoder`
-    derive shape. `seller` carries only id/display_name/handle; `book` the
-    derive shape without author/editions.
+      Serializes a marketplace listing — identical to the struct's `Jason.Encoder`
+      derive shape. `seller` carries only id/display_name/handle; `book` the
+      derive shape without author/editions.
   """
   @spec listing(map()) :: map()
   def listing(l) do
@@ -489,9 +489,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a shelf with its viewer-visible placements. `writing_book_ids`
-    (any enumerable; default `[]`) flags books the owner has written about for
-    the ribbon.
+      Serializes a shelf with its viewer-visible placements. `writing_book_ids`
+      (any enumerable; default `[]`) flags books the owner has written about for
+      the ribbon.
   """
   @spec shelf_with_placements(map(), term(), Enumerable.t()) :: map()
   def shelf_with_placements(shelf, viewer, writing_book_ids \\ []) do
@@ -510,10 +510,10 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a user's PUBLIC profile — deliberately REDACTED to handle,
-    display_name, website, location, and the already-filtered shelf summaries.
-    NEVER emit email, consent, notification, or role fields; `ProtoJSON.user/1`
-    leaks all of those and MUST NOT be used here.
+      Serializes a user's PUBLIC profile — deliberately REDACTED to handle,
+      display_name, website, location, and the already-filtered shelf summaries.
+      NEVER emit email, consent, notification, or role fields; `ProtoJSON.user/1`
+      leaks all of those and MUST NOT be used here.
   """
   @spec public_profile(map(), [map()]) :: map()
   def public_profile(user, shelves) do
@@ -529,9 +529,9 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Shelf-less `public_profile/2` variant for people-search cards. Same
-    REDACTED contract (handle/display_name/location only). Ghost/blocked
-    exclusion is enforced upstream in SQL, never here.
+      Shelf-less `public_profile/2` variant for people-search cards. Same
+      REDACTED contract (handle/display_name/location only). Ghost/blocked
+      exclusion is enforced upstream in SQL, never here.
   """
   @spec public_profile_summary(map()) :: map()
   def public_profile_summary(user) do
@@ -544,10 +544,10 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a placement's format update response.
+      Serializes a placement's format update response.
 
-    Matches the `%{id, formats}` shape returned by
-    `BookshelfPlacementController.update_formats/2`.
+      Matches the `%{id, formats}` shape returned by
+      `BookshelfPlacementController.update_formats/2`.
   """
   @spec placement_formats(map()) :: map()
   def placement_formats(placement) do
@@ -555,10 +555,10 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a placement's reading progress update response.
+      Serializes a placement's reading progress update response.
 
-    Matches the shape returned by
-    `BookshelfPlacementController.update_progress/2`.
+      Matches the shape returned by
+      `BookshelfPlacementController.update_progress/2`.
   """
   @spec reading_progress(map()) :: map()
   def reading_progress(placement) do
@@ -572,11 +572,11 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a visibility update response for a bookshelf or placement.
+      Serializes a visibility update response for a bookshelf or placement.
 
-    Matches the `%{id, visibility}` shape returned by
-    `BookshelfController.update_visibility/2` and
-    `BookshelfPlacementController.update_visibility/2`.
+      Matches the `%{id, visibility}` shape returned by
+      `BookshelfController.update_visibility/2` and
+      `BookshelfPlacementController.update_visibility/2`.
   """
   @spec visibility_update(map()) :: map()
   def visibility_update(entity) do
@@ -584,10 +584,10 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a blog association confirm/dismiss response.
+      Serializes a blog association confirm/dismiss response.
 
-    Matches the `%{id, book_id, visible}` shape returned by
-    `BlogController.confirm_association/2` and `BlogController.dismiss_association/2`.
+      Matches the `%{id, book_id, visible}` shape returned by
+      `BlogController.confirm_association/2` and `BlogController.dismiss_association/2`.
   """
   @spec association_action(map()) :: map()
   def association_action(assoc) do
@@ -595,7 +595,7 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a feed item (placement or blog post) for the group content feed.
+      Serializes a feed item (placement or blog post) for the group content feed.
   """
   @spec feed_item(map()) :: map()
   def feed_item(%{type: :placement_created} = item) do
@@ -624,8 +624,8 @@ defmodule StacksWeb.ProtoJSON do
   end
 
   @doc """
-    Serializes a partner struct for API responses.
-    Omits hmac_secret — security-sensitive, never serialized.
+      Serializes a partner struct for API responses.
+      Omits hmac_secret — security-sensitive, never serialized.
   """
   @spec partner(map()) :: map()
   def partner(p) do

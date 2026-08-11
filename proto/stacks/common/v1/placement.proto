@@ -257,7 +257,7 @@ message Placement {
   // that does not include it.
   string book_edition_id = 22 [json_name = "book_edition_id"];
 
-  // Provenance of the placement (US-1.1.9): "manual", "upload", or
+  // Provenance of the placement: "manual", "upload", or
   // "goodreads_import". A real product fact — the reader should be able to
   // tell which shelf entries came from Goodreads years later, and it is the
   // only way an import report's counts reconcile after the row-level data is

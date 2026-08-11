@@ -1,10 +1,10 @@
 defmodule Stacks.AI.VisionFixtures do
   @moduledoc """
-  Canonical `/analyze` response shapes for steering `Stacks.AI.MockClient`
-  — the ONE place the production response shape is written down. Test files
-  used to define their own mock modules, each a hand-written mirror free to
-  drift (at least one had). Compose via
-  `put_response("analyze", VisionFixtures.book_identified(isbn: ...))`.
+    Canonical `/analyze` response shapes for steering `Stacks.AI.MockClient`
+    — the ONE place the production response shape is written down. Test files
+    used to define their own mock modules, each a hand-written mirror free to
+    drift (at least one had). Compose via
+    `put_response("analyze", VisionFixtures.book_identified(isbn:...))`.
   """
 
   alias Stacks.AI.MockClient
@@ -14,21 +14,21 @@ defmodule Stacks.AI.VisionFixtures do
   @ambiguous "CLASSIFICATION_RESULT_AMBIGUOUS"
 
   @doc """
-    Register `response` as the answer to `endpoint` for the current process.
+      Register `response` as the answer to `endpoint` for the current process.
 
-    Defaults to `"analyze"`, the only endpoint the post-consolidation Moderation
-    pipeline calls. Pass `:any` to steer every endpoint.
+      Defaults to `"analyze"`, the only endpoint the post-consolidation Moderation
+      pipeline calls. Pass `:any` to steer every endpoint.
   """
   def steer_vision(response, endpoint \\ "analyze"),
     do: MockClient.put_response(endpoint, response)
 
   @doc """
-    Steer the vision seam for the duration of `fun`, then clear the registration.
+      Steer the vision seam for the duration of `fun`, then clear the registration.
 
-    Use when a single test needs two different vision answers in sequence, or when
-    work continues in the same process after the steered call and must see the
-    default again. A test that steers once does not need this — the process
-    dictionary dies with the test process.
+      Use when a single test needs two different vision answers in sequence, or when
+      work continues in the same process after the steered call and must see the
+      default again. A test that steers once does not need this — the process
+      dictionary dies with the test process.
   """
   def with_vision(response, fun), do: with_vision("analyze", response, fun)
 
@@ -43,11 +43,11 @@ defmodule Stacks.AI.VisionFixtures do
   end
 
   @doc """
-    Build an `/analyze` success response.
+      Build an `/analyze` success response.
 
-    Options: `:confidence` (image-level, default `0.9`) and `:model_used`
-    (default `"mock"` — set it to `"local_ocr"` or a VLM name when the test
-    asserts on extraction provenance).
+      Options: `:confidence` (image-level, default `0.9`) and `:model_used`
+      (default `"mock"` — set it to `"local_ocr"` or a VLM name when the test
+      asserts on extraction provenance).
   """
   def analyze_response(classification, books, opts \\ []) do
     {:ok,
@@ -60,12 +60,12 @@ defmodule Stacks.AI.VisionFixtures do
   end
 
   @doc """
-    Build one entry of the `"books"` list.
+      Build one entry of the `"books"` list.
 
-    The base candidate carries `title`, `author`, `potential_isbns` and `raw_text`
-    but **no** `confidence` key — pre-prompt-v2 payloads genuinely omit it, and
-    the threshold gate treats absent and present-nil differently. Pass
-    `confidence:` explicitly whenever the candidate should carry one.
+      The base candidate carries `title`, `author`, `potential_isbns` and `raw_text`
+      but **no** `confidence` key — pre-prompt-v2 payloads genuinely omit it, and
+      the threshold gate treats absent and present-nil differently. Pass
+      `confidence:` explicitly whenever the candidate should carry one.
   """
   def book_candidate(overrides \\ []) do
     base = %{
@@ -84,11 +84,11 @@ defmodule Stacks.AI.VisionFixtures do
   def book_response(books, opts \\ []), do: analyze_response(@book, books, opts)
 
   @doc """
-    BOOK classification with one plain candidate per ISBN. The common case.
+      BOOK classification with one plain candidate per ISBN. The common case.
 
-    `:candidate_confidence` (default `0.9`) sets each candidate's confidence — the
-    one the threshold gate reads. `:confidence` keeps its
-    `analyze_response/3` meaning: the image-level classification confidence.
+      `:candidate_confidence` (default `0.9`) sets each candidate's confidence — the
+      one the threshold gate reads. `:confidence` keeps its
+      `analyze_response/3` meaning: the image-level classification confidence.
   """
   def books_with_isbns(isbns, opts \\ []) do
     {candidate_confidence, response_opts} = Keyword.pop(opts, :candidate_confidence, 0.9)
@@ -103,8 +103,8 @@ defmodule Stacks.AI.VisionFixtures do
     do: analyze_response(@not_book, [], Keyword.put_new(opts, :confidence, 0.95))
 
   @doc """
-    AMBIGUOUS — treated as not-a-book by Moderation (only BOOK short-circuits
-    into extraction), so `books` stays empty.
+      AMBIGUOUS — treated as not-a-book by Moderation (only BOOK short-circuits
+      into extraction), so `books` stays empty.
   """
   def ambiguous(opts \\ []),
     do: analyze_response(@ambiguous, [], Keyword.put_new(opts, :confidence, 0.5))
@@ -113,14 +113,14 @@ defmodule Stacks.AI.VisionFixtures do
   def no_isbn(opts \\ []), do: book_response([], opts)
 
   @doc """
-    A steerable response that sends the outgoing `/analyze` payload to `pid` and
-    then short-circuits with an empty candidate list, so the pipeline returns
-    without doing resolution work.
+      A steerable response that sends the outgoing `/analyze` payload to `pid` and
+      then short-circuits with an empty candidate list, so the pipeline returns
+      without doing resolution work.
 
-    Use it to assert on what the caller *sent*, rather than on what the mock
-    answered — that is the only thing a payload-forwarding test is really about.
-    `pid` is normally `self`; the closure runs in whichever process calls the
-    seam, so the message still lands in the test process.
+      Use it to assert on what the caller *sent*, rather than on what the mock
+      answered — that is the only thing a payload-forwarding test is really about.
+      `pid` is normally `self`; the closure runs in whichever process calls the
+      seam, so the message still lands in the test process.
   """
   def capture_payload(pid, response \\ nil) do
     fn payload ->

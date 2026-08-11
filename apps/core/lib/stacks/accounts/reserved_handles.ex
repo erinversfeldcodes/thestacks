@@ -1,15 +1,15 @@
 defmodule Stacks.Accounts.ReservedHandles do
   @moduledoc """
-    Handles a user may NOT claim. Two reasons:
+      Handles a user may NOT claim. Two reasons:
 
-    1. **Every top-level SPA route segment** (`frontend/src/Navigation/Route.elm`)
-       plus the `u` profile prefix — so a handle can never be confused with a
-       first-class page even if the app ever exposes a bare `/:handle`. Today
-       handles live under `/u/:handle` (an Elm route that cannot shadow other SPA
-       routes), so this is defence-in-depth, not a hard routing requirement.
-    2. **Operational / impersonation-sensitive** words (`admin`, `api`, `support`…).
+      1. **Every top-level SPA route segment** (`frontend/src/Navigation/Route.elm`)
+         plus the `u` profile prefix — so a handle can never be confused with a
+         first-class page even if the app ever exposes a bare `/:handle`. Today
+         handles live under `/u/:handle` (an Elm route that cannot shadow other SPA
+         routes), so this is defence-in-depth, not a hard routing requirement.
+      2. **Operational / impersonation-sensitive** words (`admin`, `api`, `support`…).
 
-    All checks are case-insensitive against the lowercased handle.
+      All checks are case-insensitive against the lowercased handle.
   """
 
   @route_segments ~w(

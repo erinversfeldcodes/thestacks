@@ -1,11 +1,11 @@
 defmodule Stacks.AI.VisionTimeoutTest do
   @moduledoc """
-    350 — the vision client gave up 90s BEFORE Modal's own 300s deadline,
-    so core hung up on calls the GPU was still (billably) working on, then
-    retried into the same contention. Proves the client ceiling is DERIVED
-    as the server deadline + slack (never below it), that the derivation
-    reads the sidecar's constant, and that the timeout branch classifies
-    `:transient`.
+      350 — the vision client gave up 90s BEFORE Modal's own 300s deadline,
+      so core hung up on calls the GPU was still (billably) working on, then
+      retried into the same contention. Proves the client ceiling is DERIVED
+      as the server deadline + slack (never below it), that the derivation
+      reads the sidecar's constant, and that the timeout branch classifies
+      `:transient`.
   """
 
   use ExUnit.Case, async: false

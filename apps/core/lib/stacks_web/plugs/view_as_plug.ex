@@ -1,12 +1,12 @@
 defmodule StacksWeb.Plugs.ViewAsPlug do
   @moduledoc """
-    Two-phase ViewAs preview. Phase 1 (`call/2`, router): parses
-    `?view_as=<perspective>` into `assigns[:requested_perspective]`; 422 on
-    invalid/unimplemented. Does NOT check ownership. Phase 2
-    (`authorize_view_as/2`, controller, after loading the resource): checks
-    permission and sets `assigns[:view_as_context]` or halts 403.
-    Permissions: platform owner — any perspective anywhere; resource owner —
-    `"unauthenticated"`/`"platform"` on their own resources; others — 403.
+      Two-phase ViewAs preview. Phase 1 (`call/2`, router): parses
+      `?view_as=<perspective>` into `assigns[:requested_perspective]`; 422 on
+      invalid/unimplemented. Does NOT check ownership. Phase 2
+      (`authorize_view_as/2`, controller, after loading the resource): checks
+      permission and sets `assigns[:view_as_context]` or halts 403.
+      Permissions: platform owner — any perspective anywhere; resource owner —
+      `"unauthenticated"`/`"platform"` on their own resources; others — 403.
   """
 
   import Plug.Conn
@@ -30,13 +30,13 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   end
 
   @doc """
-    Authorizes the requested perspective for a resource owned by
-    `resource_owner_id`. Call this from controller actions after loading
-    the resource.
+      Authorizes the requested perspective for a resource owned by
+      `resource_owner_id`. Call this from controller actions after loading
+      the resource.
 
-    - Returns `conn` unchanged if no `?view_as` was requested.
-    - Sets `conn.assigns[:view_as_context]` on success.
-    - Halts with 403 if the user lacks permission.
+      - Returns `conn` unchanged if no `?view_as` was requested.
+      - Sets `conn.assigns[:view_as_context]` on success.
+      - Halts with 403 if the user lacks permission.
   """
   @spec authorize_view_as(Plug.Conn.t(), binary()) :: Plug.Conn.t()
   def authorize_view_as(conn, resource_owner_id) do

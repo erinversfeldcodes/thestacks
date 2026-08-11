@@ -1,7 +1,7 @@
 defmodule Stacks.CircuitBreakers.ProbeHttpClient do
   @moduledoc """
-    Real probe transport for `Stacks.CircuitBreakers` — Finch, with both the
-    per-chunk and whole-response bounds set (b/d).
+      Real probe transport for `Stacks.CircuitBreakers` — Finch, with both the
+      per-chunk and whole-response bounds set (b/d).
   """
 
   @behaviour Stacks.CircuitBreakers.ProbeHttpClientBehaviour

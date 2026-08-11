@@ -1,15 +1,15 @@
 defmodule Stacks.Accounts.LoginLockoutTest do
   @moduledoc """
-    Per-account login lockout.
+      Per-account login lockout.
 
-    Verifies the lockout policy in `Stacks.Accounts.authenticate/2`:
+      Verifies the lockout policy in `Stacks.Accounts.authenticate/2`:
 
-    - threshold failures inside the rolling window lock the account
-    - locked accounts skip ArgonPool entirely and return:account_locked
-    - successful logins reset the counter and clear the lock
-    - expired `locked_until` auto-clears
-    - repeat lockouts within the backoff window double the duration up to a cap
-    - unknown emails go through the constant-time dummy-hash path
+      - threshold failures inside the rolling window lock the account
+      - locked accounts skip ArgonPool entirely and return:account_locked
+      - successful logins reset the counter and clear the lock
+      - expired `locked_until` auto-clears
+      - repeat lockouts within the backoff window double the duration up to a cap
+      - unknown emails go through the constant-time dummy-hash path
   """
 
   use Core.DataCase, async: false

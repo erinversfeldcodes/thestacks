@@ -1,11 +1,11 @@
 defmodule StacksWeb.Plugs.MetricsAuthTest do
   @moduledoc """
-    `/internal/*` auth plug tests: 401 without the matching
-    `Bearer <METRICS_SCRAPE_TOKEN>`. The one exception is Fly's
-    managed-Prometheus scrape over 6PN, allowed WITHOUT a token only when
-    provably internal: `fdaa::/16` remote_ip AND no `fly-client-ip` header
-    (which the edge always adds to public traffic) — both conditions
-    asserted, including the spoof case.
+      `/internal/*` auth plug tests: 401 without the matching
+      `Bearer <METRICS_SCRAPE_TOKEN>`. The one exception is Fly's
+      managed-Prometheus scrape over 6PN, allowed WITHOUT a token only when
+      provably internal: `fdaa::/16` remote_ip AND no `fly-client-ip` header
+      (which the edge always adds to public traffic) — both conditions
+      asserted, including the spoof case.
   """
 
   use CoreWeb.ConnCase, async: false

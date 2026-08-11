@@ -1,10 +1,10 @@
 defmodule StacksWeb.BlogController do
   @moduledoc """
-    CRUD endpoints for blog posts.
+      CRUD endpoints for blog posts.
 
-    Public GET routes use optional auth so unauthenticated viewers see only
-    public/published posts. Authenticated POST/PUT/DELETE routes enforce
-    ownership and the visibility ceiling.
+      Public GET routes use optional auth so unauthenticated viewers see only
+      public/published posts. Authenticated POST/PUT/DELETE routes enforce
+      ownership and the visibility ceiling.
   """
 
   use CoreWeb, :controller
@@ -110,12 +110,12 @@ defmodule StacksWeb.BlogController do
   end
 
   @doc """
-    GET /api/blog/posts/:id/syndication?format=html|markdown — the canonical-
-    tagged, paste-ready copy for Substack.
+      GET /api/blog/posts/:id/syndication?format=html|markdown — the canonical-
+      tagged, paste-ready copy for Substack.
 
-    Author-only, and only for a PUBLIC published post: the export is an
-    authoring tool, and syndicating a non-public post would carry it past its
-    own audience. 422 `not_public` names that refusal distinctly from 404.
+      Author-only, and only for a PUBLIC published post: the export is an
+      authoring tool, and syndicating a non-public post would carry it past its
+      own audience. 422 `not_public` names that refusal distinctly from 404.
   """
   @spec syndication(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def syndication(conn, %{"id" => id} = params) do
@@ -146,8 +146,8 @@ defmodule StacksWeb.BlogController do
   end
 
   @doc """
-    PUT /api/blog/posts/:id/syndications/:sid — the writer pastes the live
-    Substack URL back in ("Also published at"), closing the POSSE loop.
+      PUT /api/blog/posts/:id/syndications/:sid — the writer pastes the live
+      Substack URL back in ("Also published at"), closing the POSSE loop.
   """
   @spec update_syndication(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def update_syndication(conn, %{"id" => id, "sid" => sid, "syndicated_url" => url}) do
@@ -223,12 +223,12 @@ defmodule StacksWeb.BlogController do
   end
 
   @doc """
-    POST /api/blog/posts/:id/chat — writing-assistant chat for a post.
+      POST /api/blog/posts/:id/chat — writing-assistant chat for a post.
 
-    Gated by `StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"` in the
-    router pipeline: reaching this action means the user has granted consent (a
-    403 is returned upstream otherwise). The assistant itself is not built yet —
-    this is an honest "under construction" surface, NOT real AI.
+      Gated by `StacksWeb.Plugs.ConsentCheck, feature: "writing_assistant"` in the
+      router pipeline: reaching this action means the user has granted consent (a
+      403 is returned upstream otherwise). The assistant itself is not built yet —
+      this is an honest "under construction" surface, NOT real AI.
   """
   @spec chat(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def chat(conn, %{"id" => id}) do

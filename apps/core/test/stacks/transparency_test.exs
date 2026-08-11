@@ -1,15 +1,15 @@
 defmodule Stacks.TransparencyTest do
   @moduledoc """
-    Tests for the public transparency data layer.
+      Tests for the public transparency data layer.
 
-    Load-bearing invariants:
-      * allowlist enforcement — only fixed, code-defined queries run; there is
-        NO code path that runs an arbitrary / user-supplied PromQL string;
-      * anonymisation — the payload is aggregates only (no per-user field,
-        no de-anonymisable / linked-account dimension);
-      * graceful degradation — with the Prometheus client/token absent the live
-        section is `:unavailable`, never an error/leak, and durable is still served;
-      * cache — a second call within TTL does not re-invoke the Prometheus client.
+      Load-bearing invariants:
+        * allowlist enforcement — only fixed, code-defined queries run; there is
+          NO code path that runs an arbitrary / user-supplied PromQL string;
+        * anonymisation — the payload is aggregates only (no per-user field,
+          no de-anonymisable / linked-account dimension);
+        * graceful degradation — with the Prometheus client/token absent the live
+          section is `:unavailable`, never an error/leak, and durable is still served;
+        * cache — a second call within TTL does not re-invoke the Prometheus client.
   """
 
   use Core.DataCase, async: false

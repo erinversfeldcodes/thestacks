@@ -1,16 +1,16 @@
 defmodule Stacks.Discovery.SearxngClient do
   @moduledoc """
-    HTTP client for self-hosted SearXNG search.
+      HTTP client for self-hosted SearXNG search.
 
-    No rate limiting needed (self-hosted, unlimited).
-    Uses Finch with the shared `Stacks.Finch` pool.
-    Instance URL configured via `Application.get_env(:core,:searxng_url)`.
+      No rate limiting needed (self-hosted, unlimited).
+      Uses Finch with the shared `Stacks.Finch` pool.
+      Instance URL configured via `Application.get_env(:core,:searxng_url)`.
 
-    Protected by `:searxng_fuse` — managed by `Stacks.CircuitBreakers`.
-    When the fuse is blown (SearXNG is down or slow), requests
-    short-circuit to `{:error,:circuit_open}` without touching the
-    upstream. The probe loop confirms SearXNG is back and resets the
-    fuse automatically.
+      Protected by `:searxng_fuse` — managed by `Stacks.CircuitBreakers`.
+      When the fuse is blown (SearXNG is down or slow), requests
+      short-circuit to `{:error,:circuit_open}` without touching the
+      upstream. The probe loop confirms SearXNG is back and resets the
+      fuse automatically.
   """
 
   @behaviour Stacks.Discovery.SearxngClientBehaviour
@@ -21,13 +21,13 @@ defmodule Stacks.Discovery.SearxngClient do
 
   @impl true
   @doc """
-    Searches SearXNG for the given query.
+      Searches SearXNG for the given query.
 
-    ## Options
+      ## Options
 
-      * `:limit` — maximum number of results (default: 5)
+        * `:limit` — maximum number of results (default: 5)
 
-    Returns `{:ok, [%{title, url, description}]}` or `{:error, reason}`.
+      Returns `{:ok, [%{title, url, description}]}` or `{:error, reason}`.
   """
   @spec search(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def search(query, opts \\ []) do

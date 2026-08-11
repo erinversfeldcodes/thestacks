@@ -4,7 +4,7 @@
 # Deletes the two Fly apps and the Neon DB branch created by deploy-preview.sh.
 # Safe to run multiple times; missing resources are silently skipped.
 #
-# Teardown ORDER matters (Issue #170 D): Fly machines are stopped BEFORE the
+# Teardown ORDER matters (D): Fly machines are stopped BEFORE the
 # Neon preview branch is deleted. The core app's pooled Postgrex connections
 # otherwise keep pointing at the deleted Neon endpoint until autostop kicks
 # in, spraying `Postgrex ... The requested endpoint could not be found`
@@ -32,7 +32,7 @@
 #   GITHUB_HEAD_REF         — set automatically in GitHub Actions
 #   PREVIEW_SUFFIX          — optional uniqueness component; MUST match the
 #                             value the deploy ran with so the same suffixed
-#                             names are derived (Issue #170 C). CI sets it;
+#                             names are derived (C). CI sets it;
 #                             local runs leave it unset.
 #
 # Usage:

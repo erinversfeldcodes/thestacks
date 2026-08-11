@@ -1,7 +1,7 @@
 defmodule Stacks.AgeVerificationTest do
   @moduledoc """
-    Tests for the provider-sourced age-verification recorder (ADR-020) — the sole
-    writer of the age_verified / age_verified_at / age_verification_provider fields.
+      Tests for the provider-sourced age-verification recorder — the sole
+      writer of the age_verified / age_verified_at / age_verification_provider fields.
   """
 
   use CoreWeb.ConnCase, async: true

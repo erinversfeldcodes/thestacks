@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test/platform/e2e_global_setup_guard_test.sh
 #
-# Issue #175 — Guard B: Playwright globalSetup warmup.
+# — Guard B: Playwright globalSetup warmup.
 #
 # Guard B adds e2e/global-setup.ts, wired into e2e/playwright.config.ts via the
 # `globalSetup` key. It must:

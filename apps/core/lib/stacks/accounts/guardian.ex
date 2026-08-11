@@ -1,12 +1,12 @@
 defmodule Stacks.Accounts.Guardian do
   @moduledoc """
-    Guardian implementation for JWT-based authentication.
+      Guardian implementation for JWT-based authentication.
 
-    Supports two token types:
-    - Standard user tokens (default `typ`)
-    - Admin tokens (`typ: "admin_session"`) with additional `sid` (session_id) and
-      `bid` (boot_id) claims. Admin tokens are rejected if the boot_id does not
-      match the current application boot.
+      Supports two token types:
+      - Standard user tokens (default `typ`)
+      - Admin tokens (`typ: "admin_session"`) with additional `sid` (session_id) and
+        `bid` (boot_id) claims. Admin tokens are rejected if the boot_id does not
+        match the current application boot.
   """
 
   use Guardian, otp_app: :core

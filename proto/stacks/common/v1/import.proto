@@ -7,7 +7,7 @@ option java_multiple_files = true;
 
 import "google/protobuf/timestamp.proto";
 
-// A reader's one-shot library import (US-1.1.9). Goodreads shut its public
+// A reader's one-shot library import. Goodreads shut its public
 // API in 2020, so the reader exports goodreads_library_export.csv themselves
 // and hands it over: one direction, one time, no sync. The CSV itself is
 // never stored — only the parsed rows, and those expire after 30 days.
@@ -46,7 +46,7 @@ message LibraryImport {
   google.protobuf.Timestamp updated_at = 15 [json_name = "updated_at"];
 }
 
-// One CSV row and what became of it (US-1.1.9). Holds the reader's own
+// One CSV row and what became of it. Holds the reader's own
 // writing (raw_review, raw_notes) — free-text personal data: erased with the
 // import, NEVER copied to the warehouse, purged after 30 days.
 message LibraryImportRow {

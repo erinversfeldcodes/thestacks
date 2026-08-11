@@ -61,13 +61,13 @@ setup("authenticate as owner", async ({ request, page }) => {
 });
 
 /**
- * Enrol the owner's admin second factor ONCE per run (Issue #371).
+ * Enrol the owner's admin second factor ONCE per run.
  *
  * The owner has exactly one TOTP factor and every admin spec shares that one
  * account, so enrolment is a MUTATION of state four parallel specs depend on.
  * Done per-test — as `admin-session.spec.ts` used to — the specs replace each
  * other's secret and their codes are rejected, which surfaces as a gate that
- * never opens: the same symptom as the four real #303 defects that file exists
+ * never opens: the same symptom as the four real defects that file exists
  * to catch. Doing it here, before the parallel phase any project runs in, makes
  * the factor immutable for the rest of the run; the specs only read it.
  */

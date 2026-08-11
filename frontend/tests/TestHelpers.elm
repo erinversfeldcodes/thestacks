@@ -1558,7 +1558,7 @@ bookDetailInitEffects bookId maybeToken =
 
 
 {-| Create a ProgramTest harness for the Upload page. `ageGatingEnabled`
-seeds the server-config flag (ADR-020) so tests can drive both the
+seeds the server-config flag so tests can drive both the
 flag-on (age UI present) and flag-off (age UI hidden) states.
 -}
 uploadProgram : Bool -> Maybe String -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
@@ -1969,7 +1969,7 @@ loginProgramFrom arrival =
 
 
 {-| Create a ProgramTest harness for the BookDetail page. Age-gating is
-enabled (ADR-020) so the 403-driven age-gate block renders under test; the
+enabled so the 403-driven age-gate block renders under test; the
 production default is off, which hides it (covered by the flag guard).
 -}
 bookDetailProgram : String -> Maybe String -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)

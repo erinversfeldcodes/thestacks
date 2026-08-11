@@ -1,9 +1,9 @@
 defmodule Stacks.ShelvingQueryTest do
   @moduledoc """
-    Query-plan and query-count guards for the shelf-browse read path: index sanity (the browse predicates are servable by real,
-    still-existing indexes — asserted via EXPLAIN) and no-N+1
-    (`get_bookshelf_shelves/2` issues a bounded query count regardless of
-    shelf/placement count, counted via a telemetry handler).
+      Query-plan and query-count guards for the shelf-browse read path: index sanity (the browse predicates are servable by real,
+      still-existing indexes — asserted via EXPLAIN) and no-N+1
+      (`get_bookshelf_shelves/2` issues a bounded query count regardless of
+      shelf/placement count, counted via a telemetry handler).
   """
 
   use Core.DataCase, async: false

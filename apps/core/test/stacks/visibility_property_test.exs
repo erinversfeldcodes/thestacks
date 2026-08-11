@@ -1,13 +1,13 @@
 defmodule Stacks.VisibilityPropertyTest do
   @moduledoc """
-    StreamData property-based tests for Stacks.Visibility invariants.
+      StreamData property-based tests for Stacks.Visibility invariants.
 
-    Uses `Core.DataCase` (sync, shared sandbox) so that DB-touching paths inside
-    `resolve_visibility/2` (profile-ceiling user load, block check) work correctly.
+      Uses `Core.DataCase` (sync, shared sandbox) so that DB-touching paths inside
+      `resolve_visibility/2` (profile-ceiling user load, block check) work correctly.
 
-    Block invariants that require inserting block rows are left to the unit tests
-    in `visibility_test.exs` — here we focus on structural invariants that hold
-    across randomly generated combinations of visibility values and viewer types.
+      Block invariants that require inserting block rows are left to the unit tests
+      in `visibility_test.exs` — here we focus on structural invariants that hold
+      across randomly generated combinations of visibility values and viewer types.
   """
 
   use Core.DataCase, async: false

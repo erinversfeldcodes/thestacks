@@ -1,10 +1,10 @@
 defmodule Stacks.DataCorrection.UnmergeEditionTest do
   @moduledoc """
-    376 — un-merge, the inverse of `merge_edition/2`. The centrepiece is
-    `describe "placements"`: the hard question is what happens to readers,
-    and the answer must be provably "nothing" — asserted in both directions
-    (the old work keeps its placements; the new work starts with none),
-    shaped to fail if the code ever moves them.
+      376 — un-merge, the inverse of `merge_edition/2`. The centrepiece is
+      `describe "placements"`: the hard question is what happens to readers,
+      and the answer must be provably "nothing" — asserted in both directions
+      (the old work keeps its placements; the new work starts with none),
+      shaped to fail if the code ever moves them.
   """
   use Core.DataCase, async: false
 

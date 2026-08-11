@@ -1,12 +1,12 @@
 defmodule Stacks.ObservabilityTelemetryTest do
   @moduledoc """
-    Tests for observability instrumentation added in.
+      Tests for observability instrumentation added in.
 
-    Verifies that telemetry events fire correctly for:
-    - Vision client requests (start/stop/exception)
-    - Fuse melt/blown events
-    - BudgetTracker cost recording and limit exceeded
-    - Costs context cost recording
+      Verifies that telemetry events fire correctly for:
+      - Vision client requests (start/stop/exception)
+      - Fuse melt/blown events
+      - BudgetTracker cost recording and limit exceeded
+      - Costs context cost recording
   """
 
   use Core.DataCase, async: false

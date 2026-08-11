@@ -109,7 +109,7 @@ suite =
 
 {-| Per-shelf ordering must survive the auto-flow flattening: the server
 orders shelves by position, and the frontend preserves it only because
-`List.concatMap .placements shelves` is order-preserving while auto-flow
+`List.concatMap.placements shelves` is order-preserving while auto-flow
 regroups into width-filling rows. Pins the flattened order so a
 refactor to any non-order-preserving grouping fails here.
 -}

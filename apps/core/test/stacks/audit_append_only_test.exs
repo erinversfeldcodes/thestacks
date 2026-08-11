@@ -1,16 +1,16 @@
 defmodule Stacks.AuditAppendOnlyTest do
   @moduledoc """
-    Integration tests for the DB-level append-only trigger on
-    `audit.audit_log`.
+      Integration tests for the DB-level append-only trigger on
+      `audit.audit_log`.
 
-    The trigger is `BEFORE UPDATE OR DELETE` and raises an exception unless
-    the session GUC `app.audit_gdpr_erasure` equals `'true'`. It applies to
-    ALL roles (including `neondb_owner`); the only authorised mutation path
-    is the GDPR erasure flow, which sets the GUC inside its `Ecto.Multi`
-    before issuing UPDATE/DELETE.
+      The trigger is `BEFORE UPDATE OR DELETE` and raises an exception unless
+      the session GUC `app.audit_gdpr_erasure` equals `'true'`. It applies to
+      ALL roles (including `neondb_owner`); the only authorised mutation path
+      is the GDPR erasure flow, which sets the GUC inside its `Ecto.Multi`
+      before issuing UPDATE/DELETE.
 
-    Until the migration adding the trigger lands, these tests fail because
-    raw UPDATE/DELETE succeed (no exception raised).
+      Until the migration adding the trigger lands, these tests fail because
+      raw UPDATE/DELETE succeed (no exception raised).
   """
   use Core.DataCase, async: false
 

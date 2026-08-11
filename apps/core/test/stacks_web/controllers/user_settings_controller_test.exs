@@ -1,8 +1,8 @@
 defmodule StacksWeb.UserSettingsPrivacyReadControllerTest do
   @moduledoc """
-    Tests for the privacy-settings read endpoint (`GET /api/settings/privacy`),
-    which seeds the privacy screen with the user's saved profile visibility and
-    per-shelf visibilities so a returning user sees stored values, not defaults.
+      Tests for the privacy-settings read endpoint (`GET /api/settings/privacy`),
+      which seeds the privacy screen with the user's saved profile visibility and
+      per-shelf visibilities so a returning user sees stored values, not defaults.
   """
 
   use CoreWeb.ConnCase, async: true

@@ -165,7 +165,7 @@ sources:
           - name: reading_status
             description: Reading lifecycle status (to_read, reading, completed, abandoned).
           - name: source
-            description: Capture provenance (manual, upload, goodreads_import) — US-1.1.9.
+            description: Capture provenance (manual, upload, goodreads_import).
           - name: current_page
             description: Current page the user is on (null if not reading).
           - name: started_at
@@ -255,7 +255,7 @@ sources:
           - name: consent_writing_assistant_at
             description: Timestamp of writing-assistant consent decision.
           - name: syndication_default
-            description: Account-level default for new posts' syndication-feed inclusion (US-6.2.1).
+            description: Account-level default for new posts' syndication-feed inclusion.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -281,11 +281,11 @@ sources:
           - name: password_reset_sent_at
             description: Timestamp when password reset email was sent.
           - name: failed_login_count
-            description: Failed-login counter for per-account lockout (Issue #161).
+            description: Failed-login counter for per-account lockout.
           - name: failed_login_first_at
-            description: Timestamp of the first failure in the current rolling window (Issue #161).
+            description: Timestamp of the first failure in the current rolling window.
           - name: locked_until
-            description: When non-null and in the future, the account is locked (Issue #161).
+            description: When non-null and in the future, the account is locked.
 
       - name: bookstores
         description: Partner bookstores whose prices are scraped.
@@ -711,7 +711,7 @@ sources:
           - name: published_at
             description: Timestamp when the post was published (null if draft).
           - name: syndicated
-            description: Whether the post is included in the author's public syndication feed (US-6.2.1).
+            description: Whether the post is included in the author's public syndication feed.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -1035,7 +1035,7 @@ sources:
 
       - name: invite_codes
         description: >
-          Beta invitation codes (US-14.1.3). The staging model excludes
+          Beta invitation codes. The staging model excludes
           `code_hash` (a credential), `note` and `invited_email` (the owner's
           private notes about a person, and an address) — the warehouse sees
           lifecycle and counts only.
@@ -1071,7 +1071,7 @@ sources:
 
       - name: library_imports
         description: >
-          Goodreads library imports (US-1.1.9) — the durable per-import summary.
+          Goodreads library imports — the durable per-import summary.
           The raw per-row table (library_import_rows) is deliberately ABSENT
           from the warehouse: it carries the reader's own free text (reviews,
           private notes) under a 30-day retention, and wh has no erasure path.
@@ -1111,7 +1111,7 @@ sources:
 
       - name: post_syndications
         description: >
-          POSSE syndication records (US-6.2.1) — which post went where, by
+          POSSE syndication records — which post went where, by
           which mechanism, and the canonical URL as published. No free text:
           the canonical URL embeds the post UUID, never a title-derived slug.
         columns:

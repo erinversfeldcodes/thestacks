@@ -1,11 +1,11 @@
 defmodule Stacks.DataCorrectionTest.RelabelVerificationSource do
   @moduledoc """
-    Exercises 340's mechanism through a correction over a NON-isbn column,
-    defined here and deliberately unregistered — proving the machinery
-    generalises past the one column 339 needed (shaped after 370's
-    `verification_source` repair, whose real disposition decision is not a
-    test's to make). Covers dry-run, apply, audit-in-transaction, and the
-    moved-row refusal.
+      Exercises 340's mechanism through a correction over a NON-isbn column,
+      defined here and deliberately unregistered — proving the machinery
+      generalises past the one column 339 needed (shaped after 370's
+      `verification_source` repair, whose real disposition decision is not a
+      test's to make). Covers dry-run, apply, audit-in-transaction, and the
+      moved-row refusal.
   """
   @behaviour Stacks.DataCorrection
 
@@ -47,14 +47,14 @@ end
 
 defmodule Stacks.DataCorrectionTest do
   @moduledoc """
-    — the ISBN repair, and the mechanism it is the first instance of.
+      — the ISBN repair, and the mechanism it is the first instance of.
 
-    The centrepiece is `describe "the deploy that aborted"`: it drops the real
-    CHECK constraint, plants the two ISBN-10s production actually holds, shows that
-    re-adding the constraint fails exactly as the deploy did, runs the correction,
-    and shows the same statement now succeeds. The constraint definition is read
-    back out of `pg_constraint` rather than re-spelled, so the test validates
-    against the production expression verbatim and cannot drift from it.
+      The centrepiece is `describe "the deploy that aborted"`: it drops the real
+      CHECK constraint, plants the two ISBN-10s production actually holds, shows that
+      re-adding the constraint fails exactly as the deploy did, runs the correction,
+      and shows the same statement now succeeds. The constraint definition is read
+      back out of `pg_constraint` rather than re-spelled, so the test validates
+      against the production expression verbatim and cannot drift from it.
   """
   use Core.DataCase, async: false
 

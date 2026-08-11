@@ -2,10 +2,10 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   @moduledoc "Maps proto descriptor types to Ecto schema types and migration types."
 
   @doc """
-    Maps a proto descriptor field type to an Ecto schema type.
+      Maps a proto descriptor field type to an Ecto schema type.
 
-    Handles scalar types, well-known types (Timestamp, Struct), and enums.
-    Field overrides from the manifest take precedence.
+      Handles scalar types, well-known types (Timestamp, Struct), and enums.
+      Field overrides from the manifest take precedence.
   """
   def ecto_type(field, overrides \\ %{}) do
     field_name = String.to_atom(field.name)
@@ -26,15 +26,15 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   end
 
   @doc """
-    Maps a proto descriptor field type to an Ecto migration type.
+      Maps a proto descriptor field type to an Ecto migration type.
 
-    Migration types differ from schema types in a few cases:
-    - `TYPE_STRING` → `:text` (not `:string`) — unbounded text in Postgres
-    - `TYPE_INT64` → `:bigint` (not `:integer`)
-    - `TYPE_ENUM` → `:text` (not `:string`)
+      Migration types differ from schema types in a few cases:
+      - `TYPE_STRING` → `:text` (not `:string`) — unbounded text in Postgres
+      - `TYPE_INT64` → `:bigint` (not `:integer`)
+      - `TYPE_ENUM` → `:text` (not `:string`)
 
-    Field overrides with `:migration_type` take highest precedence,
-    then `:ecto_type` overrides, then the default mapping.
+      Field overrides with `:migration_type` take highest precedence,
+      then `:ecto_type` overrides, then the default mapping.
   """
   def migration_type(field, overrides \\ %{}) do
     field_name = String.to_atom(field.name)
@@ -56,10 +56,10 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   end
 
   @doc """
-    Returns the default value for a field, if specified in overrides.
+      Returns the default value for a field, if specified in overrides.
 
-    Fragment defaults (`{:fragment, sql}`) are migration-only and excluded here.
-    Use `migration_default/2` for migration generation.
+      Fragment defaults (`{:fragment, sql}`) are migration-only and excluded here.
+      Use `migration_default/2` for migration generation.
   """
   def default(field, overrides \\ %{}) do
     field_name = String.to_atom(field.name)
@@ -72,9 +72,9 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   end
 
   @doc """
-    Returns the default value for a field for use in migrations.
+      Returns the default value for a field for use in migrations.
 
-    Includes fragment defaults (`{:fragment, sql}`) that are not valid in schemas.
+      Includes fragment defaults (`{:fragment, sql}`) that are not valid in schemas.
   """
   def migration_default(field, overrides \\ %{}) do
     field_name = String.to_atom(field.name)

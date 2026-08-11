@@ -222,7 +222,7 @@ message Edition {
   //
   // It is a CURRENT state, not a record of how the ISBN first arrived:
   // `Stacks.Workers.EnrichBookJob` rewrites it to whichever source answered the
-  // moment enrichment succeeds (#344). Serialised on the wire since #344 so the
+  // moment enrichment succeeds. Serialised on the wire since so the
   // SPA can render a not-yet-identified book as such instead of showing its
   // placeholder title as if it were the book's name.
   //

@@ -1,15 +1,15 @@
 defmodule StacksWeb.BookModerationController do
   @moduledoc """
-    Owner moderation controller for the human-set age gate.
+      Owner moderation controller for the human-set age gate.
 
-    The automatic age-gate classifier was removed: a book is age-gated only
-    because a PERSON marked it. Users may RAISE the gate at add-time (see
-    `BookController.set_age_gate/2`, raise-only). The platform OWNER may override
-    the gate in EITHER direction from this surface.
+      The automatic age-gate classifier was removed: a book is age-gated only
+      because a PERSON marked it. Users may RAISE the gate at add-time (see
+      `BookController.set_age_gate/2`, raise-only). The platform OWNER may override
+      the gate in EITHER direction from this surface.
 
-    Requires an MFA-verified admin session JWT — enforced by the `:admin`
-    pipeline at the router. Role is enforced at JWT issuance by
-    `AdminAuthController.login/2`, not repeated per action.
+      Requires an MFA-verified admin session JWT — enforced by the `:admin`
+      pipeline at the router. Role is enforced at JWT issuance by
+      `AdminAuthController.login/2`, not repeated per action.
   """
 
   use CoreWeb, :controller
@@ -19,11 +19,11 @@ defmodule StacksWeb.BookModerationController do
   alias Stacks.Books
 
   @doc """
-    GET /api/admin/books — paginated list of books for moderation.
+      GET /api/admin/books — paginated list of books for moderation.
 
-    Query params: `search` (title), `tier` (`public` | `age_gated`), `page`,
-    `per_page`. The owner sees ALL books, including age-gated ones (which are
-    hidden from the public catalogue).
+      Query params: `search` (title), `tier` (`public` | `age_gated`), `page`,
+      `per_page`. The owner sees ALL books, including age-gated ones (which are
+      hidden from the public catalogue).
   """
   def index(conn, params) do
     opts = [
@@ -44,11 +44,11 @@ defmodule StacksWeb.BookModerationController do
   end
 
   @doc """
-    PUT /api/admin/books/:id/age-gate — owner sets a book's visibility tier.
+      PUT /api/admin/books/:id/age-gate — owner sets a book's visibility tier.
 
-    Body: `{"age_gated": true|false}` or `{"visibility_tier": "public"|"age_gated"}`.
-    The owner path passes `source::owner, raise_only: false` so the gate may be
-    set in EITHER direction. Returns 200 with the updated book, 404 when missing.
+      Body: `{"age_gated": true|false}` or `{"visibility_tier": "public"|"age_gated"}`.
+      The owner path passes `source::owner, raise_only: false` so the gate may be
+      set in EITHER direction. Returns 200 with the updated book, 404 when missing.
   """
   def set_age_gate(conn, %{"id" => id} = params) do
     tier = resolve_tier(params)

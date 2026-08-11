@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { provisionBookOnShelf } from "./helpers";
 
 /**
- * The shelf organiser (US-1.7.1 / #190, campaign G5) — organising the *physical* shelves
+ * The shelf organiser — organising the *physical* shelves
  * inside a bookshelf.
  *
  * ⚠️ **Why this suite exists, and why it asserts on the books rather than on the shelves.**
@@ -19,7 +19,7 @@ import { provisionBookOnShelf } from "./helpers";
  * counted shelf rows would have passed throughout.
  *
  * Every test mints its own fresh user and provisions its own placement
- * (`provisionBookOnShelf`), following the shelf-actions/#294 pattern — self-restoring and
+ * (`provisionBookOnShelf`), following the shelf-actions/pattern — self-restoring and
  * independent.
  *
  * ⚠️ **Against a preview, run this with `--workers=1`.** The preview core VM is 512 MB, and four

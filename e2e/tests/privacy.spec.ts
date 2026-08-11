@@ -2,20 +2,20 @@ import { test, expect } from "@playwright/test";
 import { suiteAuthFile } from "./helpers";
 
 /**
- * Browser E2E for the CORE privacy/visibility flows (Issue #198, child of the
- * #122 epic). Covers punch-list items #13, #15, #17, #18, #19:
- *   - #13 Profile visibility save + auth guard        (US-10.1.1)
- *   - #15 Per-shelf visibility save                   (US-10.2.1)
- *   - #17 Blog editor visibility dropdown → draft/publish (US-10.2.3)
- *   - #18 ViewAs preview banner + Exit preview         (US-10.3.1)
- *   - #19 Search-engine privacy (robots.txt + noindex meta) (US-10.4.1)
+ * Browser E2E for the CORE privacy/visibility flows (, child of the
+ * epic). Covers punch-list items,,,,
+ *   - Profile visibility save + auth guard
+ *   - Per-shelf visibility save
+ *   - Blog editor visibility dropdown → draft/publish
+ *   - ViewAs preview banner + Exit preview
+ *   - Search-engine privacy (robots.txt + noindex meta)
  *
- * Block/unblock (#14) and the hidden-placement spine / greyed ceiling options
- * (#16) are OUT of scope for #198 (separate children of #122).
+ * Block/unblock and the hidden-placement spine / greyed ceiling options
+ * are OUT of scope for (separate children of).
  *
  * All server-side enforcement (ceiling 422s, cross-user leakage, ViewAs Phase-2
  * authorization, robots.txt server response) is already covered at the Elixir
- * controller/plug/property layers per the #122 audit. This spec adds the missing
+ * controller/plug/property layers per the audit. This spec adds the missing
  * BROWSER-level coverage: that the shipped Elm UI actually drives those flows.
  *
  * ── User strategy ───────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ import { suiteAuthFile } from "./helpers";
  * NOTE (live-drive deferred): this spec cannot be executed here — there is no
  * running preview. It is validated only for parse + discovery
  * (`npx playwright test privacy.spec.ts --list`). Live execution happens at the
- * #122 epic's finalization preview gate, which should confirm the selectors
+ * epic's finalization preview gate, which should confirm the selectors
  * flagged in the accompanying report.
  */
 
@@ -101,7 +101,7 @@ test.describe("Privacy — Profile & Shelf visibility", () => {
 });
 
 /**
- * Punch #17 — Blog editor visibility dropdown → Save Draft / Publish (US-10.2.3).
+ * Punch — Blog editor visibility dropdown → Save Draft / Publish.
  *
  * Uses the seeded `settings` user (authed, placement-backed → no onboarding
  * overlay on /blog/new). Any authenticated user may author posts. Visibility is
@@ -142,7 +142,7 @@ test.describe("Privacy — Blog editor visibility", () => {
 });
 
 /**
- * Punch #18 — ViewAs preview banner + Exit preview (US-10.3.1).
+ * Punch — ViewAs preview banner + Exit preview.
  *
  * `Components.ViewAsBar` renders unconditionally from the browser URL
  * (Main.elm:2231) for ANY authenticated user — the banner is pure client-side.
@@ -174,7 +174,7 @@ test.describe("Privacy — ViewAs preview", () => {
 });
 
 /**
- * Punch #19 — Search-engine privacy (US-10.4.1).
+ * Punch — Search-engine privacy.
  *
  * Server-side robots.txt content is covered by robots_test.exs; this adds the
  * browser-level guarantees: the crawler directives are actually served, and the
@@ -202,7 +202,7 @@ test.describe("Privacy — Search engine privacy", () => {
 
 /**
  * The search-privacy informational line lives on the AUTHED settings page
- * (Privacy.elm `settings-section__note` — built in #196), so it needs the seeded user.
+ * (Privacy.elm `settings-section__note` — built in), so it needs the seeded user.
  */
 test.describe("Privacy — search-privacy info text", () => {
   test.use({ storageState: suiteAuthFile("settings") });
@@ -220,7 +220,7 @@ test.describe("Privacy — search-privacy info text", () => {
 });
 
 /**
- * Punch #13 (auth guard) — the privacy settings page requires authentication.
+ * Punch (auth guard) — the privacy settings page requires authentication.
  *
  * SettingsPrivacy is an auth-required route (Main.elm requiresAuth `_ -> True`);
  * initPage returns the Login page when there is no session (Main.elm:410-411).

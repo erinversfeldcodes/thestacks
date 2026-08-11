@@ -10,10 +10,10 @@ end
 
 defmodule Stacks.UploadTelemetryTest do
   @moduledoc """
-    Suite 11 — telemetry for the upload pipeline: SubscriberWorker
-    handler errors, Oban job lifecycle, BudgetTracker state changes,
-    Phoenix request telemetry on upload endpoints, circuit-breaker
-    behaviour, and cost tracking, across the 111 upload user stories.
+      Suite 11 — telemetry for the upload pipeline: SubscriberWorker
+      handler errors, Oban job lifecycle, BudgetTracker state changes,
+      Phoenix request telemetry on upload endpoints, circuit-breaker
+      behaviour, and cost tracking, across the 111 upload user stories.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -87,7 +87,7 @@ defmodule Stacks.UploadTelemetryTest do
       :ok
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "emits [:stacks, :events, :handler_error] when handler returns {:error, reason}",
          %{user: user} do
       attach_telemetry([:stacks, :events, :handler_error])
@@ -124,7 +124,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.event_type == "test.returns_error"
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "emits [:stacks, :events, :handler_error] when handler raises", %{
       user: user
     } do
@@ -162,7 +162,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.event_type == "test.raises"
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "handler_error metadata includes handler name and event_type", %{user: user} do
       attach_telemetry([:stacks, :events, :handler_error])
 
@@ -201,7 +201,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — Oban job lifecycle telemetry" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:oban, :job, :start] fires for IdentifyBookJob", %{user: user} do
       attach_telemetry_filtered(
         [:oban, :job, :start],
@@ -225,7 +225,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.job.worker == "Stacks.Workers.IdentifyBookJob"
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:oban, :job, :stop] fires for IdentifyBookJob", %{user: user} do
       attach_telemetry_filtered(
         [:oban, :job, :stop],
@@ -251,7 +251,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert measurements.duration >= 0
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:oban, :job, :stop] fires for SubscriberWorker" do
       attach_telemetry_filtered(
         [:oban, :job, :stop],
@@ -271,7 +271,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert is_integer(measurements.duration)
     end
 
-    @tag stories: ["US-1.1.3"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:oban,:job,:stop] fires for IdentifyBookJob cancellation (not_a_book — )",
          %{user: user} do
       attach_telemetry_filtered(
@@ -297,7 +297,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert is_integer(measurements.duration)
     end
 
-    @tag stories: ["US-1.1.2"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:oban,:job,:stop] fires for IdentifyBookJob cancellation (isbn_not_found — )",
          %{user: user} do
       attach_telemetry_filtered(
@@ -325,7 +325,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert is_integer(measurements.duration)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:oban, :job, :stop] fires for SubscriberWorker with different event types" do
       attach_telemetry_filtered(
         [:oban, :job, :stop],
@@ -363,7 +363,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — BudgetTracker state tracking for metrics" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "record_cost updates daily_total_cents" do
       state_before = BudgetTracker.current_state()
       BudgetTracker.record_cost(:modal, 42)
@@ -373,7 +373,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert state_after.daily_total_cents == state_before.daily_total_cents + 42
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "record_cost updates monthly_total_cents" do
       state_before = BudgetTracker.current_state()
       BudgetTracker.record_cost(:modal, 100)
@@ -383,7 +383,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert state_after.monthly_total_cents == state_before.monthly_total_cents + 100
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "record_cost tracks per-provider breakdown" do
       BudgetTracker.record_cost(:modal, 25)
       BudgetTracker.record_cost(:together, 15)
@@ -396,7 +396,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert state.providers["together"] >= 15
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "current_state returns all fields needed for metrics dashboard" do
       state = BudgetTracker.current_state()
 
@@ -408,7 +408,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert is_map(state.providers)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "check_budget reflects accumulated costs" do
       original_config = Application.get_env(:core, :ai_budget, [])
 
@@ -427,7 +427,7 @@ defmodule Stacks.UploadTelemetryTest do
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "check_budget detects monthly limit exceeded" do
       original_config = Application.get_env(:core, :ai_budget, [])
 
@@ -448,7 +448,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — Phoenix endpoint telemetry for upload requests" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:phoenix, :endpoint, :stop] fires for POST /api/upload/init", %{
       conn: conn,
       token: token
@@ -464,7 +464,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert measurements.duration >= 0
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:phoenix, :endpoint, :stop] fires for GET /api/upload/:id/stream", %{
       conn: conn,
       token: token,
@@ -481,7 +481,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert is_integer(measurements.duration)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:phoenix, :router_dispatch, :stop] fires with route info for upload", %{
       conn: conn,
       token: token
@@ -501,7 +501,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — router_dispatch telemetry for POST /api/upload/init" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "telemetry fires on an error response (404 commit for unknown image)", %{
       conn: conn,
       token: token
@@ -522,7 +522,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.UploadController
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "401 when unauthenticated", %{conn: conn} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -538,7 +538,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — router_dispatch telemetry for GET /api/upload/:id/stream" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "200 pending stream emits telemetry", %{conn: conn, token: token, user: user} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -557,7 +557,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.UploadController
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "200 resolved stream emits telemetry", %{
       conn: conn,
       token: token,
@@ -593,7 +593,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.UploadController
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "404 for non-existent image emits telemetry", %{conn: conn, token: token} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -614,7 +614,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — router_dispatch telemetry for GET /api/books/:id" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "200 for existing book emits telemetry", %{conn: conn, book: book} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -629,7 +629,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.BookController
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "404 for non-existent book emits telemetry", %{conn: conn} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -647,7 +647,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — router_dispatch telemetry for POST /api/bookshelves/:name/placements" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "201 for valid placement emits telemetry", %{conn: conn, token: token, book: book} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -665,7 +665,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.BookshelfPlacementController
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "422 for invalid bookshelf name emits telemetry", %{
       conn: conn,
       token: token,
@@ -687,7 +687,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.BookshelfPlacementController
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "401 for unauthenticated placement request", %{conn: conn, book: book} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -703,7 +703,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — router_dispatch telemetry for GET /api/books/isbn/:isbn" do
-    @tag stories: ["US-1.1.5"], suite: :telemetry
+    @tag suite: :telemetry
     test "200 for existing ISBN emits telemetry", %{conn: conn, token: token} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -721,7 +721,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.BookController
     end
 
-    @tag stories: ["US-1.1.5"], suite: :telemetry
+    @tag suite: :telemetry
     test "404 for unknown ISBN emits telemetry", %{conn: conn, token: token} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -741,7 +741,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — router_dispatch telemetry for POST /api/books/confirm" do
-    @tag stories: ["US-1.1.6"], suite: :telemetry
+    @tag suite: :telemetry
     test "confirm with missing isbn returns 422 with telemetry", %{conn: conn, token: token} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -761,7 +761,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — router_dispatch telemetry for POST /api/books/:id/merge-format" do
-    @tag stories: ["US-1.1.8"], suite: :telemetry
+    @tag suite: :telemetry
     test "merge-format with unresolvable ISBN returns 422 with telemetry", %{
       conn: conn,
       token: token,
@@ -786,7 +786,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — Oban job telemetry for IdentifyBookJob cancellation" do
-    @tag stories: ["US-1.1.2"], suite: :telemetry
+    @tag suite: :telemetry
     test "job stop telemetry fires when IdentifyBookJob processes an image (isbn_not_found path)",
          %{user: user} do
       attach_telemetry_filtered(
@@ -813,7 +813,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert measurements.duration >= 0
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "Oban exception telemetry fires on unhandled job crash", %{user: user} do
       attach_telemetry_filtered(
         [:oban, :job, :exception],
@@ -843,7 +843,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — Ecto query telemetry during upload flow" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:core, :repo, :query] fires for database operations", %{token: token} do
       attach_telemetry([:core, :repo, :query])
 
@@ -858,7 +858,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — RefreshCostsJob Oban lifecycle telemetry" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "[:oban, :job, :stop] fires for RefreshCostsJob" do
       attach_telemetry_filtered(
         [:oban, :job, :stop],
@@ -875,7 +875,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert is_integer(measurements.duration)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "RefreshCostsJob emits costs.refreshed event which triggers SubscriberWorker telemetry" do
       attach_telemetry_filtered(
         [:oban, :job, :stop],
@@ -906,7 +906,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — Costs context usage metrics for cost tracking" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "Costs.usage_metrics returns all fields needed for cost dashboard" do
       metrics = Stacks.Costs.usage_metrics()
 
@@ -920,7 +920,7 @@ defmodule Stacks.UploadTelemetryTest do
       assert is_integer(metrics.uploads)
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "Costs.upsert_cost creates platform_costs records" do
       now = DateTime.utc_now()
       period_start = %{now | day: 1, hour: 0, minute: 0, second: 0, microsecond: {0, 6}}
@@ -944,7 +944,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — Circuit breaker / Fuse observability" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test ":fuse.ask returns :ok or :blown for the vision_service fuse" do
       case :fuse.ask(:vision_service, :sync) do
         :ok ->
@@ -958,7 +958,7 @@ defmodule Stacks.UploadTelemetryTest do
       end
     end
 
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "AI.Client returns {:error, :circuit_open} when fuse is blown" do
       original = Application.get_env(:core, :vision_client)
       Application.put_env(:core, :vision_client, Stacks.AI.Client)
@@ -978,7 +978,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — end-to-end telemetry across upload flow" do
-    @tag stories: ["US-1.1.1"], suite: :telemetry
+    @tag suite: :telemetry
     test "POST /api/upload/init emits both endpoint and router_dispatch telemetry", %{
       conn: conn,
       token: token
@@ -1025,7 +1025,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — telemetry for age-gated book access" do
-    @tag stories: ["US-1.1.4"], suite: :telemetry
+    @tag suite: :telemetry
     test "GET /api/books/:id for age_gated book emits router_dispatch telemetry", %{conn: conn} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
@@ -1045,7 +1045,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — telemetry for duplicate detection" do
-    @tag stories: ["US-1.1.6"], suite: :telemetry
+    @tag suite: :telemetry
     test "stream endpoint with is_duplicate flag emits telemetry", %{
       conn: conn,
       token: token,
@@ -1084,7 +1084,7 @@ defmodule Stacks.UploadTelemetryTest do
   end
 
   describe "Suite 11 — telemetry for multi-book status poll" do
-    @tag stories: ["US-1.1.7"], suite: :telemetry
+    @tag suite: :telemetry
     test "stream endpoint with multiple book_ids emits telemetry", %{
       conn: conn,
       token: token,

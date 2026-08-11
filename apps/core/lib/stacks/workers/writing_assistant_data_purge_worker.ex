@@ -1,11 +1,11 @@
 defmodule Stacks.Workers.WritingAssistantDataPurgeWorker do
   @moduledoc """
-    Purges a user's AI writing-assistant data on consent revocation —
-    NOT account erasure; the user row stays. Deletes only what the grant
-    collected: `op.blog_assistant_sessions` (cascades to `turn_feedback` +
-    `retrieval_log`), `op.embeddings`, `op.user_book_content_access`.
-    PRESERVES `op.book_content_chunks` — the shared, non-personal corpus.
-    Idempotent (`delete_all` over `user_id`); audit-logged on completion.
+      Purges a user's AI writing-assistant data on consent revocation —
+      NOT account erasure; the user row stays. Deletes only what the grant
+      collected: `op.blog_assistant_sessions` (cascades to `turn_feedback` +
+      `retrieval_log`), `op.embeddings`, `op.user_book_content_access`.
+      PRESERVES `op.book_content_chunks` — the shared, non-personal corpus.
+      Idempotent (`delete_all` over `user_id`); audit-logged on completion.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

@@ -1,12 +1,12 @@
 defmodule StacksWeb.MeInferenceControllerTest do
   @moduledoc """
-    Tests for GET /api/me/inferences — the authed, own-only personal inference
-    view.
+      Tests for GET /api/me/inferences — the authed, own-only personal inference
+      view.
 
-    Load-bearing invariants (the point of the feature):
-      * strict own-only authz — no param/route can reach another user's data;
-      * ephemeral — a view request persists nothing;
-      * consent gate — the risk section is server-gated behind `?reveal_risk=true`.
+      Load-bearing invariants (the point of the feature):
+        * strict own-only authz — no param/route can reach another user's data;
+        * ephemeral — a view request persists nothing;
+        * consent gate — the risk section is server-gated behind `?reveal_risk=true`.
   """
 
   use CoreWeb.ConnCase, async: true

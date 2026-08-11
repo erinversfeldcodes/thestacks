@@ -1,10 +1,10 @@
 defmodule Core.PromEx.DiscoveryDriftTest do
   @moduledoc """
-    Drift guard for the discovery & profiles dashboard-as-code (239,; grafana/discovery.json):
-    panels may only query metric families registered by
-    `Core.PromEx.Plugins.Stacks`, and every registered 239 discovery family must have
-    a panel. Either direction of drift — a renamed metric silently blanking
-    a panel, or a new family shipping invisible — fails CI.
+      Drift guard for the discovery & profiles dashboard-as-code (239,; grafana/discovery.json):
+      panels may only query metric families registered by
+      `Core.PromEx.Plugins.Stacks`, and every registered 239 discovery family must have
+      a panel. Either direction of drift — a renamed metric silently blanking
+      a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true

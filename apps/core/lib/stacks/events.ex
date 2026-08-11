@@ -1,17 +1,17 @@
 defmodule Stacks.Events do
   @moduledoc """
-    Event emission module. Inserts events into the `op.event_log` table and
-    dispatches them to registered handlers via `Stacks.Events.SubscriberWorker`.
+      Event emission module. Inserts events into the `op.event_log` table and
+      dispatches them to registered handlers via `Stacks.Events.SubscriberWorker`.
 
-    The event_log is append-only — records are never deleted, including during
-    GDPR erasure. For `user` aggregates the going-forward contract is that
-    payloads are UUID-only (no PII): consumers read the current state from the
-    user record via `aggregate_id`. As a defence-in-depth safety net for any
-    legacy rows that predate that contract, GDPR erasure (`Stacks.GDPR.Deletion`)
-    redacts the erased user's own rows in place — emptying `payload` and
-    `metadata` to `{}` — rather than deleting them, preserving the event stream
-    while scrubbing PII (matches the CLAUDE.md invariant: "immutable, except GDPR
-    erasure of PII in payloads").
+      The event_log is append-only — records are never deleted, including during
+      GDPR erasure. For `user` aggregates the going-forward contract is that
+      payloads are UUID-only (no PII): consumers read the current state from the
+      user record via `aggregate_id`. As a defence-in-depth safety net for any
+      legacy rows that predate that contract, GDPR erasure (`Stacks.GDPR.Deletion`)
+      redacts the erased user's own rows in place — emptying `payload` and
+      `metadata` to `{}` — rather than deleting them, preserving the event stream
+      while scrubbing PII (matches the CLAUDE.md invariant: "immutable, except GDPR
+      erasure of PII in payloads").
   """
 
   require Logger
@@ -27,13 +27,13 @@ defmodule Stacks.Events do
   @replay_batch_size 500
 
   @doc """
-    Emits an event: inserts into `event_log` and enqueues a
-    `SubscriberWorker` to dispatch to registered handlers. Required keys:
-    `:event_type`, `:aggregate_type`, `:aggregate_id`; optional `:payload`,
-    `:metadata`, `:schema_version` (default 1). Canonical field contract:
-    `EventEnvelope` in `proto/stacks/internal/v1/event_bus.proto`.
-    `{:error,:emit_failed}` if the insert failed; the Oban enqueue is
-    best-effort (event persists, warning logged).
+      Emits an event: inserts into `event_log` and enqueues a
+      `SubscriberWorker` to dispatch to registered handlers. Required keys:
+      `:event_type`, `:aggregate_type`, `:aggregate_id`; optional `:payload`,
+      `:metadata`, `:schema_version` (default 1). Canonical field contract:
+      `EventEnvelope` in `proto/stacks/internal/v1/event_bus.proto`.
+      `{:error,:emit_failed}` if the insert failed; the Oban enqueue is
+      best-effort (event persists, warning logged).
   """
   @spec emit(%{
           required(:event_type) => String.t(),
@@ -102,9 +102,9 @@ defmodule Stacks.Events do
   end
 
   @doc """
-    Emits an event with best-effort semantics. Logs a warning on failure but
-    always returns `{:ok, event_params}` so callers (e.g. `Ecto.Multi` steps)
-    are not rolled back due to event infrastructure failures.
+      Emits an event with best-effort semantics. Logs a warning on failure but
+      always returns `{:ok, event_params}` so callers (e.g. `Ecto.Multi` steps)
+      are not rolled back due to event infrastructure failures.
   """
   @spec emit_safe(map()) :: {:ok, map()}
   def emit_safe(event) do
@@ -122,11 +122,11 @@ defmodule Stacks.Events do
   end
 
   @doc """
-    Replays historical events of a type to one handler: fetches
-    `op.event_log` rows at/after `from_datetime`, upcasts each
-    (`Upcaster.upcast/1`), dispatches to `handler_module.handle_event/1` in
-    batches of #{@replay_batch_size}. For backfilling new handlers, recovery,
-    and audit replay. Returns `{:ok, count}`.
+      Replays historical events of a type to one handler: fetches
+      `op.event_log` rows at/after `from_datetime`, upcasts each
+      (`Upcaster.upcast/1`), dispatches to `handler_module.handle_event/1` in
+      batches of #{@replay_batch_size}. For backfilling new handlers, recovery,
+      and audit replay. Returns `{:ok, count}`.
   """
   @spec replay(String.t(), DateTime.t(), module()) :: {:ok, non_neg_integer()}
   def replay(event_type, %DateTime{} = from_datetime, handler_module)

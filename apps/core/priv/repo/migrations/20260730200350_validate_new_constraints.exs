@@ -1,11 +1,11 @@
 defmodule Core.Repo.Migrations.ValidateNewConstraints do
   @moduledoc """
-    Validates the three 335 constraints added `NOT VALID` (two owner FKs +
-    the ISBN CHECK). Its own migration because `VALIDATE CONSTRAINT` only
-    takes the gentle SHARE UPDATE EXCLUSIVE lock when run in a DIFFERENT
-    transaction from the ADD — same-transaction validation holds the ADD's
-    ACCESS EXCLUSIVE lock across the whole scan, the outage `NOT VALID`
-    exists to avoid.
+      Validates the three 335 constraints added `NOT VALID` (two owner FKs +
+      the ISBN CHECK). Its own migration because `VALIDATE CONSTRAINT` only
+      takes the gentle SHARE UPDATE EXCLUSIVE lock when run in a DIFFERENT
+      transaction from the ADD — same-transaction validation holds the ADD's
+      ACCESS EXCLUSIVE lock across the whole scan, the outage `NOT VALID`
+      exists to avoid.
   """
   use Ecto.Migration
 

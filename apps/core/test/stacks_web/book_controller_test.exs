@@ -1,7 +1,7 @@
 defmodule StacksWeb.BookControllerTest do
   @moduledoc """
-    Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, POST /api/books,
-    POST /api/books/confirm, and POST /api/books/:id/merge-format.
+      Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, POST /api/books,
+      POST /api/books/confirm, and POST /api/books/:id/merge-format.
   """
 
   use CoreWeb.ConnCase, async: false
