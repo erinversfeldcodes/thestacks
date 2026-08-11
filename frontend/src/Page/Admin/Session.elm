@@ -8,30 +8,11 @@ module Page.Admin.Session exposing
     , view
     )
 
-{-| The admin sign-in gate (#303).
-
-⚠️ **Why this module had to exist before any admin page could work at all.** `/api/admin/*` sits
-behind `pipeline :admin` → `AdminAuthPipeline` (needs a token whose `typ` is `"admin_session"`,
-bound to the client IP and the node's `boot_id`) → `RequireMFA` (verified within 30 minutes). All
-four admin pages were passing the **ordinary** Guardian token, which that pipeline rejects with 401.
-So source approval, scraper health, book moderation and the removal queue had never loaded for
-anyone, and every one of them looked finished from the code and its tests.
-
-The admin token this produces is held **in memory only** — see #303's Design section. No port, no
-localStorage: it needs no persistence machinery, it is the highest-value credential in the system,
-and MFA expires in 30 minutes anyway. A reload means signing in again, which is the honest
-consequence of a deliberately short-lived credential.
-
-
-## The two-and-a-bit steps
-
-1.  **Credentials** — owner email + password → an _unverified_ `session_id`. Non-owners are refused
-    here (403), as are owners with no second factor enrolled.
-2.  **Code** — that `session_id` + a TOTP code → the admin token.
-3.  **Enrolment**, only when step 1 says the factor is missing. Shown inline rather than sent
-    elsewhere, because "you cannot sign in, go and configure something" is where operator tooling
-    usually dead-ends.
-
+{-| The admin sign-in gate — the module whose absence made every
+admin page dead: `/api/admin/*` demands an MFA-verified `admin_session`
+token (IP- and boot\_id-bound, 30-min MFA window), and the pages were
+sending the ordinary token, 401ing every action. Two steps: password →
+challenge, TOTP → admin token, held in memory only.
 -}
 
 import Api exposing (AdminAuthError(..), AdminMfaEnrolment)

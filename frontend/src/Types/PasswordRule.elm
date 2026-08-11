@@ -6,43 +6,11 @@ module Types.PasswordRule exposing
     , tooShortFor
     )
 
-{-| The password-length rule, and the sentence the reader is told it in.
-
-
-## Why this exists
-
-The rule is one number and one sentence. It was ten places and five sentences.
-
-The number `8` was written out at three enforcement sites (`Page.Login`,
-`Page.ResetPassword`, `Page.Settings.Password`), and the rule was stated to the
-reader seven more times in **five different wordings**:
-
-  - "Password must be at least 8 characters" — the register field hint, no full stop
-  - "Password must be at least 8 characters." — the reset page, with one
-  - "New password must be at least 8 characters." — the settings page
-  - "At least 8 characters" — two input placeholders
-  - "That password is too slight; please choose at least eight characters." —
-    the register 422, on the **same form** as the first one, spelling the number
-    as a word
-
-The last pair is the clearest damage: a reader who typed a short password on the
-register card saw the rule twice, phrased differently, with the number written
-two different ways, and had to work out for themselves that these were the same
-requirement and not two.
-
-Nothing could catch that. No test compares two pieces of copy for agreement, and
-a wording drifts silently the moment someone edits one site. So the wording is
-here, built from `minLength`, and the number cannot be changed in one place and
-missed in another.
-
-
-## Why `tooShortFor` takes a subject
-
-"Password" and "New password" are the same rule about different fields, and a
-settings form that says "Password must be…" next to a _current_ password field
-would be ambiguous about which one it means. The subject varies; the clause does
-not.
-
+{-| The password-length rule and the sentence stating it — one number, one
+sentence. It was ten places and five wordings: three enforcement sites
+each wrote `8`, and the reader was told the rule seven more times in
+five different phrasings. `minLength` and `statement` are the only
+source; enforcement and copy cannot disagree again.
 -}
 
 

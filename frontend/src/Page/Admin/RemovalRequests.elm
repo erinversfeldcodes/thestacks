@@ -7,34 +7,12 @@ module Page.Admin.RemovalRequests exposing
     , view
     )
 
-{-| The removal-request review queue (US-2.5.3, campaign G6).
-
-A business owner asking to be delisted from an address on the listing's own domain is acted
-on immediately. Anyone else — a Gmail address, a personal account — cannot be auto-verified,
-so the request parks and **the listing stays live** until a human rules on it.
-
-This page is that human's only view of the queue. Before it existed the endpoints were live
-and tested and the queue was still invisible in practice: a business that asked and heard
-nothing could not tell the difference between waiting and being ignored, which is exactly the
-outcome the story exists to prevent.
-
-
-## ⚠️ The naming hazard, which is the whole reason this module reads carefully
-
-`/admin/sources` has an **Approve** button that _publishes_ a listing. This page has a button
-that _takes one down_. Same-sounding verbs, opposite effects, same database row. So nothing
-here is called "approve" or "reject":
-
-  - **Remove the listing** — honour the request. The business goes.
-  - **Keep the listing** — decline it. The business stays.
-
-Both are named for what happens to the _listing_, never for the reviewer's verdict on the
-request, because "approve this removal request" and "approve this source" mean opposite
-things and a tired reviewer will read only the first word.
-
-Removal is the irreversible-feeling direction, so it asks for confirmation and the
-confirmation names the business.
-
+{-| The removal-request review queue. Domain-verified requests
+act immediately; anything else parks with the LISTING STILL LIVE until a
+human rules. This page is that human's only view — before it, the
+endpoints were live and tested and the queue was invisible, so parked
+requests aged unanswered. Uses the admin session token
+(`Main.adminTokenFor`), never the ordinary one.
 -}
 
 import Api exposing (RemovalRequest)

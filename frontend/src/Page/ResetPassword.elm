@@ -144,26 +144,13 @@ update msg model =
                     ( model, Cmd.none, NoOut )
 
 
-{-| What typing in a field does to the request state: it clears a **stale error**
-and nothing else.
+{-| Typing in a field clears a STALE ERROR and nothing else.
 
-⛔ This used to be a flat `submitting = NotAsked` on every keystroke, and that is
-a state machine in which a finished request can be undone by the keyboard.
-
-The reachable damage was on the `Loading` branch, because that is the state in
-which the form is still on screen. Press "Reset password"; while the request is
-in flight, correct a character in the confirm field; `submitting` drops to
-`NotAsked`, the button un-disables itself and reads "Reset password" again. Press
-it a second time and there are two requests against a **single-use** token. The
-first returns 200 → "Your password has been reset." The second returns 400 →
-"This reset link is invalid or has expired. Request a new one." — replacing the
-confirmation, on a page where the reset genuinely succeeded. The reader is told
-it worked and then told it did not, and the message they are left holding is the
-false one.
-
-`NotAsked` and `Loading` are therefore left alone: neither is an error, and
-neither is something an edit should be able to revoke. `Success` is left alone
-for the reason in `Completed` above.
+⛔ The old flat `submitting = NotAsked` on every keystroke let the
+keyboard undo a finished request: correcting a character while the
+request was in flight re-enabled submit against a token the in-flight
+request was about to consume. Only `Failure` resets; `Loading` and
+`Success` are immune to keystrokes.
 
 -}
 clearStaleError : RemoteData Http.Error () -> RemoteData Http.Error ()

@@ -839,7 +839,7 @@ focusProgressBadgeFromModel model =
 
 
 {-| The DOM id of the dialog card — the element focused when the overlay opens
-(#295 item a; see `Main.openOverlay`). The card carries `tabindex -1` and the
+(item a; see `Main.openOverlay`). The card carries `tabindex -1` and the
 `aria-label "Book details: {title}"`, so a screen reader announces the book on
 open, and the first forward Tab moves to the close button (the card is out of
 the tab order). It is deliberately NOT a focus-trap anchor: the trap still wraps
@@ -878,7 +878,7 @@ removeTriggerId =
 
 
 {-| What `Main` needs to offer "Removed — Undo" on the shelf the reader is about
-to land on (#375).
+to land on.
 
 `Nothing` when either half is missing, and both halves are load-bearing rather
 than cosmetic: without the placement id there is no row to restore, and without
@@ -1073,22 +1073,11 @@ viewHero model book =
         ]
 
 
-{-| The book's own page is where a reader lands when the ISBN-shaped title on
-their shelf made no sense to them, so it is the page that owes them the
-explanation (#344).
-
-Informational only, and deliberately placed after the title rather than in front
-of the page: everything below it — shelving, rating, notes, writing — stays
-available, because a provisional book is a book the reader legitimately owns and
-the ISBN gate legitimately passed. Only the lookup is outstanding.
-
-Keyed off `isUnidentified`, not `isProvisional` (#370). This sentence says the
-page cannot show a title, so it may only appear on a page that is not showing
-one — which is the same predicate `displayTitle` withholds the title on. One
-predicate for both is what makes the contradiction unreachable rather than
-merely absent: there is no state in which the heading prints `book.title` and
-this paragraph denies it.
-
+{-| The provisional-book explainer: the reader lands here when the
+ISBN-shaped title on their shelf made no sense, so this page owes the
+explanation. Informational only, placed after the title — everything
+below stays available, because a provisional book is legitimately owned;
+only the lookup is pending.
 -}
 viewProvisionalNotice : Book -> Html Msg
 viewProvisionalNotice book =
@@ -1299,8 +1288,7 @@ collectionPlacements model =
         model.placements
 
 
-{-| "This book is on two of your bookshelves" — the multi-shelf highlight
-(#333).
+{-| "This book is on two of your bookshelves" — the multi-shelf highlight.
 
 Shown only when the book sits on 2+ of Library / Antilibrary / Reading Pile /
 Wish List. The reader put it there, so the copy is a plain observation with a
@@ -1389,7 +1377,7 @@ viewFormatsOnShelf model =
         ]
 
 
-{-| "Who can see this book" — per-placement visibility override (US-10.2.2).
+{-| "Who can see this book" — per-placement visibility override.
 Only shown when the user owns a placement. Options that would make the placement
 more visible than its parent shelf are greyed out, with an always-visible line of
 helper text explaining the shelf ceiling, mirroring the server-side ceiling 422.
@@ -1531,7 +1519,7 @@ formatPrice cents =
 
 {-| Author card section — delegates to the AuthorCard component.
 RSS enrichment stays Nothing (its API is future work); events are live
-(#321 item 4), passed only once fetched so the card's "coming soon" stub
+(item 4), passed only once fetched so the card's "coming soon" stub
 remains the honest not-yet-asked state.
 -}
 viewAuthorSection : Model -> Book -> Html Msg

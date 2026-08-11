@@ -1,38 +1,10 @@
 module Util.FailureCopy exposing (rateLimited, saveFailure, waitPhrase)
 
-{-| The sentences the app says when something did not work (Issue #374).
-
-
-## Why these live together
-
-Four surfaces — the login card, the upload page and the settings forms — each
-reach the same handful of failures, and each had written its own sentence for
-them. The sentences did not agree, and two of them were not true. A shared
-vocabulary is the small half of the win; the large half is that the rule they
-all have to obey is written down once, next to the words, where the next person
-adding a branch will read it.
-
-
-## ⛔ The rule
-
-**Never name a cause the response did not carry.**
-
-`Page.Login` mapped every unhandled status onto "Invalid email or password", so
-a 502 from a restarting node told readers their credentials were wrong. They
-retype details that are correct, fail again, and conclude the account is gone.
-The message was not merely unhelpful — it sent the reader to fix the one thing
-that was not broken.
-
-The same shape is why `rateLimited` takes a `Maybe Int` and not an `Int` with a
-default. `retry-after` is a header; a caller that could not read it knows only
-that it must wait, and the copy for that case says exactly that and no more.
-Hard-coding "60 seconds" to make the sentence nicer would still read "60
-seconds" the day `StacksWeb.Plugs.RateLimiter` is retuned, and nothing would
-fail.
-
-The unknown branch of every function here says the failure is unknown. That is
-not an apology for missing detail; it is the detail.
-
+{-| The sentences the app says when something did not work. Four
+surfaces reached the same failures and each wrote its own sentence —
+they disagreed, and two were untrue. The vocabulary lives together with
+its rule: name only what the response proves, blame credentials only on
+a 401, and never name a control the surface doesn't render.
 -}
 
 import Http
@@ -86,7 +58,7 @@ waitPhrase seconds =
 preferences" — so the sentences read as English rather than as a template.
 
 The 401 leg is deliberately absent: `Api.Authed` diverts an expired session to
-the page's `onExpired` handler before any resolver sees the response (#361), so
+the page's `onExpired` handler before any resolver sees the response, so
 a 401 can never reach here, and a branch for it would be dead code that looked
 like coverage.
 

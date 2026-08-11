@@ -4,22 +4,12 @@ module Page.Bookshelf.GridNav exposing
     , nextFocus
     )
 
-{-| Roving-tabindex arrow-key navigation over the bookcase grid (#388,
-US-19.1.2).
-
-The grid is not rectangular: `groupIntoRows` packs spines into rows by
-accumulated width against the bookcase inner width (~990px), so every row
-holds a different number of books at different x positions. That rules out
-"same index in the next row" for ↑/↓. The column model, decided by the owner,
-is **nearest-x**: a vertical move lands on the book in the adjacent row whose
-horizontal centre is closest to the current book's centre — which is what the
-eye does when scanning a real bookcase up a column of uneven spines.
-
-Everything here is a pure function over rows of `( bookId, spineWidth )`; the
-page owns focus state and the `Browser.Dom.focus` side effect. Widths must be
-the SAME widths the packer used (spine + gap), or the nearest-x arithmetic
-would reason about a different bookcase than the one on screen.
-
+{-| Roving-tabindex arrow-key navigation over the bookcase grid (388,
+). The grid is not rectangular — rows pack by accumulated spine
+width — so ↑/↓ cannot be "same index, next row". The column model is
+nearest-x (owner decision): a vertical move lands on the book whose
+horizontal centre is closest in the adjacent row. One tab stop for the
+whole grid; arrows rove within it.
 -}
 
 import Json.Decode as Decode
@@ -162,7 +152,7 @@ idAt index row =
         row |> List.drop index |> List.head |> Maybe.map Tuple.first
 
 
-{-| ( row index, that row, column index ) of `bookId`.
+{-| ( row index, that row, column index) of `bookId`.
 -}
 locate : String -> List (List ( String, Int )) -> Maybe ( Int, List ( String, Int ), Int )
 locate bookId rows =

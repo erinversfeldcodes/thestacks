@@ -173,27 +173,11 @@ bookPublicationYear bk =
     bk.primaryEdition |> Maybe.andThen .publicationYear
 
 
-{-| True when nothing outside The Stacks has yet confirmed this book's ISBN.
-
-The ISBN gate has still passed — a barcode decoded cleanly and its EAN-13 check
-digit is good — but neither Open Library nor Google Books has been recorded
-against this edition. This is provenance and nothing else: it is a fact about
-where the ISBN's confirmation came from, not about what The Stacks knows of the
-book.
-
-Driven by `verificationSource`, never by whether the title happens to start with
-`"ISBN "` (#344). The title is a guess about the provenance; this field IS the
-provenance. The guess is wrong in both directions: a real book could be titled
-`ISBN` and, worse, the moment enrichment succeeds the title changes and a title
-test quietly stops finding anything — which is exactly the population it most
-needs to find.
-
-This is a legitimate state, not an error, and nothing in the UI may block on it.
-
-⚠️ This does NOT mean "we do not know what this book is" — see `isUnidentified`,
-which is the question the screen actually asks, and #370 for what it cost to
-answer one with the other.
-
+{-| True when nothing outside The Stacks has confirmed this ISBN: the gate
+passed (clean barcode, good check digit) but neither OL nor GB is
+recorded against the edition. Pure provenance — driven by
+`verificationSource`, never by whether the title looks odd; a book can
+be provisional with a real title and vice versa.
 -}
 isProvisional : Book -> Bool
 isProvisional bk =
@@ -205,25 +189,11 @@ isProvisional bk =
             False
 
 
-{-| True when `title` is a name rather than one of the stand-ins the server
-mints for itself when nothing told it what the book is called.
-
-There are exactly two stand-ins, and the server writes both:
-`Moderation.derive_title/3` writes `"ISBN <isbn>"` when the barcode fast path
-deliberately skipped the catalogue lookup, and `Books.attrs_from_resolved/2`
-writes `"Unknown Title"` when a resolver answered without one. An absent title
-decodes to `""`.
-
-Matched by EQUALITY against this row's own ISBN, never by prefix.
-`String.startsWith "ISBN "` is the heuristic #344 rejected and it would call a
-real book named `"ISBN 9780262561754 and Other Numbers"` nameless; the full
-placeholder is the word `ISBN` and this edition's ISBN and nothing else, so a
-title that says anything more cannot collide with it.
-
-Deliberately NOT exposed. `ProvisionalBookTest` restates these three strings
-rather than importing this, so that widening the rule reddens the test instead
-of the test agreeing with whatever the rule has become.
-
+{-| True when `title` is a name rather than a server stand-in. There are
+exactly two stand-ins, both server-written: `"ISBN <isbn>"` (barcode
+fast path skipped the lookup) and `"Unknown Title"` (resolver answered
+without one); absent decodes to `""`. Matching is exact — a real book
+titled with an ISBN-like name stays a name.
 -}
 hasKnownTitle : Book -> Bool
 hasKnownTitle bk =
@@ -237,25 +207,11 @@ hasKnownTitle bk =
 
 
 {-| True when The Stacks holds no name for this book — only a number.
-
-`isProvisional` and this are DIFFERENT claims, and #370 is the bill for
-conflating them. `isProvisional` says _no provider has confirmed this ISBN_;
-this says _we do not know what this book is_. Every edition in the
-staging-derived database carries `barcode_unverified` — 206 of 206, honestly, as
-none of them were provider-verified — while holding a real title. So the first
-was true of all of them and the second of none, and the book detail page told
-the reader it could not show a title it was printing two lines above, beside the
-author, year and page count it also held.
-
-Both conjuncts are required because the notice this drives makes both claims at
-once: _we have the barcode, we have not matched it to a catalogue record, and so
-we cannot show a title_. A sentence that asserts two things may only be shown
-when both are true.
-
-The fix is here and not in the data: relabelling those rows `open_library` would
-assert a verification that never happened — the same untruth pointing the other
-way.
-
+DIFFERENT claim from `isProvisional`, and 370 is the bill for conflating
+them: provisional says no provider confirmed the ISBN; this says we
+don't know what the book IS. All 206 staging editions were honestly
+provisional while holding real titles — rendering them all as pending
+lookups was the bug.
 -}
 isUnidentified : Book -> Bool
 isUnidentified bk =

@@ -70,7 +70,7 @@ groupIntoRowsHelp maxWidth currentWidth currentRow remaining =
 
 {-| The horizontal room one placement's spine occupies in a row (spine + gap).
 
-Exposed because `GridNav`'s nearest-x arithmetic (#388) must reason with the
+Exposed because `GridNav`'s nearest-x arithmetic must reason with the
 SAME widths this packer laid the row out with — a second width formula would
 navigate a different bookcase than the one on screen.
 
@@ -109,7 +109,7 @@ viewShelfLabel label =
 
 
 {-| Render a single shelf row matching the mockup structure:
-.shelf-row > .shelf-row\_\_back + .shelf-row\_\_books + .shelf-row\_\_plank + .shelf-row\_\_lip
+.shelf-row >.shelf-row\_\_back +.shelf-row\_\_books +.shelf-row\_\_plank +.shelf-row\_\_lip
 -}
 viewShelfRow : WearLevel -> List Placement -> Html msg
 viewShelfRow wearLevel placements =
@@ -176,11 +176,11 @@ viewSpine wearLevel placement =
 {-| Render a shelf row where each book spine is clickable.
 The onBookClicked callback receives the Book data when a spine is clicked.
 
-`tabStopId` is the roving tabindex (#388): exactly one spine per bookcase
+`tabStopId` is the roving tabindex: exactly one spine per bookcase
 carries `tabindex 0` — the last-focused one, or the grid's first spine — and
 every other spine is reachable from it with the arrow keys via `onNavKey`.
 `Nothing` (no roving state, e.g. the plain `viewShelfRow`) leaves every spine
-a tab stop, the pre-#388 behaviour.
+a tab stop, the pre-behaviour.
 
 -}
 type alias SpineGridConfig msg =
@@ -226,31 +226,13 @@ viewEmptyShelfMessage message =
         ]
 
 
-{-| A bookcase-full of placeholder spines, for the moment the shelves are still
-in flight.
+{-| A bookcase of placeholder spines for while the shelves are in flight.
 
-⛔ **This exists because "no books yet" and "we do not know yet" used to render
-the same thing.** `Page.Bookshelf` gave `Loading` the same branch as `NotAsked`
-— an empty bookcase — which is also what an empty shelf looks like. Driven live
-on 2026-07-30: navigating to a shelf with no connection painted a serene, empty
-bookcase and stopped. The reader is told their shelves are empty; the truth is
-that the request never completed. For a product whose whole subject is the books
-someone owns, that is the worst sentence the page can say wrongly.
-
-So the loading row is not a spinner bolted onto the empty state — it is the
-opposite claim, made in the same visual language: spine-shaped placeholders on a
-real shelf, saying "books are coming" where the empty row says "there are none".
-The widths come from `spineWidth` on a fixed spread of page counts, so the rows
-have the irregular rhythm of an actual shelf rather than rows of identical bars.
-
-⚠️ **It returns every row, not one row to pad out with `minShelfRows`.** Padding
-would fill the rest of the bookcase with `shelf-row--empty` — the empty state's
-own marker — putting "this shelf is empty" back on the waiting page in the one
-place a reader and a test both look.
-
-`aria-hidden` on the placeholders: they carry no information a screen reader can
-use. The announcement is the `role="status"` region around the bookcase (see
-`Page.Bookshelf.viewLoadingBookshelf`), which says it once, in words.
+⛔ Exists because "no books yet" and "we do not know yet" rendered the
+same empty bookcase (Loading shared NotAsked's branch): offline shelf
+navigation told the reader their library was empty. Deterministic
+pseudo-random widths (seeded, stable across frames) so the skeleton
+doesn't shimmer between renders.
 
 -}
 viewLoadingShelfRows : List (Html msg)

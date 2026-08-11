@@ -1,22 +1,10 @@
 module Animation.Transition exposing (clearOnAnimationEnd, transitionClass)
 
-{-| Picks the CSS animation class for a route change (US-1.2.5).
-
-The three bookcase bookshelves sit in a fixed left-to-right order in the nav
-(`Main.elm:2594-2598`): Library, AntiLibrary, WishList. Moving between them
-slides horizontally **in the direction of travel**, so a back-navigation reads
-differently from a forward one — the direction is the spatial information.
-
-Everything else — into or out of a room page (Reading Pile, Looking for a
-Home), and any non-bookshelf route — fades through darkness.
-
-Book detail is deliberately absent. It is rendered as an overlay and never
-pushes a route (see `docs/decisions/005-book-detail-overlay-not-route.md`), so
-it can never reach this function, which is called only from `UrlChanged`.
-
-The returned string is both the CSS class and the `@keyframes` name it
-triggers; `Main.elm` relies on that to match `animationend` events.
-
+{-| Picks the CSS animation class for a route change. The three
+bookcase bookshelves sit in fixed nav order (Library, AntiLibrary,
+WishList); moving between them slides horizontally IN THE DIRECTION OF
+TRAVEL — the direction is the spatial information. Everything else
+(room pages, unrelated routes) uses the neutral fade.
 -}
 
 import Animation.RoomTransition as RoomTransition

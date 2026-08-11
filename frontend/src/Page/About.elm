@@ -1,23 +1,10 @@
 module Page.About exposing (view)
 
-{-| The public About page (US-15.1.1 sibling surface; Wave 8 #318, 8c).
-
-Carries the owner's approved launch copy (`plans/318-about-page-copy-draft.md`).
-Each drafted section maps to one `section.about__section` here, in the draft's
-order — hero, what it is, the five shelves, what you can do, built to be yours,
-the wider shelf, closing — so a future copy edit is a local change to one block,
-not a re-layout.
-
-⚠️ **"The wider shelf" (partner events) is present-tense by owner ruling.** The
-partner-events vertical (Wave 11 #321) is not live yet, but nothing ships until
-every wave completes, so that surface will be live by launch; the copy is
-written as a present fact, not "coming soon".
-
-The trailing **transparency** section (the `/metrics` and `/costs` links from
-#235) is preserved: About is still their only navigational entry point, and
-`transparency.spec.ts` / `costs.spec.ts` drive them by `about-metrics-link` /
-`about-costs-link`. Static — no model, no messages.
-
+{-| The public About page. Carries the owner's approved launch
+copy, one drafted section per `section.about__section` in the draft's
+order, so a copy edit is a local change. "The wider shelf" (partner
+events) describes an aspiration the platform is built for, not a live
+feature — the copy is deliberately future-tense.
 -}
 
 import Html exposing (Html, a, div, h1, h2, li, p, section, strong, text, ul)
@@ -152,7 +139,7 @@ viewClosing =
         ]
 
 
-{-| Preserved from #235: About is still the only entry point to the public
+{-| Preserved from: About is still the only entry point to the public
 transparency surface and the cost-transparency page, and the E2E specs drive
 these two links by their test ids.
 -}

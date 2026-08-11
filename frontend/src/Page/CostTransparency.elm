@@ -7,20 +7,10 @@ module Page.CostTransparency exposing
     , view
     )
 
-{-| Public cost transparency page.
-
-Displays the platform's infrastructure costs with consumer-friendly
-explanations. No authentication required. All data is aggregate
-operational costs — no user data is ever exposed.
-
-Follows the 5-layer model from the cost transparency research:
-
-1.  Total at the top (the human number)
-2.  Story-driven breakdown (what happens when you use the app)
-3.  Per-service detail (expandable category cards)
-4.  Real usage metrics from the database
-5.  Monthly trend over time
-
+{-| Public cost-transparency page: aggregate infrastructure costs with
+consumer-friendly explanations; no auth, no user data. Follows the
+5-layer model — total, story-driven breakdown, per-service cards, real
+usage metrics, sustainability footer.
 -}
 
 import Api
@@ -102,8 +92,7 @@ update msg model =
 
 
 {-| `Http.request` rather than the shorter `Http.get`, because `Http.get` has no
-`timeout` field at all — it is `Nothing` by construction, i.e. wait forever
-(#362). The extra four lines are what buys this page a reachable `Failure`
+`timeout` field at all — it is `Nothing` by construction, i.e. wait forever. The extra four lines are what buys this page a reachable `Failure`
 branch.
 -}
 fetchCosts : Cmd Msg

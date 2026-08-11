@@ -15,39 +15,13 @@ module Components.OnboardingOverlay exposing
     , view
     )
 
-{-| OnboardingOverlay — the D2 first-run flow (US-14.1.2): a reader who has just
-registered is walked **Welcome → Upload your first book → Consent → Done**.
+{-| OnboardingOverlay — the first-run flow: Welcome → Upload →
+Consent → Done.
 
-⚠️ **The step sequence is DATA, not branches (US-14.1.2 AC#2).** The flow is an
-ordered `steps : List Step` the view folds over, plus a `currentIndex`. There is
-no hardcoded `Welcome -> Upload -> Consent` transition chain: advancing is
-`currentIndex + 1`, the current descriptor is `List.Extra.getAt currentIndex
-steps`, and the progress dots derive from `List.length steps`. A step is added,
-reordered, or removed by editing `defaultSteps` alone — nothing in `update` or
-`view` changes. (`OnboardingOverlayTest` proves this with a reorder/extend
-oracle that fails on any hardcoded enum.)
-
-Two steps embed real product surfaces rather than re-implementing them:
-
-  - **UploadFirstBook** embeds the actual US-1.1.1 upload/identify flow
-    (`Page.Upload`). The reader photographs a cover / barcode or types an ISBN,
-    the book is identified and placed through the same pipeline every later
-    upload uses, and the step advances automatically on a real placement
-    (`Upload.step` reaching `Complete`). Its stream/navigation effects surface
-    as `OutMsg`s the parent (`Main`) wires exactly as it does for the standalone
-    upload page.
-  - **Consent** embeds `Page.Settings.Consent.viewSection` and delegates every
-    message to `Consent.update` **verbatim** — the consent write path
-    (`Api.saveConsent` / `Api.saveWritingAssistantConsent`) and its timestamp
-    semantics (US-8.3) are untouched; this module only chooses _where_ the
-    toggles appear.
-
-Server step model (#149): each client step that has a server counterpart records
-completion via `PUT /api/onboarding/step/:step` — `Welcome → "profile"`,
-`Consent → "privacy"`. Skip and advance-off-the-end use one identical finish
-path: `visible = False`, `OutMsg OnboardingFinished`, and the same server-step
-record. `Main` mirrors completion to localStorage (`saveOnboardingCompleted`),
-the fast client-side re-trigger guard.
+⚠️ The step sequence is DATA, not branches: an ordered
+`steps: List Step` + `currentIndex`; advancing is `+ 1`. Reordering or
+inserting a step is a list edit, not a transition-chain rewrite.
+Completion persists server-side, so a reload does not re-run the flow.
 
 -}
 
@@ -149,7 +123,7 @@ trailingGuardId =
 
 
 {-| The initial model: the full D2 sequence, index 0, visible, with fresh
-embedded upload and consent sub-models (consent defaults OFF, per US-14.1.2 §1).
+embedded upload and consent sub-models (consent defaults OFF, per §1).
 -}
 init : Model
 init =
@@ -318,7 +292,7 @@ update token msg model =
 
 {-| Advance by one index. If already on the last descriptor, finish instead —
 the identical finish path Skip/Escape use. Records the step being LEFT if it has
-a server counterpart (#149).
+a server counterpart.
 -}
 advance : Maybe String -> Model -> ( Model, Cmd Msg, OutMsg )
 advance token model =
@@ -365,7 +339,7 @@ recordCurrentStep maybeToken model =
             Cmd.none
 
 
-{-| The server (#149) step a client descriptor records on completion, or
+{-| The server step a client descriptor records on completion, or
 `Nothing` for a client-only step (Upload is tracked by the placement existing;
 Done is the terminus).
 -}
@@ -624,7 +598,7 @@ skipButton =
 
 {-| Progress dots derived from the sequence: ONE dot per descriptor, the dot at
 `currentIndex` marked active. Add a descriptor to `steps` → a dot appears here
-with no edit. (No `transition` on the dot — the #316/#319 indicator rule.)
+with no edit. (No `transition` on the dot — the /indicator rule.)
 -}
 viewProgressDots : Model -> Html Msg
 viewProgressDots model =

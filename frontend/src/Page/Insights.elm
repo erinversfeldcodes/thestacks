@@ -7,22 +7,11 @@ module Page.Insights exposing
     , view
     )
 
-{-| Personal inference & de-anonymisation education view (authed, own-only).
-
-The authenticated counterpart to the public `/metrics` page. Shows a signed-in
-user ONLY their own data-derived inferences, computed live from their own
-records and never persisted, to educate on:
-
-  - what can be inferred about them from their behaviour, and
-  - how they could be de-anonymised even though the platform keeps no PII.
-
-Everything shown is ephemeral — nothing here is stored, and it is computed from
-the user's own data only. The sensitive "what could be inferred" section is
-hidden behind an explicit consent-to-view action; clicking it re-fetches the
-same endpoint with `?reveal_risk=true`.
-
-Design: ADR-019 §3a. Issue #242.
-
+{-| Personal inference & de-anonymisation education view (authed,
+own-only) — the signed-in counterpart to the public `/metrics` page.
+Shows only the viewer's own inferences, computed live and never
+persisted; facts labelled as facts, inferences as guesses with limits
+stated.
 -}
 
 import Api exposing (Behaviour, Deanonymisation, InterestProfile, PersonalInferences, RiskInference, SubjectCount)

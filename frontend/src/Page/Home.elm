@@ -7,26 +7,13 @@ module Page.Home exposing
     , view
     )
 
-{-| The root URL (`/`), which has two faces of one route (US-15.1.1, Wave 8 #318).
+{-| The root URL (`/`) — two faces of one route.
 
-⛔ **`/` is never a dead end, and it never redirects.** The content branches on
-auth state instead:
-
-  - **`Landing`** — the welcoming, model-light landing shipped by #235: the title,
-    subtitle, and the About / Marketplace CTAs. This is what a signed-out visitor
-    (or a signed-in one who has no token in hand) sees.
-  - **`Collection`** — the signed-in reader's doorway INTO their books: a glimpse of
-    a shelf, a way back into the Reading Pile, and an ever-present Add-Book CTA.
-
-The two faces are separate constructors rather than a `Bool` on one record, so a
-`Landing` can never carry preview data and a `Collection` can never be rendered
-without the field that holds it — the classic "make impossible states
-impossible" the rest of this app is written to.
-
-The authenticated glimpse **reuses the existing `GET /api/bookshelves/:name`
-read** (`Api.getBookshelf`, US-1.2.1 / US-1.2.4) — no bespoke home endpoint, no
-new personal-data surface. It reads the reader's own Library shelf and shows a
-few spines; a failure degrades to the CTAs alone, so the home is always useful.
+⛔ `/` never dead-ends and never redirects; content branches on auth:
+`Landing` (signed-out: title, subtitle, About/Marketplace CTAs) or
+`Collection` (signed-in: the doorway to the reader's shelves). One
+route, one URL, no bounce that would break the back button or make the
+root unlinkable.
 
 -}
 
@@ -116,7 +103,7 @@ view model =
             viewCollection preview
 
 
-{-| The signed-out landing — the #235 shipped surface (title, subtitle, About +
+{-| The signed-out landing — the shipped surface (title, subtitle, About +
 Marketplace CTAs). Model-light and static; kept intact as the welcoming face.
 -}
 viewLanding : Html Msg
@@ -190,7 +177,7 @@ viewPreview preview =
 
 
 {-| The onward actions, present in every state. Add-Book is the primary,
-persistent affordance (US-15.1.1); continue-reading routes back into the Reading
+persistent affordance; continue-reading routes back into the Reading
 Pile. Plain links — the home issues no call of its own beyond the glimpse read.
 -}
 viewActions : Html Msg
