@@ -40,10 +40,37 @@
 
 set -euo pipefail
 
+# Optional: --base <ref> skips files whose EXTRACTED SQL is identical to the
+# base ref's — a comment/doc-only edit does not change the destructive surface,
+# and re-flagging a long-shipped migration over a docstring tweak only teaches
+# people to annotate history. Files with genuinely changed SQL still lint.
+BASE=""
+if [[ "${1:-}" == "--base" ]]; then
+    BASE="$2"
+    shift 2
+fi
+
 if [[ $# -eq 0 ]]; then
-    echo "usage: $0 <migration.exs> [migration.exs ...]" >&2
+    echo "usage: $0 [--base <ref>] <migration.exs> [migration.exs ...]" >&2
     exit 0
 fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+_sql_unchanged_from_base() {
+    local file="$1"
+    [[ -n "$BASE" ]] || return 1
+    git -C "$REPO_ROOT" rev-parse --verify "$BASE" &>/dev/null || return 1
+    local rel base_src base_tmp sql_now base_sql
+    rel="$(python3 -c "import os,sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))" "$(cd "$(dirname "$file")" && pwd)/$(basename "$file")" "$REPO_ROOT")"
+    base_src="$(git -C "$REPO_ROOT" show "$BASE:$rel" 2>/dev/null)" || return 1
+    sql_now="$(python3 "$REPO_ROOT/scripts/extract-migration-sql.py" "$file" 2>/dev/null || true)"
+    base_tmp="$(mktemp).exs"
+    printf '%s' "$base_src" > "$base_tmp"
+    base_sql="$(python3 "$REPO_ROOT/scripts/extract-migration-sql.py" "$base_tmp" 2>/dev/null || true)"
+    rm -f "$base_tmp"
+    [[ -n "$sql_now" && "$sql_now" == "$base_sql" ]]
+}
 
 FAILED=0
 
@@ -51,6 +78,11 @@ for file in "$@"; do
     if [[ ! -f "$file" ]]; then
         echo "lint-migrations: $file does not exist" >&2
         FAILED=1
+        continue
+    fi
+
+    if _sql_unchanged_from_base "$file"; then
+        echo "$file: SQL identical to $BASE — comment/doc-only change, skipping"
         continue
     fi
 

@@ -725,7 +725,7 @@ jobs:
           # shellcheck disable=SC2086
           printf '  %s\n' ${changed}
           # shellcheck disable=SC2086
-          scripts/lint-migrations.sh ${changed}
+          scripts/lint-migrations.sh --base origin/main ${changed}
 
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
