@@ -1,31 +1,10 @@
 defmodule Stacks.AI.VisionFixtures do
   @moduledoc """
-    Canonical `/analyze` response shapes for steering `Stacks.AI.MockClient`.
-
-    Before every test file that needed a non-default vision answer
-    defined its own `@behaviour Stacks.AI.ClientBehaviour` module and swapped it
-    in with `Application.put_env(:core,:vision_client, …)`. Each of those was a
-    hand-written mirror of the production response shape, free to drift from it
-    independently — and at least one had already drifted. This module is the one
-    place the shape is written down; `Stacks.AI.MockClient` is the one place it is
-    served from.
-
-    ## Usage
-
-        import Stacks.AI.VisionFixtures
-
-        steer_vision(not_a_book)
-        assert {:error,:not_a_book} = Moderation.run_pipeline(context)
-
-        steer_vision(books_with_isbns(["9780743273565"]))
-        steer_vision(service_error)
-
-        with_vision(no_isbn, fn -> perform_job(IdentifyBookJob, args) end)
-
-    Steering is process-local (`Stacks.AI.MockClient` keeps registrations in the
-    process dictionary and looks them up through `$callers`), so it reaches Tasks
-    the pipeline spawns and jobs run inline by `perform_job/2` or
-    `Oban.drain_queue/1`, without mutating any global.
+  Canonical `/analyze` response shapes for steering `Stacks.AI.MockClient`
+  — the ONE place the production response shape is written down. Test files
+  used to define their own mock modules, each a hand-written mirror free to
+  drift (at least one had). Compose via
+  `put_response("analyze", VisionFixtures.book_identified(isbn: ...))`.
   """
 
   alias Stacks.AI.MockClient

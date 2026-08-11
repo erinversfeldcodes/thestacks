@@ -1,33 +1,15 @@
 defmodule Stacks.AI.MockClient do
   @moduledoc """
-    Mock implementation of the vision client (`Stacks.AI.ClientBehaviour`) for tests.
+  Mock vision client (`Stacks.AI.ClientBehaviour`). Responses are steered
+  per endpoint through the process dictionary (isolated, `async: true`-safe);
+  unregistered endpoints fall back to the canned default.
 
-    Responses are steered **per endpoint** through the process dictionary, so each
-    test process is isolated and tests can run with `async: true`. An endpoint with
-    no registered response falls back to the canned default below.
+      MockClient.put_response("extract_isbn", {:error, :service_unavailable})
+      MockClient.put_response(:any, {:error, :circuit_open})
 
-    ## Usage
-
-        MockClient.put_response("analyze", {:ok, %{"classification" => "CLASSIFICATION_RESULT_NOT_BOOK"}})
-        MockClient.put_response("extract_isbn", {:error,:service_unavailable})
-        MockClient.put_response(:any, {:error,:circuit_open})
-        MockClient.put_response("analyze", fn payload -> {:ok, build_from(payload)} end)
-
-    A registered response is either a literal term (returned as-is) or a 1-arity
-    function of the payload (called, its result returned).
-
-    The endpoints are the logical names `Stacks.AI.Client.call_vision/2` dispatches
-    on: `"is_book"`, `"extract_isbn"`, `"analyze"`, `"associate"`. Register under
-    `:any` to steer every endpoint at once; an exact-endpoint registration wins
-    over an `:any` one.
-
-    **The most recent registration for an endpoint wins** (same semantic as
-    `Stacks.Books.MockHttpClient`), so a test can override a response installed by
-    its `setup` block. `clear/0` drops every registration for the current process.
-
-    Registrations survive `Task.async`/`Task.async_stream`: lookup walks the
-    `$callers` chain, so work the moderation pipeline farms out to tasks sees the
-    responses the test process registered.
+  `:any` steers every endpoint; a specific endpoint registration wins over
+  it. Response shapes come from `Stacks.Testing.VisionFixtures` — do not
+  hand-write them.
   """
 
   @behaviour Stacks.AI.ClientBehaviour

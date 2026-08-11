@@ -1,23 +1,13 @@
 defmodule Stacks.Books.MockHttpClient do
   @moduledoc """
-    Mock HTTP client for ISBNResolver tests.
+  Mock HTTP client for ISBNResolver tests. Responses live in the process
+  dictionary keyed by URL substring (isolated, `async: true`-safe); the
+  most recently registered matching pattern wins.
 
-    Responses are stored in the process dictionary keyed by URL substring,
-    so each test process is isolated and tests can run with `async: true`.
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => [...]}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [...]}})
 
-    ## Usage
-
-        MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{"ISBN:123" =>...}})
-        MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => [...]}})
-        MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [...]}})
-
-    The **most recently** registered pattern whose substring matches the requested
-    URL wins — registrations are prepended, so a later `put_response/2` overrides
-    an earlier one for the same (or an overlapping) pattern. That is the useful
-    semantic for a test overriding a response installed by its `setup` block, and
-    it is what the code has always done; the moduledoc previously claimed
-    first-registration-wins, which was never true.
-    Unmatched URLs return `{:ok, %{}}`.
+  An unmatched URL returns `{:error, :not_found}`.
   """
 
   @behaviour Stacks.Books.HttpClientBehaviour
