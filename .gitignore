@@ -128,3 +128,7 @@ apps/core/assets/node_modules/
 
 # Local, uncommitted working notes
 notes/
+
+# Project management files live locally only (owner decision 2026-08-11)
+/issues/
+/plans/
