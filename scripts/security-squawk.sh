@@ -88,11 +88,35 @@ echo ""
 VIOLATIONS=0
 ANALYSED=0
 
+# A file can enter the changed set through a comment/doc-only edit. Its SQL is
+# what squawk asserts about, so when the base ref holds the same file and the
+# EXTRACTED SQL is byte-identical, the migration hazard surface did not change
+# and re-linting it would only resurface historical noise the base-diff
+# selection exists to suppress. Real SQL edits still lint in full.
+_base_sql_unchanged() {
+    local abs_path="$1" sql_now="$2"
+    [[ "${BASE_AVAILABLE:-0}" == "1" ]] || return 1
+    local rel="${abs_path#"$REPO_ROOT/"}"
+    local base_src
+    base_src="$(git -C "$REPO_ROOT" show "$BASE:$rel" 2>/dev/null)" || return 1
+    local base_tmp base_sql
+    base_tmp="$(mktemp).exs"
+    printf '%s' "$base_src" > "$base_tmp"
+    base_sql="$(python3 "$REPO_ROOT/scripts/extract-migration-sql.py" "$base_tmp" 2>/dev/null || true)"
+    rm -f "$base_tmp"
+    [[ -n "$base_sql" && "$base_sql" == "$sql_now" ]]
+}
+
 for migration in "${MIGRATION_FILES[@]}"; do
     sql_block="$(python3 "$REPO_ROOT/scripts/extract-migration-sql.py" "$migration" 2>/dev/null || true)"
 
     if [[ -z "$sql_block" ]]; then
         echo "  (no raw SQL in $migration — skipping)"
+        continue
+    fi
+
+    if _base_sql_unchanged "$migration" "$sql_block"; then
+        echo "  (SQL identical to $BASE in $migration — comment/doc-only change, skipping)"
         continue
     fi
 
