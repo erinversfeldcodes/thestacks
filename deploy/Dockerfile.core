@@ -76,7 +76,7 @@ FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6ee
 
 RUN apk add --no-cache libstdc++ openssl ncurses-libs
 
-RUN addgroup -S stacks && adduser -S stacks -G stacks
+RUN addgroup -S -g 10001 stacks && adduser -S -u 10001 stacks -G stacks
 WORKDIR /app
 
 COPY --from=builder --chown=stacks:stacks /app/release ./
@@ -87,13 +87,13 @@ COPY --from=builder --chown=stacks:stacks /app/release ./
 # setting inet6: true globally (which disrupts Oban's DB connections).
 RUN mkdir -p /app/etc && echo '{lookup, [native]}.' > /app/etc/inetrc && chown stacks:stacks /app/etc/inetrc
 
-USER stacks
+USER 10001:10001
 
 ENV PHX_SERVER=true
 ENV ERL_INETRC=/app/etc/inetrc
 EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD wget -qO- http://localhost:4000/api/health || exit 1
+    CMD ["/bin/sh", "-c", "wget -qO- http://localhost:4000/api/health || exit 1"]
 
 CMD ["bin/core", "start"]
