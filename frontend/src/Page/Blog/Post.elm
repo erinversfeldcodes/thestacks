@@ -456,7 +456,7 @@ viewPost post isOwner =
         ]
 
 
-{-| Render the author's name as a link to their public profile (US-10.5.4).
+{-| Render the author's name as a link to their public profile.
 
 When the author handle is present the display name links to `/u/:handle`;
 following the link to a ghost/blocked author still resolves to the profile

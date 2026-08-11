@@ -4,7 +4,7 @@ module UserMenuTest exposing (suite)
 
 Covers Toggle (open/close), Close, SignOutClicked → SignOut OutMsg,
 NavigateClicked → NavigateTo OutMsg, and the rendered dropdown contents (the
-settings family + Sign Out, #318 TR-1). The Main.elm SignOut wiring (auth
+settings family + Sign Out, TR-1). The Main.elm SignOut wiring (auth
 cleared, clearAuth port, navigate to /login) and the non-blocking logout result
 no-op (FocusResult) are exercised at the Main level, which cannot be
 unit-tested here because it owns a Browser.Navigation.Key.
@@ -89,7 +89,7 @@ suite =
                     in
                     model.open |> Expect.equal False
             ]
-        , describe "NavigateClicked (settings family, #318 TR-1)"
+        , describe "NavigateClicked (settings family, TR-1)"
             [ test "NavigateClicked emits NavigateTo carrying the clicked path" <|
                 \() ->
                     Tuple.second (UserMenu.update (NavigateClicked "/settings/privacy") UserMenu.init)

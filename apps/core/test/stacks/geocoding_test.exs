@@ -1,11 +1,11 @@
 defmodule Stacks.GeocodingTest do
   @moduledoc """
-  Tests the geocoding seam and Nominatim's response handling.
+    Tests the geocoding seam and Nominatim's response handling.
 
-  The adapter's *request* half is a single Finch call with no branching, so it is not
-  mocked — that would test Finch. Everything with a decision in it lives in `handle/2`,
-  which is exercised directly against constructed responses: no network, no stub server,
-  and the 429 path is reachable, which it would not be against a live service.
+    The adapter's *request* half is a single Finch call with no branching, so it is not
+    mocked — that would test Finch. Everything with a decision in it lives in `handle/2`,
+    which is exercised directly against constructed responses: no network, no stub server,
+    and the 429 path is reachable, which it would not be against a live service.
   """
 
   use ExUnit.Case, async: false

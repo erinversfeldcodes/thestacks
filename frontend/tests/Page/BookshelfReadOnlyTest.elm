@@ -1,6 +1,6 @@
 module Page.BookshelfReadOnlyTest exposing (suite)
 
-{-| Program tests for read-only shelf browsing (Issue #215 / US-10.5.3).
+{-| Program tests for read-only shelf browsing.
 
 A viewer browsing `/u/:handle/:bookshelf_name` sees the target reader's shelf
 rendered read-only:
@@ -14,11 +14,11 @@ rendered read-only:
   - a failed load (hidden shelf / ghost / bad name → 404) shows a neutral
     "not available" state, not the owner's "could not load your library" error.
 
-⚠️ **Scope of the SECURITY guarantee, measured — and then moved (#330, #332).**
-Until Issue #332 it held at the VIEW layer only: `Page.Bookshelf.handleOrganiser`
-matched on `( ShelfOrganiser.AddShelf, Just token, _ )` with no `config.readOnly`
+⚠️ **Scope of the SECURITY guarantee, measured — and then moved.**
+Until it held at the VIEW layer only: `Page.Bookshelf.handleOrganiser`
+matched on `( ShelfOrganiser.AddShelf, Just token, _)` with no `config.readOnly`
 check, so a synthetic `OrganiserMsg` dispatched into a read-only model still
-issued `POST /api/bookshelves/:apiName/shelves` — confirmed by probe by #330,
+issued `POST /api/bookshelves/:apiName/shelves` — confirmed by probe by,
 which found this file's negative assertion unfalsifiable and could not fix the
 production side under its own scope lock. The blast radius was always bounded
 (the request carries the _viewer's_ token, so the server scoped the write to the
@@ -142,7 +142,7 @@ oneShelf =
 
 suite : Test
 suite =
-    describe "Page.Bookshelf — read-only browse (Issue #215 / US-10.5.3)"
+    describe "Page.Bookshelf — read-only browse"
         [ fetchesProfileEndpoint
         , fetchesProfileEndpointAnon
         , rendersReceivedPlacements
@@ -249,7 +249,7 @@ noShelfOrganiserPanel =
 {-| ⚠️ **POSITIVE CONTROL for `noMutatingRequestOnLoad` below.**
 
 The negative assertion is only worth what this test proves: that the harness can
-observe a shelf mutation at all. Until Issue #330 the shared effect translator
+observe a shelf mutation at all. Until the shared effect translator
 (`TestHelpers.libraryEffects`) was `case msg of _ -> Cmd.none`, so _no_
 `Bookshelf.Msg` could produce a request in _any_ bookshelf harness — the
 SECURITY assertion below counted POSTs in a world where the count was pinned at
@@ -391,10 +391,10 @@ ownerOrganiserDriveIsObservable =
         )
 
 
-{-| The guard, asserted where it is enforced (Issue #332).
+{-| The guard, asserted where it is enforced.
 
 Not "the button isn't rendered" — that is `noAddShelfControl` above, and it was the
-_only_ thing standing here until #332. This dispatches the organiser messages
+_only_ thing standing here until. This dispatches the organiser messages
 straight into `Page.Bookshelf.update` on a read-only model that is holding a valid
 viewer token and fully loaded shelves — every precondition the mutating branches
 used to need — and requires that nothing comes back out.

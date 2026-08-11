@@ -4,10 +4,10 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   alias Mix.Tasks.ProtoSync.TypeMapper
 
   @doc """
-  Generates an Ecto migration module for a CREATE TABLE statement.
+    Generates an Ecto migration module for a CREATE TABLE statement.
 
-  Only called for tables with `migration_exists: false` in the manifest.
-  Tables with `migration_exists: true` already have hand-written migrations.
+    Only called for tables with `migration_exists: false` in the manifest.
+    Tables with `migration_exists: true` already have hand-written migrations.
   """
   def generate_create_table(table, fields, timestamp) do
     overrides = Map.get(table, :field_overrides, %{})
@@ -60,16 +60,16 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   @slug_budget 120
 
   @doc """
-  Descriptive slug for an ADD COLUMN migration: `add_<columns>_to_<table>`.
+    Descriptive slug for an ADD COLUMN migration: `add_<columns>_to_<table>`.
 
-  The single source of truth for this name. It used to be derived independently
-  here and in `Mix.Tasks.Proto.Sync.generate_delta_migration/3` — the filename in
-  one place, the module name in the other — so capping either alone would have
-  silently desynchronised them.
+    The single source of truth for this name. It used to be derived independently
+    here and in `Mix.Tasks.Proto.Sync.generate_delta_migration/3` — the filename in
+    one place, the module name in the other — so capping either alone would have
+    silently desynchronised them.
 
-  When the column list would exceed `@slug_budget`, as many names as fit are kept
-  and the remainder is summarised, so the name stays descriptive and, more
-  importantly, deterministic: the same field set always produces the same slug.
+    When the column list would exceed `@slug_budget`, as many names as fit are kept
+    and the remainder is summarised, so the name stays descriptive and, more
+    importantly, deterministic: the same field set always produces the same slug.
   """
   def add_columns_slug(new_fields, table_name) do
     suffix = "_to_#{table_name}"
@@ -100,9 +100,9 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   end
 
   @doc """
-  Generates an Ecto migration module for ALTER TABLE ADD COLUMN statements.
+    Generates an Ecto migration module for ALTER TABLE ADD COLUMN statements.
 
-  Called when proto fields exist that are not in the current migration history.
+    Called when proto fields exist that are not in the current migration history.
   """
   def generate_add_columns(table, new_fields, timestamp) do
     overrides = Map.get(table, :field_overrides, %{})
@@ -143,9 +143,9 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   end
 
   @doc """
-  Scans existing migration files to find which columns already exist for a table.
+    Scans existing migration files to find which columns already exist for a table.
 
-  Returns a MapSet of column name strings.
+    Returns a MapSet of column name strings.
   """
   def existing_columns(migrations_dir, table_name) do
     if File.dir?(migrations_dir) do
@@ -177,7 +177,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   end
 
   @doc """
-  Generates a migration timestamp string (YYYYMMDDhhmmss).
+    Generates a migration timestamp string (YYYYMMDDhhmmss).
   """
   def generate_timestamp do
     {{y, m, d}, {h, min, s}} = :calendar.universal_time()

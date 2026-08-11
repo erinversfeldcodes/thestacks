@@ -1,9 +1,9 @@
 defmodule Stacks.Workers.PostBookAssociationWorker do
   @moduledoc """
-  Oban worker that uses an LLM to discover which books from the catalogue
-  are discussed in a newly published blog post.
+    Oban worker that uses an LLM to discover which books from the catalogue
+    are discussed in a newly published blog post.
 
-  Triggered by `blog.post_published` via `BlogAssociationHandler`.
+    Triggered by `blog.post_published` via `BlogAssociationHandler`.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

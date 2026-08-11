@@ -1,10 +1,10 @@
 defmodule Stacks.Blog.Handlers.BlogAssociationHandler do
   @moduledoc """
-  Event handler that triggers LLM-based book association when a blog post
-  is published.
+    Event handler that triggers LLM-based book association when a blog post
+    is published.
 
-  Listens for `blog.post_published` and enqueues a
-  `PostBookAssociationWorker` for the post.
+    Listens for `blog.post_published` and enqueues a
+    `PostBookAssociationWorker` for the post.
   """
 
   @behaviour Stacks.Events.Handler

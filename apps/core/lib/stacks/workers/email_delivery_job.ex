@@ -1,9 +1,9 @@
 defmodule Stacks.Workers.EmailDeliveryJob do
   @moduledoc """
-  Oban worker that delivers transactional emails via Swoosh.
+    Oban worker that delivers transactional emails via Swoosh.
 
-  Checks user notification preferences before sending, except for
-  transactional emails that must always be delivered regardless of prefs.
+    Checks user notification preferences before sending, except for
+    transactional emails that must always be delivered regardless of prefs.
   """
 
   use Oban.Worker, queue: :notifications, max_attempts: 3

@@ -1,17 +1,17 @@
 defmodule Stacks.ScraperModuleKeysTest do
   @moduledoc """
-  Guards the one hand-maintained coupling between Elixir and the Rust scraper.
+    Guards the one hand-maintained coupling between Elixir and the Rust scraper.
 
-  `op.bookstores.scraper_module` must equal the key the Rust `StoreRegistry` derives
-  from a TOML's path under `apps/scraper/scrapers/` minus the extension — so
-  `"za/exclusive_books"`, not `"exclusive_books"`. Nothing at runtime validates that,
-  and the failure is silent in the worst way: the service answers
-  `404 store not found` forever, `evaluate_outcome/1` reports the scrape as failed,
-  and the store simply never produces a price.
+    `op.bookstores.scraper_module` must equal the key the Rust `StoreRegistry` derives
+    from a TOML's path under `apps/scraper/scrapers/` minus the extension — so
+    `"za/exclusive_books"`, not `"exclusive_books"`. Nothing at runtime validates that,
+    and the failure is silent in the worst way: the service answers
+    `404 store not found` forever, `evaluate_outcome/1` reports the scrape as failed,
+    and the store simply never produces a price.
 
-  Measured 2026-07-28 against a live service: **every seeded row was unmatchable**,
-  because all of them carried the bare basename. The seed had been that way since it
-  was written, and no test noticed.
+    Measured 2026-07-28 against a live service: **every seeded row was unmatchable**,
+    because all of them carried the bare basename. The seed had been that way since it
+    was written, and no test noticed.
   """
 
   use ExUnit.Case, async: true

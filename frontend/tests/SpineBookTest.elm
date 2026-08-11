@@ -164,7 +164,7 @@ bookHasPreserve3d =
                     ]
 
 
-{-| Each book must contain three face divs: .book\_\_spine, .book**top, .book**cover
+{-| Each book must contain three face divs:.book\_\_spine,.book**top,.book**cover
 -}
 bookHasThreeFaces : Test
 bookHasThreeFaces =
@@ -187,7 +187,7 @@ bookHasThreeFaces =
         ]
 
 
-{-| Spine face must contain .book\_\_title and .book\_\_author with correct text.
+{-| Spine face must contain.book\_\_title and.book\_\_author with correct text.
 -}
 bookSpineHasTitleAndAuthor : Test
 bookSpineHasTitleAndAuthor =
@@ -209,7 +209,7 @@ bookSpineHasTitleAndAuthor =
         ]
 
 
-{-| Leather-textured books must have .book\_\_band elements.
+{-| Leather-textured books must have.book\_\_band elements.
 -}
 leatherBookHasBands : Test
 leatherBookHasBands =
@@ -221,7 +221,7 @@ leatherBookHasBands =
                 |> Query.count (Expect.atLeast 1)
 
 
-{-| Cloth-textured books must NOT have .book\_\_band elements.
+{-| Cloth-textured books must NOT have.book\_\_band elements.
 -}
 clothBookHasNoBands : Test
 clothBookHasNoBands =
@@ -299,7 +299,7 @@ wearSuffixInAriaLabel =
 {-| Wear also drives a visible CSS hook: a `Softened` book carries the
 `book--softened` class (the muted, worn treatment in main.css), a `Pristine` book
 does not, and the class composes with the base `book` class and the owner-only
-`book--hidden` class (Issue #288). Asserting the class here pins the Elm side of
+`book--hidden` class. Asserting the class here pins the Elm side of
 the visual distinction the Playwright computed-style test proves live.
 -}
 softenedBookHasWearClass : Test
@@ -371,7 +371,7 @@ readingPileSpineIsSoftened =
                     ]
 
 
-{-| A Pristine, visible book the owner has written about (#287): exercises the
+{-| A Pristine, visible book the owner has written about: exercises the
 bookmark ribbon in isolation.
 -}
 writingBook : Html.Html msg

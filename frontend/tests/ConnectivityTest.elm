@@ -1,6 +1,6 @@
 module ConnectivityTest exposing (suite)
 
-{-| Issue #362 — the shell tells the reader when the browser has no connection.
+{-| — the shell tells the reader when the browser has no connection.
 
 
 ## The defect
@@ -44,7 +44,7 @@ one:
     block **silently**. No Elm test can see this; it is the "built but not
     wired" defect class.
 
-Both are proved by the live drive recorded in issue #362's Progress Notes: the
+Both are proved by the live drive recorded in issue Progress Notes: the
 browser was taken offline, the banner appeared, and it cleared on reconnect.
 
 -}
@@ -59,7 +59,7 @@ import Test.Html.Selector as Selector
 
 suite : Test
 suite =
-    describe "Connectivity banner (Issue #362)"
+    describe "Connectivity banner"
         [ test "online_renders_nothing: a banner saying everything is fine is a permanent tax to say nothing" <|
             \() ->
                 Main.viewConnectivity Main.Online

@@ -1,6 +1,6 @@
 module Page.AdminInvitesTest exposing (suite)
 
-{-| US-14.1.3 — the owner's invitation desk, and above all the SHOW-ONCE
+{-| — the owner's invitation desk, and above all the SHOW-ONCE
 property: the full code renders only from the create response, and the list
 only ever shows a prefix.
 -}
@@ -36,7 +36,7 @@ sample =
 
 suite : Test
 suite =
-    describe "Page.Admin.Invites (US-14.1.3)"
+    describe "Page.Admin.Invites"
         [ test "the create form and empty list render" <|
             \_ ->
                 Invites.view { baseModel | invites = Success [] }

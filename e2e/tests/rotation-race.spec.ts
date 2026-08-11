@@ -24,7 +24,7 @@ const DEV_PASSWORD = "dev-password-123";
  * via an authed request here — we assert the observable outcome (no spurious
  * logout on rotation; propagated logout on clear).
  */
-test.describe("Cross-tab token rotation race (Issue #180 Phase 2)", () => {
+test.describe("Cross-tab token rotation race", () => {
   async function signIn(page: import("@playwright/test").Page) {
     await page.goto("/login");
     await page.fill('input[id="email"]', DEV_EMAIL);

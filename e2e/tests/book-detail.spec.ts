@@ -114,7 +114,7 @@ function activeElementId(page: import("@playwright/test").Page) {
   return page.evaluate(() => document.activeElement?.id ?? null);
 }
 
-test.describe("Book Detail overlay — dismissal (punch #11)", () => {
+test.describe("Book Detail overlay — dismissal", () => {
 
   test("X button closes the overlay; URL never changes", async ({ page }) => {
     const { overlay } = await openOverlayWithSpine(page);
@@ -155,8 +155,8 @@ test.describe("Book Detail overlay — dismissal (punch #11)", () => {
   });
 });
 
-test.describe("Book Detail overlay — focus contract (punch #11/#12)", () => {
-  test("focus lands on the labelled dialog card when the overlay opens (#295 a)", async ({
+test.describe("Book Detail overlay — focus contract", () => {
+  test("focus lands on the labelled dialog card when the overlay opens", async ({
     page,
   }) => {
     await openOverlayWithSpine(page);
@@ -165,7 +165,7 @@ test.describe("Book Detail overlay — focus contract (punch #11/#12)", () => {
       .toBe("book-overlay-card");
   });
 
-  test("first Tab from the freshly-focused card lands on the close button (#295 a)", async ({
+  test("first Tab from the freshly-focused card lands on the close button", async ({
     page,
   }) => {
     await openOverlayWithSpine(page);
@@ -261,7 +261,7 @@ test.describe("Book Detail overlay — focus contract (punch #11/#12)", () => {
   });
 });
 
-test.describe("Book Detail overlay — load and error states (punch #14)", () => {
+test.describe("Book Detail overlay — load and error states", () => {
 
   test("GET /api/books/:id 404 shows the load-error message", async ({
     page,
@@ -307,7 +307,7 @@ test.describe("Book Detail overlay — load and error states (punch #14)", () =>
     page,
   }) => {
     // ⚠️ The response is held open until the Loading branch has been OBSERVED —
-    // not for a fixed 1.5 s (Issue #380).
+    // not for a fixed 1.5 s ().
     //
     // A fixed sleep makes this assertion a wall-clock race. `.loading` exists only
     // while the fetch is in flight, so seeing it depended on the browser reaching
@@ -368,7 +368,7 @@ async function gotoLibrarySpine(page: import("@playwright/test").Page) {
   return spineButton;
 }
 
-test.describe("Book Detail overlay — unauthenticated (punch #15)", () => {
+test.describe("Book Detail overlay — unauthenticated", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
   test("public book overlay shows the sign-in prompt and no owner actions", async ({
@@ -473,7 +473,7 @@ test.describe("Book Detail overlay — remove-modal focus & scoped escape (rev 1
     await expect(overlay).not.toBeVisible({ timeout: 5000 });
   });
 
-  test("removing the book returns focus to the main landmark (#295 b)", async ({
+  test("removing the book returns focus to the main landmark", async ({
     page,
     request,
   }) => {
@@ -487,7 +487,7 @@ test.describe("Book Detail overlay — remove-modal focus & scoped escape (rev 1
   });
 });
 
-test.describe("Book Detail full-page route — scoped escape (#295 e)", () => {
+test.describe("Book Detail full-page route — scoped escape", () => {
 
   test("Escape dismisses the remove modal on the full-page route", async ({
     page,

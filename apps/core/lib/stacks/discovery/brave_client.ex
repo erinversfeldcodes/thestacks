@@ -1,16 +1,16 @@
 defmodule Stacks.Discovery.BraveClient do
   @moduledoc """
-  Real HTTP client for Brave Search API.
+    Real HTTP client for Brave Search API.
 
-  Rate limited to ~67 queries/day (2000/month free tier).
-  Uses Finch with the shared `Stacks.Finch` pool.
-  API key configured via `Application.get_env(:core, :brave_search_api_key)`.
+    Rate limited to ~67 queries/day (2000/month free tier).
+    Uses Finch with the shared `Stacks.Finch` pool.
+    API key configured via `Application.get_env(:core,:brave_search_api_key)`.
 
-  Protected by `:brave_fuse` — managed by `Stacks.CircuitBreakers`. When
-  the fuse is blown (Brave is rate-limiting us, 5xx'ing, or off-budget),
-  requests short-circuit to `{:error, :circuit_open}` without touching
-  the upstream. `Stacks.CircuitBreakers` runs a periodic probe against
-  Brave's API and resets the fuse as soon as it's healthy again.
+    Protected by `:brave_fuse` — managed by `Stacks.CircuitBreakers`. When
+    the fuse is blown (Brave is rate-limiting us, 5xx'ing, or off-budget),
+    requests short-circuit to `{:error,:circuit_open}` without touching
+    the upstream. `Stacks.CircuitBreakers` runs a periodic probe against
+    Brave's API and resets the fuse as soon as it's healthy again.
   """
 
   @behaviour Stacks.Discovery.BraveClientBehaviour
@@ -142,14 +142,14 @@ defmodule Stacks.Discovery.BraveClient do
   end
 
   @doc """
-  Records one Brave call against today's budget.
+    Records one Brave call against today's budget.
 
-  ⚠️ **Public only so the fresh-node path is testable, and that is not a technicality.** This
-  function crashed on the first live call in any fresh node (see the comment below), source
-  discovery produced zero rows for weeks, and the cause was misattributed to a missing API key.
-  Nothing exercised it: `brave_client_test.exs` covered only the *Mock* client, so the real
-  counter had no coverage at all. A defect that reached production through an untested private
-  function earns a seam.
+    ⚠️ **Public only so the fresh-node path is testable, and that is not a technicality.** This
+    function crashed on the first live call in any fresh node (see the comment below), source
+    discovery produced zero rows for weeks, and the cause was misattributed to a missing API key.
+    Nothing exercised it: `brave_client_test.exs` covered only the *Mock* client, so the real
+    counter had no coverage at all. A defect that reached production through an untested private
+    function earns a seam.
   """
   @spec increment_daily_counter() :: :ok
   def increment_daily_counter do

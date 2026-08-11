@@ -1,6 +1,6 @@
 module Page.SessionExpiryPagesTest exposing (suite)
 
-{-| Tests for Issue #178 Phase 1 — extend the global session-expiry 401
+{-| Tests for Phase 1 — extend the global session-expiry 401
 interceptor to the six remaining authed pages (three Settings pages, three
 Admin pages).
 
@@ -14,15 +14,15 @@ Page-seam contract (mirrors `SessionExpiryTest` Scenario 1):
 
 Before the conversion these modules return 2-tuples with no `OutMsg` type, so
 this suite fails to compile (RED). After the conversion each page returns a
-`( Model, Cmd Msg, OutMsg )` and these assertions pass (GREEN).
+`( Model, Cmd Msg, OutMsg)` and these assertions pass (GREEN).
 
 
 ## ⚠️ This list does not prove coverage — `check-session-expiry-coverage.sh` does
 
-Read the imports above: eight pages, chosen by hand in #178. Three settings
+Read the imports above: eight pages, chosen by hand in. Three settings
 write-forms that make authed calls are absent, and stayed absent for four
 months while this suite was green — `Password`, `Profile` and `Notifications`
-each answered a mid-form 401 with "Please try again" (#361). A hand-written
+each answered a mid-form 401 with "Please try again". A hand-written
 roster of covered pages cannot report what is missing from it; that is what it
 is missing. `scripts/check-session-expiry-coverage.sh` derives the roster from
 `Api.elm` and `src/Page/` instead, so a page added tomorrow is checked without
@@ -33,7 +33,7 @@ cannot see — that the 401 signal produces `SessionExpired` and that a non-401
 does not.
 
 
-## The #361 pages
+## The pages
 
 For the three converted pages the 401 no longer arrives as an `Err` at all:
 `Api.authed` claims it and emits the page's `SessionExpiryDetected` (proved in
@@ -89,7 +89,7 @@ settingsUser =
 
 suite : Test
 suite =
-    describe "Issue #178 Phase 1 — 401 interceptor on the 6 remaining authed pages"
+    describe "Phase 1 — 401 interceptor on the 6 remaining authed pages"
         [ describe "Settings.Consent"
             [ test "consent_401_bubbles: SaveCompleted 401 → SessionExpired" <|
                 \() ->
@@ -414,7 +414,7 @@ suite =
                     in
                     outMsg |> Expect.equal Catalogue.NoOut
             ]
-        , describe "#361 — Settings.Password (the three write-forms that lied)"
+        , describe "— Settings.Password (the three write-forms that lied)"
             [ test "password_401_bubbles: the wrapper's expiry signal → SessionExpired" <|
                 \() ->
                     let
@@ -470,7 +470,7 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Could not change password. Please try again." ]
             ]
-        , describe "#361 — Settings.Profile"
+        , describe "— Settings.Profile"
             [ test "profile_save_401_bubbles: the wrapper's expiry signal → SessionExpired" <|
                 \() ->
                     let
@@ -517,7 +517,7 @@ suite =
                     in
                     afterExpiry.currentPassword |> Expect.equal "hunter2"
             ]
-        , describe "#361 — Settings.Notifications"
+        , describe "— Settings.Notifications"
             [ test "notifications_save_401_bubbles: the wrapper's expiry signal → SessionExpired" <|
                 \() ->
                     let

@@ -1,9 +1,9 @@
 defmodule StacksWeb.Plugs.ViewAsPlugTest do
   @moduledoc """
-  Tests for StacksWeb.Plugs.ViewAsPlug — two-phase ViewAs support.
+    Tests for StacksWeb.Plugs.ViewAsPlug — two-phase ViewAs support.
 
-  Phase 1 (plug): parses `?view_as=` and stores `requested_perspective`.
-  Phase 2 (authorize_view_as/2): checks ownership and sets `view_as_context`.
+    Phase 1 (plug): parses `?view_as=` and stores `requested_perspective`.
+    Phase 2 (authorize_view_as/2): checks ownership and sets `view_as_context`.
   """
 
   use CoreWeb.ConnCase, async: true

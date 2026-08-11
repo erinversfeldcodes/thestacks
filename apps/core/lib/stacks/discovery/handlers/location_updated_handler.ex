@@ -1,11 +1,11 @@
 defmodule Stacks.Discovery.Handlers.LocationUpdatedHandler do
   @moduledoc """
-  On `user.location_updated`, enqueues a `GeographicDiscoveryJob` for the
-  user's area. The payload is UUID-only (city/country never enter
-  `op.event_log`), so the handler reads the CURRENT city/country off the
-  user record — meaning rapid location changes discover against the latest
-  location only, the deliberate cost of keeping PII out of the event log.
-  A since-deleted user is a no-op success.
+    On `user.location_updated`, enqueues a `GeographicDiscoveryJob` for the
+    user's area. The payload is UUID-only (city/country never enter
+    `op.event_log`), so the handler reads the CURRENT city/country off the
+    user record — meaning rapid location changes discover against the latest
+    location only, the deliberate cost of keeping PII out of the event log.
+    A since-deleted user is a no-op success.
   """
 
   @behaviour Stacks.Events.Handler

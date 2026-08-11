@@ -1,11 +1,11 @@
 defmodule Core.Repo.Migrations.ExpandUsersDiscoveredSourcesThirdSpaces do
   @moduledoc """
-  Adds notification/onboarding columns to op.users, opt-out columns to
-  op.third_spaces, exclusion columns to op.discovered_sources, and extends
-  the source_status enum with an 'excluded' value.
+    Adds notification/onboarding columns to op.users, opt-out columns to
+    op.third_spaces, exclusion columns to op.discovered_sources, and extends
+    the source_status enum with an 'excluded' value.
 
-  ALTER TYPE … ADD VALUE cannot run inside a transaction, so DDL transactions
-  are disabled for this migration.
+    ALTER TYPE … ADD VALUE cannot run inside a transaction, so DDL transactions
+    are disabled for this migration.
   """
 
   use Ecto.Migration

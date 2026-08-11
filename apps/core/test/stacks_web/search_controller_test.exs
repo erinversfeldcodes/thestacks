@@ -179,7 +179,7 @@ defmodule StacksWeb.SearchControllerTest do
     end
   end
 
-  describe "GET /api/search — sectioning (#285)" do
+  describe "GET /api/search — sectioning" do
     test "viewer's own active placement lands in collection, not platform_hits",
          %{conn: conn, user: user} do
       book = insert_book_with_edition(title: "Dune Messiah", isbn: "9780593098233")
@@ -351,7 +351,7 @@ defmodule StacksWeb.SearchControllerTest do
     end
   end
 
-  describe "GET /api/search — deep scope (#284)" do
+  describe "GET /api/search — deep scope" do
     defp insert_description_only_book(title, description, isbn) do
       insert(:book,
         title: title,

@@ -1,10 +1,10 @@
 defmodule Stacks.Discovery do
   @moduledoc """
-  Context for managing discovered sources — bookshops, review sites,
-  community spaces, and event sources found via automated search.
+    Context for managing discovered sources — bookshops, review sites,
+    community spaces, and event sources found via automated search.
 
-  Handles CRUD, deduplication by URL, status transitions, and the
-  unauthenticated business opt-out flow.
+    Handles CRUD, deduplication by URL, status transitions, and the
+    unauthenticated business opt-out flow.
   """
 
   import Ecto.Query
@@ -22,10 +22,10 @@ defmodule Stacks.Discovery do
   import Stacks.Enrichment, only: [third_space_changeset: 2]
 
   @doc """
-  Creates a new discovered source with `status: "pending_review"` and
-  `discovered_at` set to the current timestamp.
+    Creates a new discovered source with `status: "pending_review"` and
+    `discovered_at` set to the current timestamp.
 
-  Returns `{:error, :duplicate}` if a source with the same URL already exists.
+    Returns `{:error,:duplicate}` if a source with the same URL already exists.
   """
   @spec create_source(map()) :: {:ok, DiscoveredSource.t()} | {:error, term()}
   def create_source(attrs) do
@@ -66,10 +66,10 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Returns approved sources matching the given city and/or country code.
+    Returns approved sources matching the given city and/or country code.
 
-  Searches the `discovered_via` field for location context. Both parameters
-  are optional — if both are nil, returns all approved sources.
+    Searches the `discovered_via` field for location context. Both parameters
+    are optional — if both are nil, returns all approved sources.
   """
   @spec sources_for_location(String.t() | nil, String.t() | nil) :: [DiscoveredSource.t()]
   def sources_for_location(city, country_code) do
@@ -95,15 +95,15 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Lists discovered sources with optional filtering and pagination.
+    Lists discovered sources with optional filtering and pagination.
 
-  Options:
-  - `:status` — filter by status atom or string (e.g. `:pending_review`, `"approved"`)
-  - `:type` — filter by source type atom or string (e.g. `:bookshop`, `"review_site"`)
-  - `:page` — page number (default 1)
-  - `:per_page` — results per page (default 50)
+    Options:
+    - `:status` — filter by status atom or string (e.g. `:pending_review`, `"approved"`)
+    - `:type` — filter by source type atom or string (e.g. `:bookshop`, `"review_site"`)
+    - `:page` — page number (default 1)
+    - `:per_page` — results per page (default 50)
 
-  Returns `{sources, total_count}`.
+    Returns `{sources, total_count}`.
   """
   @spec list_sources(keyword()) :: {[DiscoveredSource.t()], non_neg_integer()}
   def list_sources(opts \\ []) do
@@ -166,8 +166,8 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Updates the status of a discovered source. Accepts a status string and
-  optional additional attributes (e.g., `approved_at` for approvals).
+    Updates the status of a discovered source. Accepts a status string and
+    optional additional attributes (e.g., `approved_at` for approvals).
   """
   @spec update_source_status(DiscoveredSource.t(), map()) ::
           {:ok, DiscoveredSource.t()} | {:error, Ecto.Changeset.t()}
@@ -178,7 +178,7 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Updates the confidence score for a discovered source.
+    Updates the confidence score for a discovered source.
   """
   @spec update_confidence(DiscoveredSource.t(), float()) ::
           {:ok, DiscoveredSource.t()} | {:error, Ecto.Changeset.t()}
@@ -190,10 +190,10 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Approves a discovered source. Only sources with `status: "pending_review"`
-  can be approved. Sets `approved_at` to the current timestamp.
+    Approves a discovered source. Only sources with `status: "pending_review"`
+    can be approved. Sets `approved_at` to the current timestamp.
 
-  Emits a `source.approved` event on success.
+    Emits a `source.approved` event on success.
   """
   @spec approve_source(String.t()) ::
           {:ok, DiscoveredSource.t()} | {:error, :not_found | :invalid_transition}
@@ -202,10 +202,10 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Rejects a discovered source. Only sources with `status: "pending_review"`
-  can be rejected. Transitions status to `:dismissed`.
+    Rejects a discovered source. Only sources with `status: "pending_review"`
+    can be rejected. Transitions status to `:dismissed`.
 
-  Emits a `source.rejected` event on success.
+    Emits a `source.rejected` event on success.
   """
   @spec reject_source(String.t()) ::
           {:ok, DiscoveredSource.t()} | {:error, :not_found | :invalid_transition}
@@ -253,18 +253,18 @@ defmodule Stacks.Discovery do
   defp after_transition(error, _target_status, _event_type), do: error
 
   @doc """
-  Removal requests waiting for a human decision.
+    Removal requests waiting for a human decision.
 
-  A request whose contact address did not match the listing's domain sets
-  `exclusion_requested_at` and leaves `status` alone — that pair *is* the pending state, so
-  no enum value had to be invented for it. This is the query that makes it visible.
+    A request whose contact address did not match the listing's domain sets
+    `exclusion_requested_at` and leaves `status` alone — that pair *is* the pending state, so
+    no enum value had to be invented for it. This is the query that makes it visible.
 
-  ⚠️ **Without this the parked requests were invisible.** The admin payload did not carry
-  `exclusion_requested_at` at all, so a business whose request could not be auto-verified
-  waited on a human who had no way to know they were waiting. A queue nobody can see is
-  indistinguishable from a request that was silently refused.
+    ⚠️ **Without this the parked requests were invisible.** The admin payload did not carry
+    `exclusion_requested_at` at all, so a business whose request could not be auto-verified
+    waited on a human who had no way to know they were waiting. A queue nobody can see is
+    indistinguishable from a request that was silently refused.
 
-  Oldest first: these are people waiting, and the fair order is the order they asked in.
+    Oldest first: these are people waiting, and the fair order is the order they asked in.
   """
   @spec pending_removal_requests() :: [DiscoveredSource.t()]
   def pending_removal_requests do
@@ -276,16 +276,16 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Honour a removal request: exclude the source and delist the third space.
+    Honour a removal request: exclude the source and delist the third space.
 
-  ⚠️ **Named `honour_removal_request` and not `approve` on purpose.**
-  `approve_source/1` already exists and means *approve the listing* — the opposite effect.
-  Two functions called "approve" doing opposite things to the same row is precisely the
-  mistake that gets made at 2am, so these say what happens to the *listing* instead:
-  honour (it goes) or decline (it stays).
+    ⚠️ **Named `honour_removal_request` and not `approve` on purpose.**
+    `approve_source/1` already exists and means *approve the listing* — the opposite effect.
+    Two functions called "approve" doing opposite things to the same row is precisely the
+    mistake that gets made at 2am, so these say what happens to the *listing* instead:
+    honour (it goes) or decline (it stays).
 
-  Reuses the same effect as a domain-verified request, so a listing removed by hand and one
-  removed automatically end in the same state — there is one notion of "removed".
+    Reuses the same effect as a domain-verified request, so a listing removed by hand and one
+    removed automatically end in the same state — there is one notion of "removed".
   """
   @spec honour_removal_request(String.t()) ::
           {:ok, DiscoveredSource.t()} | {:error, :not_found | :not_pending | term()}
@@ -307,11 +307,11 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Decline a removal request: the listing stays.
+    Decline a removal request: the listing stays.
 
-  Clears `exclusion_requested_at` so the request leaves the queue, and deliberately keeps
-  `exclusion_email` — a declined request is a record worth having if the same business asks
-  again, and losing it would make a repeat look like a first contact.
+    Clears `exclusion_requested_at` so the request leaves the queue, and deliberately keeps
+    `exclusion_email` — a declined request is a record worth having if the same business asks
+    again, and losing it would make a repeat look like a first contact.
   """
   @spec decline_removal_request(String.t()) ::
           {:ok, DiscoveredSource.t()} | {:error, :not_found | :not_pending | term()}
@@ -345,14 +345,14 @@ defmodule Stacks.Discovery do
   @type_for_source %{"community" => "community_centre", "event_source" => "cafe"}
 
   @doc """
-  Creates the `third_space` for a newly approved source — deliberately
-  the ONLY producer of `op.third_spaces`: these are real businesses with
-  real reputations, so a human approval is the gate; no discovery job
-  writes the table. (The documented `DiscoverThirdSpacesJob` never
-  existed — hence the table's historical zero rows.) Geocoding happens
-  here at approval (human-paced, honouring Nominatim's ~1 req/s) and the
-  nearest-bookshop distance is stored once, so the 500m filter is a scalar
-  comparison at render time.
+    Creates the `third_space` for a newly approved source — deliberately
+    the ONLY producer of `op.third_spaces`: these are real businesses with
+    real reputations, so a human approval is the gate; no discovery job
+    writes the table. (The documented `DiscoverThirdSpacesJob` never
+    existed — hence the table's historical zero rows.) Geocoding happens
+    here at approval (human-paced, honouring Nominatim's ~1 req/s) and the
+    nearest-bookshop distance is stored once, so the 500m filter is a scalar
+    comparison at render time.
   """
   @spec create_third_space(DiscoveredSource.t()) :: :ok
   def create_third_space(%DiscoveredSource{type: type} = source)
@@ -442,16 +442,16 @@ defmodule Stacks.Discovery do
   defp source_city(source), do: Map.get(source, :city)
 
   @doc """
-  Opts a source out by URL. Sets `status: "excluded"`, `excluded_at`, and
-  `exclusion_email`. The URL must match an existing discovered source.
+    Opts a source out by URL. Sets `status: "excluded"`, `excluded_at`, and
+    `exclusion_email`. The URL must match an existing discovered source.
 
-  Returns `{:error, :not_found}` if no source matches the URL.
-  Returns `{:ok, :excluded, source}` when the requester's email domain matches the
-  listing's, so the removal was applied; `{:ok, :pending_review, source}` when it did not,
-  so the request was recorded for owner review and **the listing is still live**.
+    Returns `{:error,:not_found}` if no source matches the URL.
+    Returns `{:ok,:excluded, source}` when the requester's email domain matches the
+    listing's, so the removal was applied; `{:ok,:pending_review, source}` when it did not,
+    so the request was recorded for owner review and **the listing is still live**.
 
-  Returns `{:error, :not_found}` if no source matches the URL, or
-  `{:error, :invalid_email}` if the email format is invalid.
+    Returns `{:error,:not_found}` if no source matches the URL, or
+    `{:error,:invalid_email}` if the email format is invalid.
   """
   @spec opt_out(String.t(), map()) ::
           {:ok, :excluded | :pending_review, DiscoveredSource.t()}
@@ -531,13 +531,13 @@ defmodule Stacks.Discovery do
   end
 
   @doc """
-  Whether `email`'s domain matches the domain of `url`.
+    Whether `email`'s domain matches the domain of `url`.
 
-  Compares registrable domains rather than exact hosts, so `hello@booklounge.co.za`
-  matches `https://www.booklounge.co.za/about` — a `www.` prefix or a deep path must not
-  defeat a legitimate request. Multi-part public suffixes (`.co.za`, `.com.au`) are why
-  this compares the last **three** labels when the second-to-last is a known
-  second-level suffix, rather than naively taking the last two.
+    Compares registrable domains rather than exact hosts, so `hello@booklounge.co.za`
+    matches `https://www.booklounge.co.za/about` — a `www.` prefix or a deep path must not
+    defeat a legitimate request. Multi-part public suffixes (`.co.za`, `.com.au`) are why
+    this compares the last **three** labels when the second-to-last is a known
+    second-level suffix, rather than naively taking the last two.
   """
   @spec email_domain_matches_source?(String.t(), String.t() | nil) :: boolean()
   def email_domain_matches_source?(email, url) do

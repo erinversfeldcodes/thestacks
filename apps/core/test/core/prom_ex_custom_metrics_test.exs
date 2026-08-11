@@ -1,11 +1,11 @@
 defmodule Core.PromExCustomMetricsTest do
   @moduledoc """
-  Regression for 139: custom `stacks_*` telemetry must be exported via
-  PromEx so the SLO gate sees real values at `/internal/metrics`. The
-  parser expects exactly `stacks_upload_terminal_count_total`,
-  `stacks_router_dispatch_stop_duration_milliseconds_{bucket,sum,count}`
-  and `stacks_fuse_state_state` — fires each event and asserts the family
-  appears in the exposition.
+    Regression for 139: custom `stacks_*` telemetry must be exported via
+    PromEx so the SLO gate sees real values at `/internal/metrics`. The
+    parser expects exactly `stacks_upload_terminal_count_total`,
+    `stacks_router_dispatch_stop_duration_milliseconds_{bucket,sum,count}`
+    and `stacks_fuse_state_state` — fires each event and asserts the family
+    appears in the exposition.
   """
 
   use ExUnit.Case, async: false
@@ -49,7 +49,7 @@ defmodule Core.PromExCustomMetricsTest do
            "expected stacks_fuse_state_state in PromEx output, got:\n#{output}"
   end
 
-  test "PromEx exports the auth refresh revoke-failure counter (Issue #181)" do
+  test "PromEx exports the auth refresh revoke-failure counter" do
     :telemetry.execute(
       [:stacks, :auth, :refresh, :revoke_failed],
       %{count: 1},
@@ -81,7 +81,7 @@ defmodule Core.PromExCustomMetricsTest do
            "expected #{family} exported with #{key}=\"#{value}\", got:\n#{output}"
   end
 
-  describe "auth §12 operational counters fire + export with the right tag-set (Issue #206)" do
+  describe "auth §12 operational counters fire + export with the right tag-set" do
     test "registration success/failure counter exports result label" do
       :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :ok})
       :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :error})
@@ -131,7 +131,7 @@ defmodule Core.PromExCustomMetricsTest do
     end
   end
 
-  describe "GDPR counters export with the right tag-set at the reporter level (Issue #206 / #121)" do
+  describe "GDPR counters export with the right tag-set at the reporter level" do
     test "export outcome exports result label" do
       :telemetry.execute([:stacks, :gdpr, :export], %{count: 1}, %{result: :ok})
       :telemetry.execute([:stacks, :gdpr, :export], %{count: 1}, %{result: :error})

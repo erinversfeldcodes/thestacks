@@ -1,12 +1,12 @@
 defmodule Core.Repo.Migrations.CreateBookEditions do
   @moduledoc """
-  Works/Editions data model migration.
+    Works/Editions data model migration.
 
-  Transforms `op.books` from an edition-level table (one row per ISBN) into a
-  work-level table (one row per logical book). Edition-specific columns move to
-  the new `op.book_editions` table.
+    Transforms `op.books` from an edition-level table (one row per ISBN) into a
+    work-level table (one row per logical book). Edition-specific columns move to
+    the new `op.book_editions` table.
 
-  Pre-production: we drop columns freely rather than migrating data.
+    Pre-production: we drop columns freely rather than migrating data.
   """
 
   use Ecto.Migration

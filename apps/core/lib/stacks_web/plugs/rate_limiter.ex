@@ -1,16 +1,16 @@
 defmodule StacksWeb.Plugs.RateLimiter do
   @moduledoc """
-  ETS-backed sliding-window rate limiter. Buckets: global 1000/60s per
-  IP; `:auth` 60/60s per IP; `:upload` 120/60s per user; `:social` 20/60s
-  per user; `:public` 200/60s per IP (`RATE_LIMIT_PUBLIC`);
-  `:password_change` 20/60s per IP.
+    ETS-backed sliding-window rate limiter. Buckets: global 1000/60s per
+    IP; `:auth` 60/60s per IP; `:upload` 120/60s per user; `:social` 20/60s
+    per user; `:public` 200/60s per IP (`RATE_LIMIT_PUBLIC`);
+    `:password_change` 20/60s per IP.
 
-  Sizing: per-IP limiting is a weak credential-stuffing defence (attackers
-  rotate IPs; NATs share them), so auth values slow naive scripts without
-  locking out shared-address users — the real defences are per-ACCOUNT
-  lockout (`Accounts.authenticate_user/2`) and Argon2 cost. 429s carry
-  `retry-after`. State is per-node ETS: resets on deploy, unshared across
-  machines — acceptable for the current single-machine posture.
+    Sizing: per-IP limiting is a weak credential-stuffing defence (attackers
+    rotate IPs; NATs share them), so auth values slow naive scripts without
+    locking out shared-address users — the real defences are per-ACCOUNT
+    lockout (`Accounts.authenticate_user/2`) and Argon2 cost. 429s carry
+    `retry-after`. State is per-node ETS: resets on deploy, unshared across
+    machines — acceptable for the current single-machine posture.
   """
 
   require Logger
@@ -134,8 +134,8 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defmodule Server do
     @moduledoc """
-    GenServer that creates and maintains the ETS table used by `StacksWeb.Plugs.RateLimiter`.
-    Add this to the supervision tree, not `RateLimiter` itself.
+        GenServer that creates and maintains the ETS table used by `StacksWeb.Plugs.RateLimiter`.
+        Add this to the supervision tree, not `RateLimiter` itself.
     """
 
     use GenServer

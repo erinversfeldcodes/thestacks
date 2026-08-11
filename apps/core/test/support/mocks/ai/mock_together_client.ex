@@ -1,15 +1,15 @@
 defmodule Stacks.AI.MockTogetherClient do
   @moduledoc """
-  Mock Together AI client for tests.
+    Mock Together AI client for tests.
 
-  Responses are stored in the process dictionary so each test process is
-  isolated and tests can run with `async: true`.
+    Responses are stored in the process dictionary so each test process is
+    isolated and tests can run with `async: true`.
 
-  ## Usage
+    ## Usage
 
-      MockTogetherClient.put_response({:ok, "A great book summary."})
+        MockTogetherClient.put_response({:ok, "A great book summary."})
 
-  Unmatched calls return a default summary.
+    Unmatched calls return a default summary.
   """
 
   @behaviour Stacks.AI.TogetherClientBehaviour

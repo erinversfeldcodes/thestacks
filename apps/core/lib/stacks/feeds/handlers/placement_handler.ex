@@ -1,10 +1,10 @@
 defmodule Stacks.Feeds.Handlers.PlacementHandler do
   @moduledoc """
-  Event handler that enqueues feed regeneration when shelf placements change.
+    Event handler that enqueues feed regeneration when shelf placements change.
 
-  Listens for `placement.created`, `placement.moved`, `placement.removed` and
-  `placement.restored` events and enqueues a `RegenerateFeedJob` for the
-  affected bookshelf.
+    Listens for `placement.created`, `placement.moved`, `placement.removed` and
+    `placement.restored` events and enqueues a `RegenerateFeedJob` for the
+    affected bookshelf.
   """
 
   @behaviour Stacks.Events.Handler

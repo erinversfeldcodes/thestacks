@@ -1,13 +1,13 @@
 defmodule Core.PromEx.Plugins.Stacks do
   @moduledoc """
-  PromEx plugin exporting the custom `[:stacks, ...]` telemetry events —
-  without it the `CoreWeb.Telemetry.metrics/0` entries have no reporter.
-  The SLO gate (`scripts/check-slo-gate.sh`) reads `/internal/metrics` and
-  expects exactly: `stacks_upload_terminal_count_total`,
-  `stacks_router_dispatch_stop_duration_milliseconds_*`, and
-  `stacks_fuse_state_state`. Metric paths end in `[:count, :total]` /
-  `[:duration, :milliseconds]` because the Prometheus core reporter does
-  not append suffixes — renaming a path here breaks the gate parser.
+    PromEx plugin exporting the custom `[:stacks,...]` telemetry events —
+    without it the `CoreWeb.Telemetry.metrics/0` entries have no reporter.
+    The SLO gate (`scripts/check-slo-gate.sh`) reads `/internal/metrics` and
+    expects exactly: `stacks_upload_terminal_count_total`,
+    `stacks_router_dispatch_stop_duration_milliseconds_*`, and
+    `stacks_fuse_state_state`. Metric paths end in `[:count,:total]` /
+    `[:duration,:milliseconds]` because the Prometheus core reporter does
+    not append suffixes — renaming a path here breaks the gate parser.
   """
 
   use PromEx.Plugin
@@ -95,7 +95,7 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:outcome]
         ),
 
-        # ── Vision request latency (Issue #349) ───────────────────────
+        # ── Vision request latency () ───────────────────────
         # Wall-clock for ONE Modal vision HTTP call. Emitted by
         # `Stacks.AI.Client.make_vision_request/2` on both the 200 and the
         # non-200 path — and, until now, consumed by nothing: the duration was
@@ -143,7 +143,7 @@ defmodule Core.PromEx.Plugins.Stacks do
           reporter_options: [buckets: @route_duration_buckets]
         ),
 
-        # ── Auth refresh revoke-failure counter (Issue #181) ──────────
+        # ── Auth refresh revoke-failure counter () ──────────
         # Fires when AuthController.refresh/2 fails to revoke the old token
         # during rotation. The action still mints a fresh token (degraded
         # rotation: the old token stays valid until its TTL expires), so this
@@ -322,7 +322,7 @@ defmodule Core.PromEx.Plugins.Stacks do
           description: "Audit-log read throughput (one per user audit-log listing; no PII tag)."
         ),
 
-        # ── Visibility / Social / ViewAs counters (Issue #236) ────────
+        # ── Visibility / Social / ViewAs counters () ────────
         # These families are EMITTED by #197 (profile-visibility changes,
         # ceiling rejections, the recap job, user block/unblock, and the ViewAs
         # owner-preview plug) but were never registered here, so they were absent
@@ -399,7 +399,7 @@ defmodule Core.PromEx.Plugins.Stacks do
           tags: [:reason, :phase]
         ),
 
-        # ── Discovery / profiles / people-search counters (Issue #239) ────
+        # ── Discovery / profiles / people-search counters () ────
         # Instrumentation of the public discovery surfaces (#210–#217, #221).
         # Every tag below is a bounded, whitelisted atom set at the emit site —
         # NEVER the search query string, a handle, a user-id, or an IP (those are

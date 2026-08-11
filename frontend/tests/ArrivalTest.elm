@@ -1,6 +1,6 @@
 module ArrivalTest exposing (suite)
 
-{-| Issue #360 — one `Arrival` replaces six booleans, five inits and two view
+{-| — one `Arrival` replaces six booleans, five inits and two view
 predicates.
 
 
@@ -59,7 +59,7 @@ import Types.RemoteData
 
 suite : Test
 suite =
-    describe "Arrival (Issue #360)"
+    describe "Arrival"
         [ describe "one notice per arrival"
             [ freshShowsNoNotice
             , expiryShowsExpiryNotice
@@ -82,7 +82,7 @@ suite =
             ]
         , describe "draftWasSaved is total"
             [ draftFlagIsOnlyMeaningfulForAnExpiry ]
-        , describe "the #360/#361 seam — one value answers both questions"
+        , describe "the /seam — one value answers both questions"
             [ onlyAnExpiryIsAnExpiry
             , expiryArrivalDrivesTheRedirectCapture
             , everyOtherArrivalLeavesTheCaptureAlone
@@ -206,7 +206,7 @@ forgotOpensTheResetForm =
                 (cardFor Login.ForgotPassword)
 
 
-{-| The sixth arrival (#373), held to the same rule as the other five: it opens
+{-| The sixth arrival, held to the same rule as the other five: it opens
 its own mode and raises none of the other notices.
 -}
 confirmationExpiredOpensTheResendForm : Test
@@ -357,13 +357,13 @@ onlyAnExpiryIsAnExpiry =
 
 
 {-| The seam, joined: the arrival `Main.forceSessionExpiry` raises, fed through
-the predicate `Main.UrlChanged` uses, into #361's decision. This is the journey
+the predicate `Main.UrlChanged` uses, into decision. This is the journey
 — expiry on `/settings/password` → push `/login` → sign back in → land back on
 the form — with only the `Nav.Key` left out.
 -}
 expiryArrivalDrivesTheRedirectCapture : Test
 expiryArrivalDrivesTheRedirectCapture =
-    test "expiry_arrival_drives_capture: the arrival an expiry raises is what makes #361 remember the page" <|
+    test "expiry_arrival_drives_capture: the arrival an expiry raises is what makes remember the page" <|
         \() ->
             Main.redirectAfterNavigation
                 { arrivingAt = Navigation.Route.Login

@@ -1,10 +1,10 @@
 defmodule StacksWeb.GuardianJwtDeployedTest do
   @moduledoc """
-  LIVE-STACK JWT-at-rest invariant (174): the fix is a DB trigger forcing
-  `guardian_tokens.jwt = NULL`, and the protected asset is the REAL Neon
-  DB behind the preview — the local test only proves the trigger on the
-  sandbox Postgres. Logs in via the real API, then reads the preview DB
-  directly to assert no row holds a raw JWT. Skips locally.
+    LIVE-STACK JWT-at-rest invariant: the fix is a DB trigger forcing
+    `guardian_tokens.jwt = NULL`, and the protected asset is the REAL Neon
+    DB behind the preview — the local test only proves the trigger on the
+    sandbox Postgres. Logs in via the real API, then reads the preview DB
+    directly to assert no row holds a raw JWT. Skips locally.
   """
 
   use ExUnit.Case, async: false

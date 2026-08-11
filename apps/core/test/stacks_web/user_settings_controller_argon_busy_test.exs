@@ -1,13 +1,13 @@
 defmodule StacksWeb.UserSettingsControllerArgonBusyTest do
   @moduledoc """
-  Exercises the `{:error, :argon2_busy}` -> 503 mapping in
-  `UserSettingsController` for the two endpoints that hash/verify a password
-  through `Stacks.Accounts.ArgonPool` (Issue #126, Phase 3, item 6).
+    Exercises the `{:error,:argon2_busy}` -> 503 mapping in
+    `UserSettingsController` for the two endpoints that hash/verify a password
+    through `Stacks.Accounts.ArgonPool`.
 
-  `async: false`: these tests saturate the GLOBAL, singleton ArgonPool and shrink
-  its checkout timeout so `ArgonPool.run/1` returns `{:error, :argon2_busy}`
-  immediately. They must not run concurrently with any other Argon2-using test —
-  ExUnit runs sync modules in isolation, so keep this module `async: false`.
+    `async: false`: these tests saturate the GLOBAL, singleton ArgonPool and shrink
+    its checkout timeout so `ArgonPool.run/1` returns `{:error,:argon2_busy}`
+    immediately. They must not run concurrently with any other Argon2-using test —
+    ExUnit runs sync modules in isolation, so keep this module `async: false`.
   """
 
   use CoreWeb.ConnCase, async: false

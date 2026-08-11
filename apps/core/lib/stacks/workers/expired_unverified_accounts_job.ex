@@ -1,16 +1,16 @@
 defmodule Stacks.Workers.ExpiredUnverifiedAccountsJob do
   @moduledoc """
-  Daily Oban worker that reaps abandoned signups: accounts that never confirmed
-  their email and whose confirmation link has expired
-  (`Accounts.unverified_account_ttl_seconds/0` after creation — 24h). Scheduled
-  via the crontab in `config/config.exs`.
+    Daily Oban worker that reaps abandoned signups: accounts that never confirmed
+    their email and whose confirmation link has expired
+    (`Accounts.unverified_account_ttl_seconds/0` after creation — 24h). Scheduled
+    via the crontab in `config/config.exs`.
 
-  Each expired account is erased through the full GDPR right-to-erasure path
-  (`Stacks.GDPR.Deletion.delete_user_data/2`), so the personal data (email,
-  password hash, handle) is removed, an audit row is written, and the
-  UUID-only `user.registered` event is scrubbed — identical to any other
-  erasure. Unverified accounts have never logged in, so they carry no
-  bookshelves/placements/comments/sessions; the erasure is cheap.
+    Each expired account is erased through the full GDPR right-to-erasure path
+    (`Stacks.GDPR.Deletion.delete_user_data/2`), so the personal data (email,
+    password hash, handle) is removed, an audit row is written, and the
+    UUID-only `user.registered` event is scrubbed — identical to any other
+    erasure. Unverified accounts have never logged in, so they carry no
+    bookshelves/placements/comments/sessions; the erasure is cheap.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

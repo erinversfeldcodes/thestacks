@@ -1,6 +1,6 @@
 module Page.InviteGateTest exposing (suite)
 
-{-| US-14.1.3 — the closed-beta gate on the Register tab.
+{-| — the closed-beta gate on the Register tab.
 
 Every negative is paired with its positive control (the same selector under
 the opposite gate state), so a renamed class or test id cannot green these
@@ -38,7 +38,7 @@ rendered model =
 
 suite : Test
 suite =
-    describe "invite-only registration gate (US-14.1.3)"
+    describe "invite-only registration gate"
         [ describe "the uninvited path"
             [ test "gate on: the Register tab shows the panel, not the form" <|
                 \_ ->

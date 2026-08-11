@@ -4,7 +4,7 @@ module Page.GdprExportProgramTest exposing (suite)
 using elm-program-test.
 
 Exercises the export lifecycle: clicking the button shows a loading message,
-a successful (202) response confirms the export was queued, and an HTTP
+a successful response confirms the export was queued, and an HTTP
 failure surfaces an error message.
 
 -}

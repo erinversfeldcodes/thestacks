@@ -1,8 +1,8 @@
 defmodule Stacks.Partners do
   @moduledoc """
-  Context for partner registration, approval, API key management,
-  inventory sync, and event management.
-  Partners are third-space businesses (bookshops, cafes, reading groups).
+    Context for partner registration, approval, API key management,
+    inventory sync, and event management.
+    Partners are third-space businesses (bookshops, cafes, reading groups).
   """
 
   import Ecto.Changeset
@@ -43,9 +43,9 @@ defmodule Stacks.Partners do
   end
 
   @doc """
-  Approve a partner registration. Generates an HMAC secret, stores its Argon2 hash,
-  and returns the raw key ONCE. The key is never recoverable after this call.
-  Returns {:ok, {Partner, raw_key}} or {:error, :not_found | :already_approved}.
+    Approve a partner registration. Generates an HMAC secret, stores its Argon2 hash,
+    and returns the raw key ONCE. The key is never recoverable after this call.
+    Returns {:ok, {Partner, raw_key}} or {:error,:not_found |:already_approved}.
   """
   def approve_partner(partner_id, admin_id) do
     case Repo.get(Partner, partner_id) do
@@ -96,8 +96,8 @@ defmodule Stacks.Partners do
   end
 
   @doc """
-  Rotate the API key for an approved partner.
-  Returns {:ok, raw_key} or {:error, :not_found | :not_approved}.
+    Rotate the API key for an approved partner.
+    Returns {:ok, raw_key} or {:error,:not_found |:not_approved}.
   """
   def rotate_key(partner_id) do
     case Repo.get(Partner, partner_id) do
@@ -120,9 +120,9 @@ defmodule Stacks.Partners do
   end
 
   @doc """
-  Authenticate a partner by raw API key. Scans approved partners and verifies
-  with Argon2. Returns {:ok, Partner} or {:error, :invalid}.
-  NOTE: This is O(n) over approved partners. In production, add a prefix index.
+    Authenticate a partner by raw API key. Scans approved partners and verifies
+    with Argon2. Returns {:ok, Partner} or {:error,:invalid}.
+    NOTE: This is O(n) over approved partners. In production, add a prefix index.
   """
   def authenticate_partner(raw_key) do
     prefix = String.slice(raw_key, 0, 8)
@@ -160,7 +160,7 @@ defmodule Stacks.Partners do
   @valid_conditions ~w(new like_new good fair poor)
 
   @doc """
-  Changeset for a partner inventory item.
+    Changeset for a partner inventory item.
   """
   @spec inventory_item_changeset(InventoryItem.t(), map()) :: Ecto.Changeset.t()
   def inventory_item_changeset(item, attrs) do
@@ -185,8 +185,8 @@ defmodule Stacks.Partners do
   end
 
   @doc """
-  Sync a list of inventory items for a partner. Each item has isbn, price_cents,
-  condition, and quantity. Returns `{synced_count, unresolved_isbns}`.
+    Sync a list of inventory items for a partner. Each item has isbn, price_cents,
+    condition, and quantity. Returns `{synced_count, unresolved_isbns}`.
   """
   @spec sync_inventory(Partner.t(), [map()]) ::
           {:ok, %{synced: integer(), unresolved: [String.t()]}}
@@ -235,7 +235,7 @@ defmodule Stacks.Partners do
   end
 
   @doc """
-  List inventory items for a partner.
+    List inventory items for a partner.
   """
   @spec list_inventory(Partner.t()) :: [InventoryItem.t()]
   def list_inventory(%Partner{id: partner_id}) do
@@ -263,9 +263,9 @@ defmodule Stacks.Partners do
   end
 
   @doc """
-  Create a third space event for a partner's linked third space.
-  Returns {:error, :no_third_space} if the partner has no linked space.
-  Validates that starts_at is in the future and ends_at > starts_at.
+    Create a third space event for a partner's linked third space.
+    Returns {:error,:no_third_space} if the partner has no linked space.
+    Validates that starts_at is in the future and ends_at > starts_at.
   """
   @spec create_partner_event(Partner.t(), map()) ::
           {:ok, ThirdSpaceEvent.t()} | {:error, atom() | Ecto.Changeset.t()}
@@ -308,7 +308,7 @@ defmodule Stacks.Partners do
   end
 
   @doc """
-  List events for a partner's linked third space.
+    List events for a partner's linked third space.
   """
   @spec list_partner_events(Partner.t()) :: [ThirdSpaceEvent.t()]
   def list_partner_events(%Partner{third_space_id: nil}), do: []
@@ -321,8 +321,8 @@ defmodule Stacks.Partners do
   end
 
   @doc """
-  Delete an event belonging to a partner's third space.
-  Returns {:error, :not_found} if the event doesn't exist or belongs to another space.
+    Delete an event belonging to a partner's third space.
+    Returns {:error,:not_found} if the event doesn't exist or belongs to another space.
   """
   @spec delete_partner_event(Partner.t(), String.t()) ::
           {:ok, ThirdSpaceEvent.t()} | {:error, :not_found | :no_third_space}

@@ -1,10 +1,10 @@
 defmodule Stacks.Workers.VisibilityRecapJobTest do
   @moduledoc """
-  Tests for Stacks.Workers.VisibilityRecapJob.
+    Tests for Stacks.Workers.VisibilityRecapJob.
 
-  The worker batches-updates bookshelves and placements whose stored visibility
-  violates the user's new (more restrictive) profile_visibility ceiling, then
-  emits a user.visibility_recap_completed event with the counts.
+    The worker batches-updates bookshelves and placements whose stored visibility
+    violates the user's new (more restrictive) profile_visibility ceiling, then
+    emits a user.visibility_recap_completed event with the counts.
   """
 
   use Core.DataCase, async: true

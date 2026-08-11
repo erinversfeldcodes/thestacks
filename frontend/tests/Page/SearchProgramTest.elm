@@ -87,7 +87,7 @@ suite =
 {-| The search field's only visible cue is its placeholder, which is not an
 accessible name — it disappears the moment the reader types and several screen
 readers ignore it entirely. So the input carries an explicit `aria-label`, and
-this asserts it is present and matches the placeholder copy (#318 TR-6).
+this asserts it is present and matches the placeholder copy (TR-6).
 -}
 searchInputHasAccessibleName : Test
 searchInputHasAccessibleName =
@@ -102,7 +102,7 @@ searchInputHasAccessibleName =
 
 {-| The book-search request must target `GET /api/search` — the route the
 backend actually serves (`router.ex`, alongside `/api/search/users`). Before
-the #115 fix the client built `/api/books/search`, which 404s live; this asserts
+the fix the client built `/api/books/search`, which 404s live; this asserts
 the requested URL so the mismatch can never silently return.
 -}
 searchUrlIsApiSearch : Test
@@ -507,7 +507,7 @@ resultClickEmitsOpenOverlay =
 
 {-| Each result renders as a real `<button>` (natively keyboard-focusable and
 Enter/Space-activatable) carrying `id="search-result-<bookId>"` — the stable
-element id Main hands the overlay as the focus-return trigger (#114 / #289). A
+element id Main hands the overlay as the focus-return trigger. A
 plain div with an onClick would fail both the tag and the id assertion.
 -}
 resultRendersAsButtonWithStableId : Test
@@ -579,7 +579,7 @@ collectionShelfLabel =
                 |> ProgramTest.expectViewHas [ Selector.text "On your Reading Pile shelf" ]
 
 
-{-| #333 — the annotation must name EVERY bookshelf a book sits on. It used to
+{-| — the annotation must name EVERY bookshelf a book sits on. It used to
 name one and silently drop the rest, which looked exactly like the whole truth:
 a book on the Wish List and the Reading Pile was reported as "On your Wish List
 shelf" and the reader had no way to know otherwise.
@@ -718,7 +718,7 @@ sortWithinEachSection =
 
 
 {-| A collection result is the same keyboard-operable `<button>` carrying the
-stable `search-result-<bookId>` focus-return id as a platform result (#289) —
+stable `search-result-<bookId>` focus-return id as a platform result —
 proving the click surface is shared across both sections.
 -}
 collectionResultRendersAsButton : Test
@@ -832,7 +832,7 @@ highlightRendersAsMarkElement =
 
 {-| A title match (empty snippet) renders NEITHER the snippet block NOR the "via
 deep search" label — the excerpt is shown only when the match was on description
-/review text (#284).
+/review text.
 -}
 noSnippetNoLabelWhenSnippetEmpty : Test
 noSnippetNoLabelWhenSnippetEmpty =
@@ -870,7 +870,7 @@ collectionHit bookshelfName book =
     { book = book, source = "", ownerHandle = "", price = "", bookshelfName = bookshelfName, bookshelfNames = [ bookshelfName ], snippet = "" }
 
 
-{-| A collection hit sitting on SEVERAL of the viewer's bookshelves (#333) — a
+{-| A collection hit sitting on SEVERAL of the viewer's bookshelves — a
 legal state. `bookshelf_name` carries the first, exactly as the backend emits it
 for wire compatibility; `bookshelf_names` carries them all.
 -}
@@ -908,7 +908,7 @@ listedHit ownerHandle price book =
 
 
 {-| Attach a deep-search snippet (a `ts_headline` `<mark>` excerpt) to any hit —
-the wire signal that the match was on the description/review, not the title (#284).
+the wire signal that the match was on the description/review, not the title.
 -}
 withSnippet : String -> TestHit -> TestHit
 withSnippet snippet hit =
@@ -969,8 +969,7 @@ sectionedResponseJson collection platform =
 The generic fixtures aren't tied to the viewer, so they land in the PLATFORM
 section as plain (source "") hits — rendered as bare rows, the pre-sectioning
 behaviour these existing tests assert. Every simulated book-search response goes
-through the sectioned builder so the mirror can't drift from the real wire shape
-(#285/#292).
+through the sectioned builder so the mirror can't drift from the real wire shape.
 
 -}
 searchResponseJson : List Book -> String

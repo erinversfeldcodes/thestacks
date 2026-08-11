@@ -123,7 +123,7 @@ async function gateAdvances(page: Page, advanced: Promise<unknown>, what: string
   ).toBe("advanced");
 }
 
-test.describe("Admin session gate (#303)", () => {
+test.describe("Admin session gate", () => {
   test("an owner cannot reach an admin page without an admin session", async ({ page, request }) => {
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");

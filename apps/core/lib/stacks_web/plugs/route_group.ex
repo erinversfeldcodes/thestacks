@@ -1,13 +1,13 @@
 defmodule StacksWeb.Plugs.RouteGroup do
   @moduledoc """
-  Classifies the request path into a feature group (`:auth`,
-  `:catalogue`, `:bookshelves`, `:upload`, `:gdpr`, `:settings`,
-  `:health`, `:metrics`, `:other`) for per-group SLO thresholds (136).
-  Writes the tag to `conn.private[:route_group]`,
-  `private[:telemetry_metadata][:route_group]` and
-  `assigns[:route_group]`;
-  `CoreWeb.Telemetry.attach_route_group_handler/0` copies it into
-  `[:phoenix, :router_dispatch, :stop]` metadata at emit time.
+    Classifies the request path into a feature group (`:auth`,
+    `:catalogue`, `:bookshelves`, `:upload`, `:gdpr`, `:settings`,
+    `:health`, `:metrics`, `:other`) for per-group SLO thresholds.
+    Writes the tag to `conn.private[:route_group]`,
+    `private[:telemetry_metadata][:route_group]` and
+    `assigns[:route_group]`;
+    `CoreWeb.Telemetry.attach_route_group_handler/0` copies it into
+    `[:phoenix,:router_dispatch,:stop]` metadata at emit time.
   """
 
   @behaviour Plug

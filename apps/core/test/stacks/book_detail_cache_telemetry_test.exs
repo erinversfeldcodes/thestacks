@@ -1,13 +1,13 @@
 defmodule Stacks.Books.BookDetailCacheTelemetryTest do
   @moduledoc """
-  Telemetry firing tests for `Stacks.Books.BookDetailCache` (Issue #114, Phase 2).
+    Telemetry firing tests for `Stacks.Books.BookDetailCache`.
 
-  Verifies that `get/1` emits `[:stacks, :book_detail_cache, :hit]` on a cache
-  hit and `[:stacks, :book_detail_cache, :miss]` on a cold lookup and on an
-  expired entry (expired-as-miss). These events feed the cache hit-rate metric.
+    Verifies that `get/1` emits `[:stacks,:book_detail_cache,:hit]` on a cache
+    hit and `[:stacks,:book_detail_cache,:miss]` on a cold lookup and on an
+    expired entry (expired-as-miss). These events feed the cache hit-rate metric.
 
-  GDPR: the cache is book-keyed. Telemetry metadata carries `book_id` ONLY —
-  never a user identifier — and this is pinned by the "GDPR" test below.
+    GDPR: the cache is book-keyed. Telemetry metadata carries `book_id` ONLY —
+    never a user identifier — and this is pinned by the "GDPR" test below.
   """
 
   use ExUnit.Case, async: false

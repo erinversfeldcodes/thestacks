@@ -21,7 +21,7 @@ test.describe("Looking for a Home page", () => {
     await expect(page.locator("h1.page__title")).toHaveCount(0);
   });
 
-  test("empty state matches US-1.6.5 wording", async ({ page }) => {
+  test("empty state matches wording", async ({ page }) => {
     await page.goto("/looking-for-home");
     await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
 

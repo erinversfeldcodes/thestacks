@@ -73,8 +73,8 @@ update msg model =
             ( { model | showAgeGate = False }, Cmd.none, NoOut )
 
 
-{-| Looking for a Home is a **real room in the shelf-room family** (US-18.1.1,
-Wave 8 #318), not a flat page: the same wallpaper / lamplight / brass-plate
+{-| Looking for a Home is a **real room in the shelf-room family** (,
+), not a flat page: the same wallpaper / lamplight / brass-plate
 label treatment the other bookshelves use (see `Page.Bookshelf.view`), with the
 face-out `pile-view` of cover cards staged _inside_ that room. The room framing
 is what makes the pile read as staged — books set out to catch a passing

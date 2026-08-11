@@ -1,13 +1,13 @@
 defmodule StacksWeb.ImportController do
   @moduledoc """
-  Goodreads library import (US-1.1.9).
+    Goodreads library import.
 
-  `POST /api/imports/goodreads` takes the export CSV as a multipart `file`,
-  parses it synchronously — so "this isn't a Goodreads export" is a 422 at
-  upload time, not a failed job discovered later — and answers 202 with the
-  created import; `Stacks.Workers.GoodreadsImportJob` does the shelving.
-  One import at a time per user (409). The reads are the reader's own progress
-  and per-row report, always owner-scoped.
+    `POST /api/imports/goodreads` takes the export CSV as a multipart `file`,
+    parses it synchronously — so "this isn't a Goodreads export" is a 422 at
+    upload time, not a failed job discovered later — and answers 202 with the
+    created import; `Stacks.Workers.GoodreadsImportJob` does the shelving.
+    One import at a time per user. The reads are the reader's own progress
+    and per-row report, always owner-scoped.
   """
 
   use CoreWeb, :controller

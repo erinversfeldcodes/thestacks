@@ -1,7 +1,7 @@
 defmodule Stacks.EnrichmentThirdSpacesTest do
   @moduledoc """
-  Tests for Stacks.Enrichment.list_third_spaces/1 and
-  Stacks.Enrichment.book_availability/1.
+    Tests for Stacks.Enrichment.list_third_spaces/1 and
+    Stacks.Enrichment.book_availability/1.
   """
 
   use Core.DataCase, async: true
@@ -132,7 +132,7 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
   end
 
-  describe "list_third_spaces/1 — viewport and filters (US-3.1.1)" do
+  describe "list_third_spaces/1 — viewport and filters" do
     test "returns spaces inside a viewport" do
       insert(:third_space, name: "In View", latitude: -33.92, longitude: 18.42)
       insert(:third_space, name: "Out Of View", latitude: -26.20, longitude: 28.04)

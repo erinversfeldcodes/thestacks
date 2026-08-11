@@ -1,12 +1,12 @@
 defmodule Stacks.Enrichment.RssFetcherTest do
   @moduledoc """
-  Transport-bound proofs for the real fetcher (#377).
+    Transport-bound proofs for the real fetcher.
 
-  These are the only tests in the suite that speak HTTP for real, and they do
-  it to **127.0.0.1**, against listeners this module starts and stops. Nothing
-  leaves the machine. Their job is to prove that the bounds `RssFetcher` sets
-  actually reach the socket, so that a hostile or broken peer cannot park an
-  Oban worker indefinitely in production.
+    These are the only tests in the suite that speak HTTP for real, and they do
+    it to **127.0.0.1**, against listeners this module starts and stops. Nothing
+    leaves the machine. Their job is to prove that the bounds `RssFetcher` sets
+    actually reach the socket, so that a hostile or broken peer cannot park an
+    Oban worker indefinitely in production.
   """
   use ExUnit.Case, async: true
 

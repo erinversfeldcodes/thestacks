@@ -1,17 +1,17 @@
 defmodule Core.Repo.Migrations.CreateGuardianTokens do
   @moduledoc """
-  Server-side JWT tracking for revocation (Issue #124, A2).
+    Server-side JWT tracking for revocation.
 
-  Backs `Guardian.DB` so `Guardian.revoke/1` (and logout) actually invalidate a
-  token: every issued "access" token is stored here on sign, presence-checked on
-  every verify, and deleted on revoke.
+    Backs `Guardian.DB` so `Guardian.revoke/1` (and logout) actually invalidate a
+    token: every issued "access" token is stored here on sign, presence-checked on
+    every verify, and deleted on revoke.
 
-  The column shape matches `Guardian.DB.Token`'s Ecto schema exactly:
-  a string `jti` primary key and default `timestamps()` (naive_datetime named
-  inserted_at/updated_at). We therefore add the timestamp columns explicitly
-  rather than via the `timestamps()` macro, which this project globally rewrites
-  to `created_at` (see config/config.exs) — a name Guardian.DB's schema does not
-  expect.
+    The column shape matches `Guardian.DB.Token`'s Ecto schema exactly:
+    a string `jti` primary key and default `timestamps` (naive_datetime named
+    inserted_at/updated_at). We therefore add the timestamp columns explicitly
+    rather than via the `timestamps` macro, which this project globally rewrites
+    to `created_at` (see config/config.exs) — a name Guardian.DB's schema does not
+    expect.
   """
 
   use Ecto.Migration

@@ -9,7 +9,7 @@ module Page.Import exposing
     , view
     )
 
-{-| Goodreads library import (US-1.1.9): choose the export CSV, watch the
+{-| Goodreads library import: choose the export CSV, watch the
 shelving job's counters climb, read the per-row report.
 
 The page's honesty rules:

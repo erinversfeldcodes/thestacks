@@ -469,7 +469,7 @@ defmodule StacksWeb.ProtoJSONTest do
              }
     end
 
-    test "emits placement visibility and parent bookshelf visibility independently (US-10.2.2)" do
+    test "emits placement visibility and parent bookshelf visibility independently" do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "group")
       book = insert(:book)
@@ -597,7 +597,7 @@ defmodule StacksWeb.ProtoJSONTest do
              }
     end
 
-    test "carries the syndicated flag — the take-list drops what it does not name (US-6.2.1)" do
+    test "carries the syndicated flag — the take-list drops what it does not name" do
       user = insert(:user)
       in_feed = insert(:post, user: user, syndicated: true)
       opted_out = insert(:post, user: user, syndicated: false)
@@ -634,7 +634,7 @@ defmodule StacksWeb.ProtoJSONTest do
       assert result.author_display_name == nil
     end
 
-    test "includes the author's handle for the profile link (US-10.5.4)" do
+    test "includes the author's handle for the profile link" do
       user = insert(:user, handle: "fable_quill")
       post = insert(:post, user: user)
 

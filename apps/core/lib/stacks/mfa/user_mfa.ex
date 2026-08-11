@@ -1,9 +1,9 @@
 defmodule Stacks.MFA.UserMFA do
   @moduledoc """
-  Ecto schema for the `op.user_mfa` table.
+    Ecto schema for the `op.user_mfa` table.
 
-  Stores TOTP enrollment data for a user. The `totp_secret` is encrypted at rest
-  using `Stacks.EncryptedBinary`. Recovery codes are stored as SHA-256 hashes.
+    Stores TOTP enrollment data for a user. The `totp_secret` is encrypted at rest
+    using `Stacks.EncryptedBinary`. Recovery codes are stored as SHA-256 hashes.
   """
 
   use Ecto.Schema

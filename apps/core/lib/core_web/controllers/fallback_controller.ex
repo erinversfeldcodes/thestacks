@@ -1,7 +1,7 @@
 defmodule CoreWeb.FallbackController do
   @moduledoc """
-  Translates common `{:error, reason}` tuples from controller actions into
-  appropriate HTTP responses.  Controllers opt in with `action_fallback/1`.
+    Translates common `{:error, reason}` tuples from controller actions into
+    appropriate HTTP responses.  Controllers opt in with `action_fallback/1`.
   """
 
   use CoreWeb, :controller

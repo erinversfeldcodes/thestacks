@@ -1,12 +1,12 @@
 defmodule Stacks.UploadInboxTest do
   @moduledoc """
-  `Stacks.Uploads.list_awaiting_attention/1` — the predicate behind the upload
-  inbox and the navigation badge (Issue #351).
+    `Stacks.Uploads.list_awaiting_attention/1` — the predicate behind the upload
+    inbox and the navigation badge.
 
-  The thing under test is a *definition*, so these tests are written as the
-  definition's clauses: one per branch of "is this upload still the reader's
-  problem?". The interesting ones are the exclusions — an inbox that lists
-  everything is easy and useless.
+    The thing under test is a *definition*, so these tests are written as the
+    definition's clauses: one per branch of "is this upload still the reader's
+    problem?". The interesting ones are the exclusions — an inbox that lists
+    everything is easy and useless.
   """
 
   use Core.DataCase, async: true

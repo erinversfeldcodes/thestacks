@@ -40,7 +40,7 @@ type OutMsg
 
 
 {-| The verbatim copy shown under the writing-assistant toggle when it is OFF.
-Kept as a named constant so tests can assert the exact wording (Issue #184).
+Kept as a named constant so tests can assert the exact wording.
 -}
 writingAssistantOffDescription : String
 writingAssistantOffDescription =
@@ -48,7 +48,7 @@ writingAssistantOffDescription =
 
 
 {-| Seed the consent page from the current user's actual consent state so the
-toggles reflect reality on open (Issue FF-1). Previously both toggles were
+toggles reflect reality on open. Previously both toggles were
 hard-coded OFF, so a user who had already granted consent saw them as OFF and
 their first click re-granted instead of revoking.
 -}
@@ -120,7 +120,7 @@ update msg model maybeToken =
                         ( { model | saving = Failure err }, Cmd.none, NoOut )
 
 
-{-| The standalone-page wrapper. Since #318 TR-4 the consent controls live as a
+{-| The standalone-page wrapper. Since TR-4 the consent controls live as a
 section INSIDE the Privacy page (`Page.Settings.Privacy` embeds this module and
 renders `viewSection`); this whole-page view is retained for direct unit tests
 of the consent surface. The update path — and therefore what
@@ -136,7 +136,7 @@ view model =
 
 
 {-| The consent controls with no page chrome, so the Privacy page can fold them
-in as a section (#318 TR-4). Identical markup to the standalone page minus its
+in as a section (TR-4). Identical markup to the standalone page minus its
 `page`/`h1` wrapper.
 -}
 viewSection : Model -> Html Msg

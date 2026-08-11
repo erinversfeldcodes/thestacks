@@ -13,14 +13,14 @@ defmodule Stacks.VisibilityTest do
       assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
     end
 
-    test "unauthenticated viewer + platform (Members) bookshelf → :hidden (signed-in only, #225)" do
+    test "unauthenticated viewer + platform (Members) bookshelf →:hidden (signed-in only, )" do
       owner = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
 
       assert :hidden = Visibility.resolve_visibility(bookshelf, :unauthenticated)
     end
 
-    test "unauthenticated viewer + public bookshelf + public profile → :visible (#225)" do
+    test "unauthenticated viewer + public bookshelf + public profile →:visible" do
       owner = insert(:user, profile_visibility: "public")
       bookshelf = insert(:bookshelf, user: owner, visibility: "public")
 
@@ -271,7 +271,7 @@ defmodule Stacks.VisibilityTest do
       assert Visibility.audience_levels() == ~w(owner group platform public)
     end
 
-    test "profile_audience_levels/0 is owner/platform/public (group deferred to #224)" do
+    test "profile_audience_levels/0 is owner/platform/public (group deferred to )" do
       assert Visibility.profile_audience_levels() == ~w(owner platform public)
     end
 
@@ -464,7 +464,7 @@ defmodule Stacks.VisibilityTest do
       assert length(result) == 2
     end
 
-    test "unauthenticated viewer sees only PUBLIC bookshelves (platform is Members-only, #225)" do
+    test "unauthenticated viewer sees only PUBLIC bookshelves (platform is Members-only, )" do
       owner = insert(:user, profile_visibility: "public")
       _public_shelf = insert(:bookshelf, user: owner, name: "library", visibility: "public")
       _platform_shelf = insert(:bookshelf, user: owner, name: "wishlist", visibility: "platform")
@@ -503,7 +503,7 @@ defmodule Stacks.VisibilityTest do
                Enum.sort(settable_audience_values_from_proto())
     end
 
-    test "public is a settable value in BOTH the proto and the Elixir ladder (#225)" do
+    test "public is a settable value in BOTH the proto and the Elixir ladder" do
       assert "public" in settable_audience_values_from_proto()
       assert "public" in Visibility.audience_levels()
     end

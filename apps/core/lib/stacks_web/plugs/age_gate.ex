@@ -1,17 +1,17 @@
 defmodule StacksWeb.Plugs.AgeGate do
   @moduledoc """
-  Enforces age-gating on books with `visibility_tier = "age_gated"`.
+    Enforces age-gating on books with `visibility_tier = "age_gated"`.
 
-  Call this plug inline in controller actions after the book has been fetched
-  (not as a pipeline plug), passing the book struct as an option:
+    Call this plug inline in controller actions after the book has been fetched
+    (not as a pipeline plug), passing the book struct as an option:
 
-      AgeGate.call(conn, book: book)
+        AgeGate.call(conn, book: book)
 
-  If the book's visibility_tier is "age_gated" and the current Guardian user
-  either is not authenticated or does not have `age_verified: true`, the plug
-  halts the conn with a 403 JSON response.
+    If the book's visibility_tier is "age_gated" and the current Guardian user
+    either is not authenticated or does not have `age_verified: true`, the plug
+    halts the conn with a 403 JSON response.
 
-  For all other visibility tiers the conn is returned unchanged.
+    For all other visibility tiers the conn is returned unchanged.
   """
 
   import Plug.Conn
@@ -30,13 +30,13 @@ defmodule StacksWeb.Plugs.AgeGate do
   end
 
   @doc """
-  Enforces the age gate for a fetched book struct. Call this directly from
-  controller actions after fetching the book:
+    Enforces the age gate for a fetched book struct. Call this directly from
+    controller actions after fetching the book:
 
-      conn = AgeGate.enforce(conn, book)
-      if conn.halted, do: conn, else: render(conn, ...)
+        conn = AgeGate.enforce(conn, book)
+        if conn.halted, do: conn, else: render(conn,...)
 
-  Returns the (possibly halted) conn.
+    Returns the (possibly halted) conn.
   """
   @spec enforce(Plug.Conn.t(), map() | nil) :: Plug.Conn.t()
   def enforce(conn, %{visibility_tier: "age_gated"}) do

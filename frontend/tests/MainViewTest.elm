@@ -8,7 +8,7 @@ These mirror the `MainNavTest`/`viewNav` pattern — Main.elm is a
 cannot be program-tested. We assert the shipped markup of each pure view
 directly.
 
-The home page moved out of Main.elm into `Page.Home` (Wave 8 #318, 8c) so its
+The home page moved out of Main.elm into `Page.Home` so its
 two auth-branched faces can be view-tested directly — see `Page.HomeTest`.
 
 -}

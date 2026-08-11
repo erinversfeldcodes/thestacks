@@ -1,10 +1,10 @@
 defmodule StacksWeb.OptOutController do
   @moduledoc """
-  Handles unauthenticated opt-out requests from businesses that have been
-  discovered as sources.
+    Handles unauthenticated opt-out requests from businesses that have been
+    discovered as sources.
 
-  Businesses do not need a platform account to opt out — they provide
-  their URL and a contact email, and the matching source is marked as excluded.
+    Businesses do not need a platform account to opt out — they provide
+    their URL and a contact email, and the matching source is marked as excluded.
   """
 
   use CoreWeb, :controller
@@ -12,10 +12,10 @@ defmodule StacksWeb.OptOutController do
   alias Stacks.Discovery
 
   @doc """
-  POST /api/opt-out — opt a discovered source out of the platform.
+    POST /api/opt-out — opt a discovered source out of the platform.
 
-  Expects `%{"url" => url, "email" => email}`. Optionally accepts `"reason"`.
-  Returns 200 on success, 404 if the URL is not found, 422 on validation error.
+    Expects `%{"url" => url, "email" => email}`. Optionally accepts `"reason"`.
+    Returns 200 on success, 404 if the URL is not found, 422 on validation error.
   """
   @spec create(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def create(conn, %{"url" => url, "email" => email} = _params) do

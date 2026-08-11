@@ -1,17 +1,17 @@
 defmodule CoreWeb.TelemetryFuseStateTest do
   @moduledoc """
-  Tests for the periodic fuse-state gauge (Issue #136 Phase 1, DoD #2).
+    Tests for the periodic fuse-state gauge.
 
-  `CoreWeb.Telemetry.poll_fuse_state/0` must walk every registered fuse
-  (vision_fuse, together_ai_fuse, open_library_fuse, google_books_fuse,
-  scraper_fuse) and emit `[:stacks, :fuse, :state]` with:
+    `CoreWeb.Telemetry.poll_fuse_state/0` must walk every registered fuse
+    (vision_fuse, together_ai_fuse, open_library_fuse, google_books_fuse,
+    scraper_fuse) and emit `[:stacks,:fuse,:state]` with:
 
-      measurements: %{state: 0 | 1}
-      metadata:     %{fuse_name: atom()}
+        measurements: %{state: 0 | 1}
+        metadata:     %{fuse_name: atom}
 
-  State mapping: healthy (`:ok`) → 1, blown → 0.
+    State mapping: healthy (`:ok`) → 1, blown → 0.
 
-  The emitted series feeds the SLO gate's "fuse open count = 0" threshold.
+    The emitted series feeds the SLO gate's "fuse open count = 0" threshold.
   """
 
   use ExUnit.Case, async: false

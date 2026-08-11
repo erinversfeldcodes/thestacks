@@ -69,7 +69,7 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  describe "handles (/u/:handle) — #211" do
+  describe "handles (/u/:handle) —" do
     test "register/1 auto-generates a valid, slugified handle from the display name" do
       {:ok, user} =
         Accounts.register(%{
@@ -166,14 +166,14 @@ defmodule Stacks.AccountsTest do
       assert Accounts.search_users("da Love", nil) |> Enum.map(& &1.id) == [match.id]
     end
 
-    test "an anonymous searcher gets public profiles but NOT platform (Members) ones (#225)" do
+    test "an anonymous searcher gets public profiles but NOT platform (Members) ones" do
       public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
       _members = insert(:user, display_name: "Ada Members", profile_visibility: "platform")
 
       assert Accounts.search_users("Ada", nil) |> Enum.map(& &1.id) == [public.id]
     end
 
-    test "a signed-in searcher gets BOTH platform (Members) and public profiles (#225)" do
+    test "a signed-in searcher gets BOTH platform (Members) and public profiles" do
       viewer = insert(:user)
       public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
       members = insert(:user, display_name: "Ada Members", profile_visibility: "platform")
@@ -641,7 +641,7 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  describe "token family reuse detection (Issue #179, Phase 2b)" do
+  describe "token family reuse detection" do
     setup do
       user = insert(:user)
       fid = Ecto.UUID.generate()
@@ -713,7 +713,7 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  describe "token rotation grace window (Issue #180, Phase 1)" do
+  describe "token rotation grace window" do
     setup do
       user = insert(:user)
       fid = Ecto.UUID.generate()

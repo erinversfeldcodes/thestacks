@@ -1,12 +1,12 @@
 defmodule Stacks.Enrichment.EventExtractor do
   @moduledoc """
-  The structured tier of bookstore-event extraction: schema.org `Event`
-  objects from JSON-LD blocks — the shape Shopify event apps actually emit,
-  and the one place a page STATES its events (title WITH date) rather than
-  styling them. Believed over the text heuristics. The ladder's other
-  tiers are deliberately absent: `.ics` (no reachable store links one —
-  build it when a store does) and LLM fallback (extraction-by-model
-  without an eval framework).
+    The structured tier of bookstore-event extraction: schema.org `Event`
+    objects from JSON-LD blocks — the shape Shopify event apps actually emit,
+    and the one place a page STATES its events (title WITH date) rather than
+    styling them. Believed over the text heuristics. The ladder's other
+    tiers are deliberately absent: `.ics` (no reachable store links one —
+    build it when a store does) and LLM fallback (extraction-by-model
+    without an eval framework).
   """
 
   require Logger
@@ -14,11 +14,11 @@ defmodule Stacks.Enrichment.EventExtractor do
   @script_pattern ~r/<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>(.*?)<\/script>/is
 
   @doc """
-  Every schema.org Event declared in the page's JSON-LD blocks, as attrs maps
-  (`:title`, `:event_date`, `:description`, `:location`, `:url` — the same
-  vocabulary the persistence path speaks). Pages with no/broken JSON-LD give
-  `[]`, never an error: malformed structured data downgrades to the text
-  tiers rather than failing the store.
+    Every schema.org Event declared in the page's JSON-LD blocks, as attrs maps
+    (`:title`, `:event_date`, `:description`, `:location`, `:url` — the same
+    vocabulary the persistence path speaks). Pages with no/broken JSON-LD give
+    `[]`, never an error: malformed structured data downgrades to the text
+    tiers rather than failing the store.
   """
   @spec events(String.t()) :: [map()]
   def events(body) do

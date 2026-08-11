@@ -37,9 +37,9 @@ type Msg
     | SessionExpiryDetected
 
 
-{-| `SessionExpired` bubbles to `Main.handleSessionExpiry` (#173/#178).
+{-| `SessionExpired` bubbles to `Main.handleSessionExpiry`.
 
-Until #361 this page had no `OutMsg`, so an expired session showed either
+Until this page had no `OutMsg`, so an expired session showed either
 "Could not load your notification preferences. Please refresh to try again." or
 "Could not save notification preferences. Please try again." Refreshing an
 expired session reloads the same 401; the toggle, meanwhile, had already been
@@ -177,7 +177,7 @@ viewPreferences prefs =
                 [ text "Loading your preferences…" ]
 
 
-{-| ⛔ The save feedback says WHICH failure (Issue #374).
+{-| ⛔ The save feedback says WHICH failure.
 
 "Could not save notification preferences. Please try again." was shown for a
 422 the reader cannot fix by repeating it, a dropped connection they can fix but
@@ -186,7 +186,7 @@ one case where trying again is actively the wrong advice, because it invites a
 second write to settle a question a reload answers.
 
 The 401 leg is not here and must not be added: `Api.Authed` routes an expired
-session to `SessionExpired` before this state can be reached (#361).
+session to `SessionExpired` before this state can be reached.
 
 -}
 viewSaveFeedback : RemoteData Http.Error () -> Html Msg

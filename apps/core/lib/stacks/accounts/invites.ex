@@ -1,15 +1,15 @@
 defmodule Stacks.Accounts.Invites do
   @moduledoc """
-  Closed-beta invitations (US-14.1.3). The code is a bearer secret:
-  128 random bits in Crockford base32, shown ONCE; only its SHA-256
-  (`code_hash`, the redemption lookup) and a display prefix survive.
-  SHA-256 not Argon2 because the row must be FOUND by code — and the code
-  is high-entropy and never reused, so a fast hash is right.
+    Closed-beta invitations. The code is a bearer secret:
+    128 random bits in Crockford base32, shown ONCE; only its SHA-256
+    (`code_hash`, the redemption lookup) and a display prefix survive.
+    SHA-256 not Argon2 because the row must be FOUND by code — and the code
+    is high-entropy and never reused, so a fast hash is right.
 
-  Redemption runs INSIDE the registration `Ecto.Multi` (`redeem_steps/3`),
-  never a plug, with `SELECT … FOR UPDATE` making single-use real under
-  concurrency. `note`/`invited_email` are personal data about a possible
-  never-user: scrubbed by `GDPR.Deletion`, excluded from export.
+    Redemption runs INSIDE the registration `Ecto.Multi` (`redeem_steps/3`),
+    never a plug, with `SELECT … FOR UPDATE` making single-use real under
+    concurrency. `note`/`invited_email` are personal data about a possible
+    never-user: scrubbed by `GDPR.Deletion`, excluded from export.
   """
 
   import Ecto.Query
@@ -26,8 +26,8 @@ defmodule Stacks.Accounts.Invites do
   @note_max_length 500
 
   @doc """
-  Writes an invitation. Returns `{:ok, %{invite: row, code: full_code}}` —
-  the ONLY place the full code ever exists in the clear.
+    Writes an invitation. Returns `{:ok, %{invite: row, code: full_code}}` —
+    the ONLY place the full code ever exists in the clear.
   """
   @spec issue(Stacks.Accounts.User.t(), map()) ::
           {:ok, %{invite: InviteCode.t(), code: String.t()}} | {:error, Ecto.Changeset.t()}
@@ -100,8 +100,8 @@ defmodule Stacks.Accounts.Invites do
   end
 
   @doc """
-  What `GET /api/auth/invite/:code` answers. Deliberately reveals nothing about
-  a person: no note, no address (only whether one is bound), no redeemer.
+    What `GET /api/auth/invite/:code` answers. Deliberately reveals nothing about
+    a person: no note, no address (only whether one is bound), no redeemer.
   """
   @spec check(String.t()) ::
           {:ok, %{expires_at: DateTime.t() | nil, email_bound: boolean()}}
@@ -142,18 +142,18 @@ defmodule Stacks.Accounts.Invites do
   end
 
   @doc """
-  Prepends the invite gate to a registration `Ecto.Multi` (US-14.1.3 §5):
+    Prepends the invite gate to a registration `Ecto.Multi`:
 
-    1. `:lock_invite` — `SELECT … FOR UPDATE` by hash; the lock is the
-       single-use guarantee.
-    2. `:validate_invite` — revoked/expired/exhausted/email binding.
+      1. `:lock_invite` — `SELECT … FOR UPDATE` by hash; the lock is the
+         single-use guarantee.
+      2. `:validate_invite` — revoked/expired/exhausted/email binding.
 
-  …and appends, after the `:user` insert:
+    …and appends, after the `:user` insert:
 
-    3. `:consume_invite` — `use_count + 1`; records the FIRST redeemer.
+      3. `:consume_invite` — `use_count + 1`; records the FIRST redeemer.
 
-  Steps are added only when the flag is on; when off, the multi is returned
-  untouched and any submitted code is ignored (the story's contract).
+    Steps are added only when the flag is on; when off, the multi is returned
+    untouched and any submitted code is ignored (the story's contract).
   """
   @spec redeem_steps(Multi.t(), String.t() | nil, String.t() | nil) :: Multi.t()
   def redeem_steps(multi, code, email) do

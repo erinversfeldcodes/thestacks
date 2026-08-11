@@ -1,13 +1,13 @@
 defmodule Stacks.ModerationTest do
   @moduledoc """
-  Tests for Stacks.Moderation pipeline.
+    Tests for Stacks.Moderation pipeline.
 
-  The vision client is configured to Stacks.AI.MockClient in test.exs, so all
-  calls to AIClient.call_vision/2 use the mock without hitting the network.
+    The vision client is configured to Stacks.AI.MockClient in test.exs, so all
+    calls to AIClient.call_vision/2 use the mock without hitting the network.
 
-  ISBN resolution (Books.resolve_isbn) would otherwise make real HTTP calls to
-  Open Library; the pipeline handles a resolution failure gracefully (empty
-  subjects/bisac_codes), so no HTTP mocking is needed here.
+    ISBN resolution (Books.resolve_isbn) would otherwise make real HTTP calls to
+    Open Library; the pipeline handles a resolution failure gracefully (empty
+    subjects/bisac_codes), so no HTTP mocking is needed here.
   """
 
   use Core.DataCase, async: false
@@ -77,7 +77,7 @@ defmodule Stacks.ModerationTest do
     end
   end
 
-  describe "run_pipeline/1 — the resolver's cross-reference ids reach the row (#346)" do
+  describe "run_pipeline/1 — the resolver's cross-reference ids reach the row" do
     test "an Open Library hit stores open_library_id, and the provenance agrees" do
       MockHttpClient.put_response(
         "openlibrary.org/api/books",
@@ -203,7 +203,7 @@ defmodule Stacks.ModerationTest do
     end
   end
 
-  describe "run_pipeline/1 — confidence threshold (Issue #167)" do
+  describe "run_pipeline/1 — confidence threshold" do
     setup do
       test_pid = self()
       handler_id = "test-skip-#{System.unique_integer([:positive])}"
@@ -474,7 +474,7 @@ defmodule Stacks.ModerationTest do
     end
   end
 
-  describe "run_pipeline/1 — a resolver outage is not the book's fault (#344)" do
+  describe "run_pipeline/1 — a resolver outage is not the book's fault" do
     setup do
       MockHttpClient.put_response("openlibrary.org/api/books", {:error, :unexpected_status})
       MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
@@ -556,7 +556,7 @@ defmodule Stacks.ModerationTest do
     end
   end
 
-  describe "title_fallback/5's closed failure set (#344, #352)" do
+  describe "title_fallback/5's closed failure set" do
     test "every reachable failure maps to :not_found or :unavailable, and nothing else" do
       unavailable = [
         {:error, :unexpected_status},
@@ -586,7 +586,7 @@ defmodule Stacks.ModerationTest do
     end
   end
 
-  describe "run_pipeline/1 — a title-search outage is not the book's fault (#352)" do
+  describe "run_pipeline/1 — a title-search outage is not the book's fault" do
     test "both catalogues unreachable rejects as :resolver_unavailable, not :isbn_not_found" do
       MockHttpClient.put_response("openlibrary.org", {:error, :transport_error})
       MockHttpClient.put_response("googleapis.com", {:error, :transport_error})

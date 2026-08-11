@@ -61,7 +61,7 @@ server-side, and `book_id` / `rejection_reason` arrive as JSON `null` rather
 than going missing (`UploadController.sse_receive_loop/4` passes all six on
 every branch).
 
-These fixtures spoke camelCase until Issue #328, so they exercised a decoder
+These fixtures spoke camelCase until, so they exercised a decoder
 branch the server never reaches — breaking every production wire field left the
 whole Elm suite green.
 
@@ -103,7 +103,7 @@ simulateStreamEvent status maybeBookId isDuplicate =
         )
 
 
-{-| A rejection frame carrying the reason the server actually attached (#374).
+{-| A rejection frame carrying the reason the server actually attached.
 
 `simulateStreamEvent` hardcodes `rejection_reason: null`, which is a frame the
 server emits only on the resolved/timeout branches — so every rejection test
@@ -284,7 +284,7 @@ suite =
 {-| The upload flow's status — "Reading your photo…", "Book Identified!", every
 failure card — is swapped in and out of one region as identification proceeds. A
 screen-reader user watching that region must be told when it changes, so it
-carries `aria-live="polite"` (#318 TR-6, US-19.1.1). The `polite` value (not
+carries `aria-live="polite"` (TR-6,). The `polite` value (not
 `assertive`) is asserted exactly, because an assertive region would interrupt the
 reader on every progress tick.
 -}
@@ -299,13 +299,13 @@ uploadProgressIsAnAriaLiveRegion =
                     ]
 
 
-{-| Placing or adding a book must tell the shell the inbox has changed (#351).
+{-| Placing or adding a book must tell the shell the inbox has changed.
 
 ⛔ **Found by a probe that reddened nothing.** Replacing this `RefreshInbox`
 with `NoOut` left all 1657 tests green — the badge would have gone on showing
 `1` for a book the reader had just shelved, and no test anywhere would have
 noticed. The reason is structural: `uploadProgram`'s update wrapper discards the
-third element of `Upload.update`'s tuple (`( newModel, _, _ )`), so no
+third element of `Upload.update`'s tuple (`( newModel, _, _)`), so no
 program test can see an `OutMsg` at all, and `Main.update` is a
 `Browser.application` with ports and a `Nav.Key` and cannot be program-tested
 either.
@@ -357,7 +357,7 @@ outMsgOf msg model =
     out
 
 
-{-| An inbox item as `GET /api/uploads/inbox` delivers it (Issue #351).
+{-| An inbox item as `GET /api/uploads/inbox` delivers it.
 -}
 awaitingItem : String -> String -> Api.InboxItem
 awaitingItem imageId bookId =
@@ -425,7 +425,7 @@ simulatePlacementCreated shelfName bookId =
         )
 
 
-{-| #351 — the inbox exists and says what is in it.
+{-| — the inbox exists and says what is in it.
 -}
 inboxListsWhatIsWaiting : Test
 inboxListsWhatIsWaiting =
@@ -454,7 +454,7 @@ inboxRendersNothingWhenEmpty =
                 |> ProgramTest.expectViewHasNot [ testIdSelector "upload-inbox" ]
 
 
-{-| #374's causes must survive the trip through the inbox.
+{-| causes must survive the trip through the inbox.
 
 A rejection the reader never witnessed is the ONLY way they will ever learn
 what happened to that photo, so the sentence has to be the specific one — not
@@ -464,7 +464,7 @@ as shorthand. Both items below are failures; they must not say the same thing.
 -}
 inboxNamesTheFailureCause : Test
 inboxNamesTheFailureCause =
-    test "inbox_names_the_failure_cause: each failure keeps the cause #374 gave it" <|
+    test "inbox_names_the_failure_cause: each failure keeps the cause gave it" <|
         \() ->
             startWithInbox
                 [ failedItem "img-1" (Just "vision_unavailable")
@@ -482,7 +482,7 @@ inboxNamesTheFailureCause =
                     )
 
 
-{-| The acceptance test for "resumes the EXISTING flow" (#351 DoD item 3).
+{-| The acceptance test for "resumes the EXISTING flow" (DoD item 3).
 
 Selecting an inbox item must land on the same "We think this is…" verify step a
 live stream produces, having issued the same `GET /api/books/:id` — not a new
@@ -597,7 +597,7 @@ inboxResumeKeepsNoTryAgain =
                     (.body >> Expect.equal "{\"rejected_book_ids\":[\"book-1\"]}")
 
 
-{-| #351 requirement 5 — offer the exit honestly, on elapsed time.
+{-| requirement 5 — offer the exit honestly, on elapsed time.
 
 Before the threshold the page says nothing about leaving; after it, it does.
 Asserting both directions is what stops this passing against copy that was
@@ -623,7 +623,7 @@ waitingCopyOffersTheDoorAfterTwentySeconds =
                     ]
 
 
-{-| ⛔ #351 requirement 5's warning, as a test.
+{-| ⛔ requirement 5's warning, as a test.
 
 > Do **not** claim "retrying" or "attempt 2 of 3": no attempt data exists on
 > the wire, and inventing it client-side would be a lie dressed as reassurance.
@@ -659,7 +659,7 @@ waitingCopySaysNothingAboutRetries =
                     )
 
 
-{-| The watchdog #374 left for this issue.
+{-| The watchdog left for this issue.
 
 An `EventSource` that opens and then emits neither a message nor an error used
 to leave the spinner turning until the server's own deadline — as long as 23
@@ -713,7 +713,7 @@ waitingWatchdogIsResetByAHeartbeat =
                     )
 
 
-{-| #343 — the wave's headline, and the acceptance test for it.
+{-| — the wave's headline, and the acceptance test for it.
 
 `9780156453806` is checksum-valid and is NOT in the catalogue. Against the DIY
 flow this ISBN was a dead end: `SubmitManualIsbn` issued
@@ -754,7 +754,7 @@ manualIsbnNewBookIsCreatedThroughConfirm =
                     [ Selector.text "\"The Book of Disquiet\" added to Wish List" ]
 
 
-{-| #333, re-driven over the wired path (#343).
+{-| , re-driven over the wired path.
 
 The manual add now goes through `POST /api/books/confirm`, which places the
 book and reports every bookshelf the reader has it on. The duplicate awareness
@@ -829,9 +829,9 @@ manualIsbnNoNoticeForABookYouDoNotOwn =
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours") ]
 
 
-{-| The photo path's half of the same ruling (#333/#343).
+{-| The photo path's half of the same ruling.
 
-`GET /api/books/:id` has carried every placement since #333, but the upload
+`GET /api/books/:id` has carried every placement since, but the upload
 flow read only the book out of it, so the verify step — the last moment before
 a second copy is filed — said nothing. It now shows the notice, and "Yes,
 that's it" is still live: informational, never blocking.
@@ -863,7 +863,7 @@ photoPathDuplicateNoticeInformsWithoutBlocking =
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours") ]
 
 
-{-| US-1.1.8 over the wired path (#343).
+{-| over the wired path.
 
 A second ISBN of a work the platform already holds must offer a MERGE, not
 mint a second work. `Books.confirm/2` does the matching (`find_same_work/2`,
@@ -913,7 +913,7 @@ manualIsbnSameWorkOffersMerge =
 {-| `Books.confirm/2`'s `:already_placed` branch (`source: "collection"`).
 
 Nothing changed server-side, so saying "added to your Wish List" would be the
-same untruth as the pre-#333 silent second placement. The completion card must
+same untruth as the pre-silent second placement. The completion card must
 report what actually happened.
 
 -}
@@ -1000,7 +1000,7 @@ uploadIsbnRejection =
                     [ Selector.text "Try Another Photo" ]
 
 
-{-| Four causes, four messages — the whole of Issue #374's first requirement.
+{-| Four causes, four messages — the whole of first requirement.
 
 Each leg drives the REAL path end to end: a server-shaped SSE frame through
 `Api.streamEventDecoder`, through `Page.Upload.update`, into the rendered view.
@@ -1015,7 +1015,7 @@ tests it already had failed to notice.
 -}
 uploadFailureCauses : Test
 uploadFailureCauses =
-    describe "each terminal cause says what happened (#374)"
+    describe "each terminal cause says what happened"
         [ test "undecodable_image blames the file, not the photograph's clarity" <|
             \() ->
                 startUpload
@@ -1078,7 +1078,7 @@ uploadFailureCauses =
         ]
 
 
-{-| The cause on screen is the one named, and none of the others (#374).
+{-| The cause on screen is the one named, and none of the others.
 
 ⛔ Anchored on the `data-failure-cause` attribute rather than on absent prose,
 which is what `scripts/check-prose-assertions.sh` exists to insist on:
@@ -1119,8 +1119,7 @@ onlyFailureCause expected program =
         |> ProgramTest.done
 
 
-{-| ⛔ The requirement this whole issue exists for (#374 requirement 2, #369
-requirement 5).
+{-| ⛔ The requirement this whole issue exists for (requirement 2, requirement 5).
 
 An unrecognised rejection token is what a server that grew a new one after this
 client shipped looks like. The page must answer that with an admission, not with
@@ -1130,7 +1129,7 @@ same case wearing the server's own "I don't know" label.
 -}
 uploadUnknownCauseAdmitsIt : Test
 uploadUnknownCauseAdmitsIt =
-    describe "an unknown cause is reported as unknown (#374)"
+    describe "an unknown cause is reported as unknown"
         [ test "a token this client has never seen claims nothing" <|
             \() ->
                 startUpload
@@ -1158,7 +1157,7 @@ uploadUnknownCauseAdmitsIt =
         ]
 
 
-{-| The pre-identification failures: the photo never reached the library (#374).
+{-| The pre-identification failures: the photo never reached the library.
 
 `uploadState` used to be overwritten with a literal `Http.NetworkError` at both
 of these call sites, so a 429 and a 413 both rendered as "Upload failed. Please
@@ -1167,7 +1166,7 @@ try again." — advice that cannot work for either.
 -}
 uploadSendFailures : Test
 uploadSendFailures =
-    describe "a photo that never got sent says why (#374)"
+    describe "a photo that never got sent says why"
         [ test "a 429 on the presign says wait, not retry" <|
             \() ->
                 startUpload
@@ -1423,7 +1422,7 @@ uploadDragOver =
                     [ Selector.class "upload-area--dragging" ]
 
 
-{-| US-1.1.4 sad — age-gate program flow.
+{-| sad — age-gate program flow.
 
 Drives the full upload pipeline (init -> upload accepted -> SSE
 resolved -> book fetch) for a book whose `visibility_tier` is
@@ -1450,7 +1449,7 @@ uploadAgeGated =
                     [ Selector.text "Age verification is required to view its details." ]
 
 
-{-| US-1.1.7 sad — multi-book partial-failure UX.
+{-| sad — multi-book partial-failure UX.
 
 Drives a 3-book upload where 2 book fetches succeed and 1 returns a
 network error. The Identified state should list the 2 resolved books
@@ -1495,7 +1494,7 @@ uploadMultiBookPartialFailure =
 
 
 {-| "No, try again" must keep the image, append the rejected book id to
-the cumulative rejection list, dispatch POST .../reject-identification
+the cumulative rejection list, dispatch POST.../reject-identification
 with that list, and transition the verify step back into the processing
 state so the user sees the upload spinner while the new IdentifyBookJob
 runs and emits a fresh SSE sequence.
@@ -1529,7 +1528,7 @@ uploadRejectIdentificationRetries =
                     ]
 
 
-{-| #118 — user "adults only" opt-in. On the shelf picker the checkbox is
+{-| — user "adults only" opt-in. On the shelf picker the checkbox is
 present; ticking it and confirming placement must fire the raise-only user
 age-gate PUT (`/api/books/:id/age-gate` `{adults_only: true}`) alongside the
 placement. Simulating the PUT response proves the request was dispatched.

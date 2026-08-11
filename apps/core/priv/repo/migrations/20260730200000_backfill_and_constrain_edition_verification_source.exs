@@ -1,12 +1,12 @@
 defmodule Core.Repo.Migrations.BackfillAndConstrainEditionVerificationSource do
   @moduledoc """
-  Companion to the proto-generated `add :verification_source` (335 D1):
-  backfills every edition, tightens to NOT NULL, pins the domain with a
-  CHECK. The column makes "was this ISBN externally verified?" a recorded
-  fact — previously only inferable from the placeholder title, and lost
-  the moment `EnrichBookJob` replaced it. Backfill maps provider ids →
-  their source, falling back to `barcode_unverified` for rows of unknown
-  origin (the honest reading; see the 370 correction for seed rows).
+    Companion to the proto-generated `add:verification_source`:
+    backfills every edition, tightens to NOT NULL, pins the domain with a
+    CHECK. The column makes "was this ISBN externally verified?" a recorded
+    fact — previously only inferable from the placeholder title, and lost
+    the moment `EnrichBookJob` replaced it. Backfill maps provider ids →
+    their source, falling back to `barcode_unverified` for rows of unknown
+    origin (the honest reading; see the 370 correction for seed rows).
   """
   use Ecto.Migration
 

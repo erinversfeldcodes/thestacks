@@ -1,15 +1,15 @@
 defmodule Stacks.Enrichment.MockScraperClient do
   @moduledoc """
-  Mock scraper client for tests.
+    Mock scraper client for tests.
 
-  Responses are stored in the process dictionary so each test process is
-  isolated and tests can run with `async: true`.
+    Responses are stored in the process dictionary so each test process is
+    isolated and tests can run with `async: true`.
 
-  ## Usage
+    ## Usage
 
-      MockScraperClient.put_response("9780679410232", "za/exclusive_books", {:ok, %{...}})
+        MockScraperClient.put_response("9780679410232", "za/exclusive_books", {:ok, %{...}})
 
-  Unmatched calls return `{:ok, %{"price_cents" => 29900, ...}}` with default data.
+    Unmatched calls return `{:ok, %{"price_cents" => 29900,...}}` with default data.
   """
 
   @behaviour Stacks.Enrichment.ScraperClientBehaviour
@@ -23,14 +23,14 @@ defmodule Stacks.Enrichment.MockScraperClient do
   def scrape(isbn, store_name, _product_path), do: scrape(isbn, store_name)
 
   @doc """
-  Mock page fetch, keyed on `{store_name, path}` via `put_page/3`.
+    Mock page fetch, keyed on `{store_name, path}` via `put_page/3`.
 
-  Defaults to a 200 with an empty body rather than a plausible events page: a caller
-  that gets fixture HTML it did not ask for cannot tell "parsed nothing" from "fetched
-  nothing", and the tests that care about parsing call `parse_events/2` directly.
+    Defaults to a 200 with an empty body rather than a plausible events page: a caller
+    that gets fixture HTML it did not ask for cannot tell "parsed nothing" from "fetched
+    nothing", and the tests that care about parsing call `parse_events/2` directly.
 
-  Register `{:error, {:robots_blocked, rule}}` to exercise the disallow path — that is
-  the branch that must record the block and stop, and it is the one worth testing.
+    Register `{:error, {:robots_blocked, rule}}` to exercise the disallow path — that is
+    the branch that must record the block and stop, and it is the one worth testing.
   """
   @impl true
   def fetch_page(store_name, path), do: fetch_page(store_name, path, [])

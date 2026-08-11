@@ -1,7 +1,7 @@
 defmodule Stacks.GDPR.Export do
   @moduledoc """
-  GDPR data export. Collects all user-owned data from the operational schema
-  and formats it for download (right to data portability).
+    GDPR data export. Collects all user-owned data from the operational schema
+    and formats it for download (right to data portability).
   """
 
   import Ecto.Query
@@ -14,8 +14,8 @@ defmodule Stacks.GDPR.Export do
   alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
 
   @doc """
-  Exports all data for a user. Returns a JSON-serialisable map.
-  The `_opts` parameter is reserved for future filtering options.
+    Exports all data for a user. Returns a JSON-serialisable map.
+    The `_opts` parameter is reserved for future filtering options.
   """
   @spec export_user_data(binary(), keyword()) :: {:ok, map()} | {:error, term()}
   def export_user_data(user_id, _opts \\ []) do

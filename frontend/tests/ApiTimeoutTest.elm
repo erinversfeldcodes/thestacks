@@ -1,6 +1,6 @@
 module ApiTimeoutTest exposing (suite)
 
-{-| Issue #362 — every request the SPA makes is bounded in time, and a request
+{-| — every request the SPA makes is bounded in time, and a request
 that hits the bound tells the reader something they can act on.
 
 
@@ -29,8 +29,7 @@ The claim is therefore split three ways, and each part is proved where it can be
     and their relationship. A future edit that quietly drops `standardTimeout`
     to 500 ms, or lets it overtake `uploadTimeout`, fails here.
 3.  **The bound actually fires, in elapsed seconds** — a live drive against a
-    server that accepts the connection and never answers (Issue #362 Progress
-    Notes: failure copy rendered at t = 15.0 s).
+    server that accepts the connection and never answers.
 
 What the program tests below add is the fourth thing, and the one that matters
 to a person: **what the reader sees when the bound is reached.** They hand the
@@ -53,7 +52,7 @@ import TestHelpers exposing (libraryProgram)
 
 suite : Test
 suite =
-    describe "Bounded requests (Issue #362)"
+    describe "Bounded requests"
         [ timeoutValues
         , timeoutIsVisibleToTheReader
         ]

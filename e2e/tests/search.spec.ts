@@ -320,7 +320,7 @@ test.describe("Search page", () => {
   });
 });
 
-test.describe("Sectioned search (#285)", () => {
+test.describe("Sectioned search", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
   /** First catalogue book (id + title) via the API — the deterministic anchor. */
@@ -503,7 +503,7 @@ test.describe("Sectioned search (#285)", () => {
   });
 });
 
-test.describe("Deep search (#284)", () => {
+test.describe("Deep search", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
   /**

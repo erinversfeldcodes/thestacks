@@ -1,11 +1,11 @@
 defmodule Stacks.Books.ISBNResolverCachePersistentTest do
   @moduledoc """
-  Exercises the Postgres L2 layer of `Stacks.Books.ISBNResolverCache`.
+    Exercises the Postgres L2 layer of `Stacks.Books.ISBNResolverCache`.
 
-  The default test config sets `:persistent_cache_enabled` to `false` so
-  the existing ETS-only unit tests stay deterministic. This file flips
-  it on for the duration of each test and uses the Ecto sandbox to roll
-  back changes, so neighbouring tests are unaffected.
+    The default test config sets `:persistent_cache_enabled` to `false` so
+    the existing ETS-only unit tests stay deterministic. This file flips
+    it on for the duration of each test and uses the Ecto sandbox to roll
+    back changes, so neighbouring tests are unaffected.
   """
 
   use Core.DataCase, async: false

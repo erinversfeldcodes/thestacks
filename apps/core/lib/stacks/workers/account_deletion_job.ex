@@ -1,6 +1,6 @@
 defmodule Stacks.Workers.AccountDeletionJob do
   @moduledoc """
-  Oban worker that executes the GDPR right-to-erasure deletion for a user account.
+    Oban worker that executes the GDPR right-to-erasure deletion for a user account.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 1

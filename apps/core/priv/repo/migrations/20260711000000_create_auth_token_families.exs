@@ -1,10 +1,10 @@
 defmodule Core.Repo.Migrations.CreateAuthTokenFamilies do
   @moduledoc """
-  Refresh-token family / session tracking (179, Phase 2a). Every login
-  opens a family: a rotation chain under a stable `family_id` (JWT claim),
-  recording the live token (`current_jti`) so reuse of a superseded token
-  can burn the family. Hand-migrated, NOT proto-generated: server-side
-  auth state, no `.proto` contract, invisible to `mix proto.sync`.
+    Refresh-token family / session tracking. Every login
+    opens a family: a rotation chain under a stable `family_id` (JWT claim),
+    recording the live token (`current_jti`) so reuse of a superseded token
+    can burn the family. Hand-migrated, NOT proto-generated: server-side
+    auth state, no `.proto` contract, invisible to `mix proto.sync`.
   """
 
   use Ecto.Migration

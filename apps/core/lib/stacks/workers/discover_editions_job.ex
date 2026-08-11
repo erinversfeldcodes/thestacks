@@ -1,13 +1,13 @@
 defmodule Stacks.Workers.DiscoverEditionsJob do
   @moduledoc """
-  Discovers a work's other editions from Open Library — what lets a price
-  lookup ask about the ISBNs shops actually stock, not just the one the
-  reader typed. Triggered from `book.created`, not cron: this CREATES, and
-  a cron that creates is the defect that left `discovered_sources` empty
-  for months. Two caps for two budgets: the fetch caps at 50 (protecting
-  OL), creation caps at 10 per work (protecting our own enrichment fan-out
-  — each new edition triggers its own scrape). Discovered editions are
-  recorded `verification_source: "open_library"`, never primary.
+    Discovers a work's other editions from Open Library — what lets a price
+    lookup ask about the ISBNs shops actually stock, not just the one the
+    reader typed. Triggered from `book.created`, not cron: this CREATES, and
+    a cron that creates is the defect that left `discovered_sources` empty
+    for months. Two caps for two budgets: the fetch caps at 50 (protecting
+    OL), creation caps at 10 per work (protecting our own enrichment fan-out
+    — each new edition triggers its own scrape). Discovered editions are
+    recorded `verification_source: "open_library"`, never primary.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

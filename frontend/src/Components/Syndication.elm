@@ -7,7 +7,7 @@ module Components.Syndication exposing
     , view
     )
 
-{-| The Syndication panel (US-6.2.1) — POSSE, stated honestly.
+{-| The Syndication panel — POSSE, stated honestly.
 
 Substack has no write API, so this panel offers exactly what works: the
 writer's public blog feed URL (paste into Substack once), a canonical-tagged

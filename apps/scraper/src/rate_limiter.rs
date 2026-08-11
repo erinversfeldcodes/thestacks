@@ -43,7 +43,7 @@ impl RateLimiter {
     }
 
     /// Check whether a request to `domain` is allowed under `requests_per_minute`.
-    /// If allowed, records the request and returns Ok(()).
+    /// If allowed, records the request and returns Ok().
     ///
     /// Refuses with `UpstreamBackoff` while the shop's own cooldown is in force, and with
     /// `RateLimitExceeded` when only our configured ceiling is reached. The two are distinct

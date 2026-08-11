@@ -1,14 +1,14 @@
 defmodule Core.Repo.Migrations.AddPublicToVisibilityLevel do
   @moduledoc """
-  Adds `public` to the `op.visibility_level` enum (#225) — the top rung of the
-  Audience ladder: "anyone with the link, signed in or not". Storage-only; the
-  read-access split (platform = signed-in, public = anyone) is enforced in
-  `Stacks.Visibility`. Public content stays `noindex` (anon-readable, not crawled).
+    Adds `public` to the `op.visibility_level` enum — the top rung of the
+    Audience ladder: "anyone with the link, signed in or not". Storage-only; the
+    read-access split (platform = signed-in, public = anyone) is enforced in
+    `Stacks.Visibility`. Public content stays `noindex` (anon-readable, not crawled).
 
-  `ALTER TYPE … ADD VALUE` cannot run inside a migration transaction, hence
-  `@disable_ddl_transaction`. Enum values are append-only and cannot be dropped,
-  so `down/0` is a no-op (leaving the label in place is harmless — nothing stores it
-  once the app-layer vocabulary no longer offers it).
+    `ALTER TYPE … ADD VALUE` cannot run inside a migration transaction, hence
+    `@disable_ddl_transaction`. Enum values are append-only and cannot be dropped,
+    so `down/0` is a no-op (leaving the label in place is harmless — nothing stores it
+    once the app-layer vocabulary no longer offers it).
   """
   use Ecto.Migration
 

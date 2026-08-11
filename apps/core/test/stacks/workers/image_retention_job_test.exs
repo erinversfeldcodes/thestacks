@@ -115,7 +115,7 @@ defmodule Stacks.Workers.ImageRetentionJobTest do
     end
   end
 
-  describe "cron registration (Issue #121 §6)" do
+  describe "cron registration" do
     test "is scheduled nightly at 02:00 via the Oban Cron plugin" do
       crontab =
         :core

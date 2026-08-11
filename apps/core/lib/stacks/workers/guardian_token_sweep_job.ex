@@ -1,11 +1,11 @@
 defmodule Stacks.Workers.GuardianTokenSweepJob do
   @moduledoc """
-  Daily cron (00:00 UTC) reaping dead server-side auth state:
-  `op.guardian_tokens` rows whose ttl expired without an explicit logout
-  (delegated to `Guardian.DB.Token.purge_expired_tokens/0`), and
-  `op.auth_token_families` that are long-revoked or past the absolute
-  session cap. Live families — unrevoked, within the cap — are NEVER
-  deleted.
+    Daily cron (00:00 UTC) reaping dead server-side auth state:
+    `op.guardian_tokens` rows whose ttl expired without an explicit logout
+    (delegated to `Guardian.DB.Token.purge_expired_tokens/0`), and
+    `op.auth_token_families` that are long-revoked or past the absolute
+    session cap. Live families — unrevoked, within the cap — are NEVER
+    deleted.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

@@ -1,9 +1,9 @@
 defmodule Stacks.UploadCacheTest do
   @moduledoc """
-  Suite 8 (Issue #111): Cache tests for upload pipeline.
+    Suite 8: Cache tests for upload pipeline.
 
-  Covers BookDetailCache invalidation in upload context and
-  BudgetTracker budget enforcement for vision API calls.
+    Covers BookDetailCache invalidation in upload context and
+    BudgetTracker budget enforcement for vision API calls.
   """
 
   use Core.DataCase, async: false

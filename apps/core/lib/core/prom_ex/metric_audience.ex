@@ -1,12 +1,12 @@
 defmodule Core.PromEx.MetricAudience do
   @moduledoc """
-  Per-metric AUDIENCE classification (ADR-021 §4) — the fail-closed
-  privacy boundary for observability. A metric is public iff explicitly
-  listed `:public` here; anything unlisted is `:unclassified` and treated as
-  NOT public everywhere, so a new metric family can never reach the public
-  transparency page or anonymous Grafana by default. Other audiences:
-  `:own` (producing user only), `:break_glass` (admin, logged), `:internal`
-  (operators). Classify consciously; PII-bearing metrics are coming.
+    Per-metric AUDIENCE classification (ADR-021 §4) — the fail-closed
+    privacy boundary for observability. A metric is public iff explicitly
+    listed `:public` here; anything unlisted is `:unclassified` and treated as
+    NOT public everywhere, so a new metric family can never reach the public
+    transparency page or anonymous Grafana by default. Other audiences:
+    `:own` (producing user only), `:break_glass` (admin, logged), `:internal`
+    (operators). Classify consciously; PII-bearing metrics are coming.
   """
 
   @audience %{
@@ -66,8 +66,8 @@ defmodule Core.PromEx.MetricAudience do
   @type audience :: :public | :own | :break_glass
 
   @doc """
-  Audience for a registered family name, or `:unclassified` (fail-closed) when the
-  family is not listed. `:unclassified` is never treated as public.
+    Audience for a registered family name, or `:unclassified` (fail-closed) when the
+    family is not listed. `:unclassified` is never treated as public.
   """
   @spec audience(String.t()) :: audience() | :unclassified
   def audience(family) when is_binary(family), do: Map.get(@audience, family, :unclassified)

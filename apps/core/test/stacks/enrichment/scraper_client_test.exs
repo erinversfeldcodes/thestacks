@@ -1,15 +1,15 @@
 defmodule Stacks.Enrichment.ScraperClientTest do
   @moduledoc """
-  The `/fetch` outcome contract between this client and the Rust sidecar.
+    The `/fetch` outcome contract between this client and the Rust sidecar.
 
-  ⚠️ **None of these branches had any coverage.** Tests swap the whole module out for
-  `MockScraperClient` and there is no Finch stub in this project, so every decision about what a
-  shop's answer *means* was unreachable from a test — including the one that decides whether an
-  answer melts `:scraper_fuse`, which is shared by every store and opens for 15 minutes after three
-  failures. `classify_fetch_body/2` was made public precisely so this file could exist.
+    ⚠️ **None of these branches had any coverage.** Tests swap the whole module out for
+    `MockScraperClient` and there is no Finch stub in this project, so every decision about what a
+    shop's answer *means* was unreachable from a test — including the one that decides whether an
+    answer melts `:scraper_fuse`, which is shared by every store and opens for 15 minutes after three
+    failures. `classify_fetch_body/2` was made public precisely so this file could exist.
 
-  The invariant under test: **`{:unexpected, _}` is the only return that melts a fuse.** So proving
-  an outcome is not `{:unexpected, _}` proves it cannot take price scraping down for other shops.
+    The invariant under test: **`{:unexpected, _}` is the only return that melts a fuse.** So proving
+    an outcome is not `{:unexpected, _}` proves it cannot take price scraping down for other shops.
   """
   use ExUnit.Case, async: true
 

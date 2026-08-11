@@ -1,9 +1,9 @@
 defmodule Stacks.Storage.Local do
   @moduledoc """
-  Local filesystem storage backend for development.
+    Local filesystem storage backend for development.
 
-  Stores files under `priv/static/uploads/` (configurable via `:upload_dir`).
-  Presigned URLs return `file://` paths — only suitable for local development.
+    Stores files under `priv/static/uploads/` (configurable via `:upload_dir`).
+    Presigned URLs return `file://` paths — only suitable for local development.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour

@@ -1,6 +1,6 @@
 module Page.AboutTest exposing (suite)
 
-{-| Oracle for the About page copy (US-15.1.1 sibling; Wave 8 #318, 8c).
+{-| Oracle for the About page copy (sibling;, 8c).
 
 The page now carries the owner's approved launch copy
 (`plans/318-about-page-copy-draft.md`), section by section.

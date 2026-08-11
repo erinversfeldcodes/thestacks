@@ -1,6 +1,6 @@
 module SessionExpiryTest exposing (suite)
 
-{-| Tests for Issue #173 Phase 2 — global session-expiry interceptor + proactive
+{-| Tests for Phase 2 — global session-expiry interceptor + proactive
 silent renewal.
 
 
@@ -24,7 +24,7 @@ reachable:
     clears auth (the `sessionExpired` fall-through).
   - **Notice + scheduling:** a card built with the `SessionExpired` arrival
     renders the distinct notice (the visible outcome of the expiry path — since
-    #360 that is an `Arrival` constructor, not a boolean), and
+    that is an `Arrival` constructor, not a boolean), and
     `Main.loginEffects` includes `ScheduleRenewal` (renewal is armed on login).
 
 `Main.sessionExpired`'s full redirect + `clearAuth` port (needs `Nav.Key`) is
@@ -52,7 +52,7 @@ import Types.User exposing (User)
 
 suite : Test
 suite =
-    describe "Session expiry interceptor + renewal (Issue #173 Phase 2)"
+    describe "Session expiry interceptor + renewal"
         [ describe "Scenario 1 — 401 on an authed page bubbles to the global interceptor"
             [ bookshelf401BubblesOutMsg
             , bookDetail401BubblesOutMsg
@@ -75,7 +75,7 @@ suite =
             [ expiredInitRendersDistinctNotice
             , freshInitHasNoNotice
             ]
-        , describe "#361 — an expiry bounce remembers the page it bounced off"
+        , describe "— an expiry bounce remembers the page it bounced off"
             [ expiryCapturesThePageTheReaderWasOn
             , expiryCaptureSurvivesTheRedirectToLogin
             , ordinaryNavigationToLoginCapturesNothing
@@ -229,7 +229,7 @@ type RenewMsg
 the REAL `Api.authResponseDecoder` — refresh's 200 body is byte-identical to
 login's (contract confirmed), so the same decoder reads it. A hand-mirrored
 copy used to live here; it is exactly the second-source-of-truth that let the
-upload wire format drift unnoticed (Issue #328). Results feed back as
+upload wire format drift unnoticed. Results feed back as
 `RefreshResult`.
 -}
 renewEffects : RenewMsg -> Maybe Main.Auth -> SimulatedEffect RenewMsg
@@ -418,7 +418,7 @@ expiryCapturesThePageTheReaderWasOn =
                 |> Expect.equal (Just Route.SettingsPassword)
 
 
-{-| The same for a half-finished upload — the journey #359 named.
+{-| The same for a half-finished upload — the journey named.
 -}
 expiryCaptureSurvivesTheRedirectToLogin : Test
 expiryCaptureSurvivesTheRedirectToLogin =
@@ -465,7 +465,7 @@ expiryOffAPublicPageCapturesNothing =
                 |> Expect.equal Nothing
 
 
-{-| Control: the ORIGINAL route-guard bounce (#359) still works. This is the
+{-| Control: the ORIGINAL route-guard bounce still works. This is the
 behaviour the expiry branch must not have broken.
 -}
 routeGuardBounceStillCaptures : Test

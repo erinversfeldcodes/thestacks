@@ -235,7 +235,7 @@ test.describe("Shelf actions — remove book from collection", () => {
   });
 });
 
-test.describe("Shelf actions — mutation failures (punch #13)", () => {
+test.describe("Shelf actions — mutation failures", () => {
 
   async function openLibraryOverlay(
     page: import("@playwright/test").Page,

@@ -1,8 +1,8 @@
 defmodule CoreWeb.Telemetry do
   @moduledoc """
-  Supervises the `telemetry_poller` that drives custom gauges, declares the
-  app's metric series, and wires request-scoped tags from `conn.private` into
-  the Phoenix dispatch telemetry metadata.
+    Supervises the `telemetry_poller` that drives custom gauges, declares the
+    app's metric series, and wires request-scoped tags from `conn.private` into
+    the Phoenix dispatch telemetry metadata.
   """
 
   use Supervisor
@@ -180,14 +180,14 @@ defmodule CoreWeb.Telemetry do
   end
 
   @doc """
-  Emit one `[:stacks, :fuse, :state]` gauge event per managed fuse.
+    Emit one `[:stacks,:fuse,:state]` gauge event per managed fuse.
 
-  Each event carries `%{state: 0 | 1}` — 1 if the fuse is healthy
-  (`:fuse.ask/2` returns `:ok`), 0 otherwise — and `%{fuse_name: atom()}`
-  metadata.
+    Each event carries `%{state: 0 | 1}` — 1 if the fuse is healthy
+    (`:fuse.ask/2` returns `:ok`), 0 otherwise — and `%{fuse_name: atom}`
+    metadata.
 
-  Called every 10s by `:telemetry_poller` and feeds the SLO gate's
-  "fuse open count = 0" threshold.
+    Called every 10s by `:telemetry_poller` and feeds the SLO gate's
+    "fuse open count = 0" threshold.
   """
   @spec poll_fuse_state() :: :ok
   def poll_fuse_state do
@@ -207,14 +207,14 @@ defmodule CoreWeb.Telemetry do
   end
 
   @doc """
-  Attach the telemetry handler that observes
-  `[:phoenix, :router_dispatch, :stop]` and re-emits a Stacks-namespaced
-  `[:stacks, :router_dispatch, :stop]` event with `:route_group` copied out
-  of `conn.private`. Idempotent — safe to call on supervisor restart.
+    Attach the telemetry handler that observes
+    `[:phoenix,:router_dispatch,:stop]` and re-emits a Stacks-namespaced
+    `[:stacks,:router_dispatch,:stop]` event with `:route_group` copied out
+    of `conn.private`. Idempotent — safe to call on supervisor restart.
 
-  The re-emit uses a distinct event name (not Phoenix's) so any
-  `Telemetry.Metrics` reporter attached to the Stacks series does not
-  double-count Phoenix's original emission.
+    The re-emit uses a distinct event name (not Phoenix's) so any
+    `Telemetry.Metrics` reporter attached to the Stacks series does not
+    double-count Phoenix's original emission.
   """
   @spec attach_route_group_handler() :: :ok
   def attach_route_group_handler do
@@ -231,14 +231,14 @@ defmodule CoreWeb.Telemetry do
   end
 
   @doc """
-  Attach a telemetry handler that logs Ecto queries exceeding a wall-
-  clock threshold. Listens on both `Core.Repo` and `Core.ObanRepo`
-  `[:query]` events. Idempotent — safe to call on supervisor restart.
+    Attach a telemetry handler that logs Ecto queries exceeding a wall-
+    clock threshold. Listens on both `Core.Repo` and `Core.ObanRepo`
+    `[:query]` events. Idempotent — safe to call on supervisor restart.
 
-  Why not just bump Ecto's `:log` level to `:info`? That logs EVERY
-  query, which is too noisy in prod (~200 queries/sec steady-state
-  during probe load). Slow-only is what operators need to find the
-  actual hot-spots causing db_pool_queue saturation.
+    Why not just bump Ecto's `:log` level to `:info`? That logs EVERY
+    query, which is too noisy in prod (~200 queries/sec steady-state
+    during probe load). Slow-only is what operators need to find the
+    actual hot-spots causing db_pool_queue saturation.
   """
   @spec attach_slow_query_handler() :: :ok
   def attach_slow_query_handler do
@@ -313,14 +313,14 @@ defmodule CoreWeb.Telemetry do
   end
 
   @doc """
-  Attach a telemetry handler that keeps `@current_worker_key` in the
-  process dictionary in sync with the currently-executing Oban job
-  worker module. Read by `handle_slow_query/4` to tag the per-query
-  duration histogram.
+    Attach a telemetry handler that keeps `@current_worker_key` in the
+    process dictionary in sync with the currently-executing Oban job
+    worker module. Read by `handle_slow_query/4` to tag the per-query
+    duration histogram.
 
-  Oban runs each job in a dedicated process via
-  `Oban.Worker.perform/1`, so the process-dict scoping works: one
-  worker per process, cleared on completion.
+    Oban runs each job in a dedicated process via
+    `Oban.Worker.perform/1`, so the process-dict scoping works: one
+    worker per process, cleared on completion.
   """
   @spec attach_oban_worker_tag_handler() :: :ok
   def attach_oban_worker_tag_handler do

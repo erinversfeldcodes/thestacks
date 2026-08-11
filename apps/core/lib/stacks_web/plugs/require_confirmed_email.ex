@@ -1,10 +1,10 @@
 defmodule StacksWeb.Plugs.RequireConfirmedEmail do
   @moduledoc """
-  Plug that rejects authenticated users who have not confirmed their email.
+    Plug that rejects authenticated users who have not confirmed their email.
 
-  Defense-in-depth: the primary gate is in `Accounts.authenticate/2` which
-  refuses to issue a JWT to unconfirmed users. This plug catches any edge
-  case where a token is issued without confirmation (e.g., future code paths).
+    Defense-in-depth: the primary gate is in `Accounts.authenticate/2` which
+    refuses to issue a JWT to unconfirmed users. This plug catches any edge
+    case where a token is issued without confirmation (e.g., future code paths).
   """
 
   import Plug.Conn

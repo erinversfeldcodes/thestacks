@@ -1,7 +1,6 @@
 module ProvisionalBookTest exposing (suite)
 
-{-| A book whose ISBN nothing has identified yet must read as unidentified
-(#344).
+{-| A book whose ISBN nothing has identified yet must read as unidentified.
 
 The server's stand-in title for such a book is the string `"ISBN 978…"`. Rendered
 where a title goes it reads as a book actually NAMED after a number, and the
@@ -192,7 +191,7 @@ isServerStandIn title =
 
 
 {-| Titles that are names. Deliberately includes the shapes a prefix heuristic
-gets wrong in both directions (#344), and arbitrary strings besides.
+gets wrong in both directions, and arbitrary strings besides.
 -}
 realTitleFuzzer : Fuzzer String
 realTitleFuzzer =
@@ -259,7 +258,7 @@ shortly" beside the title it had.
 -}
 uploadInvariantSuite : Test
 uploadInvariantSuite =
-    describe "#370 — the upload flow may not wait for a title it already has"
+    describe "— the upload flow may not wait for a title it already has"
         [ test "the verify step names the book and does not promise a title it is showing" <|
             \_ ->
                 Upload.view { init_ | step = Verifying reportedRow } (Just "token") Types.RemoteData.NotAsked
@@ -286,7 +285,7 @@ uploadInvariantSuite =
 
 invariantSuite : Test
 invariantSuite =
-    describe "#370 — the page may never deny a title it is holding"
+    describe "— the page may never deny a title it is holding"
         [ test "the row from the preview: 1Q84, barcode_unverified, real title" <|
             \_ ->
                 BookDetail.view (bookDetailModelFor reportedRow)
@@ -337,7 +336,7 @@ invariantSuite =
 
 suite : Test
 suite =
-    describe "Provisional books (#344)"
+    describe "Provisional books"
         [ describe "isProvisional is driven by verificationSource, not the title"
             [ test "a barcode-only book is provisional" <|
                 \_ ->

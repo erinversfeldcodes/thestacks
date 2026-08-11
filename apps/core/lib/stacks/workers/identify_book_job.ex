@@ -1,15 +1,15 @@
 defmodule Stacks.Workers.IdentifyBookJob do
   @moduledoc """
-  Oban worker running an uploaded image through the vision service to
-  identify books. New jobs carry a `storage_key` and presign at execution;
-  legacy in-flight `image_b64` jobs still match.
+    Oban worker running an uploaded image through the vision service to
+    identify books. New jobs carry a `storage_key` and presign at execution;
+    legacy in-flight `image_b64` jobs still match.
 
-  The terminal guarantee: NO exit may leave the `uploaded_images` row
-  `pending`. Every return, raise, throw and overlong attempt passes through
-  `with_terminal_guarantee/3`; on the final attempt the row is marked
-  rejected and the reader's SSE stream closes with a real answer. Written as
-  a wrapper because the bug's SHAPE recurs — the two live instances it
-  replaced looked nothing alike.
+    The terminal guarantee: NO exit may leave the `uploaded_images` row
+    `pending`. Every return, raise, throw and overlong attempt passes through
+    `with_terminal_guarantee/3`; on the final attempt the row is marked
+    rejected and the reader's SSE stream closes with a real answer. Written as
+    a wrapper because the bug's SHAPE recurs — the two live instances it
+    replaced looked nothing alike.
   """
 
   use Oban.Worker, queue: :vision, max_attempts: 3
@@ -31,27 +31,27 @@ defmodule Stacks.Workers.IdentifyBookJob do
   @attempt_slack_ms 30_000
 
   @doc """
-  Seconds to wait before the next attempt.
+    Seconds to wait before the next attempt.
 
-  Deliberately deterministic, where `Oban.Worker`'s default adds up to 10%
-  jitter. Jitter exists to desynchronise a thundering herd of jobs retrying
-  together; one job per upload is not that, and what we get in exchange is a
-  retry schedule whose total is exactly computable — which is what lets
-  `worst_case_lifetime_ms/0` state when this job is certainly dead instead of
-  approximating it. The curve itself matches Oban's default (15s pad, doubling).
+    Deliberately deterministic, where `Oban.Worker`'s default adds up to 10%
+    jitter. Jitter exists to desynchronise a thundering herd of jobs retrying
+    together; one job per upload is not that, and what we get in exchange is a
+    retry schedule whose total is exactly computable — which is what lets
+    `worst_case_lifetime_ms/0` state when this job is certainly dead instead of
+    approximating it. The curve itself matches Oban's default (15s pad, doubling).
   """
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}), do: 15 + Integer.pow(2, attempt)
 
   @doc """
-  Ceiling on ONE attempt, in ms — composed from what an attempt actually
-  waits on: two sequential `AI.Client.receive_timeout_ms/0` waits
-  (/analyze, then per-candidate resolution) plus `#{@attempt_slack_ms}ms`
-  slack. Deliberately NOT `c:Oban.Worker.timeout/1`: that delivers an async
-  exit a `try/catch` cannot intercept, which would skip the terminal
-  guarantee — the exact bug this module prevents. `run_bounded/1` enforces
-  the ceiling from inside. `:identify_attempt_timeout_ms` overrides for
-  fast tests.
+    Ceiling on ONE attempt, in ms — composed from what an attempt actually
+    waits on: two sequential `AI.Client.receive_timeout_ms/0` waits
+    (/analyze, then per-candidate resolution) plus `#{@attempt_slack_ms}ms`
+    slack. Deliberately NOT `c:Oban.Worker.timeout/1`: that delivers an async
+    exit a `try/catch` cannot intercept, which would skip the terminal
+    guarantee — the exact bug this module prevents. `run_bounded/1` enforces
+    the ceiling from inside. `:identify_attempt_timeout_ms` overrides for
+    fast tests.
   """
   @spec attempt_timeout_ms() :: pos_integer()
   def attempt_timeout_ms do
@@ -60,13 +60,13 @@ defmodule Stacks.Workers.IdentifyBookJob do
   end
 
   @doc """
-  The longest this job can stay alive, in milliseconds, from first attempt to
-  the moment its last attempt can no longer be running.
+    The longest this job can stay alive, in milliseconds, from first attempt to
+    the moment its last attempt can no longer be running.
 
-  Every attempt runs at most `attempt_timeout_ms/0`, and every gap between
-  attempts is exactly `backoff/1` — so this is a sum, not an estimate. It exists
-  so the reader's SSE deadline can be *derived* from when the job actually dies
-  rather than picked to sit near it: see `StacksWeb.UploadController`.
+    Every attempt runs at most `attempt_timeout_ms/0`, and every gap between
+    attempts is exactly `backoff/1` — so this is a sum, not an estimate. It exists
+    so the reader's SSE deadline can be *derived* from when the job actually dies
+    rather than picked to sit near it: see `StacksWeb.UploadController`.
   """
   @spec worst_case_lifetime_ms() :: pos_integer()
   def worst_case_lifetime_ms do

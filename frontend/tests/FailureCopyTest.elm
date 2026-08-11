@@ -1,6 +1,6 @@
 module FailureCopyTest exposing (suite)
 
-{-| The shared failure vocabulary (Issue #374).
+{-| The shared failure vocabulary.
 
 Two rules are under test here, and neither is about wording:
 
@@ -35,7 +35,7 @@ metadataWith headers =
 
 suite : Test
 suite =
-    describe "Util.FailureCopy / Api.retryAfterSeconds (#374)"
+    describe "Util.FailureCopy / Api.retryAfterSeconds"
         [ describe "reading retry-after off a 429"
             [ test "a delay in seconds is read" <|
                 \_ ->

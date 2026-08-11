@@ -8,7 +8,7 @@ module Page.ListingRemoval exposing
     )
 
 {-| "Is this your business?" — the form a business owner uses to have their listing
-removed (US-2.5.3, campaign G6).
+removed.
 
 Deliberately unauthenticated: the story says removal "does not require account creation",
 because a shop owner who never asked to be listed should not have to sign up in order to

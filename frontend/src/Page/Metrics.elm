@@ -6,12 +6,11 @@ module Page.Metrics exposing
     , view
     )
 
-{-| The public, unauthenticated transparency page (`/metrics`, Issue #235).
+{-| The public, unauthenticated transparency page (`/metrics`,).
 
-Renders the curated #241 payload — live ops signals and durable anonymised
+Renders the curated payload — live ops signals and durable anonymised
 aggregates — each panel showing its value plus a teaching expander with the
-plain-language _what / how / why_ (the public analogue of the #233
-self-explanatory-dashboard standard). A featured costs widget makes the
+plain-language _what / how / why_ (the public analogue of the self-explanatory-dashboard standard). A featured costs widget makes the
 platform-cost figure the flagship example (ADR-019), and the "what we observe"
 area links one hop to the GDPR data-rights surfaces.
 
@@ -195,7 +194,7 @@ viewObserveSection =
         ]
 
 
-{-| The public, read-only Grafana instance (ADR-021 / #254) — a single fixed
+{-| The public, read-only Grafana instance (ADR-021) — a single fixed
 public URL, so it is a constant rather than server-config. Anonymous access; the
 metrics store behind it is never exposed (Grafana proxies queries server-side).
 -}

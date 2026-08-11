@@ -1,18 +1,18 @@
 defmodule Stacks.Books.CandidateScorer do
   @moduledoc """
-  Pure scoring of OL/GB title-search candidates against the original
-  VLM-extracted signals (title, author, raw_text), so the resolver picks the
-  BEST candidate instead of the upstream's first-ranked doc (which for hard
-  images is often the wrong book while the right one sits later in the same
-  response).
+    Pure scoring of OL/GB title-search candidates against the original
+    VLM-extracted signals (title, author, raw_text), so the resolver picks the
+    BEST candidate instead of the upstream's first-ranked doc (which for hard
+    images is often the wrong book while the right one sits later in the same
+    response).
 
-  Weighted components: title token overlap 3.0 (overlap coefficient, not
-  Jaccard — the VLM title is often longer than the catalogue's), subtitle
-  evidence 2.0 (GB-only in practice; OL search docs return `subtitle: nil`),
-  subject hits, raw-text corroboration, author match, exact-title bonus, and
-  a derivative penalty (summaries/workbooks/study guides score against the
-  original). Pure functions — no HTTP, no Repo — so `mix eval.resolver` can
-  tune weights offline.
+    Weighted components: title token overlap 3.0 (overlap coefficient, not
+    Jaccard — the VLM title is often longer than the catalogue's), subtitle
+    evidence 2.0 (GB-only in practice; OL search docs return `subtitle: nil`),
+    subject hits, raw-text corroboration, author match, exact-title bonus, and
+    a derivative penalty (summaries/workbooks/study guides score against the
+    original). Pure functions — no HTTP, no Repo — so `mix eval.resolver` can
+    tune weights offline.
   """
 
   @default_weights %{
@@ -34,11 +34,11 @@ defmodule Stacks.Books.CandidateScorer do
   @stopwords ~w(the a an of to and in on for)
 
   @doc """
-  Scores one candidate's OL/GB metadata (`:title`, `:subtitle`, `:author`,
-  `:subjects`) against the VLM signals (`%{title, author, raw_text}`);
-  nil-safe; higher is better. No threshold here — `pick_best/3` applies the
-  plausibility floor. `:weights` overrides component weights (used by
-  `mix eval.resolver` for offline tuning).
+    Scores one candidate's OL/GB metadata (`:title`, `:subtitle`, `:author`,
+    `:subjects`) against the VLM signals (`%{title, author, raw_text}`);
+    nil-safe; higher is better. No threshold here — `pick_best/3` applies the
+    plausibility floor. `:weights` overrides component weights (used by
+    `mix eval.resolver` for offline tuning).
   """
   @spec score(candidate_meta :: map(), signals :: map(), opts :: keyword()) :: float()
   def score(candidate_meta, signals, opts \\ []) do
@@ -60,14 +60,14 @@ defmodule Stacks.Books.CandidateScorer do
   end
 
   @doc """
-  Picks the highest-scoring `{isbn, meta}` candidate and applies the
-  plausibility floor. The SINGLE seam shared by the production resolver and
-  `mix eval.resolver` — both must exercise identical pick logic. Sort is
-  stable, so a score tie preserves the provider's own ranking (old
-  first-doc-wins behaviour). Returns `:empty`, `{:ok, best, runner_up}`
-  (plausible: `score >= floor`, or author corroboration waives it), or
-  `{:floored, best, runner_up}` (treat as no match). Options: `:floor`
-  (default `#{@default_floor}`), `:weights`.
+    Picks the highest-scoring `{isbn, meta}` candidate and applies the
+    plausibility floor. The SINGLE seam shared by the production resolver and
+    `mix eval.resolver` — both must exercise identical pick logic. Sort is
+    stable, so a score tie preserves the provider's own ranking (old
+    first-doc-wins behaviour). Returns `:empty`, `{:ok, best, runner_up}`
+    (plausible: `score >= floor`, or author corroboration waives it), or
+    `{:floored, best, runner_up}` (treat as no match). Options: `:floor`
+    (default `#{@default_floor}`), `:weights`.
   """
   @spec pick_best([{String.t(), map()}], map(), keyword()) ::
           :empty
@@ -103,13 +103,13 @@ defmodule Stacks.Books.CandidateScorer do
   def default_weights, do: @default_weights
 
   @doc """
-  True when the candidate has author corroboration — the same
-  positive-evidence-only surname check that feeds the author component
-  of `score/2` (a match contributes, a mismatch never penalises).
+    True when the candidate has author corroboration — the same
+    positive-evidence-only surname check that feeds the author component
+    of `score/2` (a match contributes, a mismatch never penalises).
 
-  Exposed so the resolver's plausibility floor can waive itself for
-  author-corroborated candidates: a scored author match at any total
-  score is strong evidence the pick is not a garbage fuzzy match.
+    Exposed so the resolver's plausibility floor can waive itself for
+    author-corroborated candidates: a scored author match at any total
+    score is strong evidence the pick is not a garbage fuzzy match.
   """
   @spec author_match?(candidate_meta :: map(), signals :: map()) :: boolean()
   def author_match?(candidate_meta, signals) do

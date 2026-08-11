@@ -519,7 +519,7 @@ viewBlockedUsersSection model =
         ]
 
 
-{-| "Load more" affordance for readers who've blocked more than one page (20)
+{-| "Load more" affordance for readers who've blocked more than one page
 of others. Shown only while fewer readers are loaded than the server's total.
 -}
 viewLoadMore : Model -> List Api.BlockedUser -> Html Msg
@@ -570,7 +570,7 @@ viewBlockedRow unblocking user =
 
 
 {-| The consent controls, folded in from the former /settings/consent page
-(#318 TR-4). `Consent.viewSection` renders exactly the toggles the standalone
+(TR-4). `Consent.viewSection` renders exactly the toggles the standalone
 page showed; its messages are mapped up through `ConsentMsg` and delegated
 straight back to `Consent.update`, so the recorded consent is unchanged.
 -}
@@ -770,7 +770,7 @@ viewShelfRow profileVisibility sv =
 
 
 {-| ⛔ "Could not save. Please try again." was the answer to every failure here,
-including the one this page documents four functions above (Issue #374).
+including the one this page documents four functions above.
 
 `shelfOptionExceedsCeiling` explains that the server answers **422** when a shelf
 is set more exposed than the profile ceiling — a rule the reader can satisfy, and

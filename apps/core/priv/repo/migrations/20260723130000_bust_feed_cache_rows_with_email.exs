@@ -1,10 +1,10 @@
 defmodule Core.Repo.Migrations.BustFeedCacheRowsWithEmail do
   @moduledoc """
-  Data-only (283): deletes `op.feed_cache` rows whose `atom_xml` contains
-  an email-shaped string — pre-fix feeds rendered the owner's email into
-  public Atom XML when `display_name` was nil. Safe and self-healing: a
-  cache miss serves a fresh (email-free) render and refills; without a
-  TTL, a stale hit would leak indefinitely.
+    Data-only: deletes `op.feed_cache` rows whose `atom_xml` contains
+    an email-shaped string — pre-fix feeds rendered the owner's email into
+    public Atom XML when `display_name` was nil. Safe and self-healing: a
+    cache miss serves a fresh (email-free) render and refills; without a
+    TTL, a stale hit would leak indefinitely.
   """
   use Ecto.Migration
 

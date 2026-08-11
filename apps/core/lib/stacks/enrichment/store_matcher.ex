@@ -1,13 +1,13 @@
 defmodule Stacks.Enrichment.StoreMatcher do
   @moduledoc """
-  Matches a bookshop's product titles to our editions, for shops with no
-  ISBN on any product (Ike's Books, Love Books — title matching is the
-  only path, and it lives here because only core knows the catalogue).
-  Reuses `CandidateScorer` — the same weighted overlap, plausibility
-  floor and derivative penalty the ISBN resolver uses, already tuned and
-  eval-harnessed — rather than a second matcher with a second set of
-  weights to drift. Matches record provenance (`title_match` + score) so
-  a fuzzy match is never mistaken for an ISBN-verified one.
+    Matches a bookshop's product titles to our editions, for shops with no
+    ISBN on any product (Ike's Books, Love Books — title matching is the
+    only path, and it lives here because only core knows the catalogue).
+    Reuses `CandidateScorer` — the same weighted overlap, plausibility
+    floor and derivative penalty the ISBN resolver uses, already tuned and
+    eval-harnessed — rather than a second matcher with a second set of
+    weights to drift. Matches record provenance (`title_match` + score) so
+    a fuzzy match is never mistaken for an ISBN-verified one.
   """
 
   require Logger
@@ -21,10 +21,10 @@ defmodule Stacks.Enrichment.StoreMatcher do
   @min_symmetry 0.6
 
   @doc """
-  Best product path for `edition`, or `:no_match`.
+    Best product path for `edition`, or `:no_match`.
 
-  `listings` are `{product_path, title}` pairs as the shop lists them. `edition` needs
-  `:title` and optionally `:author`.
+    `listings` are `{product_path, title}` pairs as the shop lists them. `edition` needs
+    `:title` and optionally `:author`.
   """
   @spec match_edition([{String.t(), String.t()}], map(), keyword()) ::
           {:ok, String.t(), float()} | :no_match

@@ -9,8 +9,8 @@ defmodule Seeds do
   end
 
   @doc """
-  Strip edition suffixes to get a canonical title for grouping.
-  "Circe (PB)" → "Circe", "The Secret History (Penguin)" → "The Secret History"
+    Strip edition suffixes to get a canonical title for grouping.
+    "Circe (PB)" → "Circe", "The Secret History (Penguin)" → "The Secret History"
   """
   def canonical_title(title) do
     title
@@ -41,8 +41,8 @@ defmodule Seeds do
   end
 
   @doc """
-  Suite slugs that get bookshelves but deliberately **no** placements, so the
-  per-shelf empty states (US-1.6.5) can be asserted unconditionally.
+    Suite slugs that get bookshelves but deliberately **no** placements, so the
+    per-shelf empty states can be asserted unconditionally.
   """
   def e2e_empty_suites, do: ["empty-shelves"]
 end

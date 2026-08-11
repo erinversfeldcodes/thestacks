@@ -1,14 +1,14 @@
 defmodule StacksWeb.Plugs.AuditAdminCall do
   @moduledoc """
-  Plug that audits every admin API call.
+    Plug that audits every admin API call.
 
-  Records the start time on `call/2`, then registers a `before_send` callback
-  that fires after the controller assembles the response. The callback writes an
-  audit row via `Stacks.Audit.log/3` capturing endpoint, latency, HTTP success,
-  row count (if set by the controller), and the admin operator session.
+    Records the start time on `call/2`, then registers a `before_send` callback
+    that fires after the controller assembles the response. The callback writes an
+    audit row via `Stacks.Audit.log/3` capturing endpoint, latency, HTTP success,
+    row count (if set by the controller), and the admin operator session.
 
-  Audit failures are silently swallowed — a failing audit write must never
-  fail the admin request.
+    Audit failures are silently swallowed — a failing audit write must never
+    fail the admin request.
   """
 
   import Plug.Conn

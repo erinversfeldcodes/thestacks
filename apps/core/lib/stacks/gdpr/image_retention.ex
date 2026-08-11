@@ -1,14 +1,14 @@
 defmodule Stacks.GDPR.ImageRetention do
   @moduledoc """
-  Handles cleanup of uploaded images.
+    Handles cleanup of uploaded images.
 
-  - `cleanup_expired_images/0` — deletes images past their expires_at deadline (30 days)
-  - `cleanup_stuck_images/0` — safety net: cleans up images stuck in pending
-    for longer than 2 hours (e.g. if IdentifyBookJob never ran or failed silently)
+    - `cleanup_expired_images/0` — deletes images past their expires_at deadline (30 days)
+    - `cleanup_stuck_images/0` — safety net: cleans up images stuck in pending
+      for longer than 2 hours (e.g. if IdentifyBookJob never ran or failed silently)
 
-  Both functions delete the object from storage (R2/Local/Mock) when a
-  `storage_path` is present, then remove the DB record and emit an
-  `image.expired` event for each deleted record.
+    Both functions delete the object from storage (R2/Local/Mock) when a
+    `storage_path` is present, then remove the DB record and emit an
+    `image.expired` event for each deleted record.
   """
 
   require Logger
@@ -23,10 +23,10 @@ defmodule Stacks.GDPR.ImageRetention do
   @stuck_threshold_hours 2
 
   @doc """
-  Deletes all uploaded_images records where `expires_at < now()`.
-  Removes the corresponding object from storage, then the DB record.
-  Emits `image.expired` for each deleted record.
-  Returns `{:ok, count}` with the number of deleted records.
+    Deletes all uploaded_images records where `expires_at < now`.
+    Removes the corresponding object from storage, then the DB record.
+    Emits `image.expired` for each deleted record.
+    Returns `{:ok, count}` with the number of deleted records.
   """
   @spec cleanup_expired_images() :: {:ok, non_neg_integer()} | {:error, term()}
   def cleanup_expired_images do
@@ -64,12 +64,12 @@ defmodule Stacks.GDPR.ImageRetention do
   end
 
   @doc """
-  Deletes uploaded_images records stuck in `pending` status for longer than
-  #{@stuck_threshold_hours} hours. These are images whose IdentifyBookJob
-  failed silently or never ran.
-  Removes the corresponding object from storage, then the DB record.
-  Emits `image.expired` for each deleted record.
-  Returns `{:ok, count}`.
+    Deletes uploaded_images records stuck in `pending` status for longer than
+    #{@stuck_threshold_hours} hours. These are images whose IdentifyBookJob
+    failed silently or never ran.
+    Removes the corresponding object from storage, then the DB record.
+    Emits `image.expired` for each deleted record.
+    Returns `{:ok, count}`.
   """
   @spec cleanup_stuck_images() :: {:ok, non_neg_integer()} | {:error, term()}
   def cleanup_stuck_images do
@@ -108,14 +108,14 @@ defmodule Stacks.GDPR.ImageRetention do
   end
 
   @doc """
-  Returns image IDs that should have been purged but weren't.
+    Returns image IDs that should have been purged but weren't.
 
-  Finds images with `image.submitted`, `image.resolved`, or `image.rejected`
-  events whose `expires_at` has passed, but which have no corresponding
-  `image.expired` event. These are orphaned images that the retention job
-  missed.
+    Finds images with `image.submitted`, `image.resolved`, or `image.rejected`
+    events whose `expires_at` has passed, but which have no corresponding
+    `image.expired` event. These are orphaned images that the retention job
+    missed.
 
-  Run daily as a health check — a non-empty result indicates a retention gap.
+    Run daily as a health check — a non-empty result indicates a retention gap.
   """
   @spec missing_purge_check() :: [String.t()]
   def missing_purge_check do
@@ -142,15 +142,15 @@ defmodule Stacks.GDPR.ImageRetention do
   end
 
   @doc """
-  Deletes the storage object for each row that carries a non-empty
-  `storage_path`. A storage-layer failure is logged and swallowed — it must
-  never block the DB-side removal (a leaked object is recoverable; a surviving
-  DB row that still points a user at their image is the erasure leak).
+    Deletes the storage object for each row that carries a non-empty
+    `storage_path`. A storage-layer failure is logged and swallowed — it must
+    never block the DB-side removal (a leaked object is recoverable; a surviving
+    DB row that still points a user at their image is the erasure leak).
 
-  Shared by the retention sweeps AND by `Stacks.GDPR.Deletion.delete_user_data/1`,
-  which calls it while erasing a user so the R2 objects go BEFORE the FK cascade
-  removes the rows (the rows are the only pointer to the storage keys). Takes a
-  list of `%{storage_path: String.t() | nil}` maps.
+    Shared by the retention sweeps AND by `Stacks.GDPR.Deletion.delete_user_data/1`,
+    which calls it while erasing a user so the R2 objects go BEFORE the FK cascade
+    removes the rows (the rows are the only pointer to the storage keys). Takes a
+    list of `%{storage_path: String.t | nil}` maps.
   """
   @spec delete_storage_objects([%{optional(any) => any}]) :: :ok
   def delete_storage_objects(rows) do

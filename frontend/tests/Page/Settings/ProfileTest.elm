@@ -1,11 +1,10 @@
 module Page.Settings.ProfileTest exposing (suite)
 
-{-| #212 — the Settings → Profile handle input.
+{-| — the Settings → Profile handle input.
 
 Drives `Page.Settings.Profile.update` through the handle edit + save lifecycle
 and asserts the view: the field echoes edits, a successful save reflects the
-server-normalised (lowercased) handle, and a 422 renders the mapped US-10.5.1
-copy under the field (taken / reserved / bad format).
+server-normalised (lowercased) handle, and a 422 renders the mapped copy under the field (taken / reserved / bad format).
 
 -}
 
@@ -41,8 +40,8 @@ initialModel =
     Profile.init sampleUser
 
 
-{-| The model out of the page's `( Model, Cmd Msg, OutMsg )` triple. The page
-gained an `OutMsg` in #361 so a mid-form 401 can reach the global session-expiry
+{-| The model out of the page's `( Model, Cmd Msg, OutMsg)` triple. The page
+gained an `OutMsg` in so a mid-form 401 can reach the global session-expiry
 interceptor; the `OutMsg` itself is asserted in `Page.SessionExpiryPagesTest`.
 -}
 modelOf : ( Profile.Model, Cmd Msg, Profile.OutMsg ) -> Profile.Model
@@ -122,7 +121,7 @@ changedBody =
 
 suite : Test
 suite =
-    describe "Page.Settings.Profile — handle (#212)"
+    describe "Page.Settings.Profile — handle"
         [ test "seeds the handle field from the current user" <|
             \_ ->
                 handleInputValue initialModel
@@ -194,7 +193,7 @@ suite =
                     |> Profile.view
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "Could not save profile. Please try again." ]
-        , describe "email change (CG-1, US-17.2.1)"
+        , describe "email change (CG-1, )"
             [ test "an unchanged email omits both email and current_password from the payload" <|
                 \_ ->
                     Expect.all
@@ -307,7 +306,7 @@ suite =
                         ]
                         ()
             ]
-        , describe "personal-info setters (#126 residual)"
+        , describe "personal-info setters"
             [ test "SetDisplayName updates the field and clears a prior save result" <|
                 \_ ->
                     let
@@ -341,7 +340,7 @@ suite =
                         ]
                         ()
             ]
-        , describe "location (#126 punch 16/17)"
+        , describe "location"
             [ test "SetCountryCode updates the field and clears a prior save result" <|
                 \_ ->
                     let

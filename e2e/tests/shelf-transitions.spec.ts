@@ -195,7 +195,7 @@ async function clickShelf(page: Page, href: string): Promise<void> {
   await expect(page).toHaveURL((url) => url.pathname === href);
 }
 
-test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
+test.describe("— bookshelf navigation transitions", () => {
   test.use({ storageState: suiteAuthFile("navigation") });
 
   test("adjacent shelf, moving forwards, slides in from the right and actually animates", async ({
@@ -349,7 +349,7 @@ test.describe("US-1.2.5 — bookshelf navigation transitions", () => {
   });
 });
 
-test.describe("US-1.2.5 — transitions honour prefers-reduced-motion", () => {
+test.describe("— transitions honour prefers-reduced-motion", () => {
   test.use({ storageState: suiteAuthFile("navigation") });
 
   /**

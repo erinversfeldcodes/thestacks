@@ -1,17 +1,17 @@
 defmodule Stacks.Geocoding.Mock do
   @moduledoc """
-  Mock geocoder for tests.
+    Mock geocoder for tests.
 
-  Responses are keyed by a substring of the query and held in the process dictionary, so
-  each test process is isolated and tests can stay `async: true` — the same idiom as
-  `Stacks.Books.MockHttpClient`.
+    Responses are keyed by a substring of the query and held in the process dictionary, so
+    each test process is isolated and tests can stay `async: true` — the same idiom as
+    `Stacks.Books.MockHttpClient`.
 
-  ## Default is failure, on purpose
+    ## Default is failure, on purpose
 
-  An unmatched query returns `{:error, :not_found}` rather than a plausible point. A
-  mock that invented coordinates would make every test look like geocoding succeeded,
-  and the unpositioned-space path — which is a real state the owner must be able to see —
-  would never be exercised. A test that wants a position says so.
+    An unmatched query returns `{:error,:not_found}` rather than a plausible point. A
+    mock that invented coordinates would make every test look like geocoding succeeded,
+    and the unpositioned-space path — which is a real state the owner must be able to see —
+    would never be exercised. A test that wants a position says so.
   """
 
   @behaviour Stacks.Geocoding

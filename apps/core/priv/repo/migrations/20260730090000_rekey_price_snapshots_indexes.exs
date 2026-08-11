@@ -2,16 +2,16 @@ defmodule Core.Repo.Migrations.RekeyPriceSnapshotsIndexes do
   use Ecto.Migration
 
   @moduledoc """
-  The index half of the price-snapshots rekey (see
-  `20260727204800_rekey_price_snapshots_to_edition.exs`), split out so the
-  indexes can be built CONCURRENTLY per the house migration standard —
-  squawk's require-concurrent-index-creation gate, which the combined
-  transactional migration could not satisfy.
+    The index half of the price-snapshots rekey (see
+    `20260727204800_rekey_price_snapshots_to_edition.exs`), split out so the
+    indexes can be built CONCURRENTLY per the house migration standard —
+    squawk's require-concurrent-index-creation gate, which the combined
+    transactional migration could not satisfy.
 
-  Idempotent (`*_if_not_exists` / `drop_if_exists`): staging and previews
-  that already ran the pre-split rekey have these indexes; fresh databases
-  get them here. The new unique index is created BEFORE the old grain is
-  dropped so uniqueness never lapses.
+    Idempotent (`*_if_not_exists` / `drop_if_exists`): staging and previews
+    that already ran the pre-split rekey have these indexes; fresh databases
+    get them here. The new unique index is created BEFORE the old grain is
+    dropped so uniqueness never lapses.
   """
 
   @disable_ddl_transaction true

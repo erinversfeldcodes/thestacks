@@ -1,17 +1,17 @@
 defmodule Stacks.AI.Client do
   @moduledoc """
-  HTTP client for the Modal vision service. Wire contract:
-  `proto/stacks/internal/v1/vision.proto`. Swappable via
-  `config :core, :vision_client` (real vs `MockClient`); all callers go
-  through `call_vision/2`.
+    HTTP client for the Modal vision service. Wire contract:
+    `proto/stacks/internal/v1/vision.proto`. Swappable via
+    `config:core,:vision_client` (real vs `MockClient`); all callers go
+    through `call_vision/2`.
 
-  Auth: timestamp-based HMAC in `X-Internal-Token` —
-  `<unix_ts>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>`, ±60s replay
-  window, secret in `VISION_HMAC_SECRET`.
+    Auth: timestamp-based HMAC in `X-Internal-Token` —
+    `<unix_ts>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>`, ±60s replay
+    window, secret in `VISION_HMAC_SECRET`.
 
-  Failures are members of `Stacks.AI.VisionError.t/0` (closed set), so
-  callers can distinguish a determination about the image from a transient
-  fault.
+    Failures are members of `Stacks.AI.VisionError.t/0` (closed set), so
+    callers can distinguish a determination about the image from a transient
+    fault.
   """
 
   alias Stacks.AI.BudgetTracker
@@ -32,24 +32,24 @@ defmodule Stacks.AI.Client do
   @receive_timeout_ms @modal_function_timeout_ms + @transport_slack_ms
 
   @doc """
-  Modal's own per-call deadline, in milliseconds — mirrored from
-  `apps/vision/modal_app.py`'s `@app.cls(timeout: …)`.
+    Modal's own per-call deadline, in milliseconds — mirrored from
+    `apps/vision/modal_app.py`'s `@app.cls(timeout: …)`.
 
-  Exposed so the invariant `receive_timeout_ms() >= modal_function_timeout_ms()`
-  is a statement about two named quantities that a test can make, rather than
-  about two literals in different languages that a reader has to compare by eye.
+    Exposed so the invariant `receive_timeout_ms >= modal_function_timeout_ms`
+    is a statement about two named quantities that a test can make, rather than
+    about two literals in different languages that a reader has to compare by eye.
   """
   @spec modal_function_timeout_ms() :: pos_integer()
   def modal_function_timeout_ms, do: @modal_function_timeout_ms
 
   @doc """
-  Ceiling on a single vision HTTP call, in ms — DERIVED as Modal's own
-  300s inference deadline plus slack, never a smaller "latency budget".
-  Pre-350 this was 210s (< 300s): the client hung up on calls Modal was
-  still working on, the GPU work continued and was billed, the give-up was
-  classified `:transient`, and the retry queued a fresh cold start behind
-  the same contended GPU. Giving up before the server's deadline buys
-  nothing; after it, Modal has already answered 504.
+    Ceiling on a single vision HTTP call, in ms — DERIVED as Modal's own
+    300s inference deadline plus slack, never a smaller "latency budget".
+    Pre-350 this was 210s (< 300s): the client hung up on calls Modal was
+    still working on, the GPU work continued and was billed, the give-up was
+    classified `:transient`, and the retry queued a fresh cold start behind
+    the same contended GPU. Giving up before the server's deadline buys
+    nothing; after it, Modal has already answered 504.
   """
   @spec receive_timeout_ms() :: pos_integer()
   def receive_timeout_ms, do: @receive_timeout_ms
@@ -76,12 +76,12 @@ defmodule Stacks.AI.Client do
   end
 
   @doc """
-  POST /associate — asks the vision service to associate a known ISBN with a cover image.
-  Returns {:ok, job_id} on success, {:error, reason} on failure.
+    POST /associate — asks the vision service to associate a known ISBN with a cover image.
+    Returns {:ok, job_id} on success, {:error, reason} on failure.
 
-  Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
-  Request/response shape: `AssociateRequest` / `AssociateResponse` in vision.proto.
-  The result arrives later via the InternalController callback (`AssociateCallback`).
+    Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
+    Request/response shape: `AssociateRequest` / `AssociateResponse` in vision.proto.
+    The result arrives later via the InternalController callback (`AssociateCallback`).
   """
   @spec associate_isbn(String.t(), String.t(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, term()}
@@ -101,8 +101,8 @@ defmodule Stacks.AI.Client do
   end
 
   @doc """
-  POST /extract — extract ISBNs from a book cover image at a URL.
-  Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
+    POST /extract — extract ISBNs from a book cover image at a URL.
+    Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
   """
   @spec extract_from_url(String.t()) :: {:ok, map()} | {:error, term()}
   def extract_from_url(image_url) do
@@ -205,8 +205,8 @@ defmodule Stacks.AI.Client do
   end
 
   @typedoc """
-  The bounded vocabulary for "no answer arrived", so a transport failure can be
-  counted by kind on `[:stacks, :vision, :request, :exception]`.
+    The bounded vocabulary for "no answer arrived", so a transport failure can be
+    counted by kind on `[:stacks,:vision,:request,:exception]`.
   """
   @type reason_class :: :timeout | :closed | :unreachable | :protocol | :other
 

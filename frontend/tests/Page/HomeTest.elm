@@ -1,6 +1,6 @@
 module Page.HomeTest exposing (suite)
 
-{-| Oracles for the two faces of `/` (US-15.1.1, Wave 8 #318, 8c).
+{-| Oracles for the two faces of `/` (,, 8c).
 
 `Page.Home.view` branches on the model's constructor, which `init` chooses from
 auth state: signed out → `Landing`, signed in → `Collection` with the shelf
@@ -45,7 +45,7 @@ suite =
                         Landing ->
                             Expect.fail "expected Collection for a signed-in reader"
             ]
-        , describe "Landing face (unauthenticated, #235 CTAs)"
+        , describe "Landing face (unauthenticated, CTAs)"
             [ test "renders the title and subtitle" <|
                 \() ->
                     Home.view Landing

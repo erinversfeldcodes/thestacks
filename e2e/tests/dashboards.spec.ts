@@ -31,7 +31,7 @@ async function scrollAllPanelsIntoView(page: Page): Promise<void> {
   });
 }
 
-test.describe("Grafana dashboards render live data (#236–240)", () => {
+test.describe("Grafana dashboards render live data", () => {
   test.skip(
     !GRAFANA_URL,
     "Set GRAFANA_URL to a running Grafana (preview/prod) to enforce the render guarantee.",

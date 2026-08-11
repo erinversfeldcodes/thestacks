@@ -104,7 +104,7 @@ useGold titleStr goldProbability =
 
 
 {-| Texture data matching the mockup palette.
-Returns ( bgColor, textColor, goldProbability, isLeather )
+Returns ( bgColor, textColor, goldProbability, isLeather)
 -}
 textureData : Int -> { bg : String, text_ : String, gold : Float, leather : Bool }
 textureData idx =
@@ -163,7 +163,7 @@ textureUrl texture titleStr =
 
 
 {-| Render a complete book element with 3D spine, top, and cover.
-This produces the full `.book > .book__spine + .book__top + .book__cover`
+This produces the full `.book >.book__spine +.book__top +.book__cover`
 structure matching the reference mockup.
 -}
 book :

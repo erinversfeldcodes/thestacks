@@ -20,7 +20,7 @@ type alias Model =
     }
 
 
-{-| One destination in the account menu's settings family (#318 TR-1). The
+{-| One destination in the account menu's settings family (TR-1). The
 account menu used to reach exactly one settings page (Profile); it now folds
 over a list of these so the whole family is reachable from nav. Paths are opaque
 strings here — the caller (Main) owns `Route`, so there is one source of truth

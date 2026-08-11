@@ -1,14 +1,14 @@
 defmodule Stacks.Events.SubscriberWorker do
   @moduledoc """
-  Oban worker that dispatches a persisted event to all registered handlers.
+    Oban worker that dispatches a persisted event to all registered handlers.
 
-  Enqueued by `Stacks.Events.emit/1` after writing to `op.event_log`. The job
-  args contain only `%{"event_id" => uuid}` — the full event is fetched from
-  the database at execution time. This avoids storing PII in the Oban jobs
-  table.
+    Enqueued by `Stacks.Events.emit/1` after writing to `op.event_log`. The job
+    args contain only `%{"event_id" => uuid}` — the full event is fetched from
+    the database at execution time. This avoids storing PII in the Oban jobs
+    table.
 
-  Each handler call is isolated with `try/rescue` so that one failing handler
-  does not prevent other handlers from receiving the event.
+    Each handler call is isolated with `try/rescue` so that one failing handler
+    does not prevent other handlers from receiving the event.
   """
 
   use Oban.Worker, queue: :events, max_attempts: 3

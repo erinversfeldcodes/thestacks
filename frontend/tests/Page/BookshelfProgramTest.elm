@@ -66,7 +66,7 @@ suite =
         ]
 
 
-{-| Roving tabindex (#388): the bookcase is ONE tab stop, and the arrow keys
+{-| Roving tabindex: the bookcase is ONE tab stop, and the arrow keys
 move it. Each negative (tabindex -1) is paired with the positive control that
 proves the selector is real — a suite asserting only "some spine has
 tabindex 0" would have passed before the widget existed, when EVERY spine did.
@@ -95,7 +95,7 @@ rovingTabindexSuite =
                 (Query.find [ Selector.id ("spine-" ++ spineId) ])
                 ( "keydown", Encode.object [ ( "key", Encode.string "ArrowRight" ) ] )
     in
-    describe "roving tabindex (#388)"
+    describe "roving tabindex"
         [ test "roving_single_tab_stop: exactly the first spine is tabbable on load" <|
             \() ->
                 loaded
@@ -162,7 +162,7 @@ Mutation probe: restore `Loading -> viewBookshelfFromShelves model []` in
 -}
 bookshelfLoadingState : Test
 bookshelfLoadingState =
-    describe "Loading is not the empty shelf (#362)"
+    describe "Loading is not the empty shelf"
         [ test "bookshelf_loading_shows_a_loading_state: before the response arrives the page says so, in markup a screen reader can use" <|
             \() ->
                 startLibrary
@@ -244,7 +244,7 @@ bookshelfErrorState =
                     [ Selector.text "Could not load your library. Please try again." ]
 
 
-{-| #368's higher-severity property, pinned: a failed load must NEVER read as
+{-| higher-severity property, pinned: a failed load must NEVER read as
 an empty library. `bookshelf_empty_state` above is the positive control — it
 proves both marks (`shelf-row--empty`, the "waiting" copy) are what a real
 empty library shows, so the two `ensureViewHasNot`s here cannot pass vacuously.
@@ -282,7 +282,7 @@ bookshelfAgeGate =
 
 antiLibrarySuite : Test
 antiLibrarySuite =
-    describe "antiLibraryConfig (punch #5)"
+    describe "antiLibraryConfig"
         [ test "antilibrary_fetches_own_endpoint: init GETs /api/bookshelves/antilibrary, not the library's" <|
             \() ->
                 startShelf Bookshelf.antiLibraryConfig
@@ -332,7 +332,7 @@ antiLibrarySuite =
 
 wishListSuite : Test
 wishListSuite =
-    describe "wishListConfig (punch #6)"
+    describe "wishListConfig"
         [ test "wishlist_fetches_own_endpoint: init GETs /api/bookshelves/wishlist" <|
             \() ->
                 startShelf Bookshelf.wishListConfig
@@ -382,7 +382,7 @@ wishListSuite =
 
 noTokenSuite : Test
 noTokenSuite =
-    describe "init with no token (punch #11)"
+    describe "init with no token"
         [ test "no_token_fires_no_request: init without a token issues no bookshelf request" <|
             \() ->
                 ProgramTest.start () (libraryProgram Nothing)
@@ -423,7 +423,7 @@ noTokenSuite =
 
 viewModeSuite : Test
 viewModeSuite =
-    describe "view mode and list sorting (punch #12)"
+    describe "view mode and list sorting"
         [ test "list_view_swaps_to_book_list: toggling to list view replaces the bookcase with BookList's sortable table" <|
             \() ->
                 loadedLibrary

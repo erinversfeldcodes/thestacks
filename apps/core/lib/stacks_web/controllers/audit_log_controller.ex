@@ -1,11 +1,11 @@
 defmodule StacksWeb.AuditLogController do
   @moduledoc """
-  Read-only GDPR audit-log surface.
+    Read-only GDPR audit-log surface.
 
-  Returns the authenticated user's own audit-log entries, paginated, with
-  `metadata` decrypted for display. Hashed IP addresses are never selected or
-  surfaced. This controller has no write/update/delete path — the underlying
-  `audit.audit_log` table stays append-only.
+    Returns the authenticated user's own audit-log entries, paginated, with
+    `metadata` decrypted for display. Hashed IP addresses are never selected or
+    surfaced. This controller has no write/update/delete path — the underlying
+    `audit.audit_log` table stays append-only.
   """
 
   use CoreWeb, :controller
@@ -14,11 +14,11 @@ defmodule StacksWeb.AuditLogController do
   alias Stacks.Audit
 
   @doc """
-  GET /api/settings/audit-log — the current user's audit history.
+    GET /api/settings/audit-log — the current user's audit history.
 
-  Query parameters:
-    * `page` — 1-based page number (default 1)
-    * `per_page` — items per page (default 25, max 100)
+    Query parameters:
+      * `page` — 1-based page number (default 1)
+      * `per_page` — items per page (default 25, max 100)
   """
   @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def index(conn, params) do

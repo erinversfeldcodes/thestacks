@@ -1,14 +1,14 @@
 defmodule Stacks.Notifications.WishlistAvailabilityHandler do
   @moduledoc """
-  Event handler that enqueues wishlist availability emails when a listing is
-  activated. Notifies all users who have the book on their wishlist and have
-  `notify_wishlist_availability` enabled.
+    Event handler that enqueues wishlist availability emails when a listing is
+    activated. Notifies all users who have the book on their wishlist and have
+    `notify_wishlist_availability` enabled.
 
-  Uses Oban unique job deduplication (24-hour window per book+user pair) to
-  prevent notification spam when a listing is re-activated.
+    Uses Oban unique job deduplication (24-hour window per book+user pair) to
+    prevent notification spam when a listing is re-activated.
 
-  Implements `Stacks.Events.Handler` and is registered in
-  `Stacks.Events.Registry` for the `"listing.activated"` event type.
+    Implements `Stacks.Events.Handler` and is registered in
+    `Stacks.Events.Registry` for the `"listing.activated"` event type.
   """
 
   @behaviour Stacks.Events.Handler

@@ -116,7 +116,7 @@ async function currentUserId(page: Page): Promise<string> {
   return userId;
 }
 
-test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
+test.describe("RSS affordance on a bookshelf", () => {
   test.afterAll(async ({ browser }) => {
     const context = await browser.newContext({
       storageState: suiteAuthFile("bookshelf"),
@@ -179,7 +179,7 @@ test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
   });
 });
 
-test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name (US-6.1 §3)", () => {
+test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name", () => {
   test.afterAll(async ({ browser }) => {
     const context = await browser.newContext({
       storageState: suiteAuthFile("bookshelf"),

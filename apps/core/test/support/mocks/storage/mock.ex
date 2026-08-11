@@ -1,17 +1,17 @@
 defmodule Stacks.Storage.Mock do
   @moduledoc """
-  In-memory mock storage backend for tests.
+    In-memory mock storage backend for tests.
 
-  Stores data in the process dictionary so each test process is isolated
-  and tests can run with `async: true`.
+    Stores data in the process dictionary so each test process is isolated
+    and tests can run with `async: true`.
 
-  ## Usage
+    ## Usage
 
-      # Verify a file was stored:
-      assert Stacks.Storage.Mock.get("uploads/some-id") != nil
+        # Verify a file was stored:
+        assert Stacks.Storage.Mock.get("uploads/some-id") != nil
 
-      # Pre-seed data:
-      Stacks.Storage.Mock.seed("covers/isbn-cover.jpg", <<image_bytes>>)
+        # Pre-seed data:
+        Stacks.Storage.Mock.seed("covers/isbn-cover.jpg", <<image_bytes>>)
   """
 
   @behaviour Stacks.Storage.StorageBehaviour
@@ -75,15 +75,15 @@ defmodule Stacks.Storage.Mock do
   end
 
   @doc """
-  Make `presigned_url/2` fail with `reason` for the current process.
+    Make `presigned_url/2` fail with `reason` for the current process.
 
-  Presigning is the one storage call that happens *before* anything else in
-  `Stacks.Workers.IdentifyBookJob`, so it is the only way to exercise that
-  worker's earliest exit — the branch that returns `{:error, reason}` without
-  the pipeline ever running. Without this seam a test aiming at that branch
-  quietly takes the happy path instead and passes for the wrong reason.
+    Presigning is the one storage call that happens *before* anything else in
+    `Stacks.Workers.IdentifyBookJob`, so it is the only way to exercise that
+    worker's earliest exit — the branch that returns `{:error, reason}` without
+    the pipeline ever running. Without this seam a test aiming at that branch
+    quietly takes the happy path instead and passes for the wrong reason.
 
-  Pass `nil` to restore success.
+    Pass `nil` to restore success.
   """
   @spec put_presign_error(term()) :: :ok
   def put_presign_error(reason) do

@@ -25,13 +25,13 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
   ]
 
   @doc """
-  Generates an Ecto schema module from a manifest table entry and proto fields.
+    Generates an Ecto schema module from a manifest table entry and proto fields.
 
-  Supports:
-  - `api_only: true` in field_overrides to exclude API-only fields (no DB column)
-  - `belongs_to: ModuleName` in field_overrides to generate belongs_to associations
-  - `associations: [{:has_many, name, module, opts}]` in table entry for has_many
-  - Standard field generation with type mapping and defaults
+    Supports:
+    - `api_only: true` in field_overrides to exclude API-only fields (no DB column)
+    - `belongs_to: ModuleName` in field_overrides to generate belongs_to associations
+    - `associations: [{:has_many, name, module, opts}]` in table entry for has_many
+    - Standard field generation with type mapping and defaults
   """
   def generate(table, fields) do
     overrides = Map.get(table, :field_overrides, %{})

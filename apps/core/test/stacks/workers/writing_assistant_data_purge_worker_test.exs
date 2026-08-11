@@ -1,11 +1,11 @@
 defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
   @moduledoc """
-  Issue #184 — consent-revocation purge for the writing assistant.
+    — consent-revocation purge for the writing assistant.
 
-  Proves the worker deletes the four personal AI data sets (sessions +
-  cascaded turn_feedback/retrieval_log, embeddings, content-access), PRESERVES
-  the shared book_content_chunks corpus and the user row, is idempotent (safe to
-  perform twice), and only touches the target user's data.
+    Proves the worker deletes the four personal AI data sets (sessions +
+    cascaded turn_feedback/retrieval_log, embeddings, content-access), PRESERVES
+    the shared book_content_chunks corpus and the user row, is idempotent (safe to
+    perform twice), and only touches the target user's data.
   """
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo

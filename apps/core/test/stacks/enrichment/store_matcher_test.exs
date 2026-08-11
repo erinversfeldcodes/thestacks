@@ -1,10 +1,10 @@
 defmodule Stacks.Enrichment.StoreMatcherTest do
   @moduledoc """
-  Title matching for the two shops that carry no ISBN on any product.
+    Title matching for the two shops that carry no ISBN on any product.
 
-  A wrong match here does not merely show wrong metadata — it shows a reader a price
-  for a different book and links them to buy it. So these tests are mostly about what
-  the matcher *refuses*.
+    A wrong match here does not merely show wrong metadata — it shows a reader a price
+    for a different book and links them to buy it. So these tests are mostly about what
+    the matcher *refuses*.
   """
 
   use ExUnit.Case, async: true

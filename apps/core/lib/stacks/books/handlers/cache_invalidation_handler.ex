@@ -1,16 +1,16 @@
 defmodule Stacks.Books.Handlers.CacheInvalidationHandler do
   @moduledoc """
-  Evicts `BookDetailCache` entries (keyed by WORK id) when what they hold
-  changes. Handles `book.created`, `book.cover_confirmed`,
-  `books.edition_merged`, `book.visibility_tier_changed`, `book.enriched`,
-  `blog.associations_suggested`.
+    Evicts `BookDetailCache` entries (keyed by WORK id) when what they hold
+    changes. Handles `book.created`, `book.cover_confirmed`,
+    `books.edition_merged`, `book.visibility_tier_changed`, `book.enriched`,
+    `blog.associations_suggested`.
 
-  The only question asked of an event is "which work changed?" — and the
-  answer is NOT always `aggregate_id`: three of these events aggregate
-  something else (an edition, a blog post), so every handler reads the work
-  id from the payload, even where the aggregate happens to coincide.
-  `books.edition_merged` evicts BOTH works (the merged-away one may still
-  be cached).
+    The only question asked of an event is "which work changed?" — and the
+    answer is NOT always `aggregate_id`: three of these events aggregate
+    something else (an edition, a blog post), so every handler reads the work
+    id from the payload, even where the aggregate happens to coincide.
+    `books.edition_merged` evicts BOTH works (the merged-away one may still
+    be cached).
   """
 
   @behaviour Stacks.Events.Handler

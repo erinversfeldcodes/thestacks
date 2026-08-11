@@ -1,6 +1,6 @@
 module Page.BookshelfUndoRemoveTest exposing (suite)
 
-{-| Program tests for the "Removed — Undo" toast (US-1.6.4 extension, #375).
+{-| Program tests for the "Removed — Undo" toast (extension,).
 
 A reader who removes a book is returned to the shelf they came from, and that
 shelf offers — for a few seconds — to put it back. The undo restores the SAME
@@ -75,7 +75,7 @@ readOnlyAfterRemoval =
 
 suite : Test
 suite =
-    describe "Page.Bookshelf — undo remove (US-1.6.4 extension, #375)"
+    describe "Page.Bookshelf — undo remove"
         [ toastOffersUndoNamingTheBook
         , undoPostsToRestoreTheSameRow
         , ownerUndoIsObservable
@@ -194,7 +194,7 @@ Same page module, same harness, same drive, same seeded toast — only the confi
 differs. If this goes red, the assertions below have stopped distinguishing
 anything: they would be counting POSTs in a world where no `Bookshelf.Msg` can
 produce one, which is exactly how `BookshelfReadOnlyTest`'s equivalent assertion
-was silently disarmed before #330.
+was silently disarmed before.
 
 -}
 ownerUndoIsObservable : Test

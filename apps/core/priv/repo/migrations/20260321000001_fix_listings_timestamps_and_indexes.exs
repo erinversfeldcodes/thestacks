@@ -1,9 +1,9 @@
 defmodule Core.Repo.Migrations.FixListingsTimestampsAndIndexes do
   @moduledoc """
-  Adds indexes for marketplace listings:
+    Adds indexes for marketplace listings:
 
-  1. Partial composite index for expiry job (status='active' + expires_at)
-  2. Partial unique index preventing duplicate draft/active listings per book+seller
+    1. Partial composite index for expiry job (status='active' + expires_at)
+    2. Partial unique index preventing duplicate draft/active listings per book+seller
   """
 
   use Ecto.Migration

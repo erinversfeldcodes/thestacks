@@ -1,6 +1,6 @@
 module ApiAuthedTest exposing (suite)
 
-{-| Issue #361 — the authed-request wrapper: a 401 on a request that definitely
+{-| — the authed-request wrapper: a 401 on a request that definitely
 carried a credential is claimed before the endpoint's own resolver sees it.
 
 
@@ -8,7 +8,7 @@ carried a credential is claimed before the endpoint's own resolver sees it.
 
 `Api.interpretAuthed` is the whole decision, extracted as a pure function of the
 `Http.Response`. The alternative — asserting through a `SimulatedEffect` — is the
-shape that has twice passed vacuously here (#302, #328): the harness hand-writes
+shape that has twice passed vacuously here: the harness hand-writes
 its own copy of the request and then agrees with itself. There is no copy below.
 `Api.interpretAuthed`, `Api.resolveWhatever` and `Api.resolveProfile` are the
 production functions, wired the same way `Api.updatePassword` wires them.
@@ -94,7 +94,7 @@ resultOf outcome =
 
 suite : Test
 suite =
-    describe "Api.authed — 401 handling is forced, not remembered (#361)"
+    describe "Api.authed — 401 handling is forced, not remembered"
         [ describe "the 401 is claimed before the endpoint resolver runs"
             [ test "expired_401_never_reaches_the_result_handler" <|
                 \() ->

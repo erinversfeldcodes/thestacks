@@ -1,12 +1,12 @@
 defmodule Stacks.Workers.EmailDeliveryJobTest do
   @moduledoc """
-  Tests for Stacks.Workers.EmailDeliveryJob.
+    Tests for Stacks.Workers.EmailDeliveryJob.
 
-  Defaults to Swoosh.Adapters.Test (configured in test.exs) which stores
-  delivered emails in the test process for assertion. Setting
-  TEST_EMAIL_RECIPIENT (issue #258) opts into the real Resend adapter and
-  routes deliveries to that address; delivery assertions are adapter-aware
-  (`assert_delivered/1`) so the same tests pass under either adapter.
+    Defaults to Swoosh.Adapters.Test (configured in test.exs) which stores
+    delivered emails in the test process for assertion. Setting
+    TEST_EMAIL_RECIPIENT (issue) opts into the real Resend adapter and
+    routes deliveries to that address; delivery assertions are adapter-aware
+    (`assert_delivered/1`) so the same tests pass under either adapter.
   """
 
   use Core.DataCase, async: true

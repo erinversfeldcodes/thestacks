@@ -1,6 +1,6 @@
 module PageTitleTest exposing (suite)
 
-{-| Issue #360 — the document title is derived from the page, not from the route.
+{-| — the document title is derived from the page, not from the route.
 
 
 ## The defect
@@ -32,8 +32,7 @@ subject does not exist at all.
 
 ## Mutation probe
 
-Changing `PageAdminGate`'s branch to name the gated route — the pre-#360
-behaviour — reddens `drift_2_admin_gate` and `drift_6_admin_reauth`.
+Changing `PageAdminGate`'s branch to name the gated route — the pre-behaviour — reddens `drift_2_admin_gate` and `drift_6_admin_reauth`.
 
 -}
 
@@ -56,7 +55,7 @@ import Types.User exposing (User)
 
 suite : Test
 suite =
-    describe "Page title (Issue #360)"
+    describe "Page title"
         [ describe "the six sites where the route named a page nobody was looking at"
             [ driftBounce
             , driftAdminGate

@@ -1,6 +1,6 @@
 module Page.ForgotPasswordNoticeTest exposing (suite)
 
-{-| The forgot-password acknowledgement (#363).
+{-| The forgot-password acknowledgement.
 
 Asking for a reset link is a request whose whole outcome is a sentence: the
 reader's inbox is somewhere else, and the endpoint deliberately answers the same
@@ -124,9 +124,9 @@ throttled headers =
         ""
 
 
-{-| ⛔ The double-send (Issue #374).
+{-| ⛔ The double-send.
 
-Modelled on #373's resend guard and true for the same reason:
+Modelled on resend guard and true for the same reason:
 `expectHttpRequests` counts requests still AWAITING a response, so the zero below
 means "the second press started nothing", not "nothing ever happened". The first
 press is proved by the `simulateHttpOk` above it, which fails outright if there
@@ -176,7 +176,7 @@ forgotFailureReopensTheButton =
                     (\requests -> Expect.equal 1 (List.length requests))
 
 
-{-| ⛔ The disabled state may not depend on whether the address exists (#374).
+{-| ⛔ The disabled state may not depend on whether the address exists.
 
 `AuthController.forgot_password/2` answers 200 with ONE literal body for every
 address — that uniformity is the whole of its no-enumeration property, and the
@@ -185,10 +185,10 @@ for a registered address (a different label, a control that stayed live, a notic
 that said "sent" rather than "if that email is registered") would rebuild the
 account-existence oracle in the browser, out of an API that refuses to be one.
 
-Written the way #373's `no_enumeration` test is written: drive both addresses
+Written the way `no_enumeration` test is written: drive both addresses
 through the IDENTICAL response the server always sends, then assert the two
 control states are equal **to each other**. The second case is the anti-vacuity
-guard — `( False, NotAsked )` compares equal to itself too, so the value being
+guard — `( False, NotAsked)` compares equal to itself too, so the value being
 compared is pinned to what a completed send actually produces.
 
 -}

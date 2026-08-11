@@ -1,6 +1,6 @@
 module Page.LookingForHomeRoomTest exposing (suite)
 
-{-| Oracle for US-18.1.1 (Wave 8 #318, 8c): the Looking-for-a-Home shelf renders
+{-| Oracle for: the Looking-for-a-Home shelf renders
 as a **real room in the shelf-room family** — wallpaper, lamplight, and a
 brass-plate label — with the pile-view of cover cards staged _inside_ that room.
 

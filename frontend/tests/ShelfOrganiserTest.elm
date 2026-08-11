@@ -1,6 +1,6 @@
 module ShelfOrganiserTest exposing (suite)
 
-{-| Tests shelf organisation (US-1.7.1 / #190, campaign G5).
+{-| Tests shelf organisation.
 
 The backend has had 35 tests and 90 seeded rows for months with **no client call at all**,
 so this is the reachability half. Two things are worth guarding:

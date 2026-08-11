@@ -1,9 +1,9 @@
 defmodule Stacks.StorageTest do
   @moduledoc """
-  Tests for the Stacks.Storage context module.
+    Tests for the Stacks.Storage context module.
 
-  Uses Stacks.Storage.Mock (configured in test.exs) so tests are isolated
-  per process and can run with `async: true`.
+    Uses Stacks.Storage.Mock (configured in test.exs) so tests are isolated
+    per process and can run with `async: true`.
   """
 
   use ExUnit.Case, async: true

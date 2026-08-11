@@ -1,9 +1,9 @@
 defmodule Stacks.Accounts.InvitesTest do
   @moduledoc """
-  US-14.1.3 — the invite gate, from code mechanics to the GDPR settle step.
-  The registration tests run with the flag ON via per-test app env (the
-  compile-time :test default stays OFF so every existing registration test
-  keeps meaning what it meant).
+    — the invite gate, from code mechanics to the GDPR settle step.
+    The registration tests run with the flag ON via per-test app env (the
+    compile-time:test default stays OFF so every existing registration test
+    keeps meaning what it meant).
   """
 
   use Core.DataCase, async: false

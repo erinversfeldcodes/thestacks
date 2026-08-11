@@ -1,13 +1,13 @@
 defmodule StacksWeb.InternalController do
   @moduledoc """
-  Internal callbacks and smoke-test endpoints. The vision associate
-  callback is HMAC-authed via `X-Vision-Signature`
-  (`<ts>.<HMAC-SHA256(secret, "<ts>.POST.<path>")>`, ±60s window),
-  service-to-service only, and always returns 200 once auth passes — the
-  sidecar must not retry on app errors.
-  `POST /api/internal/smoke/circuit_breakers` is gated by
-  `:smoke_tests_enabled` (404 in production) behind the scraper's
-  `X-Internal-Token` scheme.
+    Internal callbacks and smoke-test endpoints. The vision associate
+    callback is HMAC-authed via `X-Vision-Signature`
+    (`<ts>.<HMAC-SHA256(secret, "<ts>.POST.<path>")>`, ±60s window),
+    service-to-service only, and always returns 200 once auth passes — the
+    sidecar must not retry on app errors.
+    `POST /api/internal/smoke/circuit_breakers` is gated by
+    `:smoke_tests_enabled` (404 in production) behind the scraper's
+    `X-Internal-Token` scheme.
   """
 
   use CoreWeb, :controller
@@ -41,13 +41,13 @@ defmodule StacksWeb.InternalController do
   end
 
   @doc """
-  POST /api/internal/smoke/circuit_breakers — smoke-test all 5 circuit breakers.
+    POST /api/internal/smoke/circuit_breakers — smoke-test all 5 circuit breakers.
 
-  Gated by `config :core, :smoke_tests_enabled, true`. Returns 404 if disabled.
-  Protected by the `X-Internal-Token` HMAC scheme (same as scraper).
+    Gated by `config:core,:smoke_tests_enabled, true`. Returns 404 if disabled.
+    Protected by the `X-Internal-Token` HMAC scheme (same as scraper).
 
-  Blows all 5 fuses via real failure paths, waits up to 60s for probe-driven
-  recovery, and returns a structured JSON result.
+    Blows all 5 fuses via real failure paths, waits up to 60s for probe-driven
+    recovery, and returns a structured JSON result.
   """
   def smoke_circuit_breakers(conn, _params) do
     if Application.get_env(:core, :smoke_tests_enabled, false) do

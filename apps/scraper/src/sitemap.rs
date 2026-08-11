@@ -218,7 +218,7 @@ impl CrawlBudget {
 ///
 /// Separate from the per-domain rate limiter, which is a *ceiling* across all work. This is the
 /// courtesy inside a single burst: three sitemap fetches issued back to back look exactly like the
-/// beginning of a scrape to whatever bot protection sits in front of the shop, and #308 is what
+/// beginning of a scrape to whatever bot protection sits in front of the shop, and is what
 /// happens when it decides that is what we are.
 pub const INTER_DOCUMENT_DELAY: Duration = Duration::from_millis(500);
 

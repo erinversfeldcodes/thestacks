@@ -1,14 +1,14 @@
 defmodule Stacks.Workers.BuildScraperIndexJob do
   @moduledoc """
-  Rebuilds each store's ISBN→product-path index in the scraper service.
-  Four of six Shopify targets carry the ISBN in `sku`/prose but not the
-  product handle, so they can't be addressed by ISBN without an index. The
-  index lives in the scraper's process and dies with it ON PURPOSE
-  (nothing durable holds a shop's catalogue), so it must be rebuilt after
-  every deploy — else those stores answer `IndexRequired` forever. Separate
-  from scraping because a sweep is ~20 requests against a 10/min-limited
-  shop: minutes of rate-limiter waiting that must not sit inside a price
-  scrape. Runs from cron and on `IndexRequired`.
+    Rebuilds each store's ISBN→product-path index in the scraper service.
+    Four of six Shopify targets carry the ISBN in `sku`/prose but not the
+    product handle, so they can't be addressed by ISBN without an index. The
+    index lives in the scraper's process and dies with it ON PURPOSE
+    (nothing durable holds a shop's catalogue), so it must be rebuilt after
+    every deploy — else those stores answer `IndexRequired` forever. Separate
+    from scraping because a sweep is ~20 requests against a 10/min-limited
+    shop: minutes of rate-limiter waiting that must not sit inside a price
+    scrape. Runs from cron and on `IndexRequired`.
   """
 
   use Oban.Worker, queue: :scraper, max_attempts: 2

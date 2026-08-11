@@ -1,6 +1,6 @@
 module ShelfDecoderTest exposing (suite)
 
-{-| Decoder tests for the new shelf response shape (Issue #151).
+{-| Decoder tests for the new shelf response shape.
 
 These tests verify that the JSON response containing shelves with nested
 placements decodes correctly.
@@ -18,7 +18,7 @@ import Types.Shelf exposing (shelvesResponseDecoder)
 
 suite : Test
 suite =
-    describe "Shelf decoder (Issue #151)"
+    describe "Shelf decoder"
         [ decodesShelfWithEmptyPlacements
         , decodesNestedPlacements
         , failsOnMissingShelves

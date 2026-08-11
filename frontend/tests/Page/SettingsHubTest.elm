@@ -1,6 +1,6 @@
 module Page.SettingsHubTest exposing (suite)
 
-{-| The `Page.Settings` hub shell, restyled for #318 TR-4.
+{-| The `Page.Settings` hub shell, restyled for TR-4.
 
 `Page.Settings.view` is a stateless layout parameterised by the parent's `msg`.
 Since TR-4 it renders ONE grouped nav (no mobile `<select>`): entries are
@@ -25,7 +25,7 @@ import Test.Html.Selector as Selector
 
 
 {-| The hub emits no messages of its own (the mobile-select `onInput` is gone),
-so `()` stands in for the parent's message type.
+so \`\` stands in for the parent's message type.
 -}
 viewFor : Route -> Query.Single ()
 viewFor route =
@@ -63,7 +63,7 @@ ariaCurrentPage =
 
 suite : Test
 suite =
-    describe "Page.Settings — hub shell (#318 TR-4)"
+    describe "Page.Settings — hub shell"
         [ describe "grouped nav (ORACLE: fails on the old flat nav)"
             [ test "renders the three IA group headings" <|
                 \_ ->

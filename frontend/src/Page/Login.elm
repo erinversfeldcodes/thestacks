@@ -60,7 +60,7 @@ type alias Model =
     }
 
 
-{-| Why the login card is on screen (360).
+{-| Why the login card is on screen.
 
 ⛔ What this type makes impossible: this used to be three booleans on
 `Login.Model` shadowed by three more on `Main.Model`, five inits raising
@@ -78,8 +78,7 @@ type Arrival
     | ConfirmationExpired
 
 
-{-| Whether a marketplace listing draft was saved on the way to this arrival
-(Issue #182). The ONE reader of that flag, so "was a draft saved" cannot be asked
+{-| Whether a marketplace listing draft was saved on the way to this arrival. The ONE reader of that flag, so "was a draft saved" cannot be asked
 of an arrival where the question is meaningless — every non-expiry arrival
 answers `False` by construction rather than by a forgotten `&&`.
 
@@ -124,7 +123,7 @@ type Mode
 {-| A failed submission. Registration can fail with structured per-field
 validation errors (a 422 body), which we keep so the message reflects the real
 cause; either mode can be turned away by the rate limiter, which is its own
-constructor because it is the one failure that carries a number (Issue #374) and
+constructor because it is the one failure that carries a number and
 because it is emphatically **not** a bad credential.
 -}
 type SubmitError
@@ -155,7 +154,7 @@ type Msg
 {-| What the card asks the shell to do. There is exactly one way to report a
 successful sign-in — `LoggedIn` — and it is emitted on the same update that
 decodes the `200`. The card has no "credential accepted but not yet handed over"
-outcome to report, because it never holds one (#359).
+outcome to report, because it never holds one.
 -}
 type OutMsg
     = NoOut
@@ -207,7 +206,7 @@ init arrival =
     }
 
 
-{-| The address a resend is about (Issue #373).
+{-| The address a resend is about.
 
 ⛔ Read from the card the reader is actually looking at, not from
 `model.email` unconditionally. The "check your inbox" card NAMES an address in
@@ -233,7 +232,7 @@ resendTarget model =
 disabled attribute and the guard in `update`, so a button that looks pressable
 cannot fire and a button that fires cannot look inert.
 
-Covers the double-send the epic calls out: once a request is in flight, or has
+Covers the double-send: once a request is in flight, or has
 succeeded, pressing again sends nothing. A FAILED attempt stays pressable, since
 retrying is exactly what the reader should do.
 
@@ -245,7 +244,7 @@ isResendDisabled model =
         || (model.resendState == Success ())
 
 
-{-| The same rule for the forgot-password send (374).
+{-| The same rule for the forgot-password send.
 
 ⛔ Must not read the email for anything except emptiness:
 `/api/auth/forgot-password` answers 200 to every well-formed request —
@@ -483,7 +482,7 @@ viewLoginCard model =
 {-| The "check your inbox" card shown after a successful registration.
 No JWT is stored and no navigation occurs — the user must confirm via email.
 
-Carries the resend affordance (Issue #373, US-14.4.2). This is the moment the
+Carries the resend affordance. This is the moment the
 reader is most likely to need it — the email either arrives in the next minute or
 it does not — and until now the card was a dead end: the only route out was to
 register again with an address that was already taken.
@@ -555,7 +554,7 @@ viewResendOutcome model =
             text ""
 
 
-{-| Why one of the two "we will email you" requests did not go through (#374).
+{-| Why one of the two "we will email you" requests did not go through.
 
 Both endpoints answer identically for every address, so this function may not
 branch on anything address-shaped — and it cannot, because a `RequestError`
@@ -584,7 +583,7 @@ mailRequestError err =
             "Something went wrong at our end, and we cannot say what. Please try again in a moment."
 
 
-{-| The standalone "send me a new link" form (Issue #373).
+{-| The standalone "send me a new link" form.
 
 Reached by `/resend-confirmation`, which is where a dead confirmation link now
 points. A mode of the login card rather than a page of its own, exactly like
@@ -997,7 +996,7 @@ viewFieldHint validation =
             text ""
 
 
-{-| The one notice the arrival is owed, if any (360). Two functions used
+{-| The one notice the arrival is owed, if any. Two functions used
 to re-derive the same suppression independently and stack when both
 their booleans were set. Casing over one `Arrival` means at most one
 notice can exist, and the submit-failure suppression is written once.
@@ -1063,7 +1062,7 @@ paragraph, and had no live region at all until it was routed through here.
 ⚠️ The class stays at each CALL SITE, spelled as a literal `class "…"`.
 `scripts/check-orphan-classes.sh` finds classes by matching `class "…"` in Elm
 source, so folding them in here as a `className` field — or assembling one from
-a modifier — hides every notice class from the gate (#356), and their styling
+a modifier — hides every notice class from the gate, and their styling
 could then be deleted with nothing to say so. Measured: doing exactly that took
 the Elm class count from 802 to 799 while the gate stayed green.
 
@@ -1074,7 +1073,7 @@ notice attrs copy =
 
 
 {-| Copy for the session-expiry notice. When a marketplace listing draft was
-saved on the way here (Issue #182), reassure the user their work survived.
+saved on the way here, reassure the user their work survived.
 -}
 sessionExpiredNoticeText : Bool -> String
 sessionExpiredNoticeText draftSaved =
@@ -1098,8 +1097,7 @@ viewError model =
             text ""
 
 
-{-| The accepted invitation, shown above Display Name once the gate unlocks
-(US-14.1.3). Read-only: the code was just validated, and editing it here would
+{-| The accepted invitation, shown above Display Name once the gate unlocks. Read-only: the code was just validated, and editing it here would
 race the registration against a different code than the one checked.
 -}
 viewInviteField : Model -> Html Msg
@@ -1126,8 +1124,7 @@ viewInviteField model =
         text ""
 
 
-{-| The closed-beta panel an uninvited visitor sees on the Register tab
-(US-14.1.3). No email capture, no waitlist — the platform does not collect
+{-| The closed-beta panel an uninvited visitor sees on the Register tab. No email capture, no waitlist — the platform does not collect
 addresses from people it has not invited.
 -}
 viewInviteOnlyPanel : Model -> Html Msg
@@ -1189,7 +1186,7 @@ viewInviteRefusal model =
             text ""
 
 
-{-| Refusal copy per status (US-14.1.3's sad paths). Revoked deliberately reads
+{-| Refusal copy per status (sad paths). Revoked deliberately reads
 as expired — the reader learns nothing about WHY it stopped working, and
 neither wording implies the code was ever valid for someone else.
 -}
@@ -1244,7 +1241,7 @@ fromRegisterError registerError =
             SubmitHttpError err
 
 
-{-| A sign-in failure as a `SubmitError` (Issue #374).
+{-| A sign-in failure as a `SubmitError`.
 
 The 429 is lifted out of `Http.Error` here rather than mapped in
 `httpErrorMessage` because by the time a failure is an `Http.Error` its
@@ -1278,7 +1275,7 @@ errorMessage mode submitError =
 
 
 {-| Registration-time refusal copy, keyed by the server's bounded reason
-string (US-14.1.3). Revoked reads as expired on purpose — see
+string. Revoked reads as expired on purpose — see
 `inviteErrorMessage`.
 -}
 inviteRefusalMessage : String -> String
@@ -1327,7 +1324,7 @@ registerValidationMessage errors =
 
 
 {-| A sign-in or registration failure, named only as precisely as the
-response allows (374).
+response allows.
 
 ⛔ The catch-all used to say "Invalid email or password" for ANY unlisted
 status — a 500, a mid-deploy 502, a proxy 504 all told the reader their

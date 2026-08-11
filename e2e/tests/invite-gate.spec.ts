@@ -35,7 +35,7 @@ function registration(email: string, invite_code?: string) {
   };
 }
 
-test.describe("Invite gate — the wire (US-14.1.3)", () => {
+test.describe("Invite gate — the wire", () => {
   test("uninvited registration is refused, with and without a guessed code", async ({
     request,
   }) => {

@@ -7,7 +7,7 @@ module Page.Admin.Invites exposing
     , view
     )
 
-{-| The owner's invitation desk (US-14.1.3): write an invitation, hand out the
+{-| The owner's invitation desk: write an invitation, hand out the
 code, revoke one, and see who came in.
 
 The load-bearing property is the **show-once reveal**: the full code exists in

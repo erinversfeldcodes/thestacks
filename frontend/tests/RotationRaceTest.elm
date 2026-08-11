@@ -1,6 +1,6 @@
 module RotationRaceTest exposing (suite)
 
-{-| Tests for Issue #180 Phase 2 — cross-tab token propagation + re-check-before-
+{-| Tests for Phase 2 — cross-tab token propagation + re-check-before-
 logout net.
 
 
@@ -34,7 +34,7 @@ import Types.User exposing (User)
 
 suite : Test
 suite =
-    describe "Cross-tab token propagation + re-check net (Issue #180 Phase 2)"
+    describe "Cross-tab token propagation + re-check net"
         [ describe "adoptExternalAuth — cross-tab storage propagation"
             [ differentTokenWhileAuthedAdopts
             , differentTokenPreservesUser
@@ -216,7 +216,7 @@ renewalOriginAdoptReschedules =
 
 {-| P1b (the bug): a re-check from a PAGE 401 still has its 7h renewal tick armed,
 so adopting must NOT reschedule — a second timer per adopt is a self-perpetuating
-refresh storm (the contention #180 fights).
+refresh storm (the contention fights).
 -}
 pageOriginAdoptDoesNotReschedule : Test
 pageOriginAdoptDoesNotReschedule =

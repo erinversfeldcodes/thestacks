@@ -162,7 +162,7 @@ _HEADER = """\
 """
 
 _OPEN_ENTRY = """\
-## 2026-03-13 — Issue #014, Phase 2
+## 2026-03-13 — , Phase 2
 **Reviewer axis:** Code Quality
 **Finding:** Missing typespecs on 3 public functions
 **Root cause:** Prompt does not require typespecs
@@ -171,7 +171,7 @@ _OPEN_ENTRY = """\
 """
 
 _APPLIED_ENTRY = """\
-## 2026-03-10 — Issue #012, Phase 1
+## 2026-03-10 — , Phase 1
 **Reviewer axis:** Security
 **Finding:** Hardcoded secret in config
 **Root cause:** No secret-scanning reminder
@@ -180,7 +180,7 @@ _APPLIED_ENTRY = """\
 """
 
 _SECOND_OPEN_ENTRY = """\
-## 2026-03-12 — Issue #013, Phase 3
+## 2026-03-12 — , Phase 3
 **Reviewer axis:** Testing
 **Finding:** No property tests for parser
 **Root cause:** Prompt only mentions unit tests

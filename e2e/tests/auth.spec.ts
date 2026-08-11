@@ -35,7 +35,7 @@ test.describe("Authentication", () => {
     await expect(page).toHaveURL("/login");
   });
 
-  test("a failed login preserves the typed email and password (US-16.2.1)", async ({
+  test("a failed login preserves the typed email and password", async ({
     page,
   }) => {
     await page.goto("/login");
@@ -166,7 +166,7 @@ test.describe("Logout", () => {
   });
 });
 
-test.describe("Unauthenticated access to protected pages (US-16.3.1)", () => {
+test.describe("Unauthenticated access to protected pages", () => {
   test("visiting /library unauthenticated renders the login form at the SAME url", async ({
     page,
   }) => {
@@ -250,7 +250,7 @@ test.describe("Unauthenticated access to protected pages (US-16.3.1)", () => {
  *
  * Under the pre-#359 code both hang until timeout: the token is never written.
  */
-test.describe("Login is not downstream of the door animation (#359)", () => {
+test.describe("Login is not downstream of the door animation", () => {
   /** Poll localStorage until the auth token appears; return how long it took. */
   async function msUntilTokenStored(page, deadlineMs: number) {
     const start = Date.now();
@@ -388,7 +388,7 @@ test.describe("Login is not downstream of the door animation (#359)", () => {
  * browser level (CDP `Animation.setPlaybackRate: 0`), asserting the stall took
  * hold before asserting anything else.
  */
-test.describe("The arrival door plays from the shell (#364)", () => {
+test.describe("The arrival door plays from the shell", () => {
   /**
    * Count WAAPI animations started on the door's OWN scene layers, leaving the
    * real engine intact. Counting only the door ids — not every animation on the
@@ -549,7 +549,7 @@ test.describe("Session expiry", () => {
     expect(stored).toBeFalsy();
   });
 
-  test("Session expiry redirects from a newly-covered page (Settings/Privacy) [#178]", async ({
+  test("Session expiry redirects from a newly-covered page (Settings/Privacy) []", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);
@@ -587,7 +587,7 @@ test.describe("Session expiry", () => {
     expect(stored).toBeFalsy();
   });
 
-  test("Session expiry redirects at boot when the placement check 401s (boot hook) [#178]", async ({
+  test("Session expiry redirects at boot when the placement check 401s (boot hook) []", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);

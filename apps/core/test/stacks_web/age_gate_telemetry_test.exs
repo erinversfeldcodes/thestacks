@@ -1,16 +1,15 @@
 defmodule StacksWeb.AgeGateTelemetryTest do
   @moduledoc """
-  Firing tests for the age-gate operational counters added in Issue #228
-  (US-4.2 §13, epic #118).
+    Firing tests for the age-gate operational counters added in.
 
-  Covers:
-  - `AgeGate.enforce/2` — `:blocked` (403) vs `:passed` outcome, emitted
-    ONLY for age-gated books (never the passthrough clause).
-  - `Stacks.AgeVerification.record_verification/3` — `:success` outcome
-    (repointed from the removed self-declared settings endpoint, ADR-020).
+    Covers:
+    - `AgeGate.enforce/2` — `:blocked` vs `:passed` outcome, emitted
+      ONLY for age-gated books (never the passthrough clause).
+    - `Stacks.AgeVerification.record_verification/3` — `:success` outcome
+      (repointed from the removed self-declared settings endpoint, ADR-020).
 
-  Metadata tags are whitelisted atoms only — no email, user id, or other
-  PII (GDPR: telemetry is a warehouse-adjacent sink).
+    Metadata tags are whitelisted atoms only — no email, user id, or other
+    PII (GDPR: telemetry is a warehouse-adjacent sink).
   """
 
   use CoreWeb.ConnCase, async: false

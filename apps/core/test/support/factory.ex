@@ -1,7 +1,7 @@
 defmodule Stacks.Factory do
   @moduledoc """
-  ExMachina factory for test data. Use `build/2` for in-memory structs
-  and `insert/2` for persisted records.
+    ExMachina factory for test data. Use `build/2` for in-memory structs
+    and `insert/2` for persisted records.
   """
 
   use ExMachina.Ecto, repo: Core.Repo
@@ -40,15 +40,15 @@ defmodule Stacks.Factory do
   }
 
   @doc """
-  A user whose email is confirmed — the state `RequireConfirmedEmail` demands,
-  so this is what nearly every test wants.
+    A user whose email is confirmed — the state `RequireConfirmedEmail` demands,
+    so this is what nearly every test wants.
 
-  "Confirmed" is not a *starting* state: it is the result of
-  `Accounts.mark_confirmed/1` running over a registered, unconfirmed account
-  (accounts.ex:438-446). So rather than asserting the end state by hand, this
-  builds the registered state and pushes it through the very changeset
-  `mark_confirmed/1` uses. The two cannot drift: if confirmation ever clears
-  another field or sets a confirmed_at, the factory picks it up for free.
+    "Confirmed" is not a *starting* state: it is the result of
+    `Accounts.mark_confirmed/1` running over a registered, unconfirmed account
+    (accounts.ex:438-446). So rather than asserting the end state by hand, this
+    builds the registered state and pushes it through the very changeset
+    `mark_confirmed/1` uses. The two cannot drift: if confirmation ever clears
+    another field or sets a confirmed_at, the factory picks it up for free.
   """
   def user_factory do
     :unconfirmed_user
@@ -61,15 +61,15 @@ defmodule Stacks.Factory do
   end
 
   @doc """
-  A registered-but-unconfirmed account — the state EVERY real signup passes
-  through, and the one `ExpiredUnverifiedAccountsJob` exists to reap.
+    A registered-but-unconfirmed account — the state EVERY real signup passes
+    through, and the one `ExpiredUnverifiedAccountsJob` exists to reap.
 
-  `Accounts.register/1` commits `email_confirmed: false` plus a `Phoenix.Token`
-  signed with the `"email_confirm"` salt over the user's OWN id
-  (accounts.ex:527-545). The id is therefore generated here rather than left to
-  the database, so the token genuinely verifies — a random string would fixture
-  a token no confirmation link could ever carry, and the confirmation flow
-  would be untestable from the factory.
+    `Accounts.register/1` commits `email_confirmed: false` plus a `Phoenix.Token`
+    signed with the `"email_confirm"` salt over the user's OWN id
+    (accounts.ex:527-545). The id is therefore generated here rather than left to
+    the database, so the token genuinely verifies — a random string would fixture
+    a token no confirmation link could ever carry, and the confirmation flow
+    would be untestable from the factory.
   """
   def unconfirmed_user_factory do
     id = Ecto.UUID.generate()
@@ -108,10 +108,10 @@ defmodule Stacks.Factory do
   end
 
   @doc """
-  A work with NO edition — the one state the ISBN hard gate forbids.
+    A work with NO edition — the one state the ISBN hard gate forbids.
 
-  Only for tests *about* the gate (or `primary_edition/1` returning nil).
-  Everything else wants `:book`.
+    Only for tests *about* the gate (or `primary_edition/1` returning nil).
+    Everything else wants `:book`.
   """
   def editionless_book_factory do
     %Book{
@@ -144,16 +144,16 @@ defmodule Stacks.Factory do
   end
 
   @doc """
-  The primary edition a work is created WITH — never on its own.
+    The primary edition a work is created WITH — never on its own.
 
-  `book: nil` because it is inserted through the work's `has_many :editions`,
-  which fills `book_id` in. `op.book_editions` has a partial unique index
-  (`book_editions_one_primary_per_book`), so hanging one of these off a work
-  that already has its primary edition raises — which is the point.
+    `book: nil` because it is inserted through the work's `has_many:editions`,
+    which fills `book_id` in. `op.book_editions` has a partial unique index
+    (`book_editions_one_primary_per_book`), so hanging one of these off a work
+    that already has its primary edition raises — which is the point.
 
-  Use it to pin the work's ISBN or format:
+    Use it to pin the work's ISBN or format:
 
-      insert(:book, editions: [build(:primary_book_edition, isbn: "9780593098233")])
+        insert(:book, editions: [build(:primary_book_edition, isbn: "9780593098233")])
   """
   def primary_book_edition_factory do
     %BookEdition{

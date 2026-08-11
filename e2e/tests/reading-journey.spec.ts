@@ -207,7 +207,7 @@ async function expectPileEmpty(page: Page, title: string): Promise<void> {
 const SKIP_MSG =
   "POST /api/test/session unavailable (STACKS_E2E_TEST_HELPERS off)";
 
-test.describe("Reading journey (#116)", () => {
+test.describe("Reading journey", () => {
   test("move-browse regression: a browser move re-homes the book across browse listings", async ({
     page,
     request,

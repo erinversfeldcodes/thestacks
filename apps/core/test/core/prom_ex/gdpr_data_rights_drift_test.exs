@@ -1,10 +1,10 @@
 defmodule Core.PromEx.GdprDataRightsDriftTest do
   @moduledoc """
-  Drift guard for the GDPR data-rights dashboard-as-code (238, epic 231; grafana/gdpr_data_rights.json):
-  panels may only query metric families registered by
-  `Core.PromEx.Plugins.Stacks`, and every registered GDPR family must have
-  a panel. Either direction of drift — a renamed metric silently blanking
-  a panel, or a new family shipping invisible — fails CI.
+    Drift guard for the GDPR data-rights dashboard-as-code (238,; grafana/gdpr_data_rights.json):
+    panels may only query metric families registered by
+    `Core.PromEx.Plugins.Stacks`, and every registered GDPR family must have
+    a panel. Either direction of drift — a renamed metric silently blanking
+    a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true
@@ -122,7 +122,7 @@ defmodule Core.PromEx.GdprDataRightsDriftTest do
     end
   end
 
-  describe "drift: the two NEW #238 gap metrics are each on a panel" do
+  describe "drift: the two NEW gap metrics are each on a panel" do
     test "export/deletion latency distributions + audit-read counter are queried and registered" do
       registered = registered_families()
       referenced = panel_metric_names(decoded_dashboard())

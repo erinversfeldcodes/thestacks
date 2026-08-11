@@ -1,10 +1,10 @@
 defmodule Stacks.ModerationTelemetryTest do
   @moduledoc """
-  Firing tests for the 228 moderation-funnel counters: classification
-  outcome (:book/:not_a_book/:ambiguous), ISBN resolution
-  (:resolved/:isbn_not_found), age-gate tiering (:public/:age_gated),
-  and compound-title expansion. Metadata tags are whitelisted atoms —
-  Prometheus label cardinality depends on it.
+    Firing tests for the 228 moderation-funnel counters: classification
+    outcome (:book/:not_a_book/:ambiguous), ISBN resolution
+    (:resolved/:isbn_not_found), age-gate tiering (:public/:age_gated),
+    and compound-title expansion. Metadata tags are whitelisted atoms —
+    Prometheus label cardinality depends on it.
   """
 
   use Core.DataCase, async: false

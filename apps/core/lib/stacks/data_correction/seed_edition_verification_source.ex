@@ -1,12 +1,12 @@
 defmodule Stacks.DataCorrection.SeedEditionVerificationSource do
   @moduledoc """
-  Restores the seed's declared provenance to seed-fixture editions the 335
-  backfill labelled `barcode_unverified` (370). The backfill's fallback was
-  honest for rows of unknown origin, but seed fixtures predate identifier
-  storage, so on staging all 206 editions fell into it — and every
-  book-detail overlay called its own book unidentified. Scopes strictly to
-  rows provably seed-authored (deterministic `Seeds.uuid/1` ids); real
-  user rows of unknown origin keep the honest label.
+    Restores the seed's declared provenance to seed-fixture editions the 335
+    backfill labelled `barcode_unverified`. The backfill's fallback was
+    honest for rows of unknown origin, but seed fixtures predate identifier
+    storage, so on staging all 206 editions fell into it — and every
+    book-detail overlay called its own book unidentified. Scopes strictly to
+    rows provably seed-authored (deterministic `Seeds.uuid/1` ids); real
+    user rows of unknown origin keep the honest label.
   """
 
   @behaviour Stacks.DataCorrection

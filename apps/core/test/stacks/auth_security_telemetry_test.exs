@@ -1,10 +1,10 @@
 defmodule Stacks.AuthSecurityTelemetryTest do
   @moduledoc """
-  Firing tests for the 237 auth-security counters: refresh-token reuse
-  (`[:stacks, :auth, :refresh, :reuse_detected]` on the family-burn
-  branch) and MFA verify outcome (`[:stacks, :auth, :mfa, :verify]` from
-  both TOTP and recovery-code paths). The session absolute-cap emit is
-  covered in the AuthController's own tests.
+    Firing tests for the 237 auth-security counters: refresh-token reuse
+    (`[:stacks,:auth,:refresh,:reuse_detected]` on the family-burn
+    branch) and MFA verify outcome (`[:stacks,:auth,:mfa,:verify]` from
+    both TOTP and recovery-code paths). The session absolute-cap emit is
+    covered in the AuthController's own tests.
   """
 
   use Core.DataCase, async: false

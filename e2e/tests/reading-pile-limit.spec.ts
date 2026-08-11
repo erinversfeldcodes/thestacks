@@ -53,7 +53,7 @@ async function openLibraryBookOverlay(page: Page) {
   return overlay;
 }
 
-test.describe("Reading Pile 50-book limit (#276)", () => {
+test.describe("Reading Pile 50-book limit", () => {
   test("moving a 51st book onto a full pile shows the full-pile message", async ({
     page,
     request,

@@ -1,11 +1,11 @@
 defmodule Stacks.BookshelfTelemetryTest do
   @moduledoc """
-  Layer 11 telemetry for the shelf-browse READ path (112) — the POST is
-  covered by `upload_telemetry_test.exs`; the GET had no firing test.
-  Asserts both mechanisms separately, since either can break alone:
-  Phoenix's `[:phoenix, :router_dispatch, :stop]` fires with the
-  controller's metadata, and the RouteGroup handler stamps
-  `route_group: :bookshelves` into that metadata at emit time.
+    Layer 11 telemetry for the shelf-browse READ path — the POST is
+    covered by `upload_telemetry_test.exs`; the GET had no firing test.
+    Asserts both mechanisms separately, since either can break alone:
+    Phoenix's `[:phoenix,:router_dispatch,:stop]` fires with the
+    controller's metadata, and the RouteGroup handler stamps
+    `route_group::bookshelves` into that metadata at emit time.
   """
 
   use CoreWeb.ConnCase, async: false

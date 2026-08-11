@@ -24,7 +24,7 @@ view config =
         ]
 
 
-{-| ONE nav idiom for every viewport (#318 TR-4): a grouped list of links that
+{-| ONE nav idiom for every viewport (TR-4): a grouped list of links that
 reflows from a left-hand sidebar to a stacked, wrapping row at the 768px
 breakpoint via CSS — the CSS-less mobile `<select>` is gone. The current
 sub-page is marked with `aria-current="page"`, which both announces "you are

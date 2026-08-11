@@ -1,6 +1,6 @@
 module Components.WritingAssistant exposing (view)
 
-{-| Under-construction writing-assistant widget (Issue #184).
+{-| Under-construction writing-assistant widget.
 
 Honest placeholder — the assistant is not built yet. Two states:
 

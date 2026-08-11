@@ -35,7 +35,7 @@ import { suiteAuthFile } from "./helpers";
  * flagged in the accompanying report.
  */
 
-test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", () => {
+test.describe("Privacy — Profile & Shelf visibility", () => {
   test.use({ storageState: suiteAuthFile("settings") });
 
   test("profile visibility: select Discoverable → Save → 'Saved!' confirmation", async ({
@@ -110,7 +110,7 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
  * keeping this test independent of the profile-visibility test's ordering under
  * `fullyParallel`.
  */
-test.describe("Privacy — Blog editor visibility (US-10.2.3)", () => {
+test.describe("Privacy — Blog editor visibility", () => {
   test.use({ storageState: suiteAuthFile("settings") });
 
   test("blog editor: set visibility → Save Draft → 'Draft saved!' → Publish → 'Published!'", async ({
@@ -152,7 +152,7 @@ test.describe("Privacy — Blog editor visibility (US-10.2.3)", () => {
  * (PageController catch-all, no ViewAsPlug), so no view_as-gated API call fires.
  * We therefore drive the banner with the rate-friendly seeded `settings` user.
  */
-test.describe("Privacy — ViewAs preview (US-10.3.1)", () => {
+test.describe("Privacy — ViewAs preview", () => {
   test.use({ storageState: suiteAuthFile("settings") });
 
   test("view_as banner appears and 'Exit preview' strips the param", async ({
@@ -180,7 +180,7 @@ test.describe("Privacy — ViewAs preview (US-10.3.1)", () => {
  * browser-level guarantees: the crawler directives are actually served, and the
  * SPA shell carries the noindex meta.
  */
-test.describe("Privacy — Search engine privacy (US-10.4.1)", () => {
+test.describe("Privacy — Search engine privacy", () => {
   test("robots.txt disallows user-content paths", async ({ request }) => {
     const resp = await request.get("/robots.txt");
     expect(resp.ok()).toBeTruthy();
@@ -204,7 +204,7 @@ test.describe("Privacy — Search engine privacy (US-10.4.1)", () => {
  * The search-privacy informational line lives on the AUTHED settings page
  * (Privacy.elm `settings-section__note` — built in #196), so it needs the seeded user.
  */
-test.describe("Privacy — search-privacy info text (US-10.4.1)", () => {
+test.describe("Privacy — search-privacy info text", () => {
   test.use({ storageState: suiteAuthFile("settings") });
 
   test("settings page shows the 'never appear in search engine results' info text", async ({

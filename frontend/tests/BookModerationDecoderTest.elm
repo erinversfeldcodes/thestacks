@@ -1,6 +1,6 @@
 module BookModerationDecoderTest exposing (suite)
 
-{-| Decoder tests for the owner book-moderation admin list payload (#118).
+{-| Decoder tests for the owner book-moderation admin list payload.
 -}
 
 import Api

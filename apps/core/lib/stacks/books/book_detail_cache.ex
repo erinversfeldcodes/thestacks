@@ -1,9 +1,9 @@
 defmodule Stacks.Books.BookDetailCache do
   @moduledoc """
-  ETS-backed cache for book detail lookups.
+    ETS-backed cache for book detail lookups.
 
-  Stores `{book_id, data, inserted_at_monotonic}` tuples with a 5-minute TTL.
-  A periodic cleanup sweep runs every 60 seconds to evict expired entries.
+    Stores `{book_id, data, inserted_at_monotonic}` tuples with a 5-minute TTL.
+    A periodic cleanup sweep runs every 60 seconds to evict expired entries.
   """
 
   use GenServer
@@ -17,12 +17,12 @@ defmodule Stacks.Books.BookDetailCache do
   end
 
   @doc """
-  Look up a cached book detail. Returns `{:ok, data}` or `{:miss, book_id}`.
+    Look up a cached book detail. Returns `{:ok, data}` or `{:miss, book_id}`.
 
-  Emits `[:stacks, :book_detail_cache, :hit]` on a live hit and
-  `[:stacks, :book_detail_cache, :miss]` on a cold lookup or an expired entry
-  (expired-as-miss). Telemetry metadata carries `book_id` only — the cache is
-  book-keyed and MUST stay free of user identifiers.
+    Emits `[:stacks,:book_detail_cache,:hit]` on a live hit and
+    `[:stacks,:book_detail_cache,:miss]` on a cold lookup or an expired entry
+    (expired-as-miss). Telemetry metadata carries `book_id` only — the cache is
+    book-keyed and MUST stay free of user identifiers.
   """
   @spec get(binary()) :: {:ok, term()} | {:miss, binary()}
   def get(book_id) do

@@ -167,7 +167,7 @@ const WIDTH_TITLES = [
   "The Brothers Karamazov",
 ];
 
-test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
+test.describe("Spine rendering", () => {
   test("spine width is computed from page count across the clamp range", async ({
     page,
     request,
@@ -479,7 +479,7 @@ test.describe("Spine rendering (US-1.3.1 thickness, US-1.3.2 wear)", () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
-  test("a book the owner has written about shows a bookmark ribbon; one without does not (US-1.3.2, #287)", async ({
+  test("a book the owner has written about shows a bookmark ribbon; one without does not", async ({
     page,
     request,
   }) => {

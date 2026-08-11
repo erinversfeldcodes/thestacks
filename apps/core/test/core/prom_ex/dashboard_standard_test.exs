@@ -1,10 +1,10 @@
 defmodule Core.PromEx.DashboardStandardTest do
   @moduledoc """
-  Enforces the "every panel teaches" standard (233,
-  `docs/agents/standards/dashboards.md`) across EVERY dashboard read from
-  `Core.PromEx.dashboards/0` at runtime: each data panel must carry a
-  non-trivial teaching description. New dashboards inherit the rule the
-  moment they are registered.
+    Enforces the "every panel teaches" standard (233,
+    `docs/agents/standards/dashboards.md`) across EVERY dashboard read from
+    `Core.PromEx.dashboards/0` at runtime: each data panel must carry a
+    non-trivial teaching description. New dashboards inherit the rule the
+    moment they are registered.
   """
 
   use ExUnit.Case, async: true

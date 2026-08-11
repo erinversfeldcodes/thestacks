@@ -1,17 +1,17 @@
 defmodule Stacks.UploadPipelineTest do
   @moduledoc """
-  Comprehensive integration tests for the upload pipeline (Issue #111, suites 2-7).
+    Comprehensive integration tests for the upload pipeline.
 
-  Covers the full flow from image upload through vision classification, ISBN
-  resolution, book creation, and shelf placement, plus all failure/rejection paths.
+    Covers the full flow from image upload through vision classification, ISBN
+    resolution, book creation, and shelf placement, plus all failure/rejection paths.
 
-  Suites:
-    2 — API endpoint validation
-    3 — Database assertions
-    4 — Event flow
-    5 — Background job (IdentifyBookJob)
-    6 — External service mocks
-    7 — Storage
+    Suites:
+      2 — API endpoint validation
+      3 — Database assertions
+      4 — Event flow
+      5 — Background job (IdentifyBookJob)
+      6 — External service mocks
+      7 — Storage
   """
 
   use CoreWeb.ConnCase, async: false
@@ -407,7 +407,7 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 2 — POST /api/upload (multi-book partial failure, US-1.1.7)" do
+  describe "Suite 2 — POST /api/upload (multi-book partial failure, )" do
     @tag stories: ["US-1.1.7"], suite: :api
     test "multi-book partial resolution surfaces only the resolved book(s) via SSE stream", %{
       conn: conn,
@@ -570,7 +570,7 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 3 — rejected image retains expires_at and storage_path (US-1.1.2)" do
+  describe "Suite 3 — rejected image retains expires_at and storage_path" do
     @tag stories: ["US-1.1.2"], suite: :db
     test "rejected image retains expires_at for cleanup job" do
       image =
@@ -747,7 +747,7 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 3 — multi-book edition and placement isolation (US-1.1.7)" do
+  describe "Suite 3 — multi-book edition and placement isolation" do
     @tag stories: ["US-1.1.7"], suite: :db
     test "each book from bulk upload has its own book_editions record", %{user: user} do
       image = insert(:uploaded_image, status: "pending")
@@ -1488,7 +1488,7 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 6 — MockClient steering seam (Issue #327)" do
+  describe "Suite 6 — MockClient steering seam" do
     @tag stories: ["US-1.1.1"], suite: :external
     test "put_response/2 steers is_book, and clear/0 restores the default" do
       assert {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK"}} =
@@ -1839,7 +1839,7 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 2 — POST /api/books/:id/merge-format (US-1.1.8)" do
+  describe "Suite 2 — POST /api/books/:id/merge-format" do
     @tag stories: ["US-1.1.8"], suite: :api
     test "with valid ISBN adds edition and returns 200", %{conn: conn, token: token, book: book} do
       merge_isbn = "9780451524935"
@@ -1930,7 +1930,7 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 3 — merge creates non-primary edition (US-1.1.8)" do
+  describe "Suite 3 — merge creates non-primary edition" do
     @tag stories: ["US-1.1.8"], suite: :db
     test "merge creates non-primary edition linked to existing book", %{book: book} do
       merge_isbn = "9780451524935"
@@ -1993,7 +1993,7 @@ defmodule Stacks.UploadPipelineTest do
     end
   end
 
-  describe "Suite 4 — books.edition_merged event (US-1.1.8)" do
+  describe "Suite 4 — books.edition_merged event" do
     @tag stories: ["US-1.1.8"], suite: :events
     test "books.edition_merged event emitted after successful merge", %{book: book} do
       before_count = event_count("books.edition_merged")

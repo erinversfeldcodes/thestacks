@@ -37,7 +37,7 @@ defmodule Stacks.GDPRTest do
       assert is_list(export.placements)
     end
 
-    test "includes the user's own blog posts and comments (#392 — portability of their writing)" do
+    test "includes the user's own blog posts and comments" do
       author = insert(:user)
       post = insert(:post, user: author, title: "My Post", body: "My own words.")
       insert(:post_comment, author: author, post: post, body: "My comment.")
@@ -227,7 +227,7 @@ defmodule Stacks.GDPRTest do
       assert export.embeddings_summary == []
     end
 
-    test "exports the settings personal-data fields verbatim (#299)" do
+    test "exports the settings personal-data fields verbatim" do
       user =
         insert(:user,
           handle: "night_reader",
@@ -252,7 +252,7 @@ defmodule Stacks.GDPRTest do
       assert export.user.notify_event_matches == true
     end
 
-    test "every personal user-schema field appears in the export (schema-sweep guard, #299)" do
+    test "every personal user-schema field appears in the export (schema-sweep guard, )" do
       # Mirrors the erasure schema-level guard (#185): a future column added to
       # op.users fails this test until it is either exported by
       # Export.export_user_data/2 or added to @export_excluded_fields WITH a

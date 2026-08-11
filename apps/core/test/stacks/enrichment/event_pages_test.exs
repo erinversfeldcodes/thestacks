@@ -1,9 +1,9 @@
 defmodule Stacks.Enrichment.EventPagesTest do
   @moduledoc """
-  ⚠️ The classifier's negatives matter more than its positives, and the fixtures here are not
-  invented: `@wordsworth_pages` is the shop's REAL page list from the 2026-08-04 live sitemap walk —
-  45 slugs, exactly one event. A fixture written from the classifier's own assumptions would agree
-  with them by construction; this list was measured before the classifier existed.
+    ⚠️ The classifier's negatives matter more than its positives, and the fixtures here are not
+    invented: `@wordsworth_pages` is the shop's REAL page list from the 2026-08-04 live sitemap walk —
+    45 slugs, exactly one event. A fixture written from the classifier's own assumptions would agree
+    with them by construction; this list was measured before the classifier existed.
   """
   use Core.DataCase, async: true
 

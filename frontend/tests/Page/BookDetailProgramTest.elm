@@ -93,7 +93,7 @@ suite =
         ]
 
 
-{-| #333 multi-shelf highlight: a book on two collection bookshelves is a legal
+{-| multi-shelf highlight: a book on two collection bookshelves is a legal
 state, and the overlay must SAY SO. Before this the page rendered no indication
 at all — and the request behind it 500ed.
 -}
@@ -511,7 +511,7 @@ overlayHasFocusBoundaries =
                     ]
 
 
-{-| The dialog card is the focus-on-open target (#295 item a): it carries the
+{-| The dialog card is the focus-on-open target (item a): it carries the
 stable id `Main.openOverlay` focuses, `tabindex -1` (focusable but out of the
 tab order, so the first forward Tab lands on the close button), and the labelled
 `aria-label` that becomes the first utterance for a screen reader. Asserting the
@@ -803,7 +803,7 @@ removeEndpoint =
     "/api/placements/placement-test-001"
 
 
-{-| A successful move: `Api.moveResponseToResult` maps any 2xx to `Ok ()`.
+{-| A successful move: `Api.moveResponseToResult` maps any 2xx to `Ok`.
 -}
 moveSuccessResponse : Http.Response String
 moveSuccessResponse =
@@ -816,7 +816,7 @@ moveSuccessResponse =
         "{}"
 
 
-{-| A successful remove: `expectWhatever` maps any 2xx to `Ok ()`.
+{-| A successful remove: `expectWhatever` maps any 2xx to `Ok`.
 -}
 removeSuccessResponse : Http.Response String
 removeSuccessResponse =
@@ -829,7 +829,7 @@ removeSuccessResponse =
         ""
 
 
-{-| #15 move-happy: `OpenBookshelfMover → SelectBookshelf → ConfirmMove →
+{-| move-happy: `OpenBookshelfMover → SelectBookshelf → ConfirmMove →
 MoveCompleted (Ok _)` updates `currentBookshelf` (rendered in the shelf-actions
 title), closes the mover, and renders the success message.
 -}
@@ -853,7 +853,7 @@ moveConfirmHappyUpdatesBookshelf =
                     [ Selector.class "shelf-mover" ]
 
 
-{-| #15 remove-happy: `OpenRemoveModal → ConfirmRemove → RemoveCompleted (Ok _)`
+{-| remove-happy: `OpenRemoveModal → ConfirmRemove → RemoveCompleted (Ok _)`
 emits the OutMsg `NavigateTo previousRoute`. The page cannot observe its own
 OutMsg, so this uses the `bookDetailProgramWithOut` harness (which records it)
 with a concrete previous route to assert the navigation target.
@@ -875,7 +875,7 @@ removeConfirmNavigatesToPreviousRoute =
                     (\model -> Expect.equal (BookDetail.NavigateTo Route.AntiLibrary) model.lastOut)
 
 
-{-| The producer end of the undo wire (#375).
+{-| The producer end of the undo wire.
 
 `Main` reads `undoableRemoval` off this model at the instant it acts on the
 `NavigateTo` above — the overlay is about to be torn down, taking the only
@@ -931,7 +931,7 @@ undoableRemovalIsUnsetBeforeRemoval =
                     (\model -> Expect.equal Nothing model.page.undoableRemoval)
 
 
-{-| #16 remove-sad: `RemoveCompleted (Err _)` renders the remove failure copy.
+{-| remove-sad: `RemoveCompleted (Err _)` renders the remove failure copy.
 -}
 removeCompletedErrorShowsMessage : Test
 removeCompletedErrorShowsMessage =
@@ -958,7 +958,7 @@ removeCompletedErrorShowsMessage =
                     [ Selector.text "Failed to remove book. Please try again." ]
 
 
-{-| #16 no-op guard: `ConfirmMove` with `placement == Nothing` fires no request
+{-| no-op guard: `ConfirmMove` with `placement == Nothing` fires no request
 (the simulated-effect layer's `(Just placement, Just token)` guard fails) and
 leaves `moveState` untouched.
 -}
@@ -976,7 +976,7 @@ confirmMoveNoPlacementIsNoOp =
                 |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.moveState)
 
 
-{-| #16 no-op guard: `ConfirmMove` with a placement but `maybeToken == Nothing`
+{-| no-op guard: `ConfirmMove` with a placement but `maybeToken == Nothing`
 fires no request and leaves `moveState` untouched. The placement is injected via
 `BookLoaded` because the no-token init makes no GET.
 -}
@@ -994,7 +994,7 @@ confirmMoveNoTokenIsNoOp =
                 |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.moveState)
 
 
-{-| #16 no-op guard: `ConfirmRemove` with `placement == Nothing` fires no request
+{-| no-op guard: `ConfirmRemove` with `placement == Nothing` fires no request
 and leaves `removeState` untouched.
 -}
 confirmRemoveNoPlacementIsNoOp : Test
@@ -1011,7 +1011,7 @@ confirmRemoveNoPlacementIsNoOp =
                 |> ProgramTest.expectModel (\model -> Expect.equal NotAsked model.removeState)
 
 
-{-| #16 no-op guard: `ConfirmRemove` with a placement but `maybeToken == Nothing`
+{-| no-op guard: `ConfirmRemove` with a placement but `maybeToken == Nothing`
 fires no request and leaves `removeState` untouched.
 -}
 confirmRemoveNoTokenIsNoOp : Test

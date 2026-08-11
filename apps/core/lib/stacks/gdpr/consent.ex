@@ -1,11 +1,11 @@
 defmodule Stacks.GDPR.Consent do
   @moduledoc """
-  GDPR consent: grant, revoke, check — always with timestamps. Features:
-  `"analytics"` and `"writing_assistant"` (revoking the latter enqueues
-  `WritingAssistantDataPurgeWorker` to erase AI session history +
-  embeddings). `feature` must be one of the known labels — it becomes a
-  telemetry tag, and an unbounded string would blow up Prometheus label
-  cardinality; `GDPRController` whitelists before it reaches here.
+    GDPR consent: grant, revoke, check — always with timestamps. Features:
+    `"analytics"` and `"writing_assistant"` (revoking the latter enqueues
+    `WritingAssistantDataPurgeWorker` to erase AI session history +
+    embeddings). `feature` must be one of the known labels — it becomes a
+    telemetry tag, and an unbounded string would blow up Prometheus label
+    cardinality; `GDPRController` whitelists before it reaches here.
   """
 
   alias Core.Repo
@@ -14,7 +14,7 @@ defmodule Stacks.GDPR.Consent do
   alias Stacks.Workers.WritingAssistantDataPurgeWorker
 
   @doc """
-  Grants consent for a user for the given feature. Records the timestamp.
+    Grants consent for a user for the given feature. Records the timestamp.
   """
   @spec grant_consent(binary(), String.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def grant_consent(user_id, feature \\ "analytics") do
@@ -28,12 +28,12 @@ defmodule Stacks.GDPR.Consent do
   end
 
   @doc """
-  Revokes consent for a user for the given feature.
+    Revokes consent for a user for the given feature.
 
-  Revoking `"writing_assistant"` additionally enqueues a
-  `WritingAssistantDataPurgeWorker` for the user: withdrawing consent must delete
-  the AI data that was collected under it (session history + embeddings). The
-  purge is enqueued only after the consent flag is successfully cleared.
+    Revoking `"writing_assistant"` additionally enqueues a
+    `WritingAssistantDataPurgeWorker` for the user: withdrawing consent must delete
+    the AI data that was collected under it (session history + embeddings). The
+    purge is enqueued only after the consent flag is successfully cleared.
   """
   @spec revoke_consent(binary(), String.t()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def revoke_consent(user_id, feature \\ "analytics") do
@@ -48,7 +48,7 @@ defmodule Stacks.GDPR.Consent do
   end
 
   @doc """
-  Returns true if the user has granted consent for the given feature.
+    Returns true if the user has granted consent for the given feature.
   """
   @spec check_consent(binary(), String.t()) :: boolean()
   def check_consent(user_id, feature \\ "analytics") do

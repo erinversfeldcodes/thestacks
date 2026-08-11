@@ -53,7 +53,7 @@ defmodule Stacks.Accounts.ArgonPoolTest do
     end
   end
 
-  describe "Argon2 memory cost (#369)" do
+  describe "Argon2 memory cost" do
     test "m_cost is tuned to 15 (32 MiB), not the 64 MiB library default" do
       assert Application.get_env(:argon2_elixir, :m_cost) == 15
     end

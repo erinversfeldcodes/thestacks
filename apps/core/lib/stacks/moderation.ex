@@ -1,13 +1,13 @@
 defmodule Stacks.Moderation do
   @moduledoc """
-  Moderation pipeline for uploaded book images: is_book? → extract_all →
-  store (resolve ISBNs, store each book as `public`). Age-gating is NOT
-  decided here — only a human marks a book adults-only (ADR-020).
+    Moderation pipeline for uploaded book images: is_book? → extract_all →
+    store (resolve ISBNs, store each book as `public`). Age-gating is NOT
+    decided here — only a human marks a book adults-only (ADR-020).
 
-  Sidecar contract: POST /classify → `{classification, confidence,
-  model_used}`; POST /extract → `{books: [{title, author, potential_isbns,
-  raw_text, confidence}], model_used}`. Context carries `image_url`
-  (preferred, presigned) or `image_b64` (legacy).
+    Sidecar contract: POST /classify → `{classification, confidence,
+    model_used}`; POST /extract → `{books: [{title, author, potential_isbns,
+    raw_text, confidence}], model_used}`. Context carries `image_url`
+    (preferred, presigned) or `image_b64` (legacy).
   """
 
   require Logger
@@ -20,25 +20,25 @@ defmodule Stacks.Moderation do
   alias Stacks.Workers.EnrichBookJob
 
   @typedoc """
-  Closed set of reasons the pipeline fails, following the convention
-  `Stacks.Books.ISBNResolver.error_reason/0` documents: the underlying client's
-  closed set, extended with the two determinations this layer makes itself.
+    Closed set of reasons the pipeline fails, following the convention
+    `Stacks.Books.ISBNResolver.error_reason/0` documents: the underlying client's
+    closed set, extended with the two determinations this layer makes itself.
 
-  `:not_a_book` and `:isbn_not_found` are conclusions about the image, so the
-  worker cancels on them. Everything else is a `Stacks.AI.VisionError.t/0` and
-  carries its own determination.
+    `:not_a_book` and `:isbn_not_found` are conclusions about the image, so the
+    worker cancels on them. Everything else is a `Stacks.AI.VisionError.t/0` and
+    carries its own determination.
 
-  `:resolver_unavailable` is the exception that proves the rule (#344): it is a
-  conclusion about neither the image nor the vision service, but about Open
-  Library / Google Books. It deliberately stays OUTSIDE
-  `Stacks.AI.VisionError.t/0` so the routing below treats it as a fault — which
-  is what it is.
+    `:resolver_unavailable` is the exception that proves the rule: it is a
+    conclusion about neither the image nor the vision service, but about Open
+    Library / Google Books. It deliberately stays OUTSIDE
+    `Stacks.AI.VisionError.t/0` so the routing below treats it as a fault — which
+    is what it is.
 
-  Adding a reason here means deciding, in `Stacks.Workers.IdentifyBookJob`,
-  whether it is a determination or a fault: `classify_failure/1` routes it, and
-  `rejection_token/1` names what the reader is told. Neither guesses — a reason
-  outside `Stacks.AI.VisionError.t/0` is retried and reported as
-  `processing_failed`, which is the safe answer, not a silent one.
+    Adding a reason here means deciding, in `Stacks.Workers.IdentifyBookJob`,
+    whether it is a determination or a fault: `classify_failure/1` routes it, and
+    `rejection_token/1` names what the reader is told. Neither guesses — a reason
+    outside `Stacks.AI.VisionError.t/0` is retried and reported as
+    `processing_failed`, which is the safe answer, not a silent one.
   """
   @type failure_reason ::
           Stacks.AI.VisionError.t()
@@ -47,23 +47,23 @@ defmodule Stacks.Moderation do
           | :resolver_unavailable
 
   @typedoc """
-  Pipeline result. The success shape carries both the resolved books and any
-  candidates that failed to resolve so observability events can be emitted
-  per-failure rather than silently dropped. `rejected` is a list of
-  `{isbn_or_title, reason}` tuples (the first element is the candidate's
-  potential ISBN if available, otherwise its title).
+    Pipeline result. The success shape carries both the resolved books and any
+    candidates that failed to resolve so observability events can be emitted
+    per-failure rather than silently dropped. `rejected` is a list of
+    `{isbn_or_title, reason}` tuples (the first element is the candidate's
+    potential ISBN if available, otherwise its title).
   """
   @type pipeline_result ::
           {:ok, %{resolved: [Stacks.Books.Book.t()], rejected: [{String.t(), atom()}]}}
           | {:error, failure_reason()}
 
   @doc """
-  Runs the full pipeline for one image. `context` needs `image_url`
-  (preferred) or `image_b64`, plus `user_id`/`image_id` for logging.
-  Returns `{:ok, %{resolved: books, rejected: [{candidate_id, reason}]}}`
-  when at least one book resolved — `rejected` surfaces per-candidate
-  failures in multi-book images for observability — or `{:error, reason}`
-  when nothing resolved or the image is not a book.
+    Runs the full pipeline for one image. `context` needs `image_url`
+    (preferred) or `image_b64`, plus `user_id`/`image_id` for logging.
+    Returns `{:ok, %{resolved: books, rejected: [{candidate_id, reason}]}}`
+    when at least one book resolved — `rejected` surfaces per-candidate
+    failures in multi-book images for observability — or `{:error, reason}`
+    when nothing resolved or the image is not a book.
   """
   @spec run_pipeline(map()) :: pipeline_result()
   def run_pipeline(%{image_url: image_url} = context) do

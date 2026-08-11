@@ -1,6 +1,6 @@
 defmodule Stacks.Workers.DataExportJob do
   @moduledoc """
-  Oban worker that generates and stores a GDPR data export for a user.
+    Oban worker that generates and stores a GDPR data export for a user.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

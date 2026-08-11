@@ -1,13 +1,13 @@
 defmodule Core.PromEx.MetricsPusher do
   @moduledoc """
-  Pushes this node's PromEx metrics to self-hosted VictoriaMetrics
-  (ADR-021): every `:metrics_push_interval_ms` it POSTs PromEx's own
-  Prometheus text exposition to VM's `/api/v1/import/prometheus` over 6PN —
-  no remote_write protobuf, no vmagent. Push (not scrape) because Fly's
-  scrape of a scale-to-zero app never delivered a sample (248): pushing
-  runs inside the app and simply stops when it sleeps. Adds the `app`
-  label (`extra_labels`) that scrape infra would otherwise inject, plus
-  `instance` = the Fly machine id.
+    Pushes this node's PromEx metrics to self-hosted VictoriaMetrics
+    (ADR-021): every `:metrics_push_interval_ms` it POSTs PromEx's own
+    Prometheus text exposition to VM's `/api/v1/import/prometheus` over 6PN —
+    no remote_write protobuf, no vmagent. Push (not scrape) because Fly's
+    scrape of a scale-to-zero app never delivered a sample: pushing
+    runs inside the app and simply stops when it sleeps. Adds the `app`
+    label (`extra_labels`) that scrape infra would otherwise inject, plus
+    `instance` = the Fly machine id.
   """
   use GenServer
 
@@ -41,8 +41,8 @@ defmodule Core.PromEx.MetricsPusher do
   end
 
   @doc """
-  Full import URL for a VM base — `<base>/api/v1/import/prometheus?extra_label=app=<app>`.
-  Public for testability.
+    Full import URL for a VM base — `<base>/api/v1/import/prometheus?extra_label=app=<app>`.
+    Public for testability.
   """
   @spec build_url(String.t()) :: String.t()
   def build_url(base) do

@@ -1,11 +1,11 @@
 defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
   @moduledoc """
-  The terminal guarantee, swept over EVERY failure branch rather than one
-  test per bug — the defect is a class (an exit that forgets to mark the
-  row, leaving the reader a spinner), and testing the two known-broken
-  branches proves nothing about the third. Asserts across the branch
-  table: the row always reaches a terminal status on the final attempt,
-  and deterministic errors cancel instead of burning GPU retries.
+    The terminal guarantee, swept over EVERY failure branch rather than one
+    test per bug — the defect is a class (an exit that forgets to mark the
+    row, leaving the reader a spinner), and testing the two known-broken
+    branches proves nothing about the third. Asserts across the branch
+    table: the row always reaches a terminal status on the final attempt,
+    and deterministic errors cancel instead of burning GPU retries.
   """
 
   use Core.DataCase, async: false

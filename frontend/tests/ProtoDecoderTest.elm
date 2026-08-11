@@ -4,10 +4,10 @@ module ProtoDecoderTest exposing (suite)
 
 These tests verify that:
 
-1.  Each decoder parses the JSON shape defined by the corresponding .proto file.
+1.  Each decoder parses the JSON shape defined by the corresponding.proto file.
 2.  Each encoder produces JSON that the decoder can read back unchanged.
 
-If these tests break after a .proto change, the proto/gen/elm/ decoders must
+If these tests break after a.proto change, the proto/gen/elm/ decoders must
 be regenerated or updated by hand to match the new schema.
 
 -}

@@ -1,13 +1,13 @@
 defmodule Stacks.Telemetry.Reporter do
   @moduledoc """
-  Structured-log handler: each handled telemetry event becomes one
-  `Logger.info` `key=value` line, greppable in Fly logs for p95/hit-rate
-  analysis. Handles upload phase stops (`upload_phase phase=… duration_ms=…`),
-  cache lookups (`cache_lookup cache=… tier=l1|l2 outcome=hit|miss`), and
-  cache puts (`cache_put … outcome=stored|error` — emitted from the async
-  task inside `db_put`, the ONLY place L2 write failures surface).
-  Attached once at application start; handler crashes are swallowed by
-  `:telemetry` by design.
+    Structured-log handler: each handled telemetry event becomes one
+    `Logger.info` `key=value` line, greppable in Fly logs for p95/hit-rate
+    analysis. Handles upload phase stops (`upload_phase phase=… duration_ms=…`),
+    cache lookups (`cache_lookup cache=… tier=l1|l2 outcome=hit|miss`), and
+    cache puts (`cache_put … outcome=stored|error` — emitted from the async
+    task inside `db_put`, the ONLY place L2 write failures surface).
+    Attached once at application start; handler crashes are swallowed by
+    `:telemetry` by design.
   """
 
   require Logger
@@ -26,8 +26,8 @@ defmodule Stacks.Telemetry.Reporter do
   ]
 
   @doc """
-  Attach all reporter handlers. Safe to call multiple times — subsequent
-  calls are no-ops because `:telemetry.attach/4` rejects duplicate IDs.
+    Attach all reporter handlers. Safe to call multiple times — subsequent
+    calls are no-ops because `:telemetry.attach/4` rejects duplicate IDs.
   """
   @spec attach() :: :ok
   def attach do

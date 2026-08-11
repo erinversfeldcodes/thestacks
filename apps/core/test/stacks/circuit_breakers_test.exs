@@ -1,16 +1,16 @@
 defmodule Stacks.CircuitBreakersTest do
   @moduledoc """
-  Tests that all circuit breakers are installed at startup and behave correctly
-  when circuits blow via real failure paths.
+    Tests that all circuit breakers are installed at startup and behave correctly
+    when circuits blow via real failure paths.
 
-  Tests are async: false because they share global fuse state. Each test
-  resets fuses in setup/teardown to ensure isolation.
+    Tests are async: false because they share global fuse state. Each test
+    resets fuses in setup/teardown to ensure isolation.
 
-  ## Fuse semantics
+    ## Fuse semantics
 
-  `{:standard, N, T}` blows when the melt count exceeds N within window T,
-  i.e., after N+1 melts. All test fuses use threshold=2 so 3 failures blow
-  the circuit — keeping test loops short without hitting the production threshold.
+    `{:standard, N, T}` blows when the melt count exceeds N within window T,
+    i.e., after N+1 melts. All test fuses use threshold=2 so 3 failures blow
+    the circuit — keeping test loops short without hitting the production threshold.
   """
 
   use ExUnit.Case, async: false
@@ -502,7 +502,7 @@ defmodule Stacks.CircuitBreakersTest do
     end
   end
 
-  describe "probe transport isolation (#381b)" do
+  describe "probe transport isolation" do
     @probe_env_keys [
       :vision_together_api_key,
       :brave_search_api_key,

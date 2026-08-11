@@ -159,7 +159,7 @@ suite =
                             Login.update (GotAuthResponse (Ok fakeAuthResponse)) (Login.init Login.Fresh)
                     in
                     model.submitState |> Expect.equal (Success fakeAuthResponse)
-            , test "persist_first: GotAuthResponse Ok hands the credential up on the SAME update (#359)" <|
+            , test "persist_first: GotAuthResponse Ok hands the credential up on the SAME update" <|
                 \_ ->
                     let
                         ( _, _, outMsg ) =
@@ -174,7 +174,7 @@ suite =
                     in
                     model.submitState |> Expect.equal (Failure (SubmitHttpError Http.NetworkError))
             ]
-        , describe "submit lock (#359 — the trap that had no reset path)"
+        , describe "submit lock"
             [ test "a handed-over credential locks the button so a second submit is impossible" <|
                 \_ ->
                     let
@@ -411,7 +411,7 @@ suite =
         ]
 
 
-{-| ⛔ Issue #374 requirement 2 / #369 requirement 5, as tests.
+{-| ⛔ requirement 2 / requirement 5, as tests.
 
 The catch-all was `"The door remains shut. Invalid email or password."` for every
 status this function does not list — so a 502 from a node restarting mid-deploy
@@ -431,7 +431,7 @@ while the one status that really does mean "wrong password" stopped saying so.
 -}
 unknownStatusClaimsNothing : Test
 unknownStatusClaimsNothing =
-    describe "an unknown failure never claims a known cause (#374)"
+    describe "an unknown failure never claims a known cause"
         [ test "a 502 does not tell the reader their credentials are wrong" <|
             \_ ->
                 Login.errorMessage Login.LoginMode (SubmitHttpError (Http.BadStatus 502))
@@ -460,7 +460,7 @@ unknownStatusClaimsNothing =
         ]
 
 
-{-| The 429, with the wait the server named (#374 requirement 3).
+{-| The 429, with the wait the server named (requirement 3).
 
 Consistency with the 423 lockout copy asserted directly: both end in an
 instruction to wait, and neither invents an interval it was not given.
@@ -468,7 +468,7 @@ instruction to wait, and neither invents an interval it was not given.
 -}
 throttledSignInSuite : Test
 throttledSignInSuite =
-    describe "a throttled sign-in (#374)"
+    describe "a throttled sign-in"
         [ test "a 429 with retry-after names the wait" <|
             \_ ->
                 Login.errorMessage Login.LoginMode (SubmitRateLimited (Just 60))

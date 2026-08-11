@@ -341,7 +341,7 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
            "a fetch was attempted with a nil store key — the config gate did not hold"
   end
 
-  describe "parse_events/2 — structured tier (#321 item 4)" do
+  describe "parse_events/2 — structured tier" do
     test "schema.org JSON-LD events are believed OVER the heading heuristics" do
       store = insert(:bookstore)
       author = insert(:author, name: "Jane Doe")

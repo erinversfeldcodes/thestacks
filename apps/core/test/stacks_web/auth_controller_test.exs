@@ -143,7 +143,7 @@ defmodule StacksWeb.AuthControllerTest do
       assert %{"error" => "email and password are required"} = json_response(conn, 422)
     end
 
-    test "returns 503 service_busy + Retry-After: 5 when the ArgonPool is exhausted (Issue #166)",
+    test "returns 503 service_busy + Retry-After: 5 when the ArgonPool is exhausted",
          %{conn: conn} do
       insert(:user,
         email: "busy@example.com",
@@ -247,7 +247,7 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
-  describe "POST /api/auth/login per-account lockout (Issue #161)" do
+  describe "POST /api/auth/login per-account lockout" do
     setup do
       threshold = Application.get_env(:core, :login_lockout_threshold)
       window = Application.get_env(:core, :login_lockout_window_seconds)
@@ -348,7 +348,7 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
-  describe "JWT lifecycle on GET /api/auth/me (Issue #124)" do
+  describe "JWT lifecycle on GET /api/auth/me" do
     test "an expired JWT is rejected with 401", %{conn: conn} do
       user = insert(:user, email: "expired@example.com", email_confirmed: true)
       {:ok, expired_token, _claims} = Guardian.encode_and_sign(user, %{}, ttl: {-1, :hour})
@@ -463,7 +463,7 @@ defmodule StacksWeb.AuthControllerTest do
       assert json_response(refresh_conn, 401)
     end
 
-    # Issue #181: when Guardian.revoke fails during refresh the action still
+    # when Guardian.revoke fails during refresh the action still
     # mints a fresh token (degraded rotation — the old token stays valid until
     # its TTL expires) but the degraded case must be counted/alertable via
     # telemetry, in addition to the existing Logger.warning.
@@ -548,7 +548,7 @@ defmodule StacksWeb.AuthControllerTest do
       assert json_response(stale_conn, 401)
     end
 
-    test "emits [:stacks, :auth, :session, :expired] with reason :lifetime_cap past the cap (Issue #237)",
+    test "emits [:stacks,:auth,:session,:expired] with reason:lifetime_cap past the cap",
          %{conn: conn} do
       user = insert(:user, email: "refresh-cap-telemetry@example.com", email_confirmed: true)
       now = System.system_time(:second)
@@ -613,7 +613,7 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
-  describe "refresh-token families (Issue #179, Phase 2a)" do
+  describe "refresh-token families" do
     test "login opens exactly one family whose current_jti is the minted token's jti",
          %{conn: conn} do
       user =
@@ -713,7 +713,7 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
-  describe "reuse detection & family revocation (Issue #179, Phase 2b)" do
+  describe "reuse detection & family revocation" do
     defp login_token!(conn, email) do
       insert(:user,
         email: email,
@@ -800,7 +800,7 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
-  describe "rotation grace window (Issue #180, Phase 1)" do
+  describe "rotation grace window" do
     defp login_token_g!(conn, email) do
       insert(:user,
         email: email,

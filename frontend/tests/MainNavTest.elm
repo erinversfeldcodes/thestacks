@@ -7,7 +7,7 @@ the full update loop cannot be program-tested. Following the pattern in
 NavigationProgramTest, we test the pure surfaces directly:
 
 1.  `viewNav` renders the correct nav for authenticated vs unauthenticated state
-2.  the Elm-owned disclosures (#318 TR-1): a menu's contents are in the DOM only
+2.  the Elm-owned disclosures (TR-1): a menu's contents are in the DOM only
     when its `NavMenu` is open, `aria-expanded` reflects that, "Add Book" is a
     persistent primary action, and the active highlight follows child routes
 3.  `decodeFlags` restores a `StoredAuth` from localStorage-shaped flags (the
@@ -51,14 +51,14 @@ readerAuth =
     { user = readerUser, token = "tok" }
 
 
-{-| The Add Book badge, found the way a test should find it (Issue #351).
+{-| The Add Book badge, found the way a test should find it.
 -}
 badge : Selector.Selector
 badge =
     Selector.attribute (Attr.attribute "data-testid" "nav-upload-badge")
 
 
-{-| The persistent Add Book primary action (#318 TR-1) — a `btn btn--primary`
+{-| The persistent Add Book primary action (TR-1) — a `btn btn--primary`
 link, NOT a dropdown entry.
 -}
 addBook : List Selector.Selector
@@ -188,7 +188,7 @@ suite =
                     navClosed
                         |> Query.hasNot [ Selector.text "Admin" ]
             ]
-        , describe "Elm-owned disclosure (#318 TR-1)"
+        , describe "Elm-owned disclosure"
             [ -- ⛔ THE assertion that fails on the OLD hover-only nav. There the
               -- five bookshelves were top-level `navItem`s, in the DOM always
               -- (the CSS `:hover` reveal only changed `display`), so this
@@ -257,7 +257,7 @@ suite =
                     Main.toggleNavMenu MarketplaceMenu (Just BookshelvesMenu)
                         |> Expect.equal (Just MarketplaceMenu)
             ]
-        , describe "Add Book — persistent primary action (#318 TR-1)"
+        , describe "Add Book — persistent primary action"
             [ -- Reachable on touch and keyboard because it is ALWAYS rendered and
               test "is present with all menus closed (no hover/open needed)" <|
                 \() ->
@@ -274,7 +274,7 @@ suite =
                         |> Query.find addBook
                         |> Query.has [ Selector.class "btn", Selector.class "btn--primary" ]
             ]
-        , describe "active-route highlight on child routes (#318 TR-1)"
+        , describe "active-route highlight on child routes"
             [ test "a book-detail keeps the Bookshelves item active" <|
                 \() ->
                     Main.viewNav (BookDetail "b1") (Just readerAuth) Nothing UserMenu.init Types.RemoteData.NotAsked
@@ -288,7 +288,7 @@ suite =
                         |> Query.find [ Selector.class "app-nav__item--active" ]
                         |> Query.has [ Selector.text "Marketplace" ]
             ]
-        , describe "the Add Book badge (Issue #351)"
+        , describe "the Add Book badge"
             [ test "counts the uploads awaiting confirmation" <|
                 \() ->
                     navWithInbox

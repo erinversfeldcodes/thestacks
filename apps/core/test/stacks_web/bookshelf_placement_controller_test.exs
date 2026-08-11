@@ -1,9 +1,9 @@
 defmodule StacksWeb.BookshelfPlacementControllerTest do
   @moduledoc """
-  Tests for:
-  - POST /api/bookshelves/:bookshelf_name/placements
-  - PUT  /api/placements/:id/move
-  - DELETE /api/placements/:id
+    Tests for:
+    - POST /api/bookshelves/:bookshelf_name/placements
+    - PUT  /api/placements/:id/move
+    - DELETE /api/placements/:id
   """
 
   use CoreWeb.ConnCase, async: true
@@ -270,7 +270,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     end
   end
 
-  describe "PUT /api/placements/:id/move — abandon transition (US-1.6.2)" do
+  describe "PUT /api/placements/:id/move — abandon transition" do
     test "moving a reading_pile placement to antilibrary lands it on the antilibrary browse", %{
       conn: conn
     } do
@@ -290,7 +290,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     end
   end
 
-  describe "PUT /api/placements/:id/move — re-read round-trip (US-1.6.3)" do
+  describe "PUT /api/placements/:id/move — re-read round-trip" do
     test "a library→reading_pile→library round-trip writes two history rows and ends in library",
          %{
            conn: conn

@@ -1,6 +1,6 @@
 module Animation.TransitionTest exposing (suite)
 
-{-| US-1.2.5 — bookshelf navigation transitions (issue #277, punch #9).
+{-| — bookshelf navigation transitions (issue,).
 
 The three bookcase bookshelves are ordered as the nav renders them
 (`Main.elm:2594-2598`): Library, AntiLibrary, WishList. Navigating _along_ that

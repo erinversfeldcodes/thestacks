@@ -1,11 +1,11 @@
 defmodule StacksWeb.ShelfControllerTest do
   @moduledoc """
-  Tests for the shelf management endpoints:
-  - GET    /api/bookshelves/:name/shelves
-  - POST   /api/bookshelves/:name/shelves
-  - DELETE /api/shelves/:id
-  - PUT    /api/bookshelves/:name/shelves/reorder
-  - PUT    /api/placements/:id/shelf  (new action on BookshelfPlacementController)
+    Tests for the shelf management endpoints:
+    - GET    /api/bookshelves/:name/shelves
+    - POST   /api/bookshelves/:name/shelves
+    - DELETE /api/shelves/:id
+    - PUT    /api/bookshelves/:name/shelves/reorder
+    - PUT    /api/placements/:id/shelf  (new action on BookshelfPlacementController)
   """
 
   use CoreWeb.ConnCase, async: true

@@ -1,10 +1,10 @@
 defmodule Stacks.Books.EnrichmentDiagnosticsTest do
   @moduledoc """
-  Diagnostics for the EnrichBookJob/ISBNResolver path: reproduces four
-  observed/hypothesised failure modes of the barcode-upload E2E and
-  asserts the Tier-2 telemetry fires for each, so any future failure
-  leaves its fingerprint in the logs (cache-poisoned negative, provider
-  outage, fuse open, placeholder-never-enriched).
+    Diagnostics for the EnrichBookJob/ISBNResolver path: reproduces four
+    observed/hypothesised failure modes of the barcode-upload E2E and
+    asserts the Tier-2 telemetry fires for each, so any future failure
+    leaves its fingerprint in the logs (cache-poisoned negative, provider
+    outage, fuse open, placeholder-never-enriched).
   """
 
   use Core.DataCase, async: false

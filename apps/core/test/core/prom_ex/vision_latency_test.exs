@@ -1,11 +1,11 @@
 defmodule Core.PromEx.VisionLatencyTest do
   @moduledoc """
-  349 — the vision-call duration was emitted but nothing consumed it, so
-  upload timeouts were sized from a comment's estimate. Proves what a
-  compiling metric definition does not: the distribution is ATTACHED
-  (PromEx registered a handler for its event) and EXPORTED under the
-  expected family name with the expected buckets — so the p95 exists
-  where the SLO gate and timeout-derivation can read it.
+    349 — the vision-call duration was emitted but nothing consumed it, so
+    upload timeouts were sized from a comment's estimate. Proves what a
+    compiling metric definition does not: the distribution is ATTACHED
+    (PromEx registered a handler for its event) and EXPORTED under the
+    expected family name with the expected buckets — so the p95 exists
+    where the SLO gate and timeout-derivation can read it.
   """
 
   use ExUnit.Case, async: false
@@ -99,7 +99,7 @@ defmodule Core.PromEx.VisionLatencyTest do
     end
   end
 
-  describe "buckets span the claim being tested (Issue #349 requirement 2)" do
+  describe "buckets span the claim being tested" do
     test "the top finite bucket is the client's own give-up deadline" do
       ceiling = VisionClient.receive_timeout_ms()
 

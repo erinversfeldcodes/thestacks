@@ -1,11 +1,11 @@
 defmodule Core.Repo.Migrations.BackfillPlacementBookEditionId do
   @moduledoc """
-  Companion to the proto-generated `add :book_edition_id` (335 D2):
-  points every placement at its work's primary edition. Placements only
-  ever recorded the WORK; "I own the hardback" had nowhere to live except
-  `formats` (kept — read paths still use it). Stays NULLABLE with
-  `ON DELETE SET NULL`: the edition is not the placement's identity,
-  `book_id` is.
+    Companion to the proto-generated `add:book_edition_id`:
+    points every placement at its work's primary edition. Placements only
+    ever recorded the WORK; "I own the hardback" had nowhere to live except
+    `formats` (kept — read paths still use it). Stays NULLABLE with
+    `ON DELETE SET NULL`: the edition is not the placement's identity,
+    `book_id` is.
   """
   use Ecto.Migration
 

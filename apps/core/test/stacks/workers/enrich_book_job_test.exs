@@ -1,16 +1,16 @@
 defmodule Stacks.Workers.EnrichBookJobTest do
   @moduledoc """
-  Tests for Stacks.Workers.EnrichBookJob.
+    Tests for Stacks.Workers.EnrichBookJob.
 
-  The worker is enqueued by `Stacks.Moderation.store_book/3` when a
-  checksum-valid ISBN takes the fast path — the synchronous OL/GB call
-  is skipped, a placeholder book is inserted, and this worker fills in
-  the real metadata asynchronously. Tests verify:
+    The worker is enqueued by `Stacks.Moderation.store_book/3` when a
+    checksum-valid ISBN takes the fast path — the synchronous OL/GB call
+    is skipped, a placeholder book is inserted, and this worker fills in
+    the real metadata asynchronously. Tests verify:
 
-    * Valid ISBN with a placeholder book → title + cover get filled in
-    * Unknown ISBN → :ok, no-op (book row doesn't exist yet)
-    * Already-enriched book → :ok, no-op (idempotent on retry)
-    * Legacy book_id arg shape → resolved via BookEdition join
+      * Valid ISBN with a placeholder book → title + cover get filled in
+      * Unknown ISBN →:ok, no-op (book row doesn't exist yet)
+      * Already-enriched book →:ok, no-op (idempotent on retry)
+      * Legacy book_id arg shape → resolved via BookEdition join
   """
 
   use Core.DataCase, async: true
@@ -84,7 +84,7 @@ defmodule Stacks.Workers.EnrichBookJobTest do
       assert updated.author.name == "Umberto Eco"
     end
 
-    test "enrichment stops the edition claiming nothing ever verified it (#344)" do
+    test "enrichment stops the edition claiming nothing ever verified it" do
       isbn = "9780679783268"
 
       {:ok, book} =
@@ -123,7 +123,7 @@ defmodule Stacks.Workers.EnrichBookJobTest do
       assert Repo.get!(Book, book.id).title == "Pride and Prejudice"
     end
 
-    test "enrichment stores the cross-reference id its provenance claim is read off (#346)" do
+    test "enrichment stores the cross-reference id its provenance claim is read off" do
       isbn = "9780141439518"
 
       {:ok, book} =

@@ -69,7 +69,7 @@ test.describe("Bookshelf pages — accessibility attributes", () => {
   });
 });
 
-test.describe("Bookshelf pages — bookcase structure (US-1.2.1/2/3)", () => {
+test.describe("Bookshelf pages — bookcase structure", () => {
 
   test.afterEach(async ({ page }) => {
     await expect(page.getByTestId("onboarding-overlay")).toHaveCount(0);
@@ -277,14 +277,14 @@ test.describe("Bookshelf pages — error state", () => {
   });
 });
 
-test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
+test.describe("Bookshelf pages — empty shelf hint text", () => {
   test.use({ storageState: suiteAuthFile("empty-shelves") });
 
   test.afterEach(async ({ page }) => {
     await expect(page.getByTestId("onboarding-overlay")).toHaveCount(0);
   });
 
-  test("Library empty state matches US-1.6.5 wording", async ({ page }) => {
+  test("Library empty state matches wording", async ({ page }) => {
     await page.goto("/library");
     await page.waitForSelector(".shelf-library", { timeout: 10000 });
     const emptyText = page.locator(".shelf-row__empty-text");
@@ -294,7 +294,7 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
     );
   });
 
-  test("AntiLibrary empty state matches US-1.6.5 wording", async ({
+  test("AntiLibrary empty state matches wording", async ({
     page,
   }) => {
     await page.goto("/antilibrary");
@@ -306,7 +306,7 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
     );
   });
 
-  test("WishList empty state matches US-1.6.5 wording", async ({ page }) => {
+  test("WishList empty state matches wording", async ({ page }) => {
     await page.goto("/wishlist");
     await page.waitForSelector(".shelf-wishlist", { timeout: 10000 });
     const emptyText = page.locator(".shelf-row__empty-text");
@@ -316,7 +316,7 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
     );
   });
 
-  test("Reading Pile empty state matches US-1.6.5 wording", async ({
+  test("Reading Pile empty state matches wording", async ({
     page,
   }) => {
     await page.goto("/reading-pile");
@@ -328,7 +328,7 @@ test.describe("Bookshelf pages — empty shelf hint text (US-1.6.5)", () => {
     );
   });
 
-  test("Looking for a Home empty state matches US-1.6.5 wording", async ({
+  test("Looking for a Home empty state matches wording", async ({
     page,
   }) => {
     await page.goto("/looking-for-home");

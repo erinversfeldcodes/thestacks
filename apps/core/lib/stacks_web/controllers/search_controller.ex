@@ -11,13 +11,12 @@ defmodule StacksWeb.SearchController do
   alias StacksWeb.ProtoJSON
 
   @doc """
-  GET /api/search?q=… — sectioned full-text search over book titles
-  (285). `collection` = the viewer's own active-placement matches (no
-  provenance); `platform_hits` = platform-visible books excluding the
-  viewer's collection, each with optional discovery provenance (listing /
-  looking_for_home). `results` is DEPRECATED (298): always empty, key kept
-  for wire-compat, proto field number reserved. Anonymous callers get only
-  `platform_hits`.
+    GET /api/search?q=… — sectioned full-text search over book titles. `collection` = the viewer's own active-placement matches (no
+    provenance); `platform_hits` = platform-visible books excluding the
+    viewer's collection, each with optional discovery provenance (listing /
+    looking_for_home). `results` is DEPRECATED: always empty, key kept
+    for wire-compat, proto field number reserved. Anonymous callers get only
+    `platform_hits`.
   """
   def index(conn, %{"q" => query}) when is_binary(query) and query != "" do
     limit = parse_limit(conn.params["limit"])

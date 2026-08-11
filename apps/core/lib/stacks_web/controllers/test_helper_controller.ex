@@ -1,9 +1,9 @@
 defmodule StacksWeb.TestHelperController do
   @moduledoc """
-  Test-only E2E endpoints. Deliberately UNAUTHENTICATED — the suite calls
-  them before it has a session. The sole gate is `Plugs.E2ETestHelper`
-  (404 unless `STACKS_E2E_TEST_HELPERS=1`); user-scoped helpers are further
-  restricted to `.test`-domain emails, which no real account can hold.
+    Test-only E2E endpoints. Deliberately UNAUTHENTICATED — the suite calls
+    them before it has a session. The sole gate is `Plugs.E2ETestHelper`
+    (404 unless `STACKS_E2E_TEST_HELPERS=1`); user-scoped helpers are further
+    restricted to `.test`-domain emails, which no real account can hold.
   """
 
   use CoreWeb, :controller
@@ -24,11 +24,11 @@ defmodule StacksWeb.TestHelperController do
   @e2e_seed_isbn_prefix "97899999"
 
   @doc """
-  GET /api/test/confirmation-token?email=<email>
+    GET /api/test/confirmation-token?email=<email>
 
-  Returns the raw email-confirmation token so the suite can drive the
-  confirm-email flow without real delivery. `200 {"token": ...}` for a
-  test-domain user holding a token; `404` for anything out of scope.
+    Returns the raw email-confirmation token so the suite can drive the
+    confirm-email flow without real delivery. `200 {"token":...}` for a
+    test-domain user holding a token; `404` for anything out of scope.
   """
   def confirmation_token(conn, %{"email" => email}) when is_binary(email) do
     with true <- e2e_test_email?(email),
@@ -43,13 +43,13 @@ defmodule StacksWeb.TestHelperController do
   def confirmation_token(conn, _params), do: not_found(conn)
 
   @doc """
-  GET /api/test/sent-emails?email=<email>
+    GET /api/test/sent-emails?email=<email>
 
-  Returns emails delivered to the address from the Swoosh **Local** (in-memory)
-  mailbox, so the suite can prove the whole send path, not just that a DB token
-  exists. `.test`-domain addresses only; exact-recipient match — real users'
-  mail can never surface. `200 {"emails": [...]}` newest first (empty when the
-  stack uses a real provider); `404` out of scope.
+    Returns emails delivered to the address from the Swoosh **Local** (in-memory)
+    mailbox, so the suite can prove the whole send path, not just that a DB token
+    exists. `.test`-domain addresses only; exact-recipient match — real users'
+    mail can never surface. `200 {"emails": [...]}` newest first (empty when the
+    stack uses a real provider); `404` out of scope.
   """
   def sent_emails(conn, %{"email" => email}) when is_binary(email) do
     if e2e_test_email?(email) do
@@ -89,12 +89,12 @@ defmodule StacksWeb.TestHelperController do
   defp address(addr) when is_binary(addr), do: addr
 
   @doc """
-  PUT /api/test/age-verification  body: {"email", "verified"}
+    PUT /api/test/age-verification  body: {"email", "verified"}
 
-  Sets or clears a user's age verification without a real KYC provider
-  (ADR-020: production has none). `true` records via
-  `AgeVerification.record_verification/3` with provider `"e2e_test_helper"`;
-  `false` clears. `.test`-domain emails only; `200 {"ok": true}` or `404`.
+    Sets or clears a user's age verification without a real KYC provider
+    (ADR-020: production has none). `true` records via
+    `AgeVerification.record_verification/3` with provider `"e2e_test_helper"`;
+    `false` clears. `.test`-domain emails only; `200 {"ok": true}` or `404`.
   """
   def set_age_verification(conn, %{"email" => email, "verified" => verified})
       when is_binary(email) and is_boolean(verified) do
@@ -117,16 +117,16 @@ defmodule StacksWeb.TestHelperController do
   @mint_password "e2e-password"
 
   @doc """
-  POST /api/test/session  body: {"email"?, "display_name"?}
+    POST /api/test/session  body: {"email"?, "display_name"?}
 
-  Mints a fresh CONFIRMED user + session token in one call, bypassing the
-  shared `:auth` rate bucket. The token uses the exact `AuthController.login`
-  path (Guardian + fresh `family_id` + `rotate_token_family/1`, failing closed).
+    Mints a fresh CONFIRMED user + session token in one call, bypassing the
+    shared `:auth` rate bucket. The token uses the exact `AuthController.login`
+    path (Guardian + fresh `family_id` + `rotate_token_family/1`, failing closed).
 
-  ⚠️ This endpoint MINTS AUTHENTICATION: the email MUST be in the reserved
-  `.test` TLD (else plain 404, no user created), so a session can never be
-  minted for a real account. `201 {email, token, user_id, display_name}`
-  or `422 {errors}`.
+    ⚠️ This endpoint MINTS AUTHENTICATION: the email MUST be in the reserved
+    `.test` TLD (else plain 404, no user created), so a session can never be
+    minted for a real account. `201 {email, token, user_id, display_name}`
+    or `422 {errors}`.
   """
   def mint_session(conn, params) do
     email = Map.get(params, "email") || generated_mint_email()
@@ -156,13 +156,13 @@ defmodule StacksWeb.TestHelperController do
   end
 
   @doc """
-  POST /api/test/book-writing  body: {"email", "book_id", "title"?}
+    POST /api/test/book-writing  body: {"email", "book_id", "title"?}
 
-  Seeds a blog post with a VISIBLE manual book association so the spine
-  bookmark-ribbon E2E is deterministic (production associates via an async LLM
-  worker). Writes the same end state via `Blog.associate_book/3`. `.test`-domain
-  emails only. `201 {ok, post_id, association_id}`, `404` out of scope,
-  `422 {errors}`.
+    Seeds a blog post with a VISIBLE manual book association so the spine
+    bookmark-ribbon E2E is deterministic (production associates via an async LLM
+    worker). Writes the same end state via `Blog.associate_book/3`. `.test`-domain
+    emails only. `201 {ok, post_id, association_id}`, `404` out of scope,
+    `422 {errors}`.
   """
   def seed_book_writing(conn, %{"email" => email, "book_id" => book_id} = params)
       when is_binary(email) and is_binary(book_id) do
@@ -190,17 +190,17 @@ defmodule StacksWeb.TestHelperController do
   def seed_book_writing(conn, _params), do: not_found(conn)
 
   @doc """
-  POST /api/test/book-description  body: {"title", "description", "isbn"?}
+    POST /api/test/book-description  body: {"title", "description", "isbn"?}
 
-  Creates a NEW public single-edition book so `description_tsv` populates for
-  the deep-search E2E. An omitted ISBN gets a checksum-valid one in the reserved
-  E2E-seed block (`generate_valid_isbn13/0`), so seeded books are identifiable
-  and can never masquerade as verified catalogue.
+    Creates a NEW public single-edition book so `description_tsv` populates for
+    the deep-search E2E. An omitted ISBN gets a checksum-valid one in the reserved
+    E2E-seed block (`generate_valid_isbn13/0`), so seeded books are identifiable
+    and can never masquerade as verified catalogue.
 
-  ⚠️ The one helper that inserts PUBLIC catalogue rows past the ISBN Hard
-  Gate's provider check — an accepted, bounded risk (Issue #297): reserved
-  prefix, insert-only (never mutates shared rows), flag-gated. Writes no user
-  data/PII. `201 {book_id, edition_id, isbn}` or `422 {errors}`.
+    ⚠️ The one helper that inserts PUBLIC catalogue rows past the ISBN Hard
+    Gate's provider check — an accepted, bounded risk: reserved
+    prefix, insert-only (never mutates shared rows), flag-gated. Writes no user
+    data/PII. `201 {book_id, edition_id, isbn}` or `422 {errors}`.
   """
   def seed_book_description(conn, %{"title" => title, "description" => description} = params)
       when is_binary(title) and is_binary(description) do

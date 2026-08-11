@@ -1,10 +1,10 @@
 defmodule Stacks.Accounts.GuardianDbJwtTest do
   @moduledoc """
-  174 — the raw signed bearer must never persist in
-  `op.guardian_tokens.jwt`: Guardian.DB stores the full token though
-  verify/revoke/purge never read it (verify is jti+aud, purge is exp), so
-  a SELECT-capable compromise would yield replayable sessions. Asserts
-  the column is stored redacted and the auth flows still work without it.
+    174 — the raw signed bearer must never persist in
+    `op.guardian_tokens.jwt`: Guardian.DB stores the full token though
+    verify/revoke/purge never read it (verify is jti+aud, purge is exp), so
+    a SELECT-capable compromise would yield replayable sessions. Asserts
+    the column is stored redacted and the auth flows still work without it.
   """
 
   use Core.DataCase, async: false
@@ -91,7 +91,7 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
     end
   end
 
-  describe "no #124-A2 regression — the four Guardian.DB hooks still work with jwt nulled" do
+  describe "no -A2 regression — the four Guardian.DB hooks still work with jwt nulled" do
     test "a freshly issued token verifies (after_encode_and_sign + on_verify)" do
       user = insert(:user)
 

@@ -1,7 +1,7 @@
 defmodule Stacks.Notifications.NotificationHandlersTest do
   @moduledoc """
-  Tests for GroupInvitationHandler, OfferNotificationHandler, and
-  WishlistAvailabilityHandler.
+    Tests for GroupInvitationHandler, OfferNotificationHandler, and
+    WishlistAvailabilityHandler.
   """
 
   use Core.DataCase, async: false

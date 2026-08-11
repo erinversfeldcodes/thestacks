@@ -91,7 +91,7 @@ async function pickMergeTarget(
   throw new Error("no readable catalogue book to merge onto");
 }
 
-test.describe("un-merge correction round trip (#384)", () => {
+test.describe("un-merge correction round trip", () => {
   test("a merged edition can be split onto its own work, exactly once", async ({
     request,
   }) => {

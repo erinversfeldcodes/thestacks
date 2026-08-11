@@ -1,7 +1,7 @@
 module Page.PrivacyBlockedUsersTest exposing (suite)
 
 {-| State-machine tests for the "Blocked Users" section added to
-Page.Settings.Privacy (Issue #193, US-10.1.2 frontend). Covers loading the
+Page.Settings.Privacy. Covers loading the
 list on entry, rendering each blocked reader with an Unblock control, the
 happy unblock path (row removed), a not\_found unblock, and the 401 escalation.
 -}

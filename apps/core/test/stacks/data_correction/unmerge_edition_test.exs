@@ -1,10 +1,10 @@
 defmodule Stacks.DataCorrection.UnmergeEditionTest do
   @moduledoc """
-  376 — un-merge, the inverse of `merge_edition/2`. The centrepiece is
-  `describe "placements"`: the hard question is what happens to readers,
-  and the answer must be provably "nothing" — asserted in both directions
-  (the old work keeps its placements; the new work starts with none),
-  shaped to fail if the code ever moves them.
+    376 — un-merge, the inverse of `merge_edition/2`. The centrepiece is
+    `describe "placements"`: the hard question is what happens to readers,
+    and the answer must be provably "nothing" — asserted in both directions
+    (the old work keeps its placements; the new work starts with none),
+    shaped to fail if the code ever moves them.
   """
   use Core.DataCase, async: false
 
@@ -255,7 +255,7 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       refute ctx.merged.id in edition_ids
     end
 
-    test "a placement naming the split edition follows it to the new work (#396)", ctx do
+    test "a placement naming the split edition follows it to the new work", ctx do
       scanner = insert(:placement, book: ctx.work, book_edition_id: ctx.merged.id)
 
       DataCorrection.run_targeted(UnmergeEdition, argument(ctx.merged.id),
@@ -272,7 +272,7 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       assert Repo.aggregate(from(p in Placement, where: p.book_id == ^ctx.work.id), :count) == 2
     end
 
-    test "the plan states both counts — who follows the edition, who stays (#396)", ctx do
+    test "the plan states both counts — who follows the edition, who stays", ctx do
       insert(:placement, book: ctx.work, book_edition_id: ctx.merged.id)
 
       {:ok, [change]} = UnmergeEdition.plan(argument(ctx.merged.id))

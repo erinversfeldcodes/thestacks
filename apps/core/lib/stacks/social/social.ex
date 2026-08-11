@@ -1,7 +1,7 @@
 defmodule Stacks.Social do
   @moduledoc """
-  Context for social features: user blocks, groups, group membership,
-  group invitations, and visibility grants.
+    Context for social features: user blocks, groups, group membership,
+    group invitations, and visibility grants.
   """
 
   import Ecto.Changeset
@@ -79,11 +79,11 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Blocks a user. Inserts a row into op.user_blocks and emits a
-  `social.user_blocked` event.
+    Blocks a user. Inserts a row into op.user_blocks and emits a
+    `social.user_blocked` event.
 
-  Returns `{:ok, block}` on success or `{:error, changeset}` if the
-  constraint is violated (e.g. duplicate block).
+    Returns `{:ok, block}` on success or `{:error, changeset}` if the
+    constraint is violated (e.g. duplicate block).
   """
   @spec block_user(String.t(), String.t()) :: {:ok, UserBlock.t()} | {:error, Ecto.Changeset.t()}
   def block_user(blocker_id, blocked_id) do
@@ -125,11 +125,11 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Unblocks a user. Deletes the block row from op.user_blocks and emits a
-  `social.user_unblocked` event.
+    Unblocks a user. Deletes the block row from op.user_blocks and emits a
+    `social.user_unblocked` event.
 
-  Returns `{:ok, :unblocked}` on success or `{:error, :not_found}` if no
-  block record exists.
+    Returns `{:ok,:unblocked}` on success or `{:error,:not_found}` if no
+    block record exists.
   """
   @spec unblock_user(String.t(), String.t()) :: {:ok, :unblocked} | {:error, :not_found}
   def unblock_user(blocker_id, blocked_id) do
@@ -159,9 +159,9 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Returns a paginated list of users blocked by `blocker_id`, along with the total count.
+    Returns a paginated list of users blocked by `blocker_id`, along with the total count.
 
-  Each entry is a map with `:id`, `:display_name`, and `:blocked_at`.
+    Each entry is a map with `:id`, `:display_name`, and `:blocked_at`.
   """
   @spec list_blocked_users(String.t(), keyword()) :: {[map()], non_neg_integer()}
   def list_blocked_users(blocker_id, opts \\ []) do
@@ -188,10 +188,10 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Returns true if either user has blocked the other (bidirectional check).
+    Returns true if either user has blocked the other (bidirectional check).
 
-  `blocked?(viewer_id, owner_id)` returns true if viewer blocked owner
-  OR owner blocked viewer.
+    `blocked?(viewer_id, owner_id)` returns true if viewer blocked owner
+    OR owner blocked viewer.
   """
   @spec blocked?(String.t(), String.t()) :: boolean()
   def blocked?(viewer_id, owner_id) do
@@ -205,7 +205,7 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Returns the IDs of all users blocked by the given user.
+    Returns the IDs of all users blocked by the given user.
   """
   @spec blocked_user_ids(binary()) :: [binary()]
   def blocked_user_ids(user_id) do
@@ -218,10 +218,10 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Returns true only if the viewer has blocked the owner (one direction).
+    Returns true only if the viewer has blocked the owner (one direction).
 
-  `blocked_by?(viewer_id, owner_id)` returns true if viewer is the blocker
-  and owner is the blocked user.
+    `blocked_by?(viewer_id, owner_id)` returns true if viewer is the blocker
+    and owner is the blocked user.
   """
   @spec blocked_by?(String.t(), String.t()) :: boolean()
   def blocked_by?(viewer_id, owner_id) do
@@ -234,8 +234,8 @@ defmodule Stacks.Social do
 
   @dialyzer {:no_opaque, create_group: 2}
   @doc """
-  Creates a group and inserts the owner as the first member.
-  Emits a `group.created` event.
+    Creates a group and inserts the owner as the first member.
+    Emits a `group.created` event.
   """
   def create_group(owner_id, attrs) do
     attrs = Map.merge(attrs, %{owner_id: owner_id})
@@ -274,8 +274,8 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Returns a group if the viewer is authorized to see it.
-  Platform-visible groups are accessible to any viewer; invite-only groups only to members.
+    Returns a group if the viewer is authorized to see it.
+    Platform-visible groups are accessible to any viewer; invite-only groups only to members.
   """
   def get_group(group_id, viewer_id) do
     case Repo.get(Group, group_id) do
@@ -328,8 +328,8 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Invites a user to a group by email or display_name.
-  Emits `group.invitation_sent` event.
+    Invites a user to a group by email or display_name.
+    Emits `group.invitation_sent` event.
   """
   def invite_member(group_id, inviter_id, invitee_identifier) do
     with :ok <- if(member?(group_id, inviter_id), do: :ok, else: {:error, :unauthorized}),
@@ -369,8 +369,8 @@ defmodule Stacks.Social do
 
   @dialyzer {:no_opaque, accept_invitation: 2}
   @doc """
-  Accepts a pending invitation. Atomically creates a GroupMember and updates invitation status.
-  Emits `group.member_joined` event.
+    Accepts a pending invitation. Atomically creates a GroupMember and updates invitation status.
+    Emits `group.member_joined` event.
   """
   def accept_invitation(invitation_id, user_id) do
     case Repo.get(GroupInvitation, invitation_id) do
@@ -530,10 +530,10 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Grants visibility to a user for a group-visibility bookshelf.
-  Returns {:error, :not_applicable} if bookshelf visibility != "group".
-  Returns {:error, :unauthorized} if caller does not own the bookshelf.
-  Returns {:error, :already_granted} if grant already exists.
+    Grants visibility to a user for a group-visibility bookshelf.
+    Returns {:error,:not_applicable} if bookshelf visibility != "group".
+    Returns {:error,:unauthorized} if caller does not own the bookshelf.
+    Returns {:error,:already_granted} if grant already exists.
   """
   def grant_visibility(bookshelf_id, caller_id, grantee_user_id) do
     case Repo.get(Bookshelf, bookshelf_id) do
@@ -565,8 +565,8 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Revokes a visibility grant. Returns {:error, :unauthorized} if caller doesn't own the bookshelf.
-  Returns {:error, :not_found} if no grant exists.
+    Revokes a visibility grant. Returns {:error,:unauthorized} if caller doesn't own the bookshelf.
+    Returns {:error,:not_found} if no grant exists.
   """
   def revoke_visibility(bookshelf_id, caller_id, grantee_user_id) do
     case Repo.get(Bookshelf, bookshelf_id) do
@@ -597,7 +597,7 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Lists all visibility grants for a bookshelf. Returns {:error, :unauthorized} if caller doesn't own bookshelf.
+    Lists all visibility grants for a bookshelf. Returns {:error,:unauthorized} if caller doesn't own bookshelf.
   """
   def list_visibility_grants(bookshelf_id, caller_id) do
     case Repo.get(Bookshelf, bookshelf_id) do
@@ -620,7 +620,7 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Returns true if viewer_id has an explicit visibility grant for the given bookshelf_id.
+    Returns true if viewer_id has an explicit visibility grant for the given bookshelf_id.
   """
   def has_visibility_grant?(bookshelf_id, viewer_id) do
     Repo.exists?(
@@ -634,14 +634,14 @@ defmodule Stacks.Social do
   end
 
   @doc """
-  Returns a reverse-chronological feed of activity from group members.
+    Returns a reverse-chronological feed of activity from group members.
 
-  Combines placements and blog posts visible at the "group" or "platform" level.
-  Supports cursor-based pagination via the `:before` option (DateTime) and
-  `:limit` (integer, default 20, max 50).
+    Combines placements and blog posts visible at the "group" or "platform" level.
+    Supports cursor-based pagination via the `:before` option (DateTime) and
+    `:limit` (integer, default 20, max 50).
 
-  Returns `{:error, :not_found}` if the group does not exist,
-  `{:error, :unauthorized}` if the viewer is not a member.
+    Returns `{:error,:not_found}` if the group does not exist,
+    `{:error,:unauthorized}` if the viewer is not a member.
   """
   @spec feed_for_group(String.t(), String.t(), keyword()) ::
           {:ok, list(map())} | {:error, :not_found | :unauthorized}

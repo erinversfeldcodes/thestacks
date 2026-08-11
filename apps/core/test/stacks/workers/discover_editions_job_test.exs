@@ -1,12 +1,12 @@
 defmodule Stacks.Workers.DiscoverEditionsJobTest do
   @moduledoc """
-  Tests `DiscoverEditionsJob` — turning a work's Open Library edition list into rows.
+    Tests `DiscoverEditionsJob` — turning a work's Open Library edition list into rows.
 
-  What matters here is the **bounds and the gate**, not that a row can be inserted:
-  each merge re-resolves its ISBN to honour the ISBN hard gate, so an uncapped run is
-  an unbounded number of resolver races per new book. The fetch cap (50) lives in
-  `ISBNResolver`; the creation cap (10) lives here, sized against what
-  `Prices.enqueue_refreshes/1` will actually price.
+    What matters here is the **bounds and the gate**, not that a row can be inserted:
+    each merge re-resolves its ISBN to honour the ISBN hard gate, so an uncapped run is
+    an unbounded number of resolver races per new book. The fetch cap lives in
+    `ISBNResolver`; the creation cap lives here, sized against what
+    `Prices.enqueue_refreshes/1` will actually price.
   """
 
   use Core.DataCase, async: false

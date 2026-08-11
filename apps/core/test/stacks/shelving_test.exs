@@ -285,7 +285,7 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
-  describe "reading pile 50-item limit (#276)" do
+  describe "reading pile 50-item limit" do
     test "place_book/3 allows the 50th reading_pile placement" do
       user = insert(:user)
       fill_reading_pile(user, 49)
@@ -503,7 +503,7 @@ defmodule Stacks.ShelvingTest do
     end
   end
 
-  describe "restore_placement/2 — undo of a removal (#375)" do
+  describe "restore_placement/2 — undo of a removal" do
     setup do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -995,7 +995,7 @@ defmodule Stacks.ShelvingTest do
       assert reloaded.visibility == "platform"
     end
 
-    test "rejects visibility that exceeds the profile ceiling (US-10.2.1)" do
+    test "rejects visibility that exceeds the profile ceiling" do
       user = insert(:user, profile_visibility: "owner")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
 

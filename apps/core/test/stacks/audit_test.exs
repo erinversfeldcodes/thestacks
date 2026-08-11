@@ -169,7 +169,7 @@ defmodule Stacks.AuditTest do
     end
   end
 
-  describe "log/3 with admin-call fields (Issue #138 Phase 1)" do
+  describe "log/3 with admin-call fields" do
     # Phase 1 extends audit.audit_log with five additive nullable columns
     # carrying admin-call shape: endpoint, latency_ms, success, row_count,
     # operator_session_id. Stacks.Audit.log/3 must accept and persist them

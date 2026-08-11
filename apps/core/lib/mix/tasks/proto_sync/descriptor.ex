@@ -2,10 +2,10 @@ defmodule Mix.Tasks.ProtoSync.Descriptor do
   @moduledoc "Parses buf-built JSON FileDescriptorSet and extracts message fields."
 
   @doc """
-  Parses a JSON FileDescriptorSet produced by `buf build`.
+    Parses a JSON FileDescriptorSet produced by `buf build`.
 
-  Shells out to `buf build proto/ --output /dev/stdout --as-file-descriptor-set`
-  and decodes the JSON output.
+    Shells out to `buf build proto/ --output /dev/stdout --as-file-descriptor-set`
+    and decodes the JSON output.
   """
   def parse!(repo_root) do
     proto_dir = Path.join(repo_root, "proto")
@@ -29,12 +29,12 @@ defmodule Mix.Tasks.ProtoSync.Descriptor do
   end
 
   @doc """
-  Extracts fields for a specific message from the parsed descriptor.
+    Extracts fields for a specific message from the parsed descriptor.
 
-  Matches `proto_file` against `file[n].name` and `proto_message` against
-  `file[n].messageType[m].name` in the FileDescriptorSet.
+    Matches `proto_file` against `file[n].name` and `proto_message` against
+    `file[n].messageType[m].name` in the FileDescriptorSet.
 
-  Returns a list of field maps: `%{name, number, type, type_name, label}`.
+    Returns a list of field maps: `%{name, number, type, type_name, label}`.
   """
   def extract_fields(descriptor, proto_file, proto_message) do
     file_entry =
@@ -60,16 +60,16 @@ defmodule Mix.Tasks.ProtoSync.Descriptor do
   end
 
   @doc """
-  Extracts the enum value names for a given fully-qualified enum type name.
+    Extracts the enum value names for a given fully-qualified enum type name.
 
-  The `type_name` should be in the form `.package.EnumName` as found in the
-  descriptor's field `typeName`. Returns a list of lowercase, prefix-stripped
-  value names, excluding the `_UNSPECIFIED` sentinel.
+    The `type_name` should be in the form `.package.EnumName` as found in the
+    descriptor's field `typeName`. Returns a list of lowercase, prefix-stripped
+    value names, excluding the `_UNSPECIFIED` sentinel.
 
-  ## Example
+    ## Example
 
-      iex> extract_enum_values(descriptor, ".stacks.monitoring.v1.HealthStatus")
-      ["healthy", "degraded", "broken"]
+        iex> extract_enum_values(descriptor, ".stacks.monitoring.v1.HealthStatus")
+        ["healthy", "degraded", "broken"]
   """
   def extract_enum_values(descriptor, type_name) do
     clean_name = String.trim_leading(type_name || "", ".")

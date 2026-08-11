@@ -1,14 +1,14 @@
 defmodule StacksWeb.ProfileController do
   @moduledoc """
-  Public profile read surfaces for `/u/:handle` (#213) — the reader-facing half of
-  the visibility model. Runs under the `:optional_auth` pipeline, so the viewer is
-  either an authenticated platform user or `:unauthenticated`.
+    Public profile read surfaces for `/u/:handle` — the reader-facing half of
+    the visibility model. Runs under the `:optional_auth` pipeline, so the viewer is
+    either an authenticated platform user or `:unauthenticated`.
 
-  Everything is visibility-gated by `Stacks.Visibility`: a ghost profile
-  (`profile_visibility: "owner"`) or a blocked pair renders **404 (not 403)** so a
-  hidden profile is indistinguishable from a non-existent one. Shelves and
-  placements are filtered by `resolve_visibility/2` for the viewer — the same gate
-  the owner's own bookshelf view uses, pointed at the target user.
+    Everything is visibility-gated by `Stacks.Visibility`: a ghost profile
+    (`profile_visibility: "owner"`) or a blocked pair renders **404 (not 403)** so a
+    hidden profile is indistinguishable from a non-existent one. Shelves and
+    placements are filtered by `resolve_visibility/2` for the viewer — the same gate
+    the owner's own bookshelf view uses, pointed at the target user.
   """
   use CoreWeb, :controller
 

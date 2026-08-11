@@ -1,11 +1,11 @@
 defmodule StacksWeb.AdminController do
   @moduledoc """
-  Admin data access controller.
+    Admin data access controller.
 
-  Provides break-glass admin endpoints for querying user data, audit logs,
-  platform statistics, and performing GDPR operations. All endpoints require
-  a valid admin token with MFA verification and are audited via the
-  `AuditAdminCall` plug.
+    Provides break-glass admin endpoints for querying user data, audit logs,
+    platform statistics, and performing GDPR operations. All endpoints require
+    a valid admin token with MFA verification and are audited via the
+    `AuditAdminCall` plug.
   """
 
   use CoreWeb, :controller

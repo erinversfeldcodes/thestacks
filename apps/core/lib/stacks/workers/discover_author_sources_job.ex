@@ -1,12 +1,12 @@
 defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
   @moduledoc """
-  Oban worker that discovers author websites and RSS feeds via Brave Search.
+    Oban worker that discovers author websites and RSS feeds via Brave Search.
 
-  Accepts `%{"author_id" => id}` for a single author, or `%{"batch" => true}`
-  to process all authors missing sources.
+    Accepts `%{"author_id" => id}` for a single author, or `%{"batch" => true}`
+    to process all authors missing sources.
 
-  For each author, searches Brave for their official website or blog,
-  then attempts to discover an RSS feed at the discovered URL.
+    For each author, searches Brave for their official website or blog,
+    then attempts to discover an RSS feed at the discovered URL.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

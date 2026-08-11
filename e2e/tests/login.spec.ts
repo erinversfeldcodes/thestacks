@@ -54,7 +54,7 @@ test.describe("Login Page Aesthetic", () => {
     await page.waitForURL("**/antilibrary", { timeout: 15000 });
   });
 
-  test("the register tab holds the closed-beta panel until a code is redeemed (US-14.1.3)", async ({
+  test("the register tab holds the closed-beta panel until a code is redeemed", async ({
     page,
   }) => {
     await page.goto("/login");

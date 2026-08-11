@@ -1,13 +1,13 @@
 defmodule StacksWeb.AdminAuthController do
   @moduledoc """
-  Controller for break-glass admin authentication.
+    Controller for break-glass admin authentication.
 
-  Provides endpoints for:
-  - `login/2` — authenticate with email/password, returns session_id
-  - `verify_mfa/2` — verify TOTP or recovery code, returns admin JWT
-  - `logout/2` — revoke the current admin session
-  - `mfa_setup/2` — begin MFA enrollment (returns provisioning URI + codes)
-  - `mfa_confirm/2` — confirm MFA enrollment with a TOTP code
+    Provides endpoints for:
+    - `login/2` — authenticate with email/password, returns session_id
+    - `verify_mfa/2` — verify TOTP or recovery code, returns admin JWT
+    - `logout/2` — revoke the current admin session
+    - `mfa_setup/2` — begin MFA enrollment (returns provisioning URI + codes)
+    - `mfa_confirm/2` — confirm MFA enrollment with a TOTP code
   """
 
   use CoreWeb, :controller

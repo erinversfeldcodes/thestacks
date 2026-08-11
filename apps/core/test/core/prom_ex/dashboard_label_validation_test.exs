@@ -1,11 +1,11 @@
 defmodule Core.PromEx.DashboardLabelValidationTest do
   @moduledoc """
-  Offline LABEL-key drift guard for the ops dashboards (epic 231): the
-  drift tests validate metric NAMES, but a typo'd label key
-  (`{outcom="x"}`, `by (sourc)`) is name-correct and still renders a
-  permanently-empty panel — Prometheus silently matches no series. Parses
-  every panel's PromQL selectors/groupings and asserts each label key is
-  one the metric actually carries (from the plugin's tag definitions).
+    Offline LABEL-key drift guard for the ops dashboards: the
+    drift tests validate metric NAMES, but a typo'd label key
+    (`{outcom="x"}`, `by (sourc)`) is name-correct and still renders a
+    permanently-empty panel — Prometheus silently matches no series. Parses
+    every panel's PromQL selectors/groupings and asserts each label key is
+    one the metric actually carries (from the plugin's tag definitions).
   """
 
   use ExUnit.Case, async: true

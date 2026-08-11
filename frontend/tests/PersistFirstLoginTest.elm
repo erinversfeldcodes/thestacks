@@ -1,6 +1,6 @@
 module PersistFirstLoginTest exposing (suite)
 
-{-| Issue #359 — the login credential must never be downstream of an animation.
+{-| — the login credential must never be downstream of an animation.
 
 
 ## The defect
@@ -56,7 +56,7 @@ import Types.User exposing (User)
 
 suite : Test
 suite =
-    describe "Persist-first login (Issue #359)"
+    describe "Persist-first login"
         [ describe "a 200 is durable before anything the browser can decline to run"
             [ persistFirstNoAnimationSignal
             , persistFirstBeforeAnyAnimation

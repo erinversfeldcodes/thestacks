@@ -1,13 +1,12 @@
 defmodule StacksWeb.TransparencyController do
   @moduledoc """
-  Public, unauthenticated controller for the curated transparency metrics
-  (Issue #241 / ADR-019).
+    Public, unauthenticated controller for the curated transparency metrics.
 
-  `GET /api/transparency/metrics` returns `{live, durable, generated_at,
-  cache_ttl}` — a allowlisted, anonymised subset of platform observability with
-  teaching metadata per entry. It never proxies the raw `/internal/metrics`
-  firehose, never accepts a user-supplied PromQL query, and exposes no PII or
-  de-anonymisable dimension. See `Stacks.Transparency` for the privacy boundary.
+    `GET /api/transparency/metrics` returns `{live, durable, generated_at,
+    cache_ttl}` — a allowlisted, anonymised subset of platform observability with
+    teaching metadata per entry. It never proxies the raw `/internal/metrics`
+    firehose, never accepts a user-supplied PromQL query, and exposes no PII or
+    de-anonymisable dimension. See `Stacks.Transparency` for the privacy boundary.
   """
 
   use CoreWeb, :controller

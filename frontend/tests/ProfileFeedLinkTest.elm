@@ -1,6 +1,6 @@
 module ProfileFeedLinkTest exposing (suite)
 
-{-| Tests the Atom subscribe link on a reader's public profile (campaign G4).
+{-| Tests the Atom subscribe link on a reader's public profile.
 
 The feature was "built but not reachable" in an unusual way: the server, the cache and the
 Atom rendering were all finished and tested, but `Api.elm` contained no call — because

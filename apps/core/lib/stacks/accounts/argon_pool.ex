@@ -11,10 +11,10 @@ defmodule Stacks.Accounts.ArgonPool do
   @default_checkout_timeout_ms 10_000
 
   @doc """
-  Runs `fun` inside a pool checkout, bounding concurrent Argon2 operations.
-  Returns the result of `fun.()`, or `{:error, :argon2_busy}` if all pool workers
-  are occupied and the checkout times out (default 10 seconds, configurable via
-  `config :core, :argon2_checkout_timeout_ms`).
+    Runs `fun` inside a pool checkout, bounding concurrent Argon2 operations.
+    Returns the result of `fun.`, or `{:error,:argon2_busy}` if all pool workers
+    are occupied and the checkout times out (default 10 seconds, configurable via
+    `config:core,:argon2_checkout_timeout_ms`).
   """
   @spec run(fun :: (-> term())) :: term() | {:error, :argon2_busy}
   def run(fun) do

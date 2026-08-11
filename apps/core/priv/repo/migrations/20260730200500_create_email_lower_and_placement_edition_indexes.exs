@@ -1,13 +1,13 @@
 defmodule Core.Repo.Migrations.CreateEmailLowerAndPlacementEditionIndexes do
   @moduledoc """
-  The two 335 indexes, split out so both build CONCURRENTLY (`op.users`
-  is the auth hot path; squawk requires it): `users_lower_email_index`
-  (case-insensitive login-key uniqueness, mirroring the handle index; the
-  exact-match index is kept for FK lookups) and
-  `bookshelf_placements_book_edition_id_index` (the un-enrichment join).
-  Concurrent builds can't run in a transaction — hence
-  `@disable_ddl_transaction`/`@disable_migration_lock`, and why the
-  downcase and backfill live elsewhere.
+    The two 335 indexes, split out so both build CONCURRENTLY (`op.users`
+    is the auth hot path; squawk requires it): `users_lower_email_index`
+    (case-insensitive login-key uniqueness, mirroring the handle index; the
+    exact-match index is kept for FK lookups) and
+    `bookshelf_placements_book_edition_id_index` (the un-enrichment join).
+    Concurrent builds can't run in a transaction — hence
+    `@disable_ddl_transaction`/`@disable_migration_lock`, and why the
+    downcase and backfill live elsewhere.
   """
   use Ecto.Migration
 

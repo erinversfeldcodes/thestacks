@@ -1,10 +1,10 @@
 defmodule Stacks.Notifications.GroupInvitationHandler do
   @moduledoc """
-  Event handler that enqueues a group invitation email when a user is invited
-  to a group.
+    Event handler that enqueues a group invitation email when a user is invited
+    to a group.
 
-  Implements `Stacks.Events.Handler` and is registered in
-  `Stacks.Events.Registry` for the `"group.invitation_sent"` event type.
+    Implements `Stacks.Events.Handler` and is registered in
+    `Stacks.Events.Registry` for the `"group.invitation_sent"` event type.
   """
 
   @behaviour Stacks.Events.Handler

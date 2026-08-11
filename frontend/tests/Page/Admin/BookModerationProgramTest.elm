@@ -1,6 +1,6 @@
 module Page.Admin.BookModerationProgramTest exposing (suite)
 
-{-| Program tests for Page.Admin.BookModeration (#118 owner age-gate surface).
+{-| Program tests for Page.Admin.BookModeration (owner age-gate surface).
 
 Drives the page through elm-program-test: loading the book list and toggling
 a row's age gate (which must fire the admin PUT).

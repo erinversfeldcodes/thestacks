@@ -139,7 +139,7 @@ port uploadStreamEvent : (String -> msg) -> Sub msg
 
 
 {-| Persist / clear / request an in-progress marketplace listing draft in
-localStorage (Issue #182). `saveListingDraft` is fired when a session expires
+localStorage. `saveListingDraft` is fired when a session expires
 mid-compose; `requestListingDraft` is fired when the create page is (re)built and
 its answer arrives on `gotListingDraft` (the parsed value, or `null` when absent).
 -}
@@ -155,7 +155,7 @@ port requestListingDraft : () -> Cmd msg
 port gotListingDraft : (Decode.Value -> msg) -> Sub msg
 
 
-{-| Cross-tab token propagation (Issue #180 Phase 2). Fires when ANOTHER tab
+{-| Cross-tab token propagation. Fires when ANOTHER tab
 writes `stacks-auth` in localStorage: `saveAuth` (a sibling tab just rotated its
 token → the raw new JSON string) or `clearAuth` (a sibling logged out → `null`).
 The writing tab never receives its own event, so there is no feedback loop. The
@@ -164,7 +164,7 @@ payload is the raw string / `null`; it is decoded in Elm via `adoptExternalAuth`
 port authChanged : (Decode.Value -> msg) -> Sub msg
 
 
-{-| Belt-and-suspenders re-check net (Issue #180 Phase 2). Asks JS to read the
+{-| Belt-and-suspenders re-check net. Asks JS to read the
 CURRENT `stacks-auth` from localStorage; the answer arrives on `gotStoredAuth`.
 Fired just before a 401-driven session expiry so a token another tab refreshed
 can be adopted instead of logging everyone out.
@@ -185,7 +185,7 @@ network round-trip never blocks first paint. The payload is the resolved
 port ageGatingConfig : (Bool -> msg) -> Sub msg
 
 
-{-| Second server-config flag (US-14.1.3), same channel shape as
+{-| Second server-config flag, same channel shape as
 `ageGatingConfig`. app.js sends the resolved `inviteOnly` boolean from the same
 `GET /api/config` fetch; on ANY failure it sends nothing and the fail-CLOSED
 boot default (`True`) stands — a config blip must not reopen registration.
@@ -193,7 +193,7 @@ boot default (`True`) stands — a config blip must not reopen registration.
 port inviteOnlyConfig : (Bool -> msg) -> Sub msg
 
 
-{-| Browser connectivity (362): `app.js` forwards the window online/offline
+{-| Browser connectivity: `app.js` forwards the window online/offline
 events plus one send at boot (a tab opened offline must not be told it is
 connected). The shell answers this once, centrally — like session expiry —
 rather than each page inferring "probably offline" from its own
@@ -202,7 +202,7 @@ rather than each page inferring "probably offline" from its own
 port connectivityChanged : (Bool -> msg) -> Sub msg
 
 
-{-| Clipboard write for the syndication panel (US-6.2.1) — the one place the
+{-| Clipboard write for the syndication panel — the one place the
 project needs a clipboard port, because the Clipboard API has no Elm
 equivalent. The JS side MUST answer on `copyResult` whether the write
 succeeded or was refused — a port that swallows a rejection produces a copy
@@ -277,7 +277,7 @@ type alias Auth =
 
 {-| Who the app currently believes is signed in.
 
-⛔ What this type makes impossible: the old `auth : Maybe Auth` let login
+⛔ What this type makes impossible: the old `auth: Maybe Auth` let login
 set an in-memory credential the app had not yet persisted (parked on the
 door animation, which an occluded window never finishes) — authenticated
 in memory, anonymous on disk. `Arriving` carries both the auth AND the
@@ -290,9 +290,9 @@ type AuthState
     | Authenticated Auth
 
 
-{-| Whether the browser currently has a network connection (Issue #362).
+{-| Whether the browser currently has a network connection.
 
-A two-constructor type rather than `isOffline : Bool` on the model. The banner
+A two-constructor type rather than `isOffline: Bool` on the model. The banner
 is the only reader today, but a boolean named for one of its two states is how
 `not online` and `offline` end up being written in different places and drifting;
 this cannot be read backwards.
@@ -315,7 +315,7 @@ connectivityFromOnline isOnline =
         Offline
 
 
-{-| The whole #368 refetch decision, pure: refetch exactly when the
+{-| The whole refetch decision, pure: refetch exactly when the
 connectivity change is the offline→online TRANSITION (not a repeated `online`
 event, not going offline) and the routed page lost its content to the network.
 -}
@@ -325,16 +325,16 @@ reconnectShouldRefetch before after page =
 
 
 {-| Whether the routed page's PRIMARY content was lost to a `NetworkError` —
-the one failure reconnecting actually fixes (Issue #368).
+the one failure reconnecting actually fixes.
 
 Scope rule, stated: reconnect recovery is a SHARED Main-level behaviour (the
 connectivity signal lives here, and re-entering a route is Main's job — a
-per-page copy in every module is the duplication #363 collapsed), but pages
+per-page copy in every module is the duplication collapsed), but pages
 opt IN by naming their content field here. Seeded with the shelf/book family
-the Wave 6 drive covered. The catch-all is honest: a page not named simply
+the drive covered. The catch-all is honest: a page not named simply
 keeps today's behaviour (its own error copy), it does not break — and
 `Timeout`/5xx deliberately never trigger a refetch, because reconnecting is
-not what fixes those (#362's split, kept).
+not what fixes those (split, kept).
 
 -}
 pageLostToNetwork : Page -> Bool
@@ -400,12 +400,12 @@ settleArrival authState =
             settled
 
 
-{-| A parked session-expiry intent (Issue #180 Phase 2). Raised when an
+{-| A parked session-expiry intent. Raised when an
 authenticated 401 wants to log out; the actual clear+redirect is deferred one
 port round-trip (`requestStoredAuth` → `gotStoredAuth`) so a token another tab
 refreshed can be adopted first.
 
-  - `draftSaved` carries the marketplace-draft-saved notice (#182) across that
+  - `draftSaved` carries the marketplace-draft-saved notice across that
     round-trip so it still shows on the login page.
   - `fromRenewal` records whether the expiry originated from a CONSUMED proactive
     renewal tick (a failed silent refresh). Only then does adopting a newer token
@@ -417,8 +417,7 @@ type alias PendingLogout =
     { draftSaved : Bool, fromRenewal : Bool }
 
 
-{-| Merge a new parked expiry with any intent already in flight (Issue #180
-Phase 2, P2). Both flags are STICKY (OR-ed): a later plain expiry must not erase
+{-| Merge a new parked expiry with any intent already in flight. Both flags are STICKY (OR-ed): a later plain expiry must not erase
 a `draftSaved` reassurance a draft-expiry parked, and if any origin consumed a
 renewal tick the eventual adopt must still re-arm renewal. Pure + testable.
 -}
@@ -455,7 +454,7 @@ type alias Model =
     , pendingUndo : Maybe Bookshelf.Removal
     , arrival : Login.Arrival
 
-    -- A deferred session-expiry intent (Issue #180 Phase 2): set while the
+    -- A deferred session-expiry intent (Phase 2): set while the
     -- re-check-before-logout port round-trip is in flight, cleared when it
     -- resolves (adopt a newer token, or proceed to `forceSessionExpiry`).
     , pendingLogout : Maybe PendingLogout
@@ -482,7 +481,7 @@ defaultConfig : AppConfig
 defaultConfig =
     { ageGatingEnabled = False
 
-    -- Fail CLOSED (US-14.1.3): a gate on account creation must not reopen
+    -- Fail CLOSED (): a gate on account creation must not reopen
     -- because a config fetch blipped. The server's real value arrives over
     -- `inviteOnlyConfig` a beat after boot; until then Register shows the
     -- invite panel, which an open-registration deployment replaces almost
@@ -579,7 +578,7 @@ init flags url key =
     )
 
 
-{-| Ask the server what is waiting for this reader (Issue #351).
+{-| Ask the server what is waiting for this reader.
 
 Called at boot, on sign-in, and whenever `Page.Upload` says something changed.
 Anonymous is a `Cmd.none` rather than a failure: there is no inbox to have.
@@ -597,7 +596,7 @@ fetchUploadInbox maybeAuth =
 
 {-| Decoder for a stored-auth JSON object (the exact shape `encodeAuth` writes to
 localStorage `stacks-auth`). Lifted to the top level so both `decodeFlags` (boot)
-and `adoptExternalAuth` (cross-tab propagation, Issue #180) share one contract.
+and `adoptExternalAuth` (cross-tab propagation,) share one contract.
 -}
 authDecoder : Decode.Decoder Auth
 authDecoder =
@@ -633,7 +632,7 @@ authDecoder =
         )
 
 
-{-| What boot found in localStorage (360). Three outcomes, three
+{-| What boot found in localStorage. Three outcomes, three
 constructors — the old `Maybe Auth` folded "no stored credential" and
 "stored but would not decode" into one `Nothing`. The blob is written by
 `saveAuth` and read by the same decoder, so a decode failure means
@@ -666,7 +665,7 @@ storedSession stored =
 
 {-| What a boot owes the reader an explanation for.
 
-⛔ This is the whole point of `CorruptStoredAuth` (#360): the boot outcome is
+⛔ This is the whole point of `CorruptStoredAuth`: the boot outcome is
 turned into something the reader can SEE. Before, `decodeFlags` answered
 `Nothing` and `init` simply started anonymous — the app knew a credential had
 been found and rejected, and told nobody. A silent sign-out is indistinguishable
@@ -761,7 +760,7 @@ isOwner maybeAuth =
 
 
 {-| The browser origin (scheme://host[:port]) — what turns a post id into its
-canonical absolute address client-side (US-6.2.1).
+canonical absolute address client-side.
 -}
 originOf : Url -> String
 originOf url =
@@ -881,7 +880,7 @@ reset page is not asking to go anywhere.
 ⛔ Key-free and exposed on purpose. `Model` embeds an unconstructable `Nav.Key`,
 so `update`'s `ResetPasswordMsg` branch cannot be driven from a test — and a
 wire whose far end is untestable is a wire that gets stubbed and stays stubbed
-(the seam #360/#361 found, where both ends were right and the join between them
+(the seam /found, where both ends were right and the join between them
 was never exercised). `update` **calls** this rather than re-deciding the
 destination inline, so the branch a test can reach is the branch that ships:
 change the answer here and the running app changes with it.
@@ -900,7 +899,7 @@ resetPasswordDestination outMsg =
 {-| The page to return the reader to after sign-in, recomputed for THIS
 navigation — never accumulated; read once from `UrlChanged`.
 
-⛔ An expiry bounce is a bounce too (361): a bare `loginRedirectFor` is
+⛔ An expiry bounce is a bounce too: a bare `loginRedirectFor` is
 right for a route-guard bounce and wrong when the session dies underneath
 the reader — `/login` requires no auth, so the recompute answered
 `Nothing` and dropped the page they were standing on. Expiry stashes the
@@ -970,8 +969,7 @@ isAdminRoute route =
             False
 
 
-{-| Hand a just-built page the removal the reader may still take back
-(375). Applied to `initPage`'s result, not threaded through it — only the
+{-| Hand a just-built page the removal the reader may still take back. Applied to `initPage`'s result, not threaded through it — only the
 `UrlChanged` a removal's `pushUrl` provokes can ever have an undo, and a
 seventh parameter would make the other call sites say `Nothing` forever.
 The destination is `BookDetail.previousRoute`, i.e. the shelf the reader
@@ -1332,8 +1330,7 @@ encodeAuth auth =
         ]
 
 
-{-| The single, central deferred session-expiry entry point (Issue #173 + #180
-Phase 2). EVERY authenticated page routes its `SessionExpired` OutMsg here, and a
+{-| The single, central deferred session-expiry entry point. EVERY authenticated page routes its `SessionExpired` OutMsg here, and a
 failed silent renewal falls through here too — so the re-check net lives in ONE
 place, not scattered across the ~25 call sites.
 
@@ -1363,7 +1360,7 @@ handleSessionExpiryFromRenewal model =
     )
 
 
-{-| As `handleSessionExpiry`, but for the marketplace-compose expiry (#182): the
+{-| As `handleSessionExpiry`, but for the marketplace-compose expiry: the
 in-progress draft is persisted immediately, and the parked intent remembers to
 raise the draft-saved notice if the round-trip does end in a logout.
 -}
@@ -1377,10 +1374,10 @@ handleSessionExpiryWithDraft draft model =
     )
 
 
-{-| The actual, irreversible session-expiry path (Issue #173). Reached only after
+{-| The actual, irreversible session-expiry path. Reached only after
 the re-check net (`handleSessionExpiry` → `gotStoredAuth`) confirms there is no
 newer token to adopt, or from a sibling-tab `clearAuth`. Mirrors sign-out: clears
-`model.auth`, drops the `clearAuth ()` port, and redirects to `/login` — raising
+`model.auth`, drops the `clearAuth` port, and redirects to `/login` — raising
 `sessionExpiredNotice` (and `draftSavedNotice` when a draft was parked) so the
 login page shows an "expired" message distinct from invalid-credentials. The
 notice survives the `Nav.pushUrl`-driven `UrlChanged` re-init via the flag.
@@ -1405,8 +1402,7 @@ forceSessionExpiry draftSaved model =
     )
 
 
-{-| The farewell/logout path after a successful account-deletion request
-(Issue #188). The backend has queued the erasure; here we tear down the local
+{-| The farewell/logout path after a successful account-deletion request. The backend has queued the erasure; here we tear down the local
 session the same way a deliberate sign-out does — clear `model.auth`, reset the
 user menu, wipe any persisted listing draft (it carries PII), and redirect to
 `/login`. Rather than a bare login page, we raise `accountDeletedNotice` so the
@@ -1455,7 +1451,7 @@ consumeArrival page arrival =
             arrival
 
 
-{-| The outcome of interpreting a stored-auth value (Issue #180 Phase 2), used
+{-| The outcome of interpreting a stored-auth value, used
 for BOTH cross-tab propagation and the 401 re-check net.
 -}
 type ExternalAuthOutcome
@@ -1502,7 +1498,7 @@ adoptExternalAuth value maybeAuth =
 
 
 {-| The resolution of a re-check (`gotStoredAuth`) answer against the parked
-intent (Issue #180 Phase 2). Pure, so the reschedule decision — opaque as a `Cmd`
+intent. Pure, so the reschedule decision — opaque as a `Cmd`
 — is unit-testable.
 
   - `ResolveAdopt auth reschedule` — adopt `auth`, cancel the logout; `reschedule`
@@ -1551,7 +1547,7 @@ renewAuthToken authResponse auth =
 
 
 {-| How long to wait after receiving an access token before silently renewing it.
-The access token TTL is 8h (server-side, Issue #124); we refresh comfortably
+The access token TTL is 8h (server-side,); we refresh comfortably
 before that so an active session never hits a hard 401. A single fixed delay is
 used rather than decoding the JWT `exp` claim (the token is opaque to the SPA).
 -}
@@ -1595,7 +1591,7 @@ type LoginEffect
 {-| Effects performed when a login completes. Mirrors what `init` does for a
 stored auth, plus the arrival ornament.
 
-⛔ The ORDER is the fix (#359). `PersistAuth` is first and `PlayDoorAnimation` is
+⛔ The ORDER is the fix. `PersistAuth` is first and `PlayDoorAnimation` is
 last, and every one of them is fired from the single update that decodes the
 `200` — nothing here waits for a message from the browser. It used to be the
 other way round: the animation was started, and the token was written only when
@@ -1711,7 +1707,7 @@ loginCompletionCmd key redirect arrival baseCmd =
 
 
 {-| The top-level navigation disclosures whose open/closed state Elm owns
-(#318 TR-1). Each corresponds to a `<button aria-haspopup aria-expanded>` in the
+(TR-1). Each corresponds to a `<button aria-haspopup aria-expanded>` in the
 nav; `Model.openNavMenu` holds the one that is open. Compared with `==`, so it
 must stay a plain, argument-free custom type.
 -}
@@ -3082,7 +3078,7 @@ openOverlay model bookId =
 
 
 {-| Move focus to the persistent main-content landmark. Used after a book is
-removed from its shelf (#295 item b): the remove-success path navigates to the
+removed from its shelf (item b): the remove-success path navigates to the
 previous shelf route, and without an explicit target focus would drop to
 `<body>`, stranding keyboard and screen-reader users. The landmark carries
 `tabindex -1` so this focus lands. It is always in the DOM (the app shell), so
@@ -3095,7 +3091,7 @@ focusMainContent =
 
 {-| The default top-level Escape behaviour when no book overlay is open and the
 current page has nothing nested to dismiss: close whichever menu is open — the
-account menu and every nav disclosure (#318 TR-1).
+account menu and every nav disclosure (TR-1).
 -}
 closeUserMenuOnEscape : Model -> ( Model, Cmd Msg )
 closeUserMenuOnEscape model =
@@ -3118,7 +3114,7 @@ onboardingShowing model =
 
 {-| The Escape handling for whatever page/overlay is showing when onboarding is
 NOT up. Extracted from `update` so the onboarding-first-dibs branch stays a
-one-liner (the body is unchanged from before #318 8b).
+one-liner (the body is unchanged from before 8b).
 -}
 escapeForPage : Model -> ( Model, Cmd Msg )
 escapeForPage model =
@@ -3205,8 +3201,7 @@ escapeForPage model =
 {-| Open the book detail overlay, returning focus to an explicit trigger
 element id on close. Shelf pages trigger from a `spine-<bookId>` element
 (`openOverlay`); the search results list triggers from its own
-`search-result-<bookId>` button (#289) — both compose with the #114
-focus-return mechanism via `triggerSpineId`.
+`search-result-<bookId>` button — both compose with the focus-return mechanism via `triggerSpineId`.
 -}
 openOverlayWithTrigger : Model -> String -> String -> ( Model, Cmd Msg )
 openOverlayWithTrigger model bookId triggerId =
@@ -3280,7 +3275,7 @@ subscriptions model =
         ]
 
 
-{-| The two subscriptions the US-1.1.1 upload flow needs, parameterised by how
+{-| The two subscriptions the upload flow needs, parameterised by how
 its messages are tagged so they can drive either the standalone upload page
 (`UploadMsg`) or the embedded onboarding-step flow
 (`OnboardingMsg << OnboardingOverlay.UploadMsg`).
@@ -3350,7 +3345,7 @@ view model =
 
 
 {-| The login door dolly-shot, rendered from the SHELL over the destination
-page for exactly the `Arriving` window (364). 359 navigates away from the
+page for exactly the `Arriving` window. 359 navigates away from the
 login scene on the same update that decodes the 200, unmounting
 `Page.Login`'s layers before the animation port's rAF callback runs —
 zero animations started. The layers live here, in the thing that survives
@@ -3658,7 +3653,7 @@ viewNav route maybeAuth openNavMenu userMenu inbox =
         ]
 
 
-{-| The settings family exposed by the account menu (#318 TR-1). Before this,
+{-| The settings family exposed by the account menu (TR-1). Before this,
 only the profile page was reachable from nav; the rest of the settings routes
 had no nav affordance at all. Paths come from `Route.toPath` so there is one
 source of truth for where each item goes.
@@ -3676,7 +3671,7 @@ settingsLinks =
 
 {-| `True` for the five bookshelf routes AND for a book-detail, which is a child
 of the shelves. This is what keeps the Bookshelves nav item highlighted while
-you are reading a book you reached from a shelf (#318 TR-1, child-route
+you are reading a book you reached from a shelf (TR-1, child-route
 highlight).
 -}
 isBookshelfRoute : Route -> Bool
@@ -3724,7 +3719,7 @@ isMarketplaceRoute route =
 
 
 {-| A top-level nav disclosure: a real `<button aria-haspopup aria-expanded>`
-whose menu is in the DOM ONLY when open (#318 TR-1). This replaced the CSS
+whose menu is in the DOM ONLY when open (TR-1). This replaced the CSS
 `:hover`/`:focus-within` reveal, which put the menu in the DOM always and was
 unreachable by touch or keyboard. Open/close is owned by `Model.openNavMenu`;
 the backdrop catches an outside click, and Escape is handled in `update`.
@@ -3782,9 +3777,9 @@ navDisclosure config =
         ]
 
 
-{-| The persistent "Add Book" primary action (#318 TR-1). An always-present
+{-| The persistent "Add Book" primary action (TR-1). An always-present
 `btn btn--primary` link — no hover menu in front of it — so it is reachable on
-touch and by keyboard. The #351 pending-confirmation badge rides here now that
+touch and by keyboard. The pending-confirmation badge rides here now that
 the Catalogue dropdown it used to live in is gone.
 -}
 viewAddBook : Route -> Maybe Int -> Html Msg
@@ -3862,7 +3857,7 @@ navLink route label =
     { route = route, label = label }
 
 
-{-| The number on the `Add Book` marker (351). `Nothing` when the inbox
+{-| The number on the `Add Book` marker. `Nothing` when the inbox
 has not loaded or failed — a cleared badge asserts nothing is waiting,
 which we cannot claim; `Nothing` at zero ("no badge, not a 0");
 `Just n` otherwise, from `Api.awaitingConfirmationCount` over the same
@@ -4120,7 +4115,7 @@ viewFooter =
         ]
 
 
-{-| The shell's connectivity banner (362). Losing the connection is a fact
+{-| The shell's connectivity banner. Losing the connection is a fact
 about the app, not a request — the page that most needed to say so
 rendered an empty bookcase when its fetch never returned, telling the
 reader their library was empty. One banner above every page, driven by
@@ -4146,7 +4141,7 @@ viewConnectivity connectivity =
 
 {-| An admin API call came back unauthorised. All four admin pages used to
 call `handleSessionExpiry`, signing the operator out of the WHOLE product
-when only the deliberately short-lived admin session had lapsed (303).
+when only the deliberately short-lived admin session had lapsed.
 This drops the admin token alone, keeps the ordinary session, and sends
 the operator to the admin login with a notice.
 -}

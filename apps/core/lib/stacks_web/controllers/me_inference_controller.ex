@@ -1,16 +1,16 @@
 defmodule StacksWeb.MeInferenceController do
   @moduledoc """
-  GET /api/me/inferences — the authed, own-only personal inference &
-  de-anonymisation education view (Issue #242, ADR-019 §3a).
+    GET /api/me/inferences — the authed, own-only personal inference &
+    de-anonymisation education view.
 
-  Strictly own-only: the payload is derived from the current user's own records
-  only. There is no user/path/query parameter that selects another user — the
-  resource is always `Guardian.Plug.current_resource/1`. The `:authenticated`
-  pipeline returns 401 for unauthenticated requests.
+    Strictly own-only: the payload is derived from the current user's own records
+    only. There is no user/path/query parameter that selects another user — the
+    resource is always `Guardian.Plug.current_resource/1`. The `:authenticated`
+    pipeline returns 401 for unauthenticated requests.
 
-  The sensitive `risk_inferences` section is consent-gated: it is included only
-  when the request carries `?reveal_risk=true`, so the "show me what could be
-  inferred" action is enforced server-side.
+    The sensitive `risk_inferences` section is consent-gated: it is included only
+    when the request carries `?reveal_risk=true`, so the "show me what could be
+    inferred" action is enforced server-side.
   """
 
   use CoreWeb, :controller

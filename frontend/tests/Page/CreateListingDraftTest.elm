@@ -1,6 +1,6 @@
 module Page.CreateListingDraftTest exposing (suite)
 
-{-| Tests for Issue #182 — preserve an in-progress marketplace listing when the
+{-| Tests for — preserve an in-progress marketplace listing when the
 session expires mid-compose.
 
 Seam contract:
@@ -89,7 +89,7 @@ sampleListing =
 
 suite : Test
 suite =
-    describe "Issue #182 — preserve CreateListing draft on session expiry"
+    describe "— preserve CreateListing draft on session expiry"
         [ describe "(a) 401 on ListingCreated → SessionExpiredWithDraft carrying the draft"
             [ test "encoded value round-trips to the six fields + current userId" <|
                 \() ->

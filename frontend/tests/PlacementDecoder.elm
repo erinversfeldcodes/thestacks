@@ -238,7 +238,7 @@ suite =
                         Err err ->
                             Expect.fail (Decode.errorToString err)
             ]
-        , describe "visibility is parsed at the boundary, not carried as a string (#363)"
+        , describe "visibility is parsed at the boundary, not carried as a string"
             [ test "a wire visibility becomes a Visibility" <|
                 \_ ->
                     decodedVisibility """{"id":"p-1","visibility":"owner"}"""
@@ -266,7 +266,7 @@ suite =
                     decodedVisibility """{"id":"p-1","visibility":"onwer"}"""
                         |> Expect.equal (Ok Nothing)
             ]
-        , describe "isHidden — one reader of the owner-only rule (#363)"
+        , describe "isHidden — one reader of the owner-only rule"
             [ test "an owner-only placement is hidden" <|
                 \_ ->
                     decodedPlacement """{"id":"p-1","visibility":"owner"}"""

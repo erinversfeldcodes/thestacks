@@ -1,13 +1,13 @@
 defmodule Stacks.Accounts.HandleBackfillTest do
   @moduledoc """
-  Coverage for the DEPLOY-TIME handle guarantees introduced in #211 and shipped in
-  this branch (#218 decision: roll forward with the single-release NOT NULL tighten):
+    Coverage for the DEPLOY-TIME handle guarantees introduced in and shipped in
+    this branch (decision: roll forward with the single-release NOT NULL tighten):
 
-  1. The raw backfill SQL in `20260714200500_backfill_and_constrain_user_handles.exs`
-     that populates existing NULL handles on deploy — never exercised by the app-layer
-     tests (a fresh DB has no null-handle rows), yet it runs against REAL user data.
-  2. The DB-level `NOT NULL` + case-insensitive UNIQUE constraints actually enforce
-     (beyond the changeset-level `unique_constraint`/`validate_required`).
+    1. The raw backfill SQL in `20260714200500_backfill_and_constrain_user_handles.exs`
+       that populates existing NULL handles on deploy — never exercised by the app-layer
+       tests (a fresh DB has no null-handle rows), yet it runs against REAL user data.
+    2. The DB-level `NOT NULL` + case-insensitive UNIQUE constraints actually enforce
+       (beyond the changeset-level `unique_constraint`/`validate_required`).
   """
   use Core.DataCase, async: true
 
@@ -41,7 +41,7 @@ defmodule Stacks.Accounts.HandleBackfillTest do
     handle
   end
 
-  describe "backfill SQL (#211 migration)" do
+  describe "backfill SQL" do
     test "produces a valid handle (matches the app's handle format) for a normal name" do
       handle = backfill("Ada Lovelace")
       assert handle =~ ~r/^ada_lovelace_[0-9a-f]{6}$/
@@ -72,7 +72,7 @@ defmodule Stacks.Accounts.HandleBackfillTest do
     end
   end
 
-  describe "DB-level constraints (#211 tighten)" do
+  describe "DB-level constraints" do
     test "the NOT NULL constraint rejects a handle-less insert" do
       assert_raise Postgrex.Error, ~r/handle.*not.?null|null.*handle/is, fn ->
         Repo.query!(

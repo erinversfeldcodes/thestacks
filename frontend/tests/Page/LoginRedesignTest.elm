@@ -1,6 +1,6 @@
 module Page.LoginRedesignTest exposing (suite)
 
-{-| Tests for Issue #028: Login Page Aesthetic Redesign.
+{-| Tests for: Login Page Aesthetic Redesign.
 
 These tests assert on the new bookshelf-wall / parchment-card / dolly-shot
 design. Tests verify the layer structure, parchment card classes, form
@@ -26,7 +26,7 @@ startLogin =
 
 suite : Test
 suite =
-    describe "Page.Login — Redesign (Issue #028)"
+    describe "Page.Login — Redesign"
         [ layerStructureTests
         , parchmentCardTests
         , formValidationTests

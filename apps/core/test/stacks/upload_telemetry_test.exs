@@ -10,10 +10,10 @@ end
 
 defmodule Stacks.UploadTelemetryTest do
   @moduledoc """
-  Suite 11 — telemetry for the upload pipeline (111): SubscriberWorker
-  handler errors, Oban job lifecycle, BudgetTracker state changes,
-  Phoenix request telemetry on upload endpoints, circuit-breaker
-  behaviour, and cost tracking, across the 111 upload user stories.
+    Suite 11 — telemetry for the upload pipeline: SubscriberWorker
+    handler errors, Oban job lifecycle, BudgetTracker state changes,
+    Phoenix request telemetry on upload endpoints, circuit-breaker
+    behaviour, and cost tracking, across the 111 upload user stories.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -272,7 +272,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
 
     @tag stories: ["US-1.1.3"], suite: :telemetry
-    test "[:oban, :job, :stop] fires for IdentifyBookJob cancellation (not_a_book — US-1.1.3)",
+    test "[:oban,:job,:stop] fires for IdentifyBookJob cancellation (not_a_book — )",
          %{user: user} do
       attach_telemetry_filtered(
         [:oban, :job, :stop],
@@ -298,7 +298,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
 
     @tag stories: ["US-1.1.2"], suite: :telemetry
-    test "[:oban, :job, :stop] fires for IdentifyBookJob cancellation (isbn_not_found — US-1.1.2)",
+    test "[:oban,:job,:stop] fires for IdentifyBookJob cancellation (isbn_not_found — )",
          %{user: user} do
       attach_telemetry_filtered(
         [:oban, :job, :stop],
@@ -702,7 +702,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — router_dispatch telemetry for GET /api/books/isbn/:isbn (US-1.1.5)" do
+  describe "Suite 11 — router_dispatch telemetry for GET /api/books/isbn/:isbn" do
     @tag stories: ["US-1.1.5"], suite: :telemetry
     test "200 for existing ISBN emits telemetry", %{conn: conn, token: token} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
@@ -740,7 +740,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — router_dispatch telemetry for POST /api/books/confirm (US-1.1.6 duplicate)" do
+  describe "Suite 11 — router_dispatch telemetry for POST /api/books/confirm" do
     @tag stories: ["US-1.1.6"], suite: :telemetry
     test "confirm with missing isbn returns 422 with telemetry", %{conn: conn, token: token} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
@@ -760,7 +760,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — router_dispatch telemetry for POST /api/books/:id/merge-format (US-1.1.8)" do
+  describe "Suite 11 — router_dispatch telemetry for POST /api/books/:id/merge-format" do
     @tag stories: ["US-1.1.8"], suite: :telemetry
     test "merge-format with unresolvable ISBN returns 422 with telemetry", %{
       conn: conn,
@@ -785,7 +785,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — Oban job telemetry for IdentifyBookJob cancellation (US-1.1.2, US-1.1.3)" do
+  describe "Suite 11 — Oban job telemetry for IdentifyBookJob cancellation" do
     @tag stories: ["US-1.1.2"], suite: :telemetry
     test "job stop telemetry fires when IdentifyBookJob processes an image (isbn_not_found path)",
          %{user: user} do
@@ -977,7 +977,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — end-to-end telemetry across upload flow (US-1.1.1)" do
+  describe "Suite 11 — end-to-end telemetry across upload flow" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test "POST /api/upload/init emits both endpoint and router_dispatch telemetry", %{
       conn: conn,
@@ -1024,7 +1024,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — telemetry for age-gated book access (US-1.1.4)" do
+  describe "Suite 11 — telemetry for age-gated book access" do
     @tag stories: ["US-1.1.4"], suite: :telemetry
     test "GET /api/books/:id for age_gated book emits router_dispatch telemetry", %{conn: conn} do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
@@ -1044,7 +1044,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — telemetry for duplicate detection (US-1.1.6)" do
+  describe "Suite 11 — telemetry for duplicate detection" do
     @tag stories: ["US-1.1.6"], suite: :telemetry
     test "stream endpoint with is_duplicate flag emits telemetry", %{
       conn: conn,
@@ -1083,7 +1083,7 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  describe "Suite 11 — telemetry for multi-book status poll (US-1.1.7)" do
+  describe "Suite 11 — telemetry for multi-book status poll" do
     @tag stories: ["US-1.1.7"], suite: :telemetry
     test "stream endpoint with multiple book_ids emits telemetry", %{
       conn: conn,

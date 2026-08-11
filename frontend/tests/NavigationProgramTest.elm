@@ -64,7 +64,7 @@ staleLibraryResponse =
     }
 
 
-{-| Issue #274 — US-1.2.5 sad path.
+{-| — sad path.
 
 Main.elm dispatches page messages by matching on the `Page` constructor
 (`Main.elm:1347-1396`), so a response for a page the user has left is dropped
@@ -80,7 +80,7 @@ may be applied.
 -}
 navigateAwayMidLoad : Test
 navigateAwayMidLoad =
-    describe "navigate away mid-load (Issue #274)"
+    describe "navigate away mid-load"
         [ staleSiblingShelfResponseIsDiscarded
         , staleSiblingShelfResponseDoesNotRender
         , matchingShelfResponseIsStillApplied

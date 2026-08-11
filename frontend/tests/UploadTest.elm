@@ -24,7 +24,7 @@ The one and only wire shape is `StacksWeb.ProtoJSON.poll_response/1`
 omitted. Building every fixture through here means a wire rename has exactly
 one place to be wrong, and it is the place that fails.
 
-Until Issue #328 these frames were written by hand in camelCase — a shape the
+Until these frames were written by hand in camelCase — a shape the
 server has never emitted — so breaking any production wire field left the suite
 green.
 
@@ -68,7 +68,7 @@ the test named "timeout status…" was in fact exercising a rejection with no
 reason attached — a different branch, which happened to land in the same place
 back when every failure landed in the same place. It is decoded from a real
 frame now, so "timeout" has to survive `Api.streamEventDecoder` to reach the
-page (#374; the same mirror hazard as #328).
+page (; the same mirror hazard as).
 
 -}
 timeoutPoll : PollResponse

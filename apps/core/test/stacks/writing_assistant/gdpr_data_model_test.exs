@@ -1,8 +1,8 @@
 defmodule Stacks.WritingAssistant.GdprDataModelTest do
   @moduledoc """
-  Issue #183 — GDPR data-model foundation. Proves the writing-assistant /
-  embeddings tables exist with the correct ownership + FK-cascade behaviour and
-  the personal-vs-shared erasure invariant that #185 depends on.
+    — GDPR data-model foundation. Proves the writing-assistant /
+    embeddings tables exist with the correct ownership + FK-cascade behaviour and
+    the personal-vs-shared erasure invariant that depends on.
   """
   use Core.DataCase, async: false
 
@@ -139,7 +139,7 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
     end
   end
 
-  describe "erasure — FK cascade (load-bearing for #185)" do
+  describe "erasure — FK cascade (load-bearing for )" do
     test "deleting the user row cascades to all five personal tables" do
       user = insert(:user)
       book = insert(:book)

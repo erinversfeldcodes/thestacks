@@ -5,9 +5,9 @@ module Page.LibraryProgramTest exposing (suite)
 Tests validate:
 
   - Page renders shelf-backdrop image
-  - Page renders .shelf-label with "Library" text
+  - Page renders.shelf-label with "Library" text
   - Books from the API render inside the bookcase structure
-  - Empty shelf shows .empty-msg with appropriate message
+  - Empty shelf shows.empty-msg with appropriate message
   - Clicking a book navigates to BookDetail page
   - HTTP error renders error message
   - 403 triggers age gate
@@ -60,7 +60,7 @@ wallpaperRendered =
                     [ Selector.class "wallpaper--damask" ]
 
 
-{-| The page must render a .shelf-label element containing "Library" text.
+{-| The page must render a.shelf-label element containing "Library" text.
 -}
 shelfLabelRendered : Test
 shelfLabelRendered =
@@ -76,7 +76,7 @@ shelfLabelRendered =
                     [ Selector.text "Library" ]
 
 
-{-| Books from the API must render inside a .bookcase structure.
+{-| Books from the API must render inside a.bookcase structure.
 -}
 booksInsideBookcase : Test
 booksInsideBookcase =
@@ -96,7 +96,7 @@ booksInsideBookcase =
                     [ Selector.class "book__spine" ]
 
 
-{-| Empty shelf shows .empty-msg with descriptive message.
+{-| Empty shelf shows.empty-msg with descriptive message.
 -}
 emptyShelfMessage : Test
 emptyShelfMessage =

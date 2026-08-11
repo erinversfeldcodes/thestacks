@@ -1,10 +1,10 @@
 defmodule Stacks.Workers.DataExportJobTest do
   @moduledoc """
-  Tests for Stacks.Workers.DataExportJob.
+    Tests for Stacks.Workers.DataExportJob.
 
-  The worker calls GDPR.Export.export_user_data/1:
-  - Returns :ok when the user exists (export succeeds).
-  - Returns {:error, _} when the user does not exist (export raises, returning {:error, reason}).
+    The worker calls GDPR.Export.export_user_data/1:
+    - Returns:ok when the user exists (export succeeds).
+    - Returns {:error, _} when the user does not exist (export raises, returning {:error, reason}).
   """
 
   use Core.DataCase, async: true
@@ -27,7 +27,7 @@ defmodule Stacks.Workers.DataExportJobTest do
     end
   end
 
-  describe "job config (Issue #121 §6)" do
+  describe "job config" do
     test "runs on the :default queue" do
       assert DataExportJob.__opts__()[:queue] == :default
     end

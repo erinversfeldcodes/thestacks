@@ -130,7 +130,7 @@ viewRssPost maybeEnrichment =
                 [ text "RSS feed coming soon" ]
 
 
-{-| The author's bookstore events (#321 item 4), live from
+{-| The author's bookstore events (item 4), live from
 `GET /api/authors/:id/events`.
 
 `Nothing` = not fetched (or the fetch failed): the honest "coming soon" stub —

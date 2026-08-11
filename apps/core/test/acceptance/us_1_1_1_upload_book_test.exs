@@ -1,8 +1,8 @@
 defmodule Stacks.Acceptance.UploadBookTest do
   @moduledoc """
-  Acceptance test for user story US-1.1.1: Upload → Identify → Place on bookshelf.
-  Uses mocked vision client (Stacks.AI.MockClient) which is configured in test.exs.
-  Oban is in :manual mode so jobs are enqueued but not executed inline.
+    Acceptance test for user story: Upload → Identify → Place on bookshelf.
+    Uses mocked vision client (Stacks.AI.MockClient) which is configured in test.exs.
+    Oban is in:manual mode so jobs are enqueued but not executed inline.
   """
 
   use Core.DataCase, async: true
@@ -17,7 +17,7 @@ defmodule Stacks.Acceptance.UploadBookTest do
   alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
 
-  describe "US-1.1.1 upload → identify → place on bookshelf" do
+  describe "upload → identify → place on bookshelf" do
     test "happy path: image upload enqueues IdentifyBookJob and book can be placed on bookshelf" do
       {:ok, user} =
         Accounts.register(%{"email" => "reader@example.com", "password" => "password123"})

@@ -72,7 +72,7 @@ suite =
                     in
                     model.saving |> Expect.equal (Failure Http.NetworkError)
             ]
-        , describe "Consent — a saved choice can be changed again (#363)"
+        , describe "Consent — a saved choice can be changed again"
             [ test "toggling analytics after a save clears the 'Saved!' state" <|
                 \_ ->
                     consentAfterSave

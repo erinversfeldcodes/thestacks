@@ -1,5 +1,5 @@
 defmodule StacksWeb.ImportControllerTest do
-  @moduledoc "Tests for the Goodreads import endpoints (US-1.1.9)."
+  @moduledoc "Tests for the Goodreads import endpoints."
 
   use CoreWeb.ConnCase, async: false
   use Oban.Testing, repo: Core.Repo

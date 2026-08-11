@@ -1,10 +1,10 @@
 defmodule Stacks.Workers.SourceDiscoveryJob do
   @moduledoc """
-  Discovers new sources (bookshops, communities) via web search:
-  `BraveClient` primary, `SearxngClient` fallback when the Brave daily
-  budget is exhausted; dedups by URL before creating. Args:
-  `%{"query" => q}` with optional `"location" => %{"city", "country_code"}`.
-  New sources are scored asynchronously via `ScoreSourceJob`.
+    Discovers new sources (bookshops, communities) via web search:
+    `BraveClient` primary, `SearxngClient` fallback when the Brave daily
+    budget is exhausted; dedups by URL before creating. Args:
+    `%{"query" => q}` with optional `"location" => %{"city", "country_code"}`.
+    New sources are scored asynchronously via `ScoreSourceJob`.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

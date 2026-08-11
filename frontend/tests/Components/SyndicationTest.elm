@@ -1,6 +1,6 @@
 module Components.SyndicationTest exposing (suite)
 
-{-| Components.Syndication (US-6.2.1): the honesty rules — absent affordances
+{-| Components.Syndication: the honesty rules — absent affordances
 on a non-public post, the clipboard's refusal made visible, and the toggle
 snapping back when the save fails.
 -}

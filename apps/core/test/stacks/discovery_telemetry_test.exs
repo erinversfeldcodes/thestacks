@@ -1,10 +1,10 @@
 defmodule Stacks.DiscoveryTelemetryTest do
   @moduledoc """
-  Firing tests for the 239 discovery/profiles counters: people-search
-  outcome (:hit/:zero_result), public-profile resolution (:ok/:not_found
-  on both the absent-handle and ghost/block branches), browse-cap hits
-  (only when the 221 cap truncated), and handle claims. Metadata is
-  bounded atoms only.
+    Firing tests for the 239 discovery/profiles counters: people-search
+    outcome (:hit/:zero_result), public-profile resolution (:ok/:not_found
+    on both the absent-handle and ghost/block branches), browse-cap hits
+    (only when the 221 cap truncated), and handle claims. Metadata is
+    bounded atoms only.
   """
 
   use CoreWeb.ConnCase, async: false

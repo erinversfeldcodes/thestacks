@@ -1,6 +1,6 @@
 module Page.ImportTest exposing (suite)
 
-{-| Page.Import (US-1.1.9): the phases the reader actually sees, driven
+{-| Page.Import: the phases the reader actually sees, driven
 through `update` with server-shaped values — no reaching into the model.
 -}
 

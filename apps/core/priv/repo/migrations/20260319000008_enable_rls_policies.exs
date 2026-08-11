@@ -1,13 +1,13 @@
 defmodule Core.Repo.Migrations.EnableRlsPolicies do
   @moduledoc """
-  Enables Row-Level Security policies on user-data tables in the op schema.
+    Enables Row-Level Security policies on user-data tables in the op schema.
 
-  Policies use `current_setting('app.current_user_id', true)` with a NULL
-  guard so that sessions without the variable set (migrations, test sandbox)
-  are not blocked. In production the Phoenix pool sets this via
-  `SET LOCAL app.current_user_id = '<uuid>'` at the start of each transaction.
+    Policies use `current_setting('app.current_user_id', true)` with a NULL
+    guard so that sessions without the variable set (migrations, test sandbox)
+    are not blocked. In production the Phoenix pool sets this via
+    `SET LOCAL app.current_user_id = '<uuid>'` at the start of each transaction.
 
-  See docs/rls-design.md for the full policy rationale.
+    See docs/rls-design.md for the full policy rationale.
   """
 
   use Ecto.Migration

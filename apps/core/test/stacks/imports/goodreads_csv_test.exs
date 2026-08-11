@@ -81,7 +81,7 @@ defmodule Stacks.Imports.GoodreadsCsvTest do
   end
 
   describe "destination_bookshelf/1" do
-    test "maps the four US-1.1.9 destinations" do
+    test "maps the four destinations" do
       assert GoodreadsCsv.destination_bookshelf(%{goodreads_shelf: "read"}) == "library"
 
       assert GoodreadsCsv.destination_bookshelf(%{goodreads_shelf: "currently-reading"}) ==

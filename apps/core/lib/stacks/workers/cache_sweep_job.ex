@@ -1,10 +1,10 @@
 defmodule Stacks.Workers.CacheSweepJob do
   @moduledoc """
-  Daily cron (03:30 UTC) deleting expired rows from
-  `cache.isbn_resolver_cache` and `cache.title_search_cache`. Reads
-  already filter `expires_at > now()`, so this is about DB size (backup
-  cost, planner stats), not correctness. Indexed range delete on
-  `expires_at`, so it stays cheap as the tables grow.
+    Daily cron (03:30 UTC) deleting expired rows from
+    `cache.isbn_resolver_cache` and `cache.title_search_cache`. Reads
+    already filter `expires_at > now`, so this is about DB size (backup
+    cost, planner stats), not correctness. Indexed range delete on
+    `expires_at`, so it stays cheap as the tables grow.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

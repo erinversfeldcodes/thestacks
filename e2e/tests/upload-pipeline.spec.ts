@@ -988,7 +988,7 @@ test.describe("Multi-book extraction", { tag: ["@US-1.1.7"] }, () => {
   });
 });
 
-test.describe("Age-gated content (US-1.1.4)", { tag: ["@US-1.1.4"] }, () => {
+test.describe("Age-gated content", { tag: ["@US-1.1.4"] }, () => {
   test("age-gated book flows through upload normally — gating happens on book detail", async ({
     page,
   }) => {

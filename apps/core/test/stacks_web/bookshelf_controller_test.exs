@@ -1,6 +1,6 @@
 defmodule StacksWeb.BookshelfControllerTest do
   @moduledoc """
-  Tests for GET /api/bookshelves/:bookshelf_name.
+    Tests for GET /api/bookshelves/:bookshelf_name.
   """
 
   use CoreWeb.ConnCase, async: true
@@ -346,7 +346,7 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
-  describe "GET /api/bookshelves/:bookshelf_name — has_user_writing flag (#287)" do
+  describe "GET /api/bookshelves/:bookshelf_name — has_user_writing flag" do
     test "is true for a book the owner has written a visible association about", %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -384,7 +384,7 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
-  describe "GET /api/bookshelves/reading_pile — populated response (US-1.2.4)" do
+  describe "GET /api/bookshelves/reading_pile — populated response" do
     setup %{conn: conn} do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
@@ -564,7 +564,7 @@ defmodule StacksWeb.BookshelfControllerTest do
   end
 
   describe "GET /api/bookshelves/:bookshelf_name — view_as content filtering" do
-    test "owner viewing own bookshelf as unauthenticated sees only public placements (#225)",
+    test "owner viewing own bookshelf as unauthenticated sees only public placements",
          %{conn: conn} do
       user = insert(:user, profile_visibility: "public")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
@@ -631,7 +631,7 @@ defmodule StacksWeb.BookshelfControllerTest do
       assert Stacks.Shelving.get_bookshelf(user.id, "wishlist").visibility == "platform"
     end
 
-    test "returns 422 when the new visibility exceeds the profile ceiling (US-10.2.1)", %{
+    test "returns 422 when the new visibility exceeds the profile ceiling", %{
       conn: conn
     } do
       user = insert(:user, profile_visibility: "owner")

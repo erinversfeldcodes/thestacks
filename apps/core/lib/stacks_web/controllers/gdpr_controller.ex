@@ -47,11 +47,11 @@ defmodule StacksWeb.GDPRController do
   @consent_types %{"analytics" => "analytics", "writing_assistant" => "writing_assistant"}
 
   @doc """
-  POST /api/gdpr/consent — grant or revoke consent for a feature.
+    POST /api/gdpr/consent — grant or revoke consent for a feature.
 
-  Body: `consent` (bool, required) + optional `type` ("analytics" default |
-  "writing_assistant"). An unknown `type` → 422 (whitelisted, never passed
-  through raw). Returns the matching consent flag + timestamp.
+    Body: `consent` (bool, required) + optional `type` ("analytics" default |
+    "writing_assistant"). An unknown `type` → 422 (whitelisted, never passed
+    through raw). Returns the matching consent flag + timestamp.
   """
   def update_consent(conn, %{"consent" => consent} = params) do
     user = Guardian.Plug.current_resource(conn)

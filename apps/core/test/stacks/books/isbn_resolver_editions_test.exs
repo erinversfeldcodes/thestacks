@@ -1,15 +1,15 @@
 defmodule Stacks.Books.ISBNResolverEditionsTest do
   @moduledoc """
-  Tests `ISBNResolver.editions_for_work/1` — discovering a work's other editions.
+    Tests `ISBNResolver.editions_for_work/1` — discovering a work's other editions.
 
-  A work is the abstract book; an edition is a printing with its own ISBN. Shops stock
-  whichever edition they stock, so this is what lets a price lookup find the copy a
-  reader can actually buy (Exclusive Books carries six ISBNs of *The Name of the Rose*).
+    A work is the abstract book; an edition is a printing with its own ISBN. Shops stock
+    whichever edition they stock, so this is what lets a price lookup find the copy a
+    reader can actually buy (Exclusive Books carries six ISBNs of *The Name of the Rose*).
 
-  The behaviour worth guarding is not "it parses JSON" — it is the **bounds**. Open
-  Library paginates `editions.json` and a popular work has a long tail: the work
-  measured during planning had 151 editions carrying 76 distinct ISBN-13s, and each
-  discovered ISBN is a future price-lookup target across every configured store.
+    The behaviour worth guarding is not "it parses JSON" — it is the **bounds**. Open
+    Library paginates `editions.json` and a popular work has a long tail: the work
+    measured during planning had 151 editions carrying 76 distinct ISBN-13s, and each
+    discovered ISBN is a future price-lookup target across every configured store.
   """
 
   use ExUnit.Case, async: true

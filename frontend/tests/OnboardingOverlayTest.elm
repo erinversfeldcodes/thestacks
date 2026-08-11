@@ -69,7 +69,7 @@ doneIx =
 
 suite : Test
 suite =
-    describe "OnboardingOverlay (D2 flow, US-14.1.2)"
+    describe "OnboardingOverlay (D2 flow, )"
         [ dataDrivenStepsOracle
         , d2SequenceWalk
         , finishPaths
@@ -298,7 +298,7 @@ consentDelegation =
                     , \_ -> Expect.equal NoOut out
                     ]
                     model
-        , test "the consent sub-model starts with both grants OFF (US-14.1.2 §1)" <|
+        , test "the consent sub-model starts with both grants OFF" <|
             \_ ->
                 Expect.all
                     [ \m -> Expect.equal False m.consent.analyticsConsent
@@ -394,13 +394,13 @@ keydownEvent key shiftKey targetId =
         ]
 
 
-{-| The Upload step embeds the REAL US-1.1.1 surface (not a prompt); the Consent
+{-| The Upload step embeds the REAL surface (not a prompt); the Consent
 step embeds the real consent controls.
 -}
 embeddedSurfaces : Test
 embeddedSurfaces =
     describe "embedded real surfaces"
-        [ test "the Upload step renders the real US-1.1.1 upload surface, not a prompt" <|
+        [ test "the Upload step renders the real upload surface, not a prompt" <|
             \_ ->
                 Overlay.view { init | currentIndex = uploadIx } (Just "tok")
                     |> Query.fromHtml

@@ -70,7 +70,7 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
       %{user: user, import: Imports.get_import(user.id, import.id)}
     end
 
-    test "shelves the verifiable rows onto the US-1.1.9 mapping", %{user: user} do
+    test "shelves the verifiable rows onto the mapping", %{user: user} do
       for {bookshelf, title} <- [
             {"library", "1984"},
             {"reading_pile", "The Fellowship of the Ring"},

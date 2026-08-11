@@ -295,7 +295,7 @@ view model =
         ]
 
 
-{-| #281: the direct-place path can hit the reading-pile cap. Surface the
+{-| : the direct-place path can hit the reading-pile cap. Surface the
 specific full-pile copy (shared with the move/upload paths) as a page-level
 notice; transport failures stay silent here, as before.
 -}

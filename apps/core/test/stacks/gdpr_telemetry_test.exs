@@ -1,10 +1,10 @@
 defmodule Stacks.GDPRTelemetryTest do
   @moduledoc """
-  Firing tests for `[:stacks, :gdpr, ...]` telemetry (121 Phase 4):
-  export, deletion, and consent signals. Each test attaches a real
-  handler, drives the flow, and asserts exact event name, measurement
-  keys, and metadata — non-vacuous: removing an emitter times out the
-  `assert_receive`.
+    Firing tests for `[:stacks,:gdpr,...]` telemetry (121 Phase 4):
+    export, deletion, and consent signals. Each test attaches a real
+    handler, drives the flow, and asserts exact event name, measurement
+    keys, and metadata — non-vacuous: removing an emitter times out the
+    `assert_receive`.
   """
 
   use Core.DataCase, async: false

@@ -1,7 +1,7 @@
 defmodule StacksWeb.SocialControllerTest do
   @moduledoc """
-  Tests for POST /api/users/:id/block, DELETE /api/users/:id/block,
-  and GET /api/settings/blocked-users.
+    Tests for POST /api/users/:id/block, DELETE /api/users/:id/block,
+    and GET /api/settings/blocked-users.
   """
 
   use CoreWeb.ConnCase, async: false

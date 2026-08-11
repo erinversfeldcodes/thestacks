@@ -1,6 +1,6 @@
 module AdminRemovalRequestsTest exposing (suite)
 
-{-| Tests the removal-request review queue (US-2.5.3, campaign G6).
+{-| Tests the removal-request review queue.
 
 The queue's server half shipped first and was invisible in practice — the endpoints existed,
 were tested, and nothing rendered them. So the assertions here are about **reachability and

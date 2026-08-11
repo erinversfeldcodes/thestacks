@@ -1,14 +1,14 @@
 defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   @moduledoc """
-  Oban worker discovering bookstore events from their websites. Args:
-  `%{"store_id" => id}` or `%{"batch" => true}` (all stores with a
-  `website_url`). Parses the events page and links known authors by name.
+    Oban worker discovering bookstore events from their websites. Args:
+    `%{"store_id" => id}` or `%{"batch" => true}` (all stores with a
+    `website_url`). Parses the events page and links known authors by name.
 
-  Compliance: fetches ONLY through `ScraperClient.fetch_page/2` (robots.txt,
-  rate limiter, both fuses). This job once built a bare Finch GET with none
-  of those — never scheduled, but waiting for whoever wired it up. A robots
-  disallow is recorded as a determination and the store is skipped, not
-  retried.
+    Compliance: fetches ONLY through `ScraperClient.fetch_page/2` (robots.txt,
+    rate limiter, both fuses). This job once built a bare Finch GET with none
+    of those — never scheduled, but waiting for whoever wired it up. A robots
+    disallow is recorded as a determination and the store is skipped, not
+    retried.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -172,15 +172,15 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   end
 
   @doc """
-  Parses event data from an HTML body.
+    Parses event data from an HTML body.
 
-  Structured tier first (US-2.4.1 / #321 item 4): schema.org `Event` objects
-  from the page's JSON-LD, which carry their own title↔date pairing and are
-  believed over any text heuristic. Only a page declaring NO structured events
-  falls through to the heading-block extraction below.
+    Structured tier first (/ item 4): schema.org `Event` objects
+    from the page's JSON-LD, which carry their own title↔date pairing and are
+    believed over any text heuristic. Only a page declaring NO structured events
+    falls through to the heading-block extraction below.
 
-  Returns a list of maps with `:title`, `:event_date`, `:description`,
-  `:location`, and `:url` keys.
+    Returns a list of maps with `:title`, `:event_date`, `:description`,
+    `:location`, and `:url` keys.
   """
   @spec parse_events(String.t(), map()) :: [map()]
   def parse_events(body, store) do
@@ -225,13 +225,13 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJob do
   @date_pattern ~r/(\d{4}-\d{2}-\d{2})/
 
   @doc """
-  Split a page into `{heading_text, block_html}` pairs (a block runs
-  heading→next heading). Block scoping is what makes heading/date pairing
-  sound without a DOM parser: a date only counts when it appears in the SAME
-  block as its heading. The two prior designs both failed — pairing nth
-  heading with nth date anywhere in the document manufactured confident
-  wrong records ("Follow us" + a footer date); requiring one distinct date
-  per whole document yielded zero rows on any normal multi-event listing.
+    Split a page into `{heading_text, block_html}` pairs (a block runs
+    heading→next heading). Block scoping is what makes heading/date pairing
+    sound without a DOM parser: a date only counts when it appears in the SAME
+    block as its heading. The two prior designs both failed — pairing nth
+    heading with nth date anywhere in the document manufactured confident
+    wrong records ("Follow us" + a footer date); requiring one distinct date
+    per whole document yielded zero rows on any normal multi-event listing.
   """
   @spec heading_blocks(String.t()) :: [{String.t(), String.t()}]
   def heading_blocks(body) do

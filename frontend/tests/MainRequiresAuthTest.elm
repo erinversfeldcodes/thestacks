@@ -283,7 +283,7 @@ suite =
                     )
                         |> Expect.equal ( 19, 22 )
             ]
-        , describe "admin routes are gated on an ADMIN token, not the ordinary one (#303)"
+        , describe "admin routes are gated on an ADMIN token, not the ordinary one"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|
                 \() ->
                     Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh

@@ -1,10 +1,10 @@
 defmodule Stacks.UploadTerminalTelemetryTest do
   @moduledoc """
-  Upload terminal counter (136): every `uploaded_image` transition to a
-  terminal state must emit `[:stacks, :upload, :terminal]` with
-  `outcome: :resolved | :rejected | :timeout`; non-terminal transitions
-  must not. `IdentifyBookJob` is the canonical path to
-  resolved/rejected; :timeout comes from the SSE stream.
+    Upload terminal counter: every `uploaded_image` transition to a
+    terminal state must emit `[:stacks,:upload,:terminal]` with
+    `outcome::resolved |:rejected |:timeout`; non-terminal transitions
+    must not. `IdentifyBookJob` is the canonical path to
+    resolved/rejected;:timeout comes from the SSE stream.
   """
 
   use CoreWeb.ConnCase, async: false

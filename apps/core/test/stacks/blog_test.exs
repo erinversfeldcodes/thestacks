@@ -253,7 +253,7 @@ defmodule Stacks.BlogTest do
       assert length(posts) == 1
     end
 
-    test "unauthenticated viewer sees only published public posts (#225)" do
+    test "unauthenticated viewer sees only published public posts" do
       user = insert(:user, profile_visibility: "public")
       _draft = insert(:post, user: user, visibility: "public", published_at: nil)
 
@@ -277,7 +277,7 @@ defmodule Stacks.BlogTest do
   end
 
   describe "list_user_posts/2 public visibility" do
-    test "unauthenticated sees only published + public-visible posts (#225)" do
+    test "unauthenticated sees only published + public-visible posts" do
       user = insert(:user, profile_visibility: "public")
 
       _public_published =

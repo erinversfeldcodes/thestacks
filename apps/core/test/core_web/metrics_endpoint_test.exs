@@ -1,16 +1,16 @@
 defmodule CoreWeb.MetricsEndpointTest do
   @moduledoc """
-  Tests that the /internal/metrics Prometheus endpoint returns Prometheus
-  text format when authenticated. Auth is enforced by
-  `StacksWeb.Plugs.MetricsAuth` (Issue #136).
+    Tests that the /internal/metrics Prometheus endpoint returns Prometheus
+    text format when authenticated. Auth is enforced by
+    `StacksWeb.Plugs.MetricsAuth`.
 
-  The `live exposure` describe block (Issue #230) proves the
-  registered→scrapeable path end-to-end: after the moderation funnel and
-  age-gate paths run through their real code, the #228 `stacks_moderation_*`
-  / `stacks_age_gate_*` / `stacks_age_verification_*` families appear at
-  `GET /internal/metrics` with samples. The #228 firing tests prove the
-  events fire; this proves PromEx actually exposes them on the scrape
-  endpoint the dashboard (Issue #230) queries.
+    The `live exposure` describe block proves the
+    registered→scrapeable path end-to-end: after the moderation funnel and
+    age-gate paths run through their real code, the `stacks_moderation_*`
+    / `stacks_age_gate_*` / `stacks_age_verification_*` families appear at
+    `GET /internal/metrics` with samples. The firing tests prove the
+    events fire; this proves PromEx actually exposes them on the scrape
+    endpoint the dashboard queries.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -87,7 +87,7 @@ defmodule CoreWeb.MetricsEndpointTest do
     end
   end
 
-  describe "live exposure: #228 moderation + age-gate families are scrapeable after exercising (Issue #230)" do
+  describe "live exposure: moderation + age-gate families are scrapeable after exercising" do
     test "moderation funnel families appear with samples after run_pipeline", %{conn: conn} do
       assert {:ok, %{resolved: [book]}} =
                Moderation.run_pipeline(%{
@@ -153,7 +153,7 @@ defmodule CoreWeb.MetricsEndpointTest do
     end
   end
 
-  describe "live exposure: #237 auth/session-security families are scrapeable after exercising" do
+  describe "live exposure: auth/session-security families are scrapeable after exercising" do
     test "reuse + session-cap + MFA-failure families appear with samples after their real paths",
          %{conn: conn} do
       user = insert(:user)
@@ -213,7 +213,7 @@ defmodule CoreWeb.MetricsEndpointTest do
     end
   end
 
-  describe "live exposure: #236 visibility/social/ViewAs families are scrapeable after exercising" do
+  describe "live exposure: visibility/social/ViewAs families are scrapeable after exercising" do
     test "profile-change / recap / ceiling / block+unblock / ViewAs families appear with samples",
          %{conn: conn} do
       user = insert(:user)
@@ -285,7 +285,7 @@ defmodule CoreWeb.MetricsEndpointTest do
     end
   end
 
-  describe "live exposure: #238 GDPR data-rights families are scrapeable after exercising" do
+  describe "live exposure: GDPR data-rights families are scrapeable after exercising" do
     test "export/deletion (incl. latency) + consent + audit read/write families appear with samples",
          %{conn: conn} do
       export_user = insert(:user)
@@ -343,7 +343,7 @@ defmodule CoreWeb.MetricsEndpointTest do
     end
   end
 
-  describe "live exposure: #239 discovery/profiles/search families are scrapeable after exercising" do
+  describe "live exposure: discovery/profiles/search families are scrapeable after exercising" do
     test "people-search / profile-404 / handle-claim families appear with samples", %{conn: conn} do
       searcher = insert(:user)
 
@@ -386,7 +386,7 @@ defmodule CoreWeb.MetricsEndpointTest do
     end
   end
 
-  describe "live exposure: #240 platform/ops rate-limit families are scrapeable after exercising" do
+  describe "live exposure: platform/ops rate-limit families are scrapeable after exercising" do
     setup do
       original_enabled = Application.get_env(:core, :rate_limiting_enabled)
       original_auth = Application.get_env(:core, :rate_limit_auth)

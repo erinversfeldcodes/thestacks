@@ -20,7 +20,7 @@ suite =
         [ hiddenBookHasHiddenClass
         , hiddenBookHasHiddenAria
         , visibleBookHasNoHiddenClass
-        , describe "the affordance is visible, not only audible (#363)"
+        , describe "the affordance is visible, not only audible"
             [ hiddenBookHasVisiblePadlock
             , visibleBookHasNoPadlock
             , padlockIsDecorative

@@ -1,11 +1,11 @@
 defmodule Stacks.Storage.R2 do
   @moduledoc """
-  Cloudflare R2 object storage via the ExAws S3 API (config under
-  `Stacks.Storage.R2` + `:ex_aws` in runtime.exs). Protected by
-  `:r2_fuse`: when blown, `put/3` and `delete/1` fast-fail
-  `{:error, :circuit_open}` instead of blocking on a slow round-trip.
-  `presigned_url/2` is NOT fuse-gated — it's a local SigV4 signing
-  operation with no upstream call.
+    Cloudflare R2 object storage via the ExAws S3 API (config under
+    `Stacks.Storage.R2` + `:ex_aws` in runtime.exs). Protected by
+    `:r2_fuse`: when blown, `put/3` and `delete/1` fast-fail
+    `{:error,:circuit_open}` instead of blocking on a slow round-trip.
+    `presigned_url/2` is NOT fuse-gated — it's a local SigV4 signing
+    operation with no upstream call.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour

@@ -1,10 +1,10 @@
 defmodule Core.PromEx do
   @moduledoc """
-  PromEx configuration for The Stacks.
+    PromEx configuration for The Stacks.
 
-  Bundles automatic Ecto, Phoenix, Oban, and BEAM telemetry alongside
-  custom metrics for vision requests, fuse state, budget tracking, and
-  cost recording. Exposes `/internal/metrics` in Prometheus text format.
+    Bundles automatic Ecto, Phoenix, Oban, and BEAM telemetry alongside
+    custom metrics for vision requests, fuse state, budget tracking, and
+    cost recording. Exposes `/internal/metrics` in Prometheus text format.
   """
 
   use PromEx, otp_app: :core

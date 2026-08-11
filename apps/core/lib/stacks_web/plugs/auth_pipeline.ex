@@ -1,9 +1,9 @@
 defmodule StacksWeb.Plugs.AuthPipeline do
   @moduledoc """
-  Guardian JWT authentication pipeline.
+    Guardian JWT authentication pipeline.
 
-  Verifies Bearer tokens in the Authorization header. On failure, delegates
-  to `StacksWeb.Plugs.AuthErrorHandler` which returns JSON 401/403 responses.
+    Verifies Bearer tokens in the Authorization header. On failure, delegates
+    to `StacksWeb.Plugs.AuthErrorHandler` which returns JSON 401/403 responses.
   """
 
   use Guardian.Plug.Pipeline,

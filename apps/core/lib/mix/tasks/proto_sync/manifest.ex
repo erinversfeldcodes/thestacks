@@ -2,10 +2,10 @@ defmodule Mix.Tasks.ProtoSync.Manifest do
   @moduledoc "Loads and validates the proto persistence manifest (persisted.exs)."
 
   @doc """
-  Loads and validates the proto sync manifest from `proto/persisted.exs`.
+    Loads and validates the proto sync manifest from `proto/persisted.exs`.
 
-  Returns a map with `:version` and `:tables` keys. Each table entry contains
-  the proto-to-schema mapping configuration.
+    Returns a map with `:version` and `:tables` keys. Each table entry contains
+    the proto-to-schema mapping configuration.
   """
   def load!(path) do
     unless File.exists?(path) do

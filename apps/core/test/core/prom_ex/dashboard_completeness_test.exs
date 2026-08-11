@@ -1,11 +1,11 @@
 defmodule Core.PromEx.DashboardCompletenessTest do
   @moduledoc """
-  Global "measured ⊆ displayed" gate (ADR-021): the per-dashboard drift
-  tests prove displayed ⊆ measured; this is the REVERSE across ALL
-  dashboards in `Core.PromEx.dashboards/0` — every registered `stacks_*`
-  family classified `:public` in `MetricAudience` must have a panel
-  somewhere. Measured-but-invisible is the failure mode the epic exists
-  to kill; `:own`/`:break_glass` families are exempt.
+    Global "measured ⊆ displayed" gate (ADR-021): the per-dashboard drift
+    tests prove displayed ⊆ measured; this is the REVERSE across ALL
+    dashboards in `Core.PromEx.dashboards/0` — every registered `stacks_*`
+    family classified `:public` in `MetricAudience` must have a panel
+    somewhere. Measured-but-invisible is the failure mode this gate exists
+    to kill; `:own`/`:break_glass` families are exempt.
   """
   use ExUnit.Case, async: true
 

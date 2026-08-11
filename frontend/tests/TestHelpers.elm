@@ -473,7 +473,7 @@ simulateRegisterResponse =
 
 
 {-| Create a 422 registration validation error response carrying per-field
-error messages, mirroring the backend's `{"errors": {field: [msg, ...]}}` shape
+error messages, mirroring the backend's `{"errors": {field: [msg,...]}}` shape
 (see `format_errors/1` in the Elixir `ChangesetHelpers`).
 -}
 simulateRegisterValidationResponse : List ( String, List String ) -> Http.Response String
@@ -584,10 +584,10 @@ simulateBookDetailResponse bookId book =
 
 The placement object is exactly what `StacksWeb.ProtoJSON.book_placement/1`
 emits (`apps/core/lib/stacks_web/proto_json.ex:311-322`): a `Map.take` of
-`[:id, :book_id, :personal_rating, :notes]` off the placement, merged with
+`[:id,:book_id,:personal_rating,:notes]` off the placement, merged with
 `bookshelf_name`, `formats`, `visibility` and `bookshelf_visibility`. That
 allow-list is the whole contract — nothing else can reach the client on this
-endpoint. (`bookshelf_visibility` is the #194 ceiling and has its own fixture,
+endpoint. (`bookshelf_visibility` is the ceiling and has its own fixture,
 `simulateBookDetailResponseWithVisibility`, which sets both visibility keys
 explicitly; here they stay at the "bookshelf association not loaded" value the
 serializer emits, `null`.)
@@ -596,8 +596,7 @@ In particular the reading-progress quartet — `reading_status`, `current_page`,
 `started_at`, `finished_at` — is NOT emitted here. This fixture used to send it
 anyway, which made `Components.PlacementCard` look like it renders a live
 progress badge on page load when in production the card always opens at its
-"To Read" default with no page count (Issue #328; the contract question is
-Issue #314). Those four keys only ever arrive from
+"To Read" default with no page count. Those four keys only ever arrive from
 `PUT /api/placements/:id/progress` via `ProtoJSON.reading_progress/1`
 (`proto_json.ex:688-696`) — fold them in from a progress response, never from
 here.
@@ -661,7 +660,7 @@ simulateBookDetailResponseWithPlacement bookId book placement =
 
 
 {-| A book-detail response carrying SEVERAL placements of the same book — the
-legal multi-shelf state (#333). Each entry is `{placement_id, bookshelf_name}`;
+legal multi-shelf state. Each entry is `{placement_id, bookshelf_name}`;
 the response emits both the `placements` list and the legacy singular
 `placement` key (the first entry), exactly as the controller does.
 -}
@@ -851,11 +850,10 @@ simulatePlacementVisibilityResponse placementId visibility =
         )
 
 
-{-| A simulated request derived from the REAL `Api.*` request definition
-(Issue #347).
+{-| A simulated request derived from the REAL `Api.*` request definition.
 
 Hand-copying the method/url/body here is the request-side twin of the decoder
-mirrors #328 removed: the copy and the fixture agree with each other while
+mirrors removed: the copy and the fixture agree with each other while
 drifting from production, and the drift is invisible — hardcoding
 `Api.confirmBook`'s `shelf_name` left all 1,353 tests green. Deriving from
 `Api.RequestSpec` means a change to the production request is a change to what
@@ -1108,7 +1106,7 @@ happen is only worth the positive control that proves the harness can see it
 happening at all.
 
 ⚠️ **The organiser branches read `Bookshelf.mutationToken`, not `model.token`** —
-production's own read-only guard (Issue #332), _called_, not re-implemented. A
+production's own read-only guard, _called_, not re-implemented. A
 mirror of a guard is a second place for it to be wrong, and the whole reason this
 translator needed rewriting was a harness quietly disagreeing with the page. The
 guard's own falsifiability does not rest here either way: `BookshelfReadOnlyTest`'s
@@ -1262,7 +1260,7 @@ moveShelfToId draggedId targetId shelves =
 
 Mirrors `Page.Bookshelf.init`'s own structure: with no token there is no
 request at all, and with a token the GET targets `config.apiName` and tags the
-response with `requestKey config` (Issue #274). Keyed off the config so the
+response with `requestKey config`. Keyed off the config so the
 Library / Antilibrary / Wish List harnesses all share one mirror.
 
 -}
@@ -1370,7 +1368,7 @@ searchEffects msg model maybeToken =
 
 {-| The book-search SimulatedEffect, shared by the debounce and deep-toggle paths
 so the mirror URL (`/api/search?q=…` + optional `&scope=deep`) and the reused
-`Api.searchResponseDecoder` can never drift from the real wire (#284/#292). Fires
+`Api.searchResponseDecoder` can never drift from the real wire. Fires
 nothing without a token (book search is authenticated-only).
 -}
 searchBooksEffect : String -> Bool -> Maybe String -> SimulatedEffect Search.Msg
@@ -1603,7 +1601,7 @@ uploadProgram ageGatingEnabled maybeToken =
     uploadProgramWithInbox ageGatingEnabled maybeToken Types.RemoteData.NotAsked
 
 
-{-| The upload page with an inbox already loaded (Issue #351).
+{-| The upload page with an inbox already loaded.
 
 The inbox lives on `Main`, not on `Page.Upload` — one list feeding both the
 page's listing and the navigation badge, so the two cannot disagree — so it
@@ -1651,7 +1649,7 @@ libraryProgram =
 config. Library, Antilibrary and Wish List all render through this one module,
 so the only thing that varies between them is the `Config` — pass
 `Bookshelf.antiLibraryConfig` / `Bookshelf.wishListConfig` to drive those
-surfaces (Issue #112 punch #5/#6).
+surfaces.
 -}
 bookshelfProgram : Bookshelf.Config -> Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 bookshelfProgram config maybeToken =
@@ -1680,7 +1678,7 @@ bookshelfProgram config maybeToken =
 `Page.Bookshelf.ReadingPile.update` returns a third `OutMsg` element that the
 page itself cannot observe — `Main` consumes it. Recording the most recent
 `OutMsg` alongside the page model lets a program test assert the navigation
-intent a book click produces (Issue #112 punch #7) rather than only the model
+intent a book click produces rather than only the model
 change, without reaching past the page into `Main`.
 
 -}
@@ -1796,7 +1794,7 @@ readingPileInitEffects maybeToken =
 
 
 {-| A bookshelf harness for a reader who has just removed a book and been
-returned to their shelf (US-1.6.4 extension, #375).
+returned to their shelf (extension,).
 
 Seeds the toast through production's own `Bookshelf.withPendingUndo` — the
 function `Main.applyPendingUndo` calls — rather than hand-building a model with
@@ -1837,7 +1835,7 @@ bookshelfUndoProgram config maybeToken removal =
 
 
 {-| Create a ProgramTest harness for the read-only profile-shelf browse view
-(`Page.Bookshelf` in its `profileConfig` — US-10.5.3 / Issue #215).
+(`Page.Bookshelf` in its `profileConfig` — /).
 -}
 profileShelfProgram : Maybe String -> String -> String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 profileShelfProgram maybeToken handle bookshelfName =
@@ -1981,7 +1979,7 @@ loginProgram =
     loginProgramFrom Login.Fresh
 
 
-{-| The same harness, for a reader who arrived for a REASON (#360, #373).
+{-| The same harness, for a reader who arrived for a REASON.
 
 `loginProgram` is this with `Fresh`. Deep-linked arrivals — `/forgot-password`,
 `/resend-confirmation` — open the card on a mode an ordinary visitor cannot click

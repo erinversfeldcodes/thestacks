@@ -1,10 +1,10 @@
 defmodule Stacks.Books.TitleSearchCache do
   @moduledoc """
-  Two-level cache (ETS + `cache.title_search_cache` Postgres, same shape
-  as `ISBNResolverCache`) for the title-search path — the no-barcode route
-  that runs up to 12 query variants across OL/GB at ~1–3s per book. Keyed on
-  the search signals, not ISBN, which is why it's a separate cache. Stored
-  results are only ANSWERS: `{:ok, isbn, metadata}` or `{:error,
+    Two-level cache (ETS + `cache.title_search_cache` Postgres, same shape
+    as `ISBNResolverCache`) for the title-search path — the no-barcode route
+    that runs up to 12 query variants across OL/GB at ~1–3s per book. Keyed on
+    the search signals, not ISBN, which is why it's a separate cache. Stored
+    results are only ANSWERS: `{:ok, isbn, metadata}` or `{:error,
   :not_found}` — "we could not look" has no representation here by design.
   """
 
@@ -39,10 +39,10 @@ defmodule Stacks.Books.TitleSearchCache do
   end
 
   @doc """
-  Look up a cached title-search resolution. Returns `{:ok, cached}` where
-  `cached` is the memoised return value of
-  `ISBNResolver.search_by_title/3`, or `:miss` if absent/expired in both
-  tiers.
+    Look up a cached title-search resolution. Returns `{:ok, cached}` where
+    `cached` is the memoised return value of
+    `ISBNResolver.search_by_title/3`, or `:miss` if absent/expired in both
+    tiers.
   """
   @spec get(String.t() | nil, String.t() | nil, String.t() | nil) ::
           {:ok, {:ok, String.t(), map()} | {:error, :not_found}} | :miss
@@ -70,13 +70,13 @@ defmodule Stacks.Books.TitleSearchCache do
   end
 
   @doc """
-  Store a title-search resolution. Only ANSWERS are stored: `{:ok, isbn,
-  meta}` for 24h; `{:error, :not_found}` for 1h (still a fact about the
-  book, but the one most likely to stop being true). `{:error,
+    Store a title-search resolution. Only ANSWERS are stored: `{:ok, isbn,
+    meta}` for 24h; `{:error,:not_found}` for 1h (still a fact about the
+    book, but the one most likely to stop being true). `{:error,
   :unavailable}` is named explicitly and NOT stored — memoising a provider
-  outage would serve "this book does not exist" to every reader for an hour
-  after a 503 (352). Everything else falls to the catch-all and is skipped
-  with telemetry.
+    outage would serve "this book does not exist" to every reader for an hour
+    after a 503. Everything else falls to the catch-all and is skipped
+    with telemetry.
   """
   @spec put(String.t() | nil, String.t() | nil, String.t() | nil, term()) :: :ok
   def put(title, author, raw_text, {:ok, isbn, metadata} = result)
@@ -107,17 +107,17 @@ defmodule Stacks.Books.TitleSearchCache do
   end
 
   @doc """
-  Invalidate every entry whose positive result resolved to `isbn` — called
-  on rejected identifications, so the bad `(title, author, raw_text) → ISBN`
-  memo can't poison round one of the next upload (retry rounds carry
-  `excluded_isbns` and bypass the cache; round one doesn't).
+    Invalidate every entry whose positive result resolved to `isbn` — called
+    on rejected identifications, so the bad `(title, author, raw_text) → ISBN`
+    memo can't poison round one of the next upload (retry rounds carry
+    `excluded_isbns` and bypass the cache; round one doesn't).
 
-  Matching is canonical-ISBN-13 equality on BOTH sides
-  (`ISBN.canonical_isbn13/1`): OL docs often memoise an ISBN-10, rejections
-  pass the edition's ISBN-13 — bare string equality made this a no-op.
-  Cross-edition invalidation is the caller's job (pass every edition ISBN).
-  L1 scan-deletes matching entries; L2 deletes rows; both tiers tolerate
-  the other failing.
+    Matching is canonical-ISBN-13 equality on BOTH sides
+    (`ISBN.canonical_isbn13/1`): OL docs often memoise an ISBN-10, rejections
+    pass the edition's ISBN-13 — bare string equality made this a no-op.
+    Cross-edition invalidation is the caller's job (pass every edition ISBN).
+    L1 scan-deletes matching entries; L2 deletes rows; both tiers tolerate
+    the other failing.
   """
   @spec invalidate_by_isbn(String.t()) :: :ok
   def invalidate_by_isbn(isbn) when is_binary(isbn) do
@@ -136,11 +136,11 @@ defmodule Stacks.Books.TitleSearchCache do
   def invalidate_by_isbn(_isbn), do: :ok
 
   @doc """
-  Await all in-flight async L2 write tasks from the shared
-  `Stacks.Books.CacheWriteSupervisor`. Test-only — tests that assert on
-  DB-level effects after a `put/4` must call this first, or the async
-  write may not have landed yet. Not part of the production caller
-  contract.
+    Await all in-flight async L2 write tasks from the shared
+    `Stacks.Books.CacheWriteSupervisor`. Test-only — tests that assert on
+    DB-level effects after a `put/4` must call this first, or the async
+    write may not have landed yet. Not part of the production caller
+    contract.
   """
   @spec await_pending_writes(timeout()) :: :ok
   def await_pending_writes(timeout \\ 500) do

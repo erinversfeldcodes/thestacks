@@ -1,6 +1,6 @@
 defmodule Stacks.FeedsTest do
   @moduledoc """
-  Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
+    Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
   """
 
   use Core.DataCase, async: false
@@ -143,7 +143,7 @@ defmodule Stacks.FeedsTest do
       assert String.contains?(xml, "&lt;")
     end
 
-    test "never leaks the owner email in feed XML when display_name and handle are blank (#283)" do
+    test "never leaks the owner email in feed XML when display_name and handle are blank" do
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -162,7 +162,7 @@ defmodule Stacks.FeedsTest do
       assert String.contains?(xml, "A Stacks reader")
     end
 
-    test "falls back to the claimed handle when display_name is nil (#283)" do
+    test "falls back to the claimed handle when display_name is nil" do
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -181,7 +181,7 @@ defmodule Stacks.FeedsTest do
       refute String.contains?(xml, "@")
     end
 
-    test "uses display_name when present and never the email (#283)" do
+    test "uses display_name when present and never the email" do
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -232,7 +232,7 @@ defmodule Stacks.FeedsTest do
       assert row.etag == etag
     end
 
-    test "persists email-free cache XML for a nil-display-name user (#283 self-heal)" do
+    test "persists email-free cache XML for a nil-display-name user" do
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -320,7 +320,7 @@ defmodule Stacks.FeedsTest do
     end
   end
 
-  describe "US-6.1 entry content" do
+  describe "entry content" do
     setup do
       user = insert(:user)
       library = insert(:bookshelf, user: user, name: "library", visibility: "platform")

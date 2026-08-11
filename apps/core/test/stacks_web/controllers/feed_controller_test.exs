@@ -1,6 +1,6 @@
 defmodule StacksWeb.FeedControllerTest do
   @moduledoc """
-  Tests for GET /api/feeds/:user_id/:bookshelf_name.
+    Tests for GET /api/feeds/:user_id/:bookshelf_name.
   """
 
   use CoreWeb.ConnCase, async: false

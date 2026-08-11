@@ -100,7 +100,7 @@ defmodule StacksWeb.BlogControllerTest do
   end
 
   describe "GET /api/blog/posts/:id" do
-    test "shows a published public post to unauthenticated viewer (#225)", %{conn: conn} do
+    test "shows a published public post to unauthenticated viewer", %{conn: conn} do
       user = insert(:user, profile_visibility: "public")
 
       post =

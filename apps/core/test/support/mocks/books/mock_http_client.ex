@@ -1,23 +1,23 @@
 defmodule Stacks.Books.MockHttpClient do
   @moduledoc """
-  Mock HTTP client for ISBNResolver tests.
+    Mock HTTP client for ISBNResolver tests.
 
-  Responses are stored in the process dictionary keyed by URL substring,
-  so each test process is isolated and tests can run with `async: true`.
+    Responses are stored in the process dictionary keyed by URL substring,
+    so each test process is isolated and tests can run with `async: true`.
 
-  ## Usage
+    ## Usage
 
-      MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{"ISBN:123" => ...}})
-      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => [...]}})
-      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [...]}})
+        MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{"ISBN:123" =>...}})
+        MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => [...]}})
+        MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [...]}})
 
-  The **most recently** registered pattern whose substring matches the requested
-  URL wins — registrations are prepended, so a later `put_response/2` overrides
-  an earlier one for the same (or an overlapping) pattern. That is the useful
-  semantic for a test overriding a response installed by its `setup` block, and
-  it is what the code has always done; the moduledoc previously claimed
-  first-registration-wins, which was never true (Issue #327).
-  Unmatched URLs return `{:ok, %{}}`.
+    The **most recently** registered pattern whose substring matches the requested
+    URL wins — registrations are prepended, so a later `put_response/2` overrides
+    an earlier one for the same (or an overlapping) pattern. That is the useful
+    semantic for a test overriding a response installed by its `setup` block, and
+    it is what the code has always done; the moduledoc previously claimed
+    first-registration-wins, which was never true.
+    Unmatched URLs return `{:ok, %{}}`.
   """
 
   @behaviour Stacks.Books.HttpClientBehaviour
@@ -56,13 +56,13 @@ defmodule Stacks.Books.MockHttpClient do
   end
 
   @doc """
-  Capture every requested URL by sending `{Stacks.Books.MockHttpClient,
+    Capture every requested URL by sending `{Stacks.Books.MockHttpClient,
   :request, url}` to the calling (test) process. Uses the same
-  `$callers`-walking process-dictionary mechanism as `put_response/2`,
-  so requests made from Tasks spawned by the code under test are
-  captured too. Lets tests assert on the exact query the resolver
-  built (e.g. that a corrupted keyword or `inauthor:null` never goes
-  out on the wire).
+    `$callers`-walking process-dictionary mechanism as `put_response/2`,
+    so requests made from Tasks spawned by the code under test are
+    captured too. Lets tests assert on the exact query the resolver
+    built (e.g. that a corrupted keyword or `inauthor:null` never goes
+    out on the wire).
   """
   def capture_requests do
     Process.put(@capture_key, self())

@@ -1,6 +1,6 @@
 module ListingRemovalTest exposing (suite)
 
-{-| Tests the "Is this your business?" removal form (US-2.5.3, campaign G6).
+{-| Tests the "Is this your business?" removal form.
 
 The thing worth guarding is not that a form submits. It is that the **two outcomes stay
 distinguishable**: a request from an address on the listing's own domain is applied

@@ -1,10 +1,10 @@
 defmodule StacksWeb.BookModerationControllerTest do
   @moduledoc """
-  Tests for the owner age-gate moderation admin API endpoints (#118).
+    Tests for the owner age-gate moderation admin API endpoints.
 
-  The owner sees ALL books (including age-gated ones hidden from the public
-  catalogue) and may override a book's visibility tier in EITHER direction.
-  Access is gated by the MFA-verified admin session pipeline.
+    The owner sees ALL books (including age-gated ones hidden from the public
+    catalogue) and may override a book's visibility tier in EITHER direction.
+    Access is gated by the MFA-verified admin session pipeline.
   """
 
   use CoreWeb.ConnCase, async: false

@@ -54,7 +54,7 @@ import Util.TestId exposing (testId)
 {-| Configuration that differs between bookshelf pages; everything else is
 identical. `readOnly` is the browse mode for another reader's shelf
 (`/u/:handle/:bookshelf_name`): profile-endpoint fetch, all mutating
-affordances stripped (US-10.5.3).
+affordances stripped.
 
 ⚠️ Read-only is enforced at `mutationToken` (the credential source),
 not just in the view — hiding a control is presentation, not security.
@@ -210,7 +210,7 @@ Library, Antilibrary and Wish List all render through this one module and all
 sit behind Main.elm's single `PageBookshelf` constructor, so Main's
 constructor-match cannot tell them apart: a response for the shelf the user has
 just left is still delivered to the shelf they landed on. Tagging the message
-with the requesting config lets `update` drop it (Issue #274, US-1.2.5).
+with the requesting config lets `update` drop it.
 
 The handle is part of the key because the same `apiName` is also fetched in
 read-only mode for another reader's profile shelf — `/library` and
@@ -301,9 +301,9 @@ undoToastMillis =
 
 
 {-| Offer an undo on a page just built for a reader arriving straight off
-a removal (375). Applied by `Main` AFTER `init`, deliberately — the undo
+a removal. Applied by `Main` AFTER `init`, deliberately — the undo
 is not part of building a bookshelf, and a fourth argument would make
-ten call sites pass `Nothing` forever. Composing over `( Model, Cmd )`
+ten call sites pass `Nothing` forever. Composing over `( Model, Cmd)`
 keeps the arrival-only concern at the one site where it can be true.
 -}
 withPendingUndo : Maybe Removal -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
@@ -459,7 +459,7 @@ update msg model =
 
 
 {-| The packed rows as `GridNav` reasons about them: the SAME grouping the
-SpineView renders, each spine as ( book id, the width the packer gave it ).
+SpineView renders, each spine as ( book id, the width the packer gave it).
 -}
 navRows : List Shelf -> List (List ( String, Int ))
 navRows shelves =
@@ -604,7 +604,7 @@ reloadShelves model =
             Cmd.none
 
 
-{-| A load failure in the reader's terms (362). The two cases split from
+{-| A load failure in the reader's terms. The two cases split from
 the generic copy are the two the reader can act on — `Timeout` (names
 the wait) and `Offline` (names the cause) — and both only became
 REACHABLE with this issue's timeout: a stalled connection used to sit in
@@ -629,7 +629,7 @@ loadError config err =
             "Could not load your " ++ shelf ++ ". Please try again."
 
 
-{-| A failed undo in the reader's terms (#375).
+{-| A failed undo in the reader's terms.
 
 Split from `mutationError` because every case here says something different.
 The 409 in particular is not an error at all from where the reader is standing —
@@ -745,7 +745,7 @@ view model =
         ]
 
 
-{-| The "Removed — Undo" toast (375). Hidden under `readOnly` as the
+{-| The "Removed — Undo" toast. Hidden under `readOnly` as the
 SECOND line of defence: deleting this branch would make the page look
 wrong, not act wrong — `mutationToken` in `UndoRemove` is what makes a
 viewer's undo inert, and `read_only_undo_is_inert_SECURITY` asserts
@@ -803,7 +803,7 @@ viewEmptyBookshelf model =
         ]
 
 
-{-| The shelves are on their way (362).
+{-| The shelves are on their way.
 
 ⛔ `Loading` used to share `NotAsked`'s empty-bookcase render — which is
 also what `Success []` looks like: three facts, one picture. Offline
@@ -906,7 +906,7 @@ viewBookshelfFromShelves model shelves =
                 ]
 
 
-{-| The shelf organiser (US-1.7.1 / 190), owner only. A separate panel,
+{-| The shelf organiser, owner only. A separate panel,
 deliberately NOT a change to the spine layout: the bookcase auto-flows
 placements and does not surface physical `op.shelves` boundaries (the
 151 presentation choice) — per-shelf spine rendering would quietly

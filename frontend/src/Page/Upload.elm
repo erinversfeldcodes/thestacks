@@ -30,7 +30,7 @@ import Util.FailureCopy as FailureCopy
 import Util.TestId exposing (testId)
 
 
-{-| Why a photo did not become a book (374).
+{-| Why a photo did not become a book.
 
 ⛔ Every one of these used to be one sentence ("We couldn't read the
 ISBN… try a clearer image") covering a downed vision service, a timed-out
@@ -190,7 +190,7 @@ init =
     }
 
 
-{-| The server's `rejection_reason` token as an actionable cause (374).
+{-| The server's `rejection_reason` token as an actionable cause.
 Tokens are the union of `VisionError.reason_token/1` and the two the
 pipeline writes directly (`isbn_not_found`/`processing_failed`,
 `image_too_small`); `not_a_book` is matched one level up as its own
@@ -231,7 +231,7 @@ failureFromRejection reason =
             CauseUnknown
 
 
-{-| A transport failure on the upload flow as a cause (Issue #374).
+{-| A transport failure on the upload flow as a cause.
 
 Only the two `Http.Error` constructors that describe themselves get their own
 cause. A `BadStatus` is a number, and a number is not a reason a reader can act
@@ -267,10 +267,10 @@ tickSeconds =
 
 
 {-| After this long, the page stops implying the answer is imminent and offers
-the reader the door (Issue #351).
+the reader the door.
 
 20 seconds is not a guess about the pipeline; it is a guess about patience, and
-deliberately so. #349 measured warm vision calls at a median of 5–8s and a p95
+deliberately so. measured warm vision calls at a median of 5–8s and a p95
 of 15–30s, with cold starts reaching 60s — so at 20 seconds the common case has
 already answered, and a reader still watching is in the tail this issue exists
 to release them from.
@@ -1035,7 +1035,7 @@ viewUploadArea model =
         ]
 
 
-{-| The waiting screen, which stops promising imminence (351). The old
+{-| The waiting screen, which stops promising imminence. The old
 eternal `Processing image...` spinner implied seconds for up to 35
 measured minutes, and only a reader who stayed ever saw the result.
 This tells the truth — identification continues in the background — and
@@ -1065,8 +1065,7 @@ viewWaiting model =
         ]
 
 
-{-| The inbox: uploads this reader started and has not finished with
-(351). Identification is asynchronous, so this is how work done in the
+{-| The inbox: uploads this reader started and has not finished with. Identification is asynchronous, so this is how work done in the
 reader's absence is reached again; confirmation is synchronous, so every
 item is a LINK into the existing confirm flow and nothing more — no
 "add all", no control here that shelves a book.
@@ -1169,7 +1168,7 @@ inboxKindToken kind =
             "failed"
 
 
-{-| Why the photo never reached the library at all (Issue #374).
+{-| Why the photo never reached the library at all.
 
 This is the failure BEFORE identification: the presign, the R2 PUT or the commit
 did not go through. It read "Upload failed. Please try again." for every one of
@@ -1277,12 +1276,12 @@ viewUnidentifiedPlaceholder _ =
         ]
 
 
-{-| The failure card, saying WHICH failure it is (374). Both affordances
+{-| The failure card, saying WHICH failure it is. Both affordances
 (retry, manual entry) stay on every cause; the sentence changes and
 names the button worth reaching for.
 
 ⛔ Copy must only name controls that exist — `Page.Bookshelf.loadError`
-once shipped "then try again" onto a page with no retry control (368).
+once shipped "then try again" onto a page with no retry control.
 
 -}
 viewIdentificationFailed : UploadFailure -> Html Msg
@@ -1373,8 +1372,7 @@ failureBody cause =
             "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in."
 
 
-{-| The one sentence for `not_a_book`, shared by the card and the inbox summary
-(#351). Named rather than duplicated so the two surfaces cannot come to disagree
+{-| The one sentence for `not_a_book`, shared by the card and the inbox summary. Named rather than duplicated so the two surfaces cannot come to disagree
 about what happened to the same photo.
 -}
 notABookBody : String
@@ -1397,7 +1395,7 @@ viewNotABook =
         ]
 
 
-{-| Manual ISBN entry (US-1.1.5), now a single screen and a single request.
+{-| Manual ISBN entry, now a single screen and a single request.
 
 The bookshelf is chosen here rather than on a later step because
 `Books.confirm/2` creates and places in one transaction — asking afterwards
@@ -1494,7 +1492,7 @@ viewProvisionalNoticeIfNeeded book =
 
 
 {-| Render an in-flow age-gate notice when the resolved book is
-age-gated AND age-gating is enabled (ADR-020). Per US-1.1.4 the upload
+age-gated AND age-gating is enabled (ADR-020). Per the upload
 flow proceeds normally for the identification step, but the user is
 informed that the book is age-restricted. There is no self-serve
 "verify age" action anymore (verification is provider-sourced, shipped
@@ -1519,7 +1517,7 @@ viewAgeGateNoticeIfNeeded ageGatingEnabled book =
 
 
 {-| "You already have this on your Library shelf." — the manual-ISBN duplicate
-notice (#333).
+notice.
 
 The photo path has told the reader about a duplicate since the SSE payload's
 `is_duplicate`; typing the ISBN by hand told them nothing at all, so a second
@@ -1544,7 +1542,7 @@ viewExistingShelvesNotice shelfNames =
                 [ text ("You already have this on your " ++ joinWithAnd labels ++ ".") ]
 
 
-{-| The same notice on the completion card (#343). The manual path learns the
+{-| The same notice on the completion card. The manual path learns the
 reader's other bookshelves from the confirm response, which by definition
 arrives after the placement — so this is where it can be said. Same wording,
 same muted register; still nothing but a sentence.
@@ -1574,7 +1572,7 @@ otherShelves usedShelf placements =
         |> List.filter (\name -> name /= usedShelf)
 
 
-{-| The screen a merge lands on (#355), given the prompt it was answered from.
+{-| The screen a merge lands on, given the prompt it was answered from.
 
 Both prompts that offer "Yes, merge" end in the same completion card, but only
 one of them means the reader has this book: see `MergedEdition`. Anything else
@@ -1612,7 +1610,7 @@ book has one. An unidentified book does not — quoting `Not yet identified` wou
 present a status as if it were the title, which is the same untruth as quoting
 the ISBN. `this book` is what a person would say.
 
-Asks `isUnidentified`, not `isProvisional` (#370): "does this book have a name"
+Asks `isUnidentified`, not `isProvisional`: "does this book have a name"
 is exactly the question a quoted heading needs answered, and whether a provider
 confirmed its ISBN is not that question.
 
@@ -1762,7 +1760,7 @@ viewChoosingShelf model book =
 
 
 {-| The five bookshelves, as a row of selectable buttons. Shared by the shelf
-picker (photo path) and the manual-entry screen (#343) so the two ways of
+picker (photo path) and the manual-entry screen so the two ways of
 adding a book offer the same choice in the same markup.
 -}
 viewShelfChoices : String -> Html Msg
@@ -1812,7 +1810,7 @@ viewAdultsOnlyToggle isChecked =
 
 The heading distinguishes `Books.confirm/2`'s `:already_placed` branch from the
 two that changed something. Saying "added to your Wish List" when the book was
-already sitting there is the same class of untruth as the pre-#333 silent
+already sitting there is the same class of untruth as the pre-silent
 second placement — the reader must be able to tell what actually happened.
 `Nothing` is the photo path, which places directly and always added.
 
@@ -1926,7 +1924,7 @@ viewMergePrompt book =
         ]
 
 
-{-| US-1.1.8, reached from the manual path's 409 (#343).
+{-| , reached from the manual path's 409.
 
 `Books.confirm/2` matched the ISBN's resolved title+author to a work already in
 the catalogue (Jaro-Winkler > 0.8) and refused to create a second one. The
@@ -1986,7 +1984,7 @@ viewSameWorkActions workId =
         ]
 
 
-{-| US-1.1.8 copy: "You own [Title] as a [format]. Add the [new format]
+{-| copy: "You own [Title] as a [format]. Add the [new format]
 edition?" — degraded to a title-free sentence when the work could not be
 fetched, which is a cosmetic loss rather than a dead end.
 -}
@@ -2004,7 +2002,7 @@ sameWorkPrompt maybeBook =
             "We already have this book in the catalogue. Add this edition to it?"
 
 
-{-| The card an accepted merge lands on — US-1.1.8's completion (#355).
+{-| The card an accepted merge lands on — completion.
 
 Deliberately the same shape as `viewComplete`: heading, notice, actions, and
 `role="status"` so a screen reader is told the screen changed. Both merge

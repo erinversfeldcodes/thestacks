@@ -1,12 +1,12 @@
 defmodule Stacks.Events.Registry do
   @moduledoc """
-  Compile-time dispatch table for event types, plus the hand-maintained
-  list of types known to have no subscriber. `@registry` maps event type →
-  handler modules (`handlers_for/1`); `@unsubscribed` names real emitted
-  types nothing listens to. `all_event_types/0` returns BOTH — replay and
-  diagnostics want the whole vocabulary, and a registry-only answer once
-  silently hid 32 of 54 emitted types. A test derives the emitted set from
-  the codebase and fails when either list goes stale.
+    Compile-time dispatch table for event types, plus the hand-maintained
+    list of types known to have no subscriber. `@registry` maps event type →
+    handler modules (`handlers_for/1`); `@unsubscribed` names real emitted
+    types nothing listens to. `all_event_types/0` returns BOTH — replay and
+    diagnostics want the whole vocabulary, and a registry-only answer once
+    silently hid 32 of 54 emitted types. A test derives the emitted set from
+    the codebase and fails when either list goes stale.
   """
 
   @registry %{
@@ -110,12 +110,12 @@ defmodule Stacks.Events.Registry do
     "blog.association_confirmed",
     "blog.association_dismissed",
     "post.comment_created",
-    # US-6.2.1: the record that a syndication happened. The feed is generated
+    # the record that a syndication happened. The feed is generated
     # per request behind an ETag (no cached artefact to invalidate — see the
     # §6 warning in the story about op.feed_cache being the WRONG home for a
     # blog-feed cache), and stg_post_syndications is a view, so a refresh
     # handler would map to no models. The int_syndication_reach insights model
-    # is deferred with its US-12.x consumer — wiring a refresh for a model
+    # is deferred with its x consumer — wiring a refresh for a model
     # that doesn't exist yet is the "built but not wired" shape inverted.
     "post.syndicated",
     "group.created",
@@ -146,7 +146,7 @@ defmodule Stacks.Events.Registry do
 
   @pending %{
     "enrichment.reviews_scraped" =>
-      "US-2.1.1 — reviews are planned, not deleted (owner ruling 2026-08-07, #336): " <>
+      "reviews are planned, not deleted (owner ruling 2026-08-07): " <>
         "the Wave 2 cleanup removed the scraper-side emitter but the review vertical " <>
         "returns; its handler, payload contract and dbt models stay wired"
   }
@@ -166,9 +166,9 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-  Returns the list of handler modules registered for the given event type.
+    Returns the list of handler modules registered for the given event type.
 
-  Returns an empty list if no handlers are registered.
+    Returns an empty list if no handlers are registered.
   """
   @spec handlers_for(String.t()) :: [module()]
   def handlers_for(event_type) when is_binary(event_type) do
@@ -181,12 +181,12 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-  Returns every event type this module catalogues, sorted — subscribed or not.
+    Returns every event type this module catalogues, sorted — subscribed or not.
 
-  The vocabulary for replay tooling and diagnostics, so it deliberately includes
-  types with no handler. It is the union of two hand-maintained lists, not a derived
-  fact about the codebase: absence here means "not catalogued", not "never emitted"
-  (see the moduledoc). Use `handlers_for/1` to ask what will actually run.
+    The vocabulary for replay tooling and diagnostics, so it deliberately includes
+    types with no handler. It is the union of two hand-maintained lists, not a derived
+    fact about the codebase: absence here means "not catalogued", not "never emitted"
+    (see the moduledoc). Use `handlers_for/1` to ask what will actually run.
   """
   @spec all_event_types() :: [String.t()]
   def all_event_types do
@@ -194,16 +194,16 @@ defmodule Stacks.Events.Registry do
   end
 
   @doc """
-  Returns the event types that are emitted but have no subscriber.
+    Returns the event types that are emitted but have no subscriber.
 
-  The standing inventory of what this system announces and nothing acts on.
+    The standing inventory of what this system announces and nothing acts on.
   """
   @spec unsubscribed_event_types() :: [String.t()]
   def unsubscribed_event_types, do: @unsubscribed
 
   @doc """
-  Catalogued event types with no emitter yet, mapped to the reason each one's
-  consumer-side wiring is kept. See `@pending`.
+    Catalogued event types with no emitter yet, mapped to the reason each one's
+    consumer-side wiring is kept. See `@pending`.
   """
   @spec pending_event_types() :: %{String.t() => String.t()}
   def pending_event_types, do: @pending

@@ -1,6 +1,6 @@
 module Page.ResendConfirmationTest exposing (suite)
 
-{-| Resending the confirmation email (Issue #373, US-14.4.2).
+{-| Resending the confirmation email.
 
 
 ## The defect
@@ -53,7 +53,7 @@ Three mutations, run 2026-08-02 (transcripts on the issue):
   - `resendTarget` returning `String.trim model.email` unconditionally reddens
     `resend_follows_the_card_not_the_field` — and NOTHING else, which is why that
     test had to be written the awkward way it is.
-  - dropping the `Success ()` clause from `isResendDisabled` reddens
+  - dropping the `Success` clause from `isResendDisabled` reddens
     `double_send_is_impossible` while `resend_failure_reopens` stays green,
     proving the two are not testing the same thing.
   - deleting `ResendConfirmation -> False` from `Main.requiresAuth` reddens
@@ -80,7 +80,7 @@ import Types.RemoteData
 
 suite : Test
 suite =
-    describe "Resend confirmation (Issue #373)"
+    describe "Resend confirmation"
         [ describe "from the check-your-inbox card"
             [ pendingCardOffersAResend
             , resendSendsToTheAddressOnScreen
@@ -106,7 +106,7 @@ successCopy =
     "If that address is waiting to be confirmed, a fresh link is on its way. It replaces any earlier one."
 
 
-{-| The copy for a DROPPED CONNECTION specifically (#374).
+{-| The copy for a DROPPED CONNECTION specifically.
 
 It used to be one sentence for every failure — including a 429, where "please try
 again in a moment" is the instruction guaranteed to fail. The constant is named
@@ -229,7 +229,7 @@ acknowledgementIsNotClaimedBeforeItAnswers =
                 |> ProgramTest.expectViewHasNot [ Selector.text successCopy ]
 
 
-{-| ⛔ The double-send the epic calls out.
+{-| ⛔ The double-send guard.
 
 `expectHttpRequests` counts requests still AWAITING a response, so the zero below
 is "the second press started nothing", not "nothing ever happened". The
@@ -276,7 +276,7 @@ resendFailureReopensTheButton =
 
 
 {-| The resend outcome is spent when the reader moves on, exactly as `forgotState`
-and the arrival are (#360's rule, applied to the new field).
+and the arrival are (rule, applied to the new field).
 
 Without this, a reader who resent and then went back to sign in would carry a
 stale "a fresh link is on its way" notice — and a disabled button — into a later
@@ -359,8 +359,8 @@ deadLinkResendUsesTheTypedAddress =
 
 The dead-link path proved it _sends_ (`deadLinkResendUsesTheTypedAddress`) but nothing proved it
 _acknowledges_ — only the pending-card path did (`resendIsAcknowledged`). Driving the deployed
-preview (2026-08-04, #373), the acknowledgement appeared not to render, and I nearly filed that as a
-defect. It is not one: `resendState` is `RemoteData RequestError ()`, so ANY 200 maps to `Success ()`
+preview (2026-08-04,), the acknowledgement appeared not to render, and I nearly filed that as a
+defect. It is not one: `resendState` is `RemoteData RequestError`, so ANY 200 maps to `Success`
 and `viewResendOutcome` renders the notice — this test simulates exactly that and passes with **zero
 code change**, and the decoder ignoring the body means the `"{}"` here and the server's real
 `{"message":...}` are the same input.

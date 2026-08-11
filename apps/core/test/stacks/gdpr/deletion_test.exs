@@ -1,10 +1,10 @@
 defmodule Stacks.GDPR.DeletionTest do
   @moduledoc """
-  138 Phase 1: erasure must be able to modify the append-only audit log.
-  A `Multi.run` issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before
-  audit cleanup; asserts the GUC works inside the transaction (an
-  audit-row UPDATE succeeds under the trigger) and is LOCAL (the same
-  UPDATE outside the transaction is still refused).
+    138 Phase 1: erasure must be able to modify the append-only audit log.
+    A `Multi.run` issues `SET LOCAL app.audit_gdpr_erasure = 'true'` before
+    audit cleanup; asserts the GUC works inside the transaction (an
+    audit-row UPDATE succeeds under the trigger) and is LOCAL (the same
+    UPDATE outside the transaction is still refused).
   """
   use Core.DataCase, async: false
 
@@ -75,7 +75,7 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
-  describe "delete_user_data/1 audit + event_log invariants (Issue #121)" do
+  describe "delete_user_data/1 audit + event_log invariants" do
     test "writes a user.data_deleted audit row with nil user_id and the deleted user's id as resource_id" do
       user = insert(:user)
 
@@ -100,7 +100,7 @@ defmodule Stacks.GDPR.DeletionTest do
       assert row.resource_id == Ecto.UUID.dump!(user.id)
     end
 
-    test "records the operator :reason (encrypted) in the erasure audit row (#138)" do
+    test "records the operator:reason (encrypted) in the erasure audit row" do
       user = insert(:user)
 
       assert {:ok, _result} =
@@ -158,7 +158,7 @@ defmodule Stacks.GDPR.DeletionTest do
       assert after_other == before_other
     end
 
-    test "scrubs the user's free-text PII from events under NON-user aggregates (#185)" do
+    test "scrubs the user's free-text PII from events under NON-user aggregates" do
       user = insert(:user)
       other_user = insert(:user)
       post_id = Ecto.UUID.generate()
@@ -284,7 +284,7 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
-  describe "delete_user_data/1 blog comment erasure (#185)" do
+  describe "delete_user_data/1 blog comment erasure" do
     test "tombstones the erased user's post_comment bodies but leaves other users' comments intact" do
       erased_user = insert(:user)
       other_user = insert(:user)
@@ -322,7 +322,7 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
-  describe "delete_user_data/1 feed cache erasure (#264)" do
+  describe "delete_user_data/1 feed cache erasure" do
     test "erasing a user removes their feed_cache rows and preview reports the count" do
       user = insert(:user, profile_visibility: "platform")
       other = insert(:user, profile_visibility: "platform")
@@ -354,7 +354,7 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
-  describe "delete_user_data/1 uploaded image erasure (#353)" do
+  describe "delete_user_data/1 uploaded image erasure" do
     test "erasing a user removes their uploaded_images rows immediately" do
       user = insert(:user)
 
@@ -403,7 +403,7 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
-  describe "delete_user_data/1 uploaded image storage deletion (#353)" do
+  describe "delete_user_data/1 uploaded image storage deletion" do
     setup do
       Application.put_env(:core, :storage, Stacks.GDPR.DeletionTest.RecordingStorage)
       on_exit(fn -> Application.put_env(:core, :storage, Stacks.Storage.Mock) end)
@@ -437,7 +437,7 @@ defmodule Stacks.GDPR.DeletionTest do
     end
   end
 
-  describe "erasure completeness — schema-level guard (#185)" do
+  describe "erasure completeness — schema-level guard" do
     @nilify_user_fk_allowlist %{
       "transactions" => "financial-audit / legal retention; no user free-text",
       "partners" => "business entity (partner record); approver de-linked on erasure",
@@ -517,10 +517,10 @@ end
 
 defmodule Stacks.GDPR.DeletionTest.RecordingStorage do
   @moduledoc """
-  Test-local storage backend that records every `delete/1` call by sending
-  `{:storage_delete, key}` to the process that ran the deletion. `delete/1`
-  runs synchronously inside `delete_user_data/1`'s erasure transaction, so
-  `self()` is the test process and the message lands in its mailbox.
+    Test-local storage backend that records every `delete/1` call by sending
+    `{:storage_delete, key}` to the process that ran the deletion. `delete/1`
+    runs synchronously inside `delete_user_data/1`'s erasure transaction, so
+    `self` is the test process and the message lands in its mailbox.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour

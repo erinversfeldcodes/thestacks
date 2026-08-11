@@ -1,6 +1,6 @@
 module Page.Settings.PasswordTest exposing (suite)
 
-{-| #126 punch 18/19 — the Settings → Password change form.
+{-| /19 — the Settings → Password change form.
 
 Drives `Page.Settings.Password.update`/`view` through the change lifecycle:
 `init` is empty and idle; the three setters update their fields and clear any
@@ -20,8 +20,8 @@ import Test.Html.Selector as Selector
 import Types.RemoteData exposing (RemoteData(..))
 
 
-{-| The model out of the page's `( Model, Cmd Msg, OutMsg )` triple. The page
-gained an `OutMsg` in #361 so a mid-form 401 can reach the global session-expiry
+{-| The model out of the page's `( Model, Cmd Msg, OutMsg)` triple. The page
+gained an `OutMsg` in so a mid-form 401 can reach the global session-expiry
 interceptor; the `OutMsg` itself is asserted in `Page.SessionExpiryPagesTest`.
 -}
 modelOf : ( Password.Model, Cmd Msg, Password.OutMsg ) -> Password.Model
@@ -49,7 +49,7 @@ validInput =
 
 suite : Test
 suite =
-    describe "Page.Settings.Password (#126 punch 18/19)"
+    describe "Page.Settings.Password"
         [ describe "init"
             [ test "starts with every field empty and saving NotAsked" <|
                 \_ ->

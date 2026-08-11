@@ -51,7 +51,7 @@ defmodule Stacks.Events.RegistryTest do
       assert Enum.all?(Registry.all_event_types(), &is_binary/1)
     end
 
-    test "catalogues the reading-lifecycle event types (US-1.6.6)" do
+    test "catalogues the reading-lifecycle event types" do
       types = Registry.all_event_types()
       assert "placement.reading_started" in types
       assert "placement.reading_completed" in types

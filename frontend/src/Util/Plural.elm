@@ -6,7 +6,7 @@ The recurring bug this exists to kill is "1 books" — a label built as
 `String.fromInt n ++ " books"` reads correctly for every count except one, and
 one is the count a brand-new reader's first shelf almost always has. Screen
 readers announce the shelf label verbatim, so the grammatical slip is heard, not
-just seen (#318 TR-6).
+just seen (TR-6).
 
 One function, one source of truth, so a second surface cannot drift back to the
 naive concatenation.

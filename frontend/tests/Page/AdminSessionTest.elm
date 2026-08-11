@@ -1,6 +1,6 @@
 module Page.AdminSessionTest exposing (suite)
 
-{-| The admin sign-in gate (#303).
+{-| The admin sign-in gate.
 
 ⚠️ **The four admin pages each had passing tests while being completely unreachable**, because every
 one of them fed a token straight into a mocked API. None went through the code that _chooses_ the
@@ -12,7 +12,7 @@ What is worth guarding here:
 1.  **The step machine cannot reach an impossible state.** A code can only be submitted against a
     session id that exists, and the password is dropped as soon as it is spent.
 2.  **`Authenticated` is the only way a token escapes.** Main holds it in memory; if this module
-    ever stored or leaked it the in-memory decision (#303 Design) would be quietly undone.
+    ever stored or leaked it the in-memory decision (Design) would be quietly undone.
 3.  **Every failure keeps its own remedy.** A wrong password, a non-owner account, a missing factor
     and a stale code are four different next actions. Collapsing them into "something went wrong"
     is the failure mode that makes operator tooling unusable.

@@ -1,13 +1,13 @@
 defmodule Stacks.Events.PayloadContractTest do
   @moduledoc """
-  The three static guards over the event-payload contract (the schema `buf` can't
-  see, because payloads are opaque `google.protobuf.Struct`). Shape-drift itself is
-  caught at emit time by `Stacks.Events.emit/1` (the whole suite drives the
-  emitters); this file enforces the parts a runtime emit can't:
+    The three static guards over the event-payload contract (the schema `buf` can't
+    see, because payloads are opaque `google.protobuf.Struct`). Shape-drift itself is
+    caught at emit time by `Stacks.Events.emit/1` (the whole suite drives the
+    emitters); this file enforces the parts a runtime emit can't:
 
-    * PII-lint — no personal/free-text key sneaks into a payload unjustified.
-    * version ↔ upcaster — every bumped version has a migration.
-    * coverage — every emitted event type is declared.
+      * PII-lint — no personal/free-text key sneaks into a payload unjustified.
+      * version ↔ upcaster — every bumped version has a migration.
+      * coverage — every emitted event type is declared.
   """
   use ExUnit.Case, async: true
 

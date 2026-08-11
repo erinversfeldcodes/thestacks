@@ -1,16 +1,16 @@
 defmodule Stacks.Transparency.MockPrometheusClient do
   @moduledoc """
-  Process-dictionary mock for the transparency Prometheus client (ADR-012).
+    Process-dictionary mock for the transparency Prometheus client (ADR-012).
 
-  Responses are stored per-process so tests stay isolated. A call counter is
-  maintained so the cache test can assert that a second `metrics/0` call within
-  the TTL does NOT re-invoke the client.
+    Responses are stored per-process so tests stay isolated. A call counter is
+    maintained so the cache test can assert that a second `metrics/0` call within
+    the TTL does NOT re-invoke the client.
 
-  ## Usage
+    ## Usage
 
-      MockPrometheusClient.put_response({:ok, 0.42})
-      # ... exercise Stacks.Transparency ...
-      assert MockPrometheusClient.call_count() == length(Transparency.allowlist_keys())
+        MockPrometheusClient.put_response({:ok, 0.42})
+        #... exercise Stacks.Transparency..
+        assert MockPrometheusClient.call_count == length(Transparency.allowlist_keys)
   """
 
   @behaviour Stacks.Transparency.PrometheusClient

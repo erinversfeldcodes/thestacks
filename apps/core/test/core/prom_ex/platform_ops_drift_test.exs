@@ -1,11 +1,11 @@
 defmodule Core.PromEx.PlatformOpsDriftTest do
   @moduledoc """
-  Drift guard for the platform/ops dashboard-as-code (240, epic 231;
-  grafana/platform_ops.json). Unlike the single-domain dashboards, this
-  one spans many prefixes (`stacks_rate_limit_`, `stacks_events_`,
-  `stacks_fuse_`, `stacks_repo_`, `stacks_router_`, `stacks_upload_`), so
-  lock-step is asserted against the FULL registered set. Renames blanking
-  panels or new ops families shipping invisible both fail CI.
+    Drift guard for the platform/ops dashboard-as-code (240,;
+    grafana/platform_ops.json). Unlike the single-domain dashboards, this
+    one spans many prefixes (`stacks_rate_limit_`, `stacks_events_`,
+    `stacks_fuse_`, `stacks_repo_`, `stacks_router_`, `stacks_upload_`), so
+    lock-step is asserted against the FULL registered set. Renames blanking
+    panels or new ops families shipping invisible both fail CI.
   """
 
   use ExUnit.Case, async: true
@@ -95,7 +95,7 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
     end
   end
 
-  describe "drift: the NEW #240 trusted-client-IP-source family has a panel" do
+  describe "drift: the NEW trusted-client-IP-source family has a panel" do
     test "stacks_rate_limit_client_ip is both registered and queried by >=1 panel" do
       registered = registered_families()
       referenced = panel_metric_names(decoded_dashboard())

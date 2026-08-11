@@ -1,13 +1,13 @@
 module GridNavTest exposing (suite)
 
-{-| #388 — the roving-tabindex navigation state machine, as pure decisions
+{-| — the roving-tabindex navigation state machine, as pure decisions
 over packed rows.
 
 The grid under test (widths include the packer's gap):
 
-    row 0:  A(100) B(50) C(200)     centers: A=50  B=125 C=250
-    row 1:  D(300) E(40)            centers: D=150 E=320
-    row 2:  F(90)                   centers: F=45
+    row 0:  A B C     centers: A=50  B=125 C=250
+    row 1:  D E            centers: D=150 E=320
+    row 2:  F                   centers: F=45
 
 Vertical moves are NEAREST-X (owner decision): ↓ from C (center 250) lands on
 E (center 320, distance 70) rather than D (150, distance 100) — an
@@ -32,7 +32,7 @@ grid =
 
 suite : Test
 suite =
-    describe "GridNav (#388)"
+    describe "GridNav"
         [ describe "horizontal moves stay in the row"
             [ test "ArrowRight moves to the next spine" <|
                 \_ -> GridNav.nextFocus ArrowRight "A" grid |> Expect.equal (Just "B")

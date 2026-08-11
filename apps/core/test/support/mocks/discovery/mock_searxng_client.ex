@@ -1,13 +1,13 @@
 defmodule Stacks.Discovery.MockSearxngClient do
   @moduledoc """
-  Mock SearXNG client for tests.
+    Mock SearXNG client for tests.
 
-  Responses are stored in the process dictionary so each test process is
-  isolated and tests can run with `async: true`.
+    Responses are stored in the process dictionary so each test process is
+    isolated and tests can run with `async: true`.
 
-  ## Usage
+    ## Usage
 
-      MockSearxngClient.put_response({:ok, [%{title: "Book Event", url: "https://example.com", description: "..."}]})
+        MockSearxngClient.put_response({:ok, [%{title: "Book Event", url: "https://example.com", description: "..."}]})
 
   """
 

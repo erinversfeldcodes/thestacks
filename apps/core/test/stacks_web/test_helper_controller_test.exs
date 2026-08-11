@@ -1,14 +1,14 @@
 defmodule StacksWeb.TestHelperControllerTest do
   @moduledoc """
-  Guards the test-only confirmation-token endpoint (Issue #124, Phase 3).
+    Guards the test-only confirmation-token endpoint.
 
-  This endpoint leaks an account-activation token, so the security-critical
-  property under test is that it is *disabled* unless the server env flag
-  `STACKS_E2E_TEST_HELPERS == "1"` is set. In production the flag is never
-  set, so the route returns 404 for every request.
+    This endpoint leaks an account-activation token, so the security-critical
+    property under test is that it is *disabled* unless the server env flag
+    `STACKS_E2E_TEST_HELPERS == "1"` is set. In production the flag is never
+    set, so the route returns 404 for every request.
 
-  `async: false` because the tests mutate a process-global environment
-  variable; running serially keeps them from leaking into async tests.
+    `async: false` because the tests mutate a process-global environment
+    variable; running serially keeps them from leaking into async tests.
   """
   use CoreWeb.ConnCase, async: false
 
@@ -455,7 +455,7 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert ISBN.valid_isbn_checksum?(isbn)
     end
 
-    test "auto-generated ISBN carries the recognisable E2E-seed block (Issue #297)", %{conn: conn} do
+    test "auto-generated ISBN carries the recognisable E2E-seed block", %{conn: conn} do
       %{"book_id" => book_id} =
         json_response(
           post(conn, "/api/test/book-description", %{title: "Marker", description: "z"}),

@@ -22,7 +22,7 @@ token =
 suite : Test
 suite =
     describe "Page.Settings.Privacy"
-        [ describe "init (US-10.1.1)"
+        [ describe "init"
             [ test "profileVisibility defaults to owner" <|
                 \_ ->
                     Privacy.init.profileVisibility
@@ -40,7 +40,7 @@ suite =
                     Privacy.init.savingShelf
                         |> Expect.equal NotAsked
             ]
-        , describe "profile visibility (US-10.1.1)"
+        , describe "profile visibility"
             [ test "SetProfileVisibility updates the local value" <|
                 \_ ->
                     let
@@ -93,7 +93,7 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "Visibility updated." ]
             ]
-        , describe "shelf visibility (US-10.2.1)"
+        , describe "shelf visibility"
             [ test "SetShelfVisibility updates only the matching shelf" <|
                 \_ ->
                     let
@@ -178,7 +178,7 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "A shelf cannot be more visible than your profile." ]
             ]
-        , describe "search-engine privacy (US-10.4.1, build b)"
+        , describe "search-engine privacy"
             [ test "renders the informational search-engine text" <|
                 \_ ->
                     Privacy.init
@@ -223,7 +223,7 @@ suite =
                                 token
                     in
                     List.length model.shelfVisibilities |> Expect.equal 5
-            , test "GotPrivacySettings Ok hydrates consent from the server, not the stale login blob (#367)" <|
+            , test "GotPrivacySettings Ok hydrates consent from the server, not the stale login blob" <|
                 \_ ->
                     let
                         ( model, _, _ ) =
@@ -234,7 +234,7 @@ suite =
                     in
                     model.consent.analyticsConsent |> Expect.equal True
             ]
-        , describe "consent folded into Privacy (#318 TR-4)"
+        , describe "consent folded into Privacy"
             [ test "the consent toggles now render within the Privacy page" <|
                 \_ ->
                     Privacy.init

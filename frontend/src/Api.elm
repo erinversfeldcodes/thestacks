@@ -240,7 +240,7 @@ baseUrl =
 
 
 {-| A request's data — method, url, JSON body — apart from the
-`Http.request` that sends it (347). `elm-program-test` cannot run real
+`Http.request` that sends it. `elm-program-test` cannot run real
 requests, so test translators build `SimulatedEffect`s; before this seam
 they hand-copied url/method/body, and a drifted copy was invisible to
 the whole suite. Both production and tests now consume the same spec.
@@ -262,8 +262,7 @@ specHttpBody spec =
             Http.emptyBody
 
 
-{-| How long a request may hang before `elm/http` reports `Http.Timeout`
-(362).
+{-| How long a request may hang before `elm/http` reports `Http.Timeout`.
 
 ⛔ `timeout = Nothing` means "wait forever", not "no timeout": a stalled
 connection (sleeping machine, captive portal) never resolves, so
@@ -277,7 +276,7 @@ standardTimeout =
     Just 15000
 
 
-{-| The bound for a request whose body is a file (Issue #362).
+{-| The bound for a request whose body is a file.
 
 Two minutes, not fifteen seconds, because this clock is measuring something
 else. `standardTimeout` bounds _waiting for an answer_; an upload's elapsed time
@@ -349,7 +348,7 @@ registrationResponseDecoder =
 `"timeout"`; unknown strings read as `Pending` (still in flight), never
 guessed terminal.
 
-⛔ `"timeout"` is not a rejection (374): it used to decode to `Rejected`
+⛔ `"timeout"` is not a rejection: it used to decode to `Rejected`
 with a null reason, so the reader was told their photo was refused when
 the pipeline had simply not answered yet. `TimedOut` is its own state.
 
@@ -418,7 +417,7 @@ streamEventDecoder =
         (Decode.field "is_duplicate" Decode.bool)
 
 
-{-| What an upload in the inbox is waiting for (351).
+{-| What an upload in the inbox is waiting for.
 
 ⛔ Not a scale from good to bad; never sum them. `AwaitingConfirmation`
 is a job the reader can finish; `Failed` is news they were never given.
@@ -493,8 +492,7 @@ inboxItemDecoder =
 
 {-| `GET /api/uploads/inbox` — every upload this reader has not finished with.
 
-Every field is required, for the same reason `streamEventDecoder`'s are
-(Issue #328): `StacksWeb.ProtoJSON.upload_inbox_item/1` emits all four on every
+Every field is required, for the same reason `streamEventDecoder`'s are: `StacksWeb.ProtoJSON.upload_inbox_item/1` emits all four on every
 branch, `book_ids` defaulting to `[]` and `rejection_reason` arriving as JSON
 `null`. A `Decode.succeed` fallback here would mean a wire rename could never
 redden a test.
@@ -584,7 +582,7 @@ type alias ImportRow =
 
 
 {-| Upload refusals the page owes distinct copy for. The server answers each
-with a distinct status (409 / 413 / 422), so the STATUS is the discriminant —
+with a distinct status, so the STATUS is the discriminant —
 no body parse to drift.
 -}
 type ImportError
@@ -701,7 +699,7 @@ getImportRows token importId toMsg =
         }
 
 
-{-| A request failure that may carry the server-named wait (374). Exists
+{-| A request failure that may carry the server-named wait. Exists
 because `Http.Error` structurally cannot: `expectJson` collapses non-2xx
 into `BadStatus Int` — the status survives, the headers do not, and
 `retry-after` is a header. Built with `expectStringResponse` so the 429
@@ -713,7 +711,7 @@ type RequestError
 
 
 {-| The wait a 429 named, in seconds — `Nothing` when it named none, or named
-something that is not a positive whole number of seconds (Issue #374).
+something that is not a positive whole number of seconds.
 
 RFC 9110 permits `retry-after` to be an HTTP-date as well as a delay in seconds,
 and this deliberately does **not** parse the date form. Turning a date into a
@@ -760,7 +758,7 @@ for the 2xx body.
 
 Exported (via `resolveAuthResponse` / `resolveNoContent`) so `TestHelpers`'
 simulated effects run the **real** resolver rather than a hand-written mirror of
-it. `registerResponseResult` used to be such a mirror, and #328 is the record of
+it. `registerResponseResult` used to be such a mirror, and is the record of
 what mirrors cost: the copy and the fixtures agree with each other while both
 disagree with the server, and the suite stays green through a wire rename.
 
@@ -805,7 +803,7 @@ resolveNoContent =
 
 A 422 carries per-field validation errors (keyed by field name — `email`,
 `password`, `display_name`) so the UI can explain the _actual_ problem rather
-than guessing. A 429 carries the rate limiter's wait (Issue #374). Every other
+than guessing. A 429 carries the rate limiter's wait. Every other
 failure (network, timeout, unexpected status, or a 422 whose body we could not
 parse) is a `RegisterRequestFailed`.
 
@@ -817,7 +815,7 @@ type RegisterError
     | RegisterRequestFailed Http.Error
 
 
-{-| Decode the backend's `{"errors": {field: [msg, ...]}}` 422 body. See
+{-| Decode the backend's `{"errors": {field: [msg,...]}}` 422 body. See
 `format_errors/1` in the Elixir `StacksWeb.ChangesetHelpers`.
 -}
 registerErrorsDecoder : Decoder (List ( String, List String ))
@@ -826,7 +824,7 @@ registerErrorsDecoder =
 
 
 {-| The invite gate's refusal body — only `invite_*` reasons qualify, so an
-unrelated `{"error": ...}` still reads as its plain HTTP status.
+unrelated `{"error":...}` still reads as its plain HTTP status.
 -}
 inviteErrorDecoder : Decoder String
 inviteErrorDecoder =
@@ -841,7 +839,7 @@ inviteErrorDecoder =
             )
 
 
-{-| What `GET /api/auth/invite/:code` says about a redeemable code (US-14.1.3).
+{-| What `GET /api/auth/invite/:code` says about a redeemable code.
 Deliberately tiny: the server never reveals the note, the bound address, or a
 redeemer — `emailBound` is a boolean so the form can say "written for a
 specific address" without naming it.
@@ -859,8 +857,8 @@ inviteStatusDecoder =
         (Decode.field "email_bound" Decode.bool)
 
 
-{-| Look an invitation code up before offering the Register form (US-14.1.3).
-The failure statuses (404/410/403/409) arrive as `BadStatus` — the card maps
+{-| Look an invitation code up before offering the Register form.
+The failure statuses arrive as `BadStatus` — the card maps
 them to copy; it never needs the body's error string because the status alone
 distinguishes the four refusals.
 -}
@@ -902,9 +900,9 @@ register body toMsg =
 
 
 {-| `Http.expectJson` discards the response body on a non-2xx status, which
-would throw away the structured `{"errors": ...}` payload a 422 carries. This
+would throw away the structured `{"errors":...}` payload a 422 carries. This
 custom expect keeps those field errors so the caller can surface the real
-reason a registration was rejected — and, since #374, the 429's `retry-after`
+reason a registration was rejected — and, since, the 429's `retry-after`
 for the same reason: it is the only place the number is still readable.
 
 The resolver is a named top-level function rather than a lambda so the
@@ -961,7 +959,7 @@ resolveRegister response =
 
 
 {-| POST /api/auth/login. Answers with `RequestError` rather than `Http.Error`
-so a 429 arrives with the wait the server named (Issue #374); this endpoint is
+so a 429 arrives with the wait the server named; this endpoint is
 in the `:auth` rate-limit bucket, which is the tightest one in the app, and a
 mistyped password is the commonest way a reader reaches it.
 -}
@@ -1004,12 +1002,12 @@ forgotPassword email toMsg =
         }
 
 
-{-| Ask for a fresh email-confirmation link (Issue #373, US-14.4.2).
+{-| Ask for a fresh email-confirmation link.
 
 Same shape as `forgotPassword` and for the same reason: the backend answers
 identically for an address awaiting confirmation, an address already confirmed
 and an address with no account at all, so there is nothing here to decode. A
-`Result` with a `()` in it is the honest type — the caller genuinely cannot learn
+`Result` with a \`\` in it is the honest type — the caller genuinely cannot learn
 which of the three happened, and giving it a richer type would be inventing an
 answer the server deliberately refused to give.
 
@@ -1067,7 +1065,7 @@ type RemovalOutcome
 
 {-| POST /api/opt-out — ask for a business listing to be removed.
 
-Unauthenticated by design (US-2.5.3: "does not require account creation"). The contact
+Unauthenticated by design (: "does not require account creation"). The contact
 address is how the request is verified: a matching domain is applied at once, anything
 else is queued for review.
 
@@ -1144,7 +1142,7 @@ isNotFound err =
 
 
 {-| An authenticated request's credential AND the handler for the one
-failure every authed request can suffer: the session is gone (361).
+failure every authed request can suffer: the session is gone.
 
 ⛔ A type, not a convention: with a bare token + callback, a 401 is just
 another `Err`, and noticing it was opt-in — three settings forms did not
@@ -1224,8 +1222,8 @@ unwrapNever result =
 
 
 {-| The whole 401 decision, as a pure function of the response — so it can be
-tested directly instead of through a simulated effect that mirrors it (#302,
-#328: a test that re-implements the thing under test agrees only with itself).
+tested directly instead of through a simulated effect that mirrors it (,
+: a test that re-implements the thing under test agrees only with itself).
 -}
 interpretAuthed :
     (Http.Response String -> Result err ok)
@@ -1285,7 +1283,7 @@ resolveBody decode response =
 
 
 {-| POST /api/auth/refresh — exchange the current (still-valid) access token for
-a fresh one before it expires (Issue #173 proactive silent renewal). The 200
+a fresh one before it expires. The 200
 body is byte-identical to login's, so we reuse `authResponseDecoder`. A 401/error
 here means the session is no longer renewable and the caller falls through to the
 session-expiry interceptor.
@@ -1307,7 +1305,7 @@ refresh token toMsg =
 
 
 {-| DELETE /api/auth/logout — invalidate the current session server-side
-(revokes the token via guardian\_db, Issue #124 A2). The method MUST be DELETE
+(revokes the token via guardian\_db, A2). The method MUST be DELETE
 to match the router; a POST silently 404s the SPA catch-all, leaving the token
 valid until its TTL — caught by the logout E2E (auth.spec.ts).
 -}
@@ -1397,7 +1395,7 @@ transparencyMetricsDecoder =
 
 
 {-| `GET /api/transparency/metrics` — the public, unauthenticated transparency
-payload (#241). No auth header: the endpoint is public and returns only curated,
+payload. No auth header: the endpoint is public and returns only curated,
 anonymised aggregates.
 -}
 getTransparencyMetrics :
@@ -1536,7 +1534,7 @@ rejectIdentification { imageId, rejectedBookIds, token } toMsg =
 {-| Response from GET /api/books/:id — book with the viewer's placement data.
 
 `placements` carries EVERY bookshelf the viewer has this book on; a book may
-legally sit on several at once (#333). `placement` is the first of them, kept
+legally sit on several at once. `placement` is the first of them, kept
 because most of the page only ever needs one (the rating, the visibility
 control, the progress card all belong to a single placement) — but anything
 answering "where is this book of mine?" must read `placements`.
@@ -1677,7 +1675,7 @@ getBookshelf shelfName token toMsg =
         }
 
 
-{-| Error type for `moveBook` (#276). The backend rejects a move that would
+{-| Error type for `moveBook`. The backend rejects a move that would
 take the reading pile past its 50-book cap with a 422 whose body carries the
 stable `reading_pile_full` code; `Http.expectWhatever` would discard that
 body, so a custom expect surfaces it as a distinguishable constructor.
@@ -1763,7 +1761,7 @@ removeBook placementId token toMsg =
         }
 
 
-{-| `POST /api/placements/:id/restore` — undo a removal (US-1.6.4 extension).
+{-| `POST /api/placements/:id/restore` — undo a removal (extension).
 
 Takes the id `removeBook` was given, because the undo clears `removed_at` on
 that same row rather than placing the book again; see
@@ -1814,7 +1812,7 @@ A 422 carrying per-field `{errors: {current_page: [...]}}` (the page-count
 ceiling, a negative page, or an invalid status) is surfaced as
 `ProgressValidationFailed` so the page can explain "that page is past the end of
 the book". Every other failure — including the missing-status 422, which uses
-the `{error: ...}` shape — is a `ProgressRequestFailed`.
+the `{error:...}` shape — is a `ProgressRequestFailed`.
 
 -}
 type ProgressError
@@ -1846,7 +1844,7 @@ progressDecoder =
 {-| Fold the reading-progress fields returned by the API into the placement the
 host page already holds, so the badge and progress line re-render in place. One
 home for the byte-identical fold both BookDetail and the Reading Pile card used
-(#281 item 5).
+(item 5).
 -}
 foldProgress : Placement -> Progress -> Placement
 foldProgress placement progress =
@@ -1859,7 +1857,7 @@ foldProgress placement progress =
 
 
 {-| The user-facing copy for a failed progress save, shared by every host so the
-message and the current-page special case live in one place (#281 item 5). The
+message and the current-page special case live in one place (item 5). The
 host wraps this string in its own error element (classes differ per surface).
 -}
 progressErrorMessage : ProgressError -> String
@@ -1878,7 +1876,7 @@ progressErrorMessage error =
 
 {-| Map the raw HTTP response into a typed progress result. Pure so the
 elm-program-test simulated effect can reuse the exact mapping (mirrors
-`moveResponseToResult`). A 422 whose body carries `{errors: ...}` becomes
+`moveResponseToResult`). A 422 whose body carries `{errors:...}` becomes
 `ProgressValidationFailed`; everything else is a `ProgressRequestFailed`.
 -}
 progressResponseToResult : Http.Response String -> Result ProgressError Progress
@@ -2018,7 +2016,7 @@ saveConsent consent token toMsg =
 
 {-| POST /api/gdpr/consent — save the user's writing-assistant consent
 preference. Sends `type: "writing_assistant"` so the backend targets the
-`consent_writing_assistant` flag (Issue #184). Revoking triggers a server-side
+`consent_writing_assistant` flag. Revoking triggers a server-side
 purge of the user's writing-assistant data.
 -}
 saveWritingAssistantConsent :
@@ -2074,10 +2072,10 @@ catalogueResponseDecoder =
 
 {-| A book the viewer already holds, matched by the search query, tagged with the
 bookshelf it sits on (raw name, e.g. `"library"` / `"reading_pile"`). Rendered in
-the "Your Collection" section (#285). Mapped from a proto `SearchHit` whose
+the "Your Collection" section. Mapped from a proto `SearchHit` whose
 `collection` entries populate `bookshelf_name` and leave the label fields empty.
 `snippet` is a deep-search `ts_headline` excerpt (`<mark>`-wrapped), non-empty
-only when the match was on the description/review under `scope=deep` (#284).
+only when the match was on the description/review under `scope=deep`.
 -}
 type alias CollectionHit =
     { book : Book
@@ -2088,12 +2086,12 @@ type alias CollectionHit =
 
 
 {-| A platform-visible book surfaced by the search, with its discoverable-by-design
-provenance (#285). `source` is `""` (a plain platform result — no label),
+provenance. `source` is `""` (a plain platform result — no label),
 `"looking_for_home"` (an always-visible LFH advert → owner handle), or `"listed"`
 (an active marketplace listing → owner handle + formatted price). Rendered in the
 "On the Platform" section; the label is shown only when `source` is non-empty.
 `snippet` is a deep-search `ts_headline` excerpt, non-empty only for a
-description/review match under `scope=deep` (#284).
+description/review match under `scope=deep`.
 -}
 type alias PlatformHit =
     { book : Book
@@ -2387,7 +2385,7 @@ getInferences revealRisk token toMsg =
         }
 
 
-{-| Error type for `placeBook` (#276/#281). The direct-place path — Upload,
+{-| Error type for `placeBook`. The direct-place path — Upload,
 Catalogue, and BookDetail "Add to Collection" — can hit the same reading-pile
 cap the move path does: the backend rejects a placement that would take the
 pile past 50 with a 422 whose body carries the stable `reading_pile_full`
@@ -2517,7 +2515,7 @@ placementsMineDecoder =
         |> Decode.map (List.map fromProtoPlacementSummary)
 
 
-{-| Which of `Books.confirm/2`'s branches answered (#343).
+{-| Which of `Books.confirm/2`'s branches answered.
 
 The verb is one round trip that resolves the ISBN, creates the work and its
 primary edition if the platform has never seen it, and places it — so the
@@ -2554,7 +2552,7 @@ type alias ConfirmResponse =
 `ConfirmMergeRequired` is the 409: the resolved title+author fuzzy-matched an
 existing work (`Books.find_same_work/2`, Jaro-Winkler > 0.8), so the server
 refused to mint a second work and named the one to merge into. It is the
-US-1.1.8 prompt's trigger, not an error to show as "something went wrong" —
+prompt's trigger, not an error to show as "something went wrong" —
 collapsing it into `Http.BadStatus 409` is what would lose it.
 
 -}
@@ -2654,7 +2652,7 @@ confirmOutcomeFromSource source =
             ConfirmCreated
 
 
-{-| POST /api/books/confirm — the manual-entry verb (343). One atomic round
+{-| POST /api/books/confirm — the manual-entry verb. One atomic round
 trip: resolve the ISBN against OL/GB, create work+edition if unseen,
 409 on a duplicate edition, and place it. Replaces the client-side
 GET-then-place assembly, which could only add books the catalogue
@@ -2810,7 +2808,7 @@ encodeProfileBody body =
         )
 
 
-{-| Keep the structured `{"errors": ...}` payload a 422 carries so the caller
+{-| Keep the structured `{"errors":...}` payload a 422 carries so the caller
 can surface the real reason a profile save was rejected (mirrors
 `expectRegister`). On success it hands back the server-normalised handle (the
 200 body echoes the lowercased value) so the settings page can reflect it.
@@ -3677,7 +3675,7 @@ blockedUsersResponseDecoder =
         (Decode.field "page" Decode.int)
 
 
-{-| `Http.expectWhatever` would collapse the backend's `{"error": ...}` body
+{-| `Http.expectWhatever` would collapse the backend's `{"error":...}` body
 into an opaque `BadStatus`, losing the difference between `already_blocked`,
 `cannot_block_self`, and `not_found`. This custom expect keeps that reason so
 the UI can explain what actually happened.
@@ -4097,7 +4095,7 @@ adminSourcesResponseDecoder =
     Decode.map fromProtoSourceAdminListResponse ProtoSourceResp.decodeSourceAdminListResponse
 
 
-{-| The admin-session flow (303) — the layer whose absence made four admin
+{-| The admin-session flow — the layer whose absence made four admin
 pages dead: `/api/admin/*` requires an MFA-verified `admin_session`
 token (IP- and boot\_id-bound), and the pages were passing the ordinary
 Guardian token, so every admin surface 401'd. Two steps: password →
@@ -4290,7 +4288,7 @@ adminErrorFromBody body =
             AdminAuthTransport (Http.BadBody body)
 
 
-{-| A business waiting on a human decision about its listing (US-2.5.3, campaign G6).
+{-| A business waiting on a human decision about its listing.
 
 `GET /api/admin/removal-requests`. A removal request whose contact address was not on the
 listing's own domain cannot be auto-verified, so it parks with `exclusion_requested_at` set
@@ -4337,7 +4335,7 @@ getRemovalRequests token toMsg =
         }
 
 
-{-| An invitation as the owner's list sees it (US-14.1.3): `codePrefix` only —
+{-| An invitation as the owner's list sees it: `codePrefix` only —
 the full code is unrecoverable after issue, and only `createAdminInvite`'s
 response ever carries it.
 -}
@@ -4545,7 +4543,7 @@ rejectSource sourceId token toMsg =
         }
 
 
-{-| A book as returned by the owner moderation API (#118).
+{-| A book as returned by the owner moderation API.
 -}
 type alias AdminBook =
     { id : String

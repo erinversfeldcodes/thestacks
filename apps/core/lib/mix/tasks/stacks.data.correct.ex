@@ -2,12 +2,12 @@ defmodule Mix.Tasks.Stacks.Data.Correct do
   @shortdoc "Dry-run (or apply) the registered data corrections"
 
   @moduledoc """
-  Runs the corrections in `DataCorrection.Registry`. DRY-RUN BY DEFAULT —
-  without `--apply` it prints the blast radius and writes nothing. `--only
-  NAME` restricts (repeatable). Applied changes are audited in the same
-  transaction. On a deployed stack use
-  `/app/bin/core eval 'Stacks.Release.correct_data(apply: true)'`.
-  Exit is non-zero when any correction errors, so CI/deploy can gate on it.
+    Runs the corrections in `DataCorrection.Registry`. DRY-RUN BY DEFAULT —
+    without `--apply` it prints the blast radius and writes nothing. `--only
+    NAME` restricts (repeatable). Applied changes are audited in the same
+    transaction. On a deployed stack use
+    `/app/bin/core eval 'Stacks.Release.correct_data(apply: true)'`.
+    Exit is non-zero when any correction errors, so CI/deploy can gate on it.
   """
 
   use Mix.Task

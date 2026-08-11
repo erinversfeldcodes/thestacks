@@ -1,17 +1,17 @@
 defmodule StacksWeb.BlogFeedController do
   @moduledoc """
-  The writer's public blog feed (US-6.2.1) — the URL they paste into
-  Substack's *Settings → Import → RSS* once, after which every public post
-  arrives there as a draft.
+    The writer's public blog feed — the URL they paste into
+    Substack's *Settings → Import → RSS* once, after which every public post
+    arrives there as a draft.
 
-  ⛔ **Anonymous-only, and the missing `:optional_auth` is a security control,
-  not an omission.** The shelf feed (`FeedController`) is `:optional_auth`
-  because a `platform` bookshelf's feed is legitimately visible to a signed-in
-  reader. THIS feed's consumer is a third-party fetcher that republishes what
-  it reads, so the viewer is removed from the picture entirely: any token on
-  the request is ignored, and there is no authenticated branch through which a
-  non-public post could be served. Guarded by a test that fetches WITH a valid
-  owner token and asserts the platform post is still absent.
+    ⛔ **Anonymous-only, and the missing `:optional_auth` is a security control,
+    not an omission.** The shelf feed (`FeedController`) is `:optional_auth`
+    because a `platform` bookshelf's feed is legitimately visible to a signed-in
+    reader. THIS feed's consumer is a third-party fetcher that republishes what
+    it reads, so the viewer is removed from the picture entirely: any token on
+    the request is ignored, and there is no authenticated branch through which a
+    non-public post could be served. Guarded by a test that fetches WITH a valid
+    owner token and asserts the platform post is still absent.
   """
 
   use CoreWeb, :controller

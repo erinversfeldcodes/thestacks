@@ -1,11 +1,11 @@
 module StoredAuthTest exposing (suite)
 
-{-| Issue #360 — a boot has three outcomes, and the app must be able to say which.
+{-| — a boot has three outcomes, and the app must be able to say which.
 
 
 ## The defect
 
-`decodeFlags : Decode.Value -> Maybe Auth` folded three outcomes into two.
+`decodeFlags: Decode.Value -> Maybe Auth` folded three outcomes into two.
 "Nothing was stored" and "something was stored and would not decode" both
 arrived as `Nothing`, and `init` treated both as an ordinary signed-out boot.
 
@@ -39,7 +39,7 @@ The notice assertions are paired the same way in `ArrivalTest`.
 ## Mutation probe
 
 Returning `NoStoredAuth` instead of `CorruptStoredAuth` on a decode failure —
-the pre-#360 behaviour, `Result.toMaybe` in one line — reddens
+the pre-behaviour, `Result.toMaybe` in one line — reddens
 `nested_blob_is_corrupt`, `partial_blob_is_corrupt`,
 `corrupt_blob_reaches_the_reader` and `corrupt_reason_survives_to_the_page`.
 
@@ -57,7 +57,7 @@ import Test.Html.Selector as Selector
 
 suite : Test
 suite =
-    describe "StoredAuth (Issue #360)"
+    describe "StoredAuth"
         [ describe "the three outcomes of a boot"
             [ noBlobIsACleanSignedOutBoot
             , validBlobSignsThemIn

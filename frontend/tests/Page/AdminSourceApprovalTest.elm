@@ -5,7 +5,7 @@ module Page.AdminSourceApprovalTest exposing (suite)
 ⚠️ **This page had TWO independent defects stacked, and the outer one hid the inner one.**
 
 1.  It was unreachable at all — it sent the ordinary Guardian token to the `:admin` pipeline, which
-    401s anything without an MFA-verified admin session (#303).
+    401s anything without an MFA-verified admin session.
 2.  Once reachable, it was still unusable: the row's action cell tested `status == "pending"`, but
     the server's value is **`"pending_review"`**, so **Approve and Reject never rendered**. The page
     showed an "Actions" column that was permanently empty.

@@ -1,8 +1,8 @@
 defmodule Stacks.Books.ISBNResolver do
   @moduledoc """
-  Resolves ISBNs to book metadata by querying Open Library (primary)
-  and Google Books (fallback). Uses Finch for HTTP and Fuse circuit breakers
-  for resilience.
+    Resolves ISBNs to book metadata by querying Open Library (primary)
+    and Google Books (fallback). Uses Finch for HTTP and Fuse circuit breakers
+    for resilience.
   """
 
   require Logger
@@ -14,14 +14,14 @@ defmodule Stacks.Books.ISBNResolver do
   alias Stacks.Books.TitleSearchCache
 
   @typedoc """
-  Closed set of error reasons returned by `resolve/1`. Extends the
-  underlying `HttpClientBehaviour.error_reason()` with two resolver-level
-  reasons: `:not_found` (no upstream returned a match) and
-  `:circuit_open` (the relevant Fuse breaker is blown). Adding a new
-  reason here requires adding a matching clause in
-  `Stacks.Workers.EnrichBookJob.outcome_tag/1` and in `determination/1` —
-  both are written without a catch-all, so dialyzer enforces the
-  exhaustiveness end-to-end.
+    Closed set of error reasons returned by `resolve/1`. Extends the
+    underlying `HttpClientBehaviour.error_reason` with two resolver-level
+    reasons: `:not_found` (no upstream returned a match) and
+    `:circuit_open` (the relevant Fuse breaker is blown). Adding a new
+    reason here requires adding a matching clause in
+    `Stacks.Workers.EnrichBookJob.outcome_tag/1` and in `determination/1` —
+    both are written without a catch-all, so dialyzer enforces the
+    exhaustiveness end-to-end.
   """
   @type error_reason ::
           HttpClientBehaviour.error_reason()
@@ -29,14 +29,14 @@ defmodule Stacks.Books.ISBNResolver do
           | :circuit_open
 
   @doc """
-  Whether a failure said something about the *ISBN* or about *us* (344).
+    Whether a failure said something about the *ISBN* or about *us*.
 
-  Only `:not_found` (both upstreams answered; neither knows the ISBN) is a
-  fact about the book. Everything else — blown fuse, 5xx, unparseable body,
-  timeout — is a fact about the lookup, and retrying may answer differently.
-  No catch-all on purpose (mirrors `VisionError.determination/1`): a new
-  `error_reason/0` must be classified here before it ships, instead of
-  defaulting to "the book's fault".
+    Only `:not_found` (both upstreams answered; neither knows the ISBN) is a
+    fact about the book. Everything else — blown fuse, 5xx, unparseable body,
+    timeout — is a fact about the lookup, and retrying may answer differently.
+    No catch-all on purpose (mirrors `VisionError.determination/1`): a new
+    `error_reason/0` must be classified here before it ships, instead of
+    defaulting to "the book's fault".
   """
   @spec determination(error_reason()) :: :not_found | :unavailable
   def determination(:not_found), do: :not_found
@@ -47,13 +47,13 @@ defmodule Stacks.Books.ISBNResolver do
   def determination(:timeout), do: :unavailable
 
   @doc """
-  True when `reason` is a member of `error_reason/0`.
+    True when `reason` is a member of `error_reason/0`.
 
-  Callers that receive failures from more than one source — `Stacks.Books.confirm/2`
-  hands back changesets and `Stacks.Shelving` errors alongside resolver ones — use
-  this to decide whether `determination/1` applies, instead of assuming it does
-  and being met with a `FunctionClauseError`. Mirrors
-  `Stacks.AI.VisionError.vision_error?/1`.
+    Callers that receive failures from more than one source — `Stacks.Books.confirm/2`
+    hands back changesets and `Stacks.Shelving` errors alongside resolver ones — use
+    this to decide whether `determination/1` applies, instead of assuming it does
+    and being met with a `FunctionClauseError`. Mirrors
+    `Stacks.AI.VisionError.vision_error?/1`.
   """
   @spec resolver_error?(term()) :: boolean()
   def resolver_error?(reason)
@@ -97,11 +97,11 @@ defmodule Stacks.Books.ISBNResolver do
   @google_books_fuse :google_books_fuse
 
   @doc """
-  Resolves an ISBN to book metadata: check `ISBNResolverCache` (positive
-  24h, negative 1h — ISBN→book is immutable), on miss race OpenLibrary and
-  Google Books in parallel and take the first success (~300ms off worst case
-  vs sequential). Circuit-open responses are NOT cached — the fuse means
-  retry later, not memoise.
+    Resolves an ISBN to book metadata: check `ISBNResolverCache` (positive
+    24h, negative 1h — ISBN→book is immutable), on miss race OpenLibrary and
+    Google Books in parallel and take the first success (~300ms off worst case
+    vs sequential). Circuit-open responses are NOT cached — the fuse means
+    retry later, not memoise.
   """
   @spec resolve(String.t()) :: {:ok, map()} | {:error, error_reason()}
   def resolve(isbn) do
@@ -164,17 +164,17 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   @doc """
-  Searches by title (and optional author) for the first match with an ISBN,
-  trying progressively broader query variants (trimmed title, surname-only,
-  title-only) to handle cut-off titles. Open Library first, Google Books only
-  on a miss per variant (`try_candidate/4`).
+    Searches by title (and optional author) for the first match with an ISBN,
+    trying progressively broader query variants (trimmed title, surname-only,
+    title-only) to handle cut-off titles. Open Library first, Google Books only
+    on a miss per variant (`try_candidate/4`).
 
-  Failure splits on the same axis as `determination/1` (352):
-  `{:error, :not_found}` — every variant answered by both catalogues (a fact
-  about the book, safe to negative-cache); `{:error, :unavailable}` — at
-  least one lookup never happened (a fact about us; retry may differ, and it
-  must NOT be cached — pre-352 outages were cached as "no such book" for an
-  hour).
+    Failure splits on the same axis as `determination/1`:
+    `{:error,:not_found}` — every variant answered by both catalogues (a fact
+    about the book, safe to negative-cache); `{:error,:unavailable}` — at
+    least one lookup never happened (a fact about us; retry may differ, and it
+    must NOT be cached — pre-352 outages were cached as "no such book" for an
+    hour).
   """
   @spec search_by_title(String.t(), String.t() | nil, String.t() | nil, keyword()) ::
           {:ok, String.t(), map()} | {:error, :not_found | :unavailable}
@@ -615,12 +615,12 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   @doc """
-  ISBN-13s of the other editions of an Open Library **work** — what lets a
-  price lookup find the copy a shop actually stocks. Lives here (not a
-  worker) to reuse this module's OL fuse and injectable HTTP client rather
-  than opening a second egress to the same upstream. Deduplicated, capped at
-  `#{@max_editions_per_work}`; ISBN-10s dropped (the hard gate speaks 13s).
-  `{:error, :circuit_open}` distinguishes "no editions" from "could not ask".
+    ISBN-13s of the other editions of an Open Library **work** — what lets a
+    price lookup find the copy a shop actually stocks. Lives here (not a
+    worker) to reuse this module's OL fuse and injectable HTTP client rather
+    than opening a second egress to the same upstream. Deduplicated, capped at
+    `#{@max_editions_per_work}`; ISBN-10s dropped (the hard gate speaks 13s).
+    `{:error,:circuit_open}` distinguishes "no editions" from "could not ask".
   """
   @spec editions_for_work(String.t()) :: {:ok, [String.t()]} | {:error, error_reason()}
   def editions_for_work(work_id) when is_binary(work_id) and work_id != "" do

@@ -1,10 +1,10 @@
 defmodule Stacks.Enrichment.Prices do
   @moduledoc """
-  Price enrichment — scraped price snapshots for editions across bookstores.
+    Price enrichment — scraped price snapshots for editions across bookstores.
 
-  Snapshots are keyed on `(book_edition_id, store_id)` and upserted per scrape.
-  A price is a fact about an EDITION, not a work: shops stock specific ISBNs at
-  different prices, so all staleness and lookups are per edition.
+    Snapshots are keyed on `(book_edition_id, store_id)` and upserted per scrape.
+    A price is a fact about an EDITION, not a work: shops stock specific ISBNs at
+    different prices, so all staleness and lookups are per edition.
   """
 
   import Ecto.Query
@@ -18,11 +18,11 @@ defmodule Stacks.Enrichment.Prices do
   alias Stacks.Workers.TriggerPriceScrapeJob
 
   @doc """
-  Upserts the snapshot for a `(book_edition_id, store_id)` pair.
+    Upserts the snapshot for a `(book_edition_id, store_id)` pair.
 
-  `book_id` is derived here from the edition and must NOT be supplied: the
-  schema carries both columns (proto field numbers are forever), and deriving
-  at the single write site keeps them from disagreeing.
+    `book_id` is derived here from the edition and must NOT be supplied: the
+    schema carries both columns (proto field numbers are forever), and deriving
+    at the single write site keeps them from disagreeing.
   """
   @spec upsert_snapshot(map()) ::
           {:ok, PriceSnapshot.t()} | {:error, Ecto.Changeset.t()} | {:error, :unknown_edition}
@@ -61,10 +61,10 @@ defmodule Stacks.Enrichment.Prices do
   defp put_book_id(attrs, book_id), do: Map.put(attrs, "book_id", book_id)
 
   @doc """
-  Returns the latest price snapshot per store for every edition of the given work.
+    Returns the latest price snapshot per store for every edition of the given work.
 
-  Callers hold a work (that is what a book-detail page shows), while prices hang
-  off editions — so the join is part of the read, not the caller's problem.
+    Callers hold a work (that is what a book-detail page shows), while prices hang
+    off editions — so the join is part of the read, not the caller's problem.
   """
   @spec latest_prices(String.t()) :: [PriceSnapshot.t()]
   def latest_prices(book_id) do
@@ -76,9 +76,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Prices for a work, refreshing stale ones in the background — the read path
-  that replaced the nightly sweep, so outbound load tracks reader interest.
-  Returns held snapshots immediately; refreshes land on later reads.
+    Prices for a work, refreshing stale ones in the background — the read path
+    that replaced the nightly sweep, so outbound load tracks reader interest.
+    Returns held snapshots immediately; refreshes land on later reads.
   """
   @spec prices_for_work(String.t(), keyword()) :: [map()]
   def prices_for_work(book_id, opts \\ []) do
@@ -142,9 +142,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Editions not priced in the last `days` days, as
-  `%{isbn:, book_id:, book_edition_id:}` maps. Staleness is judged PER
-  EDITION — a fresh snapshot for one edition must not mask its siblings.
+    Editions not priced in the last `days` days, as
+    `%{isbn:, book_id:, book_edition_id:}` maps. Staleness is judged PER
+    EDITION — a fresh snapshot for one edition must not mask its siblings.
   """
   @spec stale_isbns(non_neg_integer()) :: [
           %{isbn: String.t(), book_id: String.t(), book_edition_id: String.t()}
@@ -163,9 +163,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Records what a store was OBSERVED to be capable of. Capability is derived,
-  never declared: shops replatform, and the scraper reports observations on
-  every response so a replatform surfaces on the next scrape.
+    Records what a store was OBSERVED to be capable of. Capability is derived,
+    never declared: shops replatform, and the scraper reports observations on
+    every response so a replatform surfaces on the next scrape.
   """
   @spec record_capability(Bookstore.t(), map() | nil) :: :ok
   def record_capability(_store, nil), do: :ok
@@ -197,9 +197,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Records that robots.txt blocks `path`, with the responsible rule — a block
-  is observable state, not a silent skip. The store's configuration stays in
-  place so a lifted disallow resumes on its own (see `clear_robots_block/1`).
+    Records that robots.txt blocks `path`, with the responsible rule — a block
+    is observable state, not a silent skip. The store's configuration stays in
+    place so a lifted disallow resumes on its own (see `clear_robots_block/1`).
   """
   @spec record_robots_block(map(), String.t(), String.t()) :: :ok
   def record_robots_block(store, path, rule) do
@@ -220,9 +220,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Clears a store's robots block after a successful fetch — the half that makes
-  blocks self-healing. No-op when none is recorded, so call it unconditionally
-  on success.
+    Clears a store's robots block after a successful fetch — the half that makes
+    blocks self-healing. No-op when none is recorded, so call it unconditionally
+    on success.
   """
   @spec clear_robots_block(map()) :: :ok
   def clear_robots_block(%{robots_blocked_path: nil}), do: :ok
@@ -273,9 +273,9 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Notes a successfully-priced ISBN as the store's canary. Capability detection
-  only notices when detected values CHANGE; the canary catches the subtler
-  failure where the platform looks the same but lookups quietly stop resolving.
+    Notes a successfully-priced ISBN as the store's canary. Capability detection
+    only notices when detected values CHANGE; the canary catches the subtler
+    failure where the platform looks the same but lookups quietly stop resolving.
   """
   @spec note_canary(Bookstore.t(), String.t()) :: :ok
   def note_canary(%{canary_isbn: isbn}, isbn), do: :ok
@@ -293,9 +293,9 @@ defmodule Stacks.Enrichment.Prices do
   def note_canary(_store, _isbn), do: :ok
 
   @doc """
-  Reacts to the canary no longer resolving: clears the derived capability so
-  the next scrape re-derives it. Does nothing for non-canary ISBNs — an
-  ordinary edition going out of stock is normal.
+    Reacts to the canary no longer resolving: clears the derived capability so
+    the next scrape re-derives it. Does nothing for non-canary ISBNs — an
+    ordinary edition going out of stock is normal.
   """
   @spec canary_failed(Bookstore.t(), String.t()) :: :ok | :not_canary
   def canary_failed(%{canary_isbn: canary} = store, isbn)
@@ -322,11 +322,11 @@ defmodule Stacks.Enrichment.Prices do
   def canary_failed(_store, _isbn), do: :not_canary
 
   @doc """
-  Stores that must be matched by title because no product carries an ISBN.
+    Stores that must be matched by title because no product carries an ISBN.
 
-  `isbn_location == "none"` with a working product API: the shop can be enumerated but
-  its products cannot be identified by ISBN, so titles are the only handle. Measured
-  for Ike's Books (0 of 50 products) and Love Books (0 of 30).
+    `isbn_location == "none"` with a working product API: the shop can be enumerated but
+    its products cannot be identified by ISBN, so titles are the only handle. Measured
+    for Ike's Books (0 of 50 products) and Love Books (0 of 30).
   """
   @spec stores_needing_title_match() :: [Bookstore.t()]
   def stores_needing_title_match do
@@ -338,12 +338,12 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Stores whose observed capability says they need a local ISBN index.
+    Stores whose observed capability says they need a local ISBN index.
 
-  Only stores that have actually been observed to need one. A store with no
-  observation yet is excluded deliberately: its capability is derived on the next
-  scrape, and sweeping a shop's whole catalogue on a guess is exactly the bulk
-  harvesting this design avoids.
+    Only stores that have actually been observed to need one. A store with no
+    observation yet is excluded deliberately: its capability is derived on the next
+    scrape, and sweeping a shop's whole catalogue on a guess is exactly the bulk
+    harvesting this design avoids.
   """
   @spec stores_needing_index() :: [Bookstore.t()]
   def stores_needing_index do
@@ -355,7 +355,7 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Returns all bookstores.
+    Returns all bookstores.
   """
   @spec all_stores() :: [Bookstore.t()]
   def all_stores do
@@ -363,10 +363,10 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   @doc """
-  Stores the scraper service can actually be asked about — those with a
-  `scraper_module` registry key naming a TOML config (base URL, selectors,
-  rate limit). A store without one answers `404 store not found`; use this,
-  never `all_stores/0`, for anything that fetches.
+    Stores the scraper service can actually be asked about — those with a
+    `scraper_module` registry key naming a TOML config (base URL, selectors,
+    rate limit). A store without one answers `404 store not found`; use this,
+    never `all_stores/0`, for anything that fetches.
   """
   @spec scrapeable_stores() :: [Bookstore.t()]
   def scrapeable_stores do

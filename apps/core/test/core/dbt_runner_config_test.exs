@@ -1,9 +1,9 @@
 defmodule Core.DbtRunnerConfigTest do
   @moduledoc """
-  Drift guard for `DbtRunner.dbt_dir/0` (282): a cwd-relative default
-  (`../../dbt`) worked under `mix test` (cwd = apps/core) but broke under
-  `just dev` (cwd = repo root), failing every `DbtRefreshJob`. Asserts the
-  resolved dir is anchored to the repo root regardless of cwd.
+    Drift guard for `DbtRunner.dbt_dir/0`: a cwd-relative default
+    (`../../dbt`) worked under `mix test` (cwd = apps/core) but broke under
+    `just dev` (cwd = repo root), failing every `DbtRefreshJob`. Asserts the
+    resolved dir is anchored to the repo root regardless of cwd.
   """
 
   use ExUnit.Case, async: false

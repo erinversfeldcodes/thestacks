@@ -1,14 +1,14 @@
 defmodule Stacks.Accounts.AuthTokenFamily do
   @moduledoc """
-  A refresh-token *family*: one rotation chain per session (Issue #179).
+    A refresh-token *family*: one rotation chain per session.
 
-  Opened at login and updated on every refresh rotation. `current_jti` tracks
-  the family's single live access token; a later phase uses it to detect reuse
-  of a superseded token and revoke the whole family (`revoked_at`).
+    Opened at login and updated on every refresh rotation. `current_jti` tracks
+    the family's single live access token; a later phase uses it to detect reuse
+    of a superseded token and revoke the whole family (`revoked_at`).
 
-  `family_id` is application-supplied (login generates it before minting the
-  JWT so the same value can be embedded as a claim), hence `autogenerate: false`.
-  This is a hand-written schema — the table has no `.proto` contract.
+    `family_id` is application-supplied (login generates it before minting the
+    JWT so the same value can be embedded as a claim), hence `autogenerate: false`.
+    This is a hand-written schema — the table has no `.proto` contract.
   """
 
   use Ecto.Schema
@@ -26,7 +26,7 @@ defmodule Stacks.Accounts.AuthTokenFamily do
     field :session_started_at, :utc_datetime_usec
     field :revoked_at, :utc_datetime_usec
 
-    # Rotation grace window (Issue #180). `previous_jti` is the jti superseded by
+    # Rotation grace window (). `previous_jti` is the jti superseded by
     # the last rotation; `rotated_at` is when that rotation happened. The reuse
     # gate honours `previous_jti` for a short grace window after `rotated_at`
     # without burning the family. Both nil until the family's first rotation.

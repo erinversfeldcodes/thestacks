@@ -1,6 +1,6 @@
 module Page.ReadingPileProgramTest exposing (suite)
 
-{-| Program tests for `Page.Bookshelf.ReadingPile` (Issue #112 punch #7/#8).
+{-| Program tests for `Page.Bookshelf.ReadingPile`.
 
 `Page.ReadingPileMsgTest` drives `update` directly; this suite drives the page
 through its _rendered DOM_ — the request `init` fires, the pile the response
@@ -9,7 +9,7 @@ user-visible message.
 
 Note that the Reading Pile deliberately does **not** share `Page.Bookshelf`'s
 `ShelvesLoaded`/`shelves` shape: it uses `BooksLoaded` and flattens straight to
-`books : RemoteData Http.Error (List Placement)`. The two families diverged on
+`books: RemoteData Http.Error (List Placement)`. The two families diverged on
 purpose and these tests assert the pile's own contract.
 
 -}
@@ -59,7 +59,7 @@ solarisP =
 suite : Test
 suite =
     describe "Page.Bookshelf.ReadingPile (ProgramTest)"
-        [ describe "happy path (punch #7)"
+        [ describe "happy path"
             [ initFiresPileRequest
             , booksLoadedFlattensAcrossShelves
             , bookHoveredSelectsThatBook
@@ -69,7 +69,7 @@ suite =
             , pileRendersExactlyFifty
             , grandfatheredPileRendersEverything
             ]
-        , describe "sad paths (punch #8)"
+        , describe "sad paths"
             [ forbiddenRaisesAgeGate
             , serverErrorShowsPileErrorMessage
             , emptyPileShowsEmptyMessage

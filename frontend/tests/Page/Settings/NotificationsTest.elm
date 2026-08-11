@@ -1,6 +1,6 @@
 module Page.Settings.NotificationsTest exposing (suite)
 
-{-| #126 CG-2 (US-17.3.1) — the Settings → Notifications toggles hydrate from the
+{-| CG-2 — the Settings → Notifications toggles hydrate from the
 server instead of rendering hardcoded defaults.
 
 Drives `Page.Settings.Notifications.update`/`view` through the load lifecycle:
@@ -38,8 +38,8 @@ allOff =
     }
 
 
-{-| The model out of the page's `( Model, Cmd Msg, OutMsg )` triple. The page
-gained an `OutMsg` in #361 so a mid-form 401 can reach the global session-expiry
+{-| The model out of the page's `( Model, Cmd Msg, OutMsg)` triple. The page
+gained an `OutMsg` in so a mid-form 401 can reach the global session-expiry
 interceptor; the `OutMsg` itself is asserted in `Page.SessionExpiryPagesTest`.
 -}
 modelOf : ( Notifications.Model, Cmd Msg, Notifications.OutMsg ) -> Notifications.Model
@@ -65,25 +65,25 @@ toggleButtons model =
 
 suite : Test
 suite =
-    describe "Page.Settings.Notifications — hydration (#126 CG-2)"
+    describe "Page.Settings.Notifications — hydration"
         [ test "init starts in the Loading state (no toggles at silently-wrong defaults)" <|
             \_ ->
                 Notifications.init (Just "test-token")
                     |> Tuple.first
                     |> .prefs
                     |> Expect.equal Loading
-        , test "tokenless init yields NotAsked, not a Loading state nothing will resolve (#324 0h)" <|
+        , test "tokenless init yields NotAsked, not a Loading state nothing will resolve" <|
             \_ ->
                 Notifications.init Nothing
                     |> Tuple.first
                     |> .prefs
                     |> Expect.equal NotAsked
-        , test "tokenless init produces no effect (#324 0h)" <|
+        , test "tokenless init produces no effect" <|
             \_ ->
                 Notifications.init Nothing
                     |> Tuple.second
                     |> Expect.equal Cmd.none
-        , test "tokenless init does not render the loading copy (#324 0h)" <|
+        , test "tokenless init does not render the loading copy" <|
             \_ ->
                 Notifications.init Nothing
                     |> Tuple.first

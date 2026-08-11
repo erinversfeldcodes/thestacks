@@ -1,12 +1,12 @@
 defmodule StacksWeb.ProfileControllerTest do
   @moduledoc """
-  Tests for the public profile read surfaces (#213):
-  GET /api/u/:handle and GET /api/u/:handle/bookshelves/:bookshelf_name.
+    Tests for the public profile read surfaces:
+    GET /api/u/:handle and GET /api/u/:handle/bookshelves/:bookshelf_name.
 
-  These assert the ENDPOINTS wire the correct (viewer, target) through the
-  already-unit-tested visibility resolver — ghost/block → 404, redaction, and
-  viewer-visible shelf/placement filtering. The full combinatoric matrix lives in
-  the resolver unit tests + the #218 E2E.
+    These assert the ENDPOINTS wire the correct (viewer, target) through the
+    already-unit-tested visibility resolver — ghost/block → 404, redaction, and
+    viewer-visible shelf/placement filtering. The full combinatoric matrix lives in
+    the resolver unit tests + the E2E.
   """
   use CoreWeb.ConnCase, async: true
 
@@ -86,7 +86,7 @@ defmodule StacksWeb.ProfileControllerTest do
       assert body["handle"] == "public_ada"
     end
 
-    test "an unauthenticated viewer gets 404 for a platform (Members) profile (#225)", %{
+    test "an unauthenticated viewer gets 404 for a platform (Members) profile", %{
       conn: conn
     } do
       insert(:user, handle: "members_ada", profile_visibility: "platform")
@@ -237,7 +237,7 @@ defmodule StacksWeb.ProfileControllerTest do
       assert nonmember_count == 0
     end
 
-    test "an unauthenticated viewer sees public placements but not owner-only ones (shelf, #225)",
+    test "an unauthenticated viewer sees public placements but not owner-only ones (shelf, )",
          %{
            conn: conn
          } do
@@ -268,7 +268,7 @@ defmodule StacksWeb.ProfileControllerTest do
       assert count == 1
     end
 
-    test "a signed-in non-member sees platform (Members) placements but an anon viewer does not (#225)",
+    test "a signed-in non-member sees platform (Members) placements but an anon viewer does not",
          %{conn: conn} do
       owner = insert(:user, handle: "members_shelf_owner", profile_visibility: "public")
       bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "public")
@@ -344,7 +344,7 @@ defmodule StacksWeb.ProfileControllerTest do
     end
   end
 
-  describe "marketplace exception — looking_for_home shelf endpoint (#226)" do
+  describe "marketplace exception — looking_for_home shelf endpoint" do
     setup %{conn: conn} do
       owner = insert(:user, handle: "lfh_owner", profile_visibility: "public")
 
@@ -392,7 +392,7 @@ defmodule StacksWeb.ProfileControllerTest do
     end
   end
 
-  describe "public browse bounding + O(1) shared-gate queries (#221)" do
+  describe "public browse bounding + O(1) shared-gate queries" do
     test "the public response is hard-capped while the owner's own view is not", %{conn: conn} do
       prev = Application.get_env(:core, :public_shelf_cap)
       Application.put_env(:core, :public_shelf_cap, 2)

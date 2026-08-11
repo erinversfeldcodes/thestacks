@@ -1,15 +1,15 @@
 defmodule Stacks.Imports do
   @moduledoc """
-  Library imports (US-1.1.9): Goodreads CSV in, shelves out — through
-  the same ISBN hard gate as every capture source. Import is a source, not
-  a bypass: unverifiable rows land in the per-row report, not the system.
-  `create_import/3` parses synchronously (format errors answered at upload
-  time), persists import + rows, and enqueues `GoodreadsImportJob`, which
-  writes each row's outcome (`shelved`/`duplicate`/`unverified`/
-  `unreadable`). Raw rows are the reader's own free text: never in the
-  warehouse (`skip_dbt`), swept after 30 days
-  (`LibraryImportRowRetentionJob`); the import's counts survive as the
-  durable summary. Rows are erasure-covered and export-included.
+    Library imports: Goodreads CSV in, shelves out — through
+    the same ISBN hard gate as every capture source. Import is a source, not
+    a bypass: unverifiable rows land in the per-row report, not the system.
+    `create_import/3` parses synchronously (format errors answered at upload
+    time), persists import + rows, and enqueues `GoodreadsImportJob`, which
+    writes each row's outcome (`shelved`/`duplicate`/`unverified`/
+    `unreadable`). Raw rows are the reader's own free text: never in the
+    warehouse (`skip_dbt`), swept after 30 days
+    (`LibraryImportRowRetentionJob`); the import's counts survive as the
+    durable summary. Rows are erasure-covered and export-included.
   """
 
   # Ecto.Multi's opaque internals trip dialyzer's call_without_opaque on every
@@ -35,13 +35,13 @@ defmodule Stacks.Imports do
   def row_retention_days, do: @row_retention_days
 
   @doc """
-  Parses a Goodreads CSV export and creates the import with all its rows,
-  enqueueing the processing job. Returns:
+    Parses a Goodreads CSV export and creates the import with all its rows,
+    enqueueing the processing job. Returns:
 
-    * `{:ok, import}` — parsed, persisted, job enqueued
-    * `{:error, :import_in_progress}` — the user already has an active import
-    * `{:error, :unrecognised_format, headers}` — not a Goodreads export
-    * `{:error, :no_rows}` — a header with nothing under it
+      * `{:ok, import}` — parsed, persisted, job enqueued
+      * `{:error,:import_in_progress}` — the user already has an active import
+      * `{:error,:unrecognised_format, headers}` — not a Goodreads export
+      * `{:error,:no_rows}` — a header with nothing under it
   """
   @spec create_import(binary(), String.t(), binary()) ::
           {:ok, LibraryImport.t()}
@@ -123,10 +123,10 @@ defmodule Stacks.Imports do
   end
 
   @doc """
-  The per-row report for an import, scoped to its owner; `outcome:` narrows to
-  one outcome (the "what didn't make it" view). Rows may already be gone —
-  the retention sweep deletes them after #{@row_retention_days} days — so an
-  empty list against a non-zero `row_count` means expired, not lost.
+    The per-row report for an import, scoped to its owner; `outcome:` narrows to
+    one outcome (the "what didn't make it" view). Rows may already be gone —
+    the retention sweep deletes them after #{@row_retention_days} days — so an
+    empty list against a non-zero `row_count` means expired, not lost.
   """
   @spec list_rows(binary(), binary(), keyword()) ::
           {:ok, [LibraryImportRow.t()]} | {:error, :not_found}
@@ -190,11 +190,11 @@ defmodule Stacks.Imports do
   end
 
   @doc """
-  Finalises an import: aggregates outcome counts from the rows (idempotent —
-  re-running recomputes the same numbers), stamps the terminal status, and emits
-  `library_import.completed`. Returns the bookshelf names that gained books, so
-  the caller can enqueue ONE feed regeneration per bookshelf instead of one per
-  placement.
+    Finalises an import: aggregates outcome counts from the rows (idempotent —
+    re-running recomputes the same numbers), stamps the terminal status, and emits
+    `library_import.completed`. Returns the bookshelf names that gained books, so
+    the caller can enqueue ONE feed regeneration per bookshelf instead of one per
+    placement.
   """
   @spec finalize(LibraryImport.t(), String.t()) :: {:ok, [String.t()]}
   def finalize(%LibraryImport{} = import, status) when status in ["complete", "failed"] do
@@ -249,9 +249,9 @@ defmodule Stacks.Imports do
   end
 
   @doc """
-  Deletes raw rows older than #{@row_retention_days} days (GDPR §data-minimisation:
-  the reviews/notes in a raw row serve the one-time report, not the platform).
-  Returns the number deleted.
+    Deletes raw rows older than #{@row_retention_days} days (GDPR §data-minimisation:
+    the reviews/notes in a raw row serve the one-time report, not the platform).
+    Returns the number deleted.
   """
   @spec delete_expired_rows() :: non_neg_integer()
   def delete_expired_rows do

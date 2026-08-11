@@ -160,7 +160,7 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  describe "confirm/2 records the scanned edition on the placement (#378)" do
+  describe "confirm/2 records the scanned edition on the placement" do
     test "placing an existing work by a non-primary ISBN records THAT edition, not the primary" do
       user = insert(:user)
       book = insert(:book)
@@ -369,7 +369,7 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  describe "search_books/2 — deep scope (#284)" do
+  describe "search_books/2 — deep scope" do
     test "deep scope finds a book matched only by its description" do
       book =
         insert(:book,
@@ -519,7 +519,7 @@ defmodule Stacks.BooksTest do
       assert updated.cover_image_url == cover_url
     end
 
-    test "the cover fetch is seamed — routed through the client, never a live request (#381a)" do
+    test "the cover fetch is seamed — routed through the client, never a live request" do
       edition = insert(:book_edition)
       cover_url = "https://covers.example.test/#{edition.isbn}.jpg"
 

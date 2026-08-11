@@ -19,7 +19,7 @@ const MAX_FUTURE_SKEW_SECS: u64 = 5;
 ///
 /// Signature is HMAC-SHA256 of `"<timestamp>.<method>.<path>"`.
 ///
-/// Returns Ok(()) if valid, Err(ScraperError::AuthFailed) otherwise.
+/// Returns Ok() if valid, Err(ScraperError::AuthFailed) otherwise.
 pub fn verify_token(
     token: &str,
     method: &str,

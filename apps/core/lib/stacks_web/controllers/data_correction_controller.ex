@@ -1,15 +1,15 @@
 defmodule StacksWeb.DataCorrectionController do
   @moduledoc """
-  The platform owner's HTTP surface for `Stacks.DataCorrection` (340) —
-  a repair should be a reviewed operation, not a `psql` session, and a
-  running stack has no shell. Three verbs, no more: `index` (every
-  registered correction + the rows it WOULD change — a GET means dry-run),
-  `apply` (one named correction, `reason` required), `target` (one named
-  targeted correction against operator-named rows, `reason` required).
-  `:name` resolves through `Registry.fetch/1`, so the reachable set is
-  exactly the reviewed list — no endpoint takes a table or column. Owner
-  role enforced by `:require_owner` AFTER `:admin` (a demoted admin token
-  must not reach this).
+    The platform owner's HTTP surface for `Stacks.DataCorrection` —
+    a repair should be a reviewed operation, not a `psql` session, and a
+    running stack has no shell. Three verbs, no more: `index` (every
+    registered correction + the rows it WOULD change — a GET means dry-run),
+    `apply` (one named correction, `reason` required), `target` (one named
+    targeted correction against operator-named rows, `reason` required).
+    `:name` resolves through `Registry.fetch/1`, so the reachable set is
+    exactly the reviewed list — no endpoint takes a table or column. Owner
+    role enforced by `:require_owner` AFTER `:admin` (a demoted admin token
+    must not reach this).
   """
 
   use CoreWeb, :controller
@@ -18,9 +18,9 @@ defmodule StacksWeb.DataCorrectionController do
   alias Stacks.DataCorrection.Registry
 
   @doc """
-  GET /api/admin/data_corrections
+    GET /api/admin/data_corrections
 
-  Every registered correction and its current blast radius. Writes nothing.
+    Every registered correction and its current blast radius. Writes nothing.
   """
   @spec index(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def index(conn, _params) do
@@ -32,10 +32,10 @@ defmodule StacksWeb.DataCorrectionController do
   end
 
   @doc """
-  POST /api/admin/data_corrections/:name/apply
+    POST /api/admin/data_corrections/:name/apply
 
-  Applies one correction. `reason` is required and is recorded verbatim in the
-  audit row for every changed row, in the same transaction as the change.
+    Applies one correction. `reason` is required and is recorded verbatim in the
+    audit row for every changed row, in the same transaction as the change.
   """
   @spec apply(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def apply(conn, %{"name" => name} = params) do
@@ -54,11 +54,11 @@ defmodule StacksWeb.DataCorrectionController do
   end
 
   @doc """
-  POST /api/admin/data_corrections/:name/target
+    POST /api/admin/data_corrections/:name/target
 
-  Runs one targeted correction (#376) against the rows named in `argument`.
-  `reason` is required. `apply` defaults to `false` — a dry-run that reports the
-  blast radius and writes nothing.
+    Runs one targeted correction against the rows named in `argument`.
+    `reason` is required. `apply` defaults to `false` — a dry-run that reports the
+    blast radius and writes nothing.
   """
   @spec target(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def target(conn, %{"name" => name} = params) do

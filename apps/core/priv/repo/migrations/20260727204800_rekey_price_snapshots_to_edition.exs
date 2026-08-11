@@ -2,13 +2,13 @@ defmodule Core.Repo.Migrations.RekeyPriceSnapshotsToEdition do
   use Ecto.Migration
 
   @moduledoc """
-  Re-keys `op.price_snapshots` from work to edition — a price is a fact
-  about an edition (shops stock specific ISBNs at different prices).
-  Uniqueness on `(book_id, store_id)` meant pricing ONE edition marked
-  every edition of the work freshly scraped, so the rest could never be
-  priced. Backfills `book_edition_id` to the work's primary edition,
-  re-points uniqueness to `(book_edition_id, store_id)`, keeps `book_id`
-  for read-path joins.
+    Re-keys `op.price_snapshots` from work to edition — a price is a fact
+    about an edition (shops stock specific ISBNs at different prices).
+    Uniqueness on `(book_id, store_id)` meant pricing ONE edition marked
+    every edition of the work freshly scraped, so the rest could never be
+    priced. Backfills `book_edition_id` to the work's primary edition,
+    re-points uniqueness to `(book_edition_id, store_id)`, keeps `book_id`
+    for read-path joins.
   """
 
   def up do

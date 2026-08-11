@@ -1,6 +1,6 @@
 module Page.ProfileTest exposing (suite)
 
-{-| #214 — the public profile hub at `/u/:handle`.
+{-| — the public profile hub at `/u/:handle`.
 
 Drives `Page.Profile.update` through the fetch outcomes and asserts the view:
 a loaded profile renders the reader's identity, meta, and one browse link per
@@ -56,7 +56,7 @@ outMsgFor result =
 
 suite : Test
 suite =
-    describe "Page.Profile — public profile hub (#214)"
+    describe "Page.Profile — public profile hub"
         [ test "renders the reader's display name and handle" <|
             \_ ->
                 received (Ok sampleProfile)

@@ -1,9 +1,9 @@
 defmodule StacksWeb.SourceAdminController do
   @moduledoc """
-  Admin controller for managing discovered sources.
+    Admin controller for managing discovered sources.
 
-  Requires an MFA-verified admin session JWT. Role is enforced at JWT issuance
-  by `AdminAuthController.login/2` — not repeated per action.
+    Requires an MFA-verified admin session JWT. Role is enforced at JWT issuance
+    by `AdminAuthController.login/2` — not repeated per action.
   """
 
   use CoreWeb, :controller
@@ -44,11 +44,11 @@ defmodule StacksWeb.SourceAdminController do
   end
 
   @doc """
-  GET /api/admin/removal-requests — businesses waiting on a human decision.
+    GET /api/admin/removal-requests — businesses waiting on a human decision.
 
-  A removal request whose contact address did not match the listing's domain parks with
-  `exclusion_requested_at` set. This is where those become visible; before it, they were
-  not in any payload at all.
+    A removal request whose contact address did not match the listing's domain parks with
+    `exclusion_requested_at` set. This is where those become visible; before it, they were
+    not in any payload at all.
   """
   def removal_requests(conn, _params) do
     requests =
@@ -59,11 +59,11 @@ defmodule StacksWeb.SourceAdminController do
   end
 
   @doc """
-  PUT /api/admin/removal-requests/:id/honour — remove the listing.
+    PUT /api/admin/removal-requests/:id/honour — remove the listing.
 
-  ⚠️ **Not `approve`.** `PUT /sources/:id/approve` already exists and *publishes* a
-  listing; this takes one down. Two endpoints named "approve" with opposite effects on the
-  same row is a mistake waiting to happen, so these name what happens to the listing.
+    ⚠️ **Not `approve`.** `PUT /sources/:id/approve` already exists and *publishes* a
+    listing; this takes one down. Two endpoints named "approve" with opposite effects on the
+    same row is a mistake waiting to happen, so these name what happens to the listing.
   """
   def honour_removal(conn, %{"id" => id}) do
     case Discovery.honour_removal_request(id) do

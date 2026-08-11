@@ -1,13 +1,13 @@
 defmodule Stacks.CircuitBreakers do
   @moduledoc """
-  Installs all Fuse circuit breakers at startup, emits telemetry on every
-  state change, and actively probes blown fuses so circuits close as soon
-  as the service recovers (instead of waiting out the full reset timer).
+    Installs all Fuse circuit breakers at startup, emits telemetry on every
+    state change, and actively probes blown fuses so circuits close as soon
+    as the service recovers (instead of waiting out the full reset timer).
 
-  Fuses: `:vision_fuse`, `:together_ai_fuse`, `:open_library_fuse`,
-  `:google_books_fuse`, `:brave_fuse`, `:searxng_fuse`, `:r2_fuse`
-  (5 failures/60s, 5min reset) and `:scraper_fuse` (3/60s, 15min).
-  Per-store scraper fuses are installed lazily via `store_fuse/1`.
+    Fuses: `:vision_fuse`, `:together_ai_fuse`, `:open_library_fuse`,
+    `:google_books_fuse`, `:brave_fuse`, `:searxng_fuse`, `:r2_fuse`
+    (5 failures/60s, 5min reset) and `:scraper_fuse` (3/60s, 15min).
+    Per-store scraper fuses are installed lazily via `store_fuse/1`.
   """
 
   use GenServer
@@ -57,10 +57,10 @@ defmodule Stacks.CircuitBreakers do
   end
 
   @doc """
-  Install all managed fuses. Safe to call multiple times — already-installed
-  fuses are skipped without error.
+    Install all managed fuses. Safe to call multiple times — already-installed
+    fuses are skipped without error.
 
-  Returns `:ok`.
+    Returns `:ok`.
   """
   @spec install_all() :: :ok
   def install_all do
@@ -79,12 +79,12 @@ defmodule Stacks.CircuitBreakers do
   end
 
   @doc """
-  Fuse name for ONE bookstore's scraper circuit, installed on first use.
-  The shared `:scraper_fuse` covers the sidecar being down (service-wide);
-  this one confines a single hostile/broken shop, whose failures recur on
-  every attempt and would otherwise keep the shared fuse open for everyone.
-  Both are consulted. Falls back to `:scraper_fuse` past `@max_store_fuses`
-  distinct stores so store rows cannot exhaust the atom table.
+    Fuse name for ONE bookstore's scraper circuit, installed on first use.
+    The shared `:scraper_fuse` covers the sidecar being down (service-wide);
+    this one confines a single hostile/broken shop, whose failures recur on
+    every attempt and would otherwise keep the shared fuse open for everyone.
+    Both are consulted. Falls back to `:scraper_fuse` past `@max_store_fuses`
+    distinct stores so store rows cannot exhaust the atom table.
   """
   @spec store_fuse(String.t() | atom() | nil) :: atom()
   def store_fuse(nil), do: :scraper_fuse
@@ -152,10 +152,10 @@ defmodule Stacks.CircuitBreakers do
   end
 
   @doc """
-  Melt `fuse_name` and emit telemetry reflecting the resulting circuit state.
+    Melt `fuse_name` and emit telemetry reflecting the resulting circuit state.
 
-  Emits `[:stacks, :fuse, :blown]` if the circuit opened, or
-  `[:stacks, :fuse, :melt]` if it is still closed.
+    Emits `[:stacks,:fuse,:blown]` if the circuit opened, or
+    `[:stacks,:fuse,:melt]` if it is still closed.
   """
   @spec melt(atom()) :: :ok
   def melt(fuse_name) do

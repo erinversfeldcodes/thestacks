@@ -1,11 +1,11 @@
 defmodule Stacks.UploadDbtTest do
   @moduledoc """
-  Suite 9: upload-pipeline events trigger the right dbt refresh jobs via
-  `DbtRefreshHandler`, and the underlying records the staging views
-  expose are correct after each upload-flow scenario — all 8 user stories
-  of 111 (upload/hard-gate/non-book/age-gate/manual-ISBN/duplicate/
-  multi-book/SSE), each asserting both the enqueued refresh and the row
-  state dbt would read.
+    Suite 9: upload-pipeline events trigger the right dbt refresh jobs via
+    `DbtRefreshHandler`, and the underlying records the staging views
+    expose are correct after each upload-flow scenario — all 8 user stories
+    of 111 (upload/hard-gate/non-book/age-gate/manual-ISBN/duplicate/
+    multi-book/SSE), each asserting both the enqueued refresh and the row
+    state dbt would read.
   """
 
   use Core.DataCase, async: false
@@ -202,7 +202,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "US-1.1.1: successful upload -> book + edition + placement records" do
+  describe "successful upload -> book + edition + placement records" do
     @tag stories: ["US-1.1.1"], suite: :dbt
     test "uploaded_images record has correct status and storage_path after upload" do
       image = insert(:uploaded_image, storage_path: "uploads/test-image-id", status: "pending")
@@ -296,7 +296,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "US-1.1.2: ISBN hard gate rejection records" do
+  describe "ISBN hard gate rejection records" do
     @tag stories: ["US-1.1.2"], suite: :dbt
     test "uploaded_images marked rejected with isbn_not_found reason" do
       image = insert(:uploaded_image, status: "pending")
@@ -356,7 +356,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "US-1.1.3: non-book rejection records" do
+  describe "non-book rejection records" do
     @tag stories: ["US-1.1.3"], suite: :dbt
     test "uploaded_images marked rejected with not_a_book reason" do
       image = insert(:uploaded_image, status: "pending")
@@ -396,7 +396,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "US-1.1.4: age-gated book records" do
+  describe "age-gated book records" do
     @tag stories: ["US-1.1.4"], suite: :dbt
     test "book with age_gated visibility_tier persists correctly" do
       {_user, book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
@@ -441,7 +441,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "US-1.1.5: manual ISBN entry records" do
+  describe "manual ISBN entry records" do
     @tag stories: ["US-1.1.5"], suite: :dbt
     test "book created via manual ISBN has correct edition data" do
       isbn = sequence_isbn()
@@ -476,7 +476,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "US-1.1.6: duplicate book detection records" do
+  describe "duplicate book detection records" do
     @tag stories: ["US-1.1.6"], suite: :dbt
     test "find_existing returns book when ISBN already exists" do
       {_user, book, edition, _author} = create_user_with_book()
@@ -517,7 +517,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "US-1.1.7: bulk upload records (multi-book from single image)" do
+  describe "bulk upload records (multi-book from single image)" do
     @tag stories: ["US-1.1.7"], suite: :dbt
     test "uploaded_images stores multiple book_ids for multi-book resolution" do
       {_user, book1, _ed1, _author1} = create_user_with_book(title: "Book One")
@@ -568,7 +568,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  describe "US-1.1.8: multi-format merge records" do
+  describe "multi-format merge records" do
     @tag stories: ["US-1.1.8"], suite: :dbt
     test "merging adds a new non-primary edition to existing work" do
       {_user, book, _edition, _author} = create_user_with_book()

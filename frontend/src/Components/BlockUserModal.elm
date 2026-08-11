@@ -14,7 +14,7 @@ actual block is fired from the modal and the outcome is reported back to the
 host via `OutMsg` so it can refresh the surface (blocked content disappears
 server-side once `Visibility.resolve_visibility/2` sees the block).
 
-Model-Update-View, `RemoteData` for the request, no ports. Issue #193 (US-10.1.2).
+Model-Update-View, `RemoteData` for the request, no ports.
 
 -}
 

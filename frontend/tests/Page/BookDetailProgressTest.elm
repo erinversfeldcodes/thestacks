@@ -1,7 +1,7 @@
 module Page.BookDetailProgressTest exposing (suite)
 
 {-| Program tests for the reading-progress UI mounted on the BookDetail overlay
-(US-1.6.6, Issue #116 Phase 2).
+(, Phase 2).
 
 The progress card is mounted whenever the placement sits on a readable bookshelf
 (reading\_pile, library). Opening it and saving drives
@@ -27,11 +27,10 @@ saves, and `PUT /api/placements/:id/progress` answers with
 quartet. Every test below therefore starts from "To Read, no pages" and drives
 progress in through the form — the only path a real reader has.
 
-Until Issue #328 the fixture injected the quartet into the book-detail
+Until the fixture injected the quartet into the book-detail
 response, so two of these tests asserted a rendering the server can never
 produce (a live "p. 40 / 371" badge on load, and a page field pre-seeded to
-"40"). Whether the contract SHOULD carry progress here is Issue #314's
-question; faking it in a fixture is not an answer to it.
+"40"). Whether the contract SHOULD carry progress here is question; faking it in a fixture is not an answer to it.
 
 -}
 
@@ -131,7 +130,7 @@ openAndSave program =
 
 suite : Test
 suite =
-    describe "BookDetail reading progress (US-1.6.6)"
+    describe "BookDetail reading progress"
         [ cardRendersForReadableShelf
         , saveFoldsResult
         , errorResponseKeepsFormOpen

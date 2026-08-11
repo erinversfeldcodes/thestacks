@@ -37,7 +37,7 @@ defmodule Stacks.Feeds.Handlers.PlacementHandlerTest do
       )
     end
 
-    test "stands down for goodreads_import-sourced placements (US-1.1.9 coalescing)" do
+    test "stands down for goodreads_import-sourced placements" do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
       book = insert(:book)

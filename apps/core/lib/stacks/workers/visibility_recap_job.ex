@@ -1,11 +1,11 @@
 defmodule Stacks.Workers.VisibilityRecapJob do
   @moduledoc """
-  Caps stored bookshelf/placement visibility down to a user's new, more
-  restrictive `profile_visibility` — one batch update, run async so the
-  settings response doesn't block. Read-time enforcement
-  (`Visibility.resolve_visibility/2`) already ignores stale stored values,
-  so this is stored-state hygiene, not a security fix. Args: `"user_id"`,
-  `"new_visibility"`.
+    Caps stored bookshelf/placement visibility down to a user's new, more
+    restrictive `profile_visibility` — one batch update, run async so the
+    settings response doesn't block. Read-time enforcement
+    (`Visibility.resolve_visibility/2`) already ignores stale stored values,
+    so this is stored-state hygiene, not a security fix. Args: `"user_id"`,
+    `"new_visibility"`.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

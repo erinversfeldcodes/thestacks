@@ -1,6 +1,6 @@
 defmodule StacksWeb.AuthController do
   @moduledoc """
-  Handles authentication endpoints: register, login, logout, and current user.
+    Handles authentication endpoints: register, login, logout, and current user.
   """
 
   use CoreWeb, :controller
@@ -104,7 +104,7 @@ defmodule StacksWeb.AuthController do
         |> json(%{error: "invalid_credentials"})
 
       {:error, {:account_locked, retry_after_seconds}} ->
-        # Per-account login lockout (Issue #161). 423 Locked is the standard
+        # Per-account login lockout (). 423 Locked is the standard
         # status for a resource that exists but is temporarily unavailable
         # due to lock state. We surface retry_after_seconds in BOTH the
         # standard Retry-After header (for HTTP-compliant clients) and in
@@ -174,8 +174,8 @@ defmodule StacksWeb.AuthController do
   end
 
   @doc """
-  POST /api/auth/forgot-password — enqueue a password reset email.
-  Always returns 200 regardless of whether the email is registered.
+    POST /api/auth/forgot-password — enqueue a password reset email.
+    Always returns 200 regardless of whether the email is registered.
   """
   def forgot_password(conn, %{"email" => email}) do
     Email.send_password_reset(email)
@@ -190,16 +190,15 @@ defmodule StacksWeb.AuthController do
   end
 
   @doc """
-  POST /api/auth/resend-confirmation — issue a fresh confirmation link
-  (US-14.4.2).
+    POST /api/auth/resend-confirmation — issue a fresh confirmation link.
 
-  ⛔ This action must be a MIRROR: the reply may not depend on the email.
-  Unconfirmed, already-confirmed, past-the-cap, and no-account addresses
-  all get the same status, body and headers — any observable difference
-  makes an unauthenticated endpoint an account-existence oracle over the
-  whole user base. Hence `Email.send_confirmation_resend/1` returns a bare
-  `:ok` and this function does not case on it. Guessing cost is carried by
-  the shared `:auth` rate bucket.
+    ⛔ This action must be a MIRROR: the reply may not depend on the email.
+    Unconfirmed, already-confirmed, past-the-cap, and no-account addresses
+    all get the same status, body and headers — any observable difference
+    makes an unauthenticated endpoint an account-existence oracle over the
+    whole user base. Hence `Email.send_confirmation_resend/1` returns a bare
+    `:ok` and this function does not case on it. Guessing cost is carried by
+    the shared `:auth` rate bucket.
   """
   def resend_confirmation(conn, %{"email" => email}) do
     Email.send_confirmation_resend(email)
@@ -247,14 +246,14 @@ defmodule StacksWeb.AuthController do
   end
 
   @doc """
-  POST /api/auth/refresh — rotate the current JWT for a fresh one.
+    POST /api/auth/refresh — rotate the current JWT for a fresh one.
 
-  Reachable only behind the `:authenticated` pipeline, so an expired, revoked,
-  or absent token is rejected with 401 before this action runs. On a valid
-  token we rotate: the old token is revoked server-side (its `guardian_tokens`
-  row is deleted, so it can never be used again) and a fresh token with the
-  standard 8h access TTL is minted. Response mirrors login's `%{token, user}`
-  shape so the SPA can swap tokens transparently during silent renewal.
+    Reachable only behind the `:authenticated` pipeline, so an expired, revoked,
+    or absent token is rejected with 401 before this action runs. On a valid
+    token we rotate: the old token is revoked server-side (its `guardian_tokens`
+    row is deleted, so it can never be used again) and a fresh token with the
+    standard 8h access TTL is minted. Response mirrors login's `%{token, user}`
+    shape so the SPA can swap tokens transparently during silent renewal.
   """
   def refresh(conn, _params) do
     user = Guardian.Plug.current_resource(conn)

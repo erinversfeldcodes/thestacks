@@ -1,15 +1,15 @@
 defmodule Stacks.Workers.RSSLivenessJob do
   @moduledoc """
-  Weekly Oban cron worker that checks the liveness of author RSS feed URLs.
+    Weekly Oban cron worker that checks the liveness of author RSS feed URLs.
 
-  Probes each author's `rss_feed_url` (HTTP HEAD via the seamed
-  `Stacks.Enrichment.RssFetcher`, #381c) and records the result in
-  `source_health_checks` via `Stacks.Monitoring`. A 2xx response is recorded
-  as success; non-2xx statuses, timeouts, and errors are recorded as
-  failures.
+    Probes each author's `rss_feed_url` (HTTP HEAD via the seamed
+    `Stacks.Enrichment.RssFetcher`, c) and records the result in
+    `source_health_checks` via `Stacks.Monitoring`. A 2xx response is recorded
+    as success; non-2xx statuses, timeouts, and errors are recorded as
+    failures.
 
-  Scheduled via cron: `{"0 3 * * 0", Stacks.Workers.RSSLivenessJob}` (Sundays
-  at 03:00 UTC).
+    Scheduled via cron: `{"0 3 * * 0", Stacks.Workers.RSSLivenessJob}` (Sundays
+    at 03:00 UTC).
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

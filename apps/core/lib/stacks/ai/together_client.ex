@@ -1,10 +1,10 @@
 defmodule Stacks.AI.TogetherClient do
   @moduledoc """
-  HTTP client for the Together AI LLM API (review summaries). Swappable
-  via `config :core, :together_client` (real vs mock). Auth is
-  `Authorization: Bearer <VISION_TOGETHER_API_KEY>` (not HMAC). Protected
-  by `:together_ai_fuse` — when blown, callers persist snapshots without a
-  summary.
+    HTTP client for the Together AI LLM API (review summaries). Swappable
+    via `config:core,:together_client` (real vs mock). Auth is
+    `Authorization: Bearer <VISION_TOGETHER_API_KEY>` (not HMAC). Protected
+    by `:together_ai_fuse` — when blown, callers persist snapshots without a
+    summary.
   """
 
   @model "meta-llama/Llama-3.3-70B-Instruct-Turbo"

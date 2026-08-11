@@ -2,18 +2,18 @@ defmodule Mix.Tasks.Eval.Resolver do
   @shortdoc "Offline eval of the title-search scorer against recorded production cases"
 
   @moduledoc """
-  Replays recorded VLM signals + OL/GB docs through the REAL production
-  pick logic (`CandidateScorer.pick_best/3`, the exact resolver seam) and
-  scores each pick against the expected ISBN. Zero network — a sub-second
-  offline run instead of a 30-minute deploy cycle.
+    Replays recorded VLM signals + OL/GB docs through the REAL production
+    pick logic (`CandidateScorer.pick_best/3`, the exact resolver seam) and
+    scores each pick against the expected ISBN. Zero network — a sub-second
+    offline run instead of a 30-minute deploy cycle.
 
-      mix eval.resolver                    # production defaults
-      mix eval.resolver --floor 3.25       # floor experiment
-      mix eval.resolver --w-<component> N  # any scorer weight
-      mix eval.resolver --corpus path.exs  # alternative corpus
+        mix eval.resolver                    # production defaults
+        mix eval.resolver --floor 3.25       # floor experiment
+        mix eval.resolver --w-<component> N  # any scorer weight
+        mix eval.resolver --corpus path.exs  # alternative corpus
 
-  Corpus: `priv/eval/resolver_corpus.exs`. Exit 0 always — it reports, it
-  does not gate.
+    Corpus: `priv/eval/resolver_corpus.exs`. Exit 0 always — it reports, it
+    does not gate.
   """
 
   use Mix.Task

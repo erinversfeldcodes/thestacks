@@ -1,11 +1,11 @@
 defmodule Stacks.MFA do
   @moduledoc """
-  Context for TOTP-based Multi-Factor Authentication.
+    Context for TOTP-based Multi-Factor Authentication.
 
-  Manages enrollment, verification, and disabling of TOTP MFA for users.
-  Recovery codes are generated as 12-character uppercase hex strings and
-  stored as SHA-256 hashes. TOTP secrets are encrypted at rest via
-  `Stacks.EncryptedBinary`.
+    Manages enrollment, verification, and disabling of TOTP MFA for users.
+    Recovery codes are generated as 12-character uppercase hex strings and
+    stored as SHA-256 hashes. TOTP secrets are encrypted at rest via
+    `Stacks.EncryptedBinary`.
   """
 
   import Ecto.Query, warn: false
@@ -18,14 +18,14 @@ defmodule Stacks.MFA do
   @recovery_code_count 10
 
   @doc """
-  Begin MFA enrollment for a user.
+    Begin MFA enrollment for a user.
 
-  Returns a map with:
-  - `secret`: raw binary TOTP seed (not persisted yet)
-  - `provisioning_uri`: otpauth:// URI for QR code display
-  - `recovery_codes`: list of 10 plaintext recovery codes (one-time display)
+    Returns a map with:
+    - `secret`: raw binary TOTP seed (not persisted yet)
+    - `provisioning_uri`: otpauth:// URI for QR code display
+    - `recovery_codes`: list of 10 plaintext recovery codes (one-time display)
 
-  The caller must call `confirm_enrollment/4` after the user verifies the code.
+    The caller must call `confirm_enrollment/4` after the user verifies the code.
   """
   @spec begin_enrollment(User.t()) ::
           {:ok, %{secret: binary(), provisioning_uri: String.t(), recovery_codes: [String.t()]}}
@@ -37,12 +37,12 @@ defmodule Stacks.MFA do
   end
 
   @doc """
-  Confirm MFA enrollment by verifying the TOTP code.
+    Confirm MFA enrollment by verifying the TOTP code.
 
-  If valid, persists the `UserMFA` record with hashed recovery codes and sets
-  `enabled_at`. Uses upsert so re-enrollment replaces the existing record.
+    If valid, persists the `UserMFA` record with hashed recovery codes and sets
+    `enabled_at`. Uses upsert so re-enrollment replaces the existing record.
 
-  Returns `{:ok, user_mfa}` or `{:error, :invalid_code}`.
+    Returns `{:ok, user_mfa}` or `{:error,:invalid_code}`.
   """
   @spec confirm_enrollment(User.t(), String.t(), binary(), [String.t()]) ::
           {:ok, UserMFA.t()} | {:error, :invalid_code}
@@ -78,9 +78,9 @@ defmodule Stacks.MFA do
   end
 
   @doc """
-  Verify a TOTP code for an enrolled user.
+    Verify a TOTP code for an enrolled user.
 
-  Returns `:ok`, `{:error, :invalid_code}`, or `{:error, :not_enrolled}`.
+    Returns `:ok`, `{:error,:invalid_code}`, or `{:error,:not_enrolled}`.
   """
   @spec verify_totp(User.t(), String.t()) :: :ok | {:error, :not_enrolled | :invalid_code}
   def verify_totp(%User{} = user, code) do
@@ -100,10 +100,10 @@ defmodule Stacks.MFA do
   end
 
   @doc """
-  Verify a recovery code for an enrolled user.
+    Verify a recovery code for an enrolled user.
 
-  If valid, removes the code from the stored list so it cannot be reused.
-  Returns `:ok`, `{:error, :invalid_code}`, or `{:error, :not_enrolled}`.
+    If valid, removes the code from the stored list so it cannot be reused.
+    Returns `:ok`, `{:error,:invalid_code}`, or `{:error,:not_enrolled}`.
   """
   @spec verify_recovery_code(User.t(), String.t()) ::
           :ok | {:error, :not_enrolled | :invalid_code}
@@ -126,7 +126,7 @@ defmodule Stacks.MFA do
   end
 
   @doc """
-  Check whether a user has MFA enrolled.
+    Check whether a user has MFA enrolled.
   """
   @spec mfa_enabled?(User.t()) :: boolean()
   def mfa_enabled?(%User{} = user) do
@@ -134,9 +134,9 @@ defmodule Stacks.MFA do
   end
 
   @doc """
-  Disable MFA for a user after verifying their current TOTP code.
+    Disable MFA for a user after verifying their current TOTP code.
 
-  Returns `:ok`, `{:error, :invalid_code}`, or `{:error, :not_enrolled}`.
+    Returns `:ok`, `{:error,:invalid_code}`, or `{:error,:not_enrolled}`.
   """
   @spec disable(User.t(), String.t()) :: :ok | {:error, :not_enrolled | :invalid_code}
   def disable(%User{} = user, totp_code) do

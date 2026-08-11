@@ -48,9 +48,9 @@ type Msg
     | SessionExpiryDetected
 
 
-{-| `SessionExpired` bubbles to `Main.handleSessionExpiry` (#173/#178).
+{-| `SessionExpired` bubbles to `Main.handleSessionExpiry`.
 
-Until #361 this page had no `OutMsg`, so an expired session came back as
+Until this page had no `OutMsg`, so an expired session came back as
 `ProfileRequestFailed (BadStatus 401)` and rendered "Could not save profile.
 Please try again." — over a form still holding the reader's current password,
 typed in to authorise an email change that can no longer happen.
@@ -389,7 +389,7 @@ profileRequestErrorText err =
 
 
 {-| Surface a handle-specific 422 error under the handle input, mapped to the
-user-facing copy from US-10.5.1.
+user-facing copy from
 -}
 viewHandleError : RemoteData Api.ProfileError () -> Html Msg
 viewHandleError saving =

@@ -1,7 +1,7 @@
 defmodule StacksWeb.BookControllerTest do
   @moduledoc """
-  Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, POST /api/books,
-  POST /api/books/confirm, and POST /api/books/:id/merge-format.
+    Tests for GET /api/books/:id, GET /api/books/isbn/:isbn, POST /api/books,
+    POST /api/books/confirm, and POST /api/books/:id/merge-format.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -267,7 +267,7 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  describe "POST /api/books — mocked ISBN resolver (US-1.1.5)" do
+  describe "POST /api/books — mocked ISBN resolver" do
     setup do
       original = Application.get_env(:core, :isbn_http_client)
       Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
@@ -320,7 +320,7 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  describe "a resolver outage is a 503, not 'isbn_not_found' (#344)" do
+  describe "a resolver outage is a 503, not 'isbn_not_found'" do
     setup do
       MockHttpClient.put_response("openlibrary.org", {:error, :unexpected_status})
       MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
@@ -381,7 +381,7 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  describe "an ISBN the catalogues denied is still 422 isbn_not_found (#344)" do
+  describe "an ISBN the catalogues denied is still 422 isbn_not_found" do
     setup do
       MockHttpClient.put_response("openlibrary.org", {:ok, %{}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})

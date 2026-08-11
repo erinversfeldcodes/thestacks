@@ -1,7 +1,7 @@
 module Components.BlockUserModalTest exposing (suite)
 
 {-| State-machine tests for the reusable "Block a user" overflow menu +
-confirmation modal (Issue #193, US-10.1.2 frontend). Exercises the full
+confirmation modal. Exercises the full
 lifecycle: open menu -> request -> confirm -> in-flight -> success/failure,
 plus the sad paths the backend returns (already\_blocked, not\_found) and the
 401 session-expiry escalation.

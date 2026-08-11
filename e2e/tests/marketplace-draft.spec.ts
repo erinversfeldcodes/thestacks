@@ -13,8 +13,8 @@ const DRAFT_CONTACT = "e2e-182-draft@thestacks.test";
 const DRAFT_DESCRIPTION =
   "DRAFT-RESTORE-MARKER — Plath first edition, mid-compose expiry #182";
 
-test.describe("Marketplace listing draft [#182]", () => {
-  test("CreateListing draft survives a mid-compose session expiry and is restored after re-login [#182]", async ({
+test.describe("Marketplace listing draft []", () => {
+  test("CreateListing draft survives a mid-compose session expiry and is restored after re-login []", async ({
     page,
   }) => {
     await signInViaForm(page, DEV_EMAIL, DEV_PASSWORD);

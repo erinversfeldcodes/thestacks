@@ -1,9 +1,9 @@
 defmodule StacksWeb.ConfigControllerTest do
   @moduledoc """
-  Tests for GET /api/config — the public frontend feature-flag channel (ADR-020).
+    Tests for GET /api/config — the public frontend feature-flag channel (ADR-020).
 
-  `async: false` because the age-gating flag test toggles the process-global
-  `:age_gating_enabled` Application env and restores it.
+    `async: false` because the age-gating flag test toggles the process-global
+    `:age_gating_enabled` Application env and restores it.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -23,7 +23,7 @@ defmodule StacksWeb.ConfigControllerTest do
              }
     end
 
-    test "reflects inviteOnly = true when the closed-beta gate is on (US-14.1.3)", %{conn: conn} do
+    test "reflects inviteOnly = true when the closed-beta gate is on", %{conn: conn} do
       original = Application.get_env(:core, :invite_only_registration)
       Application.put_env(:core, :invite_only_registration, true)
 

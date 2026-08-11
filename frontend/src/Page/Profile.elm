@@ -1,6 +1,6 @@
 module Page.Profile exposing (Model, Msg(..), OutMsg(..), init, update, view, viewShelvesFor)
 
-{-| A user's public profile hub at `/u/:handle` (#214). Fetches the
+{-| A user's public profile hub at `/u/:handle`. Fetches the
 visibility-filtered profile for the current viewer and renders the reader's
 identity plus links to each bookshelf they are allowed to browse. A hidden or
 non-existent profile comes back as a 404 and renders a neutral "not found" — a

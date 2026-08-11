@@ -1,10 +1,10 @@
 defmodule Core.PromEx.DashboardDriftTest do
   @moduledoc """
-  Drift guard for the moderation + age-gate dashboard-as-code (230; priv/grafana):
-  panels may only query metric families registered by
-  `Core.PromEx.Plugins.Stacks`, and every registered 228 moderation/age-gate family must have
-  a panel. Either direction of drift — a renamed metric silently blanking
-  a panel, or a new family shipping invisible — fails CI.
+    Drift guard for the moderation + age-gate dashboard-as-code (230; priv/grafana):
+    panels may only query metric families registered by
+    `Core.PromEx.Plugins.Stacks`, and every registered 228 moderation/age-gate family must have
+    a panel. Either direction of drift — a renamed metric silently blanking
+    a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true
@@ -88,7 +88,7 @@ defmodule Core.PromEx.DashboardDriftTest do
     end
   end
 
-  describe "drift: every #228 moderation/age-gate metric has a panel" do
+  describe "drift: every moderation/age-gate metric has a panel" do
     test "each registered moderation/age-gate family is queried by at least one panel" do
       registered = registered_families()
       referenced = panel_metric_names(decoded_dashboard())

@@ -840,7 +840,7 @@ impl Engine {
     /// As `sitemap_urls`, with the budget supplied.
     ///
     /// A parameter so budget *exhaustion* can be driven by a tiny cap rather than a multi-megabyte
-    /// fixture. Production always calls `sitemap_urls`, which supplies `for_discovery()` — the budget
+    /// fixture. Production always calls `sitemap_urls`, which supplies `for_discovery` — the budget
     /// is not a per-caller knob and callers do not get to raise it.
     pub async fn sitemap_urls_with_budget(
         &self,
@@ -988,7 +988,7 @@ impl Engine {
 
     /// GET a URL, reading at most `byte_limit` bytes of the body.
     ///
-    /// Streamed chunk by chunk rather than `response.text()`, because `text()` reads whatever the
+    /// Streamed chunk by chunk rather than `response.text`, because `text` reads whatever the
     /// server sends — and the documents this guards against are exactly the ones that are too big.
     /// A cap enforced after the transfer is not a cap; the shop has already paid for it.
     ///

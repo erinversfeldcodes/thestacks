@@ -1,8 +1,8 @@
 defmodule Stacks.Books.TitleSearchCachePersistentTest do
   @moduledoc """
-  Exercises the Postgres L2 layer of `Stacks.Books.TitleSearchCache`.
-  See `ISBNResolverCachePersistentTest` for the rationale on opting
-  into persistent mode per-test rather than globally in test env.
+    Exercises the Postgres L2 layer of `Stacks.Books.TitleSearchCache`.
+    See `ISBNResolverCachePersistentTest` for the rationale on opting
+    into persistent mode per-test rather than globally in test env.
   """
 
   use Core.DataCase, async: false

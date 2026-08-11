@@ -1,14 +1,14 @@
 defmodule StacksWeb.InviteAdminController do
   @moduledoc """
-  The owner's invitation surface (US-14.1.3): list, write, revoke.
+    The owner's invitation surface: list, write, revoke.
 
-  Behind `:admin` (MFA-verified session) AND `:require_owner` — the role is
-  re-checked where the write happens (#340's lesson: an admin token outlives
-  the role it was minted under), and a future non-owner admin must not be able
-  to widen the beta.
+    Behind `:admin` (MFA-verified session) AND `:require_owner` — the role is
+    re-checked where the write happens (lesson: an admin token outlives
+    the role it was minted under), and a future non-owner admin must not be able
+    to widen the beta.
 
-  `POST` is the ONLY response that ever contains the full `code`; every other
-  read carries `code_prefix` only — the code is unrecoverable after issue.
+    `POST` is the ONLY response that ever contains the full `code`; every other
+    read carries `code_prefix` only — the code is unrecoverable after issue.
   """
 
   use CoreWeb, :controller

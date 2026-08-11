@@ -1,9 +1,9 @@
 defmodule Core.Extensions.UUIDString do
   @moduledoc """
-  Custom Postgrex extension that accepts both 16-byte binary UUIDs and
-  36-character string UUIDs. This allows raw table queries (e.g.
-  `from(t in "table_name", where: t.uuid_col == ^string_uuid)`) to work
-  without requiring callers to call `Ecto.UUID.dump!/1` manually.
+    Custom Postgrex extension that accepts both 16-byte binary UUIDs and
+    36-character string UUIDs. This allows raw table queries (e.g.
+    `from(t in "table_name", where: t.uuid_col == ^string_uuid)`) to work
+    without requiring callers to call `Ecto.UUID.dump!/1` manually.
   """
 
   import Postgrex.BinaryUtils, warn: false

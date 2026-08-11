@@ -1,10 +1,10 @@
 module DoorArrivalTest exposing (suite)
 
-{-| Issue #364 — the login door dolly-shot plays again, driven from the shell.
+{-| — the login door dolly-shot plays again, driven from the shell.
 
 `Main.viewArrivalDoor` renders the door scene layers over the destination page
 for exactly the `Arriving` window, and nothing at either end of it. That is what
-gives `Arriving` an observable job: #359 navigated away from the login scene on
+gives `Arriving` an observable job: navigated away from the login scene on
 the same update that decoded the `200`, so the port had no elements left to
 animate (`animationsStarted=0`). Rendering the layers from the shell puts the
 ids the port targets back on screen — over the page the reader just landed on —
@@ -12,8 +12,7 @@ without ever putting the credential downstream of the animation.
 
 ⚠️ This is a SEPARATE harness from `PersistFirstLoginTest` on purpose. That
 suite has no animation-finished message by design — its absence IS the
-occluded-window simulation — so a door-render test must not be smuggled into it
-(Issue #364 reviewer context). The persist-first guarantee and the door's
+occluded-window simulation — so a door-render test must not be smuggled into it. The persist-first guarantee and the door's
 presence are proved independently.
 
 
@@ -65,7 +64,7 @@ readerAuth =
 
 suite : Test
 suite =
-    describe "The arrival door renders from the shell (#364)"
+    describe "The arrival door renders from the shell"
         [ test "door_renders_while_arriving: the dolly-shot scene is present while AuthState is Arriving" <|
             \() ->
                 Main.viewArrivalDoor (Main.Arriving readerAuth)

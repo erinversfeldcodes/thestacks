@@ -1,10 +1,10 @@
 defmodule StacksWeb.Plugs.RouteGroupTest do
   @moduledoc """
-  Route-grouping plug tests (136): `request_path` → `:route_group` tag
-  (:auth, :catalogue, :bookshelves, :upload, :gdpr, :settings, :health,
-  :metrics, :other) flowing into router-dispatch telemetry metadata for
-  per-group SLO thresholds. Asserts each mapping and the three conn
-  locations the tag is written to.
+    Route-grouping plug tests: `request_path` → `:route_group` tag
+    (:auth,:catalogue,:bookshelves,:upload,:gdpr,:settings,:health,
+  :metrics,:other) flowing into router-dispatch telemetry metadata for
+    per-group SLO thresholds. Asserts each mapping and the three conn
+    locations the tag is written to.
   """
 
   use CoreWeb.ConnCase, async: false

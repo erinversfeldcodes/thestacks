@@ -34,10 +34,10 @@ type Msg
     | SessionExpiryDetected
 
 
-{-| `SessionExpired` bubbles to `Main.handleSessionExpiry` (#173/#178): the
+{-| `SessionExpired` bubbles to `Main.handleSessionExpiry`: the
 re-check net that adopts a sibling tab's newer token before it logs anyone out.
 
-Until #361 this page had no `OutMsg` at all, so a mid-form 401 landed in
+Until this page had no `OutMsg` at all, so a mid-form 401 landed in
 `SaveCompleted`'s `Err` branch and rendered "Could not change password. Please
 try again." — asking the reader to retype a password into a form whose session
 no longer exists.
