@@ -97,12 +97,18 @@ test.describe("Email confirmation — full flow", () => {
     });
     expect(reg.ok()).toBeTruthy();
 
-    const emails = await fetchSentEmails(request, email);
+    // Delivery is asynchronous by design (registration emits an event; an Oban
+    // worker sends the email), so the mailbox is polled: one immediate read
+    // raced the worker and failed on any stack slower than the local one.
+    let emails = await fetchSentEmails(request, email);
     test.skip(
       emails === null,
       "requires the /api/test/sent-emails helper (STACKS_E2E_TEST_HELPERS=1)"
     );
-    expect(emails!.length).toBeGreaterThan(0);
+    await expect(async () => {
+      emails = await fetchSentEmails(request, email);
+      expect(emails!.length).toBeGreaterThan(0);
+    }).toPass({ timeout: 30_000, intervals: [1_000, 2_000, 5_000] });
     const confirmation = emails!.find((e) => /confirm/i.test(e.subject));
     expect(
       confirmation,
