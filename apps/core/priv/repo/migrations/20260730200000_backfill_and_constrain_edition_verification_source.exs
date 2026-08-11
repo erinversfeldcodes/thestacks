@@ -1,32 +1,12 @@
 defmodule Core.Repo.Migrations.BackfillAndConstrainEditionVerificationSource do
   @moduledoc """
-  Companion to the proto-generated `add :verification_source` migration
-  (`20260730193134`, Issue #335 D1). Backfills every existing edition, tightens
-  the column to NOT NULL, and pins the value domain with a CHECK.
-
-  ## Why the column exists
-
-  "Was this ISBN ever verified against an external source?" was previously only
-  *inferable*, and only for as long as the inference held: `Stacks.Moderation`'s
-  barcode fast path skips the synchronous Open Library / Google Books lookup and
-  writes a placeholder work title of `"ISBN <isbn>"`. Once `EnrichBookJob`
-  succeeds, that placeholder is replaced and the fact that nothing external ever
-  confirmed the ISBN becomes unrecoverable. `verification_source` records it at
-  write time instead, on the row that owns the ISBN.
-
-  ## Backfill mapping
-
-      open_library_id IS NOT NULL   -> 'open_library'
-      google_books_id IS NOT NULL   -> 'google_books'
-      neither                       -> 'barcode_unverified'
-
-  The third bucket is deliberately the conservative reading: it asserts only
-  that *no external verification is recorded for this row*, which is exactly
-  what a missing identifier tells us. A legacy row that WAS resolved but whose
-  resolver never stored an identifier is therefore understated, never
-  overstated — an audit of "which ISBNs did we never externally confirm?" may
-  return a superset, and can never miss one. `open_library_id` is checked first
-  because `Books.create_confirmed_book/4` only ever persists that identifier.
+  Companion to the proto-generated `add :verification_source` (335 D1):
+  backfills every edition, tightens to NOT NULL, pins the domain with a
+  CHECK. The column makes "was this ISBN externally verified?" a recorded
+  fact — previously only inferable from the placeholder title, and lost
+  the moment `EnrichBookJob` replaced it. Backfill maps provider ids →
+  their source, falling back to `barcode_unverified` for rows of unknown
+  origin (the honest reading; see the 370 correction for seed rows).
   """
   use Ecto.Migration
 

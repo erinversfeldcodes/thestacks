@@ -1,24 +1,11 @@
 defmodule Core.Repo.Migrations.CreateEmbeddingsAndBookContentChunks do
   @moduledoc """
-  Hand-written (NOT proto.sync-generated) migration for the two pgvector-bearing
-  tables of the writing-assistant data model (Issue #183, docs/decisions/017).
-
-  proto.sync cannot express the `vector(1024)` column (proto has no matching
-  type; the codegen type-mapper would raise), so these two tables are
-  `migration_exists: true` + `skip_ecto: true` in proto/persisted.exs. Their
-  scalar columns still match the proto messages (proto.sync --check verifies the
-  scalar columns are present here); the `embedding` column is invisible to the
-  codegen path and lives only here + in the hand-written Ecto schemas.
-
-  Classification (GDPR):
-    op.embeddings          — PERSONAL, user-scoped. user_id FK ON DELETE CASCADE,
-                             so Stacks.GDPR.Deletion's `Repo.delete(user)` erases
-                             a user's embeddings.
-    op.book_content_chunks — SHARED, NON-personal corpus. NO user_id column ⇒
-                             PRESERVED by erasure (load-bearing for #185).
-
-  Vector dimension 1024 = Together AI `BAAI/bge-m3` (US-12.2.1). HNSW index with
-  `vector_cosine_ops` (bge-m3 produces cosine-normalized embeddings).
+  Hand-written migration for the two pgvector tables (183, ADR-017):
+  proto.sync cannot express `vector(1024)`, so both are
+  `migration_exists: true` + `skip_ecto: true` in persisted.exs (scalar
+  columns still checked against the proto). GDPR: `op.embeddings` is
+  PERSONAL (user-scoped, purged on consent revocation);
+  `op.book_content_chunks` is the shared non-personal corpus.
   """
 
   use Ecto.Migration

@@ -1,24 +1,10 @@
 defmodule Core.Repo.Migrations.CreateAuthTokenFamilies do
   @moduledoc """
-  Refresh-token family / session tracking (Issue #179, Phase 2a).
-
-  Every login opens a *family*: a rotation chain identified by a stable
-  `family_id` that is carried forward (as a JWT claim) across every refresh
-  rotation. The family row records the family's current live access token
-  (`current_jti`) so a later phase (2b) can detect reuse of a superseded token
-  and revoke the whole family.
-
-  This table is hand-migrated (NOT proto-generated) — it holds server-side
-  auth session state, not a domain entity, so it has no `.proto` contract and
-  `mix proto.sync` neither generates nor drifts against it. It uses the
-  project's standard `timestamps()` (globally rewritten to `created_at` /
-  `updated_at` at microsecond precision — see config/config.exs), so unlike
-  op.guardian_tokens (which mirrors Guardian.DB's `inserted_at` schema and
-  therefore declares its timestamps explicitly) this table keeps the default.
-
-  `family_id` is supplied by the application (login generates it via
-  `Ecto.UUID.generate/0`) rather than a DB default, because the same value must
-  be embedded in the JWT before the row is written.
+  Refresh-token family / session tracking (179, Phase 2a). Every login
+  opens a family: a rotation chain under a stable `family_id` (JWT claim),
+  recording the live token (`current_jti`) so reuse of a superseded token
+  can burn the family. Hand-migrated, NOT proto-generated: server-side
+  auth state, no `.proto` contract, invisible to `mix proto.sync`.
   """
 
   use Ecto.Migration

@@ -1,19 +1,11 @@
 defmodule Core.Repo.Migrations.DowncaseUserEmails do
   @moduledoc """
-  Normalises every stored address to lower case, so the case-insensitive unique
-  index built in `20260730200500` has nothing to trip over (Issue #335 D4).
-
-  An email address's domain is case-insensitive by definition and no mail
-  provider anyone signs up with treats the local part as case-sensitive, but
-  `op.users.email` has only ever had an exact-match unique index. Two accounts
-  could therefore exist on the same address — and worse, `Accounts.get_user_by_email/1`
-  downcases its argument before an exact match, so an account stored with any
-  upper-case character was silently unreachable by login. Downcasing repairs
-  those accounts; the index in the next migration stops new ones appearing.
-
-  If two rows already differ only by case the migration RAISES rather than
-  guessing. Which of two accounts on one address survives — and what happens to
-  the shelves hanging off the other — is a decision for a person, not an UPDATE.
+  Downcases every stored email so the case-insensitive unique index in
+  `20260730200500` has nothing to trip over (335 D4). The old exact-match
+  index allowed two accounts on one address — and since
+  `get_user_by_email/1` downcases before matching, an account stored with
+  any upper-case character was unreachable by login. This repairs those;
+  the index stops new ones.
   """
   use Ecto.Migration
 

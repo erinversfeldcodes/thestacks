@@ -1,42 +1,13 @@
 defmodule Core.Repo.Migrations.AddOwnerFksToAuthSessionTables do
   @moduledoc """
-  The two user references GDPR erasure has been compensating for in application
-  code (Issue #335 D3).
-
-  `op.auth_token_families.user_id` and `op.guardian_tokens.sub` both name a user
-  and neither carried a foreign key, so `repo.delete(user)` left live session
-  state behind. `Stacks.GDPR.Deletion.delete_user_data/2` papered over that with
-  a hand-rolled `:revoke_sessions` step — a guarantee that held only for the one
-  code path that remembered to run it. After this migration the database owns
-  it: any delete of an `op.users` row, from any path including a bare `psql`
-  session, takes the user's sessions with it.
-
-  ## guardian_tokens: why a generated column
-
-  `sub` is guardian_db's own schema (`varchar`, holding the user id as a
-  string), and this project does not own that schema — it cannot be retyped to
-  `uuid` without forking the library's model. So the owner reference is a
-  separate `user_id uuid GENERATED ALWAYS AS (NULLIF(sub, '')::uuid) STORED`
-  column carrying the FK. PostgreSQL permits a foreign key on a stored generated
-  column (verified against PG 16), and because the value is *derived*, no writer
-  — guardian_db, a future refresh path, an operator — can set it inconsistently
-  with `sub`. A NULL/empty `sub` yields NULL, which no FK constrains: such a row
-  names no user, so erasure has nothing to reach.
-
-  ## Pre-clean
-
-  Both tables may hold rows that predate any enforcement. They are deleted, not
-  repaired: an auth session whose user no longer exists is already dead
-  (`Guardian.resource_from_claims/1` 401s on a missing user), and a
-  `guardian_tokens.sub` that is not a UUID was never a valid subject. The two
-  guardian_tokens deletes are kept SEPARATE so the non-UUID rows are gone before
-  any statement casts `sub` to `uuid` — a single combined predicate could have
-  its casting branch evaluated first and abort the migration.
-
-  Both constraints are added `NOT VALID` here and validated by
-  `20260730200350`, which runs OUTSIDE a transaction — validating in this one
-  would hold the ACCESS EXCLUSIVE lock across the scan and defeat the point
-  (squawk `constraint-missing-not-valid`).
+  Adds the two FKs GDPR erasure was compensating for in application code
+  (335 D3): `auth_token_families.user_id` and `guardian_tokens.sub` named
+  users with no FK, so `repo.delete(user)` left live session state behind
+  and only the hand-rolled `:revoke_sessions` step cleaned it. Now the
+  database owns it — any delete path takes the sessions along.
+  `guardian_tokens` needs a generated uuid column over `sub` (guardian_db
+  owns that column's text type); added `NOT VALID`, validated in
+  `20260730200350`.
   """
   use Ecto.Migration
 
