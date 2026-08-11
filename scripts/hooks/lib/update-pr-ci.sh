@@ -119,9 +119,18 @@ EOF
 run_ci_and_get_section() {
     local repo_root="$1"
 
+    # Same PATH bolt-on as `just run`: a hook fired from a shell without nix on
+    # PATH must still find the pinned toolchain, or `just ci` silently runs on
+    # the system Elixir and version-drift fails.
+    export PATH="/nix/var/nix/profiles/default/bin:${HOME}/.nix-profile/bin:${PATH}"
+
     local runner=()
-    if [[ -z "${STACKS_DEV_SHELL:-}" ]] && command -v nix &>/dev/null; then
-        runner=(nix develop --command)
+    if [[ -z "${STACKS_DEV_SHELL:-}" ]]; then
+        if command -v nix &>/dev/null; then
+            runner=(nix develop --command)
+        else
+            echo "[hook] WARNING: nix not found; running CI on the system toolchain (version-drift will likely fail)." >&2
+        fi
     fi
 
     local tmpfile
