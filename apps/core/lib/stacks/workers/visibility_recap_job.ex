@@ -1,22 +1,11 @@
 defmodule Stacks.Workers.VisibilityRecapJob do
   @moduledoc """
-  Oban worker that caps bookshelf and placement visibility down to match a
-  user's new (more restrictive) profile_visibility setting.
-
-  When a user changes profile_visibility to "owner", any bookshelves or
-  placements stored as "platform" or "group" violate the new ceiling and are
-  updated in a single batch. The visibility_level enum is (group, platform, owner);
-  there is no "public" value. This runs asynchronously so it does not block
-  the HTTP response for the settings change.
-
-  The visibility change is already enforced at read time by
-  `Stacks.Visibility.resolve_visibility/2` regardless of stored values, so
-  stale stored visibility is a correctness-of-stored-state issue, not a
-  security issue. This job brings stored values into sync.
-
-  Args:
-    - `"user_id"` — the user whose resources should be recapped
-    - `"new_visibility"` — the new profile_visibility value ("owner" or "platform")
+  Caps stored bookshelf/placement visibility down to a user's new, more
+  restrictive `profile_visibility` — one batch update, run async so the
+  settings response doesn't block. Read-time enforcement
+  (`Visibility.resolve_visibility/2`) already ignores stale stored values,
+  so this is stored-state hygiene, not a security fix. Args: `"user_id"`,
+  `"new_visibility"`.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

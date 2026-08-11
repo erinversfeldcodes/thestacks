@@ -1,22 +1,11 @@
 defmodule Stacks.Transparency.PrometheusClient do
   @moduledoc """
-  Behaviour for the read-only Prometheus client used by the public
-  transparency data layer (Issue #241 / ADR-019).
-
-  The single callback runs ONE instant PromQL query and returns a scalar
-  numeric value. Callers (`Stacks.Transparency`) only ever pass queries drawn
-  from the fixed, code-defined allowlist — the behaviour deliberately exposes
-  no way to run a caller-assembled query beyond that allowlist. The
-  implementation guards Fly's managed-Prometheus read token: when the token is
-  absent the client returns `{:error, :not_configured}` and the live section
-  degrades to `:unavailable` rather than erroring or leaking.
-
-  Two implementations follow the ADR-012 behaviour-mock pattern:
-
-    * `Stacks.Transparency.Prometheus` — real HTTP client against Fly's
-      managed-Prometheus `/api/v1/query` endpoint (default in dev/prod).
-    * `Stacks.Transparency.MockPrometheusClient` — process-dictionary mock
-      wired in `config/test.exs`.
+  Behaviour for the transparency layer's read-only Prometheus client:
+  one instant PromQL query → one scalar. Callers only pass allowlist
+  queries; the behaviour exposes no caller-assembled query path. Missing
+  config → `{:error, :not_configured}` and graceful degradation.
+  Implementations (ADR-012 pattern): `Transparency.Prometheus` (real) and
+  `MockPrometheusClient` (tests).
   """
 
   @doc """

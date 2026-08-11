@@ -1,24 +1,13 @@
 defmodule Stacks.Workers.MatchStoreCatalogueJob do
   @moduledoc """
-  Prices books at the shops that carry no ISBN on any product, by matching titles.
-
-  Ike's Books had no ISBN on any of 50 sampled products and Love Books none on 30, so
-  no enumeration can map an ISBN to a product there. `StoreMatcher` matches the shop's
-  titles against editions we hold, and each match is used immediately to fetch that
-  product's price.
-
-  ## Why no pointer table
-
-  A match could be persisted and reused, but it would be a third thing to keep fresh —
-  invalidated by the shop re-slugging, by our catalogue changing, and by the match
-  thresholds being retuned. Since matching only applies to two shops and prices carry a
-  staleness TTL anyway, the match is made and spent in one pass. If a third shop of
-  this kind appears, or the sweep gets expensive, that is the moment to persist it.
-
-  ## Why it is a separate job
-
-  Fetching a shop's titles is a bulk sweep that waits on its rate limit and takes
-  minutes, exactly like the index build, so it must never sit inside a request.
+  Prices books at the no-ISBN shops (Ike's Books, Love Books) by title
+  matching: `StoreMatcher` matches the shop's titles against our editions
+  and each match is spent immediately on a price fetch. No pointer table —
+  a persisted match would be a third thing to keep fresh (re-slugging,
+  catalogue changes, threshold retuning) for only two shops whose prices
+  carry a TTL anyway; persist when a third shop appears. A separate job
+  because the title sweep waits minutes on the shop's rate limit and must
+  not sit inside the ordinary scrape path.
   """
 
   use Oban.Worker, queue: :scraper, max_attempts: 2

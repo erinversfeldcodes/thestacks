@@ -1,30 +1,14 @@
 defmodule Stacks.Workers.GoodreadsImportJob do
   @moduledoc """
-  Works through a library import's rows in batches of #{25}, writing each row's
-  outcome, then re-enqueues itself for the next batch until the rows are
-  exhausted — a 600-row library becomes 24 short jobs instead of one long one,
-  so a deploy or crash loses at most a batch of progress, never the import.
-
-  Retry safety rests on two facts:
-
-    * every row's `outcome` is written as it is processed, and a row with an
-      outcome is **skipped** on re-run — so a batch that dies halfway resumes
-      where it stopped, and the unique `[import_id, row_number]` index means a
-      row can never be duplicated;
-    * a resolver outage (`:resolver_unavailable`) fails the WHOLE batch with
-      `{:error, …}` so Oban retries it with backoff. The hard gate's rule: an
-      upstream that did not answer said nothing about the book, so the row must
-      not be marked `unverified` — that word is reserved for ISBNs the upstreams
-      actually rejected. Only on the final exhausted attempt does the import
-      itself go `failed`, with every processed row's outcome intact.
-
-  Rows that fail the gate get an outcome and a `reason` the reader can act on
-  (`unverified` — no/unknown ISBN; `duplicate` — already on a bookshelf;
-  `unreadable` — the CSV row itself was malformed). Placements are created via
-  `Shelving.place_book/5` with `source: "goodreads_import"`, which both records
-  provenance and suppresses per-placement feed regeneration —
-  `Stacks.Imports.finalize/2` returns the touched bookshelves and this job
-  enqueues ONE `RegenerateFeedJob` per bookshelf at the end.
+  Works through a library import's rows in batches of 25, writing each
+  row's outcome, then re-enqueues itself — a 600-row library is 24 short
+  jobs, so a crash loses at most a batch. Retry safety: rows with an
+  outcome are skipped on re-run (and `[import_id, row_number]` is unique),
+  while a resolver outage fails the WHOLE batch for Oban backoff — an
+  upstream that did not answer said nothing about the book, so the row
+  must never be marked `unverified` (that word is reserved for "both
+  catalogues answered and neither knows it"). Terminal completion stamps
+  the import and emits `import.completed`.
   """
 
   use Oban.Worker,

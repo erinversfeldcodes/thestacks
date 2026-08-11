@@ -1,25 +1,12 @@
 defmodule Stacks.Workers.EnrichBookJob do
   @moduledoc """
-  Oban worker that fills in external-registry metadata (title, author,
-  cover, publisher, etc.) for a book previously stored with placeholder
-  fields.
-
-  Invoked by `Stacks.Moderation.store_book/3` when a checksum-valid ISBN
-  arrives from the vision pipeline — that fast path skips the synchronous
-  OpenLibrary/Google Books lookup to cut ~400ms from the upload hot path,
-  so this worker picks up the round-trip asynchronously.
-
-  Behaviour:
-    * Looks up the book by ISBN (not by ID — the Moderation pipeline
-      deduplicates via `Books.find_existing(isbn)`, so the same ISBN
-      may already have been enriched by a prior run; we re-fetch the
-      latest row every time).
-    * Calls `Books.resolve_isbn/1` which hits the cached + parallel
-      OL/GB resolver. Any miss is logged and retried by Oban.
-    * Updates the book row in-place, overwriting the placeholder
-      title/author/cover/etc. with real metadata.
-    * No-ops when the book already has a real title (not starting with
-      the `"ISBN "` placeholder) — another run already enriched it.
+  Fills in external-registry metadata for a book stored with placeholder
+  fields — the async half of the fast path where `Moderation.store_book/3`
+  skips the synchronous OL/GB lookup (~400ms off the upload hot path).
+  Looks up by ISBN, not ID (the pipeline dedups via `find_existing/1`, so
+  a prior run may already have enriched the row); calls
+  `Books.resolve_isbn/1` (cached, parallel); overwrites placeholders
+  in place. Emits `book.enriched` so caches invalidate.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 5

@@ -1,27 +1,13 @@
 defmodule Stacks.Workers.DiscoverEditionsJob do
   @moduledoc """
-  Discovers other editions of a work from Open Library and records them.
-
-  A work is the abstract book; an edition is a printing with its own ISBN. Shops stock
-  whichever edition they stock, so without this a price lookup can only ever ask about
-  the one ISBN a reader happened to type. Exclusive Books carries six ISBNs of *The
-  Name of the Rose*, two of them Spanish — pricing the work means knowing they exist.
-
-  Triggered from `book.created` rather than a cron: this **creates** rather than
-  refreshes, and a cron that creates is the defect that left `discovered_sources` empty
-  for months (campaign ROOT H). Work should arrive in proportion to catalogue growth.
-
-  ## Two different caps, for two different budgets
-
-  `ISBNResolver.editions_for_work/1` caps the *fetch* at 50, protecting Open Library
-  from an unbounded page walk. This job caps *creation* at ten, protecting our own
-  budget: `Books.merge_edition/2` re-resolves each ISBN to honour the ISBN hard gate, so
-  fifty merges is fifty resolver races on a first-time book.
-
-  Ten is chosen against the consumer, not picked round: `Prices.enqueue_refreshes/1`
-  prices at most five editions per work, so ten gives the price layer more choice than
-  it can use while keeping the cost per new book bounded. Discovering fifty editions to
-  price five would be work nobody collects.
+  Discovers a work's other editions from Open Library — what lets a price
+  lookup ask about the ISBNs shops actually stock, not just the one the
+  reader typed. Triggered from `book.created`, not cron: this CREATES, and
+  a cron that creates is the defect that left `discovered_sources` empty
+  for months. Two caps for two budgets: the fetch caps at 50 (protecting
+  OL), creation caps at 10 per work (protecting our own enrichment fan-out
+  — each new edition triggers its own scrape). Discovered editions are
+  recorded `verification_source: "open_library"`, never primary.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

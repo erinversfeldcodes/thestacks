@@ -1,47 +1,13 @@
 defmodule Stacks.Transparency do
   @moduledoc """
-  Public, curated, anonymised transparency data layer (Issue #241 / ADR-019).
-
-  Serves the subset of platform observability the public `/metrics` page (#235)
-  renders — combining **live ops signals** (windowed rates / current values
-  queried from Fly's managed Prometheus via a fixed allowlist) with **durable
-  aggregates** (public-safe corpus/cost totals). Everything is an aggregate,
-  never a per-user value.
-
-  ## The privacy boundary is the allowlist + the durable column set
-
-  Nothing is public by default. Live signals come ONLY from `@allowlist` — a
-  fixed, code-defined list of safe PromQL queries built from the registered
-  `stacks_*` metric families (see `Core.PromEx.Plugins.Stacks`). There is NO
-  function that accepts a caller-supplied PromQL string; `run_signal/1` accepts
-  only a allowlist KEY. Durable aggregates come from `durable_stats/0`, a fixed
-  set of anonymised corpus/cost counts. Adding a signal to either is an
-  explicit, reviewed code change — so nothing leaks by construction.
-
-  Linked-account / cross-integration (future Audible-style) signals are
-  **excluded by construction**; they enable de-anonymisation by correlation and
-  are reserved for a future owner-only view (ADR-019 §3/§3a).
-
-  ## Live signals — cached, token-guarded, degrade-on-absent
-
-  Live signals are cached (`Stacks.Transparency.Cache`) for `@cache_ttl_seconds`
-  so public page-loads don't fan out to Prometheus. When the Prometheus read
-  token is absent (or the client otherwise errors on every query), the live
-  section degrades to `:unavailable` — never an error or a leak — and the
-  durable section is still served. A previously cached good value is served
-  stale-on-error where one exists.
-
-  ## Teaching metadata
-
-  Every returned entry carries `label`, `what`, `how`, `why`, `unit` so #235 can
-  render the "why we measure this" tooltip — the public analogue of the #233
-  self-explanatory-dashboard standard.
-
-  > NOTE: `durable_stats/0` currently reads aggregate op-data directly. A
-  > dedicated `wh.mart_public_transparency` dbt mart is a #235 refinement
-  > (tracked): it would make the durable totals deploy-surviving and let dbt
-  > schema tests assert the public-safe column set. The context aggregate here
-  > is the interim, equally-anonymised source.
+  Public, curated, anonymised transparency data layer (241 / ADR-019) for
+  the public `/metrics` page: live ops signals + durable aggregates, never
+  a per-user value. The privacy boundary is structural: live signals come
+  ONLY from `@allowlist` (fixed, code-defined PromQL — `run_signal/1`
+  accepts an allowlist KEY, no function takes a query string), and every
+  family used must be classified `:public` in `Core.PromEx.MetricAudience`
+  (enforced by test, fail-closed). Degrades to `:unavailable` when the
+  metrics store is unreachable — public page, no errors, no leaks.
   """
 
   import Ecto.Query

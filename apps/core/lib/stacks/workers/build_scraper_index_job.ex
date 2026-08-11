@@ -1,30 +1,14 @@
 defmodule Stacks.Workers.BuildScraperIndexJob do
   @moduledoc """
   Rebuilds each store's ISBN→product-path index in the scraper service.
-
-  ## Why this job exists
-
-  Four of the six Shopify targets carry the ISBN in `sku` or in prose but not in the
-  product handle, so their products cannot be addressed by ISBN directly. An
-  ISBN→path index makes them work — Wordsworth prices R215.00 for "Where's Spot?" at
-  `/products/wheres-spot-2`, a handle nothing like its ISBN.
-
-  That index lives in the scraper service's process and **dies with it**, which is
-  deliberate: nothing durable holds a copy of anyone's catalogue. The cost of that
-  choice is that it has to be rebuilt, and this is what rebuilds it. Without this
-  job, every store needing an index answers `IndexRequired` forever after a deploy.
-
-  ## Why it is separate from scraping
-
-  A sweep is up to twenty requests against a shop limited to ten a minute, so it
-  waits on the rate limiter and takes minutes. A price lookup must never do that —
-  measured: an inline build exhausted Wordsworth's budget on its first page and
-  returned `rate limit exceeded`.
-
-  Stores are rebuilt one at a time rather than concurrently. The limiter is
-  per-domain so parallelism would not speed any single store up, and a burst of
-  simultaneous sweeps across eleven shops is exactly the kind of load this design
-  exists to avoid.
+  Four of six Shopify targets carry the ISBN in `sku`/prose but not the
+  product handle, so they can't be addressed by ISBN without an index. The
+  index lives in the scraper's process and dies with it ON PURPOSE
+  (nothing durable holds a shop's catalogue), so it must be rebuilt after
+  every deploy — else those stores answer `IndexRequired` forever. Separate
+  from scraping because a sweep is ~20 requests against a 10/min-limited
+  shop: minutes of rate-limiter waiting that must not sit inside a price
+  scrape. Runs from cron and on `IndexRequired`.
   """
 
   use Oban.Worker, queue: :scraper, max_attempts: 2

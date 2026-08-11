@@ -1,19 +1,10 @@
 defmodule Stacks.Workers.CacheSweepJob do
   @moduledoc """
-  Daily Oban cron worker that deletes expired rows from the persistent
-  cache tables `cache.isbn_resolver_cache` and `cache.title_search_cache`.
-
-  Without this, both tables grow unbounded — every ISBN/title ever
-  looked up stays as a tombstone past its `expires_at`. Reads still
-  filter on `expires_at > now()` so stale rows can't be served, but DB
-  size matters for backup cost and query planner stats.
-
-  Scheduled daily at 03:30 UTC (between ImageRetentionJob at 02:00 and
-  RSSLivenessJob at 03:00). Uses an indexed range delete
-  (`title_search_cache_expires_at_index` /
-  `isbn_resolver_cache_expires_at_index`) so it remains cheap even as
-  the tables grow — Postgres walks the index from the low end up to
-  `now()` and drops the corresponding heap rows.
+  Daily cron (03:30 UTC) deleting expired rows from
+  `cache.isbn_resolver_cache` and `cache.title_search_cache`. Reads
+  already filter `expires_at > now()`, so this is about DB size (backup
+  cost, planner stats), not correctness. Indexed range delete on
+  `expires_at`, so it stays cheap as the tables grow.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
