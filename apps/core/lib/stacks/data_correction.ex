@@ -1,65 +1,12 @@
 defmodule Stacks.DataCorrection do
   @moduledoc """
-  Repairing bad data as a named operation instead of a one-off `UPDATE`.
-
-  Issue #339 found rows in production and staging that violate an invariant the
-  application has always claimed to hold. Fixing them by hand — a `psql`
-  session, or an inline `UPDATE` buried in a migration — would have left no
-  record of what changed, no way to see the blast radius first, and nothing to
-  reuse the next time. The owner's ruling was to build the repair as something
-  that outlives its first use, so this module is the shape every future
-  correction takes:
-
-    * **dry-run by default.** `run/2` reports what it *would* change and touches
-      nothing unless the caller passes `apply: true`. Seeing the rows before
-      moving them is the whole point.
-    * **idempotent.** A correction's `c:plan/0` selects only rows that still
-      need changing, so the second run is empty by construction rather than by
-      the caller remembering not to run it twice.
-    * **audited.** Every applied change writes an `audit.audit_log` row naming
-      the correction, the row, the old value, the new value, the reason, and
-      who invoked it. The audit write is inside the same transaction as the
-      change: a correction that cannot be recorded does not happen.
-    * **scoped by an explicit predicate.** A correction says in `c:scope/0`
-      exactly which rows it claims, and `c:plan/0` must implement that and
-      nothing wider. "Fix everything that looks wrong" is how a repair becomes
-      the next incident.
-    * **honest about reversal.** `c:reversibility/0` states whether the change
-      can be undone and what an undo could not restore. Most corrections are
-      one-way, and the moment to say so is before the run, not after.
-
-  ## Running one
-
-      # from apps/core, against the configured DB
-      mix stacks.data.correct                 # dry-run every correction
-      mix stacks.data.correct --apply         # apply them
-
-      # against a deployed stack (no mix in a release)
-      /app/bin/core eval 'Stacks.Release.correct_data()'
-
-      # as the platform owner, against a running stack (#340)
-      GET  /api/admin/data_corrections              # blast radius, writes nothing
-      POST /api/admin/data_corrections/:name/apply  # requires a reason
-
-  `docs/runbooks/data-correction.md` is the operator-facing walkthrough.
-
-  ## Writing one
-
-  Implement the five callbacks. Reach the rows through
-  `Stacks.DataCorrection.Column` rather than an Ecto schema: a correction is
-  usually run precisely because reality and the schema disagree, and the
-  changeset that normalises the bad value away is how a repair quietly becomes
-  a no-op. Then add the module to `Stacks.DataCorrection.Registry`, which is
-  the only way anything can name it.
-
-  ## Deliberately not a framework
-
-  There is no scheduler and no generic "edit any row" path — not in the mix
-  task, not in the release entry point, and not in the admin API, whose `:name`
-  parameter resolves through the registry and can therefore only ever reach a
-  correction someone wrote down. Adding a correction is a code change that gets
-  reviewed like one; that is the point, and it is why there is no endpoint that
-  takes a table, a column and a value.
+  Repairing bad data as a named, reusable operation instead of a one-off
+  `UPDATE` (339 ruling). Every correction is: dry-run by default (`run/2`
+  reports; writes only with `apply: true`), idempotent (`c:plan/0` selects
+  only rows still needing change), audited (each change writes an
+  `audit.audit_log` row in the SAME transaction — no audit, no change), and
+  registered in `Registry` so the deploy path runs the full set. See
+  `Stacks.DataCorrection.Column` for the common single-column shape.
   """
 
   alias Core.Repo
@@ -144,20 +91,11 @@ defmodule Stacks.DataCorrection do
   @audit_action "data.correction.applied"
 
   @doc """
-  Plans `correction`, and applies it only when `apply: true` is passed.
-
-  ## Options
-
-    * `:apply` — write the changes (default `false`, i.e. dry-run)
-    * `:invoked_by` — free text naming the entry point, e.g.
-      `"mix stacks.data.correct"` (default `"unknown"`)
-    * `:actor_id` — the user id of the human who asked for this, when there is
-      one. `nil` for the deploy path, which no human invokes directly.
-    * `:reason` — the operator's justification for *this* run, distinct from
-      the per-row `:because` the correction itself supplies.
-
-  Returns `{:ok, outcome}`, or `{:error, {row_id, reason}}` when a change or
-  its audit write failed — in which case nothing was committed.
+  Plans `correction`; applies only with `apply: true`. Options: `:apply`
+  (default false = dry-run), `:invoked_by` (entry-point label), `:actor_id`
+  (nil for the deploy path), `:reason` (this run's justification, distinct
+  from the correction's per-row `:because`). Returns `{:ok, outcome}` or
+  `{:error, {row_id, reason}}` — in which case nothing was committed.
   """
   @spec run(module(), keyword()) :: {:ok, outcome()} | {:error, term()}
   def run(correction, opts \\ []) do
@@ -171,20 +109,12 @@ defmodule Stacks.DataCorrection do
   end
 
   @doc """
-  `run/2` for a `Stacks.DataCorrection.Targeted` — a correction that repairs the
-  rows the operator *names* rather than every row a standing predicate matches.
-
-  The parameterised sibling `Stacks.DataCorrection.Registry` said un-merge would
-  need. Everything after planning is the parameter-free path, verbatim: the same
-  transaction, the same audit row, the same rollback when the audit cannot be
-  written. Only the planning differs, because only the planning takes an
-  argument.
-
-  Dry-run is still the default. Returns `{:error, reason}` without opening a
-  transaction when `c:Stacks.DataCorrection.Targeted.plan/1` refuses the
-  argument.
-
-  Takes the same options as `run/2`.
+  `run/2` for a `Targeted` correction — repairs the rows the operator NAMES
+  rather than a standing predicate's matches. After planning it is the
+  parameter-free path verbatim (same transaction, audit, rollback); only
+  planning takes the argument. Dry-run default; `{:error, reason}` without a
+  transaction when `c:Targeted.plan/1` refuses the argument. Same options
+  as `run/2`.
   """
   @spec run_targeted(module(), term(), keyword()) :: {:ok, outcome()} | {:error, term()}
   def run_targeted(correction, argument, opts \\ []) do

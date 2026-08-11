@@ -1,47 +1,12 @@
 defmodule Stacks.Books.ISBNResolverCache do
   @moduledoc """
-  Two-level cache for ISBN → book metadata lookups against Open Library
-  and Google Books.
-
-    * **L1 — ETS** (this GenServer owns the table). Per-node, in-memory,
-      monotonic-time TTL, microsecond reads. The hot path for repeat
-      hits within a live node.
-    * **L2 — Postgres** (`cache.isbn_resolver_cache`, Ecto schema
-      `Stacks.Books.IsbnResolverCacheEntry`). Shared across all Fly
-      machines, survives machine stops and deploys, ~1–3 ms round-trip.
-      Populated alongside ETS on `put/2`; read on ETS miss and back-fills
-      ETS on DB hit.
-
-  Why two layers:
-
-    * ETS alone was ephemeral — `auto_stop_machines = true` on
-      `fly.core.toml` means machines idle-stop, wiping the cache.
-      Load-balancing across multiple machines also caps per-request hit
-      rate at `1 / machine_count` even when cache is warm.
-    * Postgres alone would pay the DB round-trip on every hit — fine
-      (still beats 400 ms+ OpenLibrary/Google Books calls), but the ETS
-      L1 folds it to a pointer chase when a node keeps seeing the same
-      ISBNs.
-
-  Cache entry shape (in-memory):
-    `{isbn, result, expires_at_monotonic}` where `result` is one of
-    `{:ok, metadata}` or `{:error, :not_found}`.
-
-  TTLs:
-
-    * **Positive** (`{:ok, _}`): 24 h. Publisher metadata does drift
-      (covers, descriptions) but not fast enough to matter here.
-    * **Negative** (`{:error, :not_found}`): 1 h. Shorter so a transient
-      OL/GB outage that returned `not_found` doesn't poison lookups for
-      a whole day once the upstream is healthy again.
-
-  `{:error, :circuit_open}` is **not cached** — the circuit breaker is
-  the signal to retry later, not to memoise. Caching it would stall
-  resolution until next cleanup sweep even after the fuse resets.
-
-  Persistence can be disabled per-env via
-  `config :core, :persistent_cache_enabled, false` (test env does this —
-  see `config/test.exs`). ETS stays on regardless.
+  Two-level cache for ISBN → metadata lookups. L1 is ETS (per-node,
+  monotonic TTL, microsecond reads) — but Fly's `auto_stop_machines` wipes
+  it and multi-machine balancing caps its hit rate, so L2 is Postgres
+  (`cache.isbn_resolver_cache`): shared, deploy-surviving, ~1–3ms.
+  `put/2` writes both; an ETS miss reads the DB and back-fills ETS. Entries
+  are `{isbn, result, expires_at_monotonic}` with `result` either
+  `{:ok, metadata}` or `{:error, :not_found}`.
   """
 
   use GenServer
@@ -100,29 +65,13 @@ defmodule Stacks.Books.ISBNResolverCache do
   end
 
   @doc """
-  Store a resolution result.
-
-  Caching policy:
-
-    * `{:ok, _metadata}` → cached for the positive TTL (24 h).
-    * `{:error, :not_found}` → cached for the negative TTL (1 h). This is
-      the only error worth memoising: a checksum-valid ISBN that genuinely
-      isn't in either upstream's catalogue won't suddenly appear within
-      the hour.
-    * **All other errors are NOT cached** — they signal a transient
-      upstream condition (HTTP 429/5xx, transport timeout, malformed JSON,
-      blown circuit). Caching any of them poisons subsequent enrichment
-      retries for the negative TTL, leaving placeholder titles stuck in
-      the UI even after the upstream recovers. We let the fuse + Oban
-      retries handle these instead — the upstream is the signal to retry
-      later, not to memoise.
-
-  Skips emit `[:stacks, :books, :isbn_resolver_cache, :put_skipped]`
-  with `%{isbn: isbn, reason: error_atom}` so the "cache correctly
-  refused to poison" path is observable in Fly logs alongside the
-  `cache_lookup` and `cache_put` lines.
-
-  Writes to both ETS and Postgres (subject to `:persistent_cache_enabled`).
+  Store a resolution result. `{:ok, meta}` caches 24h; `{:error,
+  :not_found}` caches 1h (the one error worth memoising — a valid ISBN
+  missing from both catalogues won't appear within the hour). ALL other
+  errors are NOT cached: they're transient (429/5xx, timeout, blown fuse)
+  and memoising one poisons enrichment retries for the negative TTL. Skips
+  emit `[:stacks, :books, :isbn_resolver_cache, :put_skipped]` so the
+  refused-to-poison path is observable. Writes ETS + Postgres.
   """
   @spec put(String.t(), term()) :: :ok
   def put(isbn, {:ok, _metadata} = result) when is_binary(isbn) do
@@ -181,35 +130,12 @@ defmodule Stacks.Books.ISBNResolverCache do
   end
 
   @doc """
-  Await all in-flight async L2 write tasks from the shared
-  `Stacks.Books.CacheWriteSupervisor`. Test-only — tests that assert on
-  DB-level effects after a `put/2` must call this first, or the async
-  write may not have landed yet. Not part of the production caller
-  contract.
-
-  Important semantics:
-
-    * **Sandbox ownership.** The async task runs in a separate process
-      that does NOT inherit the test's Ecto sandbox owner by default.
-      Callers must use `Core.DataCase` with `async: false` so the
-      sandbox runs in shared mode (`Sandbox.start_owner!(Core.Repo,
-      shared: true)`); in shared mode any process on the node can
-      transparently use the owner's connection. An `async: true` test
-      that fires an async cache write will raise
-      `DBConnection.OwnershipError` inside the task.
-
-    * **Snapshot race.** This function calls `Task.Supervisor.children/1`
-      once, then monitors the returned PIDs. A task spawned AFTER the
-      snapshot is NOT awaited. In practice tests always fire `put` and
-      THEN `await_pending_writes`, so the snapshot sees the task — but
-      back-to-back `put` + `await` + `put` + assert patterns must call
-      `await` a second time before the assertion.
-
-    * **Cross-cache supervisor.** `ISBNResolverCache` and
-      `TitleSearchCache` share the same `CacheWriteSupervisor`.
-      `await_pending_writes/1` drains BOTH caches' tasks — it is not
-      module-scoped. The delegate on `TitleSearchCache.await_pending_writes/1`
-      calls this function for the same reason.
+  Test-only: await in-flight async L2 writes from `CacheWriteSupervisor`
+  before asserting on DB effects. Requires `Core.DataCase, async: false`
+  (shared sandbox mode) — an `async: true` test raises
+  `DBConnection.OwnershipError` inside the task. Snapshot semantics: tasks
+  spawned AFTER the call are not awaited, so put→await→put→assert patterns
+  need a second await.
   """
   @spec await_pending_writes(timeout()) :: :ok
   def await_pending_writes(timeout \\ 500) do

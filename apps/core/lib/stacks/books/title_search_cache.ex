@@ -1,46 +1,11 @@
 defmodule Stacks.Books.TitleSearchCache do
   @moduledoc """
-  Two-level cache for `Stacks.Books.ISBNResolver.search_by_title/3`.
-
-    * **L1 — ETS** (this GenServer owns the table). Per-node in-memory,
-      monotonic-time TTL.
-    * **L2 — Postgres** (`cache.title_search_cache`, Ecto schema
-      `Stacks.Books.TitleSearchCacheEntry`). Shared across all Fly
-      machines; survives machine stops and deploys.
-
-  Why this exists separately from `ISBNResolverCache`:
-
-    * `ISBNResolverCache` keys by ISBN and caches the direct-lookup
-      path (`resolve/1`). Books with a clean barcode ISBN hit that
-      cache on repeat.
-    * The title-search path (no barcode — e.g. screenshot of a book
-      cover, screenshot of a text post listing books) does NOT hit
-      that cache. It runs up to 12 progressive query variants across
-      OpenLibrary and Google Books, costing ~1–3 s per book per
-      pipeline. Text-heavy uploads that extract 4–5 books pay that
-      per book.
-
-  Cache entry shape (in-memory):
-    `{key, result, expires_at_monotonic}` where `result` is either
-    `{:ok, isbn, metadata}` or `{:error, :not_found}`. Note what is
-    absent from that pair: there is no representation for "we could not
-    look", because that is not something this table is allowed to hold.
-
-  Key is a deterministic digest of `(title, author, raw_text)`.
-  Normalisation (trim + downcase) collapses whitespace/case variants
-  to the same entry.
-
-  TTLs:
-    * **Positive** (`{:ok, _, _}`): 24 h.
-    * **Negative** (`{:error, :not_found}`): 1 h.
-
-  Only an ANSWER is cacheable. `{:error, :unavailable}` (#352) and
-  `{:error, :circuit_open}` are **not cached** — a failed lookup is the
-  signal to retry later, not a fact about the book to memoise. See
-  `put/4` for the full policy and why the asymmetry decides it.
-
-  Persistence can be disabled per-env via
-  `config :core, :persistent_cache_enabled, false` (test env does this).
+  Two-level cache (ETS + `cache.title_search_cache` Postgres, same shape
+  as `ISBNResolverCache`) for the title-search path — the no-barcode route
+  that runs up to 12 query variants across OL/GB at ~1–3s per book. Keyed on
+  the search signals, not ISBN, which is why it's a separate cache. Stored
+  results are only ANSWERS: `{:ok, isbn, metadata}` or `{:error,
+  :not_found}` — "we could not look" has no representation here by design.
   """
 
   use GenServer
@@ -105,39 +70,13 @@ defmodule Stacks.Books.TitleSearchCache do
   end
 
   @doc """
-  Store a title-search resolution.
-
-  A cache entry records an ANSWER. Two of the values
-  `ISBNResolver.search_by_title/4` can return are answers and get stored:
-
-    * `{:ok, isbn, metadata}` — 24 h. The catalogues told us which book this
-      is, and that does not change on the timescale of a day.
-    * `{:error, :not_found}` — 1 h. Both catalogues answered and neither knew
-      the book. That is still a fact about the book, so it is cacheable; the
-      TTL is an order of magnitude shorter than the positive one because it is
-      the fact most likely to stop being true (Open Library gains records
-      continuously, and a reader who has just been told "we can't identify
-      this" is the person most likely to try again soon).
-
-  Everything else is the ABSENCE of an answer and is deliberately not stored:
-
-    * `{:error, :unavailable}` — a provider outage (#352). This is the
-      dangerous one, and the reason this clause is written out by name instead
-      of being swept up by the catch-all below. Storing it would persist "this
-      book does not exist" for an hour on the strength of a 503 we happened to
-      catch, and serve it to every later reader long after the providers
-      recovered — turning a transient failure into a durable lie about a book
-      that was in the catalogue the whole time. Under-caching an outage costs
-      one extra OL/GB round-trip; caching one costs an hour of false answers,
-      so the asymmetry decides it.
-    * `{:error, :circuit_open}` and any other term — same reasoning: the
-      breaker is the signal to retry later, not something to memoise.
-
-  No backfill was done for entries written before #352. They are indexed by
-  `expires_at` and the negative TTL is one hour, so the last of the outage rows
-  written under the old behaviour ages out within an hour of the fix shipping —
-  a migration to delete them would race that clock rather than beat it. The
-  fix is that no NEW outage can be written; the existing ones expire.
+  Store a title-search resolution. Only ANSWERS are stored: `{:ok, isbn,
+  meta}` for 24h; `{:error, :not_found}` for 1h (still a fact about the
+  book, but the one most likely to stop being true). `{:error,
+  :unavailable}` is named explicitly and NOT stored — memoising a provider
+  outage would serve "this book does not exist" to every reader for an hour
+  after a 503 (352). Everything else falls to the catch-all and is skipped
+  with telemetry.
   """
   @spec put(String.t() | nil, String.t() | nil, String.t() | nil, term()) :: :ok
   def put(title, author, raw_text, {:ok, isbn, metadata} = result)
@@ -168,45 +107,17 @@ defmodule Stacks.Books.TitleSearchCache do
   end
 
   @doc """
-  Invalidate every cache entry whose positive result resolved to `isbn`.
+  Invalidate every entry whose positive result resolved to `isbn` — called
+  on rejected identifications, so the bad `(title, author, raw_text) → ISBN`
+  memo can't poison round one of the next upload (retry rounds carry
+  `excluded_isbns` and bypass the cache; round one doesn't).
 
-  Called when a user rejects an identification: the
-  `(title, author, raw_text) → ISBN` memo that produced the wrong pick
-  must not survive its 24 h TTL and poison the first round of the next
-  upload of the same image (retry rounds carry `excluded_isbns` and
-  bypass the cache; round one does not).
-
-  Matching is canonical-ISBN-13 equality (`Stacks.Books.ISBN.canonical_isbn13/1`)
-  on BOTH the argument and the stored ISBN: hyphens/whitespace stripped,
-  upcased, and any valid ISBN-10 converted to its ISBN-13 form. The
-  conversion matters in production — title searches memoise whatever
-  ISBN form the OL/GB doc yielded (OL docs often only carry ISBN-10),
-  while rejections pass `book_editions.isbn`, which is always ISBN-13.
-  Bare string equality made the invalidation a no-op for those rows.
-  Cross-EDITION invalidation (different works/printings, genuinely
-  different ISBNs) remains the caller's job — pass every edition ISBN
-  of the rejected book.
-
-  Tier mechanics:
-
-    * **L1 (ETS)** — scan-and-delete: only entries whose stored value is
-      `{:ok, matching_isbn, _}` are removed, so the rest of the warm
-      cache survives. Per-node only; other Fly machines' L1 entries
-      converge when they expire (≤24 h), and cannot be repopulated from
-      L2 because the authoritative row is deleted below.
-    * **L2 (Postgres)** — fetch-then-delete: read `(id, isbn)` for all
-      `outcome = 'found'` rows, canonicalise in Elixir, delete the
-      matching ids. Replicating ISBN-10 → 13 conversion in SQL isn't
-      worth it at this table's scale (bounded by distinct title-search
-      inputs per 24 h); two round-trips on a user-initiated rejection
-      are fine. Deliberately NOT transactional — a row inserted between
-      the read and the delete would carry the just-rejected ISBN from a
-      concurrent in-flight pipeline and is acceptable best-effort loss,
-      same as invalidation racing that pipeline in any interleaving.
-
-  Emits `[:stacks, :books, :title_search_cache, :invalidated]` with
-  measurements `%{count: n}` (total entries removed across both tiers)
-  and metadata `%{isbn: canonical_isbn, l1_count: _, l2_count: _}`.
+  Matching is canonical-ISBN-13 equality on BOTH sides
+  (`ISBN.canonical_isbn13/1`): OL docs often memoise an ISBN-10, rejections
+  pass the edition's ISBN-13 — bare string equality made this a no-op.
+  Cross-edition invalidation is the caller's job (pass every edition ISBN).
+  L1 scan-deletes matching entries; L2 deletes rows; both tiers tolerate
+  the other failing.
   """
   @spec invalidate_by_isbn(String.t()) :: :ok
   def invalidate_by_isbn(isbn) when is_binary(isbn) do

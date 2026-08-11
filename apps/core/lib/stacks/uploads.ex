@@ -1,35 +1,14 @@
 defmodule Stacks.Uploads do
   @moduledoc """
   The uploaded-image lifecycle: `op.uploaded_images` from creation to a
-  terminal state.
+  terminal state (`awaiting_upload → pending → resolved | rejected`).
 
-  An upload row moves through:
-
-      awaiting_upload → client has been issued an upload URL but hasn't yet
-        committed. The bytes may or may not be in storage.
-      pending         → bytes verified in storage, IdentifyBookJob enqueued.
-      resolved        → the identify pipeline matched one or more books.
-      rejected        → the pipeline (or `commit_upload/2`'s size floor)
-        rejected it.
-
-  ## Boundary (#345)
-
-  This module owns **the image row and its bytes** — minting it, proving the
-  bytes landed, handing it to the identify pipeline, and marking it terminal.
-  It deliberately does NOT own:
-
-    * the `Stacks.Books.UploadedImage` schema, which is proto-generated and
-      stays under `Stacks.Books`;
-    * what the pipeline *decides* — `Stacks.Workers.IdentifyBookJob` and
-      `Stacks.Moderation` turn an image into books, and `Stacks.Books` mints
-      the works and editions. Nothing here knows what a book is;
-    * retention/erasure — `Stacks.GDPR.ImageRetention` expires rows and the
-      `user_id` FK cascade erases them. Both reach `uploaded_images` through
-      the schema, not through this module.
-
-  `upload_and_identify/3` sits on the seam and is kept here on purpose: it
-  only *enqueues*, and its one production caller is `commit_upload/2`. The
-  decision the job then makes belongs to the job.
+  Boundary (345): this module owns the image ROW and its BYTES — minting,
+  proving the bytes landed, enqueueing identify, marking terminal. It does
+  NOT own the proto-generated `Stacks.Books.UploadedImage` schema, what the
+  pipeline decides (`IdentifyBookJob`/`Moderation`/`Books`), or
+  retention/erasure (`GDPR.ImageRetention` + FK cascade). Nothing here knows
+  what a book is.
   """
 
   require Logger
@@ -120,24 +99,14 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-  Init step of the presigned-URL upload flow. Allocates an `image_id`,
-  reserves the R2 storage key, inserts an `UploadedImage` row with
-  status `"awaiting_upload"`, and returns a short-lived presigned PUT
-  URL the client uploads to directly.
+  Init step of the presigned-URL flow: allocates `image_id`, reserves the
+  R2 key, inserts the row as `"awaiting_upload"`, returns a short-lived
+  presigned PUT URL. Bytes never touch Phoenix — the client PUTs straight to
+  R2, then calls `commit_upload/2`.
 
-  Bytes never touch the Phoenix handler — the client PUTs straight to
-  R2, then calls `commit_upload/2` to signal completion. Frees the
-  HTTP pool during the slow upload transit and removes R2 latency
-  from the API response.
-
-  Returns `{:ok, %{image_id: ..., upload_url: ..., expires_in: ...}}`
-  or `{:error, reason}` if the row insert or presigning fails.
-
-  `opts` may include:
-    * `:content_type` — MIME type hint baked into the presigned URL.
-      The client MUST send the matching `Content-Type` header on its
-      PUT or R2 rejects with a signature mismatch.
-    * `:ttl_seconds` — presigned URL lifetime. Default 900s (15 min).
+  Options: `:content_type` (client MUST send the matching header on its PUT
+  or R2 rejects the signature) and `:ttl_seconds` (default 900).
+  `{:ok, %{image_id, upload_url, expires_in}}` or `{:error, reason}`.
   """
   @spec init_upload(binary(), keyword()) ::
           {:ok, %{image_id: binary(), upload_url: String.t(), expires_in: pos_integer()}}
@@ -156,26 +125,13 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-  Commit step of the presigned-URL upload flow. Verifies the client's
-  direct PUT to R2 actually landed, flips the `UploadedImage` row from
-  `"awaiting_upload"` to `"pending"`, and enqueues `IdentifyBookJob`.
-
-  The HEAD check prevents a client from calling commit without actually
-  uploading — we won't enqueue vision work against a missing object.
-
-  Returns `{:ok, %{image_id: ..., job_id: ...}}` on success, or:
-    * `{:error, :not_found}` — no such upload row, or the client's
-      user_id doesn't own it.
-    * `{:error, :not_yet_uploaded}` — row exists and is owned, but R2
-      HEAD returned 404. Either the client is racing the commit before
-      their PUT completed, or the upload failed silently.
-    * `{:error, :already_committed}` — row status is already `"pending"`
-      or a terminal state. Idempotent — repeat commits are safe but
-      don't re-enqueue.
-    * `{:error, :image_too_small}` — the object landed but is under
-      `#{@min_image_bytes}` bytes, which no real book photo is. The row is
-      marked rejected via the same machinery the identify pipeline uses,
-      so the SSE stream reports it as an ordinary rejection.
+  Commit step: HEAD-verifies the client's PUT actually landed (no vision
+  work against a missing object), flips the row to `"pending"`, enqueues
+  `IdentifyBookJob`. Errors: `:not_found` (no row / not owner),
+  `:not_yet_uploaded` (R2 HEAD 404 — racing or failed PUT),
+  `:already_committed` (idempotent, no re-enqueue), `:image_too_small`
+  (under `#{@min_image_bytes}` bytes → rejected via the pipeline's own
+  machinery so SSE reports it normally).
   """
   @spec commit_upload(binary(), binary()) ::
           {:ok, %{image_id: binary(), job_id: binary()}} | {:error, term()}
@@ -295,44 +251,16 @@ defmodule Stacks.Uploads do
   end
 
   @doc """
-  The uploads this reader started and has not finished with (#351).
+  The uploads this reader started and has not finished with (351): owned,
+  terminal (`resolved`/`rejected` — in-flight rows await the pipeline, not
+  the reader), not yet claimed by the 30-day sweep, and still actionable:
 
-  ## The predicate, stated
-
-  An upload is *awaiting attention* when all of the following hold:
-
-    * it belongs to this reader;
-    * it has reached a terminal status — `resolved` or `rejected`. An
-      in-flight row is not awaiting the reader, it is awaiting the pipeline,
-      and `IdentifyBookJob`'s terminal guarantee (#342) says it will get there;
-    * the 30-day retention sweep has not already claimed it
-      (`expires_at > now`). A row past its expiry is about to be deleted;
-      listing it would offer the reader work that is going to vanish;
-    * **and** there is still something for a human to do with it:
-        * `resolved` with at least one candidate the reader has NOT shelved by
-          some other route → `:awaiting_confirmation`, carrying exactly those
-          unshelved candidates;
-        * `resolved` with every candidate already shelved → **dropped**. The
-          reader typed the ISBN in, or photographed it again, or confirmed it
-          in another tab. The work is done; an inbox that keeps asking is a
-          nag, not a reminder;
-        * `resolved` with no candidates at all, or `rejected` → `:failed`.
-
-  ## Why failures are here but are not confirmations
-
-  A `rejected` upload the reader never witnessed is lost work too — today they
-  simply never learn, because the only place a rejection was ever rendered was
-  a page they had already left. So it is surfaced. It is a *different kind*,
-  and the caller must keep it that way: a failure has nothing to confirm and
-  nothing to place, and counting it as a pending confirmation would put a
-  number on the navigation badge that no action can ever clear.
-
-  ⚠️ **This function places nothing and can place nothing.** It reads
-  `uploaded_images` and `bookshelf_placements` and returns maps. Every route
-  from an inbox item to a shelf runs through the reader's existing
-  confirm → choose-shelf → place flow.
-
-  Newest first. Two queries regardless of how many items there are.
+  * `resolved` with unshelved candidates → `:awaiting_confirmation`
+    (carrying exactly those candidates);
+  * `resolved` with every candidate already shelved → dropped (the work is
+    done; an inbox that keeps asking is a nag);
+  * `resolved` with none, or `rejected` → `:failed` — surfaced because a
+    rejection the reader never witnessed is lost work too.
   """
   @spec list_awaiting_attention(binary()) :: [map()]
   def list_awaiting_attention(user_id) when is_binary(user_id) do

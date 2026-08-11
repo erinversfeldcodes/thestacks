@@ -30,19 +30,13 @@ defmodule Stacks.Feeds do
   end
 
   @doc """
-  Cache-first fetch used by `FeedController`.
-
-  Resolves the platform-visible bookshelf, then serves the persisted
-  `op.feed_cache` row on a hit. On a miss it generates the feed, synchronously
-  fills the cache (so the next read is a guaranteed hit), and serves the fresh
-  result. Because the stored etag is the pure MD5 of the stored XML, a `304`
-  holds identically across a cache hit and a miss-fill.
-
-  The cache is an optimization, not a correctness dependency: if the miss-fill
-  write fails, the freshly-rendered XML is still served (the failure is logged),
-  so a public read never 500s on a cache-write error.
-
-  Returns `{:ok, xml, etag}` or `{:error, :not_found | :not_public}`.
+  Cache-first fetch for `FeedController`: resolve the platform-visible
+  bookshelf, serve the `op.feed_cache` row on a hit; on a miss generate,
+  synchronously fill the cache, and serve. The etag is the pure MD5 of the
+  XML, so 304s hold across hit and miss-fill. The cache is an optimisation,
+  not a correctness dependency — a failed miss-fill write logs and still
+  serves the fresh XML. `{:ok, xml, etag}` or
+  `{:error, :not_found | :not_public}`.
   """
   @spec fetch_feed(binary(), String.t(), map() | nil) ::
           {:ok, String.t(), String.t()} | {:error, :not_found | :not_public}
@@ -57,20 +51,12 @@ defmodule Stacks.Feeds do
   end
 
   @doc """
-  Regenerates the feed for a bookshelf and upserts the `op.feed_cache` row.
-
-  Used by `RegenerateFeedJob` on a placement event. Idempotent: two runs over
-  unchanged data leave a single row with the same etag (the etag is a pure
-  function of the XML). Non-public / missing bookshelves write no row and
-  surface `{:error, :not_public}` / `{:error, :not_found}` for the caller to
-  translate into skip/cancel.
-
-  Because filling the cache *is* the job here (unlike the read path), a failed
-  cache write surfaces as `{:error, {:cache_write_failed, changeset}}` so the
-  worker can retry rather than silently dropping the update.
-
-  Returns `{:ok, xml, etag}` or
-  `{:error, :not_found | :not_public | {:cache_write_failed, Ecto.Changeset.t()}}`.
+  Regenerates a bookshelf's feed and upserts `op.feed_cache` (used by
+  `RegenerateFeedJob`). Idempotent — the etag is a pure function of the XML.
+  Unlike the read path, filling the cache IS the job: a failed write returns
+  `{:error, {:cache_write_failed, changeset}}` so the worker retries instead
+  of silently dropping the update. Non-public/missing bookshelves return
+  `{:error, :not_public | :not_found}` for skip/cancel.
   """
   @spec regenerate(binary(), String.t()) ::
           {:ok, String.t(), String.t()}
@@ -122,19 +108,12 @@ defmodule Stacks.Feeds do
   end
 
   @doc """
-  Does a bookshelf at this visibility have an Atom feed?
-
-  **The single source of truth for that question**, because two callers need it and they must not
-  answer it differently: this module decides whether to *serve* the feed, and
-  `StacksWeb.ProtoJSON.public_profile/2` decides whether to *offer a subscribe link*. If the two
-  disagree in one direction a reader is shown a link that 403s; in the other, a working feed is
-  never advertised.
-
-  ⚠️ **They did disagree.** Both hardcoded `visibility == "platform"`, with a comment in
-  `proto_json.ex` promising it "mirrors `Feeds.resolve_platform_bookshelf/2` exactly" — an
-  invariant maintained by duplication and a comment, which is to say not maintained. Fixing the
-  ladder bug in one place would silently have broken the pair. Calling one function makes the
-  mirror structural.
+  Does a bookshelf at this visibility have an Atom feed? The SINGLE source
+  of truth: this module decides whether to serve the feed and
+  `ProtoJSON.public_profile/2` whether to offer the subscribe link — the two
+  previously duplicated the rule ("mirrors exactly" by comment, i.e. not
+  maintained) and would have diverged on the first ladder change. One
+  function makes the mirror structural.
   """
   @spec feed_eligible?(String.t()) :: boolean()
   def feed_eligible?(visibility), do: Visibility.at_least?(visibility, "platform")

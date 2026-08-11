@@ -1,21 +1,12 @@
 defmodule Stacks.AI.VisionError do
   @moduledoc """
-  The closed set of ways a call to the vision service can fail, and the two
-  questions every caller asks about one: *should this be tried again?* and
-  *what do we tell the reader?*
-
-  Before this module a vision failure was an open-ended term. `{:error, reason}`
-  could be `:circuit_open`, a `%Finch.Error{}`, or `%{status: 422, body: "..."}`,
-  and `Stacks.Workers.IdentifyBookJob` treated all three identically: retry on a
-  GPU, three times. An image the service had already proved it cannot decode was
-  re-sent twice more to be un-decoded again, and the reader waited out the whole
-  backoff schedule to be told the same thing.
-
-  The split mirrors `Stacks.Workers.TriggerPriceScrapeJob.interpret/2`, which
-  separates what the scraper *concluded* from whether it *worked*. Here:
-  a `:deterministic` error is a conclusion about the input, and repeating the
-  request repeats the conclusion. A `:transient` error is a statement about the
-  service, and the next attempt may well succeed.
+  The closed set of vision-service failures, answering the two questions
+  every caller has: retry? and what do we tell the reader? A
+  `:deterministic` error is a conclusion about the INPUT — repeating the
+  request repeats the conclusion; `:transient` is a statement about the
+  SERVICE — the next attempt may succeed. (Pre-split, `IdentifyBookJob`
+  retried undecodable images on a GPU three times.) Mirrors
+  `TriggerPriceScrapeJob.interpret/2`.
   """
 
   require Logger
@@ -67,20 +58,12 @@ defmodule Stacks.AI.VisionError do
   def vision_error?(_other), do: false
 
   @doc """
-  Whether repeating the identical request could plausibly produce a different
-  answer.
-
-  `:deterministic` means it could not, so the caller cancels. `:transient` means
-  it could, so the caller retries.
-
-  Note what decides this: **the labelled error code, never the HTTP status
-  number.** A 4xx the service did not label could be a deploy skew between core
-  and the sidecar, and permanently rejecting a reader's upload on the strength
-  of an unlabelled status is a worse failure than three cheap retries — cheap
-  because every deterministic rejection the sidecar makes happens in its
-  validation layer, before any GPU is allocated. So the GPU-cost argument that
-  motivates the split only applies to the codes, and the codes are the only
-  thing that gets to cancel.
+  Whether repeating the identical request could produce a different answer:
+  `:deterministic` → cancel, `:transient` → retry. Decided by the LABELLED
+  error code, never the raw HTTP status — an unlabelled 4xx could be deploy
+  skew between core and the sidecar, and permanently rejecting an upload on
+  that is worse than three cheap retries (deterministic rejections happen in
+  the sidecar's validation layer, before any GPU is allocated).
   """
   @spec determination(t()) :: :deterministic | :transient
   def determination({:undecodable_image, _token}), do: :deterministic
@@ -131,23 +114,13 @@ defmodule Stacks.AI.VisionError do
   def message({:transport, reason}), do: "vision service unreachable: #{inspect(reason)}"
 
   @doc """
-  Interpret a non-200 from the vision service.
-
-  A body carrying a `VisionError` is a determination the service made about the
-  input. Anything else is a fault, and is reported as one.
-
-  The catch-all cannot swallow quietly, by construction:
-
-    * a **new** `VisionErrorCode` cannot reach it at all —
-      `scripts/check-enum-coverage.py` fails the build the moment this file
-      stops matching one of the enum's values;
-    * an **unrecognised** code (a sidecar deployed ahead of core) is logged at
-      warning and counted on `[:stacks, :vision, :error]` with `code:
-      :unrecognised`, so it shows up as a rate rather than as silence;
-    * whatever it returns is still terminal for the reader — the final-attempt
-      wrapper in `Stacks.Workers.IdentifyBookJob` marks the row rejected when
-      the retries run out, so "unrecognised" costs a slower failure, never an
-      eternal spinner.
+  Interpret a non-200 from the vision service. A body carrying a
+  `VisionError` is a determination about the input; anything else is a fault.
+  The catch-all cannot swallow quietly: a new `VisionErrorCode` fails the
+  build (`scripts/check-enum-coverage.py`), an unrecognised code (sidecar
+  deployed ahead of core) is logged + counted on `[:stacks, :vision, :error]`,
+  and the result is still terminal for the reader via `IdentifyBookJob`'s
+  final-attempt wrapper — slower failure, never an eternal spinner.
   """
   @spec from_http_error(non_neg_integer(), binary()) :: t()
   def from_http_error(status, body) when is_integer(status) and is_binary(body) do

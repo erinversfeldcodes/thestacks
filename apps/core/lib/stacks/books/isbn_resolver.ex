@@ -29,30 +29,14 @@ defmodule Stacks.Books.ISBNResolver do
           | :circuit_open
 
   @doc """
-  Whether a failure said something about the *ISBN* or about *us*.
+  Whether a failure said something about the *ISBN* or about *us* (344).
 
-  This is the question every caller of `resolve/1` actually has, and until #344
-  none of them asked it: they matched `{:error, _}` and recorded the answer as a
-  property of the book. So a Google Books 503 — our dependency being down — was
-  written down as `:invalid_book` on the moderation funnel and answered to the
-  reader as `isbn_not_found`, i.e. "this is not a real book". It is not a
-  statement about the book at all; nobody looked.
-
-  Exactly one reason is a conclusion:
-
-    * `:not_found` — both upstreams answered, and neither knows this ISBN.
-      That IS a property of the ISBN, and recording it as one is correct.
-
-  The rest are statements about the lookup, which did not happen: a blown fuse,
-  a 5xx, a body we could not parse, a dead socket, a timeout. Repeating the
-  request may well produce a different answer, and nothing has been learned
-  about the book in the meantime.
-
-  Written without a catch-all on purpose, and mirroring
-  `Stacks.AI.VisionError.determination/1`, which splits vision failures on the
-  same axis: a new `error_reason/0` must be classified here before it can ship,
-  rather than defaulting into "the book's fault", which is the failure mode this
-  function exists to end.
+  Only `:not_found` (both upstreams answered; neither knows the ISBN) is a
+  fact about the book. Everything else — blown fuse, 5xx, unparseable body,
+  timeout — is a fact about the lookup, and retrying may answer differently.
+  No catch-all on purpose (mirrors `VisionError.determination/1`): a new
+  `error_reason/0` must be classified here before it ships, instead of
+  defaulting to "the book's fault".
   """
   @spec determination(error_reason()) :: :not_found | :unavailable
   def determination(:not_found), do: :not_found
@@ -113,19 +97,11 @@ defmodule Stacks.Books.ISBNResolver do
   @google_books_fuse :google_books_fuse
 
   @doc """
-  Resolves an ISBN to book metadata.
-
-  Flow:
-    1. Check `ISBNResolverCache` — immutable ISBN→book means we cache
-       positive results for 24h, negative for 1h.
-    2. On miss, race OpenLibrary and Google Books in parallel and take
-       the first success. Costs one extra API call per request when OL
-       hits first, but cuts ~300ms off the worst case (sequential
-       fallback was `OL_time + GB_time`; parallel is `max(OL, GB)`).
-    3. Memoise the result (positive or negative).
-
-  Circuit-open responses are NOT cached — the fuse is the signal to
-  retry later, not to memoise.
+  Resolves an ISBN to book metadata: check `ISBNResolverCache` (positive
+  24h, negative 1h — ISBN→book is immutable), on miss race OpenLibrary and
+  Google Books in parallel and take the first success (~300ms off worst case
+  vs sequential). Circuit-open responses are NOT cached — the fuse means
+  retry later, not memoise.
   """
   @spec resolve(String.t()) :: {:ok, map()} | {:error, error_reason()}
   def resolve(isbn) do
@@ -188,61 +164,17 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   @doc """
-  Searches for a book by title and optional author, returning the first match
-  with an ISBN. Consults Open Library first and falls back to Google Books
-  only when Open Library misses for a given query variant (see
-  `try_candidate/4` for the rationale).
+  Searches by title (and optional author) for the first match with an ISBN,
+  trying progressively broader query variants (trimmed title, surname-only,
+  title-only) to handle cut-off titles. Open Library first, Google Books only
+  on a miss per variant (`try_candidate/4`).
 
-  Tries progressively broader queries to handle cut-off titles and partial
-  author names:
-    1. Full title + full author name
-    2. Trimmed title (last word dropped, may be cut off) + full author
-    3. Full title + author surname only
-    4. Trimmed title + author surname only
-    5. Full title only (no author)
-    6. Trimmed title only
-
-  Returns `{:ok, isbn, metadata}` on success. On failure it answers the
-  question `determination/1` asks of the direct-lookup path, because the title
-  path has exactly the same two things to say (#352):
-
-    * `{:error, :not_found}` — every query variant was answered by both
-      catalogues, and none of them knew this book. A fact about the book.
-    * `{:error, :unavailable}` — at least one lookup never happened: a blown
-      fuse, a 5xx, an undecodable body, a dead socket, a timeout. A fact about
-      us. Nothing has been learned about the book, and retrying may well
-      produce a different answer.
-
-  Until #352 both arrived as `{:error, :not_found}`, so a provider outage was
-  reported to the reader as "there is no such book" — and then, being
-  indistinguishable from a real miss, was written into the negative cache and
-  repeated for an hour after the providers came back.
-
-  Results are cached in `TitleSearchCache` keyed by `(title, author,
-  raw_text)` with 24h positive / 1h negative TTL. Repeat lookups for
-  the same extracted title (common on probe workloads and real users
-  uploading the same book cover or text post multiple times) skip
-  OL/GB entirely. **`:unavailable` is never cached** — see the cache
-  policy note on `TitleSearchCache.put/4`.
-
-  ## Options
-
-    * `:excluded_isbns` — list of ISBN strings to skip when matching OL/GB
-      search results. Used by the rejection-retry flow: the user has
-      already said "no" to a book whose ISBN we resolved, so any OL/GB
-      hit that maps to that same ISBN is suppressed and we fall through
-      to the next candidate query variant. Comparison is hyphen/space-
-      insensitive (so `"978-0-12-345678-9"` matches `"9780123456789"`).
-
-  ## Cache behaviour
-
-  When `excluded_isbns` is non-empty, the `TitleSearchCache` is bypassed
-  entirely. A cached entry was computed without the exclusion list and
-  would return the very ISBN the caller asked us to skip. Bypassing
-  rather than keying-with-exclusions keeps the cache table compact —
-  retry requests are rare relative to first-attempt requests, so the
-  extra OL/GB call on a retry is an acceptable trade for not exploding
-  the cache key space.
+  Failure splits on the same axis as `determination/1` (352):
+  `{:error, :not_found}` — every variant answered by both catalogues (a fact
+  about the book, safe to negative-cache); `{:error, :unavailable}` — at
+  least one lookup never happened (a fact about us; retry may differ, and it
+  must NOT be cached — pre-352 outages were cached as "no such book" for an
+  hour).
   """
   @spec search_by_title(String.t(), String.t() | nil, String.t() | nil, keyword()) ::
           {:ok, String.t(), map()} | {:error, :not_found | :unavailable}
@@ -683,24 +615,12 @@ defmodule Stacks.Books.ISBNResolver do
   end
 
   @doc """
-  ISBN-13s of the other editions of an Open Library **work**.
-
-  A work is the abstract book; an edition is a particular printing with its own ISBN.
-  Shops stock whichever edition they stock, so knowing a work's editions is what lets a
-  price lookup find the copy a reader can actually buy — Exclusive Books carries six
-  ISBNs of *The Name of the Rose*, two of them Spanish.
-
-  Lives here rather than in a worker so it reuses this module's Open Library fuse and
-  its injectable HTTP client. A new module making its own request would be a second
-  egress to the same upstream with its own failure behaviour — the mistake that left
-  `DiscoverBookstoreEventsJob` bypassing robots.txt for months.
-
-  Returns ISBN-13s only, deduplicated, capped at `#{@max_editions_per_work}`. ISBN-10s
-  are deliberately dropped: the ISBN hard gate is expressed in 13s, and returning a
-  mixture would push the normalising decision onto every caller.
-
-  `{:error, :circuit_open}` when the Open Library fuse is blown, so a caller can tell
-  "no editions" from "could not ask".
+  ISBN-13s of the other editions of an Open Library **work** — what lets a
+  price lookup find the copy a shop actually stocks. Lives here (not a
+  worker) to reuse this module's OL fuse and injectable HTTP client rather
+  than opening a second egress to the same upstream. Deduplicated, capped at
+  `#{@max_editions_per_work}`; ISBN-10s dropped (the hard gate speaks 13s).
+  `{:error, :circuit_open}` distinguishes "no editions" from "could not ask".
   """
   @spec editions_for_work(String.t()) :: {:ok, [String.t()]} | {:error, error_reason()}
   def editions_for_work(work_id) when is_binary(work_id) and work_id != "" do
