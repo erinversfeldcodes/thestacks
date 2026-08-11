@@ -22,8 +22,6 @@ defmodule Core.Repo.Migrations.CreatePgTrgmExtension do
     execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
   end
 
-  # No-op down: dropping a shared extension could break other objects that depend
-  # on it, and the extension is harmless when left installed.
   def down do
     :ok
   end

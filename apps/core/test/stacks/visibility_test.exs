@@ -5,10 +5,6 @@ defmodule Stacks.VisibilityTest do
 
   alias Stacks.Visibility
 
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — profile ceiling
-  # ---------------------------------------------------------------------------
-
   describe "resolve_visibility/2 — profile ceiling" do
     test "unauthenticated viewer + private bookshelf (profile_visibility: owner) → :hidden" do
       owner = insert(:user, profile_visibility: "owner")
@@ -55,15 +51,10 @@ defmodule Stacks.VisibilityTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — block check
-  # ---------------------------------------------------------------------------
-
   describe "resolve_visibility/2 — block check" do
     test "viewer is blocked by resource owner → :hidden" do
       owner = insert(:user, profile_visibility: "platform")
       viewer = insert(:user)
-      # owner blocks viewer
       insert(:user_block, blocker: owner, blocked: viewer)
       bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
 
@@ -73,7 +64,6 @@ defmodule Stacks.VisibilityTest do
     test "viewer has blocked resource owner → :hidden" do
       owner = insert(:user, profile_visibility: "platform")
       viewer = insert(:user)
-      # viewer blocks owner
       insert(:user_block, blocker: viewer, blocked: owner)
       bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
 
@@ -88,10 +78,6 @@ defmodule Stacks.VisibilityTest do
       assert :visible = Visibility.resolve_visibility(bookshelf, {:platform_user, viewer.id})
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — age gate
-  # ---------------------------------------------------------------------------
 
   describe "resolve_visibility/2 — age gate" do
     test "book with visibility_tier age_gated + unverified viewer → :hidden" do
@@ -116,13 +102,8 @@ defmodule Stacks.VisibilityTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — marketplace exception
-  # ---------------------------------------------------------------------------
-
   describe "resolve_visibility/2 — marketplace exception" do
     test "active looking_for_home placement with profile_visibility owner → :visible for platform user" do
-      # Profile ceiling is "owner" but active marketplace listing punches through for platform users
       owner = insert(:user, profile_visibility: "owner")
       bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home", visibility: "owner")
 
@@ -139,7 +120,6 @@ defmodule Stacks.VisibilityTest do
     end
 
     test "active looking_for_home placement with profile_visibility owner → :hidden for unauthenticated" do
-      # Marketplace exception only applies to platform users, not unauthenticated
       owner = insert(:user, profile_visibility: "owner")
       bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home", visibility: "owner")
 
@@ -154,7 +134,6 @@ defmodule Stacks.VisibilityTest do
     end
 
     test "library placement with nil listing_status + profile_visibility owner → :hidden for platform user" do
-      # No marketplace exception for non-looking_for_home shelves
       owner = insert(:user, profile_visibility: "owner")
       bookshelf = insert(:bookshelf, user: owner, name: "library", visibility: "owner")
 
@@ -187,8 +166,6 @@ defmodule Stacks.VisibilityTest do
     end
 
     test "active looking_for_home listing is :hidden for a viewer the owner has blocked (SEC-2)" do
-      # A block hides ALL of the owner's content — the marketplace exception must
-      # not punch through the bidirectional block.
       owner = insert(:user, profile_visibility: "owner")
       bookshelf = insert(:bookshelf, user: owner, name: "looking_for_home", visibility: "owner")
 
@@ -201,10 +178,6 @@ defmodule Stacks.VisibilityTest do
       assert :hidden = Visibility.resolve_visibility(placement, {:platform_user, viewer.id})
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — platform preview (ViewAs :platform perspective)
-  # ---------------------------------------------------------------------------
 
   describe "resolve_visibility/2 — platform preview" do
     test "platform preview does NOT see owner-only content (SEC-1)" do
@@ -228,10 +201,6 @@ defmodule Stacks.VisibilityTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — returns :hidden on error/ambiguity
-  # ---------------------------------------------------------------------------
-
   describe "resolve_visibility/2 — returns :hidden on error/ambiguity" do
     test "nil resource → :hidden" do
       assert :hidden = Visibility.resolve_visibility(nil, {:platform_user, Ecto.UUID.generate()})
@@ -243,10 +212,6 @@ defmodule Stacks.VisibilityTest do
       assert :hidden = Visibility.resolve_visibility(book, {:unknown_viewer_type, "something"})
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # validate_visibility_ceiling/3
-  # ---------------------------------------------------------------------------
 
   describe "validate_visibility_ceiling/3" do
     test "child visibility platform with parent visibility owner → error (child > parent)" do
@@ -262,10 +227,6 @@ defmodule Stacks.VisibilityTest do
       assert :ok = Visibility.validate_visibility_ceiling("platform", "platform", :bookshelf)
     end
 
-    # Unified Audience ladder (owner < group < platform < public), #209 Phase 2.
-    # These are the cells the former two-rank-map implementation got WRONG:
-    # `@visibility_rank` omitted "group" (defaulting it to 0 = most permissive),
-    # so a group child was wrongly rejected under a platform/owner parent.
     test "child group under platform parent → ok (group is more restrictive than platform)" do
       assert :ok = Visibility.validate_visibility_ceiling("group", "platform", :bookshelf)
     end
@@ -320,10 +281,6 @@ defmodule Stacks.VisibilityTest do
       refute Visibility.valid_audience_level?("nonsense")
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — group visibility
-  # ---------------------------------------------------------------------------
 
   describe "resolve_visibility/2 — group visibility" do
     test "group visibility + viewer is group member → :visible" do
@@ -405,10 +362,6 @@ defmodule Stacks.VisibilityTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — resource visibility edge cases
-  # ---------------------------------------------------------------------------
-
   describe "resolve_visibility/2 — resource visibility edge cases" do
     test "resource with only visibility_tier (no visibility field) treated as public" do
       book = insert(:book, visibility_tier: "public")
@@ -424,7 +377,6 @@ defmodule Stacks.VisibilityTest do
     end
 
     test "resource with neither visibility nor visibility_tier defaults to owner-only" do
-      # A plain map without visibility or visibility_tier — get_resource_visibility returns "owner"
       resource = %{user_id: Ecto.UUID.generate()}
 
       assert :hidden = Visibility.resolve_visibility(resource, :unauthenticated)
@@ -432,7 +384,6 @@ defmodule Stacks.VisibilityTest do
 
     test "unknown visibility falls back to check_default_visibility — owner can view" do
       owner = insert(:user, profile_visibility: "platform")
-      # A resource with an unknown visibility string
       resource = %{user_id: owner.id, visibility: "custom_unknown"}
 
       assert :visible = Visibility.resolve_visibility(resource, {:platform_user, owner.id})
@@ -447,13 +398,8 @@ defmodule Stacks.VisibilityTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — placement with unloaded bookshelf
-  # ---------------------------------------------------------------------------
-
   describe "resolve_visibility/2 — placement profile visibility edge cases" do
     test "placement with bookshelf whose user is nil → profile ceiling defaults to owner" do
-      # Placement where bookshelf association has no user_id
       owner = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: owner, visibility: "platform")
 
@@ -470,10 +416,6 @@ defmodule Stacks.VisibilityTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # resolve_visibility/2 — age gate for unauthenticated
-  # ---------------------------------------------------------------------------
-
   describe "resolve_visibility/2 — age gate unauthenticated" do
     test "book with visibility_tier age_gated + unauthenticated → :hidden" do
       book = insert(:book, visibility_tier: "age_gated")
@@ -481,10 +423,6 @@ defmodule Stacks.VisibilityTest do
       assert :hidden = Visibility.resolve_visibility(book, :unauthenticated)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # can_view?/2
-  # ---------------------------------------------------------------------------
 
   describe "can_view?/2" do
     test "wraps resolve_visibility: visible → true" do
@@ -502,10 +440,6 @@ defmodule Stacks.VisibilityTest do
       assert false == Visibility.can_view?(bookshelf, :unauthenticated)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # viewable_shelves/2
-  # ---------------------------------------------------------------------------
 
   describe "viewable_shelves/2" do
     test "returns only visible bookshelves for platform user" do
@@ -538,19 +472,10 @@ defmodule Stacks.VisibilityTest do
 
       result = Visibility.viewable_shelves(owner.id, :unauthenticated)
 
-      # Only the public shelf — platform (Members) and owner are hidden from anon.
       assert length(result) == 1
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Audience proto ↔ Elixir vocabulary parity (#209 Phase 1 drift guard)
-  #
-  # The canonical vocabulary is DECLARED in proto/stacks/common/v1/visibility.proto
-  # (enum Audience). The Elixir runtime source (Visibility.audience_levels/0, which
-  # Shelving/Blog/Accounts all consume) must not drift from it. Parsing the .proto
-  # text keeps the proto the authority without depending on generated code.
-  # ---------------------------------------------------------------------------
   describe "Audience proto ↔ Elixir vocabulary parity" do
     @proto_path Path.join([
                   __DIR__,

@@ -1,29 +1,4 @@
 #!/usr/bin/env bash
-# test/platform/rollback_action_composite_test.sh
-#
-# Contract test for the composite GitHub Action at
-# .github/actions/rollback-production/action.yml (Issue #137 Phase 3).
-#
-# This test locks the schema-level contract between three components:
-#   1. The composite action wrapper (the producer)
-#   2. scripts/rollback-production.sh (the script the action shells out to)
-#   3. deploy-production.yml (the consumer of the action)
-#
-# Because composite GitHub Actions are YAML, the contract is parsed and asserted
-# directly on action.yml. The test fails meaningfully BEFORE the action exists
-# (every YAML-parse case fails with a clear "file not found" message), and is
-# expected to pass once Phase 3 implementation lands.
-#
-# YAML parsing strategy:
-#   PyYAML is not in the project's nix-managed Python by default — we probe a
-#   handful of candidate interpreters and pick the first that has `yaml`
-#   importable. .venv-tools/bin/python3 carries pyyaml from the dbt-checkpoint
-#   pin (verified locally). If none of the candidates work, the script falls
-#   back to creating an ephemeral pyyaml install under $TMPDIR so the test
-#   still runs cleanly on a CI runner that has only stock python3.
-#
-#   We emit YAML-as-JSON via a one-shot Python invocation, then `jq` the rest.
-#   jq is in the dev shell (and is available system-wide on macOS).
 
 set -uo pipefail
 
@@ -36,11 +11,6 @@ ACTION_DIR="$REPO_ROOT/.github/actions/rollback-production"
 ACTION_YML="$ACTION_DIR/action.yml"
 ACTION_README="$ACTION_DIR/README.md"
 
-# ── YAML-capable Python probe ───────────────────────────────────────────────
-# Probe candidates in priority order; first match wins. If none has pyyaml,
-# bootstrap an ephemeral venv (last resort — slow but keeps the test runnable
-# on a fresh CI runner). The probe runs once at the top so each parse call
-# below is cheap.
 _pick_yaml_python() {
     local candidates=(
         "$REPO_ROOT/.venv-tools/bin/python3"
@@ -54,7 +24,6 @@ _pick_yaml_python() {
             return 0
         fi
     done
-    # Last resort: ephemeral venv with pyyaml.
     local fallback_venv="${TMPDIR:-/tmp}/stacks-rollback-action-test-venv"
     if [[ ! -x "$fallback_venv/bin/python3" ]] \
         || ! "$fallback_venv/bin/python3" -c "import yaml" >/dev/null 2>&1; then
@@ -72,11 +41,6 @@ if [[ -z "$YAML_PYTHON" ]]; then
     exit 2
 fi
 
-# ── YAML helpers ────────────────────────────────────────────────────────────
-# yaml_to_json <file>: prints the file's parsed contents as JSON to stdout.
-# When the file does not exist, prints "{}" so downstream `jq` queries return
-# null/empty rather than crashing on a missing-file error — the assertions
-# themselves then record the failure with a meaningful message.
 yaml_to_json() {
     local file="$1"
     if [[ ! -f "$file" ]]; then
@@ -91,20 +55,16 @@ print(json.dumps(data if data is not None else {}))
 PY
 }
 
-# yaml_query <jq-filter> <file>: runs `jq -r <filter>` against the JSON form
-# of the YAML file. Convenience wrapper.
 yaml_query() {
     local filter="$1"
     local file="$2"
     yaml_to_json "$file" | jq -r "$filter"
 }
 
-# ── Case 1: file layout exists ──────────────────────────────────────────────
 test_case "file_layout_exists" "action.yml + README.md must exist at .github/actions/rollback-production/"
 assert_path_exists "$ACTION_YML" "action.yml exists at .github/actions/rollback-production/action.yml"
 assert_path_exists "$ACTION_README" "README.md exists at .github/actions/rollback-production/README.md"
 
-# ── Case 2: top-level structure ─────────────────────────────────────────────
 test_case "top_level_structure" "action.yml declares using:composite, name, description, and >=4 steps"
 USING="$(yaml_query '.runs.using // ""' "$ACTION_YML")"
 assert_contains "$USING" "composite" "runs.using is 'composite' (got: '$USING')"
@@ -130,9 +90,6 @@ else
     _record_fail "runs.steps must have at least 4 entries (got: '$STEP_COUNT')"
 fi
 
-# ── Case 3: required inputs declared with correct required-ness + defaults ──
-# Contract table: name|required(true|false)|default(literal or __none__ for required)
-# __none__ is a sentinel meaning "required input — no default expected".
 test_case "required_inputs" "all 15 contract inputs declared with correct required-ness and defaults"
 INPUT_CONTRACT=(
     "core-app|false|thestacks-core"
@@ -155,19 +112,14 @@ INPUT_CONTRACT=(
 for entry in "${INPUT_CONTRACT[@]}"; do
     IFS='|' read -r INPUT_NAME EXPECTED_REQUIRED EXPECTED_DEFAULT <<< "$entry"
 
-    # Existence
     EXISTS="$(yaml_query "(.inputs[\"$INPUT_NAME\"] // null) | (. != null)" "$ACTION_YML")"
     if [[ "$EXISTS" == "true" ]]; then
         _record_pass "input '$INPUT_NAME' is declared"
     else
         _record_fail "input '$INPUT_NAME' is missing from inputs:"
-        # If the input is missing, skip the required/default sub-asserts to
-        # keep the failure list focused.
         continue
     fi
 
-    # Required-ness — coerce both YAML-bool forms ("true"/"false") and the
-    # null/missing case (which GitHub treats as "not required").
     ACTUAL_REQUIRED_RAW="$(yaml_query ".inputs[\"$INPUT_NAME\"].required // false" "$ACTION_YML")"
     case "$ACTUAL_REQUIRED_RAW" in
         true|True|TRUE) ACTUAL_REQUIRED="true" ;;
@@ -179,16 +131,11 @@ for entry in "${INPUT_CONTRACT[@]}"; do
         _record_fail "input '$INPUT_NAME' required mismatch (expected: $EXPECTED_REQUIRED, got: $ACTUAL_REQUIRED_RAW)"
     fi
 
-    # Default — only check when contract specifies one (i.e., not __none__).
     if [[ "$EXPECTED_DEFAULT" != "__none__" ]]; then
-        # `// "__missing__"` distinguishes "absent" from "set to empty string".
         ACTUAL_DEFAULT="$(yaml_query ".inputs[\"$INPUT_NAME\"].default // \"__missing__\"" "$ACTION_YML")"
         if [[ "$ACTUAL_DEFAULT" == "__missing__" && "$EXPECTED_DEFAULT" != "" ]]; then
             _record_fail "input '$INPUT_NAME' default missing (expected: '$EXPECTED_DEFAULT')"
         elif [[ "$ACTUAL_DEFAULT" == "__missing__" && "$EXPECTED_DEFAULT" == "" ]]; then
-            # Optional inputs may legitimately omit a default — but the
-            # contract table calls out `""` explicitly for these. Fail on
-            # missing so the implementer is forced to be explicit.
             _record_fail "input '$INPUT_NAME' default missing (contract requires explicit default: \"\")"
         elif [[ "$ACTUAL_DEFAULT" == "$EXPECTED_DEFAULT" ]]; then
             _record_pass "input '$INPUT_NAME' default='$EXPECTED_DEFAULT'"
@@ -198,7 +145,6 @@ for entry in "${INPUT_CONTRACT[@]}"; do
     fi
 done
 
-# ── Case 4: required outputs declared ───────────────────────────────────────
 test_case "required_outputs" "core-rolled-back, modal-rolled-back, db-rolled-back declared with non-empty descriptions and step-output values"
 for OUTPUT_NAME in core-rolled-back modal-rolled-back db-rolled-back; do
     EXISTS="$(yaml_query "(.outputs[\"$OUTPUT_NAME\"] // null) | (. != null)" "$ACTION_YML")"
@@ -217,9 +163,6 @@ for OUTPUT_NAME in core-rolled-back modal-rolled-back db-rolled-back; do
     fi
 
     VALUE="$(yaml_query ".outputs[\"$OUTPUT_NAME\"].value // \"\"" "$ACTION_YML")"
-    # Outputs of a composite action must reference a step output via the
-    # ${{ steps.<id>.outputs.<name> }} expression form. We assert on the
-    # leading sentinel rather than full-form — the step ID may vary.
     if [[ "$VALUE" == \$\{\{*"steps."* ]]; then
         _record_pass "output '$OUTPUT_NAME' value references a step output (got: '$VALUE')"
     else
@@ -227,13 +170,10 @@ for OUTPUT_NAME in core-rolled-back modal-rolled-back db-rolled-back; do
     fi
 done
 
-# ── Case 5: required step IDs in order, with the right gating ───────────────
 test_case "step_ids_and_gating" "validate-inputs, run-rollback, log-audit, emit-outputs in order with correct if: gating"
-# Extract step IDs as a newline-separated list (in order).
 STEP_IDS_JSON="$(yaml_query '[.runs.steps[]?.id // empty]' "$ACTION_YML")"
 mapfile -t STEP_IDS < <(printf '%s' "$STEP_IDS_JSON" | jq -r '.[]?')
 
-# Helper: index-of in STEP_IDS, returns -1 if not found.
 _idx_of() {
     local target="$1"
     local i
@@ -261,9 +201,6 @@ for pair in "validate-inputs:$IDX_VALIDATE" "run-rollback:$IDX_RUN" "log-audit:$
     fi
 done
 
-# Order check: validate < run < audit < emit. Only meaningful when all four
-# IDs were found; otherwise the missing-step assertions above already
-# captured the failure.
 if [[ "$IDX_VALIDATE" -ge 0 && "$IDX_RUN" -ge 0 && "$IDX_AUDIT" -ge 0 && "$IDX_EMIT" -ge 0 ]]; then
     if [[ "$IDX_VALIDATE" -lt "$IDX_RUN" \
         && "$IDX_RUN" -lt "$IDX_AUDIT" \
@@ -274,9 +211,6 @@ if [[ "$IDX_VALIDATE" -ge 0 && "$IDX_RUN" -ge 0 && "$IDX_AUDIT" -ge 0 && "$IDX_E
     fi
 fi
 
-# log-audit must have a non-empty if: that gates on success of run-rollback.
-# We accept either `success()` or `steps.run-rollback.outcome == 'success'`
-# (or any other expression that mentions the previous step's success).
 AUDIT_IF="$(yaml_query '.runs.steps[]? | select(.id == "log-audit") | .if // ""' "$ACTION_YML")"
 if [[ -z "$AUDIT_IF" || "$AUDIT_IF" == "null" ]]; then
     _record_fail "log-audit step must have a non-empty if: expression (got: empty)"
@@ -286,8 +220,6 @@ else
     _record_fail "log-audit step's if: expression must reference success (got: '$AUDIT_IF')"
 fi
 
-# emit-outputs must NOT have a restrictive if:. Accept missing if: OR
-# `if: always()` — both run on failure of upstream steps.
 EMIT_IF="$(yaml_query '.runs.steps[]? | select(.id == "emit-outputs") | .if // "__missing__"' "$ACTION_YML")"
 if [[ "$EMIT_IF" == "__missing__" || "$EMIT_IF" == "null" || "$EMIT_IF" == "" ]]; then
     _record_pass "emit-outputs has no restrictive if: (will run unconditionally)"
@@ -297,10 +229,6 @@ else
     _record_fail "emit-outputs has a restrictive if: (must be missing or always(); got: '$EMIT_IF')"
 fi
 
-# ── Case 6: script env wiring ───────────────────────────────────────────────
-# Each env var the script reads must be wired to the matching input via
-# ${{ inputs.<name> }}. The mapping is the contract — drift here is the bug
-# this test exists to catch.
 test_case "script_env_wiring" "run-rollback step env: maps every script env var to the correct input"
 ENV_CONTRACT=(
     "CORE_APP|core-app"
@@ -320,10 +248,6 @@ ENV_CONTRACT=(
 
 for entry in "${ENV_CONTRACT[@]}"; do
     IFS='|' read -r ENV_VAR INPUT_NAME <<< "$entry"
-    # Two-stage probe: first check whether the run-rollback step exists at
-    # all (so missing-step doesn't masquerade as missing-env-key), then
-    # check the env key. `select` over an empty input emits nothing, which
-    # is why `// "__missing__"` alone isn't enough.
     STEP_PRESENT="$(yaml_query '[.runs.steps[]? | select(.id == "run-rollback")] | length' "$ACTION_YML")"
     if [[ "$STEP_PRESENT" != "1" ]]; then
         _record_fail "run-rollback step missing — cannot check env wiring for '$ENV_VAR'"
@@ -339,12 +263,10 @@ for entry in "${ENV_CONTRACT[@]}"; do
     fi
 done
 
-# The step's run: must reference the rollback script.
 RUN_BLOCK="$(yaml_query '.runs.steps[]? | select(.id == "run-rollback") | .run // ""' "$ACTION_YML")"
 assert_contains "$RUN_BLOCK" "rollback-production.sh" \
     "run-rollback step's run: shells to scripts/rollback-production.sh"
 
-# ── Case 7: audit helper invocation shape ───────────────────────────────────
 test_case "audit_helper_invocation" "log-audit step invokes Stacks.Audit.log_rollback via mix run with DATABASE_URL + CLOAK_KEY in env"
 AUDIT_RUN="$(yaml_query '.runs.steps[]? | select(.id == "log-audit") | .run // ""' "$ACTION_YML")"
 assert_contains "$AUDIT_RUN" "Stacks.Audit.log_rollback" \
@@ -352,9 +274,6 @@ assert_contains "$AUDIT_RUN" "Stacks.Audit.log_rollback" \
 assert_contains "$AUDIT_RUN" "mix run" \
     "log-audit step's run: uses 'mix run' (canonical invocation)"
 
-# Env must include DATABASE_URL and CLOAK_KEY. We don't assert on the value
-# (it can come from inputs OR secrets — both are valid composite-action
-# patterns; the workflow wiring in Phase 4 closes the secrets question).
 AUDIT_STEP_PRESENT="$(yaml_query '[.runs.steps[]? | select(.id == "log-audit")] | length' "$ACTION_YML")"
 for ENV_KEY in DATABASE_URL CLOAK_KEY; do
     if [[ "$AUDIT_STEP_PRESENT" != "1" ]]; then
@@ -369,11 +288,6 @@ for ENV_KEY in DATABASE_URL CLOAK_KEY; do
     fi
 done
 
-# ── Case 8: actionlint clean (best-effort) ──────────────────────────────────
-# actionlint v1.7.x lints workflow YAML; composite action.yml files are validated
-# only as part of the workflows that use them. So we lint deploy-production.yml
-# (which `uses: ./.github/actions/rollback-production`); any schema/expression
-# error inside the composite action surfaces there.
 test_case "actionlint_clean" "actionlint passes on the workflow that consumes action.yml"
 DEPLOY_YML="$REPO_ROOT/.github/workflows/deploy-production.yml"
 if command -v actionlint >/dev/null 2>&1; then
@@ -384,8 +298,6 @@ if command -v actionlint >/dev/null 2>&1; then
             _record_fail "actionlint failed: $ACTIONLINT_OUT"
         fi
     else
-        # action.yml doesn't exist yet — skip with a pass so this case
-        # doesn't double-count the file-not-found failure from Case 1.
         _record_pass "actionlint skipped (action.yml not present yet — Case 1 covers existence)"
     fi
 else

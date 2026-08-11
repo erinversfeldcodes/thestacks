@@ -62,9 +62,6 @@ defmodule StacksWeb.UserSettingsController do
 
     case Accounts.change_password(user, current, new_pw) do
       {:ok, _} ->
-        # Password change logs the user out everywhere (Issue #179, Phase 2b):
-        # revoke all the user's families AND burn all their guardian_tokens so a
-        # stolen/leaked token cannot outlive the credential it was minted under.
         Accounts.revoke_all_user_sessions(user.id)
         json(conn, %{ok: true})
 
@@ -140,10 +137,6 @@ defmodule StacksWeb.UserSettingsController do
     json(conn, %{
       profile_visibility: user.profile_visibility,
       shelves: shelves,
-      # #367: the Privacy page already calls this endpoint on init, so surfacing
-      # consent here lets it hydrate the live server value instead of trusting the
-      # login-time `stacks-auth` blob (which no consent write ever refreshes — the
-      # read-after-write staleness this fixes). No new request, no new route.
       consent_analytics: user.consent_analytics,
       consent_writing_assistant: user.consent_writing_assistant
     })

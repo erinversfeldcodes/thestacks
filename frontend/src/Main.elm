@@ -237,10 +237,6 @@ main =
         }
 
 
-
--- MODEL
-
-
 type Page
     = PageHome Home.Model
     | PageLogin Login.Model
@@ -471,88 +467,26 @@ type alias Model =
     , url : Url
     , route : Route
     , auth : AuthState
-
-    -- The MFA-verified admin-session token (#303). Held IN MEMORY and deliberately never
-    -- persisted: it needs no port, it is the highest-value credential here, and MFA expires after
-    -- 30 minutes anyway. Losing it on reload is the honest cost of that. Separate from `auth`
-    -- because an expiring admin session must NOT eject the operator from the ordinary app.
     , adminAuth : Maybe String
     , page : Page
     , previousRoute : Maybe Route
     , transition : Maybe String
-
-    -- The page the reader actually asked for and was bounced off, captured the
-    -- moment `initPage` swaps it for the sign-in gate (see `loginRedirectFor`).
-    -- Without it, a deep link to /upload sent them to their antilibrary after
-    -- signing in and the page they wanted was simply lost. Recomputed on every
-    -- `UrlChanged`, so it cannot outlive the bounce that raised it.
     , redirectAfterLogin : Maybe Route
     , bookDetailOverlay : Maybe BookDetailOverlay
     , userMenu : UserMenu.Model
-
-    -- Which top-level nav disclosure (Bookshelves / Marketplace / Admin) is
-    -- currently open, if any (#318 TR-1). At most one is open at a time —
-    -- opening a second closes the first — so a single `Maybe` is the whole of
-    -- the state. The account menu keeps its own `open` flag in `userMenu`; the
-    -- two are held mutually exclusive in `update`. This field is what replaced
-    -- the CSS `:hover`/`:focus-within` reveal, which was unreachable on touch.
     , openNavMenu : Maybe NavMenu
     , onboarding : OnboardingOverlay.Model
     , onboardingCompleted : Bool
     , hasAnyPlacements : Bool
-
-    -- A removal the reader may still take back (US-1.6.4 extension, #375).
-    --
-    -- It has to live here, rather than on either page, because it spans the gap
-    -- between them: `Page.BookDetail` records it and immediately asks to
-    -- navigate, and `Nav.pushUrl` re-runs `initPage`, so the shelf that will
-    -- show the toast does not exist yet at the moment the removal is known.
-    -- Raised in the `BookDetail.NavigateTo` branches and consumed by the very
-    -- next `UrlChanged` — the same "survives exactly one navigation" shape as
-    -- `arrival` above, and cleared there for the same reason: an undo offer that
-    -- outlived its navigation would reappear on a shelf the reader browsed to
-    -- minutes later, pointing at a removal they had forgotten making.
     , pendingUndo : Maybe Bookshelf.Removal
-
-    -- Why the reader will be standing at the login door when they next get
-    -- there (Issue #360). Raised by whatever ended the session — expiry,
-    -- account deletion, an unreadable stored credential — and consumed the
-    -- moment a login card is built, so the reason survives the redirect's
-    -- `UrlChanged` and no further.
-    --
-    -- ⛔ This ONE field replaced three booleans here, which shadowed three more
-    -- on `Login.Model`. Six independently-settable flags for four mutually
-    -- exclusive facts: see `Login.Arrival`.
     , arrival : Login.Arrival
 
     -- A deferred session-expiry intent (Issue #180 Phase 2): set while the
     -- re-check-before-logout port round-trip is in flight, cleared when it
     -- resolves (adopt a newer token, or proceed to `forceSessionExpiry`).
     , pendingLogout : Maybe PendingLogout
-
-    -- Server-provided runtime config (ADR-020), fetched via `GET /api/config`
-    -- and merged into the boot flags. The app's first global config channel;
-    -- keep it minimal and extensible. Currently just the age-gating flag.
     , config : AppConfig
-
-    -- Whether the browser has a network connection (Issue #362). Fed by the
-    -- `connectivityChanged` port; read only by the shell's banner, so no page
-    -- has to work this out from its own failed request.
     , connectivity : Connectivity
-
-    -- Uploads this reader started and has not finished with (Issue #351).
-    --
-    -- It lives on the shell, not on `Page.Upload`, because two surfaces read it
-    -- and they must not be able to disagree: the inbox listing on the upload
-    -- page, and the count on the `Add Book` navigation marker — which has to be
-    -- right on every page, including the ones where `Page.Upload` does not
-    -- exist. One value, fetched once, rendered twice.
-    --
-    -- Refetched, never adjusted in place. When a placement or a manual add
-    -- finishes, `Page.Upload` raises `RefreshInbox` and this is asked for
-    -- again: the server owns the "is this still awaiting attention" predicate,
-    -- and a client that decremented a number here would be a second, quieter
-    -- implementation of it.
     , uploadInbox : RemoteData Http.Error (List Api.InboxItem)
     }
 
@@ -594,8 +528,6 @@ configDecoder =
             , Decode.succeed False
             ]
         )
-        -- Opposite fail direction from age-gating, deliberately: a missing or
-        -- malformed `inviteOnly` means the gate is ON (US-14.1.3).
         (Decode.oneOf
             [ Decode.field "inviteOnly" Decode.bool
             , Decode.succeed True
@@ -637,9 +569,6 @@ init flags url key =
       , url = url
       , route = route
       , auth =
-            -- A token read back from localStorage is durable by definition, so it
-            -- boots straight into the settled state — nothing is owed a completion
-            -- signal.
             maybeAuth |> Maybe.map Authenticated |> Maybe.withDefault Anonymous
       , adminAuth = Nothing
       , page = page
@@ -656,11 +585,6 @@ init flags url key =
       , arrival = consumeArrival page arrival
       , pendingLogout = Nothing
       , config = config
-
-      -- Fail-safe: boot as connected. `app.js` sends the real
-      -- `navigator.onLine` immediately, so an offline tab corrects itself
-      -- within a tick — whereas booting `Offline` would flash a banner at
-      -- every reader whose browser happens to answer a moment late.
       , connectivity = Online
       , uploadInbox = NotAsked
       }
@@ -713,15 +637,6 @@ authDecoder =
                 , role = role
                 , countryCode = Nothing
                 , city = Nothing
-
-                -- #367: consent is NOT read from the stored blob. The blob is only
-                -- (re)written from the server at login/renewal, so persisting
-                -- consent here let a change made elsewhere show stale AND clobber
-                -- the server hydration when the Privacy page re-initialised. The
-                -- Privacy page is the sole consumer and now hydrates consent from
-                -- GET /api/settings/privacy; this neutral default is just the
-                -- pre-fetch placeholder. Older blobs still carrying the fields
-                -- decode fine — the extra keys are simply ignored.
                 , consentAnalytics = False
                 , consentWritingAssistant = False
                 }
@@ -926,9 +841,6 @@ requiresAuth route =
         About ->
             False
 
-        -- Unauthenticated by design: US-2.5.3 says removal "does not require account
-        -- creation". A shop owner who never asked to be listed must not have to sign up
-        -- in order to leave.
         ListingRemoval ->
             False
 
@@ -957,9 +869,6 @@ requiresAuth route =
             False
 
         Search ->
-            -- People-search is optional-auth (US-10.5.4): an anonymous visitor can
-            -- discover readers even though book search still needs a token. Keeping
-            -- /search open exercises the optional-auth backend anonymously.
             False
 
         ConfirmEmail _ ->
@@ -968,11 +877,6 @@ requiresAuth route =
         ForgotPassword ->
             False
 
-        -- Public by necessity (#373): the reader asking for a new confirmation
-        -- link is unconfirmed, so they CANNOT sign in — gating this route would
-        -- bounce them to the very door they cannot open. Caught by
-        -- `route_is_wired`: the `_ -> True` fallthrough below had quietly made
-        -- this route protected, and the resend form was unreachable.
         ResendConfirmation ->
             False
 
@@ -1336,8 +1240,6 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                 ( model, cmd ) =
                     CreateListing.init maybeToken
             in
-            -- Ask JS for any persisted draft; the answer arrives on
-            -- `gotListingDraft` and is routed to CreateListing.DraftLoaded (#182).
             ( PageMarketplaceCreate model
             , Cmd.batch
                 [ Cmd.map CreateListingMsg cmd
@@ -1361,9 +1263,6 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
 
         SettingsPrivacy ->
             let
-                -- Seed the folded-in consent toggles from the signed-in user's
-                -- current consent (#318 TR-4), exactly as the standalone consent
-                -- page used to. `/settings/consent` now redirects here.
                 consentSeed =
                     case maybeAuth of
                         Just auth ->
@@ -1427,8 +1326,6 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                 ( PageNotFound, Cmd.none )
 
         Route.AdminInvites ->
-            -- The owner widens the beta, nobody else (US-14.1.3) — same
-            -- owner-only shape as the data-correction surfaces.
             if isOwner maybeAuth then
                 let
                     ( subModel, subCmd ) =
@@ -1451,10 +1348,6 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                 ( PageNotFound, Cmd.none )
 
         Route.AdminBookModeration ->
-            -- Owner-only AND gated behind the age-gating flag (ADR-020). While
-            -- age-gating ships dark the moderation surface is unavailable — a
-            -- flag-off route resolves to NotFound, exactly like an unauthorised
-            -- owner-guarded route.
             if isOwner maybeAuth && config.ageGatingEnabled then
                 let
                     ( subModel, subCmd ) =
@@ -1466,8 +1359,6 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
                 ( PageNotFound, Cmd.none )
 
         Route.AdminRemovalRequests ->
-            -- Owner-only, and NOT flag-gated: a business waiting to be delisted is waiting
-            -- now, whatever else ships dark.
             if isOwner maybeAuth then
                 let
                     ( subModel, subCmd ) =
@@ -1506,26 +1397,15 @@ initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRout
             ( PageProfile m, Cmd.map PublicProfileMsg cmd )
 
         ProfileShelf handle bookshelfName ->
-            -- Browse another reader's shelf read-only (#215 / US-10.5.3): the
-            -- Bookshelf module in its profile config fetches the profile endpoint
-            -- and strips every mutating affordance.
             initBookshelf (Bookshelf.profileConfig handle bookshelfName) maybeAuth
 
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
 
         ForgotPassword ->
-            -- The forgot-password form is a mode of the login card, not a
-            -- standalone page — deep-linking /forgot-password opens the login
-            -- card straight onto that mode. Asking to reset a password is
-            -- itself an arrival reason, which is why it is a constructor of the
-            -- same type and not a fourth boolean (#360).
             ( PageLogin (Login.init Login.ForgotPassword |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         ResendConfirmation ->
-            -- Where a dead confirmation link sends the reader (#373). Same shape
-            -- as ForgotPassword directly above: a mode of the login card, opened
-            -- by an arrival, not a page of its own.
             ( PageLogin (Login.init Login.ConfirmationExpired |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         ResetPassword token ->
@@ -1544,12 +1424,6 @@ encodeAuth auth =
         , ( "displayName", Json.Encode.string auth.user.displayName )
         , ( "handle", Json.Encode.string auth.user.handle )
         , ( "role", Json.Encode.string auth.user.role )
-
-        -- #367: consent is deliberately NOT persisted in the stored blob. It is a
-        -- server-owned value the Privacy page hydrates from GET
-        -- /api/settings/privacy; keeping a copy here only created a stale mirror
-        -- with no invalidation. `role` stays because it gates admin UI and is
-        -- re-checked server-side; consent has no such client use.
         ]
 
 
@@ -1611,11 +1485,6 @@ forceSessionExpiry draftSaved model =
     ( { model
         | auth = Anonymous
         , adminAuth = Nothing
-
-        -- `draftSaved` is STICKY: a second, plain expiry arriving on top of a
-        -- draft expiry must not withdraw the reassurance that the listing was
-        -- saved. It was two fields OR-ed independently; now the OR is inside the
-        -- one constructor that gives the flag any meaning.
         , arrival =
             Login.SessionExpired
                 { draftSaved = draftSaved || Login.draftWasSaved model.arrival }
@@ -1725,8 +1594,6 @@ adoptExternalAuth value maybeAuth =
                     IgnoreExternal
 
         Ok Nothing ->
-            -- JSON null: a sibling `clearAuth`. Log this tab out too, but only if
-            -- it is currently authed (a signed-out tab has nothing to clear).
             case maybeAuth of
                 Just _ ->
                     LogOutExternally
@@ -1735,7 +1602,6 @@ adoptExternalAuth value maybeAuth =
                     IgnoreExternal
 
         Err _ ->
-            -- Not a string and not null (unexpected shape): ignore, never log out.
             IgnoreExternal
 
 
@@ -1927,36 +1793,12 @@ loginEffectCmd key redirect auth effect =
             scheduleRenewal
 
         NavigateToRequestedPage ->
-            -- Back to the page they asked for, or the antilibrary if they simply
-            -- signed in. Note this fires even when the target equals the current
-            -- URL (the bounce leaves the URL alone), which is what re-runs
-            -- `initPage` with a token in hand and swaps the gate for the real page.
             Nav.pushUrl key (Route.toPath (Maybe.withDefault AntiLibrary redirect))
 
         ArmArrivalBackstop ->
-            -- The sleep race (#359, requirement 3). The ornament's completion
-            -- signal comes from JS and can be lost outright: an occluded window
-            -- never runs `requestAnimationFrame`, and a machine that suspends
-            -- mid-animation may never settle the promise at all. A timer is the
-            -- backstop because timers are throttled in a background tab, not
-            -- cancelled, and fire on wake. Belt and braces, though: the arrival
-            -- settling late — or never — costs nothing, because `Arriving` and
-            -- `Authenticated` answer `currentAuth` identically.
             Process.sleep arrivalBackstopMs |> Task.perform (\_ -> ArrivalSettled)
 
         PlayDoorAnimation ->
-            -- Decoration, fired last, gating nothing. See `loginEffects`.
-            --
-            -- ⚠️ Measured 2026-07-31: with the navigation above firing in the same
-            -- update, the login scene is unmounted before the port's frame
-            -- callback runs, so the dolly-shot starts ZERO animations. The
-            -- ornament is not merely ungating — it no longer plays. That is the
-            -- direct cost of "the animation cannot gate anything", and it is a
-            -- design decision to take rather than a bug to fix here: bringing the
-            -- flourish back means rendering the door layers from the SHELL while
-            -- `AuthState` is `Arriving`, over the destination page, which is what
-            -- `Arriving` is shaped for and is its own issue. Reported as a
-            -- finding on #359 rather than smuggled in.
             playLoginTransition
                 (Json.Encode.object [ ( "duration", Json.Encode.int 4000 ) ])
 
@@ -1970,10 +1812,6 @@ loginCompletionCmd key redirect arrival baseCmd =
         (baseCmd
             :: List.map (loginEffectCmd key redirect arrival.session) arrival.effects
         )
-
-
-
--- UPDATE
 
 
 {-| The top-level navigation disclosures whose open/closed state Elm owns
@@ -2007,8 +1845,6 @@ type Msg
     | TransitionEnded String
     | LoginMsg Login.Msg
     | ResetPasswordMsg ResetPassword.Msg
-      -- The door ornament finished, or the backstop timer gave up waiting for it.
-      -- Both mean the same thing and neither touches the credential (#359).
     | ArrivalSettled
     | HomeMsg Home.Msg
     | BookshelfMsg Bookshelf.Msg
@@ -2093,12 +1929,6 @@ update msg model =
                 transition =
                     Just (transitionClass model.route newRoute)
 
-                -- The pending arrival goes IN, so whichever branch of `initPage`
-                -- produces a login card produces it already carrying its reason.
-                -- This replaced a three-branch `if newRoute == Login && …` ladder
-                -- that re-built the page and then threw it away — and which only
-                -- fired for the literal `/login` route, so the notice was lost on
-                -- every bounce that leaves the URL alone.
                 ( page, cmd ) =
                     initPage model.config
                         newRoute
@@ -2114,18 +1944,12 @@ update msg model =
                 , route = newRoute
                 , page = page
                 , previousRoute = Just model.route
-
-                -- Spent. See the field's own note: one navigation, no further.
                 , pendingUndo = Nothing
                 , transition = transition
                 , redirectAfterLogin =
                     redirectAfterNavigation
                         { arrivingAt = newRoute
                         , leaving = model.route
-
-                        -- #361's question, answered by #360's value. Read
-                        -- BEFORE `consumeArrival` spends it, just as the boolean
-                        -- this replaced was read before `UrlChanged` cleared it.
                         , sessionExpiring = Login.isSessionExpiry model.arrival
                         , auth = currentAuth model.auth
                         }
@@ -2136,10 +1960,6 @@ update msg model =
             )
 
         TransitionEnded animationName ->
-            -- Clear the navigation transition class once its own animation has
-            -- finished, so the next navigation re-adds it and the browser
-            -- restarts the animation (US-1.2.5, issue #277). The bubbling
-            -- filter lives in Animation.Transition, where it is unit-tested.
             ( { model
                 | transition =
                     Transition.clearOnAnimationEnd animationName model.transition
@@ -2165,11 +1985,6 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         Login.LoggedIn authResponse ->
-                            -- The whole login lands here, in the update that decoded
-                            -- the 200: the session goes into the model and the token
-                            -- goes to localStorage in the same breath. Nothing waits
-                            -- on the browser, so an occluded window signs in exactly
-                            -- like a focused one (#359).
                             let
                                 arrival =
                                     completeLogin authResponse
@@ -2179,21 +1994,12 @@ update msg model =
                             )
 
                         Login.RegistrationSucceeded _ ->
-                            -- Registration only sends a confirmation email; no JWT is
-                            -- issued and no navigation happens. The Login page has already
-                            -- switched itself to the pending state via its own model.
                             ( baseModel, baseCmd )
 
                 _ ->
                     ( model, Cmd.none )
 
         ArrivalSettled ->
-            -- ⛔ Cosmetic by design. This used to be `LoginTransitionCompleted`, and
-            -- it was where the token got written — the browser telling us an
-            -- animation had finished was the app's only cue to persist a credential
-            -- it had been holding since the 200. Now the credential is long since
-            -- durable and there is nothing left for this message to do but retire
-            -- the arrival state. Losing it entirely changes nothing observable.
             ( { model | auth = settleArrival model.auth }, Cmd.none )
 
         BookshelfMsg subMsg ->
@@ -2364,10 +2170,6 @@ update msg model =
                             , Cmd.batch
                                 [ baseCmd
                                 , Nav.pushUrl model.key (Route.toPath route)
-
-                                -- Match the overlay path: after a remove on the
-                                -- full-page route, focus the main landmark so it
-                                -- is not lost to <body> (#295 item b).
                                 , focusMainContent
                                 ]
                             )
@@ -2859,9 +2661,6 @@ update msg model =
                             )
 
                         BlogPostPage.RequestCopy payload ->
-                            -- The syndication panel's clipboard ask (US-6.2.1).
-                            -- The port's answer arrives via copyResult and is
-                            -- routed back to the page in subscriptions.
                             ( { model | page = PageBlogPost newSubModel }
                             , Cmd.batch
                                 [ Cmd.map BlogPostMsg subCmd
@@ -2876,14 +2675,6 @@ update msg model =
             case model.page of
                 PageAdminSourceApproval subModel ->
                     let
-                        -- ⛔ The ADMIN token, not the ordinary one. `init` was repointed and
-                        -- `update` was not, so the first load worked (admin token) and every
-                        -- subsequent action 401'd (ordinary token). Driven on a preview
-                        -- 2026-07-29: GET /api/admin/sources -> 200, then
-                        -- PUT /api/admin/sources/:id/approve -> 401 unauthorized.
-                        --
-                        -- Same half-wiring shape as the bug this whole change fixes — fixing one
-                        -- entry point and not the other leaves a page that loads and cannot act.
                         adminToken =
                             adminTokenFor model
 
@@ -2906,8 +2697,6 @@ update msg model =
             case model.page of
                 PageAdminInvites subModel ->
                     let
-                        -- The ADMIN token, as every admin page's update must —
-                        -- see AdminSourceApprovalMsg's half-wiring note above.
                         ( newSubModel, subCmd, outMsg ) =
                             AdminInvites.update subMsg subModel (adminTokenFor model)
                     in
@@ -2946,14 +2735,6 @@ update msg model =
             case model.page of
                 PageAdminBookModeration subModel ->
                     let
-                        -- ⛔ The ADMIN token, not the ordinary one. `init` was repointed and
-                        -- `update` was not, so the first load worked (admin token) and every
-                        -- subsequent action 401'd (ordinary token). Driven on a preview
-                        -- 2026-07-29: GET /api/admin/sources -> 200, then
-                        -- PUT /api/admin/sources/:id/approve -> 401 unauthorized.
-                        --
-                        -- Same half-wiring shape as the bug this whole change fixes — fixing one
-                        -- entry point and not the other leaves a page that loads and cannot act.
                         adminToken =
                             adminTokenFor model
 
@@ -2986,17 +2767,11 @@ update msg model =
                             )
 
                         AdminSession.Authenticated adminToken ->
-                            -- Hold the token in memory and re-resolve the route the operator was
-                            -- actually going to, so signing in lands them on that page rather than
-                            -- on a "now navigate again" screen.
                             let
                                 withToken =
                                     { model | adminAuth = Just adminToken }
 
                                 ( page, pageCmd ) =
-                                    -- `adminTokenFor withToken`, not `Just adminToken`: the same value
-                                    -- by two different routes is exactly what the resolver exists to
-                                    -- remove. One way to obtain the admin token, everywhere.
                                     initPage model.config
                                         gatedRoute
                                         (originOf model.url)
@@ -3016,14 +2791,6 @@ update msg model =
             case model.page of
                 PageAdminRemovalRequests subModel ->
                     let
-                        -- ⛔ The ADMIN token, not the ordinary one. `init` was repointed and
-                        -- `update` was not, so the first load worked (admin token) and every
-                        -- subsequent action 401'd (ordinary token). Driven on a preview
-                        -- 2026-07-29: GET /api/admin/sources -> 200, then
-                        -- PUT /api/admin/sources/:id/approve -> 401 unauthorized.
-                        --
-                        -- Same half-wiring shape as the bug this whole change fixes — fixing one
-                        -- entry point and not the other leaves a page that loads and cannot act.
                         adminToken =
                             adminTokenFor model
 
@@ -3148,16 +2915,6 @@ update msg model =
                             )
 
                         BookDetail.NavigateTo route ->
-                            -- Remove-success path: tear down the overlay, land on
-                            -- the previous shelf, and move focus to the main
-                            -- landmark so it is not lost to <body> (#295 item b).
-                            --
-                            -- `newDetail.undoableRemoval` rides along so the shelf
-                            -- can offer to put the book back (#375). It is read
-                            -- HERE and not in the `NoOut` branch because this is
-                            -- the branch a completed removal takes — the overlay
-                            -- is about to cease to exist, taking the only record
-                            -- of what was removed with it.
                             ( { model
                                 | bookDetailOverlay = Nothing
                                 , pendingUndo = newDetail.undoableRemoval
@@ -3186,8 +2943,6 @@ update msg model =
             in
             case outMsg of
                 UserMenu.NoOut ->
-                    -- Opening the account menu closes any open nav disclosure:
-                    -- at most one menu is ever open (#318 TR-1).
                     ( { model | userMenu = newUserMenu, openNavMenu = Nothing }, Cmd.none )
 
                 UserMenu.NavigateTo path ->
@@ -3209,29 +2964,18 @@ update msg model =
                         | userMenu = newUserMenu
                         , auth = Anonymous
                         , adminAuth = Nothing
-
-                        -- A deliberate sign-out needs no explanation, so the
-                        -- card is built `Fresh` — and any arrival left pending
-                        -- from an earlier session goes with it.
                         , page = PageLogin (Login.init Login.Fresh |> Login.withInviteOnly model.config.inviteOnly)
                         , arrival = Login.Fresh
                       }
                     , Cmd.batch
                         [ logoutCmd
                         , clearAuth ()
-
-                        -- Defense-in-depth (#182): a deliberate sign-out also
-                        -- wipes any persisted listing draft (it carries PII).
-                        -- NB: the session-expiry path deliberately does NOT do
-                        -- this — it must preserve the draft across the redirect.
                         , clearListingDraft ()
                         , Nav.pushUrl model.key (Route.toPath Login)
                         ]
                     )
 
         ToggleNavMenu menu ->
-            -- Opening a nav disclosure closes the account menu, keeping the
-            -- "at most one open" invariant (#318 TR-1).
             ( { model
                 | openNavMenu = toggleNavMenu menu model.openNavMenu
                 , userMenu = UserMenu.init
@@ -3244,8 +2988,6 @@ update msg model =
 
         EscapePressed ->
             if onboardingShowing model then
-                -- The onboarding overlay is the topmost surface; Escape dismisses
-                -- it via the same finish path as Skip (US-14.1.2 §2 sad path).
                 update (OnboardingMsg OnboardingOverlay.EscapePressed) model
 
             else
@@ -3266,17 +3008,11 @@ update msg model =
                     Cmd.map OnboardingMsg subCmd
             in
             case outMsg of
-                -- Skip, Escape, and advancing off the last step share ONE finish
-                -- path (US-14.1.2 §12): flip the client-side re-trigger guard and
-                -- mirror it to localStorage. The overlay's own Cmd has already
-                -- recorded the server step being left (#149).
                 OnboardingOverlay.OnboardingFinished ->
                     ( { baseModel | onboardingCompleted = True }
                     , Cmd.batch [ baseCmd, saveOnboardingCompleted () ]
                     )
 
-                -- The embedded US-1.1.1 upload flow's effects, relayed to the
-                -- shell exactly as the standalone upload page wires them.
                 OnboardingOverlay.UploadOpenStream url ->
                     ( baseModel, Cmd.batch [ baseCmd, openUploadStream { url = url } ] )
 
@@ -3300,9 +3036,6 @@ update msg model =
                 config =
                     model.config
 
-                -- A login card already on screen adopts the resolved flag —
-                -- the boot default is fail-closed, so this only ever REVEALS
-                -- the Register form on open-registration deployments.
                 page =
                     case model.page of
                         PageLogin loginModel ->
@@ -3314,9 +3047,6 @@ update msg model =
             ( { model | config = { config | inviteOnly = enabled }, page = page }, Cmd.none )
 
         AgeGatingConfigReceived enabled ->
-            -- The background `GET /api/config` fetch resolved (ADR-020). Adopt the
-            -- server-provided flag; in production it is `False` (no-op vs. the
-            -- boot default), and only flips age UI on where the flag is set.
             let
                 config =
                     model.config
@@ -3324,19 +3054,6 @@ update msg model =
             ( { model | config = { config | ageGatingEnabled = enabled } }, Cmd.none )
 
         ConnectivityChanged isOnline ->
-            -- The browser's own `online`/`offline` event (Issue #362).
-            --
-            -- #368 (owner-decided scope): on the offline→online TRANSITION,
-            -- and only then, re-enter the current route IF its page lost its
-            -- content to a `NetworkError` — the app demonstrably knows the
-            -- connection returned (it clears its own banner on this very
-            -- message), so leaving the reader staring at "unreachable" on a
-            -- working connection was the worse behaviour. The old worry here
-            -- ("quietly re-issuing a request the reader has since navigated
-            -- away from is how stale data lands on the wrong page") is what
-            -- the scoping answers: only the page CURRENTLY routed, only in
-            -- `NetworkError`, and through `initPage` — the same path the page
-            -- loads through on arrival, not a side-channel refetch.
             let
                 connectivity =
                     connectivityFromOnline isOnline
@@ -3358,8 +3075,6 @@ update msg model =
                 ( { model | connectivity = connectivity }, Cmd.none )
 
         FocusResult ->
-            -- Shared fire-and-forget no-op: absorbs focus-attempt results and
-            -- the logout request's result (best-effort server-side revocation).
             ( model, Cmd.none )
 
         GotPlacementCheck result ->
@@ -3384,16 +3099,9 @@ update msg model =
                         handleSessionExpiry model
 
                     else
-                        -- The badge renders nothing in this state, and the
-                        -- upload page says it could not check. Neither pretends
-                        -- the inbox is empty: "we don't know" and "nothing is
-                        -- waiting" are different answers, and only one of them
-                        -- is safe to show as a cleared badge.
                         ( { model | uploadInbox = Failure err }, Cmd.none )
 
         RenewToken ->
-            -- Proactive silent renewal tick. Only meaningful while authenticated;
-            -- a signed-out session simply drops the tick.
             case currentAuth model.auth of
                 Just auth ->
                     ( model, Api.refresh auth.token TokenRefreshed )
@@ -3402,8 +3110,6 @@ update msg model =
                     ( model, Cmd.none )
 
         TokenRefreshed (Ok authResponse) ->
-            -- Renewal succeeded: adopt the fresh token (keeping the same user),
-            -- persist it, and roll the next renewal. No navigation, no logout.
             case currentAuth model.auth of
                 Just auth ->
                     let
@@ -3418,45 +3124,24 @@ update msg model =
                     ( model, Cmd.none )
 
         TokenRefreshed (Err _) ->
-            -- Renewal failed (token already expired/revoked, or the service is
-            -- down): fall through to the session-expiry path, tagged as
-            -- renewal-origin so a re-check adopt re-arms the consumed tick (P1b).
             handleSessionExpiryFromRenewal model
 
         AuthChangedExternally value ->
-            -- A sibling tab wrote `stacks-auth` (Issue #180 Phase 2).
             case adoptExternalAuth value (currentAuth model.auth) of
                 AdoptAuth newAuth ->
-                    -- Adopt the token another tab rotated in. No `saveAuth` (that
-                    -- tab already persisted it) and NO reschedule: this tab still
-                    -- has its own renewal tick armed, so re-arming here would let
-                    -- every rotation spawn an extra timer per tab (a growing
-                    -- refresh storm — exactly what #180 fights).
-                    --
-                    -- P1a: adopting a VALID token also cancels any parked expiry —
-                    -- otherwise an in-flight `gotStoredAuth` (whose stored value now
-                    -- equals this adopted token → IgnoreExternal) would force a
-                    -- logout on a tab that just adopted a live credential.
                     ( { model | auth = Authenticated newAuth, pendingLogout = Nothing }
                     , Cmd.none
                     )
 
                 LogOutExternally ->
-                    -- A sibling `clearAuth`: a logout in one tab logs out all.
                     forceSessionExpiry False model
 
                 IgnoreExternal ->
                     ( model, Cmd.none )
 
         GotStoredAuth value ->
-            -- The re-check-before-logout answer (Issue #180 Phase 2). The pure
-            -- resolver folds in the parked intent (origin + draft flags); a stray
-            -- answer with no parked intent is a no-op (P1a).
             case resolveRecheck model.pendingLogout (adoptExternalAuth value (currentAuth model.auth)) of
                 ResolveAdopt newAuth reschedule ->
-                    -- localStorage holds a newer token than the one that 401'd —
-                    -- adopt it and cancel the logout. Re-arm renewal ONLY for a
-                    -- renewal-origin expiry, whose proactive tick was consumed (P1b).
                     ( { model | auth = Authenticated newAuth, pendingLogout = Nothing }
                     , if reschedule then
                         scheduleRenewal
@@ -3466,8 +3151,6 @@ update msg model =
                     )
 
                 ResolveForceLogout draftSaved ->
-                    -- Nothing newer stored (same token / cleared / garbage):
-                    -- proceed to the real logout, carrying the draft notice.
                     forceSessionExpiry draftSaved model
 
                 ResolveNoop ->
@@ -3549,9 +3232,6 @@ escapeForPage model =
                 maybeToken =
                     Maybe.map .token (currentAuth model.auth)
 
-                -- Give the overlay first dibs on Escape: it dismisses a
-                -- nested surface (remove modal / progress-edit form) if
-                -- one is open, else returns RequestCloseOverlay.
                 ( newDetail, subCmd, outMsg ) =
                     BookDetail.update BookDetail.EscapePressed overlay.detail maybeToken
 
@@ -3565,22 +3245,14 @@ escapeForPage model =
             in
             case outMsg of
                 BookDetail.RequestCloseOverlay ->
-                    -- No nested surface consumed it: close the overlay and
-                    -- return focus to the triggering spine.
                     ( { model | bookDetailOverlay = Nothing }, returnFocusCmd )
 
                 _ ->
-                    -- The overlay closed a nested surface and stays open;
-                    -- run its (focus-return) command.
                     ( { model | bookDetailOverlay = Just { overlay | detail = newDetail } }
                     , Cmd.map OverlayBookDetailMsg subCmd
                     )
 
         Nothing ->
-            -- No overlay is open. On the full-page BookDetail route,
-            -- give the page first dibs on Escape so its nested surfaces
-            -- (remove modal / progress-edit form) dismiss too (#295 item
-            -- e) — the same consumed/not-consumed pattern as the overlay.
             case model.page of
                 PageBookDetail subModel ->
                     let
@@ -3592,22 +3264,14 @@ escapeForPage model =
                     in
                     case outMsg of
                         BookDetail.RequestCloseOverlay ->
-                            -- No nested surface consumed it; there is no
-                            -- overlay to close on the page route, so fall
-                            -- back to the default (close the user menu).
                             closeUserMenuOnEscape model
 
                         _ ->
-                            -- The page dismissed a nested surface and
-                            -- stays put; run its (focus-return) command.
                             ( { model | page = PageBookDetail newSubModel }
                             , Cmd.map BookDetailMsg subCmd
                             )
 
                 PageBlogPost subModel ->
-                    -- Give the blog post's block affordance (⋯ menu / block
-                    -- confirm) first dibs on Escape (#389); fall through to the
-                    -- default when nothing was open to consume it.
                     let
                         maybeToken =
                             Maybe.map .token (currentAuth model.auth)
@@ -3625,7 +3289,6 @@ escapeForPage model =
                             )
 
                 PageGroupsDetail subModel ->
-                    -- Same, for the group feed's per-member block affordances (#389).
                     let
                         ( newSubModel, subCmd, outMsg ) =
                             GroupsDetail.update GroupsDetail.EscapePressed subModel
@@ -3667,18 +3330,9 @@ openOverlayWithTrigger model bookId triggerId =
     ( { model | bookDetailOverlay = Just overlay }
     , Cmd.batch
         [ Cmd.map OverlayBookDetailMsg detailCmd
-
-        -- #295 item a: focus the labelled dialog card on open (not the close
-        -- button), so a screen reader announces the book first. The card is
-        -- `tabindex -1`, so the first forward Tab still lands on the close
-        -- button and the focus trap is unaffected.
         , Task.attempt (always FocusResult) (Browser.Dom.focus BookDetail.cardFocusId)
         ]
     )
-
-
-
--- SUBSCRIPTIONS
 
 
 subscriptions : Model -> Sub Msg
@@ -3704,10 +3358,6 @@ subscriptions model =
                     )
             )
         , if onboardingShowing model && OnboardingOverlay.isOnUploadStep model.onboarding then
-            -- The onboarding Upload step embeds the real US-1.1.1 flow, so the
-            -- SSE stream and wait-clock must reach the overlay's upload sub-model
-            -- (routed through `OnboardingMsg`) rather than a `PageUpload` that is
-            -- not the current page. Same two subscriptions, one hop deeper.
             uploadSubscriptions (OnboardingMsg << OnboardingOverlay.UploadMsg)
 
           else
@@ -3716,15 +3366,10 @@ subscriptions model =
                     uploadSubscriptions UploadMsg
 
                 PageImport _ ->
-                    -- The import page's poll clock (US-1.1.9). Interval MUST
-                    -- match `ImportPage.pollSeconds`; `PollTick` is a no-op in
-                    -- every phase but Watching, so an idle import surface
-                    -- costs one discarded message every two seconds.
                     Time.every (toFloat ImportPage.pollSeconds * 1000)
                         (\_ -> ImportPageMsg ImportPage.PollTick)
 
                 PageBlogPost _ ->
-                    -- The clipboard's verdict, back to the syndication panel.
                     copyResult
                         (BlogPostMsg
                             << BlogPostPage.SyndicationMsg
@@ -3756,14 +3401,6 @@ uploadSubscriptions tag =
                     _ ->
                         tag (Upload.StreamEvent raw)
             )
-
-        -- The only clock `Page.Upload` has (Issue #351). It drives the "you may
-        -- leave" copy and the silent-stream watchdog, both of which are
-        -- elapsed-time facts the client genuinely owns — unlike the retry count
-        -- it deliberately never claims. The interval MUST match
-        -- `Upload.tickSeconds`; `WaitTick` is a no-op whenever the flow is not
-        -- waiting, so an idle upload surface costs one discarded message every
-        -- five seconds and nothing else.
         , Time.every (toFloat Upload.tickSeconds * 1000)
             (\_ -> tag Upload.WaitTick)
         ]
@@ -3779,10 +3416,6 @@ decodeSwipe value =
             SwipeIgnored
 
 
-
--- VIEW
-
-
 view : Model -> Browser.Document Msg
 view model =
     { title = pageTitle model.page
@@ -3796,10 +3429,6 @@ view model =
             , viewNav model.route (currentAuth model.auth) model.openNavMenu model.userMenu model.uploadInbox
             , main_
                 [ id "main-content"
-
-                -- `tabindex -1` makes the main landmark programmatically
-                -- focusable: it is both the skip-link target and where focus
-                -- lands after a book is removed from its shelf (#295 item b).
                 , tabindex -1
                 , class
                     ("app__main"
@@ -3915,10 +3544,6 @@ pageTitle page =
             "The Stacks"
 
         PageLogin loginModel ->
-            -- Derived from the card's CURRENT mode, not from the route that
-            -- opened it: switching to Register or to the reset form now
-            -- retitles the document, which a route-derived title structurally
-            -- could not do — the URL does not change when the card does.
             titled (loginCardTitle loginModel.mode)
 
         PageBookshelf bookshelfModel ->
@@ -4017,10 +3642,6 @@ pageTitle page =
             titled "Removal Requests"
 
         PageAdminGate _ _ ->
-            -- Drift sites 2 and 6. The operator is looking at an MFA challenge,
-            -- not at the surface behind it. The gated route IS carried by this
-            -- constructor and is deliberately not read here: naming the surface
-            -- is precisely the claim that was false.
             titled "Admin Sign-In"
 
         PageGroups _ ->
@@ -4042,8 +3663,6 @@ pageTitle page =
             titled "Reset Password"
 
         PageNotFound ->
-            -- Drift sites 3 and 4. A refused admin route renders this page; it
-            -- must not keep announcing the surface it refused.
             titled "Not Found"
 
 
@@ -4125,8 +3744,6 @@ viewNav route maybeAuth openNavMenu userMenu inbox =
 
                     Just auth ->
                         [ -- The five bookshelves, grouped under one disclosure
-                          -- (#318 TR-1). A book-detail is a child of the shelves,
-                          -- so `isBookshelfRoute` keeps this item active there too.
                           navDisclosure
                             { menu = BookshelvesMenu
                             , label = "Bookshelves"
@@ -4141,14 +3758,7 @@ viewNav route maybeAuth openNavMenu userMenu inbox =
                                     , navLink LookingForHome "Looking for a Home"
                                     ]
                             }
-
-                        -- Search is a top-level destination, not buried in a
-                        -- menu (#318 TR-1).
                         , navItem route Search "Search"
-
-                        -- Add Book is a PERSISTENT primary action: always in the
-                        -- DOM, reachable on touch, never behind a hover reveal
-                        -- (#318 TR-1). The #351 pending badge rides on it.
                         , viewAddBook route (pendingConfirmationBadge inbox)
                         , navDisclosure
                             { menu = MarketplaceMenu
@@ -4299,8 +3909,6 @@ navDisclosure config =
         , if config.isOpen then
             div []
                 [ -- Transparent full-screen layer that turns an outside click
-                  -- into `CloseNavMenu` — the same click-away shape as the
-                  -- account menu's backdrop.
                   div
                     [ class "app-nav__backdrop"
                     , style "position" "fixed"
@@ -4350,11 +3958,6 @@ viewAddBook route badge =
                             [ span
                                 [ class "app-nav__badge"
                                 , testId "nav-upload-badge"
-
-                                -- The visible number is a glyph; this is what it
-                                -- means. A screen reader hearing "Add Book 2"
-                                -- would be told a quantity of nothing in
-                                -- particular.
                                 , attribute "aria-label"
                                     (String.fromInt count ++ " waiting to be confirmed")
                                 ]
@@ -4629,10 +4232,6 @@ viewOnboarding model =
 
 viewConfirmEmail : ConfirmStatus -> Html Msg
 viewConfirmEmail status =
-    -- Reuse the login page's static scene (library background + dim + vignette)
-    -- so the email-confirmation result matches the login and reset-password cards.
-    -- The animated door layers are login-only; this renders the background
-    -- statically — no animation.
     div [ class "page page--login" ]
         [ div [ class "layer-arrival" ] []
         , div [ class "layer-bookshelf" ] []
@@ -4654,12 +4253,6 @@ viewConfirmEmailCard status =
             ]
 
         EmailConfirmFailed ->
-            -- ⛔ This used to end "Please register again to receive a fresh
-            -- confirmation email" (#373). That was advice the app could not
-            -- honour: registering again with the same address fails on the
-            -- unique-email constraint, which is the state every reader who
-            -- reaches this page is in. The instruction sent them into a wall.
-            -- There is now a real way out, so the copy points at it.
             [ h1 [ class "login-card__title" ] [ text "Confirmation failed" ]
             , p [ class "login-card__subtitle" ]
                 [ text "This confirmation link is no longer valid — it may have expired, or already been used. If it has already been used, you can simply sign in." ]

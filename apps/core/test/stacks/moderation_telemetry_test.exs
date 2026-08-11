@@ -19,8 +19,6 @@ defmodule Stacks.ModerationTelemetryTest do
   `upload_telemetry_test.exs` / `visibility_telemetry_test.exs`.
   """
 
-  # async: false — swaps the vision client via Application.put_env (global
-  # process state) and attaches global telemetry handlers.
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -48,17 +46,11 @@ defmodule Stacks.ModerationTelemetryTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  # A candidate whose title is two book titles joined with " OR " — exercises
-  # expand_compound_candidates/1.
   defp compound_title_text do
     book_response([book_candidate(title: "First Book OR Second Book", confidence: 0.9)])
   end
 
-  # BOOK classification with a candidate that has no ISBN and a nil title —
-  # title_fallback returns :isbn_not_found for it.
   defp no_resolvable, do: book_response([book_candidate()])
-
-  # ── Step 1: classification outcome ─────────────────────────────────────
 
   describe "classification telemetry" do
     test "emits :book when the image is classified as a book (happy)" do
@@ -94,8 +86,6 @@ defmodule Stacks.ModerationTelemetryTest do
     end
   end
 
-  # ── Step 2: ISBN resolution outcome ────────────────────────────────────
-
   describe "ISBN resolution telemetry" do
     test "emits :resolved when a candidate resolves to a book (happy)" do
       attach_telemetry([[:stacks, :moderation, :isbn_resolution]])
@@ -118,13 +108,6 @@ defmodule Stacks.ModerationTelemetryTest do
                       %{outcome: :isbn_not_found}}
     end
   end
-
-  # ── Age-gate tiering (repointed to the user/owner set path) ────────────
-  #
-  # The automatic subject→BISAC classifier was removed (Issue #118), so the
-  # pipeline no longer emits [:stacks, :moderation, :tiering]. The metric is
-  # repointed onto Books.set_visibility_tier/3, which fires it when a PERSON
-  # sets the tier. These tests keep the metric covered on both sides.
 
   describe "tiering telemetry" do
     test "the pipeline no longer emits tiering — books default to public (happy)" do
@@ -149,15 +132,11 @@ defmodule Stacks.ModerationTelemetryTest do
     end
   end
 
-  # ── Compound-title expansion ───────────────────────────────────────────
-
   describe "compound expansion telemetry" do
     test "emits a split measurement when a ' OR '-joined title is expanded" do
       attach_telemetry([[:stacks, :moderation, :compound_expansion]])
 
       with_vision(compound_title_text(), fn ->
-        # Neither part resolves (no HTTP responses registered) so the pipeline
-        # ends in :isbn_not_found — but the expansion event fires regardless.
         assert {:error, :isbn_not_found} = Moderation.run_pipeline(%{image_b64: @test_image_b64})
       end)
 

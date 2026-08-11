@@ -45,7 +45,6 @@ DOD_TEMPLATES: dict[str, list[str]] = {
     ],
 }
 
-# Domain-to-agent mapping (mirrors AGENTS.md domain routing table)
 DOMAIN_AGENTS: dict[str, str] = {
     "elixir": "elixir-agent",
     "elm": "elm-agent",

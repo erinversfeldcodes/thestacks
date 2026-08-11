@@ -37,31 +37,18 @@ defmodule StacksWeb.AuditIpDeployedTest do
 
   @moduletag :deployed_only
 
-  # BASE_URL is resolved when this test file loads (at `mix test` start, after
-  # the env is in place). Without a preview target there is nothing to drive, so
-  # skip the whole module rather than fail — this keeps a bare
-  # `--only deployed_only` run without BASE_URL inert instead of red.
   @base_url System.get_env("BASE_URL")
 
   if @base_url in [nil, ""] do
     @moduletag skip: "BASE_URL not set — deployed Fly preview required"
   end
 
-  # A spoofed, attacker-controlled forwarded-for. On the real stack Fly rewrites
-  # `fly-client-ip` with the true client address, so this XFF must be ignored
-  # for provenance. Hashed the same way Audit.hash_ip/1 does (sha256, hex-lower).
   @spoofed_xff "203.0.113.99"
 
   defp sha256_hex(value) do
     :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
   end
 
-  # Reads the ip_address of the most recent audit.audit_log row for a user +
-  # action via raw SQL on a DIRECT Postgrex connection to the preview DB,
-  # mirroring latest_audit_row/1 in auth_controller_test.exs (independent of the
-  # proto-generated Ecto schema shape). user_id is a text UUID; we compare the
-  # column cast to text (user_id::text = $1) so no 16-byte UUID binary encoding
-  # is needed on the Postgrex param.
   defp latest_audit_ip(conn, user_id, action) do
     %Postgrex.Result{rows: rows} =
       Postgrex.query!(
@@ -94,11 +81,6 @@ defmodule StacksWeb.AuditIpDeployedTest do
   end
 
   setup do
-    # Core.Repo is hardcoded to localhost/stacks_test (config/test.exs) with no
-    # deployed override, so it CANNOT read the preview DB. Open a direct Postgrex
-    # connection to the preview Neon URL the runner passes in DATABASE_URL, which
-    # sees the row the live app committed over HTTP. Neon requires SSL;
-    # verify_none skips CA-bundle fuss for the preview cert (acceptable in test).
     db_url = System.get_env("DATABASE_URL")
     uri = URI.parse(db_url)
     [user, pass] = String.split(uri.userinfo || "", ":", parts: 2)
@@ -127,16 +109,9 @@ defmodule StacksWeb.AuditIpDeployedTest do
     test "a spoofed X-Forwarded-For on register is NOT recorded as the audit IP", %{conn: conn} do
       base_url = @base_url
 
-      # Fresh, unique account so the register succeeds and writes exactly one
-      # `user.registered` audit row we can pinpoint.
       email =
         "audit-xff-#{System.system_time(:millisecond)}-#{:rand.uniform(1_000_000)}@ratelimit.test"
 
-      # Fly auto-stops idle preview machines (auto_stop_machines, Issue #175), so
-      # the first request can hit a cold machine and 502/503/504 while it wakes.
-      # A real user retries and succeeds — so does this test: retry: :transient
-      # replays the same register on connection errors + 408/429/5xx, with a
-      # 2s→10s backoff over 8 attempts to cover the cold-start window.
       resp =
         Req.post!("#{base_url}/api/auth/register",
           json: %{email: email, password: "password123"},
@@ -149,12 +124,9 @@ defmodule StacksWeb.AuditIpDeployedTest do
           end
         )
 
-      # Registration must have succeeded through the real stack (201).
       assert resp.status == 201,
              "expected 201 from register through preview, got #{resp.status}: #{inspect(resp.body)}"
 
-      # The register response body carries no user id, so resolve it from the
-      # unique email against the preview DB.
       user_id = user_id_for_email(conn, email)
       assert user_id, "registered user #{email} not found in preview op.users"
 
@@ -163,10 +135,6 @@ defmodule StacksWeb.AuditIpDeployedTest do
       assert recorded_ip,
              "no user.registered audit row found for #{email} (#{user_id})"
 
-      # THE SECURITY ASSERTION: the spoofed XFF must not be the provenance IP.
-      # We can't know the exact Fly-injected client IP to assert the positive,
-      # but we can prove the spoof was rejected: the recorded (hashed) IP is not
-      # sha256("203.0.113.99").
       refute recorded_ip == sha256_hex(@spoofed_xff),
              "spoofed X-Forwarded-For #{@spoofed_xff} was trusted as the audit provenance IP"
     end

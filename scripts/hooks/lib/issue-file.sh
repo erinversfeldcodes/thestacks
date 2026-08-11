@@ -1,27 +1,18 @@
 #!/usr/bin/env bash
-# Shared helpers for reading issue files.
-# Source this file; do not execute directly.
 
-# find_issue_file <branch>
-# Prints the absolute path to the issue file matching the branch name, or empty string.
-# Handles branches with a type prefix (refactor/, feat/, fix/, etc.) by stripping
-# everything up to and including the first slash before matching.
 find_issue_file() {
     local branch="$1"
     local repo_root
     repo_root="$(git rev-parse --show-toplevel)"
 
-    # Strip optional type prefix (e.g. refactor/000-slug → 000-slug)
     local slug="${branch#*/}"
 
-    # Exact match on slug: issues/NNN-some-slug.md
     local exact="$repo_root/issues/${slug}.md"
     if [[ -f "$exact" ]]; then
         echo "$exact"
         return
     fi
 
-    # Prefix match by issue number extracted from slug: 042-foo matches issues/042-*.md
     local num
     num="$(echo "$slug" | grep -oE '^[0-9]+')"
     if [[ -n "$num" ]]; then
@@ -31,14 +22,10 @@ find_issue_file() {
     fi
 }
 
-# extract_issue_title <file>
-# Prints the human title from "# Issue #NNN: Title Here"
 extract_issue_title() {
     grep -m1 "^# Issue" "$1" | sed 's/^# Issue #[0-9]*:[[:space:]]*//'
 }
 
-# extract_section <file> <heading>
-# Prints the full content of a ## section, preserving line breaks and formatting.
 extract_section() {
     local file="$1"
     local heading="$2"
@@ -49,11 +36,6 @@ extract_section() {
     ' "$file" | sed 's/^[[:space:]]*$//;s/[[:space:]]*$//'
 }
 
-# build_pr_description <issue_file> <gh_issue_number> [ci_section]
-# Reads .github/pull_request_template.md and substitutes <!-- pr:field --> markers
-# with content extracted from the issue file.
-# Goal/Approach/Verification are set once at PR creation and never overwritten —
-# only the CI sentinel block is replaced on subsequent pushes via _replace_sentinel.
 build_pr_description() {
     local file="$1"
     local issue_num="$2"
@@ -74,7 +56,6 @@ build_pr_description() {
     approach="$(extract_section "$file" "Technical Requirements")"
     verification="$(extract_section "$file" "Definition of Done")"
 
-    # Write each multi-line substitution to a temp file so awk can insert it cleanly.
     local goal_file approach_file verification_file ci_file
     goal_file="$(mktemp)"
     approach_file="$(mktemp)"
@@ -88,9 +69,6 @@ build_pr_description() {
     if [[ -n "$ci_section" ]]; then
         printf '%s\n' "$ci_section" > "$ci_file"
     else
-        # Keep the placeholder already in the template — write nothing so awk
-        # leaves the <!-- pr:* --> marker untouched and the template's own CI
-        # sentinel block is preserved as-is.
         : > "$ci_file"
     fi
 

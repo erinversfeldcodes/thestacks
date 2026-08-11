@@ -19,23 +19,17 @@ defmodule Core.PromEx.DashboardStandardTest do
 
   use ExUnit.Case, async: true
 
-  # Keep this in lock-step with DashboardDriftTest's teaching-description
-  # threshold: a description shorter than this cannot carry what/how/means/
-  # spike-drop and is treated as missing.
   @min_description_length 40
 
   defp dashboard_path(relative),
     do: Application.app_dir(:core, Path.join("priv", relative))
 
-  # Recursively collect every panel, including panels nested inside Grafana
-  # "row" panels.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel -> [panel | all_panels(panel)] end)
   end
 
   defp all_panels(_), do: []
 
-  # Only panels that render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
@@ -51,8 +45,6 @@ defmodule Core.PromEx.DashboardStandardTest do
     end)
   end
 
-  # The registered dashboards, normalised to their priv-relative JSON path.
-  # `dashboards/0` uses the `{:core, path}` form (see Core.PromEx).
   defp registered_dashboard_paths do
     Enum.map(Core.PromEx.dashboards(), fn
       {:core, relative} -> relative

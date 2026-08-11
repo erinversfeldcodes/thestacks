@@ -34,13 +34,7 @@ defmodule Core.Repo.Migrations.CreateAuthTokenFamilies do
       timestamps()
     end
 
-    # Revoke-all-by-user (Phase 2b: log-out-everywhere / password change).
     create index(:auth_token_families, [:user_id], prefix: "op")
-
-    # No index on current_jti: the Phase 2b reuse gate loads the family by its
-    # primary key (family_id) and compares current_jti in memory, so an index
-    # there would be pure write overhead on a table written on every login and
-    # refresh.
 
     execute("""
     DO $$ BEGIN
@@ -49,11 +43,6 @@ defmodule Core.Repo.Migrations.CreateAuthTokenFamilies do
       END IF;
     END $$;
     """)
-
-    # stacks_dbt is intentionally NOT granted access: auth session state has no
-    # analytics use, and replicating live jti values into the warehouse would
-    # widen the blast radius of a warehouse-credential compromise (mirrors
-    # op.guardian_tokens).
   end
 
   def down do

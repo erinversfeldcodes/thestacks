@@ -13,11 +13,9 @@ defmodule Core.Extensions.UUIDString do
 
   def encode(_) do
     quote location: :keep, generated: true do
-      # Already a 16-byte raw binary — pass through.
       uuid when is_binary(uuid) and byte_size(uuid) == 16 ->
         [<<16::signed-32>> | uuid]
 
-      # 36-char string UUID — dump to 16-byte binary first.
       uuid when is_binary(uuid) and byte_size(uuid) == 36 ->
         case Ecto.UUID.dump(uuid) do
           {:ok, bin} -> [<<16::signed-32>> | bin]

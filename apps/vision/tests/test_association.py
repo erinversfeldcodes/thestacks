@@ -80,9 +80,7 @@ def test_associate_background_task_queued() -> None:
         client.post("/associate", json=_VALID_BODY, headers=_make_header())
         client.post("/associate", json=_VALID_BODY, headers=_make_header())
 
-    # add_task called exactly once (second call is idempotent short-circuit)
     assert mock_add_task.call_count == 1
-    # Confirm the right task function was registered (not a silent no-op).
     assert mock_add_task.call_args.args[0] is _run_associate
 
 
@@ -226,8 +224,6 @@ async def test_run_associate_ambiguous_path() -> None:
     post_call = mock_httpx.return_value.post.call_args
     payload = json.loads(post_call.kwargs["content"])
     assert payload["status"] == "ASSOCIATION_STATUS_REJECTED"
-    # Ambiguous is distinct from definitive non-book.
-    # See docs/decisions/006-ambiguous-classification-as-rejection.md
     assert payload["reason"] == "ambiguous_classification"
 
 
@@ -279,7 +275,6 @@ def test_associate_callback_signature_present() -> None:
     ts_str, provided_sig = parts
     assert ts_str.isdigit()
     assert len(provided_sig) == 64  # hex SHA256
-    # Verify the HMAC covers timestamp + method + path
     message = f"{ts_str}.POST./api/internal/vision/associate"
     expected = hmac.new(settings.hmac_secret.encode(), message.encode(), hashlib.sha256).hexdigest()
     assert provided_sig == expected

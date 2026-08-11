@@ -69,9 +69,6 @@ defmodule Stacks.AgeVerification do
     |> emit()
   end
 
-  # Age-verification outcome counter (repointed from the removed self-declared
-  # endpoint, ADR-020). `outcome` is a whitelisted atom — no user id, email, or
-  # provider name in metadata (GDPR: telemetry is a warehouse-adjacent sink).
   defp emit({:ok, _user} = result) do
     :telemetry.execute([:stacks, :age_verification], %{count: 1}, %{outcome: :success})
     result

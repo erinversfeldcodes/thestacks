@@ -27,7 +27,6 @@ defmodule StacksWeb.Plugs.AgeGateTest do
 
   describe "enforce/2 for age-gated books" do
     test "halts with 403 when no user is authenticated (nil user)", %{conn: conn} do
-      # conn has no Guardian resource set — current_resource returns nil
       result = AgeGate.enforce(conn, @age_gated_book)
       assert result.halted
       assert result.status == 403

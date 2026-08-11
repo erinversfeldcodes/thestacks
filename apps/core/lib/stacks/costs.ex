@@ -18,19 +18,11 @@ defmodule Stacks.Costs do
   alias Stacks.Costs.PlatformCost
   alias Stacks.Shelving.Placement
 
-  # ── Known pricing (from published rate cards) ─────────────────────────────
-  # Fly.io shared-cpu-1x, 512MB: $5.34/mo (see deploy/fly.core.toml [[vm]])
-  # Modal A10G GPU: ~$0.000463/sec (~$0.03/inference at ~60s)
-  # Neon free tier: $0 (0.5 GiB storage, 190 compute hours)
-  # Domain: ~$12/year = $1.00/month amortised
-
   @fly_core_cents 534
   @fly_vision_cents 534
   @modal_per_inference_cents 3
   @neon_cents 0
   @domain_monthly_cents 100
-
-  # ── Cost Queries ──────────────────────────────────────────────────────────
 
   @doc """
   Returns all cost line items for the current billing period (current calendar month).
@@ -68,8 +60,6 @@ defmodule Stacks.Costs do
     |> order_by([c], c.period_start)
     |> Repo.all()
   end
-
-  # ── Usage Metrics (real data from DB) ─────────────────────────────────────
 
   @doc """
   Returns platform usage metrics derived from actual database contents.
@@ -147,8 +137,6 @@ defmodule Stacks.Costs do
     ) || 0
   end
 
-  # ── Changesets ────────────────────────────────────────────────────────────
-
   @platform_cost_valid_categories ~w(hosting compute database domain)
 
   @doc "Changeset for creating or updating a platform cost line item."
@@ -175,8 +163,6 @@ defmodule Stacks.Costs do
     |> validate_number(:amount_cents, greater_than_or_equal_to: 0)
     |> unique_constraint([:service, :period_start, :period_end])
   end
-
-  # ── Upsert ────────────────────────────────────────────────────────────────
 
   @doc """
   Upserts a cost line item. If a record with the same service and period
@@ -206,8 +192,6 @@ defmodule Stacks.Costs do
 
     result
   end
-
-  # ── Cost Item Builder (single source of truth, Issue #259) ────────────────
 
   @doc """
   Builds the 5 platform cost line items for a billing period.
@@ -262,8 +246,6 @@ defmodule Stacks.Costs do
     ]
   end
 
-  # ── Seed Fixture (E2E cost-data, Issue #110) ──────────────────────────────
-
   @doc """
   Seeds the 5 static current-month platform cost line items so preview/local
   deploys always have current-period data for the `/costs` page E2E.
@@ -291,8 +273,6 @@ defmodule Stacks.Costs do
 
     :ok
   end
-
-  # ── Public Breakdown ──────────────────────────────────────────────────────
 
   @doc """
   Builds the full public cost breakdown response with real usage metrics.

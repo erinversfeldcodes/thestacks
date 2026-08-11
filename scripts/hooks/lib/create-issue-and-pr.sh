@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Creates a GitHub issue and draft PR for a branch on its first push.
-# Source this file; do not execute directly.
 
 # shellcheck source=scripts/hooks/lib/issue-file.sh
 source "$(git rev-parse --show-toplevel)/scripts/hooks/lib/issue-file.sh"
@@ -14,8 +12,6 @@ create_issue_and_pr() {
     issue_file="$(find_issue_file "$branch")"
 
     if [[ -z "$issue_file" ]]; then
-        # Branch not named after an issue. Look for any open PR and post the CI
-        # report to it rather than skipping entirely.
         local branch_pr_num
         branch_pr_num="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number' 2>/dev/null)"
         if [[ -n "$branch_pr_num" && "$branch_pr_num" != "null" ]]; then
@@ -34,9 +30,6 @@ create_issue_and_pr() {
         title="$branch"
     fi
 
-    # Check whether a GitHub issue with this title already exists — handles the
-    # case where a previous push created the issue but failed before creating the PR.
-    # Avoids creating a duplicate issue on retry.
     local issue_num
     issue_num="$(gh issue list --search "\"$title\"" --json number,title \
         --jq ".[] | select(.title == \"$title\") | .number" 2>/dev/null | head -1)"
@@ -63,8 +56,6 @@ create_issue_and_pr() {
         echo "[hook] Issue #${issue_num} created: $issue_url" >&2
     fi
 
-    # Run CI before creating the PR so it opens with real results, not a placeholder.
-    # run_ci_and_get_section is provided by update-pr-ci.sh, sourced in pre-push.
     echo "[hook] Running CI checks before creating PR (push --no-verify to skip)..." >&2
     local ci_section
     ci_section="$(run_ci_and_get_section "$repo_root")"

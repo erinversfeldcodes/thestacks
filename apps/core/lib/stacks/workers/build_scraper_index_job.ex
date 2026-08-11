@@ -49,9 +49,6 @@ defmodule Stacks.Workers.BuildScraperIndexJob do
   end
 
   def perform(%Oban.Job{args: %{}}) do
-    # Fan out one job per store that needs an index, rather than sweeping them all in
-    # one long-running job: a failure against one shop should not lose the others'
-    # work, and Oban's retry then applies per store.
     stores = Prices.stores_needing_index()
 
     if stores == [] do

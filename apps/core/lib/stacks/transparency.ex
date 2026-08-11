@@ -55,25 +55,8 @@ defmodule Stacks.Transparency do
   @cache_ttl_ms @cache_ttl_seconds * 1_000
   @live_cache_key :live_signals
 
-  # ── App scoping (Fly org-wide Prometheus) ───────────────────────────────────
-  # Fly's managed Prometheus is ORG-WIDE: every scraped series carries an `app`
-  # label (`thestacks-core` for prod, `stacks-core-pr-…` for previews). The
-  # PUBLIC page must show prod-only data, so every allowlist query is scoped to
-  # the app this node serves. The app name is derived from `FLY_APP_NAME` (set
-  # automatically on every Fly machine) with a config/default fallback, and the
-  # `app="…"` matcher is injected as a code-defined literal (NOT user input) —
-  # the allowlist remains the privacy boundary.
   @default_app "thestacks-core"
 
-  # ── Live PromQL allowlist ───────────────────────────────────────────────────
-  # Fixed, code-defined queries built ONLY from metric families registered in
-  # `Core.PromEx.Plugins.Stacks`. Each entry is an aggregate (sum/min across
-  # series) — no per-series/per-user label is projected. This list IS the live
-  # privacy boundary; a query not here can never run.
-  #
-  # Each query carries an `app="$app"` placeholder in its metric selector; the
-  # placeholder is substituted with the concrete serving-app literal at query
-  # time (see `scoped_query/1` / `app_label/0`), never with caller input.
   @allowlist [
     %{
       key: :isbn_not_found_rate,
@@ -146,8 +129,6 @@ defmodule Stacks.Transparency do
   ]
 
   @entry_public_keys [:key, :label, :what, :how, :why, :unit, :value]
-
-  # ── Public API ──────────────────────────────────────────────────────────────
 
   @doc """
   Builds the full public transparency payload:
@@ -249,8 +230,6 @@ defmodule Stacks.Transparency do
     ]
   end
 
-  # ── Live signal computation + cache ─────────────────────────────────────────
-
   defp cached_live_signals do
     case Cache.get(@live_cache_key, @cache_ttl_ms) do
       {:ok, cached} -> cached
@@ -265,8 +244,6 @@ defmodule Stacks.Transparency do
         entries
 
       :unavailable ->
-        # Do not cache a failure: retry next request. Serve the last good value
-        # stale-on-error if one exists, otherwise report unavailable.
         case Cache.get_stale(@live_cache_key) do
           {:ok, stale} -> stale
           :miss -> :unavailable
@@ -274,9 +251,6 @@ defmodule Stacks.Transparency do
     end
   end
 
-  # Runs every allowlisted query through the configured client. If EVERY query
-  # errors (e.g. token absent), the whole section is `:unavailable`. Otherwise
-  # returns the entries that resolved to a number.
   defp compute_live_signals do
     client = prometheus_client()
 
@@ -319,8 +293,6 @@ defmodule Stacks.Transparency do
     }
   end
 
-  # ── Durable aggregate queries (anonymised) ──────────────────────────────────
-
   defp edition_count do
     Repo.one(from(e in BookEdition, select: count(e.id))) || 0
   end
@@ -343,21 +315,10 @@ defmodule Stacks.Transparency do
     Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
   end
 
-  # ── App scoping ─────────────────────────────────────────────────────────────
-
-  # Substitutes the `$app` placeholder in a code-defined allowlist query with the
-  # concrete serving-app literal. The replacement value is `app_label/0` — a
-  # config/env-derived constant, NEVER caller input — so this cannot widen the
-  # fixed allowlist into a query-injection surface.
   defp scoped_query(query) when is_binary(query) do
     String.replace(query, "$app", app_label())
   end
 
-  # The Fly app whose metrics this node should expose publicly. Fly sets
-  # `FLY_APP_NAME` on every machine (`thestacks-core` in prod, `stacks-core-pr-…`
-  # on previews); a config override wins for tests/staging, and the prod app name
-  # is the final fallback so a mis-set env never blends preview traffic into the
-  # public prod page.
   defp app_label do
     Application.get_env(
       :core,

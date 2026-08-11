@@ -48,9 +48,6 @@ removeBookModal config =
             , attribute "role" "dialog"
             , attribute "aria-modal" "true"
             , attribute "aria-labelledby" titleId
-
-            -- Two-element focus trap keeps keyboard focus on the destructive
-            -- dialog's two buttons while it is open.
             , preventDefaultOn "keydown" (trapKeydownDecoder config.onWrapToFirst config.onWrapToLast)
             ]
             [ h2 [ class "modal__title", id titleId ] [ text "Remove Book" ]

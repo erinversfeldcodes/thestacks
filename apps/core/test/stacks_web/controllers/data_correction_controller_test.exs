@@ -29,16 +29,9 @@ defmodule StacksWeb.DataCorrectionControllerTest do
 
   @constraint "book_editions_isbn_ean13_checksum"
 
-  # The ISBN-10 the Wave 4 live drive found in production, verbatim.
   @isbn10 "0071615695"
   @isbn13 "9780071615693"
 
-  # ── Session helpers ───────────────────────────────────────────────────────
-
-  # An MFA-verified admin session for `user`, minted directly rather than
-  # through `POST /api/admin/auth/login`. That is deliberate: login refuses a
-  # non-owner, so going through it could never produce the token a demoted
-  # operator still holds — which is exactly the case `:require_owner` exists for.
   defp admin_session(conn, user) do
     boot_id = Core.Application.boot_id()
     {:ok, session} = SessionContext.create(user, "127.0.0.1", boot_id)
@@ -61,8 +54,6 @@ defmodule StacksWeb.DataCorrectionControllerTest do
     {conn, user}
   end
 
-  # ── Data helpers ──────────────────────────────────────────────────────────
-
   defp constraint_definition do
     %{rows: [[definition]]} =
       Repo.query!("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = $1", [
@@ -72,8 +63,6 @@ defmodule StacksWeb.DataCorrectionControllerTest do
     definition
   end
 
-  # Writes a row the current constraint forbids, the way a pre-2026-05-15 write
-  # path did: no changeset, no normalisation.
   defp plant_legacy_edition!(isbn) do
     book = insert(:editionless_book)
     id = Ecto.UUID.generate()
@@ -111,8 +100,6 @@ defmodule StacksWeb.DataCorrectionControllerTest do
     %{definition: definition, id: id}
   end
 
-  # ── Authorisation ─────────────────────────────────────────────────────────
-
   describe "authorisation" do
     test "GET is 401 without an admin token", %{conn: conn} do
       assert json_response(get(conn, "/api/admin/data_corrections"), 401)
@@ -142,8 +129,6 @@ defmodule StacksWeb.DataCorrectionControllerTest do
       assert correction_audit_rows() == []
     end
   end
-
-  # ── Dry run ───────────────────────────────────────────────────────────────
 
   describe "GET /api/admin/data_corrections" do
     test "lists every registered correction with its scope and reversibility", %{conn: conn} do
@@ -194,8 +179,6 @@ defmodule StacksWeb.DataCorrectionControllerTest do
       assert correction_audit_rows() == []
     end
   end
-
-  # ── Applying ──────────────────────────────────────────────────────────────
 
   describe "POST /api/admin/data_corrections/:name/apply" do
     test "applies the named correction and reports what it did", %{conn: conn, id: id} do
@@ -299,7 +282,6 @@ defmodule StacksWeb.DataCorrectionControllerTest do
     test "surfaces a collision with real data instead of forcing the write", %{conn: conn, id: id} do
       {conn, _owner} = as_owner(conn)
 
-      # A different edition already owns the ISBN-13 the repair would produce.
       book = insert(:book)
       Repo.insert!(build(:book_edition, book: book, isbn: @isbn13))
 
@@ -316,12 +298,6 @@ defmodule StacksWeb.DataCorrectionControllerTest do
     end
   end
 
-  # ── Targeted corrections (#376) ───────────────────────────────────────────
-
-  # The same four properties, over the verb that takes an argument. The one
-  # genuinely new property is the last describe: the two registries are separate
-  # lists, and a name may not cross between them — they take different arguments
-  # and mean different things.
   describe "POST /api/admin/data_corrections/:name/target" do
     setup do
       work = insert(:book)
@@ -467,10 +443,6 @@ defmodule StacksWeb.DataCorrectionControllerTest do
       assert work_id_of(merged.id) == work.id
     end
 
-    # The two registries are separate lists, not one union. A standing
-    # correction reached through the targeted verb would be handed an argument
-    # it has no callback for; a targeted one reached through `apply` would be
-    # run with no argument at all. Both are 404, in both directions.
     test "a standing correction is not reachable through the targeted verb", %{
       conn: conn,
       id: id

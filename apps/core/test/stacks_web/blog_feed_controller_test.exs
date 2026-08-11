@@ -30,7 +30,6 @@ defmodule StacksWeb.BlogFeedControllerTest do
       assert body =~ "On Marginalia"
       assert body =~ "/blog/#{post.id}"
 
-      # 304 on a matching ETag — importer politeness.
       conn2 =
         build_conn()
         |> put_req_header("if-none-match", etag)
@@ -40,9 +39,6 @@ defmodule StacksWeb.BlogFeedControllerTest do
     end
 
     test "⛔ a valid OWNER token changes nothing: the platform post stays absent", %{conn: conn} do
-      # The absence of :optional_auth is the security control (US-6.2.1 §4):
-      # the feed's consumer republishes what it reads, so there must be no
-      # authenticated branch at all. This is the guard the story demands.
       user = insert(:user)
       public_post(user, title: "For everyone")
 
@@ -66,7 +62,6 @@ defmodule StacksWeb.BlogFeedControllerTest do
     end
 
     test "a handle with no public posts gets a valid EMPTY feed — 200, never 404", %{conn: conn} do
-      # A 404 would make Substack drop the subscription.
       user = insert(:user)
 
       body = conn |> get("/api/feeds/u/#{user.handle}/blog") |> response(200)
@@ -82,10 +77,6 @@ defmodule StacksWeb.BlogFeedControllerTest do
     test "route ordering: /blog reaches BlogFeedController, not a bookshelf named blog", %{
       conn: conn
     } do
-      # ⚠️ Declared before `get "/feeds/u/:handle/:bookshelf_name"` in the
-      # router — if that ordering regresses, :bookshelf_name swallows "blog"
-      # and this request 404s as "Bookshelf not found". Distinguishable
-      # because THIS controller answers an empty feed with 200.
       user = insert(:user)
 
       conn = get(conn, "/api/feeds/u/#{user.handle}/blog")

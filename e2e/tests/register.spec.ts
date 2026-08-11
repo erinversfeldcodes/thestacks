@@ -73,7 +73,6 @@ test.describe("Registration flow", () => {
     await expect(
       page.locator('input[placeholder="Enter your password"]')
     ).toBeVisible();
-    // The accepted code is held read-only, exactly as checked.
     await expect(page.getByTestId("invite-code-input")).toHaveAttribute(
       "readonly",
       "readonly"
@@ -95,19 +94,16 @@ test.describe("Registration flow", () => {
     await page.goto("/login");
     await page.waitForTimeout(2000);
 
-    // Start on sign in — no display name field, no panel.
     await expect(
       page.locator('input[placeholder="Your name"]')
     ).not.toBeVisible();
 
-    // Switch to register: the gate panel, not the form (US-14.1.3).
     await page.locator('button:has-text("Register")').first().click();
     await expect(page.getByTestId("invite-only-panel")).toBeVisible();
     await expect(
       page.locator('input[placeholder="Your name"]')
     ).not.toBeVisible();
 
-    // Switch back to sign in — the panel goes with the tab.
     await page.locator('button:has-text("Sign In")').first().click();
     await expect(page.getByTestId("invite-only-panel")).not.toBeVisible();
   });
@@ -127,18 +123,15 @@ test.describe("Registration → pending (Bug-2/3 invariant)", () => {
       password: "a-strong-password",
     });
 
-    // Submit should be enabled once all four fields validate.
     const submit = page.getByTestId("login-submit");
     await expect(submit).toBeEnabled();
     await submit.click();
 
-    // The pending card appears, naming the email the confirmation was sent to.
     const pending = page.getByTestId("registration-pending");
     await expect(pending).toBeVisible();
     await expect(pending).toContainText("Check your inbox!");
     await expect(pending).toContainText(email);
 
-    // Bug-2 invariant: registration does NOT navigate into the app.
     await expect(page).toHaveURL(/\/login/);
 
     // Bug-3 invariant: registration stores NO JWT — the account is inert until
@@ -148,7 +141,6 @@ test.describe("Registration → pending (Bug-2/3 invariant)", () => {
     );
     expect(stored).toBeFalsy();
 
-    // "Back to Sign In" returns the user to the login form.
     await page.getByTestId("back-to-sign-in").click();
     await expect(page.getByTestId("login-form")).toBeVisible();
     await expect(page.getByTestId("registration-pending")).toHaveCount(0);
@@ -183,8 +175,6 @@ test.describe("Registration — sad paths", () => {
   }) => {
     await page.goto("/login");
 
-    // The "auth" suite user is seeded and confirmed — registering with its
-    // email must hit the unique-constraint 422 on the real backend.
     await fillRegisterForm(page, request, {
       displayName: "Impostor",
       email: suiteEmail("auth"),
@@ -202,9 +192,6 @@ test.describe("Registration — sad paths", () => {
     page,
     request,
   }) => {
-    // Front and back both require >= 8 chars, so a weak password is rejected at
-    // the field level and submit never fires. The message shown must be about
-    // the password — never the email-in-use copy meant for duplicate accounts.
     await page.goto("/login");
 
     await fillRegisterForm(page, request, {

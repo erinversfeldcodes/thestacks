@@ -590,10 +590,6 @@ getUploadInbox token toMsg =
         }
 
 
-
--- AUTHOR BOOKSTORE EVENTS (US-2.4.1 / #321 item 4)
-
-
 {-| One bookstore event for an author, scraped from the shop's own page.
 `eventDate` is Nothing when the page states none — the shop's page has the
 details, and the card must not pretend to a date it doesn't hold.
@@ -627,10 +623,6 @@ getAuthorEvents authorId toMsg =
         { url = baseUrl ++ "/api/authors/" ++ authorId ++ "/events"
         , expect = Http.expectJson toMsg (Decode.field "events" (Decode.list authorEventDecoder))
         }
-
-
-
--- GOODREADS LIBRARY IMPORT (US-1.1.9)
 
 
 {-| An import's summary — the progress counters the reader watches while the
@@ -676,8 +668,6 @@ type ImportError
 
 libraryImportDecoder : Decoder LibraryImport
 libraryImportDecoder =
-    -- All fields required: ImportController.import_json/1 emits every one on
-    -- every branch. A fallback here would let a wire rename pass silently.
     Decode.succeed LibraryImport
         |> andMap (Decode.field "id" Decode.string)
         |> andMap (Decode.field "status" Decode.string)
@@ -1038,10 +1028,6 @@ resolveRegister response =
                 Err (RegisterRateLimited (retryAfterSeconds metadata))
 
             else
-                -- The invite gate answers 403/409/410 with {"error":
-                -- "invite_*"} (US-14.1.3); carry the bounded reason string so
-                -- the card can explain, falling through to the plain status
-                -- for any other refusal.
                 case Decode.decodeString inviteErrorDecoder bodyText of
                     Ok reason ->
                         Err (RegisterInviteRefused reason)
@@ -1208,9 +1194,6 @@ removalOutcomeDecoder =
                         Decode.succeed PendingReview
 
                     other ->
-                        -- Fails rather than defaulting. An unrecognised status defaulting
-                        -- to Removed would tell a business their listing is gone on the
-                        -- strength of a value we do not understand.
                         Decode.fail ("unknown removal status: " ++ other)
             )
 
@@ -1449,10 +1432,6 @@ logout token toMsg =
         }
 
 
-
--- TRANSPARENCY (#241 → #235)
-
-
 {-| A single curated transparency signal, carrying the teaching metadata the
 public `/metrics` page renders as a "why we measure this" tooltip. Shared by both
 the live signals and the durable aggregates. `value` is a plain number (a rate, a
@@ -1686,27 +1665,16 @@ bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
     Decode.map4 BookDetailResponse
         (Decode.field "book" bookDecoder)
-        -- Decode.maybe alone is insufficient here: the proto-generated placementDecoder
-        -- decodes JSON null as a default struct (all fields empty/zero) because each
-        -- field uses `D.oneOf [D.field "..." ..., D.succeed default]`. Using
-        -- Decode.nullable ensures JSON null → Nothing; non-null → Just placement.
-        -- Decode.oneOf handles the case where the field is absent entirely.
         (Decode.oneOf
             [ Decode.field "placement" (Decode.nullable placementDecoder)
             , Decode.succeed Nothing
             ]
         )
-        -- The parent bookshelf's visibility (the placement ceiling), denormalised
-        -- onto the placement payload. Absent → Nothing (no client-side greying).
         (Decode.oneOf
             [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
             , Decode.succeed Nothing
             ]
         )
-        -- Every placement the viewer has of this book, oldest first (#333). An
-        -- absent key decodes to [] rather than failing, so an older server (or
-        -- the /api/books/isbn lookup before it carried them) degrades to "no
-        -- multi-shelf notice" instead of a decode error that blanks the page.
         (Decode.oneOf
             [ Decode.field "placements" (Decode.list placementDecoder)
             , Decode.succeed []
@@ -1777,10 +1745,6 @@ searchBooks :
     -> Cmd msg
 searchBooks query deep token toMsg =
     let
-        -- Deep search opts into description/review matching via `scope=deep`
-        -- (#284). The default (title-only) search emits NO scope param, so the
-        -- backend's default behaviour is unchanged and the wire URL stays
-        -- byte-identical to the pre-#284 request.
         queryParams =
             Url.Builder.string "q" query
                 :: (if deep then
@@ -1795,12 +1759,6 @@ searchBooks query deep token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] queryParams
         , body = Http.emptyBody
-
-        -- SearchController.index returns the SearchResponse envelope carrying
-        -- `collection` (the viewer's own placements) and `platform_hits`
-        -- (platform-visible books, some label-bearing). Decode it through the
-        -- generated proto decoder (mirrors catalogueResponseDecoder) into the
-        -- typed `SearchSections` the search page renders as two sections (#285).
         , expect = Http.expectJson toMsg searchResponseDecoder
         , timeout = standardTimeout
         , tracker = Nothing
@@ -1939,10 +1897,6 @@ restoreBook placementId token toMsg =
         , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- READING PROGRESS (US-1.6.6)
 
 
 {-| The reading-progress fields returned by `PUT /api/placements/:id/progress`
@@ -2269,10 +2223,6 @@ fromProtoCollectionHit : ProtoBookResp.SearchHit -> CollectionHit
 fromProtoCollectionHit hit =
     { book = Types.Book.fromProtoBook hit.book
     , bookshelfName = hit.bookshelfName
-
-    -- A book on several bookshelves used to be annotated with just one of them
-    -- (#333). Fall back to the singular name when the list is absent, so an
-    -- older server still names the one shelf it knows about rather than none.
     , bookshelfNames =
         if List.isEmpty hit.bookshelfNames then
             List.filter (\name -> name /= "") [ hit.bookshelfName ]
@@ -3205,10 +3155,6 @@ mergeFormatRequest bookId body =
     }
 
 
-
--- MARKETPLACE LISTINGS
-
-
 {-| Parameters for creating a new listing.
 -}
 type alias ListingParams =
@@ -3279,7 +3225,6 @@ createListing params token toMsg =
             Http.jsonBody
                 (Requests.encodeCreateListingRequest
                     { -- Backend Marketplace.create_listing reads book_id; the
-                      -- legacy placement_id field is left empty.
                       placementId = ""
                     , bookId = params.bookId
                     , condition = params.condition
@@ -3369,10 +3314,6 @@ getMyPlacements token toMsg =
         , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- BLOG
 
 
 {-| GET /api/blog/posts — fetch all blog posts.
@@ -3475,10 +3416,6 @@ updateBlogPost postId postData token toMsg =
         , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- SYNDICATION (US-6.2.1)
 
 
 {-| The paste-ready copy of a post for Substack's editor.
@@ -3740,10 +3677,6 @@ deleteComment commentId token toMsg =
         }
 
 
-
--- PRIVACY / VISIBILITY
-
-
 {-| PUT /api/settings/profile\_visibility — update profile visibility.
 -}
 updateProfileVisibility :
@@ -3819,10 +3752,6 @@ updatePlacementVisibility placementId visibility token toMsg =
         , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- BLOCKING / SOCIAL
 
 
 {-| A block failure.
@@ -4029,10 +3958,6 @@ getPrivacySettings token toMsg =
         }
 
 
-
--- PUBLIC PROFILE (/u/:handle) — #214
-
-
 {-| A user's public profile as seen by a viewer: redacted identity fields plus
 the bookshelves the viewer is allowed to see (visibility-filtered server-side).
 -}
@@ -4048,11 +3973,6 @@ type alias PublicProfile =
 
 type alias ProfileShelfSummary =
     { name : String
-
-    -- True only when the bookshelf is platform-visible, which is the sole case that
-    -- has an Atom feed. Sent by the server rather than derived here, so the rule lives
-    -- next to `Feeds.resolve_platform_bookshelf/2` instead of being duplicated — and so
-    -- a public payload never has to disclose the visibility tier itself.
     , hasFeed : Bool
     }
 
@@ -4072,9 +3992,6 @@ profileShelfSummaryDecoder : Decoder ProfileShelfSummary
 profileShelfSummaryDecoder =
     Decode.map2 ProfileShelfSummary
         (Decode.field "name" Decode.string)
-        -- Defaults to False when absent so an older server cannot make the client offer
-        -- a subscribe link that would 403. Absent means "unknown", and unknown must not
-        -- mean "yes" for something a reader will paste into their feed reader.
         (Decode.oneOf [ Decode.field "has_feed" Decode.bool, Decode.succeed False ])
 
 
@@ -4196,10 +4113,6 @@ getProfileShelf maybeToken handle bookshelfName toMsg =
         }
 
 
-
--- PEOPLE SEARCH (/api/search/users) — #217
-
-
 {-| A single people-search result — the redacted `public_profile_summary` shape
 (handle + display\_name + location). Shelf-less; the server excludes ghosts and
 blocked users from the result set in SQL, so every summary here is discoverable.
@@ -4250,10 +4163,6 @@ authHeaders maybeToken =
 
         Nothing ->
             []
-
-
-
--- ADMIN: SOURCE APPROVAL
 
 
 {-| A source as returned by the admin sources API.
@@ -4586,10 +4495,6 @@ type alias AdminInvite =
     }
 
 
-
--- Applicative helper for records past map8 — local, tiny, standard shape.
-
-
 andMap : Decoder a -> Decoder (a -> b) -> Decoder b
 andMap =
     Decode.map2 (|>)
@@ -4780,10 +4685,6 @@ rejectSource sourceId token toMsg =
         }
 
 
-
--- ADMIN: BOOK MODERATION (age gate)
-
-
 {-| A book as returned by the owner moderation API (#118).
 -}
 type alias AdminBook =
@@ -4873,10 +4774,6 @@ adminSetBookAgeGate bookId ageGated token toMsg =
         , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- SOURCE HEALTH (admin scraper page)
 
 
 {-| Source health record from GET /api/admin/source-health.

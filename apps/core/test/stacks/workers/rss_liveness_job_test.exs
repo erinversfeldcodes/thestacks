@@ -11,10 +11,6 @@ defmodule Stacks.Workers.RSSLivenessJobTest do
   alias Stacks.Workers.RSSLivenessJob
 
   describe "perform/1" do
-    # The job probes through the :rss_fetcher seam (#381c), so these tests run
-    # against Stacks.Enrichment.MockRssFetcher — whose probe defaults to
-    # {:error, :not_found} — and never dial. (Before the seam, they relied on
-    # `.invalid` hosts failing DNS: safe by fixture choice, not construction.)
     test "records failure when the probe finds no live feed" do
       author = insert(:author, rss_feed_url: "https://unreachable.invalid/feed.xml")
 
@@ -29,7 +25,6 @@ defmodule Stacks.Workers.RSSLivenessJobTest do
           )
         )
 
-      # Should have recorded a failure since the URL is unreachable
       assert check
       assert check.consecutive_failures >= 1
       assert check.last_failure_reason
@@ -97,21 +92,18 @@ defmodule Stacks.Workers.RSSLivenessJobTest do
     end
 
     test "handles multiple authors with mixed results in a single run" do
-      # All will fail since hosts are unreachable, but the job should not abort
       _author1 = insert(:author, rss_feed_url: "https://feed1.invalid/rss")
       _author2 = insert(:author, rss_feed_url: nil)
       _author3 = insert(:author, rss_feed_url: "https://feed3.invalid/rss")
 
       assert :ok = perform_job(RSSLivenessJob, %{})
 
-      # Only authors with rss_feed_url should have checks
       count =
         Core.Repo.aggregate(
           from(s in SourceHealthCheck, where: s.source_type == "rss_feed"),
           :count
         )
 
-      # At least the two authors with RSS URLs should have records
       assert count >= 2
     end
 

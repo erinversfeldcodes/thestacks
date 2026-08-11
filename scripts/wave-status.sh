@@ -1,45 +1,4 @@
 #!/usr/bin/env bash
-# wave-status.sh — machine-checkable completion for a staff-campaign's waves.
-#
-# WHY THIS EXISTS
-#
-# Issue-level completion is already enforced mechanically: issues/*.md carry a DoD whose
-# checked boxes must bear evidence tokens, and scripts/hooks/lib/check-issue-evidence.sh
-# fails the Stop hook otherwise. Per-issue orchestrator progress is already machine-readable:
-# plans/NNN-*-state.json, read by mcp__project-tools__get_plan_status.
-#
-# The CAMPAIGN layer had neither. A campaign's waves held ad-hoc work-unit labels (G1, G4,
-# C3, P7…) with no backing issue file and no state file, so "Wave 0 is complete" was prose
-# an agent asserted and a human had to challenge. It was challenged, twice, and was wrong
-# both times. That is not a discipline problem — completion was simply not checkable, so the
-# cheapest way to find out was to ask the agent, who had no artifact to consult either.
-#
-# This makes it checkable. `just wave-status <campaign-slug>` reads the campaign state file
-# and refuses three specific lies:
-#
-#   1. an item marked done with NO backing issues/NNN-*.md   (the G1/G4/G5/G6 defect:
-#      a work unit nobody can audit, which is also the inverse of the project's
-#      "never cite a #NNN with no backing file" rule)
-#   2. an item marked done whose issue DoD still has unchecked boxes
-#   2b. an item marked done whose issue records NO `staff-review` verdict in its Progress Notes.
-#      Every issue and epic filed by a campaign must be staff-reviewed as it is implemented, and a
-#      rule nothing checks is a rule that decays. "Was this reviewed?" has to be answerable from
-#      disk, not from someone's memory of the run — so the verdict is written into the issue and
-#      read back out here.
-#   3. a WAVE marked done while any of its items is not done  (the "wave claimed
-#      finished when it wasn't" defect)
-#
-# Exit 0 means every completion claim in the campaign is backed by an artifact. Exit 1 prints
-# what is unbacked. An agent that can run this never has to ask a human whether a wave is
-# done, and cannot credibly claim it is when it isn't.
-#
-# Bash 3.2-safe (macOS): no mapfile, no associative arrays.
-#
-# Usage:
-#   scripts/wave-status.sh                        # newest plans/*-campaign-*-state.json
-#   scripts/wave-status.sh staff-campaign-2026-07-27
-#   scripts/wave-status.sh <slug> --wave 0        # one wave only
-#   scripts/wave-status.sh <slug> --next          # print the next actionable item and exit
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
@@ -88,8 +47,6 @@ except Exception as e:
     sys.exit(2)
 
 DONE = {"complete", "done"}
-# Mirrors has_evidence() in scripts/hooks/lib/check-issue-evidence.sh. Kept in step with it
-# deliberately: one notion of "this claim carries proof" across both layers.
 EVIDENCE = re.compile(
     r'`[^`]+`|_test\.(exs|ex)|\.spec\.ts|[0-9]{4}-[0-9]{2}-[0-9]{2}|#[0-9]+'
     r'|[0-9]+ (tests?|passed|panels?|series|failures?|families|checks?)|evidence:|proven:'
@@ -167,7 +124,6 @@ def dod_boxes(path):
                 items.append(current)
             current = {"checked": stripped[3].lower() == "x", "text": stripped[5:].strip()}
         elif current is not None and raw.startswith((" ", "\t")) and stripped:
-            # Continuation of the item above.
             current["text"] += " " + stripped
         elif not stripped:
             continue
@@ -182,16 +138,10 @@ def dod_boxes(path):
     no_ev = [i["text"][:90] for i in items if i["checked"] and not EVIDENCE.search(i["text"])]
     return unchecked, no_ev
 
-
-# A staff-review verdict recorded anywhere in the issue. The vocabulary is the skill's own:
-# LGTM / LGTM WITH NOTES / DESIGN CONCERNS. Matched case-insensitively and allowed to appear in any
-# section, because the natural home is Progress Notes but a DoD box citing it is just as good
-# evidence — the point is that it is on disk, not where exactly it sits.
 STAFF_REVIEW = re.compile(
     r"staff[- ]review\b.{0,120}?(LGTM|DESIGN CONCERNS)|(LGTM|DESIGN CONCERNS).{0,120}?staff[- ]review\b",
     re.IGNORECASE | re.DOTALL,
 )
-
 
 def staff_reviewed(path):
     """True when the issue records a staff-review verdict."""
@@ -229,11 +179,6 @@ for wname in sorted(waves, key=lambda w: (len(w), w)):
 
         if istatus in DONE:
             if not issue_num:
-                # An escape hatch you must NAME. Work done straight off the plan with no issue
-                # file is how completion claims got cheap, so it stays visible — but a check
-                # that is permanently red gets ignored, and then it protects nothing. So
-                # `informal: true` + a real `note` downgrades it to a counted exemption rather
-                # than a failure. New work cannot use this: Mode E files the issue first.
                 if item.get("informal") and (item.get("note") or "").strip():
                     informal.append(f"{wname}/{iname}")
                     flags.append("INFORMAL(no issue file)")
@@ -317,7 +262,6 @@ done = sum(1 for w in waves.values() for it in (w.get("items") or {}).values()
            if (it.get("status") or "").lower() in DONE)
 print(f"All completion claims are backed. {done}/{total} items done, {len(actionable)} actionable.")
 if informal:
-    # Counted, never silent: this is the exact debt that made false completion claims cheap.
     print(f"\n{len(informal)} item(s) done WITHOUT an issue file (declared informal): "
           + ", ".join(informal))
     print("Each is unauditable by design. Do not add to this list — Mode E files the issue first.")

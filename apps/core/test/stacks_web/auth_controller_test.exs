@@ -10,9 +10,6 @@ defmodule StacksWeb.AuthControllerTest do
   alias Stacks.Accounts.Guardian
   alias StacksWeb.AuthController
 
-  # Reads the most recent audit.audit_log row for a given action via raw SQL so
-  # the assertion does not depend on the (proto-generated) Ecto schema shape.
-  # user_id is returned as a UUID string; ip_address is returned as stored.
   defp latest_audit_row(action) do
     {:ok, %{rows: [row], columns: cols}} =
       Repo.query(
@@ -29,20 +26,6 @@ defmodule StacksWeb.AuthControllerTest do
     Enum.zip(cols, row) |> Enum.into(%{})
   end
 
-  # The complete observable answer to one resend request, recorded at the byte
-  # level (Issue #373).
-  #
-  # ⛔ Deliberately NOT `json_response/2`. Decoding to a map is what makes an
-  # enumeration test unable to see an enumeration leak: `%{"message" => "sent"}`
-  # and `%{"message" => "sent "}` compare equal as far as a `assert %{"message"
-  # => _}` pattern is concerned, key order is discarded though it is plainly
-  # visible on the wire, and the status/headers are never looked at at all. A
-  # caller probing this endpoint sees bytes, so the test compares bytes.
-  #
-  # `x-request-id` is dropped for the only acceptable reason: Plug.RequestId
-  # mints it from a random 128-bit value per request with no reference to the
-  # request's content, so it differs between two *identical* calls and cannot
-  # carry account state. Every other header is compared as-is.
   defp resend_response(email) do
     conn = post(build_conn(), "/api/auth/resend-confirmation", %{email: email})
 
@@ -100,8 +83,6 @@ defmodule StacksWeb.AuthControllerTest do
     end
 
     test "first registered user gets owner role", %{conn: conn} do
-      # Ensure no users exist before this test (ConnCase wraps in a transaction,
-      # but this is declared async: false so the table should be empty)
       assert Core.Repo.aggregate(Stacks.Accounts.User, :count, :id) == 0
 
       params = %{email: "founder@example.com", password: "password123"}
@@ -150,7 +131,6 @@ defmodule StacksWeb.AuthControllerTest do
       assert %{"error" => "email_unconfirmed"} = json_response(conn, 403)
     end
 
-    # Punch #1 (Issue #124): missing-field and pool-exhaustion contracts.
     test "returns 422 with a descriptive error when fields are missing", %{conn: conn} do
       conn = post(conn, "/api/auth/login", %{})
 
@@ -171,14 +151,6 @@ defmodule StacksWeb.AuthControllerTest do
         email_confirmed: true
       )
 
-      # Force the Argon2 pool to report busy quickly instead of the 10s prod
-      # default, then saturate every worker so the login verify cannot check
-      # out a slot. The login controller must map :argon2_busy -> 503.
-      #
-      # Both the timeout override and the pool-holder release live in on_exit so
-      # a mid-test assertion failure below can't leak the global
-      # :argon2_checkout_timeout_ms override or leave the ArgonPool saturated for
-      # subsequent tests.
       original_timeout = Application.get_env(:core, :argon2_checkout_timeout_ms)
       Application.put_env(:core, :argon2_checkout_timeout_ms, 25)
 
@@ -211,10 +183,6 @@ defmodule StacksWeb.AuthControllerTest do
           end)
         end
 
-      # Release every holder from on_exit (best-effort: the pids may already have
-      # finished). on_exit runs in a separate process so Task.await/1 isn't
-      # available here — the send is enough for each holder to return and free
-      # its pool slot.
       on_exit(fn ->
         for t <- holders, do: send(t.pid, :release)
       end)
@@ -228,8 +196,6 @@ defmodule StacksWeb.AuthControllerTest do
       assert get_resp_header(busy_conn, "retry-after") == ["5"]
     end
 
-    # Punch #6 (Issue #124): a successful login must write a user.login audit
-    # entry with the acting user, resource_type "user", and a HASHED ip.
     test "writes a user.login audit entry with a hashed IP on success", %{conn: conn} do
       user =
         insert(:user,
@@ -238,8 +204,6 @@ defmodule StacksWeb.AuthControllerTest do
           email_confirmed: true
         )
 
-      # Issue #176: the audit IP is taken from the trusted Fly-Client-IP header
-      # (Fly overwrites it at the edge), not the spoofable X-Forwarded-For.
       client_ip = "203.0.113.7"
       expected_hash = :crypto.hash(:sha256, client_ip) |> Base.encode16(case: :lower)
 
@@ -253,14 +217,10 @@ defmodule StacksWeb.AuthControllerTest do
       assert row["action"] == "user.login"
       assert row["resource_type"] == "user"
       assert row["user_id"] == user.id
-      # IP must be stored hashed, never in the clear.
       assert row["ip_address"] == expected_hash
       refute row["ip_address"] == client_ip
     end
 
-    # Issue #176: X-Forwarded-For is client-supplied behind Fly and trivially
-    # spoofed. It must never be stamped into the audit provenance IP — when no
-    # trusted Fly-Client-IP header is present, fall back to conn.remote_ip.
     test "audit IP does not trust X-Forwarded-For", %{conn: conn} do
       user =
         insert(:user,
@@ -270,8 +230,6 @@ defmodule StacksWeb.AuthControllerTest do
         )
 
       spoofed_ip = "203.0.113.99"
-      # The test conn's remote_ip is the loopback default; that is the trusted
-      # fallback when no Fly-Client-IP header is set.
       fallback_ip = conn.remote_ip |> :inet.ntoa() |> to_string()
       spoofed_hash = :crypto.hash(:sha256, spoofed_ip) |> Base.encode16(case: :lower)
       fallback_hash = :crypto.hash(:sha256, fallback_ip) |> Base.encode16(case: :lower)
@@ -284,16 +242,13 @@ defmodule StacksWeb.AuthControllerTest do
       row = latest_audit_row("user.login")
 
       assert row["user_id"] == user.id
-      # The spoofed X-Forwarded-For must NOT be the recorded provenance IP.
       refute row["ip_address"] == spoofed_hash
-      # The trusted fallback (remote_ip) is what gets hashed and stored.
       assert row["ip_address"] == fallback_hash
     end
   end
 
   describe "POST /api/auth/login per-account lockout (Issue #161)" do
     setup do
-      # Tight threshold for fast tests.
       threshold = Application.get_env(:core, :login_lockout_threshold)
       window = Application.get_env(:core, :login_lockout_window_seconds)
       duration = Application.get_env(:core, :login_lockout_duration_seconds)
@@ -319,12 +274,10 @@ defmodule StacksWeb.AuthControllerTest do
         email_confirmed: true
       )
 
-      # Burn through the threshold with wrong passwords.
       for _ <- 1..3 do
         post(conn, "/api/auth/login", %{email: "lockme@example.com", password: "wrong"})
       end
 
-      # The next attempt — even with the correct password — must be 423.
       locked_conn =
         post(conn, "/api/auth/login", %{email: "lockme@example.com", password: "right-pass"})
 
@@ -396,8 +349,6 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   describe "JWT lifecycle on GET /api/auth/me (Issue #124)" do
-    # Punch #2: an expired JWT (driven through the real Guardian TTL/exp, not a
-    # hand-built AuthErrorHandler unit) must be rejected with 401.
     test "an expired JWT is rejected with 401", %{conn: conn} do
       user = insert(:user, email: "expired@example.com", email_confirmed: true)
       {:ok, expired_token, _claims} = Guardian.encode_and_sign(user, %{}, ttl: {-1, :hour})
@@ -410,14 +361,10 @@ defmodule StacksWeb.AuthControllerTest do
       assert json_response(conn, 401)
     end
 
-    # Punch #4: after logout the SAME JWT must be rejected (401). This can only
-    # pass once server-side revocation (A2) is in place — before A2, revoke is a
-    # no-op and the token stays valid (200).
     test "the same JWT is rejected with 401 after logout", %{conn: conn} do
       user = insert(:user, email: "revoke@example.com", email_confirmed: true)
       {:ok, token, _claims} = Guardian.encode_and_sign(user)
 
-      # Sanity: the token works before logout.
       pre_logout =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
@@ -425,7 +372,6 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert json_response(pre_logout, 200)
 
-      # Log out — this must revoke the token server-side.
       logout_conn =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
@@ -433,7 +379,6 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert response(logout_conn, 204)
 
-      # The same token must now be rejected.
       post_logout =
         conn
         |> put_req_header("authorization", "Bearer #{token}")
@@ -444,12 +389,6 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   describe "POST /api/auth/refresh" do
-    # Issue #173, Phase 1: proactive silent-renewal. Exchange a valid,
-    # non-revoked, non-expired JWT for a fresh one behind the :authenticated
-    # pipeline. The pipeline rejects expired/revoked/absent tokens with 401
-    # before the controller runs; a valid token is rotated (old token revoked,
-    # new token minted) and returned in login's %{token, user} shape.
-
     test "returns 200 with a fresh, different, verifiable token and a user object",
          %{conn: conn} do
       user = insert(:user, email: "refresh-happy@example.com", email_confirmed: true)
@@ -462,15 +401,12 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert %{"token" => new_token, "user" => returned_user} = json_response(refresh_conn, 200)
 
-      # The new token must be a non-empty binary and DIFFERENT from the old one.
       assert is_binary(new_token)
       assert new_token != ""
       assert new_token != old_token
 
-      # The user payload mirrors login's ProtoJSON.user shape.
       assert returned_user["email"] == "refresh-happy@example.com"
 
-      # The freshly minted token must itself verify.
       assert {:ok, _new_claims} = Guardian.decode_and_verify(new_token)
     end
 
@@ -487,8 +423,6 @@ defmodule StacksWeb.AuthControllerTest do
       assert %{"token" => new_token} = json_response(refresh_conn, 200)
       assert new_token != old_token
 
-      # Rotation proof: the OLD token must no longer authenticate — a subsequent
-      # authed request with it is rejected 401 (its guardian_tokens row is gone).
       stale_conn =
         conn
         |> put_req_header("authorization", "Bearer #{old_token}")
@@ -501,7 +435,6 @@ defmodule StacksWeb.AuthControllerTest do
       user = insert(:user, email: "refresh-revoked@example.com", email_confirmed: true)
       {:ok, token, _claims} = Guardian.encode_and_sign(user)
 
-      # Revoke server-side (deletes the guardian_tokens row), mirroring logout.
       {:ok, _claims} = Guardian.revoke(token)
 
       refresh_conn =
@@ -567,23 +500,11 @@ defmodule StacksWeb.AuthControllerTest do
         |> Guardian.Plug.put_current_token("not-a-real-token")
         |> AuthController.refresh(%{})
 
-      # Behaviour is unchanged: a fresh token is still minted and returned 200.
       assert %{"token" => new_token} = json_response(refresh_conn, 200)
       assert is_binary(new_token) and new_token != ""
 
-      # The degraded case is now counted/alertable.
       assert_receive {:telemetry, [:stacks, :auth, :refresh, :revoke_failed], %{count: 1}, %{}}
     end
-
-    # ---------------------------------------------------------------------
-    # Issue #179, Phase 1: absolute session-lifetime cap (7 days).
-    #
-    # A session carries a "sst" (session-start) anchor stamped in unix seconds
-    # at LOGIN. Refresh may rotate the token indefinitely up to 7 days from that
-    # ORIGINAL issue; the anchor is carried forward on every rotation (it does
-    # NOT reset), so once 7 days elapse from the first login the session can no
-    # longer be renewed and refresh returns 401.
-    # ---------------------------------------------------------------------
 
     test "an in-cap refresh preserves the original sst anchor (survives rotation)",
          %{conn: conn} do
@@ -599,10 +520,8 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert %{"token" => new_token} = json_response(refresh_conn, 200)
 
-      # Non-vacuity: a normal in-cap refresh still rotates to a fresh token.
       assert new_token != old_token
 
-      # Survive-rotation: the NEW token's sst equals the ORIGINAL, not reset to now.
       assert {:ok, new_claims} = Guardian.decode_and_verify(new_token)
       assert new_claims["sst"] == original_sst
     end
@@ -611,7 +530,6 @@ defmodule StacksWeb.AuthControllerTest do
          %{conn: conn} do
       user = insert(:user, email: "refresh-cap-exceeded@example.com", email_confirmed: true)
       now = System.system_time(:second)
-      # 8 days ago — beyond the 7-day cap.
       old_sst = now - 8 * 24 * 3600
       {:ok, old_token, _claims} = Guardian.encode_and_sign(user, %{"sst" => old_sst})
 
@@ -622,8 +540,6 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert %{"error" => "session_expired"} = json_response(refresh_conn, 401)
 
-      # The presented token is revoked even though no new token was minted:
-      # a follow-up authed request with it is rejected 401.
       stale_conn =
         conn
         |> put_req_header("authorization", "Bearer #{old_token}")
@@ -636,7 +552,6 @@ defmodule StacksWeb.AuthControllerTest do
          %{conn: conn} do
       user = insert(:user, email: "refresh-cap-telemetry@example.com", email_confirmed: true)
       now = System.system_time(:second)
-      # 8 days ago — beyond the 7-day cap.
       old_sst = now - 8 * 24 * 3600
       {:ok, old_token, _claims} = Guardian.encode_and_sign(user, %{"sst" => old_sst})
 
@@ -661,7 +576,6 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert %{"error" => "session_expired"} = json_response(refresh_conn, 401)
 
-      # Whitelisted-atom tag only — no token/user-id/IP in the metadata.
       assert_receive {:telemetry, [:stacks, :auth, :session, :expired], %{count: 1},
                       %{reason: :lifetime_cap}}
     end
@@ -671,7 +585,6 @@ defmodule StacksWeb.AuthControllerTest do
       user = insert(:user, email: "sst-stamp@example.com", email_confirmed: true)
       now = System.system_time(:second)
 
-      # login/2 mints via Guardian.encode_and_sign(user) with no explicit claims.
       {:ok, token, _claims} = Guardian.encode_and_sign(user)
 
       assert {:ok, claims} = Guardian.decode_and_verify(token)
@@ -685,10 +598,6 @@ defmodule StacksWeb.AuthControllerTest do
       {:ok, old_token, _claims} = Guardian.encode_and_sign(user)
       now = System.system_time(:second)
 
-      # Simulate a token minted BEFORE the absolute-cap change: current_claims
-      # carries no "sst". Drive the action directly with a real, revocable token
-      # so the missing-sst policy (stamp forward to now) is exercised without a
-      # production seam.
       refresh_conn =
         conn
         |> Guardian.Plug.put_current_resource(user)
@@ -696,10 +605,8 @@ defmodule StacksWeb.AuthControllerTest do
         |> Guardian.Plug.put_current_claims(%{"sub" => to_string(user.id)})
         |> AuthController.refresh(%{})
 
-      # Not a 500, not a lock-out: a fresh token is minted and returned.
       assert %{"token" => new_token} = json_response(refresh_conn, 200)
 
-      # The legacy session is now bounded: sst is stamped forward to ~now.
       assert {:ok, new_claims} = Guardian.decode_and_verify(new_token)
       assert is_integer(new_claims["sst"])
       assert_in_delta new_claims["sst"], now, 5
@@ -707,11 +614,6 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   describe "refresh-token families (Issue #179, Phase 2a)" do
-    # A session opens exactly one family at login. The family's current_jti
-    # tracks the single live access token; refresh advances that jti in place
-    # (same row, same family_id) rather than opening a new family, so the whole
-    # rotation chain remains one revocable unit (Phase 2b).
-
     test "login opens exactly one family whose current_jti is the minted token's jti",
          %{conn: conn} do
       user =
@@ -727,7 +629,6 @@ defmodule StacksWeb.AuthControllerTest do
       assert %{"token" => token} = json_response(login_conn, 200)
       assert {:ok, claims} = Guardian.decode_and_verify(token)
 
-      # Exactly one family row (sandboxed transaction → only this test's rows).
       assert Repo.aggregate(AuthTokenFamily, :count, :family_id) == 1
 
       family = Repo.get(AuthTokenFamily, claims["family_id"])
@@ -777,11 +678,9 @@ defmodule StacksWeb.AuthControllerTest do
       assert %{"token" => new_token} = json_response(refresh_conn, 200)
       assert {:ok, new_claims} = Guardian.decode_and_verify(new_token)
 
-      # Same family carried across rotation; the token itself rotated.
       assert new_claims["family_id"] == old_claims["family_id"]
       assert new_claims["jti"] != old_claims["jti"]
 
-      # Still exactly one family — refresh updated, did not open a new one.
       assert Repo.aggregate(AuthTokenFamily, :count, :family_id) == 1
 
       family = Repo.get(AuthTokenFamily, old_claims["family_id"])
@@ -794,9 +693,6 @@ defmodule StacksWeb.AuthControllerTest do
       user =
         insert(:user, email: "family-legacy@example.com", email_confirmed: true)
 
-      # Token minted the old way: no family_id claim. Drive the action directly
-      # with claims that carry neither sst nor family_id (a pre-Phase-2a session)
-      # so the lazy-adopt path is exercised without a production seam.
       {:ok, old_token, _claims} = Guardian.encode_and_sign(user)
 
       refresh_conn =
@@ -806,11 +702,9 @@ defmodule StacksWeb.AuthControllerTest do
         |> Guardian.Plug.put_current_claims(%{"sub" => to_string(user.id)})
         |> AuthController.refresh(%{})
 
-      # Not a 500, not a lock-out: a fresh token is minted and returned.
       assert %{"token" => new_token} = json_response(refresh_conn, 200)
       assert {:ok, new_claims} = Guardian.decode_and_verify(new_token)
 
-      # The legacy session is now tracked: a family row was lazily created.
       assert is_binary(new_claims["family_id"])
       family = Repo.get(AuthTokenFamily, new_claims["family_id"])
       assert family
@@ -820,16 +714,6 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   describe "reuse detection & family revocation (Issue #179, Phase 2b)" do
-    # A refresh-token family is one rotation chain. `current_jti` names the
-    # single live token; every OTHER jti in the family is superseded. Presenting
-    # a superseded token on any authed request is REUSE (an already-rotated
-    # token replayed, benignly by a stale tab or maliciously by a thief). The
-    # verify_claims gate — which runs on EVERY request, before guardian_db's
-    # on_verify row-presence check — detects the non-current jti and revokes the
-    # WHOLE family, burning the live token too. #180 adds a 20s grace window for
-    # the IMMEDIATELY-PREVIOUS token only, so a genuine reuse is now a token
-    # OLDER than the immediate predecessor (2+ rotations back) or the previous
-    # token past grace — both still burn.
     defp login_token!(conn, email) do
       insert(:user,
         email: email,
@@ -848,9 +732,6 @@ defmodule StacksWeb.AuthControllerTest do
       {token_a, claims_a} = login_token!(conn, "reuse-detect@example.com")
       family_id = claims_a["family_id"]
 
-      # Rotate twice: A → B → C. Token B is now the immediate predecessor (inside
-      # the #180 grace window); token A is TWO rotations back — past the grace
-      # window's single-predecessor scope, so replaying it is genuine reuse.
       refresh_b =
         conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
 
@@ -861,19 +742,14 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert %{"token" => token_c} = json_response(refresh_c, 200)
 
-      # Replay the OLD token A (2-back) on an authed endpoint → 401 (reuse). Grace
-      # applies only to the immediate predecessor (B), never to A.
       replay_conn =
         conn |> put_req_header("authorization", "Bearer #{token_a}") |> get("/api/auth/me")
 
       assert json_response(replay_conn, 401)
 
-      # The whole family is now revoked (revoked_at stamped)...
       family = Repo.get(AuthTokenFamily, family_id)
       assert family.revoked_at
 
-      # ...so the CURRENT token C is ALSO rejected — a detected replay burns the
-      # entire session, not just the replayed token.
       burned_conn =
         conn |> put_req_header("authorization", "Bearer #{token_c}") |> get("/api/auth/me")
 
@@ -890,8 +766,6 @@ defmodule StacksWeb.AuthControllerTest do
       assert %{"token" => token_b} = json_response(refresh_conn, 200)
       assert {:ok, claims_b} = Guardian.decode_and_verify(token_b)
 
-      # Non-vacuity: the legit CURRENT token verifies repeatedly and does NOT
-      # trip the reuse gate (guards against over-revoking on every request).
       ok1 = conn |> put_req_header("authorization", "Bearer #{token_b}") |> get("/api/auth/me")
       assert json_response(ok1, 200)
       ok2 = conn |> put_req_header("authorization", "Bearer #{token_b}") |> get("/api/auth/me")
@@ -905,36 +779,28 @@ defmodule StacksWeb.AuthControllerTest do
          %{conn: conn} do
       {token_a, _claims_a} = login_token!(conn, "logout-family@example.com")
 
-      # Refresh so the family has a live current token (token B).
       refresh_conn =
         conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
 
       assert %{"token" => token_b} = json_response(refresh_conn, 200)
       assert {:ok, claims_b} = Guardian.decode_and_verify(token_b)
 
-      # Log out with the current token.
       logout_conn =
         conn |> put_req_header("authorization", "Bearer #{token_b}") |> delete("/api/auth/logout")
 
       assert response(logout_conn, 204)
 
-      # The current token is dead...
       after_conn =
         conn |> put_req_header("authorization", "Bearer #{token_b}") |> get("/api/auth/me")
 
       assert json_response(after_conn, 401)
 
-      # ...and the family is marked revoked, so any rotated token sharing this
-      # family_id (e.g. a thief's already-rotated chain) is rejected on next use.
       family = Repo.get(AuthTokenFamily, claims_b["family_id"])
       assert family.revoked_at
     end
   end
 
   describe "rotation grace window (Issue #180, Phase 1)" do
-    # Rotation records the predecessor jti + rotated_at so the reuse gate can
-    # honour the JUST-rotated old token for a short grace window (20s) instead
-    # of burning the family on a benign in-flight / multi-tab race.
     defp login_token_g!(conn, email) do
       insert(:user,
         email: email,
@@ -962,10 +828,8 @@ defmodule StacksWeb.AuthControllerTest do
       {:ok, claims_b} = Guardian.decode_and_verify(token_b)
 
       family = Repo.get(AuthTokenFamily, family_id)
-      # The OLD token's jti is preserved as the predecessor; current advanced.
       assert family.previous_jti == claims_a["jti"]
       assert family.current_jti == claims_b["jti"]
-      # rotated_at was stamped ~now (at or after the pre-refresh timestamp).
       assert family.rotated_at
       assert DateTime.compare(family.rotated_at, before) in [:gt, :eq]
     end
@@ -974,17 +838,12 @@ defmodule StacksWeb.AuthControllerTest do
          %{conn: conn} do
       {token_a, claims_a} = login_token_g!(conn, "grace-inflight@example.com")
 
-      # Rotate → token B. token A's jti is now the immediate predecessor,
-      # rotated ~now. (guardian_db deletes token A's row on rotation, so we
-      # exercise the family gate directly with the captured predecessor jti.)
       refresh_conn =
         conn |> put_req_header("authorization", "Bearer #{token_a}") |> post("/api/auth/refresh")
 
       assert %{"token" => token_b} = json_response(refresh_conn, 200)
       {:ok, claims_b} = Guardian.decode_and_verify(token_b)
 
-      # An in-flight request carrying the just-rotated old token: honoured within
-      # grace (would 401 + burn the whole family under bare #179).
       assert :ok =
                Accounts.check_token_family(
                  claims_b["family_id"],
@@ -992,7 +851,6 @@ defmodule StacksWeb.AuthControllerTest do
                  claims_a["sub"]
                )
 
-      # And the family is NOT revoked — the current token keeps working.
       family = Repo.get(AuthTokenFamily, claims_b["family_id"])
       assert is_nil(family.revoked_at)
     end
@@ -1020,21 +878,10 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   describe "POST /api/auth/resend-confirmation" do
-    # ⛔ THE test for this endpoint (Issue #373, US-14.4.2).
-    #
-    # The cases are asserted equal TO EACH OTHER, not each equal to some expected
-    # shape. "Returns 200 for a real email" — which is how the forgot-password
-    # tests directly above are written — cannot fail on a leak: it is satisfied
-    # by an endpoint that answers 200/"sent" for a registered address and
-    # 200/"no such account" for an unregistered one. Only comparing the answers
-    # against one another can see the difference between them.
     test "no_enumeration: unconfirmed, confirmed, capped and unknown addresses get one identical answer" do
       insert(:unconfirmed_user, email: "waiting@example.com")
       insert(:user, email: "already-in@example.com", email_confirmed: true)
 
-      # The fourth case, and the one where the server does LEAST work: an
-      # unconfirmed account past the resend cap, for which no link is issued at
-      # all. It must still be indistinguishable from the other three.
       too_old = insert(:unconfirmed_user, email: "long-abandoned@example.com")
 
       {1, _} =
@@ -1075,19 +922,12 @@ defmodule StacksWeb.AuthControllerTest do
              capped:  #{inspect(capped)}
              """
 
-      # Pins the shared answer, so the four cannot converge by all becoming a
-      # 500 (or all becoming nothing) and still pass the equalities above — and
-      # proves the headers arm of the comparison is carrying real content rather
-      # than comparing two empty lists.
       assert unconfirmed.status == 200
       assert unconfirmed.body =~ "fresh link"
 
       assert {"content-type", "application/json; charset=utf-8"} in unconfirmed.headers
     end
 
-    # The positive control for the equality test. Without it, an endpoint that
-    # ignored its input entirely — and sent nobody anything — would satisfy
-    # no_enumeration perfectly.
     test "an unconfirmed account is issued a NEW link, and the old one stops working" do
       user = insert(:unconfirmed_user, email: "waiting@example.com")
       old_token = user.email_confirmation_token
@@ -1104,8 +944,6 @@ defmodule StacksWeb.AuthControllerTest do
       assert args["params"]["token"] == new_token,
              "the email must carry the token that was just stored"
 
-      # The reissued link works and the superseded one does not — a re-issued
-      # credential retires its predecessor.
       assert {:error, :invalid} = Stacks.Email.confirm_email(old_token)
       assert {:ok, confirmed} = Stacks.Email.confirm_email(new_token)
       assert confirmed.email_confirmed
@@ -1125,20 +963,12 @@ defmodule StacksWeb.AuthControllerTest do
       assert Repo.all(Oban.Job) == []
     end
 
-    # Shape, not existence — answers the same for every address, so it is not a
-    # leak. Mirrors forgot-password.
     test "returns 422 when the email param is missing", %{conn: conn} do
       conn = post(conn, "/api/auth/resend-confirmation", %{})
 
       assert json_response(conn, 422)
     end
 
-    # ⛔ The second half of no-enumeration. A body that refuses to answer the
-    # question is worthless if the *limiter* answers it — "you were throttled on
-    # request 4 instead of request 9" is the same fact, told by timing instead of
-    # by text. The `:auth` bucket is keyed per-IP and consumed in the plug before
-    # the action runs, so this must hold by construction; the test is what keeps
-    # a later "cheaper limit for addresses we don't recognise" from being added.
     test "rate limiting is not an oracle: a real and an unknown address are throttled identically" do
       insert(:unconfirmed_user, email: "waiting@example.com")
 
@@ -1172,8 +1002,6 @@ defmodule StacksWeb.AuthControllerTest do
              unknown: #{inspect(unknown)}
              """
 
-      # Positive control: the limiter is actually engaged, so `real == unknown`
-      # is not the trivial truth of two all-200 lists.
       assert 429 in real, "expected the :auth bucket to reject once the limit was passed"
     end
   end
@@ -1206,17 +1034,6 @@ defmodule StacksWeb.AuthControllerTest do
   end
 
   describe "rate limiting on auth endpoints" do
-    # Rate limiting is disabled in test.exs by default to keep tests fast.
-    # This describe block re-enables it and uses a dedicated IP range
-    # (10.99.x.x) to avoid cross-test contamination. ETS is cleared after
-    # each test so counts don't bleed across tests in this block.
-    #
-    # The :auth bucket's production default is 60/60s — sized for
-    # NAT-shared IPs hitting login traffic. Pin a tight 5/60s value
-    # here so the boundary tests below can fire with a small loop
-    # rather than 60+ HTTP requests. See rate_limiter.ex moduledoc
-    # for the prod sizing rationale and rate_limiter_test.exs for the
-    # same per-test override pattern.
     setup do
       original = Application.get_env(:core, :rate_limiting_enabled)
       Application.put_env(:core, :rate_limiting_enabled, true)
@@ -1242,9 +1059,6 @@ defmodule StacksWeb.AuthControllerTest do
     end
 
     test "returns 429 after exceeding rate limit on register", %{conn: conn} do
-      # Use a dedicated IP so these requests don't interfere with other tests.
-      # Issue #176: the limiter keys on the trusted Fly-Client-IP header, not
-      # the spoofable X-Forwarded-For.
       conn = put_req_header(conn, "fly-client-ip", "10.99.1.1")
 
       for n <- 1..5 do
@@ -1264,9 +1078,6 @@ defmodule StacksWeb.AuthControllerTest do
     end
 
     test "returns 429 after exceeding rate limit on login", %{conn: conn} do
-      # Use a dedicated IP so these requests don't interfere with other tests.
-      # Issue #176: the limiter keys on the trusted Fly-Client-IP header, not
-      # the spoofable X-Forwarded-For.
       conn = put_req_header(conn, "fly-client-ip", "10.99.1.2")
 
       insert(:user,
@@ -1290,18 +1101,11 @@ defmodule StacksWeb.AuthControllerTest do
       assert response(rate_limited_conn, 429)
     end
 
-    # Issue #176 integration proof: buckets must be keyed on the trusted
-    # Fly-Client-IP through the real :api → RateLimiter pipeline, NOT on the
-    # shared remote_ip. Two clients differ ONLY by Fly-Client-IP (same conn /
-    # remote_ip); exhausting client A must not spill onto client B. Against the
-    # old XFF impl this is RED — it ignores fly-client-ip, so A and B collapse
-    # into one remote_ip bucket and B would be blocked.
     test "per-Fly-Client-IP isolation: exhausting one client does not block another",
          %{conn: conn} do
       client_a = put_req_header(conn, "fly-client-ip", "10.99.2.1")
       client_b = put_req_header(conn, "fly-client-ip", "10.99.2.2")
 
-      # Exhaust client A's :auth bucket (pinned limit 5).
       for n <- 1..5 do
         post(client_a, "/api/auth/register", %{
           email: "iso-a#{n}@example.com",
@@ -1317,8 +1121,6 @@ defmodule StacksWeb.AuthControllerTest do
 
       assert response(overflow_a, 429)
 
-      # Client B shares the remote_ip but has a distinct Fly-Client-IP — it must
-      # still be allowed (registration succeeds with 201, not a 429).
       allowed_b =
         post(client_b, "/api/auth/register", %{
           email: "iso-b1@example.com",
@@ -1331,20 +1133,16 @@ defmodule StacksWeb.AuthControllerTest do
 
   describe "integration: register → confirm → login → access protected route → logout" do
     test "full auth flow works end to end", %{conn: conn} do
-      # Register — returns confirmation message, no JWT
       reg_conn =
         post(conn, "/api/auth/register", %{email: "flow@example.com", password: "password123"})
 
       assert %{"message" => "confirmation_email_sent"} = json_response(reg_conn, 201)
 
-      # Login fails before confirmation
       pre_confirm_conn =
         post(conn, "/api/auth/login", %{email: "flow@example.com", password: "password123"})
 
       assert %{"error" => "email_unconfirmed"} = json_response(pre_confirm_conn, 403)
 
-      # Confirm the user's email directly (in production this happens via
-      # the confirmation link, but Oban jobs don't run in :manual test mode)
       user = Stacks.Accounts.get_user_by_email("flow@example.com")
 
       {:ok, _} =
@@ -1355,13 +1153,11 @@ defmodule StacksWeb.AuthControllerTest do
         })
         |> Core.Repo.update()
 
-      # Login succeeds after confirmation
       login_conn =
         post(conn, "/api/auth/login", %{email: "flow@example.com", password: "password123"})
 
       assert %{"token" => login_token} = json_response(login_conn, 200)
 
-      # Access protected route
       me_conn =
         conn
         |> put_req_header("authorization", "Bearer #{login_token}")
@@ -1370,7 +1166,6 @@ defmodule StacksWeb.AuthControllerTest do
       assert %{"user" => returned_user} = json_response(me_conn, 200)
       assert returned_user["email"] == "flow@example.com"
 
-      # Logout
       logout_conn =
         conn
         |> put_req_header("authorization", "Bearer #{login_token}")
@@ -1380,13 +1175,6 @@ defmodule StacksWeb.AuthControllerTest do
     end
   end
 
-  # ── Auth §12 operational-metric emission (Issue #206) ──────────────────────
-  #
-  # Proves the auth counters actually FIRE from the real controller code paths
-  # (not just that PromEx can export them — that is the reporter-tag-set proof
-  # in prom_ex_custom_metrics_test.exs). Each test attaches a real telemetry
-  # handler, drives the endpoint, and asserts the exact event + bounded tag.
-  # Removing any emitter makes the corresponding assert_receive time out.
   describe "auth §12 telemetry emission" do
     defp attach_auth_events(events) do
       test_pid = self()

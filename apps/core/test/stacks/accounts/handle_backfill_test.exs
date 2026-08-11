@@ -15,10 +15,6 @@ defmodule Stacks.Accounts.HandleBackfillTest do
 
   alias Core.Repo
 
-  # MUST stay identical to the UPDATE expression in
-  # priv/repo/migrations/20260714200500_backfill_and_constrain_user_handles.exs.
-  # (Kept here so the load-bearing backfill logic is testable without recreating the
-  # pre-migration nullable schema.)
   @backfill_expr """
   coalesce(
     nullif(
@@ -49,7 +45,6 @@ defmodule Stacks.Accounts.HandleBackfillTest do
     test "produces a valid handle (matches the app's handle format) for a normal name" do
       handle = backfill("Ada Lovelace")
       assert handle =~ ~r/^ada_lovelace_[0-9a-f]{6}$/
-      # Same shape the app validates: [a-z0-9_]{3,30}
       assert handle =~ ~r/^[a-z0-9_]{3,30}$/
     end
 
@@ -66,7 +61,6 @@ defmodule Stacks.Accounts.HandleBackfillTest do
 
     test "truncates the slug to 20 chars before the suffix (stays within the 30-char limit)" do
       handle = backfill("Supercalifragilisticexpialidocious Reader")
-      # slug ≤ 20 + "_" + 6 = ≤ 27 chars, always within the [a-z0-9_]{3,30} format.
       assert handle =~ ~r/^[a-z0-9_]{3,30}$/
       slug = String.replace(handle, ~r/_[0-9a-f]{6}$/, "")
       assert String.length(slug) <= 20
@@ -74,15 +68,12 @@ defmodule Stacks.Accounts.HandleBackfillTest do
 
     test "the random suffix makes two identical display names collide-resistant" do
       handles = for _ <- 1..50, do: backfill("Ada Lovelace")
-      # 50 draws of a 6-hex suffix from the same slug → effectively no duplicates.
       assert length(Enum.uniq(handles)) == length(handles)
     end
   end
 
   describe "DB-level constraints (#211 tighten)" do
     test "the NOT NULL constraint rejects a handle-less insert" do
-      # Bypass the changeset (which auto-assigns a handle) to prove the DB itself enforces.
-      # password_hash is supplied so the insert fails specifically on handle, not on it.
       assert_raise Postgrex.Error, ~r/handle.*not.?null|null.*handle/is, fn ->
         Repo.query!(
           "INSERT INTO op.users (id, email, password_hash, display_name, role, profile_visibility, created_at, updated_at) " <>

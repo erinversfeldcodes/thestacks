@@ -81,8 +81,6 @@ simulateStreamEvent status maybeBookId isDuplicate =
                     "rejected"
 
                 TimedOut ->
-                    -- The SSE loop's synthetic status, spelled exactly as
-                    -- `UploadController.sse_receive_loop/4` spells it.
                     "timeout"
 
         ( bookId, bookIds ) =
@@ -561,17 +559,13 @@ inboxResumeToAShelfIsFourDeliberateSteps =
     test "inbox_resume_to_a_shelf_is_four_deliberate_steps: pick, confirm, choose, place" <|
         \() ->
             startWithInbox [ awaitingItem "img-1" "book-1" ]
-                -- 1. The reader picks the item out of the inbox.
                 |> ProgramTest.clickButton "Check this one"
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Piranesi" "Susanna Clarke")
-                -- 2. The reader agrees it is the right book.
                 |> ProgramTest.clickButton "Yes, that's it"
                 |> ProgramTest.ensureViewHas [ testIdSelector "upload-shelf-picker" ]
-                -- 3. The reader chooses which of their bookshelves.
                 |> ProgramTest.clickButton "Library"
-                -- 4. And only now is anything filed.
                 |> ProgramTest.clickButton "Add to Library"
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/bookshelves/library/placements"
@@ -598,7 +592,6 @@ inboxResumeKeepsNoTryAgain =
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Wrong Book" "Wrong Author")
                 |> ProgramTest.clickButton "No, try again"
-                -- Against the ORIGINAL image, with the rejected book excluded.
                 |> ProgramTest.expectHttpRequest "POST"
                     "/api/upload/img-from-inbox/reject-identification"
                     (.body >> Expect.equal "{\"rejected_book_ids\":[\"book-1\"]}")
@@ -619,8 +612,6 @@ waitingCopyOffersTheDoorAfterTwentySeconds =
             startUpload
                 |> simulateUploadAccepted
                 |> ProgramTest.ensureViewHasNot [ testIdSelector "upload-leave-note" ]
-                -- Three ticks — 15 seconds — is still inside the p95 #349
-                -- measured. Nothing is said.
                 |> ProgramTest.update WaitTick
                 |> ProgramTest.update WaitTick
                 |> ProgramTest.update WaitTick
@@ -690,10 +681,6 @@ waitingWatchdogNoticesASilentStream =
                             [ testIdSelector "upload-stream-silent"
                             , Selector.text "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return."
                             ]
-
-                        -- ⛔ And it is NOT reported as a failure. The job is
-                        -- very probably still running; #342's derivation exists
-                        -- precisely because calling that a timeout is a lie.
                         , Query.hasNot [ testIdSelector "upload-error" ]
                         ]
                     )
@@ -720,14 +707,7 @@ waitingWatchdogIsResetByAHeartbeat =
                 |> ProgramTest.update WaitTick
                 |> ProgramTest.expectView
                     (Expect.all
-                        -- The stream is demonstrably alive, so nothing is said
-                        -- about silence...
                         [ Query.hasNot [ testIdSelector "upload-stream-silent" ]
-
-                        -- ...but 50 seconds HAVE passed, and the leave note is
-                        -- driven by total elapsed time rather than by contact.
-                        -- Without this, "no silence warning" would also pass
-                        -- against a heartbeat that reset the wrong clock.
                         , Query.has [ testIdSelector "upload-leave-note" ]
                         ]
                     )
@@ -806,18 +786,14 @@ manualIsbnDuplicateNoticeInformsWithoutBlocking =
                             ]
                         }
                     )
-                -- The add HAPPENED — this is the terminal screen, not a block.
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-complete")
                     , Selector.text "\"The Power of Habit\" added to Wish List"
                     ]
-                -- …and the reader is told about the shelf they already had it on.
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours")
                     , Selector.text "You already have this on your Library."
                     ]
-                -- Every control on the completion card still works: "Add
-                -- another" returns to the drop zone rather than dead-ending.
                 |> ProgramTest.clickButton "Add another"
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Drag a photo of a book cover here" ]
@@ -880,13 +856,9 @@ photoPathDuplicateNoticeInformsWithoutBlocking =
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours")
                     , Selector.text "You already have this on your Library and Antilibrary."
                     ]
-                -- Nothing is blocked: the verification step still advances…
                 |> ProgramTest.clickButton "Yes, that's it"
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-shelf-picker") ]
-                -- …and the notice follows the reader to the moment of choosing,
-                -- where every shelf — including the ones it is already on —
-                -- remains selectable.
                 |> ProgramTest.expectViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-already-yours") ]
 
@@ -911,10 +883,8 @@ manualIsbnSameWorkOffersMerge =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/books/confirm"
                     (simulateConfirmMergeRequiredResponse "work-existing-1")
-                -- The 409 is an OUTCOME, not an error: no "check the number".
                 |> ProgramTest.ensureViewHasNot
                     [ Selector.text "We couldn't find a book with that ISBN. Please check the number and try again." ]
-                -- The work is fetched only to name it in the prompt.
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/work-existing-1"
                     (simulateBookResponse "work-existing-1" "The Name of the Rose" "Umberto Eco")
@@ -922,18 +892,10 @@ manualIsbnSameWorkOffersMerge =
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-same-work")
                     , Selector.text "You already have \"The Name of the Rose\" by Umberto Eco. Add this edition to it?"
                     ]
-                -- Merging adds an edition to the named work.
                 |> ProgramTest.clickButton "Yes, merge"
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/books/work-existing-1/merge-format"
                     (simulateMergeFormatResponse "work-existing-1" "edition-new-1" "9780156453806" "Paperback")
-                -- #355: the screen MOVES ON. The question that was just
-                -- answered, and the button that answered it, are gone — the
-                -- live drive found both still on screen after a 200, which is
-                -- indistinguishable from nothing having happened and invites a
-                -- second click that re-posts an applied merge.
-                -- Structural first, so a copy edit cannot quietly disarm this:
-                -- the prompt's own testid, asserted PRESENT above, is gone.
                 |> ProgramTest.ensureViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-same-work") ]
                 |> ProgramTest.ensureViewHasNot
@@ -942,14 +904,8 @@ manualIsbnSameWorkOffersMerge =
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-complete")
                     , Selector.text "\"The Name of the Rose\" has a new edition"
-
-                    -- Named from the server's own answer, not a client-side
-                    -- edition-count guess.
                     , Selector.text "The Paperback edition (ISBN 9780156453806) is now listed on the book's page."
                     ]
-                -- Nothing was placed: `confirm/2` answered 409 before it placed
-                -- anything and a merge places nothing either, so this reader
-                -- must not be left believing they now own the book.
                 |> ProgramTest.expectViewHas
                     [ Selector.text "It isn't on one of your bookshelves yet — open the book to add it." ]
 
@@ -980,10 +936,6 @@ manualIsbnAlreadyOnThatShelfSaysSo =
                         , placements = [ { placementId = "pl-wish", bookshelfName = "wishlist" } ]
                         }
                     )
-                -- `completeHeading` is one `case` returning one string, so
-                -- matching the already-on wording is the same guarantee as
-                -- refuting the added-to wording — without a prose negative
-                -- that could pass by matching nothing.
                 |> ProgramTest.expectViewHas
                     [ Selector.text "\"The Power of Habit\" is already on your Wish List" ]
 
@@ -1238,28 +1190,11 @@ uploadSendFailures =
                         [ Selector.text "Your photo could not be sent, and we cannot say why. Please try again in a moment." ]
         , test "⛔ the three do not share a sentence" <|
             \() ->
-                -- Without this, a `sendError` that ignored its argument would
-                -- satisfy at most one of the three above and fail the rest —
-                -- but a `sendError` returning ONE new sentence for everything
-                -- would fail them all in a way that reads as three copy edits.
-                -- This states the invariant directly.
                 [ Http.BadStatus 429, Http.BadStatus 413, Http.BadStatus 418 ]
                     |> List.map (\err -> Upload.sendError err)
                     |> distinctCount
                     |> Expect.equal 3
         , -- ⛔ Added because a probe found nothing (#374).
-          --
-          -- Overwriting the error at the *commit* step is caught by the three
-          -- cases above, but the R2 PUT step had the same defect — a literal
-          -- `Failure Http.NetworkError` in place of the error it was handed —
-          -- and reintroducing it there left all 1637 tests green, because no
-          -- test drove `R2PutCompleted`'s failure leg at all. It does now.
-          --
-          -- ⚠️ `UploadInitialised`'s failure leg carries the identical one-line
-          -- fix and is NOT covered here: its constructor takes a `File`, which
-          -- is opaque and cannot be built in pure Elm, so the message cannot be
-          -- delivered from a test. The pattern is proved here; that site is
-          -- proved by reading.
           test "a 429 on the R2 PUT keeps its status instead of becoming a network error" <|
             \() ->
                 startUpload
@@ -1410,22 +1345,13 @@ uploadMergeFormatSuccess =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/books/book-1/merge-format"
                     (simulateMergeFormatResponse "book-1" "edition-new-1" "9780141988511" "Hardback")
-                -- #355: the prompt is answered, so the prompt is gone.
                 |> ProgramTest.ensureViewHasNot [ Selector.text "Already in Your Library" ]
                 |> ProgramTest.ensureViewHasNot [ Selector.text "Yes, merge" ]
-                -- This used to assert "2 editions", computed as
-                -- `book.editionCount + 1` off a book fetched earlier — a number
-                -- the client cannot know and was reading from the very cache
-                -- #355 found stale. The card now reports the row the server
-                -- says it wrote.
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-complete")
                     , Selector.text "\"Duplicate Book\" has a new edition"
                     , Selector.text "The Hardback edition (ISBN 9780141988511) is now listed on the book's page."
                     ]
-                -- This reader was only offered a merge because the book is
-                -- already on one of their bookshelves, so the shelf hint would
-                -- be false here.
                 |> ProgramTest.expectViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-merge-shelf-hint") ]
 
@@ -1463,7 +1389,6 @@ uploadManualIsbnValidation =
         \() ->
             startUpload
                 |> ProgramTest.clickButton "Enter ISBN manually instead"
-                -- Enter an invalid ISBN
                 |> ProgramTest.update (ManualIsbnChanged "1234567890")
                 |> ProgramTest.update SubmitManualIsbn
                 |> ProgramTest.ensureViewHas
@@ -1477,14 +1402,11 @@ uploadReset =
     test "upload_reset: from identification failed state -> click reset -> returns to drop zone" <|
         \() ->
             startUpload
-                -- Get to IdentificationFailed state via StreamError
                 |> simulateUploadAccepted
                 |> ProgramTest.update StreamError
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "The Library Is Unreachable" ]
-                -- Click the reset button
                 |> ProgramTest.clickButton "Try Another Photo"
-                -- Assert we're back at the upload area
                 |> ProgramTest.ensureViewHas
                     [ Selector.class "upload-area" ]
                 |> ProgramTest.expectViewHas
@@ -1520,11 +1442,8 @@ uploadAgeGated =
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-age-gated"
                     (simulateBookWithVisibilityTier "book-age-gated" "Adult Title" "Adult Author" "age_gated")
-                -- We are in the verifying step for the identified book.
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "We think this is…" ]
-                -- Age-gate notice is rendered (informational only — there is no
-                -- self-serve "verify age" CTA anymore; ADR-020).
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-age-gate-notice") ]
                 |> ProgramTest.expectViewHas
@@ -1546,14 +1465,12 @@ uploadMultiBookPartialFailure =
             startUpload
                 |> simulateUploadAccepted
                 |> ProgramTest.update (StreamEvent (simulateMultiBookStreamEvent [ "book-a", "book-b", "book-c" ]))
-                -- Two resolve normally...
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-a"
                     (simulateBookResponse "book-a" "First Book" "Author One")
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-b"
                     (simulateBookResponse "book-b" "Second Book" "Author Two")
-                -- ...and the third fails the underlying book fetch.
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-c"
                     (Http.BadStatus_
@@ -1564,8 +1481,6 @@ uploadMultiBookPartialFailure =
                         }
                         ""
                     )
-                -- The two resolved books are listed, alongside a "Could not identify"
-                -- placeholder for the failed fetch.
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Books Identified!" ]
                 |> ProgramTest.ensureViewHas
@@ -1574,8 +1489,6 @@ uploadMultiBookPartialFailure =
                     [ Selector.text "Second Book" ]
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Could not identify" ]
-                -- Confirming placement on a partial-failure result must not crash —
-                -- the program continues to render the identified list.
                 |> ProgramTest.update Upload.ConfirmPlacement
                 |> ProgramTest.expectViewHas
                     [ Selector.text "First Book" ]
@@ -1597,12 +1510,9 @@ uploadRejectIdentificationRetries =
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Wrong Guess" "Wrong Author")
-                -- Verifying step is now active.
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "We think this is…" ]
-                -- Click "No, try again" — this fires RejectIdentification.
                 |> ProgramTest.clickButton "No, try again"
-                -- The server acknowledges the rejection with 202.
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/upload/img-test-001/reject-identification"
                     (Http.GoodStatus_
@@ -1613,11 +1523,6 @@ uploadRejectIdentificationRetries =
                         }
                         ""
                     )
-                -- Model is back in the Uploading step, waiting spinner is showing
-                -- while we wait for the re-run vision pipeline to emit SSE events.
-                -- (The copy is "Reading your photo..." since #351 — the old
-                -- "Processing image..." was the sentence that implied imminence
-                -- for as long as 35 minutes.)
                 |> ProgramTest.expectViewHas
                     [ testIdSelector "upload-loading"
                     , Selector.text "Reading your photo..."
@@ -1639,15 +1544,11 @@ uploadAdultsOnly =
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Adult Title" "Adult Author")
-                -- Move from Verifying to the shelf picker.
                 |> ProgramTest.clickButton "Yes, that's it"
-                -- The adults-only checkbox is present on the shelf picker.
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-adults-only") ]
-                -- Tick it, then confirm placement.
                 |> ProgramTest.update ToggleAdultsOnly
                 |> ProgramTest.update ConfirmPlacement
-                -- The age-gate PUT was dispatched (fails here if it was not).
                 |> ProgramTest.simulateHttpResponse "PUT"
                     "/api/books/book-1/age-gate"
                     (Http.GoodStatus_
@@ -1658,7 +1559,6 @@ uploadAdultsOnly =
                         }
                         "{}"
                     )
-                -- Placement is still in flight; the spinner is showing.
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Adding to shelf..." ]
 
@@ -1677,11 +1577,8 @@ uploadAdultsOnlyHiddenWhenFlagOff =
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-1"
                     (simulateBookResponse "book-1" "Adult Title" "Adult Author")
-                -- Move from Verifying to the shelf picker.
                 |> ProgramTest.clickButton "Yes, that's it"
-                -- The shelf picker is shown...
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-shelf-picker") ]
-                -- ...but the adults-only checkbox is absent (flag off).
                 |> ProgramTest.expectViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-adults-only") ]

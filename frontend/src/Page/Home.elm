@@ -71,9 +71,6 @@ init maybeToken =
             ( Landing, Cmd.none )
 
         Just token ->
-            -- Only the shelves are wanted here; drop the response's visibility
-            -- (it exists for the owner bookshelf page's RSS gate, not the home
-            -- glimpse), exactly as Page.Bookshelf.LookingForHome does.
             ( Collection { preview = Loading }
             , Api.getBookshelf "library" token (PreviewLoaded << Result.map .shelves)
             )
@@ -95,14 +92,8 @@ update msg model =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- A failed glimpse must NOT take the home down with it:
-                        -- the Add-Book CTA and continue-reading affordance still
-                        -- render (see `viewCollection`), the shelf glimpse alone
-                        -- degrades.
                         ( Collection { data | preview = Failure err }, Cmd.none, NoOut )
 
-        -- A late `PreviewLoaded` arriving after the reader has signed out (model
-        -- is now `Landing`) has nothing to update.
         ( PreviewLoaded _, Landing ) ->
             ( model, Cmd.none, NoOut )
 
@@ -175,7 +166,6 @@ viewPreview preview =
                 [ text "Fetching a glimpse of your shelves…" ]
 
         Failure _ ->
-            -- Degrade gracefully: no glimpse, but the actions below still stand.
             p [ class "home-collection__status" ]
                 [ text "We couldn't reach your shelves just now — your collection is still there." ]
 

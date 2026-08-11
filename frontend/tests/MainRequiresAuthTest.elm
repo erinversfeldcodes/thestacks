@@ -54,7 +54,6 @@ expectedAuth route =
             True
 
         Import ->
-            -- The reader's own shelves arrive here; nothing to import signed out.
             True
 
         Search ->
@@ -84,10 +83,6 @@ expectedAuth route =
         About ->
             False
 
-        -- Unauthenticated on purpose. US-2.5.3: removal "does not require account
-        -- creation" — a business that never asked to be listed must not have to sign up
-        -- in order to leave. This branch existing is the deliberate decision that
-        -- exhaustiveness forces.
         ListingRemoval ->
             False
 
@@ -125,7 +120,6 @@ expectedAuth route =
             True
 
         AdminInvites ->
-            -- Owner-only (US-14.1.3), like every /admin surface.
             True
 
         AdminScraperConfig ->
@@ -156,9 +150,6 @@ expectedAuth route =
             False
 
         ResendConfirmation ->
-            -- Public by necessity: a reader who cannot confirm their email
-            -- cannot sign in, so requiring auth here would close the only door
-            -- out of that state.
             False
 
         ResetPassword _ ->
@@ -295,11 +286,6 @@ suite =
         , describe "admin routes are gated on an ADMIN token, not the ordinary one (#303)"
             [ test "an owner with no admin token gets the sign-in gate, not the page" <|
                 \() ->
-                    -- ⛔ The bug this closes. All four admin pages were handed the ordinary Guardian
-                    -- token and rendered; every request then 401'd against the `:admin` pipeline,
-                    -- which needs a `typ: "admin_session"` token. Four surfaces were built, routed,
-                    -- tested and unreachable — and nothing failed, because each page's own tests
-                    -- passed a token straight into a mocked API.
                     Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageAdminGate
@@ -312,9 +298,6 @@ suite =
                         |> Expect.equal False
             , test "every admin route is gated, not just the new one" <|
                 \() ->
-                    -- `isAdminRoute` is exhaustive over Route on purpose; this asserts the four are
-                    -- actually wired to it, so adding a fifth admin page cannot silently skip the
-                    -- gate.
                     [ AdminSourceApproval, AdminScraperConfig, AdminBookModeration, AdminRemovalRequests ]
                         |> List.map
                             (\r ->

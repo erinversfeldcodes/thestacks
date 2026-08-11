@@ -15,8 +15,6 @@ defmodule CoreWeb.RobotsTxtTest do
   """
   use CoreWeb.ConnCase, async: true
 
-  # Blocking these would deindex the site. `Google-Extended` (training) and
-  # `Googlebot` (search) are distinct tokens and it is easy to conflate them.
   @search_engines ~w(Googlebot bingbot DuckDuckBot)
 
   describe "GET /robots.txt" do
@@ -37,7 +35,6 @@ defmodule CoreWeb.RobotsTxtTest do
     test "keeps user-scoped paths out of search results", %{conn: conn} do
       body = get(conn, "/robots.txt").resp_body
 
-      # US-10.4.1: these paths carry user-authored, user-identifying content.
       for path <- ~w(/api/ /u/ /shelf/ /post/ /listing/) do
         assert body =~ "Disallow: #{path}",
                "the `*` group no longer disallows #{path}"
@@ -45,9 +42,6 @@ defmodule CoreWeb.RobotsTxtTest do
     end
 
     test "opts the site out of AI training crawlers" do
-      # Sampled across vendors rather than asserting the full list: the point is
-      # that the policy exists and covers the major pipelines, not that one exact
-      # roster is frozen. Adding a crawler should not require editing a test.
       body = get(build_conn(), "/robots.txt").resp_body
 
       for agent <- ~w(GPTBot ClaudeBot CCBot Bytespider PerplexityBot Google-Extended) do
@@ -57,9 +51,6 @@ defmodule CoreWeb.RobotsTxtTest do
     end
 
     test "each AI crawler group actually disallows something" do
-      # A `User-agent:` line with no `Disallow: /` under it is worse than absent:
-      # it reads as a policy while granting full access. Parse the groups rather
-      # than trusting adjacency in the file.
       body = get(build_conn(), "/robots.txt").resp_body
 
       for agent <- ~w(GPTBot ClaudeBot CCBot Bytespider PerplexityBot Google-Extended) do
@@ -70,8 +61,6 @@ defmodule CoreWeb.RobotsTxtTest do
     end
 
     test "does not block search engines", %{conn: conn} do
-      # The inverse mistake to E2, and a far more damaging one: a `Disallow: /`
-      # group for Googlebot would remove the site from search entirely.
       body = get(conn, "/robots.txt").resp_body
 
       for agent <- @search_engines do
@@ -81,9 +70,6 @@ defmodule CoreWeb.RobotsTxtTest do
     end
   end
 
-  # Returns the directive lines belonging to `agent`'s group, or [] if it has none.
-  # RFC 9309 §2.2.1: a group is one or more `User-agent:` lines followed by rules,
-  # and the most specific matching group replaces the `*` group outright.
   defp directives_for(body, agent) do
     body
     |> String.split("\n")

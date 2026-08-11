@@ -153,10 +153,6 @@ profileConfig handle bookshelfName =
     }
 
 
-
--- MODEL
-
-
 type alias Model =
     { shelves : RemoteData Http.Error (List Shelf)
     , showAgeGate : Bool
@@ -167,19 +163,10 @@ type alias Model =
     , viewMode : ShelfViewMode
     , sortState : BookList.SortState
     , token : Maybe String
-
-    -- Shelf organisation (US-1.7.1 / #190, G5). `organiserBusy` gates every control while
-    -- a mutation is in flight, so two conflicting orders cannot be queued.
     , organiser : ShelfOrganiser.State
     , organiserBusy : Bool
     , organiserError : Maybe String
-
-    -- Undo-remove (US-1.6.4 extension, #375). Seeded by `withPendingUndo` when the
-    -- reader arrives here straight off a removal; see `UndoToast` below.
     , undoToast : UndoToast
-
-    -- Roving tabindex (#388): the spine that last held arrow-key focus, and so
-    -- the bookcase's single tab stop. Nothing = the grid's first spine.
     , focusedSpine : Maybe String
     }
 
@@ -265,21 +252,9 @@ type Msg
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
-        -- ⛔ The state and the command are decided TOGETHER, and that is the
-        -- point. `shelves` used to be an unconditional `Loading` while the
-        -- command below could be `Cmd.none` — a page claiming a request was in
-        -- flight when none had been made. Nothing would ever resolve it, so the
-        -- loading view (below) would have become a skeleton that shimmers
-        -- forever. `Loading` is a promise; only issue it with the request that
-        -- keeps it.
         ( apiCmd, initialShelves ) =
             case ( config.readOnly, config.profileHandle ) of
                 ( True, Just handle ) ->
-                    -- Browsing another reader's shelf: optional-auth GET so the
-                    -- backend visibility-filters against the viewer (even anon).
-                    -- The read-only path never renders RSS, so the profile
-                    -- payload carries no visibility; default it to "owner" to
-                    -- reuse the shared ShelvesLoaded response shape.
                     ( Api.getProfileShelf maybeToken
                         handle
                         config.apiName
@@ -313,9 +288,6 @@ init config maybeToken userId =
       , organiser = ShelfOrganiser.init
       , organiserBusy = False
       , organiserError = Nothing
-
-      -- No toast by default: a plain visit to a bookshelf has nothing to undo.
-      -- `withPendingUndo` is the only way in.
       , undoToast = ToastHidden
       , focusedSpine = Nothing
       }
@@ -368,21 +340,11 @@ expireToastAfterDelay =
     Process.sleep undoToastMillis |> Task.perform (\_ -> ToastExpired)
 
 
-
--- UPDATE
-
-
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
 update msg model =
     case msg of
         ShelvesLoaded key result ->
             if key /= requestKey model.config then
-                -- Stale: this response belongs to a bookshelf the user has since
-                -- navigated away from. Because Library / Antilibrary / Wish List
-                -- share Main's single `PageBookshelf` constructor, it still lands
-                -- here — applying it would paint the previous shelf's books onto
-                -- this one (Issue #274). Drop it; this page's own request is still
-                -- in flight and will resolve on its own.
                 ( model, Cmd.none, NoOut )
 
             else
@@ -411,8 +373,6 @@ update msg model =
 
         BookClicked bk ->
             if model.config.readOnly then
-                -- Read-only browse is look-only (US-10.5.3): a spine click must not
-                -- escape into the viewer's OWN owner-mode BookDetail (Add/move/remove).
                 ( model, Cmd.none, NoOut )
 
             else
@@ -444,9 +404,6 @@ update msg model =
             handleOrganiser subMsg model
 
         ShelfMutated (Ok ()) ->
-            -- Refetch rather than trusting the local order. A create assigns a position the
-            -- client never chose, and a delete renumbers — so the server's answer is the
-            -- only trustworthy one, and the extra round trip is cheap on a rare action.
             ( { model | organiserBusy = False, organiserError = Nothing }
             , reloadShelves model
             , NoOut
@@ -457,23 +414,12 @@ update msg model =
                 ( model, Cmd.none, SessionExpired )
 
             else
-                -- Refetch on failure too: the optimistic reorder below already moved the
-                -- row, so leaving it there would show an order the server rejected.
                 ( { model | organiserBusy = False, organiserError = Just (mutationError err) }
                 , reloadShelves model
                 , NoOut
                 )
 
         UndoRemove ->
-            -- ⚠️ Dispatches on `mutationToken`, not `model.token` — an undo is a
-            -- write, so it goes through the read-only guard rather than round it
-            -- (Issue #332). The tuple match is the structure: with `Nothing` for
-            -- the token there is no branch to take and this falls through to the
-            -- silent catch-all, exactly as `handleOrganiser` does.
-            --
-            -- Matching `ToastOffered` and no other state is what makes a second
-            -- click during a slow undo (or after a failure) inert, without a
-            -- separate `busy` flag to keep in step.
             case ( model.undoToast, mutationToken model ) of
                 ( ToastOffered removal, Just token ) ->
                     ( { model | undoToast = ToastRestoring removal }
@@ -485,10 +431,6 @@ update msg model =
                     ( model, Cmd.none, NoOut )
 
         UndoCompleted (Ok ()) ->
-            -- Refetch rather than re-inserting the spine locally, for
-            -- `reloadShelves`' reason: the server decides which shelf row the
-            -- restored placement sits on and in what position, and a client that
-            -- guessed would paint a bookcase the server disagrees with.
             ( { model | undoToast = ToastHidden }
             , reloadShelves model
             , NoOut
@@ -499,9 +441,6 @@ update msg model =
                 ( model, Cmd.none, SessionExpired )
 
             else
-                -- The failure REPLACES the offer and does not auto-dismiss: a
-                -- toast that says "couldn't undo that" and then vanishes before
-                -- it is read leaves the reader believing the undo worked.
                 ( { model | undoToast = ToastFailed (undoError model.config err) }
                 , Cmd.none
                 , NoOut
@@ -513,10 +452,6 @@ update msg model =
                     ( { model | undoToast = ToastHidden }, Cmd.none, NoOut )
 
                 _ ->
-                    -- `Process.sleep` cannot be cancelled, so this message arrives
-                    -- whatever happened in the meantime. Restoring, already
-                    -- hidden, or showing a failure: none of those are the offer
-                    -- this timer was started for, so it has nothing to retract.
                     ( model, Cmd.none, NoOut )
 
         SpineNavKey originId key ->
@@ -524,9 +459,6 @@ update msg model =
                 Success shelves ->
                     case GridNav.nextFocus key originId (navRows shelves) of
                         Just nextId ->
-                            -- The Result is dropped: the model already points
-                            -- at the spine, and a focus miss (the node vanished
-                            -- mid-move) self-heals on the next key press.
                             ( { model | focusedSpine = Just nextId }
                             , Task.attempt (\_ -> SpineFocusAttempted)
                                 (Browser.Dom.focus ("spine-" ++ nextId))
@@ -534,7 +466,6 @@ update msg model =
                             )
 
                         Nothing ->
-                            -- Off the edge of the grid: focus stays put.
                             ( model, Cmd.none, NoOut )
 
                 _ ->
@@ -637,16 +568,11 @@ handleOrganiser subMsg model =
             ( { model | organiser = { dragging = Nothing } }, Cmd.none, NoOut )
 
         ( ShelfOrganiser.DragOver, _, _ ) ->
-            -- ⚠️ Must leave `dragging` alone. `dragover` fires continuously while a row is
-            -- hovered, so anything that clears the drag state here makes every drop a
-            -- silent no-op — which is exactly the bug this clause replaced.
             ( model, Cmd.none, NoOut )
 
         ( ShelfOrganiser.DropOn targetId, Just token, Success shelves ) ->
             case model.organiser.dragging of
                 Just draggedId ->
-                    -- Drop resolves to the same pure move the buttons use, so the two
-                    -- affordances cannot disagree about what a move means.
                     persistOrder
                         (moveToId draggedId targetId shelves)
                         token
@@ -656,10 +582,6 @@ handleOrganiser subMsg model =
                     ( model, Cmd.none, NoOut )
 
         _ ->
-            -- Read-only, no token, or shelves not loaded: nothing this page may organise.
-            -- Silent because the controls are not rendered in any of those states, so
-            -- reaching here is a stale click — or, in read-only, a message that had no
-            -- business arriving at all.
             ( model, Cmd.none, NoOut )
 
 
@@ -750,9 +672,6 @@ loadError config err =
             "Your " ++ shelf ++ " is taking too long to arrive. The library may be busy — please try again."
 
         Http.NetworkError ->
-            -- No "try again": since #368 the app reloads this shelf itself the
-            -- moment the connection returns, so the copy promises exactly what
-            -- happens and asks for nothing.
             "The library is unreachable. Your "
                 ++ shelf
                 ++ " will reload by itself as soon as the connection returns."
@@ -773,8 +692,6 @@ undoError : Config -> Http.Error -> String
 undoError config err =
     case err of
         Http.BadStatus 409 ->
-            -- `Shelving.restore_placement/2` refuses rather than reconciling two
-            -- rows; the reason it can refuse safely is exactly what this says.
             "That book is already back on your " ++ config.label ++ "."
 
         Http.BadStatus 404 ->
@@ -811,10 +728,6 @@ mutationError err =
             "Could not save that change. Please try again."
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     let
@@ -831,8 +744,6 @@ view model =
                         (viewShelfLabel cfg.label
                             :: ViewModeToggle.view model.viewMode ViewModeChanged
                             :: (if cfg.readOnly then
-                                    -- The RSS feed link is an owner affordance; a viewer
-                                    -- browsing another reader's shelf gets no feed control.
                                     []
 
                                 else
@@ -855,9 +766,6 @@ view model =
                         div [ attribute "aria-live" "polite" ]
                             [ case model.shelves of
                                 NotAsked ->
-                                    -- No request was issued (no credential), so
-                                    -- there is nothing to wait for and nothing
-                                    -- to report: the bare bookcase frame.
                                     viewBookshelfFromShelves model []
 
                                 Loading ->
@@ -987,8 +895,6 @@ who glances at the page for half a second draws the right conclusion.
 viewLoadingBookshelf : Model -> Html Msg
 viewLoadingBookshelf model =
     let
-        -- Whose shelf is being fetched. "your Library" is wrong on someone
-        -- else's shelf, and read-only browse reaches this same view.
         whose =
             case model.config.profileHandle of
                 Just handle ->
@@ -1043,19 +949,10 @@ viewBookshelfFromShelves model shelves =
 
         SpineView ->
             let
-                -- Auto-flow: flatten every placement across the server's shelves
-                -- and re-group into rows that fill the bookcase inner width, so the
-                -- bookcase grows a new row only as books demand it. This is a
-                -- deliberate presentation choice — the frontend does not surface the
-                -- physical op.shelves boundaries (#151). The shelves themselves are
-                -- live backend infrastructure (place_book assigns each placement a
-                -- shelf); we simply render across them rather than per-shelf.
                 packedRows =
                     List.concatMap .placements shelves
                         |> groupIntoRows bookcaseInnerWidth
 
-                -- The bookcase's one tab stop (#388): the last arrow-focused
-                -- spine while it is still on the grid, else the first spine.
                 tabStopId =
                     let
                         gridIds =

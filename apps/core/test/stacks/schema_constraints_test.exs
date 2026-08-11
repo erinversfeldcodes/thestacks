@@ -25,8 +25,6 @@ defmodule Stacks.SchemaConstraintsTest do
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Shelving.Placement
 
-  # A raw op.book_editions row. `overrides` is merged last so a test can omit a
-  # column (proving NOT NULL) or supply a bad value (proving a CHECK).
   defp raw_edition(book_id, overrides) do
     now = DateTime.utc_now()
 
@@ -47,8 +45,6 @@ defmodule Stacks.SchemaConstraintsTest do
     Repo.insert_all("book_editions", [row], prefix: "op")
   end
 
-  # A 13-digit ISBN with a correct EAN-13 check digit, from a block no fixture
-  # hard-codes. Mirrors `Stacks.Factory.next_isbn/0`'s reasoning.
   defp valid_isbn do
     body = "97819" <> String.pad_leading(to_string(System.unique_integer([:positive])), 7, "0")
     body <> check_digit(body)
@@ -64,10 +60,6 @@ defmodule Stacks.SchemaConstraintsTest do
 
     Integer.to_string(rem(10 - rem(sum, 10), 10))
   end
-
-  # ---------------------------------------------------------------------------
-  # D1 — book_editions.verification_source
-  # ---------------------------------------------------------------------------
 
   describe "op.book_editions.verification_source NOT NULL (20260730200000)" do
     test "an out-of-band insert that omits the provenance is rejected" do
@@ -111,15 +103,10 @@ defmodule Stacks.SchemaConstraintsTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # D4 — the ISBN checksum CHECK
-  # ---------------------------------------------------------------------------
-
   describe "op.book_editions ISBN checksum CHECK (20260730200300)" do
     test "an out-of-band insert with a wrong check digit is rejected" do
       book = insert(:book)
-      # 9780306406158 is the textbook example of a near-miss: correct body,
-      # check digit off by one (the real one is 7).
+
       error =
         assert_raise Postgrex.Error, fn ->
           raw_edition(book.id, %{isbn: "9780306406158"})
@@ -143,9 +130,6 @@ defmodule Stacks.SchemaConstraintsTest do
     test "an ISBN-10, which the write path always converts, is rejected in its 10-digit form" do
       book = insert(:book)
 
-      # 0306406152 is the same book's valid ISBN-10. The changeset normalises it
-      # to 9780306406157 before storage, so a stored 10-digit value would itself
-      # be a defect — the constraint says so.
       error =
         assert_raise Postgrex.Error, fn ->
           raw_edition(book.id, %{isbn: "0306406152"})
@@ -159,10 +143,6 @@ defmodule Stacks.SchemaConstraintsTest do
       assert {1, _} = raw_edition(book.id, %{isbn: "9780306406157"})
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # D4 — case-insensitive email uniqueness
-  # ---------------------------------------------------------------------------
 
   describe "op.users lower(email) unique index (20260730200500)" do
     test "an out-of-band insert cannot add an address that differs only in case" do
@@ -201,15 +181,10 @@ defmodule Stacks.SchemaConstraintsTest do
 
       assert user.email == "mixed.case@example.test"
 
-      # …and is therefore reachable by the login lookup, which downcases its
-      # argument. Before #335 D4 this account existed and could never log in.
       assert Stacks.Accounts.get_user_by_email("mixed.case@example.test").id == user.id
     end
 
     test "a second registration differing only in case is a changeset error, not a 500" do
-      # A CONFIRMED account: `register/1` reaps an abandoned (unconfirmed) signup
-      # on the same address by design, so an unconfirmed first user would be
-      # erased and the second registration would legitimately succeed.
       insert(:user, email: "dup@example.test")
 
       assert {:error, changeset} =
@@ -222,10 +197,6 @@ defmodule Stacks.SchemaConstraintsTest do
       assert "has already been taken" in errors_on(changeset).email
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # D3 — the two owner FKs the deletion path used to compensate for
-  # ---------------------------------------------------------------------------
 
   describe "op.auth_token_families.user_id FK (20260730200200)" do
     test "a family naming no user is rejected" do
@@ -255,7 +226,6 @@ defmodule Stacks.SchemaConstraintsTest do
 
       assert family_count(user.id) == 1
 
-      # A bare delete: no Ecto.Multi, no GDPR module, nothing that remembers.
       Repo.delete!(user)
 
       assert family_count(user.id) == 0
@@ -294,10 +264,6 @@ defmodule Stacks.SchemaConstraintsTest do
              ) == 1
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # D2 — placements.book_edition_id
-  # ---------------------------------------------------------------------------
 
   describe "op.bookshelf_placements.book_edition_id FK (20260730193135)" do
     test "placing a book points the placement at the work's primary edition" do
@@ -343,7 +309,6 @@ defmodule Stacks.SchemaConstraintsTest do
     end
 
     test "the same book on two bookshelves keeps both placements and both editions" do
-      # #333 made this a legal state. `book_edition_id` must not narrow it.
       user = insert(:user)
       book = insert(:book)
       edition = hd(Repo.preload(book, :editions).editions)
@@ -357,10 +322,6 @@ defmodule Stacks.SchemaConstraintsTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
-
   defp family_count(user_id) do
     Repo.aggregate(from(f in AuthTokenFamily, where: f.user_id == ^user_id), :count, :family_id)
   end
@@ -373,8 +334,6 @@ defmodule Stacks.SchemaConstraintsTest do
     )
   end
 
-  # Writes an op.guardian_tokens row the way guardian_db does — schemalessly,
-  # since the project owns no Ecto schema for that table.
   defp insert_raw_token(sub) do
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
 

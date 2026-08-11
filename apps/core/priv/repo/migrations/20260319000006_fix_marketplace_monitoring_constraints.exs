@@ -19,7 +19,6 @@ defmodule Core.Repo.Migrations.FixMarketplaceMonitoringConstraints do
     EXCEPTION WHEN duplicate_object THEN NULL; END $$;
     """)
 
-    # Drop the incorrect ON DELETE RESTRICT constraints and re-add as SET NULL
     execute("ALTER TABLE op.transactions DROP CONSTRAINT IF EXISTS transactions_buyer_id_fkey")
     execute("ALTER TABLE op.transactions DROP CONSTRAINT IF EXISTS transactions_seller_id_fkey")
 

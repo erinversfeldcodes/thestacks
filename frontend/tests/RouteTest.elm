@@ -297,9 +297,6 @@ suite =
                     fromPath "/search"
                         |> Expect.equal Search
             , -- #318 TR-4: the consent page folded into Privacy. The legacy path
-              -- resolves to SettingsPrivacy in the SPA (a full-page load is 302'd
-              -- server-side before the SPA sees it — proven in
-              -- CoreWeb.PageControllerTest).
               test "legacy /settings/consent resolves to Privacy" <|
                 \_ ->
                     fromPath "/settings/consent"

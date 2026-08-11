@@ -32,46 +32,37 @@ run_linter() {
     RC=$?
 }
 
-# ── drop_column bad ───────────────────────────────────────────────────────────
 test_case "drop_column_bad" "destructive remove/drop_column without @breaking_ok fails"
 run_linter "$FIXTURES/drop_column_bad.exs"
 assert_exit_nonzero "$RC" "drop_column_bad.exs causes linter to exit non-zero"
 assert_contains "$OUT" "drop_column_bad.exs" "output names the offending file"
 assert_contains "$OUT" "breaking_ok" "output explains the missing annotation"
 
-# ── drop_column ok ────────────────────────────────────────────────────────────
 test_case "drop_column_ok" "annotated drop_column passes and reason is echoed"
 run_linter "$FIXTURES/drop_column_ok.exs"
 assert_exit_zero "$RC" "drop_column_ok.exs exits 0 (annotation present)"
-# The linter should print the extracted reason so reviewers can read it in CI
-# logs without opening the file.
 assert_contains "$OUT" "cover_image_url superseded" \
     "linter prints the @breaking_ok reason to stdout"
 
-# ── rename bad (multi-line) ──────────────────────────────────────────────────
 test_case "rename_bad_multiline" "rename split across lines is still detected"
 run_linter "$FIXTURES/rename_bad.exs"
 assert_exit_nonzero "$RC" "rename_bad.exs causes linter to exit non-zero"
 assert_contains "$OUT" "rename_bad.exs" "output names the offending file"
 assert_contains "$OUT" "rename" "output mentions the rename op"
 
-# ── modify null: false bad ────────────────────────────────────────────────────
 test_case "modify_not_null_bad" "modify ..., null: false without annotation fails"
 run_linter "$FIXTURES/modify_not_null_bad.exs"
 assert_exit_nonzero "$RC" "modify_not_null_bad.exs causes linter to exit non-zero"
 assert_contains "$OUT" "modify_not_null_bad.exs" "output names the offending file"
 
-# ── safe additive ─────────────────────────────────────────────────────────────
 test_case "safe_additive" "add_column (nullable) passes cleanly"
 run_linter "$FIXTURES/safe.exs"
 assert_exit_zero "$RC" "safe.exs exits 0"
 
-# ── create_table with canonical def down reversal ────────────────────────────
 test_case "create_table_with_down" "drop table inside def down is not destructive"
 run_linter "$FIXTURES/create_table_with_down.exs"
 assert_exit_zero "$RC" "create_table_with_down.exs exits 0 (drop only in down)"
 
-# ── multiple files in one invocation ─────────────────────────────────────────
 test_case "multiple_files" "argv with >1 file exits non-zero if ANY is bad"
 run_linter \
     "$FIXTURES/safe.exs" \

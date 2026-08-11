@@ -80,9 +80,6 @@ defmodule Core.PromEx.MetricAudienceTest do
              "to the public /metrics page: " <> inspect(non_public)
   end
 
-  # Map an exported series name back to its registered family key. Distribution
-  # series carry _bucket/_sum/_count; counters export `<family>_count_total`,
-  # which ends in `_total` (never stripped), so this only strips histogram suffixes.
   defp normalize_family(name) do
     cond do
       String.ends_with?(name, "_bucket") -> String.replace_suffix(name, "_bucket", "")

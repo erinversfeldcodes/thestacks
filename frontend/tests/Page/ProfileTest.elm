@@ -110,9 +110,6 @@ suite =
                 outMsgFor (Err (Http.BadStatus 401))
                     |> Expect.equal SessionExpired
         , -- Paired contract (#220): the Elixir serializer key-set assertions live in
-          -- apps/core/test/stacks_web/proto_json_test.exs (public_profile/2 +
-          -- public_profile_summary/1). This decoder and that serializer MUST describe
-          -- the same redacted shape — update both sides together or CI drifts.
           describe "publicProfileDecoder (redaction + null tolerance)"
             [ test "decodes a full payload" <|
                 \_ ->
@@ -149,8 +146,6 @@ suite =
                             )
             , test "ignores any leaked account/PII keys (redaction is structural)" <|
                 \_ ->
-                    -- Even if the server erroneously included email/role/consent, the
-                    -- decoder's record type has no such fields, so they cannot surface.
                     """
                     {"handle":"ada","display_name":"Ada","email":"a@x.com","role":"admin",
                      "consent_analytics":true,"bookshelves":[]}

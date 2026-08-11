@@ -118,7 +118,6 @@ defmodule StacksWeb.AdminController do
     end
   end
 
-  # Parse an ISO 8601 datetime string, or return a default (for missing optional params).
   defp parse_datetime(nil, :from) do
     {:ok, DateTime.add(DateTime.utc_now(), -30, :day)}
   end

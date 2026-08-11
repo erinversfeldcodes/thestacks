@@ -47,10 +47,6 @@ type alias Placement =
     }
 
 
-
--- MAPPING
-
-
 parseFormat : String -> Maybe Format
 parseFormat s =
     case s of
@@ -124,10 +120,6 @@ readingStatusToString status =
             "abandoned"
 
 
-
--- DECODERS
-
-
 {-| The placement decoder unifies the multiple proto placement shapes
 (PlacementDetail with embedded book, BookPlacement with bookshelf\_name,
 and PlacementRef) into the single app-level Placement type.
@@ -138,21 +130,6 @@ falls back to the slim shape (with bookshelf\_name, no book).
 -}
 placementDecoder : Decoder Placement
 placementDecoder =
-    -- Capture top-level `visibility` and `has_user_writing` regardless of which
-    -- base placement shape matched — the proto base decoders drop unknown fields,
-    -- so we layer these optional reads on top. `has_user_writing` (#287) is a
-    -- server-computed flag (not a proto field) that the bookshelf payload adds
-    -- alongside each PlacementDetail; absent/false → no bookmark ribbon.
-    --
-    -- ⛔ `visibility` is parsed HERE, at the boundary, not at each use site. It
-    -- was a `Maybe String` carried into the view layer, where three separate
-    -- places asked `placement.visibility == Just "owner"` and a fourth called
-    -- `Visibility.fromString` on it again. A wire string that survives into the
-    -- app's own types is a decode that has not finished: every reader has to
-    -- know the enum's spelling, a typo in any one of them is a silent `False`,
-    -- and the compiler cannot tell "not owner-only" from "not a visibility I
-    -- recognise". After this the app holds a `Visibility` and the string exists
-    -- only between the socket and this line.
     Decode.map3 (\p vis writing -> { p | visibility = vis, hasUserWriting = writing })
         placementBaseDecoder
         (Decode.maybe (Decode.field "visibility" Decode.string)

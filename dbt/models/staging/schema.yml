@@ -1,9 +1,6 @@
 version: 2
 
 models:
-  # -------------------------------------------------------------------------
-  # Core models
-  # -------------------------------------------------------------------------
 
   - name: stg_books
     description: >
@@ -437,10 +434,6 @@ models:
       - name: published_at
         description: Published at.
 
-  # -------------------------------------------------------------------------
-  # Social models (Issue #043)
-  # -------------------------------------------------------------------------
-
   - name: stg_user_blocks
     description: >
       Proto-synced staging model for user_blocks.
@@ -553,10 +546,6 @@ models:
         tests:
           - not_null
 
-  # -------------------------------------------------------------------------
-  # Blog models (Issue #043)
-  # -------------------------------------------------------------------------
-
   - name: stg_blog_posts
     description: >
       Proto-synced staging model for blog_posts.
@@ -616,10 +605,6 @@ models:
         description: Timestamp when the record was created.
         tests:
           - not_null
-
-  # -------------------------------------------------------------------------
-  # Marketplace models (Issue #043)
-  # -------------------------------------------------------------------------
 
   - name: stg_offer_threads
     description: >
@@ -750,10 +735,6 @@ models:
         description: Timestamp when the record was created.
         tests:
           - not_null
-
-  # -------------------------------------------------------------------------
-  # Monitoring models (Issue #043)
-  # -------------------------------------------------------------------------
 
   - name: stg_source_health_checks
     description: >

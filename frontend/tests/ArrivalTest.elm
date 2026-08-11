@@ -90,10 +90,6 @@ suite =
         ]
 
 
-
--- COPY (named once, so a test cannot assert copy the page does not have)
-
-
 expiryCopy : String
 expiryCopy =
     "The library closed your session for safekeeping — sign in again to return."
@@ -119,10 +115,6 @@ cardFor arrival =
     Login.init arrival
         |> Login.view
         |> Query.fromHtml
-
-
-
--- ONE NOTICE PER ARRIVAL
 
 
 {-| The negative control for every notice test below. Paired with the positives
@@ -229,10 +221,6 @@ confirmationExpiredOpensTheResendForm =
                 (cardFor Login.ConfirmationExpired)
 
 
-
--- SPENDING THE ARRIVAL
-
-
 modeSwitchSpendsTheArrival : Test
 modeSwitchSpendsTheArrival =
     test "mode_switch_spends_arrival: moving to Register drops the notice that brought them here" <|
@@ -284,9 +272,6 @@ aSubmitFailureOutranksTheNotice =
             in
             Expect.all
                 [ \_ ->
-                    -- positive control: the SAME arrival shows the notice while
-                    -- the submit has not failed. Without it, "the notice is
-                    -- absent" would be satisfied by a card that never shows one.
                     Login.view expired
                         |> Query.fromHtml
                         |> Query.has [ Selector.text expiryCopy ]
@@ -296,10 +281,6 @@ aSubmitFailureOutranksTheNotice =
                         |> Query.hasNot [ Selector.text expiryCopy ]
                 ]
                 failed
-
-
-
--- MAIN'S SIDE OF THE SAME VALUE
 
 
 consumedByALoginCard : Test
@@ -343,10 +324,6 @@ keptWhileTheReaderIsElsewhere =
                 |> Expect.equal Login.AccountDeleted
 
 
-
--- draftWasSaved
-
-
 draftFlagIsOnlyMeaningfulForAnExpiry : Test
 draftFlagIsOnlyMeaningfulForAnExpiry =
     test "draft_flag_totality: every arrival answers, and only an expiry can answer True" <|
@@ -361,22 +338,6 @@ draftFlagIsOnlyMeaningfulForAnExpiry =
             ]
                 |> List.map Login.draftWasSaved
                 |> Expect.equalLists [ False, False, False, False, False, False, True ]
-
-
-
--- THE #360/#361 SEAM
---
--- ⛔ These exist because of a gap MEASURED during the #361 reconcile, not
--- because they seemed like a good idea. #361 needs to know "is this navigation
--- an expiry bounce" and read it from `Main.Model.sessionExpiredNotice`; #360
--- collapsed that boolean into `Arrival`, so the wire now runs through
--- `Login.isSessionExpiry`. `SessionExpiryTest`'s five #361 tests call
--- `Main.redirectAfterNavigation` with `sessionExpiring` passed as a LITERAL, so
--- none of them can see whether the call site computes it correctly.
---
--- Probe (2026-08-01): stubbing `isSessionExpiry` to `always False` — which is
--- the #361 defect restored, an expiry bounce forgetting the page it left —
--- left ALL 1464 tests green. These three are what makes that probe redden.
 
 
 onlyAnExpiryIsAnExpiry : Test

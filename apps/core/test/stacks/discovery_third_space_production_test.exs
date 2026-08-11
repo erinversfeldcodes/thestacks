@@ -48,12 +48,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     insert(:discovered_source, Keyword.merge(defaults, attrs))
   end
 
-  # Scoped to the source under test rather than `Repo.all(ThirdSpace)`. An unscoped helper
-  # cannot tell its own row from anyone else's, so when something does go wrong it reports
-  # the wrong thing: #379 surfaced as a baffling assertion about a latitude instead of a
-  # legible one about identity, and the first day of that investigation was spent chasing a
-  # sandbox leak that had never happened. `website_url` is the same key production's
-  # `space_exists?/1` treats as the business's identity.
   defp spaces(source), do: Repo.all(from s in ThirdSpace, where: s.website_url == ^source.url)
 
   describe "approval creates the third space" do
@@ -86,9 +80,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     end
 
     test "a bookshop source creates no third space" do
-      # Bookshops live in op.bookstores and are the OTHER side of the 500 m pairing.
-      # Making one a third space too would let a shop satisfy the rule by being near
-      # itself.
       source = pending_source(type: "bookshop", url: "https://ashop.test")
 
       assert {:ok, _} = Discovery.approve_source(source.id)
@@ -100,7 +91,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
       source = pending_source()
 
       assert {:ok, _} = Discovery.approve_source(source.id)
-      # Approval is idempotent from the owner's side; the producer must be too.
       Discovery.create_third_space(Discovery.get_source(source.id))
 
       assert length(spaces(source)) == 1
@@ -109,7 +99,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
   describe "geocoding at approval" do
     test "computes and stores the distance to the nearest bookshop" do
-      # Two shops: one ~300 m away, one ~7 km. The stored scalar must be the nearer.
       insert(:bookstore, name: "Close Books", latitude: -33.9249, longitude: 18.4273)
       insert(:bookstore, name: "Distant Books", latitude: -33.9500, longitude: 18.5000)
 
@@ -126,7 +115,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     end
 
     test "leaves the distance nil when no bookshop has coordinates" do
-      # nil means "not computed", which `list_third_spaces/1` refuses to treat as "near".
       insert(:bookstore, name: "Unpositioned Books", latitude: nil, longitude: nil)
       MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
       source = pending_source()
@@ -136,8 +124,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     end
 
     test "a space that cannot be geocoded is still created, unpositioned" do
-      # The owner made an approval; losing it because a third-party geocoder had no match
-      # would silently discard a human decision. The space must remain visible to them.
       source = pending_source()
 
       assert {:ok, _} = Discovery.approve_source(source.id)
@@ -148,7 +134,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     end
 
     test "an unpositioned space cannot reach the map" do
-      # The other half of the previous test: created, but never rendered as if positioned.
       source = pending_source()
       assert {:ok, _} = Discovery.approve_source(source.id)
 
@@ -160,7 +145,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     end
 
     test "the geocoding query carries the city, not just the name" do
-      # A bare name matches the wrong continent. This is the assembly `query_for/1` owns.
       MockGeocoder.put_point("Cape Town", -33.9249, 18.4241)
       source = pending_source()
 
@@ -173,14 +157,11 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
   describe "nothing else produces third spaces" do
     test "creating a source does not create a space" do
-      # Discovery finds candidates; only a human approving one may list a business.
       source = pending_source()
       assert spaces(source) == []
     end
 
     test "the table has no other writer in the codebase" do
-      # A structural assertion, cheap to keep: if a second producer appears, this fails
-      # and forces the author to justify it against US-3.1.1 §4.
       writers =
         Path.wildcard("lib/stacks/**/*.ex")
         |> Enum.filter(fn path ->
@@ -200,15 +181,11 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
   describe "a verified removal request delists the space a reader sees" do
     test "the space is opted out, not just the source" do
-      # ⚠️ The gap this closes: excluding only the `discovered_source` left the listing on
-      # the map. The source is how we *found* the business; the third space is what a
-      # reader actually sees.
       MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
       source = pending_source()
       assert {:ok, _} = Discovery.approve_source(source.id)
       assert [%{opted_out: false}] = spaces(source)
 
-      # A contact address on the listing's own domain — the verified path.
       assert {:ok, :excluded, _} =
                Discovery.opt_out("https://readingroom.test", %{email: "owner@readingroom.test"})
 
@@ -218,9 +195,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
     end
 
     test "the row survives — a hard delete would be rediscovered and re-listed" do
-      # The load-bearing reason for a soft delete. Discovery re-finds sources
-      # continuously, so a deleted row comes back, gets re-approved by an owner with no
-      # record of the objection, and one removal request becomes a recurring one.
       MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
       source = pending_source()
       assert {:ok, _} = Discovery.approve_source(source.id)
@@ -230,7 +204,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
       assert length(spaces(source)) == 1, "the space row was deleted rather than delisted"
 
-      # And re-approval cannot resurrect it.
       Discovery.create_third_space(Discovery.get_source(source.id))
 
       assert [%{opted_out: true}] = spaces(source),
@@ -266,8 +239,6 @@ defmodule Stacks.DiscoveryThirdSpaceProductionTest do
 
   describe "opted-out businesses stay delisted" do
     test "an approved source whose space opted out is not re-listed" do
-      # The discovery pipeline re-finds sources continuously, so a hard delete would be
-      # rediscovered and re-approved. The surviving row is what makes removal stick.
       MockGeocoder.put_point("The Reading Room", -33.9249, 18.4241)
       source = pending_source()
       assert {:ok, _} = Discovery.approve_source(source.id)

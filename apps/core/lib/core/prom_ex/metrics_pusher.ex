@@ -75,7 +75,6 @@ defmodule Core.PromEx.MetricsPusher do
   defp push(url) do
     case PromEx.get_metrics(@prom_ex_module) do
       metrics when is_binary(metrics) and metrics != "" -> do_post(url, metrics)
-      # PromEx not up yet / empty exposition — nothing to push this tick.
       _ -> :ok
     end
   end
@@ -83,8 +82,6 @@ defmodule Core.PromEx.MetricsPusher do
   defp do_post(url, metrics) do
     req = Finch.build(:post, url, [{"content-type", "text/plain"}], metrics)
 
-    # request_timeout bounds the WHOLE response (receive_timeout is
-    # per-chunk — #381d); the import endpoint answers with an empty body.
     case Finch.request(req, Stacks.Finch,
            receive_timeout: @receive_timeout,
            request_timeout: @receive_timeout

@@ -85,8 +85,6 @@ defmodule StacksWeb.SourceAdminController do
   end
 
   defp removal_error(conn, :not_pending) do
-    # 409, not 404: the request exists, it has simply already been decided. A double-click
-    # or a second reviewer must not read as "never existed".
     conn |> put_status(409) |> json(%{error: "That request has already been decided."})
   end
 
@@ -100,8 +98,6 @@ defmodule StacksWeb.SourceAdminController do
       name: s.name,
       url: s.url,
       type: s.type,
-      # The address the request came from — the whole reason a human is looking. Without it
-      # the reviewer has nothing to judge, and the queue is a list of names.
       exclusion_email: s.exclusion_email,
       requested_at: s.exclusion_requested_at,
       status: s.status

@@ -24,8 +24,6 @@ defmodule Core.DbtRunnerConfigTest do
   alias Stacks.Workers.DbtRunner
 
   test "resolves a real dbt project directory independent of the process cwd" do
-    # A directory from which the old `File.cwd!()`-relative default would land on
-    # a nonexistent path — proving the resolution does not depend on cwd.
     neutral = System.tmp_dir!()
     dir = File.cd!(neutral, fn -> DbtRunner.dbt_dir() end)
 

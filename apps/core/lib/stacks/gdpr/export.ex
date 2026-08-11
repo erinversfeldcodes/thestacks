@@ -50,9 +50,6 @@ defmodule Stacks.GDPR.Export do
       |> where([_f, s], s.user_id == ^user_id)
       |> Repo.all()
 
-    # Summary only — the `embedding` vector column is deliberately NOT selected,
-    # so the raw vector never leaves the database. Vectors are not human-readable
-    # and carry no portability value; exporting them would be a data-leak risk.
     embeddings_summary =
       Embedding
       |> where([e], e.user_id == ^user_id)
@@ -64,25 +61,12 @@ defmodule Stacks.GDPR.Export do
       })
       |> Repo.all()
 
-    # DECISION (#353): the user's uploaded images ARE included in the export
-    # (right to data portability — the reader can see which uploads the system
-    # holds for them and their status). We export ONLY id + uploaded_at + status.
-    # We deliberately export NEITHER the image bytes NOR the storage_path / a
-    # presigned URL: the bytes are not portable structured data, and emitting a
-    # usable storage key/URL from a plain export endpoint would leak a fetchable
-    # pointer to the raw image. The bytes are erased on request via
-    # delete_user_data/1 and by the 30-day retention sweep.
     uploaded_images =
       UploadedImage
       |> where([i], i.user_id == ^user_id)
       |> select([i], %{id: i.id, uploaded_at: i.uploaded_at, status: i.status})
       |> Repo.all()
 
-    # The reader's own writing (#392). `blog_posts.body` and `post_comments.body`
-    # are the user's own free text and squarely within the right to portability,
-    # so they are exported in full. Posts are keyed by `user_id`, comments by
-    # `author_id`. We deliberately do NOT export `post_book_associations` — its
-    # `reasoning` is LLM-derived, not the reader's own writing.
     blog_posts =
       Post
       |> where([p], p.user_id == ^user_id)
@@ -93,8 +77,6 @@ defmodule Stacks.GDPR.Export do
       |> where([c], c.author_id == ^user_id)
       |> Repo.all()
 
-    # US-6.2.1: where the user's posts went. Ids, target, method and two URLs —
-    # the record of syndication, reached through the user's own posts.
     blog_syndications =
       Stacks.Blog.PostSyndication
       |> join(:inner, [s], p in Post, on: s.post_id == p.id)
@@ -111,11 +93,6 @@ defmodule Stacks.GDPR.Export do
         }
       )
 
-    # US-14.1.3: invitations the user REDEEMED — their entry into the beta is
-    # part of their record. Deliberately excluded: `code_hash` (a credential),
-    # `note` (the OWNER's private writing about them, not their own data), and
-    # anything they merely issued as owner (platform-operations data, on the
-    # admin surface).
     invitations =
       Stacks.Accounts.InviteCode
       |> where([i], i.redeemed_by_id == ^user_id)
@@ -126,11 +103,6 @@ defmodule Stacks.GDPR.Export do
       })
       |> Repo.all()
 
-    # US-1.1.9: the user's library imports — the durable summary (filename,
-    # status, counts) AND any raw rows still inside their 30-day retention
-    # window. The raw rows are the reader's own Goodreads free text (reviews,
-    # private notes) — squarely portable while they exist; after the sweep the
-    # summary alone remains and the export says so via the counts.
     library_imports =
       Stacks.Imports.LibraryImport
       |> where([li], li.user_id == ^user_id)
@@ -166,7 +138,6 @@ defmodule Stacks.GDPR.Export do
         notify_marketplace: user.notify_marketplace,
         notify_group_invitations: user.notify_group_invitations,
         notify_event_matches: user.notify_event_matches,
-        # US-6.2.1: a preference like the notify_* flags above.
         syndication_default: user.syndication_default,
         age_verified: user.age_verified,
         age_verified_at: user.age_verified_at,
@@ -278,13 +249,6 @@ defmodule Stacks.GDPR.Export do
     }
   end
 
-  # Which ISBN this placement is OF. Since #335 D2 a placement names its own
-  # edition, so the export reports the copy the person actually shelved rather
-  # than whichever edition the work currently displays as primary — a work can
-  # gain a new primary edition long after they shelved theirs, and an export
-  # that silently re-pointed at it would be reporting someone else's book.
-  # Falls back to the work's primary for placements made before the column
-  # existed and for a work with no edition at all.
   defp placement_isbn(%{book_edition: %{isbn: isbn}}) when is_binary(isbn), do: isbn
 
   defp placement_isbn(%{book: nil}), do: nil

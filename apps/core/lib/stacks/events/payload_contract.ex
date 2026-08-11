@@ -33,10 +33,7 @@ defmodule Stacks.Events.PayloadContract do
   `proto/persisted.exs` is for the DB schema.
   """
 
-  # event_type => %{version: current schema_version, keys: required payload keys,
-  #                 optional: keys that may be absent (default [])}
   @contract %{
-    # ── blog ──────────────────────────────────────────────────────────────────
     "blog.post_created" => %{version: 2, keys: ~w(user_id visibility)},
     "blog.post_updated" => %{version: 2, keys: ~w(user_id visibility)},
     "blog.post_published" => %{version: 2, keys: ~w(user_id)},
@@ -45,45 +42,17 @@ defmodule Stacks.Events.PayloadContract do
     "blog.association_dismissed" => %{version: 1, keys: ~w(book_id post_id)},
     "blog.associations_suggested" => %{version: 1, keys: ~w(book_ids count)},
     "post.comment_created" => %{version: 1, keys: ~w(author_id comment_id)},
-    # US-6.2.1 — deliberately NO title, body, canonical URL or Substack URL: a
-    # URL containing a title-derived slug is title data by another name, and
-    # even the UUID-form canonical is derivable from aggregate_id.
     "post.syndicated" => %{version: 1, keys: ~w(target method)},
-    # ── books ─────────────────────────────────────────────────────────────────
     "book.created" => %{version: 1, keys: ~w(isbn title visibility_tier)},
-    # `book_id` stays v1 rather than becoming v2: it was ADDED (#355), and an
-    # upcaster cannot invent it for the historical rows that predate it — it
-    # would have to query. So the contract states what every emit from this
-    # codebase now carries, the one consumer degrades to the cache TTL when an
-    # old row arrives without it, and no version pretends to a migration that
-    # cannot be written.
     "book.cover_confirmed" => %{version: 1, keys: ~w(book_id cover_image_url)},
-    # #357, the age-gate write. `book_id` is the WORK id (what the one subscriber
-    # keys its cache by, not read off `aggregate_id` — see
-    # CacheInvalidationHandler); `visibility_tier` is the closed two-value enum
-    # `book.created` already carries. Who raised the gate is `metadata.actor`
-    # ("user" | "owner") and never an id, so the payload says a BOOK changed,
-    # not who changed it.
     "book.visibility_tier_changed" => %{version: 1, keys: ~w(book_id visibility_tier)},
-    # #357. UUID-only by design: the work whose metadata EnrichBookJob just
-    # rewrote. The enriched title is deliberately absent — `event_log` is
-    # immutable, and the title is readable from the book row this event names.
     "book.enriched" => %{version: 1, keys: ~w(book_id)},
     "books.confirmed" => %{version: 1, keys: ~w(isbn shelf title)},
     "books.edition_merged" => %{version: 1, keys: ~w(isbn work_id)},
     "image.submitted" => %{version: 1, keys: ~w(storage_path)},
-    # `isbn` present only when a candidate ISBN was found but mismatched; the
-    # not-a-book / ISBN-not-extracted path emits `reason` alone (identify_book_job).
     "image.rejected" => %{version: 1, keys: ~w(reason), optional: ~w(isbn)},
     "image.resolved" => %{version: 1, keys: ~w(book_count)},
-    # `reason` present only on the stuck-image cleanup path; the 30-day retention
-    # path emits an empty payload (gdpr/image_retention.ex).
     "image.expired" => %{version: 1, keys: ~w(), optional: ~w(reason)},
-    # ── shelving ──────────────────────────────────────────────────────────────
-    # `source` (US-1.1.9): capture provenance — manual / upload / goodreads_import.
-    # Optional because pre-import events lack it; readers default absent to
-    # "manual". PlacementHandler uses it to coalesce an import's feed
-    # regenerations (the import job enqueues one per bookshelf at finalize).
     "placement.created" => %{
       version: 1,
       keys: ~w(book_id bookshelf visibility_tier),
@@ -92,31 +61,20 @@ defmodule Stacks.Events.PayloadContract do
     "placement.moved" => %{version: 1, keys: ~w(from_bookshelf to_bookshelf)},
     "placement.reread" => %{version: 1, keys: ~w(book_id to_bookshelf)},
     "placement.removed" => %{version: 1, keys: ~w(book_id)},
-    # The undo of a removal (#375). Carries `bookshelf` where `placement.removed`
-    # does not, because the feed handler has to know which bookshelf's Atom feed
-    # gained a book back — a removal only ever takes one away, so it can rebuild
-    # from the placement alone.
     "placement.restored" => %{version: 1, keys: ~w(book_id bookshelf)},
     "placement.reading_started" => %{version: 1, keys: ~w(book_id)},
     "placement.reading_completed" => %{version: 1, keys: ~w(book_id)},
-    # ── library imports (US-1.1.9) ────────────────────────────────────────────
-    # Counts ONLY — never row content. A raw import row is the reader's own free
-    # text (reviews, private notes) with a 30-day retention; an event payload is
-    # immutable. Any row detail on these events would outlive its erasure path.
     "library_import.started" => %{version: 1, keys: ~w(user_id source row_count)},
     "library_import.completed" => %{
       version: 1,
       keys:
         ~w(user_id source status row_count shelved_count duplicate_count unverified_count unreadable_count)
     },
-    # ── accounts / user ───────────────────────────────────────────────────────
     "user.registered" => %{version: 1, keys: ~w(role)},
     "user.profile_updated" => %{version: 1, keys: ~w()},
     "user.profile_visibility_changed" => %{version: 1, keys: ~w(visibility)},
     "user.location_updated" => %{version: 1, keys: ~w()},
     "user.password_changed" => %{version: 1, keys: ~w()},
-    # US-14.1.3 — deliberately no code, no note, no invited address; a payload
-    # carrying any of those would fail this contract in test.
     "invite.issued" => %{version: 1, keys: ~w(max_uses expires_at email_bound)},
     "invite.redeemed" => %{version: 1, keys: ~w(user_id use_count)},
     "invite.revoked" => %{version: 1, keys: ~w()},
@@ -125,7 +83,6 @@ defmodule Stacks.Events.PayloadContract do
       version: 1,
       keys: ~w(bookshelves_capped new_visibility placements_capped posts_capped)
     },
-    # ── social ────────────────────────────────────────────────────────────────
     "social.user_blocked" => %{version: 1, keys: ~w(blocked_id)},
     "social.user_unblocked" => %{version: 1, keys: ~w(blocked_id)},
     "group.created" => %{version: 1, keys: ~w(owner_id)},
@@ -133,25 +90,16 @@ defmodule Stacks.Events.PayloadContract do
     "group.member_joined" => %{version: 1, keys: ~w(user_id)},
     "group.member_left" => %{version: 1, keys: ~w(user_id)},
     "group.member_removed" => %{version: 1, keys: ~w(removed_by_id removed_user_id)},
-    # ── marketplace ───────────────────────────────────────────────────────────
     "listing.created" => %{version: 1, keys: ~w(book_id seller_id)},
     "listing.activated" => %{version: 1, keys: ~w(book_id seller_id)},
     "listing.removed" => %{version: 1, keys: ~w(book_id seller_id)},
     "listing.sold" => %{version: 1, keys: ~w(book_id seller_id)},
     "listing.expired" => %{version: 1, keys: ~w(book_id seller_id)},
-    # ── partners (business, not user) ─────────────────────────────────────────
     "partner.event_created" => %{version: 1, keys: ~w(space_id title)},
     "partner.event_deleted" => %{version: 1, keys: ~w(space_id)},
     "partner.inventory_synced" => %{version: 1, keys: ~w(synced unresolved_count)},
-    # ── enrichment / discovery (system/operational) ───────────────────────────
     "source.approved" => %{version: 1, keys: ~w(status)},
-    # `geocoded` is carried so an operator can see, from the event stream alone, how many
-    # approvals produced a mappable space versus an unpositioned one — the difference
-    # between a working geocoder and a silently degraded one.
     "third_space.created" => %{version: 1, keys: ~w(source_id geocoded)},
-    # No payload at all: `aggregate_id` is the space's own id, which says everything the
-    # event needs to. An earlier draft carried the business URL and the PII lint refused
-    # it — `event_log` is immutable, so free text in it is permanent.
     "third_space.delisted" => %{version: 1, keys: ~w()},
     "source.rejected" => %{version: 1, keys: ~w(status)},
     "enrichment.sources_discovered" => %{version: 1, keys: ~w(count query source_ids)},
@@ -160,7 +108,6 @@ defmodule Stacks.Events.PayloadContract do
     "enrichment.events_discovered" => %{version: 1, keys: ~w(events_count store_name)},
     "enrichment.prices_scraped" => %{version: 1, keys: ~w(book_ids count)},
     "enrichment.reviews_scraped" => %{version: 1, keys: ~w(book_count)},
-    # ── ops / monitoring ──────────────────────────────────────────────────────
     "costs.refreshed" => %{version: 1, keys: ~w(item_count period vision_jobs)},
     "source_health.recorded" => %{
       version: 1,
@@ -168,9 +115,6 @@ defmodule Stacks.Events.PayloadContract do
     }
   }
 
-  # Payload keys whose NAME looks personal/free-text but are verified NOT user PII —
-  # each carries a justification (mirrors the erasure schema-guard's nilify allowlist).
-  # The PII-lint fails on any personal-shaped key absent from this list.
   @free_text_allowlist %{
     "title" => "bibliographic book title / partner-event title — public metadata, not user PII",
     "query" =>
@@ -182,12 +126,9 @@ defmodule Stacks.Events.PayloadContract do
     "website_url" => "external author website URL, not user PII",
     "cover_image_url" => "book cover image URL, not user PII",
     "storage_path" => "opaque object-storage key, not free-text personal data",
-    # US-14.1.3: a BOOLEAN — whether the invitation is bound to some address —
-    # deliberately chosen so event_log never carries the address itself.
     "email_bound" => "boolean flag (bound-or-not), never the address itself"
   }
 
-  # Substrings that mark a payload key as personal/free-text-shaped (PII-lint trigger).
   @pii_shaped ~w(title body name comment note query email city address phone handle display description message content url path reason store)
 
   @doc "The full contract: event_type => %{version, keys, optional}."

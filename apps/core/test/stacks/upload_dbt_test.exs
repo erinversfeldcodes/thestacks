@@ -45,10 +45,6 @@ defmodule Stacks.UploadDbtTest do
   alias Stacks.Workers.DbtRefreshJob
   alias Stacks.Workers.IdentifyBookJob
 
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
-
   defp build_event(event_type) do
     %{event_type: event_type, aggregate_id: Ecto.UUID.generate(), payload: %{}}
   end
@@ -60,11 +56,6 @@ defmodule Stacks.UploadDbtTest do
     user = insert(:user)
     author = insert(:author)
 
-    # The work and its primary edition are one insert, exactly as
-    # `Books.create/1` commits them. The local checksum-computing
-    # `sequence_isbn/0` this used to need is gone: the factory's own ISBNs are
-    # now checksum-valid, and unlike the old `:rand.uniform(999)` they cannot
-    # collide.
     edition_attrs = if isbn, do: [isbn: isbn], else: []
 
     book =
@@ -78,14 +69,7 @@ defmodule Stacks.UploadDbtTest do
     {user, book, hd(book.editions), author}
   end
 
-  # Was a local ISBN-13 check-digit calculator over `:rand.uniform(999)` — both
-  # jobs now belong to the factory, which generates checksum-valid ISBNs from a
-  # sequence (so they cannot collide the way the random ones could).
   defp sequence_isbn, do: build(:primary_book_edition).isbn
-
-  # =========================================================================
-  # A. Existing DbtRefreshHandler event-mapping tests (preserved from original)
-  # =========================================================================
 
   describe "upload-pipeline events: book.created" do
     @tag stories: ["US-1.1.1"], suite: :dbt
@@ -172,10 +156,6 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # B. DbtRefreshHandler coverage for all upload-related events
-  # =========================================================================
-
   describe "DbtRefreshHandler: enrichment events in upload flow" do
     @tag stories: ["US-1.1.1"], suite: :dbt
     test "enrichment.prices_scraped enqueues price model refresh" do
@@ -199,9 +179,6 @@ defmodule Stacks.UploadDbtTest do
       )
     end
 
-    # Issue #116 punch #14b: a placement removal decrements the community read
-    # count (mart_community_read_count filters removed_at is null), so it must
-    # trigger the same refresh as created/moved. Mirrors the moved test above.
     @tag stories: ["US-1.6.4"], suite: :dbt
     test "placement.removed enqueues community read count refresh" do
       event = build_event("placement.removed")
@@ -246,10 +223,6 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # C. Staging model content verification — US-1.1.1: successful upload flow
-  # =========================================================================
-
   describe "US-1.1.1: successful upload -> book + edition + placement records" do
     @tag stories: ["US-1.1.1"], suite: :dbt
     test "uploaded_images record has correct status and storage_path after upload" do
@@ -261,7 +234,6 @@ defmodule Stacks.UploadDbtTest do
       assert db_image.uploaded_at != nil
       assert db_image.expires_at != nil
 
-      # Verify 30-day retention window
       diff = DateTime.diff(db_image.expires_at, db_image.uploaded_at, :day)
       assert diff >= 29 and diff <= 31
     end
@@ -305,8 +277,6 @@ defmodule Stacks.UploadDbtTest do
 
       {:ok, _placement} = Shelving.place_book(user.id, book.id, "wishlist")
 
-      # The placement emits placement.created internally;
-      # verify handler would enqueue the right models
       event = build_event("placement.created")
       assert :ok = DbtRefreshHandler.handle_event(event)
 
@@ -321,7 +291,6 @@ defmodule Stacks.UploadDbtTest do
       {_user, book, _edition, _author} = create_user_with_book()
       image = insert(:uploaded_image, status: "pending")
 
-      # Simulate IdentifyBookJob.mark_resolved by updating directly
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
       {:ok, book_id_bin} = Ecto.UUID.dump(book.id)
 
@@ -347,10 +316,6 @@ defmodule Stacks.UploadDbtTest do
       assert db_image.book_ids == [book.id]
     end
   end
-
-  # =========================================================================
-  # US-1.1.2: ISBN hard gate — book rejected, no ISBN found
-  # =========================================================================
 
   describe "US-1.1.2: ISBN hard gate rejection records" do
     @tag stories: ["US-1.1.2"], suite: :dbt
@@ -412,10 +377,6 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # US-1.1.3: Non-book rejection
-  # =========================================================================
-
   describe "US-1.1.3: non-book rejection records" do
     @tag stories: ["US-1.1.3"], suite: :dbt
     test "uploaded_images marked rejected with not_a_book reason" do
@@ -456,10 +417,6 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # US-1.1.4: Age-gated content flagging
-  # =========================================================================
-
   describe "US-1.1.4: age-gated book records" do
     @tag stories: ["US-1.1.4"], suite: :dbt
     test "book with age_gated visibility_tier persists correctly" do
@@ -481,8 +438,6 @@ defmodule Stacks.UploadDbtTest do
     test "age_gated book is included for an age-verified authenticated viewer" do
       {user, book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
-      # #229: age-gated books are visible only to an age-VERIFIED viewer — the
-      # `{:platform_user, id, true}` shape the catalogue controller builds.
       {books, _total} = Books.list_catalogue(viewer: {:platform_user, user.id, true})
       assert Enum.any?(books, fn b -> b.id == book.id end)
     end
@@ -491,8 +446,6 @@ defmodule Stacks.UploadDbtTest do
     test "age_gated book is excluded for an authenticated-but-unverified viewer" do
       {user, _book, _edition, _author} = create_user_with_book(visibility_tier: "age_gated")
 
-      # #229: an authenticated viewer who is NOT age-verified must not see
-      # age-gated books in listings — same as anonymous (the fail-closed rule).
       {books, _total} = Books.list_catalogue(viewer: {:platform_user, user.id, false})
       refute Enum.any?(books, fn b -> b.visibility_tier == "age_gated" end)
     end
@@ -508,10 +461,6 @@ defmodule Stacks.UploadDbtTest do
       )
     end
   end
-
-  # =========================================================================
-  # US-1.1.5: Manual ISBN entry
-  # =========================================================================
 
   describe "US-1.1.5: manual ISBN entry records" do
     @tag stories: ["US-1.1.5"], suite: :dbt
@@ -534,15 +483,11 @@ defmodule Stacks.UploadDbtTest do
       isbn = sequence_isbn()
       {_user, book, _edition, _author} = create_user_with_book(isbn: isbn)
 
-      # Attempting to insert a duplicate ISBN should fail with unique constraint
       duplicate =
         Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => isbn,
           "book_id" => book.id,
           "is_primary" => false,
-          # Required since #335 D1. Without it the changeset is invalid before
-          # it reaches the database and the ISBN-uniqueness assertion below can
-          # never fire — the test would pass on the wrong error.
           "verification_source" => "open_library"
         })
 
@@ -551,10 +496,6 @@ defmodule Stacks.UploadDbtTest do
       assert {"has already been taken", _} = changeset.errors[:isbn]
     end
   end
-
-  # =========================================================================
-  # US-1.1.6: Duplicate book detection
-  # =========================================================================
 
   describe "US-1.1.6: duplicate book detection records" do
     @tag stories: ["US-1.1.6"], suite: :dbt
@@ -591,16 +532,11 @@ defmodule Stacks.UploadDbtTest do
       {_user, book, edition, _author} = create_user_with_book()
       book_count = Repo.aggregate(Book, :count)
 
-      # Finding existing book should not create a new one
       found = Books.find_existing(edition.isbn)
       assert found.id == book.id
       assert Repo.aggregate(Book, :count) == book_count
     end
   end
-
-  # =========================================================================
-  # US-1.1.7: Bulk upload (multi-book from single image)
-  # =========================================================================
 
   describe "US-1.1.7: bulk upload records (multi-book from single image)" do
     @tag stories: ["US-1.1.7"], suite: :dbt
@@ -652,10 +588,6 @@ defmodule Stacks.UploadDbtTest do
       assert Shelving.book_on_any_shelf?(user.id, book2.id)
     end
   end
-
-  # =========================================================================
-  # US-1.1.8: Multi-format book merging
-  # =========================================================================
 
   describe "US-1.1.8: multi-format merge records" do
     @tag stories: ["US-1.1.8"], suite: :dbt
@@ -711,27 +643,18 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # D. Full event sequence integration (all user stories combined)
-  # =========================================================================
-
   describe "full event sequence: upload -> identify -> place" do
     @tag stories: ["US-1.1.1"], suite: :dbt
     test "complete happy-path event sequence enqueues correct dbt jobs" do
-      # Simulate the complete upload pipeline event sequence
-      # 1. image.submitted — no dbt job
       assert :ok = DbtRefreshHandler.handle_event(build_event("image.submitted"))
       refute_enqueued(worker: DbtRefreshJob)
 
-      # 2. image.resolved — no dbt job
       assert :ok = DbtRefreshHandler.handle_event(build_event("image.resolved"))
       refute_enqueued(worker: DbtRefreshJob)
 
-      # 3. book.created — no dbt job
       assert :ok = DbtRefreshHandler.handle_event(build_event("book.created"))
       refute_enqueued(worker: DbtRefreshJob)
 
-      # 4. placement.created — triggers mart refresh
       assert :ok = DbtRefreshHandler.handle_event(build_event("placement.created"))
 
       assert_enqueued(
@@ -750,7 +673,6 @@ defmodule Stacks.UploadDbtTest do
 
     @tag stories: ["US-1.1.1"], suite: :dbt
     test "placement.moved enqueues community read count refresh (standalone)" do
-      # Test placement.moved independently — placement.created is covered above
       assert :ok = DbtRefreshHandler.handle_event(build_event("placement.moved"))
 
       assert_enqueued(
@@ -760,18 +682,7 @@ defmodule Stacks.UploadDbtTest do
     end
   end
 
-  # =========================================================================
-  # E. Deployed-only tests: dbt staging view verification
-  # =========================================================================
-
   describe "deployed-only: dbt staging views reflect op table data" do
-    # These tests require `dbt run` to have been executed against a live
-    # warehouse database that has the `wh` schema materialised. They verify
-    # that the staging views (which are simple SELECT * views over op tables)
-    # expose the correct columns and data.
-    #
-    # Excluded from local test runs. To run:
-    #   TEST_TARGET=deployed mix test --only deployed_only
     @moduletag :deployed_only
 
     @tag stories: ["US-1.1.4"], suite: :dbt
@@ -790,7 +701,6 @@ defmodule Stacks.UploadDbtTest do
           assert tier == "age_gated"
 
         {:error, _} ->
-          # wh schema not available — expected in non-deployed environments
           :ok
       end
     end
@@ -861,11 +771,8 @@ defmodule Stacks.UploadDbtTest do
       {user, book, _edition, _author} = create_user_with_book()
       {:ok, _placement} = Shelving.place_book(user.id, book.id, "library")
 
-      # This requires dbt run to have materialised the mart
       count = Books.community_read_count(book.id)
 
-      # In deployed environment with dbt, count should be >= 1
-      # In non-deployed, community_read_count returns 0 (graceful fallback)
       assert is_integer(count)
     end
   end

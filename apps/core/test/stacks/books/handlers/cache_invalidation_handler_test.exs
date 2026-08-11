@@ -4,8 +4,6 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
   alias Stacks.Books.BookDetailCache
   alias Stacks.Books.Handlers.CacheInvalidationHandler
 
-  # Use per-test unique keys to avoid races with BookDetailCacheTest's
-  # invalidate_all() setup that runs concurrently (both modules are async: true).
   setup do
     n = System.unique_integer([:positive])
     id1 = "book-#{n}-1"
@@ -26,34 +24,21 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
 
   @tag stories: ["US-1.1.7"], suite: :cache
   test "two book.created events each invalidate their own cache entry", %{id1: id1, id2: id2} do
-    # Both primed in setup already
     assert {:ok, _} = BookDetailCache.get(id1)
     assert {:ok, _} = BookDetailCache.get(id2)
 
-    # Invalidate id1 only
     event1 = %{event_type: "book.created", aggregate_id: id1, payload: %{}}
     assert :ok = CacheInvalidationHandler.handle_event(event1)
 
-    # id1 gone, id2 still present
     assert {:miss, ^id1} = BookDetailCache.get(id1)
     assert {:ok, _} = BookDetailCache.get(id2)
 
-    # Now invalidate id2
     event2 = %{event_type: "book.created", aggregate_id: id2, payload: %{}}
     assert :ok = CacheInvalidationHandler.handle_event(event2)
 
     assert {:miss, ^id2} = BookDetailCache.get(id2)
   end
 
-  # ⚠️ This test used to build the event as
-  # `%{aggregate_id: <a book id>, payload: %{}}` and assert the handler evicted
-  # that key. It passed for as long as the handler read `aggregate_id` — and
-  # `Books.confirm_cover_association/2` has never emitted that shape. It
-  # aggregates the EDITION (`aggregate_type: "book_edition"`), so the handler
-  # was evicting under an edition id: a key that is never in a book-keyed cache.
-  # A confirmed cover therefore stayed invisible for the full 5-minute TTL, with
-  # the handler, the registry and this test all green. Found by #355's sibling
-  # sweep; the events below are the shape the emitter actually produces.
   test "invalidates the WORK on book.cover_confirmed, not the edition the event aggregates",
        %{id1: id1, id2: id2} do
     event = %{
@@ -79,10 +64,6 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
     assert {:miss, ^id1} = BookDetailCache.get(id1)
   end
 
-  # US-1.1.8. `merge_edition/2` aggregates the new EDITION and names the work it
-  # was merged into as `work_id` — the same aggregate/cache-key mismatch as
-  # cover_confirmed, and the reason #355's reader was shown a book without the
-  # edition they had just added.
   test "invalidates the merged-into work on books.edition_merged", %{id1: id1, id2: id2} do
     event = %{
       event_type: "books.edition_merged",
@@ -107,9 +88,6 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
     assert {:miss, ^id2} = BookDetailCache.get(id2)
   end
 
-  # Historical rows predate the payload key (see PayloadContract). Degrade to
-  # the TTL; never crash the dispatch, which would take the other handlers on
-  # that event down with it.
   test "a payload with no work id degrades to the TTL rather than raising", %{id1: id1} do
     event = %{
       event_type: "books.edition_merged",
@@ -121,10 +99,6 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
     assert {:ok, _} = BookDetailCache.get(id1)
   end
 
-  # #357. The shape `Books.set_visibility_tier/3` emits: it aggregates the WORK,
-  # so `aggregate_id` and `payload.book_id` agree here — the handler still reads
-  # the payload, which is what keeps the clause correct if the aggregate ever
-  # moves (the way `cover_confirmed`'s did).
   test "invalidates the work on book.visibility_tier_changed", %{id1: id1, id2: id2} do
     event = %{
       event_type: "book.visibility_tier_changed",
@@ -149,8 +123,6 @@ defmodule Stacks.Books.Handlers.CacheInvalidationHandlerTest do
     assert {:miss, ^id2} = BookDetailCache.get(id2)
   end
 
-  # #357. `EnrichBookJob` replaces a placeholder title/author/cover; this event is
-  # the ONLY route that evicts the work it rewrote.
   test "invalidates the enriched work on book.enriched", %{id1: id1, id2: id2} do
     event = %{
       event_type: "book.enriched",

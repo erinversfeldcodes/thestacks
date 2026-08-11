@@ -30,41 +30,13 @@ defmodule Stacks.Accounts do
   alias Stacks.Social.UserBlock
   alias Stacks.Workers.VisibilityRecapJob
 
-  # ---------------------------------------------------------------------------
-  # Changeset functions (migrated from User schema for codegen compatibility)
-  # ---------------------------------------------------------------------------
-
-  # An email-confirmation link (and therefore an unverified account) lives 24h
-  # after the link was ISSUED — at registration, or at the most recent resend.
-  # Single source of truth: `Stacks.Email.confirm_email/1` uses this for the
-  # token's `max_age`, `Stacks.Email.send_confirmation_resend/1` re-signs against
-  # it, and `ExpiredUnverifiedAccountsJob` uses it to reap accounts whose link has
-  # expired. See docs/runbooks/gdpr-erase-user.md (erasure) and the daily crontab
-  # in config/config.exs.
   @unverified_account_ttl_seconds 24 * 60 * 60
 
-  # The ceiling on how long resending can keep an unconfirmed account alive
-  # (Issue #373). Each resend buys another @unverified_account_ttl_seconds; past
-  # this age no further link is issued, so the last one expires within a TTL and
-  # the reaper takes the account. Absolute worst case is therefore this plus one
-  # TTL — 8 days — no matter how many times resend is pressed.
-  #
-  # ⛔ This exists because `POST /api/auth/resend-confirmation` is necessarily
-  # UNAUTHENTICATED — the reader cannot sign in, that being the problem. So the
-  # caller is not provably the data subject, and without a ceiling a stranger who
-  # posts someone else's address every 23 hours could prevent that person's
-  # abandoned signup from ever being erased. Storage limitation cannot be left in
-  # the hands of an anonymous caller. The cap is enforced when the link is ISSUED
-  # rather than when the account is reaped, so a link is never issued that would
-  # outlive the account behind it.
   @unverified_account_max_lifetime_seconds 7 * 24 * 60 * 60
 
   @registration_required_fields [:email, :password]
-  # `:age_verified` is intentionally NOT castable from user input (ADR-020):
-  # self-declaration is gone; it is set only by Stacks.AgeVerification.
   @registration_optional_fields [:display_name, :role, :profile_visibility]
 
-  # The self-declared "verify your age" onboarding step was dropped (ADR-020).
   @valid_onboarding_steps ~w(profile privacy)
   @onboarding_step_order ~w(profile privacy)
 
@@ -113,21 +85,12 @@ defmodule Stacks.Accounts do
   @doc "Changeset for profile update (display_name, website_url)."
   def profile_changeset(user, attrs) do
     user
-    # syndication_default (US-6.2.1): the writer's account-level default for
-    # new posts' feed inclusion — a preference like the notify_* flags.
     |> cast(attrs, [:display_name, :website_url, :handle, :syndication_default])
     |> drop_blank_handle_change()
     |> validate_length(:website_url, max: 500)
-    # No-op unless :handle is being changed — keeps other profile updates unaffected.
     |> validate_handle()
   end
 
-  # An empty/blank handle param casts to a nil change on the NOT NULL handle
-  # column. validate_handle/1's validators skip nil changes, so without this the
-  # nil reaches the UPDATE and violates the NOT NULL constraint (Postgrex 23502 →
-  # 500). A real handle change is never to nil, so a nil handle change
-  # unambiguously means "absent/blank input" — drop it so the save is a
-  # no-handle-change (preserving the #211 validation path for real changes).
   defp drop_blank_handle_change(changeset) do
     case fetch_change(changeset, :handle) do
       {:ok, nil} -> delete_change(changeset, :handle)
@@ -146,22 +109,6 @@ defmodule Stacks.Accounts do
     |> unique_constraint(:email, name: :users_lower_email_index)
   end
 
-  # Downcase-on-write (#335 D4). `get_user_by_email/1` has always downcased its
-  # ARGUMENT before an exact match, so an address stored with any upper-case
-  # character produced an account nobody could log into — the sign-up succeeded
-  # and every subsequent login failed. Normalising the stored value is the half
-  # that was missing; `users_lower_email_index` (20260730200500) is the half that
-  # stops two accounts sharing one address in different cases. Runs AFTER
-  # `validate_format/3` so whitespace is still rejected outright rather than
-  # silently trimmed into acceptance — `normalise_email/1`'s trim is then a
-  # no-op here, kept only so the stored form and the comparison form in
-  # `email_change?/2` are produced by one function.
-  #
-  # Both unique_constraint/2 calls above are needed: the exact-match
-  # `users_email_index` is what a normalised duplicate actually violates, and
-  # naming `users_lower_email_index` as well means a row that somehow reaches the
-  # functional index (a direct put_change, a future write path) still comes back
-  # as a changeset error rather than a raised Postgrex error.
   defp downcase_email(changeset) do
     case get_change(changeset, :email) do
       nil -> changeset
@@ -239,10 +186,6 @@ defmodule Stacks.Accounts do
 
   defp hash_password(changeset), do: changeset
 
-  # ---------------------------------------------------------------------------
-  # Public URL handle (/u/:handle) — #211
-  # ---------------------------------------------------------------------------
-
   @handle_format ~r/^[a-z0-9_]{3,30}$/
 
   @doc """
@@ -277,8 +220,6 @@ defmodule Stacks.Accounts do
     end
   end
 
-  # Auto-assign a handle at registration when none is present, so every user has
-  # a reachable /u/:handle. Users can change it later in settings (#212).
   defp maybe_put_handle(changeset) do
     case get_field(changeset, :handle) do
       nil -> put_change(changeset, :handle, generate_handle(get_field(changeset, :display_name)))
@@ -510,20 +451,8 @@ defmodule Stacks.Accounts do
     if trimmed == "" do
       []
     else
-      # Compare against `lower(display_name)` (not raw `display_name`) so the
-      # GIN trigram index on `lower(display_name)` (migration
-      # 20260715120000_add_display_name_trgm_index) is usable — a leading-wildcard
-      # ILIKE otherwise forces a sequential scan (Issue #222). Lowercasing both
-      # sides is result-equivalent to the previous `ILIKE display_name`: ILIKE is
-      # already case-insensitive, so `lower(display_name) ILIKE lower(pattern)`
-      # matches exactly the same rows.
       pattern = "%#{escape_like(String.downcase(trimmed))}%"
 
-      # Discoverability follows the Audience ladder (#225): a signed-in searcher
-      # discovers "Members" (platform) AND public profiles; an ANONYMOUS searcher
-      # discovers ONLY public profiles — platform is signed-in-only, so a logged-out
-      # visitor must not even learn a Members profile exists (they'd 404 on it).
-      # owner/group profiles are never discoverable via search.
       discoverable =
         if is_nil(viewer_id), do: ["public"], else: ["platform", "public"]
 
@@ -544,9 +473,6 @@ defmodule Stacks.Accounts do
 
   def search_users(_term, _viewer_id), do: []
 
-  # Anti-join on op.user_blocks in BOTH directions. NOT EXISTS keeps the
-  # exclusion in the result set (never a post-filter). No viewer → no block
-  # filter (ghosts are still excluded by the discoverability filter above).
   defp exclude_blocked(query, nil), do: query
 
   defp exclude_blocked(query, viewer_id) do
@@ -562,8 +488,6 @@ defmodule Stacks.Accounts do
     )
   end
 
-  # Escape ILIKE metacharacters so a literal % or _ in the term is not treated
-  # as a wildcard.
   defp escape_like(term) do
     term
     |> String.replace("\\", "\\\\")
@@ -617,31 +541,12 @@ defmodule Stacks.Accounts do
              | :invite_exhausted
              | :invite_email_mismatch}
   def register(attrs, opts \\ []) do
-    # Reap abandoned signups on the way in, so this does not depend on a nightly job.
-    #
-    # `ExpiredUnverifiedAccountsJob` was the only thing erasing accounts that never
-    # confirmed their email, which made a cron entry the sole guarantee for a *retention*
-    # obligation — and nothing user-triggered could substitute, because the person who
-    # abandoned a signup by definition never comes back. With the platform scaling to
-    # zero, that job may not fire at all.
-    #
-    # Registration is the right moment for two reasons. It is the event most correlated
-    # with signup abandonment, so the work arrives roughly in proportion to the debt.
-    # And an abandoned account currently *blocks* a real one: someone re-registering the
-    # same address gets "email has already been taken" for an account nobody owns.
     reap_abandoned_signups(attrs)
 
     attrs = maybe_assign_owner_role(attrs)
     do_register(attrs, 2, opts)
   end
 
-  # Erases the abandoned signup for this email, if there is one, plus a small batch of
-  # others.
-  #
-  # Bounded and synchronous-but-cheap: an unverified account has never logged in, so it
-  # carries no bookshelves, placements, comments or sessions. Failures are swallowed —
-  # a registration must not fail because someone else's abandoned signup could not be
-  # erased. The nightly job stays as a backstop.
   @reap_batch 5
 
   defp reap_abandoned_signups(attrs) do
@@ -656,9 +561,6 @@ defmodule Stacks.Accounts do
       Deletion.delete_user_data(id,
         reason: "unverified account expired — email never confirmed within TTL",
         actor: "system:registration_reap",
-        # US-14.1.3: an abandoned signup never became a participant, so the
-        # invitation it consumed is restored. Explicit opt, never inferred
-        # from the actor string.
         restore_invite: true
       )
     end)
@@ -668,9 +570,6 @@ defmodule Stacks.Accounts do
       :ok
   end
 
-  # Deliberately ignores the TTL: if someone is registering this exact address, the
-  # earlier unconfirmed attempt is abandoned regardless of how recent it is, and holding
-  # the address hostage for 24 hours serves nobody.
   defp abandoned_id_for_email(nil), do: []
 
   defp abandoned_id_for_email(email) do
@@ -683,18 +582,8 @@ defmodule Stacks.Accounts do
     )
   end
 
-  # The handle is auto-assigned at registration (maybe_put_handle) and its only
-  # failure mode is the astronomically-rare lower(handle) unique collision. Since
-  # the user never chose it, regenerate (a fresh random suffix) and retry rather
-  # than surfacing an inexplicable "handle has already been taken" for a handle
-  # they cannot see.
   defp do_register(attrs, retries_left, opts) do
     Multi.new()
-    # Invite gate (US-14.1.3): when INVITE_ONLY_REGISTRATION is on, the code is
-    # locked and validated BEFORE the user insert and consumed after it — all
-    # inside this one transaction, so two concurrent redemptions of a
-    # single-use code produce exactly one account. When the flag is off these
-    # calls add nothing and any submitted code is ignored.
     |> then(fn multi ->
       if Keyword.get(opts, :skip_invite_gate, false) do
         multi
@@ -708,15 +597,6 @@ defmodule Stacks.Accounts do
     end)
     |> Multi.insert(:user, registration_changeset(%User{}, attrs))
     |> Multi.run(:set_confirmation, fn _repo, %{user: user} ->
-      # Generate the FINAL, verifiable confirmation token synchronously so it is
-      # stable the moment registration commits. Signed through
-      # `sign_confirmation_token/1` so registration, resend, the confirm endpoint
-      # and the reaper all share one definition of a link; the async
-      # EmailConfirmationHandler only DELIVERS this token, it never regenerates
-      # it. Previously this stored a raw random token that the handler later
-      # overwrote with a Phoenix.Token — a register↔handler race where a token
-      # read before the handler ran (E2E helper, or a fast client) failed
-      # verification and redirected to /confirm-email/error.
       token = sign_confirmation_token(user.id)
 
       user
@@ -796,9 +676,6 @@ defmodule Stacks.Accounts do
   end
 
   defp check_password(nil, _password) do
-    # Run a dummy hash through the pool to prevent timing-based email enumeration.
-    # We always return :invalid_credentials regardless of pool status — a busy pool
-    # is a marginally faster response but not meaningfully exploitable.
     _ = ArgonPool.run(fn -> Argon2.no_user_verify() end)
     {:error, :invalid_credentials}
   end
@@ -806,10 +683,6 @@ defmodule Stacks.Accounts do
   defp check_password(user, password) do
     now = DateTime.utc_now()
 
-    # CRITICAL: lockout check is performed BEFORE ArgonPool. A locked
-    # account must not be able to consume pool slots, and we must not
-    # leak whether the attacker-controlled password is right or wrong
-    # while the account is locked.
     case lockout_status(user, now) do
       {:locked, retry_after_seconds} ->
         {:error, {:account_locked, retry_after_seconds}}
@@ -833,32 +706,20 @@ defmodule Stacks.Accounts do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Per-account login lockout (Issue #161)
-  # ---------------------------------------------------------------------------
-
   @spec lockout_status(User.t(), DateTime.t()) :: :unlocked | {:locked, pos_integer()}
   defp lockout_status(%User{locked_until: nil}, _now), do: :unlocked
 
   defp lockout_status(%User{locked_until: locked_until}, now) do
     case DateTime.compare(locked_until, now) do
       :gt ->
-        # max(1, diff) so we never return 0 (would defeat the point of
-        # retry_after) and never negative (clock skew at the boundary).
         seconds = max(1, DateTime.diff(locked_until, now, :second))
         {:locked, seconds}
 
       _ ->
-        # Lock is in the past — treat as expired/unlocked. The row will
-        # be cleared on the next successful login (or stays as historical
-        # data we can use for backoff calculations).
         :unlocked
     end
   end
 
-  # Successful login: reset counter, clear lock, clear window start.
-  # Returns the updated user (or the original on unexpected failure — caller
-  # already has a valid authentication).
   defp clear_failed_logins(%User{failed_login_count: 0, locked_until: nil} = user, _now), do: user
 
   defp clear_failed_logins(%User{} = user, _now) do
@@ -911,11 +772,6 @@ defmodule Stacks.Accounts do
     :ok
   end
 
-  # Compute the new {count, first_at} for the rolling failure window.
-  # - If there's no prior failure or the prior window has expired, start fresh
-  #   at count=1.
-  # - Otherwise increment the existing count, keeping the original first_at so
-  #   the window is anchored to the FIRST failure.
   defp next_failure_window(%User{failed_login_first_at: nil}, now, _window_seconds) do
     {1, now}
   end
@@ -929,11 +785,9 @@ defmodule Stacks.Accounts do
 
     case DateTime.compare(first_at, window_start) do
       :lt ->
-        # Prior window has elapsed — fresh window.
         {1, now}
 
       _ ->
-        # Still inside the window — increment.
         {count + 1, first_at}
     end
   end
@@ -954,10 +808,6 @@ defmodule Stacks.Accounts do
     horizon = DateTime.add(now, -backoff_window, :second)
 
     if DateTime.compare(prior_lock, horizon) == :gt do
-      # The previous lock was within the backoff window — compound.
-      # We can't know the prior duration exactly without a history table,
-      # so derive it from the failed_login_first_at anchor: the prior
-      # duration is approximately (prior_lock - failed_login_first_at).
       prior_duration =
         if user.failed_login_first_at do
           max(
@@ -970,7 +820,6 @@ defmodule Stacks.Accounts do
 
       min(prior_duration * 2, login_lockout_max_duration_seconds())
     else
-      # Prior lock is too old to count — restart at the initial duration.
       login_lockout_duration_seconds()
     end
   end
@@ -1050,15 +899,6 @@ defmodule Stacks.Accounts do
     end
   end
 
-  # A payload carries an email CHANGE only when it includes an "email" key whose
-  # normalised value differs from the user's current email. The settings UI sends
-  # the current email on every profile save, so a same-email payload must NOT be
-  # treated as a change (that would demand current_password on ordinary profile
-  # edits). auth resolves identity case-insensitively (get_user_by_email/1
-  # downcases), so we compare downcased/trimmed on both sides. Storage now
-  # matches: `downcase_email/1` normalises on every write path (#335 D4), closing
-  # the inconsistency flagged in the #126 report. The comparison stays normalised
-  # anyway so a legacy mixed-case row still reads as "no change".
   defp email_change?(%User{email: current}, attrs) do
     case Map.get(attrs, "email") do
       nil -> false
@@ -1071,9 +911,6 @@ defmodule Stacks.Accounts do
 
   defp normalise_email(value), do: value
 
-  # NO-PII: emit ONLY the fact that a handle was set/changed — never the handle
-  # value (public but unbounded cardinality; telemetry is warehouse-adjacent).
-  # Fires only on a successful update whose changeset actually changed `:handle`.
   defp tap_emit_handle_claimed({:ok, _user} = result, changeset) do
     if Ecto.Changeset.get_change(changeset, :handle) do
       :telemetry.execute([:stacks, :handle, :claimed], %{count: 1}, %{})
@@ -1094,9 +931,6 @@ defmodule Stacks.Accounts do
         email_changeset(u, %{"email" => attrs["email"]})
       end)
       |> Multi.run(:emit_event, fn _repo, %{email: u} ->
-        # UUID-only payload: display_name is PII and must not enter
-        # op.event_log (GDPR — Issue #121). Consumers read the current
-        # profile from the user record via aggregate_id.
         Events.emit_safe(%{
           event_type: "user.profile_updated",
           aggregate_type: "user",
@@ -1115,9 +949,6 @@ defmodule Stacks.Accounts do
   end
 
   defp tap_emit_profile_updated({:ok, user} = result) do
-    # UUID-only payload: display_name is PII and must not enter op.event_log
-    # (GDPR — Issue #121). Consumers read the current profile from the user
-    # record via aggregate_id.
     Events.emit_safe(%{
       event_type: "user.profile_updated",
       aggregate_type: "user",
@@ -1145,8 +976,6 @@ defmodule Stacks.Accounts do
 
     case result do
       {:ok, updated} ->
-        # UUID-only payload: city + country_code are PII and must not enter
-        # op.event_log (GDPR — Issue #121).
         Events.emit_safe(%{
           event_type: "user.location_updated",
           aggregate_type: "user",
@@ -1208,9 +1037,6 @@ defmodule Stacks.Accounts do
 
     case result do
       {:ok, updated} ->
-        # UUID-only payload: notification preferences are personal data and must
-        # not enter op.event_log (GDPR — Issue #121). Consumers read the current
-        # preferences from the user record via aggregate_id.
         Events.emit_safe(%{
           event_type: "user.notifications_updated",
           aggregate_type: "user",
@@ -1260,9 +1086,6 @@ defmodule Stacks.Accounts do
       updated = Map.put(current, step, true)
 
       case user |> onboarding_steps_changeset(%{onboarding_steps: updated}) |> Repo.update() do
-        # Repo.reload! is required: onboarding_completed is a GENERATED ALWAYS AS column.
-        # Ecto does not fetch generated columns automatically after an update — we must
-        # reload to get the DB-computed value in the returned struct.
         {:ok, saved} -> {:ok, Repo.reload!(saved)}
         error -> error
       end
@@ -1285,21 +1108,10 @@ defmodule Stacks.Accounts do
          |> get_user!()
          |> onboarding_steps_changeset(%{onboarding_steps: empty})
          |> Repo.update() do
-      # Repo.reload! is required: onboarding_completed is a GENERATED ALWAYS AS column.
-      # Ecto does not fetch generated columns automatically after an update — we must
-      # reload to get the DB-computed value in the returned struct.
       {:ok, saved} -> {:ok, Repo.reload!(saved)}
       error -> error
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Refresh-token families (Issue #179, Phase 2a)
-  #
-  # A family is a rotation chain, opened at login and updated on every refresh.
-  # `current_jti` tracks the single live access token of the session so a later
-  # phase can detect reuse of a superseded token and revoke the whole family.
-  # ---------------------------------------------------------------------------
 
   @doc """
   Open a family at login, or advance a family's live token on refresh rotation.
@@ -1329,10 +1141,6 @@ defmodule Stacks.Accounts do
       conflict_target: :family_id
     )
   end
-
-  # ---------------------------------------------------------------------------
-  # Reuse detection + family revocation (Issue #179, Phase 2b)
-  # ---------------------------------------------------------------------------
 
   @doc """
   Reuse-detection gate for a family-bearing access token.
@@ -1377,37 +1185,20 @@ defmodule Stacks.Accounts do
 
   def check_token_family(_family_id, _jti, _sub), do: {:error, :session_revoked}
 
-  # Classify a token against its live (non-revoked, existing) family.
   defp classify_live_family(%AuthTokenFamily{} = family, jti, sub) do
     cond do
-      # Ownership guard (defense-in-depth): `family_id` is a signed claim, so a
-      # cross-user family_id is not reachable today — but if `sub` and
-      # `family_id` ever desync, reject WITHOUT burning the innocent owner's
-      # family (a mismatched token must not revoke someone else's session).
       to_string(family.user_id) != sub ->
         {:error, :session_revoked}
 
       family.current_jti == jti ->
         :ok
 
-      # Rotation grace window (Issue #180): the IMMEDIATELY-PREVIOUS token,
-      # presented within `grace_seconds` of the rotation that superseded it, is a
-      # benign in-flight / multi-tab race — NOT reuse. Honour it WITHOUT burning
-      # and WITHOUT advancing current_jti. Applies ONLY to `previous_jti` (the
-      # single immediate predecessor): an older token (2+ rotations back) has a
-      # different jti and falls through to burn.
       within_rotation_grace?(family, jti) ->
         :ok
 
       true ->
         revoke_family_and_burn(family)
 
-        # Refresh-token REUSE detected (Issue #237). A presented jti that is
-        # neither the family's current token nor a within-grace predecessor
-        # means a rotated/superseded refresh token was replayed — the
-        # token-theft signal. We burned the whole family above; count it so any
-        # non-zero value is alertable. NO PII in the metadata: no token, jti,
-        # user-id, or IP (telemetry is warehouse-adjacent, GDPR).
         :telemetry.execute([:stacks, :auth, :refresh, :reuse_detected], %{count: 1}, %{})
 
         {:error, :token_reuse_detected}
@@ -1451,12 +1242,6 @@ defmodule Stacks.Accounts do
     :ok
   end
 
-  # Rotation grace predicate (Issue #180). True IFF the presented jti is the
-  # family's immediate predecessor (`previous_jti`) AND that rotation happened no
-  # more than `session_rotation_grace` seconds ago. Requires BOTH `previous_jti`
-  # and `rotated_at` to be set (a never-rotated / legacy family has neither, so
-  # this is always false and the caller burns as #179 intended). The window is
-  # applied ONLY to `previous_jti`, never to an older jti.
   defp within_rotation_grace?(%AuthTokenFamily{previous_jti: prev, rotated_at: rotated_at}, jti)
        when is_binary(prev) and not is_nil(rotated_at) and prev == jti do
     DateTime.diff(DateTime.utc_now(), rotated_at, :second) <= rotation_grace_seconds()
@@ -1464,24 +1249,12 @@ defmodule Stacks.Accounts do
 
   defp within_rotation_grace?(_family, _jti), do: false
 
-  # Grace window expressed as `{n, unit}` in config, converted to seconds here at
-  # the check site.
-  #
-  # ⛔ This function's previous comment said it mirrored the AuthController
-  # session-cap converter. It did not: its private unit table stopped at `:hour`,
-  # so a `session_rotation_grace` of `{1, :day}` fell into the catch-all and was
-  # honoured as ONE SECOND. `Stacks.Duration` carries the fail-safe (unknown unit
-  # → seconds, so a misconfig fails toward LESS grace) that made the catch-all
-  # right, and the units that made it wrong.
   defp rotation_grace_seconds do
     :core
     |> Application.get_env(:session_rotation_grace, {20, :second})
     |> Duration.to_seconds()
   end
 
-  # Reuse response: mark the family revoked and burn all the user's live tokens.
-  # `update_all` (not scoped to unrevoked) is fine — re-stamping an already-set
-  # revoked_at is harmless and keeps the primitive branch-free.
   defp revoke_family_and_burn(%AuthTokenFamily{} = family) do
     now = DateTime.utc_now()
 
@@ -1526,13 +1299,6 @@ defmodule Stacks.Accounts do
     end
   end
 
-  # Mirrors the caller's key style rather than always writing a string key.
-  #
-  # It used to `Map.put(attrs, "role", …)` unconditionally, so atom-keyed attrs became
-  # a mixed-key map and Ecto refused to cast it: `expected params to be a map with
-  # atoms or string keys, got a map with mixed keys`. That only bites when the new user
-  # is the *first* one — the owner branch — which is why the controller (string keys
-  # from JSON) never hit it, and why nothing noticed.
   defp maybe_assign_owner_role(attrs) do
     if Repo.aggregate(User, :count, :id) == 0 do
       put_role(attrs, "owner")

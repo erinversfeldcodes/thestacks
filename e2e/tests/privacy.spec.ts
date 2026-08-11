@@ -38,14 +38,11 @@ import { suiteAuthFile } from "./helpers";
 test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", () => {
   test.use({ storageState: suiteAuthFile("settings") });
 
-  // Punch #13 — profile visibility save.
   test("profile visibility: select Discoverable → Save → 'Saved!' confirmation", async ({
     page,
   }) => {
     await page.goto("/settings/privacy");
 
-    // Scope to the Profile Visibility section (the one holding the profile save
-    // button) so the profile <select> can't be confused with a shelf-row select.
     const profileSection = page
       .locator(".settings-section")
       .filter({ has: page.getByRole("button", { name: "Save Profile Visibility" }) });
@@ -53,32 +50,19 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
     const profileSelect = profileSection.locator("select");
     await expect(profileSelect).toBeVisible({ timeout: 10000 });
 
-    // "Discoverable" == platform. Loosening to platform is idempotent and does
-    // NOT trigger the recap job to cap this user's shelves (recap only tightens
-    // toward "owner"), so the seeded user's shelf state is left untouched.
     await profileSelect.selectOption("platform");
 
     await profileSection
       .getByRole("button", { name: "Save Profile Visibility" })
       .click();
 
-    // On success viewSaveButton swaps the label to "Saved!" (Privacy.elm:472-474)…
     await expect(
       page.getByRole("button", { name: "Saved!" })
     ).toBeVisible({ timeout: 10000 });
-    // …and the shared viewFeedback renders this exact copy (Privacy.elm:484-485).
     await expect(page.getByText("Visibility updated.")).toBeVisible();
     await expect(page.locator(".error")).toHaveCount(0);
   });
 
-  // Punch #15 — per-shelf visibility save.
-  //
-  // The shelf row Save button fires PUT /api/bookshelves/:name/visibility. The
-  // Shelf Visibility section renders `viewFeedback model.savingShelf` (built in
-  // #196), so a success shows "Visibility updated." — asserted below alongside
-  // the accepted PUT (200). "Only me" (owner) is the most-restrictive value and
-  // is always within any profile ceiling, so this is 200 regardless of the
-  // seeded user's profile visibility.
   test("shelf visibility: select 'Only me' → Save issues an accepted PUT", async ({
     page,
   }) => {
@@ -87,9 +71,6 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
     const firstShelfRow = page.locator(".privacy__shelf-row").first();
     await expect(firstShelfRow).toBeVisible({ timeout: 10000 });
 
-    // Capture the original value so we can restore it — this shelf is shared with
-    // the parallel privacy-placement spec; leaving it at "owner" would disable
-    // that spec's placement options.
     const original = await firstShelfRow.locator("select").inputValue();
 
     await firstShelfRow.locator("select").selectOption("owner");
@@ -105,12 +86,8 @@ test.describe("Privacy — Profile & Shelf visibility (US-10.1.1 / US-10.2.1)", 
 
     expect(resp.status()).toBe(200);
     await expect(page.locator(".error")).toHaveCount(0);
-    // Shelf save shows the same feedback as profile save (Privacy.elm viewFeedback
-    // model.savingShelf → "Visibility updated." on success — built in #196).
     await expect(page.getByText("Visibility updated.")).toBeVisible();
 
-    // Restore the shared shelf to its original visibility. Await the restore PUT
-    // so it completes before teardown — no residue on the shared seeded user.
     await firstShelfRow.locator("select").selectOption(original);
     await Promise.all([
       page.waitForResponse(
@@ -148,17 +125,13 @@ test.describe("Privacy — Blog editor visibility (US-10.2.3)", () => {
       .getByPlaceholder("Write your post here...")
       .fill("Body written by the #198 privacy E2E spec.");
 
-    // The lone <select> in the editor form is the visibility dropdown
-    // (Editor.elm:287-295). "owner" == "Only me".
     await page.locator(".blog-editor__form select").selectOption("owner");
 
-    // Save Draft → viewSaveButton swaps to "Draft saved!" (Editor.elm:311-313).
     await page.getByRole("button", { name: "Save Draft" }).click();
     await expect(
       page.getByRole("button", { name: "Draft saved!" })
     ).toBeVisible({ timeout: 10000 });
 
-    // Publish → viewPublishButton swaps to "Published!" (Editor.elm:327-329).
     await page.getByRole("button", { name: "Publish" }).click();
     await expect(
       page.getByRole("button", { name: "Published!" })
@@ -189,15 +162,11 @@ test.describe("Privacy — ViewAs preview (US-10.3.1)", () => {
 
     const banner = page.locator(".view-as-bar");
     await expect(banner).toBeVisible({ timeout: 10000 });
-    // ViewAsBar humanizes the perspective: `unauthenticated` → "Not logged in"
-    // (perspectiveLabel, ViewAsBar.elm:30-34 — built in #196). Exact copy per #122 §1.
     await expect(banner).toContainText("Viewing as: Not logged in");
 
     const exit = banner.getByText("Exit preview");
     await expect(exit).toBeVisible();
 
-    // removeViewAs (ViewAsBar.elm:55-91) rebuilds the URL without view_as; the
-    // link href is the bare path, so the banner disappears after navigation.
     await exit.click();
     await expect(banner).not.toBeVisible();
     expect(page.url()).not.toContain("view_as");
@@ -223,8 +192,6 @@ test.describe("Privacy — Search engine privacy (US-10.4.1)", () => {
 
   test("SPA shell carries the noindex, nofollow robots meta", async ({ page }) => {
     await page.goto("/");
-    // priv/static/index.html (source: apps/core/assets/index.html:6) — the shell
-    // served for every SPA route.
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
       "content",
       "noindex, nofollow"
@@ -266,9 +233,7 @@ test.describe("Privacy — auth guard", () => {
   }) => {
     await page.goto("/settings/privacy");
 
-    // The login form's submit control proves the Login page was rendered.
     await expect(page.getByTestId("login-submit")).toBeVisible({ timeout: 10000 });
-    // And the privacy form must NOT be reachable while unauthenticated.
     await expect(
       page.getByRole("button", { name: "Save Profile Visibility" })
     ).toHaveCount(0);

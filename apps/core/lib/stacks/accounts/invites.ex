@@ -33,12 +33,9 @@ defmodule Stacks.Accounts.Invites do
   alias Stacks.Events
 
   @code_bytes 16
-  # Crockford base32 — unambiguous glyphs only (no I, L, O, U).
   @crockford ~c"0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
   @note_max_length 500
-
-  # ── Issue / list / revoke (owner surface) ─────────────────────────────────
 
   @doc """
   Writes an invitation. Returns `{:ok, %{invite: row, code: full_code}}` —
@@ -114,8 +111,6 @@ defmodule Stacks.Accounts.Invites do
     end
   end
 
-  # ── Checking (the public lookup) ──────────────────────────────────────────
-
   @doc """
   What `GET /api/auth/invite/:code` answers. Deliberately reveals nothing about
   a person: no note, no address (only whether one is bound), no redeemer.
@@ -157,8 +152,6 @@ defmodule Stacks.Accounts.Invites do
         :ok
     end
   end
-
-  # ── Redemption inside the registration Multi ──────────────────────────────
 
   @doc """
   Prepends the invite gate to a registration `Ecto.Multi` (US-14.1.3 §5):
@@ -231,8 +224,6 @@ defmodule Stacks.Accounts.Invites do
     {:ok, invite}
   end
 
-  # ── Code mechanics ────────────────────────────────────────────────────────
-
   @doc "Generates `{full_code, sha256_hex, display_prefix}`."
   @spec generate_code() :: {String.t(), String.t(), String.t()}
   def generate_code do
@@ -262,14 +253,11 @@ defmodule Stacks.Accounts.Invites do
     for <<chunk::5 <- pad_to_5(bytes)>>, do: Enum.at(@crockford, chunk)
   end
 
-  # Pad the bitstring so it splits into whole 5-bit chunks.
   defp pad_to_5(bytes) do
     bits = bit_size(bytes)
     rem = rem(bits, 5)
     if rem == 0, do: bytes, else: <<bytes::bitstring, 0::size(5 - rem)>>
   end
-
-  # ── Internals ─────────────────────────────────────────────────────────────
 
   defp changeset(invite, attrs) do
     invite
@@ -309,8 +297,6 @@ defmodule Stacks.Accounts.Invites do
     end
   end
 
-  # The registration Multi reports `invite_invalid` for an unknown code, and
-  # the story's distinct per-mode statuses for a known one.
   defp status_as_registration_error(invite) do
     case status(invite) do
       :ok -> :ok

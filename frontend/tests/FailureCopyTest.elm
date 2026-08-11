@@ -51,9 +51,6 @@ suite =
                         |> Expect.equal Nothing
             , test "an HTTP-date is Nothing rather than a guess" <|
                 \_ ->
-                    -- RFC 9110 allows this form. Converting it needs the current
-                    -- time, which is not available here — and a wrong number is
-                    -- worse than no number.
                     Api.retryAfterSeconds
                         (metadataWith [ ( "retry-after", "Wed, 21 Oct 2026 07:28:00 GMT" ) ])
                         |> Expect.equal Nothing
@@ -77,7 +74,6 @@ suite =
                         |> Expect.equal True
             , test "⛔ with no wait known, it invents no number" <|
                 \_ ->
-                    -- The guard on requirement 3: "where the server provides it".
                     FailureCopy.rateLimited Nothing
                         |> String.any Char.isDigit
                         |> Expect.equal False
@@ -96,9 +92,6 @@ suite =
                 \_ -> FailureCopy.waitPhrase 60 |> Expect.equal "a minute"
             , test "⛔ a part-minute wait rounds UP, never down" <|
                 \_ ->
-                    -- 61s rounding to "1 minute" would send the reader back
-                    -- before the limiter will have them, producing a second 429
-                    -- and a message they learn to distrust.
                     FailureCopy.waitPhrase 61 |> Expect.equal "2 minutes"
             , test "a longer wait rounds up too" <|
                 \_ -> FailureCopy.waitPhrase 130 |> Expect.equal "3 minutes"
@@ -116,8 +109,6 @@ suite =
                         |> Expect.equal True
             , test "⛔ a timeout does NOT claim the change was lost" <|
                 \_ ->
-                    -- A request that timed out may well have been applied. The
-                    -- honest report is that we stopped waiting for the answer.
                     FailureCopy.saveFailure "your preferences" Http.Timeout
                         |> String.contains "we cannot say whether"
                         |> Expect.equal True
@@ -128,9 +119,6 @@ suite =
                         |> Expect.equal True
             , test "⛔ the four causes do not share a sentence" <|
                 \_ ->
-                    -- The whole point. Without this, a `saveFailure` that ignored
-                    -- its argument would pass every test above that only checks
-                    -- one branch at a time.
                     [ FailureCopy.saveFailure "your preferences" (Http.BadStatus 422)
                     , FailureCopy.saveFailure "your preferences" (Http.BadStatus 429)
                     , FailureCopy.saveFailure "your preferences" Http.NetworkError

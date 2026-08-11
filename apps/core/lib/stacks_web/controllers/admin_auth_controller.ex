@@ -113,17 +113,6 @@ defmodule StacksWeb.AdminAuthController do
     user = Guardian.Plug.current_resource(conn)
     recovery_codes = Map.get(params, "recovery_codes", [])
 
-    # ⚠️ **base32, because that is what `mfa_setup` actually publishes.**
-    #
-    # This decoded base64 — and nothing the client can reach ever holds base64. `mfa_setup` returns
-    # only `provisioning_uri`, whose `secret=` parameter is **base32** (the TOTP standard). So every
-    # possible client had to base32-decode and re-base64-encode to satisfy this, and getting it wrong
-    # returns `422 invalid_code`, which reads as clock skew or a mistyped code. It cost real time on
-    # 2026-07-29 before the encoding was suspected at all.
-    #
-    # The tests did not catch it because they call `MFA.begin_enrollment/1` directly for the raw
-    # secret bytes — **bypassing the very contract a client must use.** A test that walks the client's
-    # path (setup → read the URI → confirm) now exists and fails on the old encoding.
     case Base.decode32(encoded_secret, padding: false) do
       {:ok, secret} ->
         case MFA.confirm_enrollment(user, totp_code, secret, recovery_codes) do
@@ -138,10 +127,6 @@ defmodule StacksWeb.AdminAuthController do
         conn |> put_status(422) |> json(%{error: "invalid_secret"})
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
 
   defp authenticate(email, password) do
     case Accounts.authenticate(email, password) do

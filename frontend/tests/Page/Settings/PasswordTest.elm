@@ -82,8 +82,6 @@ suite =
                         |> Expect.equal "brand-new"
             , test "a setter clears a prior save result back to NotAsked" <|
                 \_ ->
-                    -- A completed (or failed) save must not linger while the user
-                    -- retypes; editing any field resets the banner.
                     validInput
                         |> applyWithToken (SaveCompleted (Ok ()))
                         |> applyWithToken (SetNewPassword "typing-again")

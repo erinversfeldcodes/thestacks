@@ -15,17 +15,13 @@ defmodule Core.PromExCustomMetricsTest do
   via `PromEx.get_metrics/1`.
   """
 
-  # async: false — PromEx state is global and we assert on scraped output.
   use ExUnit.Case, async: false
 
   setup do
-    # Let the scraper drain any previously emitted events before asserting.
     :ok
   end
 
   test "PromEx exports custom stacks_* metrics the SLO gate scraper reads" do
-    # Emit a representative sample of each custom event so PromEx records a
-    # non-empty series for each.
     :telemetry.execute(
       [:stacks, :upload, :terminal],
       %{count: 1},
@@ -44,7 +40,6 @@ defmodule Core.PromExCustomMetricsTest do
       %{fuse_name: :vision_fuse}
     )
 
-    # Give PromEx's telemetry handler a moment to process the ETS writes.
     Process.sleep(50)
 
     output = PromEx.get_metrics(Core.PromEx)
@@ -61,12 +56,6 @@ defmodule Core.PromExCustomMetricsTest do
            "expected stacks_fuse_state_state in PromEx output, got:\n#{output}"
   end
 
-  # Issue #181: AuthController.refresh/2 emits
-  # [:stacks, :auth, :refresh, :revoke_failed] when it fails to revoke the old
-  # token during rotation. This test proves the metric is registered in the
-  # PromEx plugin AND that emitting the event is picked up by the registered
-  # counter — i.e. the emission in the controller branch (covered directly by
-  # the auth_controller_test) will be exported as a real, scrapeable series.
   test "PromEx exports the auth refresh revoke-failure counter (Issue #181)" do
     :telemetry.execute(
       [:stacks, :auth, :refresh, :revoke_failed],
@@ -74,7 +63,6 @@ defmodule Core.PromExCustomMetricsTest do
       %{}
     )
 
-    # Give PromEx's telemetry handler a moment to process the ETS writes.
     Process.sleep(50)
 
     output = PromEx.get_metrics(Core.PromEx)
@@ -84,18 +72,6 @@ defmodule Core.PromExCustomMetricsTest do
     assert output =~ "stacks_auth_refresh_revoke_failed_count_total",
            "expected stacks_auth_refresh_revoke_failed_count_total in PromEx output, got:\n#{output}"
   end
-
-  # ── Issue #206: reporter/tag-set assertions ─────────────────────────────
-  #
-  # The family-name-only assertions above prove a series *exists*; these prove
-  # the series is exported with the *correct label set*. A counter whose tags
-  # were silently dropped in the plugin (the Phase-4 GDPR tag-drop this issue
-  # was filed for) still passes a family-name check but fails a tag-set check.
-  #
-  # PromEx renders `Telemetry.Metrics` tags as Prometheus labels in the form
-  # `metric_family_name{key="value",…} <value>`. `assert_label/4` matches the
-  # family name followed (in the same `{…}` label block) by `key="value"`,
-  # tolerant of label ordering and of other labels being present.
 
   defp scrape do
     Process.sleep(50)
@@ -134,9 +110,6 @@ defmodule Core.PromExCustomMetricsTest do
     end
 
     test "login-failure-by-type counter exports type label for each status class" do
-      # 401 / 403 / 422 / 423 / 503 login failures are counted in the
-      # controller tagged by reason; 429 (rate-limit) is counted in the
-      # RateLimiter plug tagged by bucket (asserted below).
       for type <- [
             :invalid_credentials,
             :email_unconfirmed,
@@ -166,11 +139,6 @@ defmodule Core.PromExCustomMetricsTest do
   end
 
   describe "GDPR counters export with the right tag-set at the reporter level (Issue #206 / #121)" do
-    # gdpr_telemetry_test.exs asserts these signals at the :telemetry handler
-    # level (event name + measurements + metadata). These assertions close the
-    # gap the Phase-4 tag-drop slipped through: that each of the 8 GDPR signals
-    # is exported by PromEx *with its label set intact*.
-
     test "export outcome exports result label" do
       :telemetry.execute([:stacks, :gdpr, :export], %{count: 1}, %{result: :ok})
       :telemetry.execute([:stacks, :gdpr, :export], %{count: 1}, %{result: :error})
@@ -194,8 +162,6 @@ defmodule Core.PromExCustomMetricsTest do
 
       output = scrape()
 
-      # Assert BOTH labels co-exist on the failure series — the diagnostic
-      # failed_step tag is exactly the kind of tag a drop would silently lose.
       assert output =~
                ~r/stacks_gdpr_deletion_count_total\{[^}\n]*result="error"[^}\n]*failed_step="delete_user"[^}\n]*\}|stacks_gdpr_deletion_count_total\{[^}\n]*failed_step="delete_user"[^}\n]*result="error"[^}\n]*\}/,
              "expected stacks_gdpr_deletion_count_total with result=\"error\" AND failed_step=\"delete_user\", got:\n#{output}"

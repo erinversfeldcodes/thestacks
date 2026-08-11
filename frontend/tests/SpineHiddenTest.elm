@@ -50,8 +50,6 @@ visibleBookHasNoPadlock : Test
 visibleBookHasNoPadlock =
     test "a visible placement renders no padlock" <|
         \_ ->
-            -- The positive control for the assertion above: without it, a
-            -- padlock rendered unconditionally would also pass.
             visibleBook
                 |> Query.fromHtml
                 |> Query.hasNot [ Selector.class "book__lock" ]
@@ -74,9 +72,6 @@ hiddenBookCarriesNoInlineOpacity : Test
 hiddenBookCarriesNoInlineOpacity =
     test "the hidden treatment is a stylesheet rule, not an inline style" <|
         \_ ->
-            -- An inline style beats every rule in main.css, so it cannot be
-            -- overridden, reviewed, or seen by scripts/check-css.sh. The
-            -- treatment now lives in `.book--hidden`, where it can be.
             hiddenBook
                 |> Query.fromHtml
                 |> Query.hasNot

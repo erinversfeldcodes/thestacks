@@ -140,20 +140,6 @@ bookDetailModelFor book =
     { base | book = Success book }
 
 
-
--- #370 — THE INVARIANT ------------------------------------------------------
---
--- The row the lead read off the preview, verbatim: a real title, a real
--- author, a real year and page count, and `barcode_unverified` — which was
--- ACCURATE, nothing had verified it. The page nonetheless printed "Not yet
--- identified" over the top of "1Q84" and a paragraph saying it could not show
--- a title, two lines above the author it was showing. 206 of 206 editions.
---
--- Nothing below needs a fixture from the database: the contradiction is
--- between two things the page renders from the SAME record, so a record is all
--- it takes to expose it. That is why this would have caught it on day one.
-
-
 reportedRow : Book
 reportedRow =
     let
@@ -303,8 +289,6 @@ invariantSuite =
     describe "#370 — the page may never deny a title it is holding"
         [ test "the row from the preview: 1Q84, barcode_unverified, real title" <|
             \_ ->
-                -- The whole defect in one assertion. Before the predicate
-                -- split this rendered "Not yet identified" and the notice.
                 BookDetail.view (bookDetailModelFor reportedRow)
                     |> Query.fromHtml
                     |> Expect.all
@@ -313,9 +297,6 @@ invariantSuite =
                         ]
         , test "a real book named 'ISBN …' is still safe once provenance no longer decides alone" <|
             \_ ->
-                -- #344's false-positive case, now with the provenance the fix
-                -- stopped keying off. `String.startsWith "ISBN "` would call
-                -- this book nameless; equality against its own ISBN cannot.
                 BookDetail.view (bookDetailModelFor (bookWith "ISBN 9780262561754 and Other Numbers" "barcode_unverified"))
                     |> Query.fromHtml
                     |> Expect.all
@@ -340,27 +321,12 @@ invariantSuite =
                         , Query.find [ noticeSelector ] >> Query.has [ Selector.text provisionalIsbn ]
                         ]
         , test "a catalogue that answered without a title is not accused of never answering" <|
-            -- Found by probe: dropping the `isProvisional` conjunct from
-            -- `isUnidentified` reddened NOTHING, because no test held a
-            -- stand-in title beside a verified source. Production reaches
-            -- it directly — `Books.attrs_from_resolved/2` writes
-            -- "Unknown Title" and `verification_source_from/1` writes
-            -- "open_library" from the SAME resolver answer, so an Open
-            -- Library record carrying an id but no title lands here.
-            --
-            -- The notice says "we have this book's barcode but haven't
-            -- matched it to a catalogue record yet". We DID match it. It
-            -- may not appear, and this is the only thing saying so.
             \_ ->
                 BookDetail.view (bookDetailModelFor (bookWith "Unknown Title" "open_library"))
                     |> Query.fromHtml
                     |> Query.hasNot [ noticeSelector ]
         , fuzz2 realTitleFuzzer verificationSourceFuzzer "the two claims stay separable: provenance is still readable on its own" <|
             \title verificationSource ->
-                -- `isProvisional` keeps its meaning. It is the conflation that
-                -- was the bug, not the fact — and a titled unverified edition
-                -- is exactly the pair the old single predicate could not
-                -- express.
                 Expect.all
                     [ \b -> isProvisional b |> Expect.equal (verificationSource == "barcode_unverified")
                     , \b -> isUnidentified b |> Expect.equal False
@@ -381,16 +347,9 @@ suite =
                     isProvisional identifiedBook |> Expect.equal False
             , test "a book enriched AFTER arriving by barcode is no longer provisional" <|
                 \_ ->
-                    -- The title changed and so did the provenance. A title
-                    -- heuristic would also pass this one — and would then fail
-                    -- every case where the two disagree, which is the population
-                    -- the treatment exists for.
                     isProvisional enrichedAfterBarcodeBook |> Expect.equal False
             , test "a real book actually titled 'ISBN …' is NOT treated as provisional" <|
                 \_ ->
-                    -- False-positive direction: a title heuristic would tell this
-                    -- reader their identified book is unidentified, and would
-                    -- replace its real title with a status.
                     Expect.all
                         [ \b -> isProvisional b |> Expect.equal False
                         , \b -> displayTitle b |> Expect.equal "ISBN 9780262561754 and Other Numbers"
@@ -398,8 +357,6 @@ suite =
                         realBookTitledIsbn
             , test "a provisional book whose title is NOT 'ISBN …' is still caught" <|
                 \_ ->
-                    -- False-negative direction, and the one that matters: this is
-                    -- the population a title heuristic silently loses.
                     Expect.all
                         [ \b -> isProvisional b |> Expect.equal True
                         , \b -> displayTitle b |> Expect.equal "Not yet identified"
@@ -442,8 +399,6 @@ suite =
                             [ Selector.attribute (Html.Attributes.attribute "data-testid" "upload-provisional-notice") ]
             , test "INFORMS ONLY: both confirm and reject stay on screen and enabled" <|
                 \_ ->
-                    -- The whole point of the ruling. A provisional book is one
-                    -- the reader may shelve; the notice is a sentence, not a gate.
                     Upload.view { init_ | step = Verifying provisionalBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Expect.all
@@ -458,7 +413,6 @@ suite =
         , describe "upload shelf picker"
             [ test "offers every shelf for a provisional book" <|
                 \_ ->
-                    -- Five bookshelves, none withheld because the lookup is late.
                     Upload.view { init_ | step = ChoosingShelf provisionalBook } (Just "token") Types.RemoteData.NotAsked
                         |> Query.fromHtml
                         |> Query.findAll [ Selector.class "upload-shelf-picker__shelf" ]

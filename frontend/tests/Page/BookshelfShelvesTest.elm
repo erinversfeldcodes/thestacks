@@ -141,14 +141,10 @@ shelfOrderIsPreserved =
                           }
                         ]
                     )
-                -- Both books are on the page at all...
                 |> ProgramTest.ensureView
                     (Query.findAll [ Selector.class "book-button" ]
                         >> Query.count (Expect.equal 2)
                     )
-                -- ...and shelf-first's book comes first. Pinning BOTH positions
-                -- is what makes a reversal fail: asserting only index 0 would
-                -- still pass if the flattening emitted [alpha, alpha].
                 |> ProgramTest.ensureView
                     (Query.findAll [ Selector.class "book-button" ]
                         >> Query.index 0

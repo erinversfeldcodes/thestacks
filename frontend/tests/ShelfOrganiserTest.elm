@@ -90,9 +90,6 @@ suite =
         , describe "moveDown"
             [ test "moves a shelf one place later" <|
                 \_ ->
-                    -- ⚠️ The case an off-by-one breaks. Removing "a" shifts "b" and "c"
-                    -- down one, so inserting at the raw target index would leave "a"
-                    -- exactly where it started and look like the click did nothing.
                     moveDownIds "a" three |> Expect.equal [ "b", "a", "c" ]
             , test "moves the middle shelf to the end" <|
                 \_ -> moveDownIds "b" three |> Expect.equal [ "a", "c", "b" ]
@@ -124,7 +121,6 @@ suite =
                     Organiser.moveTo 2 0 three |> ids |> Expect.equal [ "c", "a", "b" ]
             , test "clamps a target past the end instead of dropping the shelf" <|
                 \_ ->
-                    -- A drop below the last row must land at the bottom, not vanish.
                     Organiser.moveTo 0 99 three |> ids |> Expect.equal [ "b", "c", "a" ]
             , test "clamps a negative target" <|
                 \_ ->
@@ -134,8 +130,6 @@ suite =
                     Organiser.moveTo 9 0 three |> ids |> Expect.equal [ "a", "b", "c" ]
             , test "never loses or duplicates a shelf" <|
                 \_ ->
-                    -- The invariant that matters most: a reorder is a permutation. Losing
-                    -- a shelf would strand its books.
                     Organiser.moveTo 1 2 three
                         |> List.length
                         |> Expect.equal 3
@@ -159,8 +153,6 @@ suite =
                         |> Query.count (Expect.equal 3)
             , test "every row also has explicit move buttons — the keyboard path" <|
                 \_ ->
-                    -- Without these the feature is mouse-only, which is the half that
-                    -- "drag now, accessible later" always defers indefinitely.
                     render three
                         |> Query.findAll [ Selector.attribute (attr "data-testid" "shelf-move-up") ]
                         |> Query.count (Expect.equal 3)
@@ -187,8 +179,6 @@ suite =
                         |> Query.has [ Selector.disabled True ]
             , test "remove is disabled while a shelf holds books" <|
                 \_ ->
-                    -- The server refuses with 422. Offering an action that cannot succeed
-                    -- is worse than not offering it.
                     Organiser.view
                         { shelves = [ shelf "full" 3 ], state = Organiser.init, busy = False }
                         |> Query.fromHtml
@@ -201,7 +191,6 @@ suite =
                         |> Query.has [ Selector.disabled False ]
             , test "everything is disabled while a request is in flight" <|
                 \_ ->
-                    -- Two queued reorders would resolve arbitrarily.
                     Organiser.view
                         { shelves = three, state = Organiser.init, busy = True }
                         |> Query.fromHtml
@@ -211,21 +200,6 @@ suite =
         , describe "the drag events do not cancel the drag they are part of"
             [ test "dragover must NOT emit DragEnd — that killed every drop" <|
                 \_ ->
-                    -- ⛔ The bug this replaced, found by driving a preview on 2026-07-28.
-                    --
-                    -- `dragover` has to call preventDefault or the browser refuses the drop,
-                    -- and the message it carried was chosen as an irrelevant placeholder:
-                    -- `DragEnd`. But `DragEnd` clears `dragging`, and `dragover` fires
-                    -- *continuously* while the pointer is over a row — so by the time `drop`
-                    -- arrived, `dragging` was always `Nothing`, `DropOn`'s Nothing branch
-                    -- returned silently, and no drop ever reordered anything. Drag-and-drop
-                    -- could not have worked in any browser.
-                    --
-                    -- Live proof of the mechanism: dragstart → drop reorders;
-                    -- dragstart → dragover → drop does nothing.
-                    --
-                    -- 28 tests passed throughout, because they all tested the pure move
-                    -- functions — which were never wrong — and never the event wiring.
                     render three
                         |> Query.findAll [ Selector.attribute (attr "data-testid" "shelf-row") ]
                         |> Query.first
@@ -250,7 +224,6 @@ suite =
                         |> Expect.equal (Ok (Organiser.DropOn "a"))
             , test "dragend is still reachable, for a drag abandoned off-target" <|
                 \_ ->
-                    -- Cancelling is a real case — it just must not be what `dragover` does.
                     render three
                         |> Query.findAll [ Selector.attribute (attr "data-testid" "shelf-row") ]
                         |> Query.first

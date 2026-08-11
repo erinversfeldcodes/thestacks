@@ -7,16 +7,9 @@ kill_timeout = "5s"
   dockerfile = "Dockerfile.core"
 
 [deploy]
-  # correct-then-migrate, not migrate alone (#339): a constraint added to an
-  # existing table is a claim about existing data, so repairs must land first.
   release_command = "/app/bin/core eval 'Stacks.Release.deploy()'"
 
 [env]
-  # The production domain (certs linked to this app). Phoenix builds absolute
-  # URLs from this — confirmation and password-reset links above all.
-  # NOTE: scripts/deploy-stack.sh sets PHX_HOST as a Fly *secret*, which
-  # overrides this [env] value. Both are kept correct so a bare `fly deploy`
-  # and a scripted deploy agree; previews get "${CORE_APP}.fly.dev" instead.
   PHX_HOST = "readinginthestacks.com"
   PORT = "4000"
   ECTO_IPV6 = "true"
@@ -53,17 +46,6 @@ kill_timeout = "5s"
   grace_period = "10s"
   method = "GET"
   path = "/api/health"
-
-# NOTE(#323): the `[metrics]` block (Fly managed-Prometheus scrape of
-# /internal/metrics, Issue #232) was REMOVED. It triggered Fly's platform
-# scraper every 15s, but the scrape never ingested a single stacks_* series
-# (#248) and 401'd continuously against StacksWeb.Plugs.MetricsAuth — the
-# platform scraper cannot send the METRICS_SCRAPE_TOKEN bearer and its
-# requests do not satisfy the 6PN bypass. ADR-021 replaced scraping with an
-# in-BEAM PUSH (Core.PromEx.MetricsPusher → VictoriaMetrics via
-# STACKS_METRICS_PUSH_URL), so nothing consumes the Fly scrape. Do not
-# re-add a `[metrics]` block without also solving its auth.
-# See docs/runbooks/metrics-stack.md.
 
 [[vm]]
   size = "shared-cpu-1x"

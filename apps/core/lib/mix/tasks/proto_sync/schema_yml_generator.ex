@@ -20,7 +20,6 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     ts_fields = timestamp_field_names(table)
     model_name = "stg_#{table.table_name}"
 
-    # Filter out: id, timestamps (added separately), api_only/dbt_exclude fields
     filtered_fields =
       Enum.reject(fields, fn field ->
         field_atom = String.to_atom(field.name)
@@ -84,15 +83,9 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     end
   end
 
-  # -- Model block replacement ------------------------------------------------
-
-  # Replace a single model block in the schema.yml content.
-  # Finds the block by its "  - name: <model_name>" line and replaces
-  # everything from that line to just before the next model/section/EOF.
   defp replace_model_block(content, model_name, new_block) do
     lines = String.split(content, "\n")
 
-    # Find the line index where this model starts
     start_idx =
       Enum.find_index(lines, fn line ->
         String.trim(line) == "- name: #{model_name}"
@@ -100,11 +93,9 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
 
     case start_idx do
       nil ->
-        # Model not found — append before the final newline
         String.trim_trailing(content) <> "\n\n" <> new_block <> "\n"
 
       idx ->
-        # Find where this model's content ends
         end_idx = find_model_end(lines, idx)
 
         before = Enum.take(lines, idx)
@@ -117,13 +108,9 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     end
   end
 
-  # Find the last line index belonging to a model block starting at start_idx.
-  # A model block ends when we hit the next "  - name:" line, a section
-  # comment line ("  # ---"), or the end of file.
   defp find_model_end(lines, start_idx) do
     total = length(lines)
 
-    # Walk forward from start_idx + 1 to find the next boundary
     result =
       (start_idx + 1)..(total - 1)//1
       |> Enum.find(fn idx ->
@@ -133,23 +120,18 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
 
     case result do
       nil ->
-        # No boundary found — model runs to end of file.
-        # Trim trailing blank lines.
         (total - 1)..start_idx//-1
         |> Enum.find(start_idx, fn idx ->
           String.trim(Enum.at(lines, idx)) != ""
         end)
 
       boundary_idx ->
-        # Walk backwards from boundary to skip blank lines that separate models
         (boundary_idx - 1)..start_idx//-1
         |> Enum.find(start_idx, fn idx ->
           String.trim(Enum.at(lines, idx)) != ""
         end)
     end
   end
-
-  # -- Column building helpers ------------------------------------------------
 
   defp id_column do
     %{name: "id", description: "Surrogate UUID primary key.", tests: [:not_null, :unique]}
@@ -205,7 +187,6 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
   defp build_tests(_field, override, _ecto_type, _descriptor) do
     tests = []
 
-    # not_null for fields with null: false override
     tests =
       if Map.get(override, :null) == false do
         tests ++ [:not_null]
@@ -213,13 +194,6 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
         tests
       end
 
-    # relationships tests removed: Postgres enforces FK integrity at the OLTP
-    # layer, and auto-inferred ref model names are unreliable (naive pluralisation,
-    # polymorphic references like aggregate_id). Add relationships tests manually
-    # to intermediate/mart schema.yml where denormalised joins could produce orphans.
-
-    # accepted_values: not auto-inferred from proto (proto enums are additive
-    # and may lead the DB). Opt-in per field via dbt_tests in field_overrides.
     tests =
       case Map.get(override, :dbt_tests) do
         nil -> tests
@@ -235,8 +209,6 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     |> String.capitalize()
     |> Kernel.<>(".")
   end
-
-  # -- YAML rendering ---------------------------------------------------------
 
   defp render_column(%{name: name, description: desc, tests: tests}) do
     base = "      - name: #{name}\n        description: #{desc}"
@@ -276,8 +248,6 @@ defmodule Mix.Tasks.ProtoSync.SchemaYmlGenerator do
     "          - accepted_values:\n" <>
       "              values: [#{values_str}]"
   end
-
-  # -- Diff helpers -----------------------------------------------------------
 
   defp normalize(content) do
     content

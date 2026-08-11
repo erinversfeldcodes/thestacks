@@ -29,16 +29,11 @@ import Util.TestId exposing (testId)
 
 type alias Model =
     { invites : RemoteData Http.Error (List AdminInvite)
-
-    -- The create form. `expiresInDays` stays a raw string so a half-typed
-    -- number is not silently coerced; it parses at submit.
     , note : String
     , invitedEmail : String
     , maxUses : String
     , expiresInDays : String
     , creating : Bool
-
-    -- The one place the full code ever appears (see the moduledoc).
     , revealed : Maybe ( AdminInvite, String )
     , revoking : Maybe String
     , error : Maybe String
@@ -131,8 +126,6 @@ update msg model maybeToken =
                     ( model, Cmd.none, NoOut )
 
         CreateCompleted (Ok ( invite, fullCode )) ->
-            -- Prepend locally AND hold the reveal; a refetch would not carry
-            -- the code, which exists only in this response.
             ( { model
                 | creating = False
                 , revealed = Just ( invite, fullCode )
@@ -166,8 +159,6 @@ update msg model maybeToken =
                     ( model, Cmd.none, NoOut )
 
         RevokeCompleted (Ok ()) ->
-            -- Refetch: revocation is a timestamp the server wrote, and the row
-            -- must now render exactly what the server holds.
             ( { model | revoking = Nothing }, fetch maybeToken, NoOut )
 
         RevokeCompleted (Err err) ->

@@ -54,9 +54,6 @@ defmodule Stacks.DataCorrection.StaleSeedEditionIsbn do
 
   alias Stacks.DataCorrection.EditionIsbn
 
-  # {fixture id, the pre-#335 seed literal, the literal seeds.exs declares today}
-  # `seed_honesty_test.exs` asserts each `to` is present in seeds.exs and each
-  # `from` is absent, so this table cannot drift from the file it mirrors.
   @fixtures [
     {"a1b2c3d4-0000-0000-0000-000000004076", "9780156030358", "9780156030359"},
     {"a1b2c3d4-0000-0000-0000-000000004096", "9780679775474", "9780679775478"},

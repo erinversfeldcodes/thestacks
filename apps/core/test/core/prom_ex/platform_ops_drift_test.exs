@@ -50,19 +50,13 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
 
   @dashboard_relative_path "grafana/platform_ops.json"
 
-  # The NEW #240 family this dashboard exists to surface. It MUST be queried by
-  # at least one panel — an unwatched trusted-client-IP-source counter is a gap.
   @new_family "stacks_rate_limit_client_ip_count_total"
 
-  # Histogram/summary wire suffixes that a `distribution` produces. A panel
-  # queries the `_bucket` variant; normalise it back to the registered base.
   @histogram_suffixes ["_bucket", "_sum", "_count"]
 
   defp dashboard_path,
     do: Application.app_dir(:core, Path.join("priv", @dashboard_relative_path))
 
-  # Registered Prometheus family names, derived from the plugin's declared
-  # Telemetry.Metrics structs — the same join TelemetryMetricsPrometheus uses.
   defp registered_families do
     StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
@@ -70,15 +64,12 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
     |> MapSet.new()
   end
 
-  # Recursively collect every panel (including panels nested inside Grafana
-  # "row" panels) from a decoded dashboard.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel -> [panel | all_panels(panel)] end)
   end
 
   defp all_panels(_), do: []
 
-  # Only panels that actually render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
@@ -89,19 +80,12 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
     dashboard_path() |> File.read!() |> Jason.decode!()
   end
 
-  # Strip a trailing distribution wire-suffix (`_bucket`/`_sum`/`_count`) so a
-  # `histogram_quantile(...stacks_repo_query_duration_milliseconds_bucket...)`
-  # reference collapses to the registered base name. Counters end in `_total`,
-  # never a bare histogram suffix, so this never mangles a counter name.
   defp normalise(name) do
     Enum.find_value(@histogram_suffixes, name, fn suffix ->
       if String.ends_with?(name, suffix), do: String.trim_trailing(name, suffix)
     end)
   end
 
-  # All `stacks_*` metric names referenced by any panel target `expr`,
-  # normalised back to their registered base names. The regex excludes
-  # PromEx-builtin (non-`stacks_`) metrics by construction.
   defp panel_metric_names(dashboard) do
     for panel <- data_panels(dashboard),
         target <- panel["targets"] || [],

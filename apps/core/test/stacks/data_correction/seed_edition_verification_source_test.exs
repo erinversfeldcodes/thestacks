@@ -15,9 +15,6 @@ defmodule Stacks.DataCorrection.SeedEditionVerificationSourceTest do
   alias Stacks.DataCorrection
   alias Stacks.DataCorrection.SeedEditionVerificationSource
 
-  # A deterministic seed-shaped id no real fixture uses (fixture suffixes are
-  # far below 9_990_000). Production writes autogenerate v4 UUIDs, so this
-  # prefix is the seed's signature.
   @seed_id "a1b2c3d4-0000-0000-0000-000000999001"
 
   defp insert_edition(id, verification_source) do
@@ -43,7 +40,6 @@ defmodule Stacks.DataCorrection.SeedEditionVerificationSourceTest do
     end
 
     test "never claims a reader-created barcode_unverified edition — that label is true" do
-      # Factory-generated v4 id — the shape every production write path mints.
       %{id: id} =
         Repo.insert!(
           build(:book_edition, book: insert(:book), verification_source: "barcode_unverified")
@@ -73,8 +69,6 @@ defmodule Stacks.DataCorrection.SeedEditionVerificationSourceTest do
       assert Enum.any?(first.changes, &(&1.id == id))
       assert source_of(id) == "open_library"
 
-      # Idempotence — the DoD's own probe: the second consecutive run plans
-      # nothing, because no seed row still holds the fallback.
       assert {:ok, second} =
                DataCorrection.run(SeedEditionVerificationSource,
                  apply: true,

@@ -10,8 +10,6 @@ defmodule CoreWeb.Endpoint do
 
   plug Plug.RequestId
 
-  # Must precede Plug.Static — it serves /robots.txt and halts before any
-  # later plug runs, so crawler-fetch telemetry has to be observed here first.
   plug StacksWeb.Plugs.CrawlerTelemetry
 
   plug Plug.Static,
@@ -37,29 +35,11 @@ defmodule CoreWeb.Endpoint do
   plug Plug.Head
   plug Plug.Session, @session_options
 
-  # Prometheus-format metrics exposition — auth-gated by
-  # StacksWeb.Plugs.MetricsAuth: public callers need an Authorization: Bearer
-  # <METRICS_SCRAPE_TOKEN> header; the plug halts with 401 before PromEx.Plug
-  # sees the request. Its reader is scripts/check-slo-gate.sh; the metrics
-  # store is fed by push, not by scraping this route
-  # (Core.PromEx.MetricsPusher → VictoriaMetrics, ADR-021). The one bypass is
-  # an in-cluster scrape arriving directly over 6PN (fdaa::/16 remote_ip AND
-  # no fly-proxy `fly-client-ip` header), which has no caller today — see the
-  # plug's @moduledoc. remote_ip alone is not a trust signal.
   plug StacksWeb.Plugs.MetricsAuth
   plug PromEx.Plug, prom_ex_module: Core.PromEx, path: "/internal/metrics"
 
-  # Synthetic dependency probe for SLO gate cold-start coverage. Handled at
-  # the endpoint level (before the router) so it (a) never appears in
-  # `core_prom_ex_phoenix_http_requests_total` and therefore can't skew
-  # `real_5xx_rate`, (b) never triggers route-group tagging, and (c) short-
-  # circuits dependency-heavy Plug pipelines that the real `/api/*` routes
-  # run. Bearer auth is provided by the MetricsAuth plug above.
   plug StacksWeb.Plugs.DepsCheck
 
-  # Tag every request with a :route_group before the router dispatches so
-  # phoenix.router_dispatch.stop metadata carries the group. Feeds the SLO
-  # gate in Issue #136.
   plug StacksWeb.Plugs.RouteGroup
 
   plug CoreWeb.Router

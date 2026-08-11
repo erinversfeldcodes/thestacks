@@ -1,39 +1,3 @@
-/* The Stacks — Main CSS
-   Dark-academic meets cottage-core aesthetic
-   ------------------------------------------ */
-
-/* ===== Design Tokens (Wave 9 / #319) =====
- *
- * Every reusable value lives behind a token so it can be governed at the value
- * level. All tokens below reuse a value already present in the file — Wave 9
- * moved values behind names, it did not introduce any new visual value.
- *
- * SPACING SCALE (--space-1 … --space-7) — the EMERGENT core, not strict base-4.
- * These seven steps already cover ~53% of the spacing literals in the file:
- *   --space-1 0.25rem · --space-2 0.5rem · --space-3 0.75rem · --space-4 1rem
- *   --space-5 1.5rem · --space-6 2rem · --space-7 3rem
- * New code MUST use the scale where a value matches a step (gated in 9c).
- *
- * TYPE SCALE (--size-xs … --size-8xl) — --size-5xl…8xl extend the ramp past
- * --size-4xl (2.5rem) to cover the display headings that were previously
- * off-scale (3 / 3.5 / 4 / 5rem).
- *
- * RADII — --radius-sm/md/lg plus --radius-pill (999px) for pills/badges.
- *
- * SEMANTIC STATE — one canonical error red (--error), a darker variant
- * (--error-strong), success green (--success), and the lamplight-amber warning
- * pair (--warning / --warning-text). See the :root block for the source values.
- *
- * PALETTE / THEMES — the :root palette is redefined by five shelf-theme blocks
- * (.shelf-library / -antilibrary / -wishlist / -looking-for-home / -reading-pile)
- * and a page-scoped parchment palette (.page--book-detail). A palette value maps
- * to DIFFERENT token names in different themes; only tokens defined solely in
- * :root (e.g. --text-muted, --accent-hover) are theme-invariant. Migrate
- * literals to a token only when the token resolves to that exact value in the
- * rule's rendering context.
- */
-
-/* ===== CSS Custom Properties ===== */
 
 :root {
     --font-heading: 'Playfair Display', 'Georgia', serif;
@@ -48,13 +12,11 @@
     --size-xxl: 1.5rem;
     --size-3xl: 2rem;
     --size-4xl: 2.5rem;
-    /* Display sizes — extend the ramp past 4xl for off-scale headings. */
     --size-5xl: 3rem;
     --size-6xl: 3.5rem;
     --size-7xl: 4rem;
     --size-8xl: 5rem;
 
-    /* Spacing scale — emergent core (see header). */
     --space-1: 0.25rem;
     --space-2: 0.5rem;
     --space-3: 0.75rem;
@@ -72,7 +34,6 @@
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 
-    /* Global / default (library-like dark) */
     --bg: #1a1208;
     --text: #e8dcc8;
     --text-muted: #a09070;
@@ -82,20 +43,12 @@
     --wallpaper-color: #2a3d2f;
     --border: rgba(255, 255, 255, 0.1);
 
-    /* Semantic state — theme-invariant (defined only here). Source values:
-     * --error         #e05050  (the brighter/more-used error red)
-     * --error-strong  #b03030  (the darker error red, e.g. filled buttons)
-     * --success       #4a7c59  (the accent green; = rgba(74,124,89,…) grounds)
-     * --warning       #b8860b  (lamplight amber; = rgba(184,134,11,…) grounds)
-     * --warning-text  #6b4310  (dark brass warning text on the amber panels) */
     --error: #e05050;
     --error-strong: #b03030;
     --success: #4a7c59;
     --warning: #b8860b;
     --warning-text: #6b4310;
 }
-
-/* ===== Shelf Theme Classes ===== */
 
 .shelf-library {
     --shelf-bg: #3d2b1f;
@@ -163,8 +116,6 @@
     --accent: #9a6aaa;
 }
 
-/* ===== Base Reset & Body ===== */
-
 *,
 *::before,
 *::after {
@@ -204,8 +155,6 @@ h4 {
     line-height: 1.2;
 }
 
-/* ===== App Layout ===== */
-
 .app {
     display: flex;
     flex-direction: column;
@@ -219,14 +168,6 @@ h4 {
     margin: 0 auto;
     width: 100%;
 }
-
-/* ===== Connectivity banner (#362) =====
-
-   Above the header in the DOM and in the flow, so it pushes the whole app down
-   rather than covering a control the reader may be reaching for. Amber on a
-   deep, warm ground: this is not an error the reader caused, and red would say
-   it was. Only ever rendered when offline — an "everything is fine" bar is a
-   permanent tax on every reader to say nothing. */
 
 .connectivity-banner {
     position: relative;
@@ -246,8 +187,6 @@ h4 {
     color: #f0dfae;
     text-align: center;
 }
-
-/* ===== Header & Navigation ===== */
 
 .app-header {
     position: relative;
@@ -281,11 +220,6 @@ h4 {
     flex-wrap: wrap;
 }
 
-/* The nav `<li>` wrapper. Rule-less by design — all visual styling lives on the child
-   `.app-nav__link` (and on `.app-nav__item--active .app-nav__link` for the current route), the
-   same split as `.user-menu__backdrop` being purely structural. This minimal, inert rule exists
-   only to make that intent explicit and satisfy the orphan gate; `list-style` is already inherited
-   from `.app-nav__list`, so it changes nothing visually. */
 .app-nav__item {
     list-style: none;
 }
@@ -310,16 +244,10 @@ h4 {
     color: var(--text);
 }
 
-/* ===== Nav Dropdowns ===== */
-
 .app-nav__dropdown {
     position: relative;
 }
 
-/* Elm owns open/closed now (#318 TR-1): the menu is in the DOM only while its
-   disclosure is open, so it is `display: block` unconditionally. The old
-   `:hover`/`:focus-within` reveal was deleted with this change — it kept the
-   menu in the DOM always and was unreachable by touch. */
 .app-nav__dropdown-menu {
     display: block;
     position: absolute;
@@ -335,9 +263,6 @@ h4 {
     z-index: 200;
 }
 
-/* The disclosure trigger: a real <button> carrying aria-haspopup/aria-expanded
-   (#318 TR-1). It sits in the nav row alongside the anchor links, so it must
-   shed the browser button chrome and match `.app-nav__link`. */
 .app-nav__disclosure {
     display: inline-flex;
     align-items: center;
@@ -348,10 +273,6 @@ h4 {
     font-family: var(--font-body);
 }
 
-/* The disclosure caret. A caret is a directional affordance, not a state
-   indicator, so it may rotate on open (the #316/#319 rule forbids a
-   `transition` on indicators, not on affordances) — and even that is disabled
-   under reduced-motion below. */
 .app-nav__caret {
     display: inline-block;
     width: 0;
@@ -372,17 +293,12 @@ h4 {
     }
 }
 
-/* The transparent click-away layer behind an open nav disclosure — the same
-   shape as `.user-menu__backdrop`. It exists to catch an outside click, not to
-   be seen, but it still needs a rule or it has no size and catches nothing. */
 .app-nav__backdrop {
     position: fixed;
     inset: 0;
     background: transparent;
 }
 
-/* The persistent "Add Book" primary action (#318 TR-1). Styled as a
-   `btn btn--primary`; this only positions the badge that may ride on it. */
 .app-nav__add-book {
     position: relative;
 }
@@ -407,13 +323,6 @@ h4 {
     text-decoration: none;
 }
 
-/* The count of uploads waiting to be confirmed, on the `Add Book` entry
-   (#351). "Low-but-easy-visibility" was the owner's phrase and this is the
-   whole of the design: it sits INSIDE the Catalogue dropdown, so a reader who
-   is not looking for it is never interrupted by it, and a reader who opens the
-   menu cannot miss it. Nothing is rendered at zero, so the mark's presence is
-   itself the signal. */
-
 .app-nav__badge {
     display: inline-block;
     min-width: 1.35em;
@@ -430,8 +339,6 @@ h4 {
     vertical-align: baseline;
 }
 
-/* ===== Footer ===== */
-
 .app-footer {
     border-top: 1px solid var(--border);
     padding: 1rem 1.5rem;
@@ -443,8 +350,6 @@ h4 {
     color: var(--text-muted);
 }
 
-/* ===== Page Base ===== */
-
 .page {
     padding-bottom: 3rem;
 }
@@ -454,8 +359,6 @@ h4 {
     margin-bottom: 1.5rem;
     font-family: var(--font-heading);
 }
-
-/* ===== Buttons ===== */
 
 .btn {
     display: inline-flex;
@@ -514,8 +417,6 @@ h4 {
     cursor: not-allowed;
 }
 
-/* ===== Loading & Error ===== */
-
 .loading {
     text-align: center;
     padding: 3rem;
@@ -546,10 +447,6 @@ h4 {
         transform: rotate(360deg);
     }
 }
-
-/* (Old bookshelf/spine layout removed — replaced by 3D bookcase below) */
-
-/* ===== Reading Pile (armchair scene) ===== */
 
 .reading-pile {
     position: relative;
@@ -585,7 +482,6 @@ h4 {
 .reading-pile__floor {
     position: absolute;
     bottom: 0;
-    /* Break out of container to span full viewport width */
     left: 50%;
     transform: translateX(-50%);
     width: 100vw;
@@ -600,7 +496,6 @@ h4 {
     position: relative;
     width: 400px;
     z-index: 1;
-    /* Pile grows upward in normal flow, pushing this container taller */
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -621,8 +516,6 @@ h4 {
     max-width: 260px;
 }
 
-/* ===== CSS Armchair ===== */
-
 .armchair {
     position: relative;
     width: 400px;
@@ -630,7 +523,6 @@ h4 {
     margin: 0 auto;
 }
 
-/* Chair back */
 .armchair__back {
     position: absolute;
     bottom: 160px;
@@ -653,7 +545,6 @@ h4 {
     z-index: 1;
 }
 
-/* Seat cushion */
 .armchair__seat {
     position: absolute;
     bottom: 110px;
@@ -668,7 +559,6 @@ h4 {
     z-index: 3;
 }
 
-/* Arms — z-index HIGHER than books so they visually contain the pile */
 .armchair__arm {
     position: absolute;
     bottom: 110px;
@@ -693,7 +583,6 @@ h4 {
                 4px 2px 10px rgba(0, 0, 0, 0.3);
 }
 
-/* Front panel below seat */
 .armchair__leg--fl,
 .armchair__leg--fr {
     position: absolute;
@@ -710,8 +599,6 @@ h4 {
 .armchair__leg--bl { display: none; }
 .armchair__leg--br { display: none; }
 
-/* ===== Book pile stacked on the chair seat ===== */
-
 .book-pile {
     position: relative;
     z-index: 10;
@@ -719,11 +606,8 @@ h4 {
     display: flex;
     flex-direction: column-reverse;
     align-items: center;
-    /* Negative margin pulls the pile down to overlap the chair seat */
     margin-bottom: -170px;
 }
-
-/* --- Book pile items --- */
 
 .book-pile__book {
     all: unset;
@@ -739,7 +623,6 @@ h4 {
     outline-offset: 2px;
 }
 
-/* Rotated wrapper: lays the shelf book flat */
 .book-pile__rotated-book {
     transform: rotate(-90deg);
     transform-origin: center center;
@@ -760,19 +643,15 @@ h4 {
     pointer-events: none;
 }
 
-/* When selected, re-enable pointer events so the floated book is clickable */
 .book-pile__book--selected .book-pile__rotated-book,
 .book-pile__book--selected .book-pile__rotated-book .book,
 .book-pile__book--selected .book-pile__rotated-book .book__face {
     pointer-events: auto;
 }
 
-/* Hide top face when flat (edge-on white line), restore when selected (book stands up) */
 .book-pile__rotated-book .book__top { display: none; }
 .book-pile__book--selected .book-pile__rotated-book .book__top { display: block; }
 .book-pile__book .book:hover { animation: none; }
-
-/* --- Selected: book floats right, stands upright, tilts to show cover --- */
 
 .book-pile__book--selected {
     z-index: 200 !important;
@@ -792,7 +671,6 @@ h4 {
     z-index: 30;
 }
 
-/* Wallpaper: lavender dragons */
 .wallpaper--dragons {
     background-color: var(--wallpaper-color);
     background-image: url('/textures/wallpaper-lavender-dragons.png');
@@ -805,8 +683,6 @@ h4 {
         transform: none !important;
     }
 }
-
-/* ===== Empty Shelf ===== */
 
 .empty-shelf {
     text-align: center;
@@ -828,8 +704,6 @@ h4 {
     margin: 0 auto;
     line-height: 1.5;
 }
-
-/* ===== Upload Page ===== */
 
 .upload-area {
     border: 2px dashed var(--border);
@@ -883,12 +757,6 @@ h4 {
     margin-top: 0.5rem;
 }
 
-/* The two things the waiting screen may say once time has passed (#351).
-   Muted and italic on purpose: neither is an error, and neither is an
-   instruction. One offers the reader the door; the other admits this page has
-   stopped hearing from the server. Both sit under a spinner that is still
-   spinning, because the work genuinely is still happening. */
-
 .upload-waiting__leave-note,
 .upload-waiting__stream-silent {
     max-width: 34rem;
@@ -900,14 +768,6 @@ h4 {
     text-align: center;
     color: var(--parchment-muted, var(--text-muted));
 }
-
-/* ===== Upload inbox (#351) ===== */
-
-/* Uploads the reader started and has not finished with. It lives below the
-   drop zone rather than above it: the page's first job is still "add a book",
-   and this is a shelf of things set aside, not a queue demanding attention.
-   Nothing here places anything — every row is a way back into the confirm
-   flow. */
 
 .upload-inbox {
     max-width: 480px;
@@ -950,10 +810,6 @@ h4 {
     border-radius: var(--radius-md);
 }
 
-/* A failure is a different KIND of row, not a worse one — the reader has
-   nothing to confirm and nothing to fix. The left edge goes quiet rather than
-   red: this is news they were never given, not an alarm. */
-
 .upload-inbox__item--failed {
     border-left-color: var(--border);
 }
@@ -991,8 +847,6 @@ h4 {
     gap: 1rem;
     max-width: 480px;
 }
-
-/* ===== Modal ===== */
 
 .modal-overlay {
     position: fixed;
@@ -1032,8 +886,6 @@ h4 {
     gap: 0.75rem;
     justify-content: flex-end;
 }
-
-/* ===== Search ===== */
 
 .search-bar {
     display: flex;
@@ -1088,8 +940,6 @@ h4 {
     margin-top: 1rem;
 }
 
-/* A search result is a real <button> (#289) so it is keyboard-operable; reset
-   the native button chrome so it renders as the full-width card row it was. */
 .search-result {
     appearance: none;
     background: none;
@@ -1130,9 +980,6 @@ h4 {
     font-size: var(--size-xs);
 }
 
-/* The provenance line: the collection shelf ("On your Library shelf") or the
-   platform source ("Listed by … for …" / "Looking for a home on …"). Rendered
-   only for label-bearing hits (#285). */
 .search-result__label {
     margin-top: 0.35rem;
     font-size: var(--size-xs);
@@ -1140,10 +987,6 @@ h4 {
     color: #c8951f;
 }
 
-/* ===== Deep Search (#284) ===== */
-
-/* The "Deep search" toggle sits under the filter panel — a labelled checkbox
-   that opts the query into matching descriptions/reviews (not just titles). */
 .deep-search-toggle {
     display: inline-flex;
     align-items: center;
@@ -1158,8 +1001,6 @@ h4 {
     cursor: pointer;
 }
 
-/* A deep-search description/review excerpt, shown beneath a result whose match
-   was NOT on the title. The <mark> runs are the query terms ts_headline flagged. */
 .search-result__snippet {
     margin-top: 0.5rem;
     font-size: var(--size-sm);
@@ -1174,7 +1015,6 @@ h4 {
     padding: 0 0.15em;
 }
 
-/* The "via deep search" provenance line — why this result matched at all. */
 .search-result__via-deep {
     margin-top: 0.2rem;
     font-size: var(--size-xs);
@@ -1182,10 +1022,6 @@ h4 {
     color: #c8951f;
 }
 
-/* ===== Search Sections (#285) ===== */
-
-/* Two stacked sections — "Your Collection" above "On the Platform" — each a
-   column of result rows under a serif heading. */
 .search-section {
     display: flex;
     flex-direction: column;
@@ -1203,8 +1039,6 @@ h4 {
     padding-bottom: 0.35rem;
     border-bottom: 1px solid var(--border);
 }
-
-/* ===== Filter Panel ===== */
 
 .filter-panel {
     margin-bottom: 1rem;
@@ -1267,8 +1101,6 @@ h4 {
     align-self: flex-end;
 }
 
-/* ===== Sort Selector ===== */
-
 .sort-selector {
     display: flex;
     align-items: center;
@@ -1290,8 +1122,6 @@ h4 {
     font-size: var(--size-sm);
     cursor: pointer;
 }
-
-/* ===== Format Picker ===== */
 
 .format-picker {
     display: flex;
@@ -1322,8 +1152,6 @@ h4 {
     color: #fff;
 }
 
-/* ===== Shelf Mover ===== */
-
 .shelf-mover {
     display: flex;
     gap: 0.5rem;
@@ -1352,8 +1180,6 @@ h4 {
     font-size: var(--size-sm);
     font-weight: 600;
 }
-
-/* ===== ISBN Input ===== */
 
 .isbn-input-wrapper {
     display: flex;
@@ -1387,10 +1213,6 @@ h4 {
     font-size: var(--size-xs);
 }
 
-/* ===== Book Detail ===== */
-
-/* -- Entry animation: slide-out from shelf -- */
-
 @keyframes book-detail-enter {
     0% {
         opacity: 0;
@@ -1411,8 +1233,6 @@ h4 {
 .book-detail-enter {
     animation: book-detail-enter 0.5s ease-out;
 }
-
-/* -- Parchment background -- */
 
 .page--book-detail {
     --parchment: #f5efe0;
@@ -1448,16 +1268,12 @@ h4 {
     pointer-events: none;
 }
 
-/* -- Book detail layout -- */
-
 .book-detail {
     display: flex;
     flex-direction: column;
     gap: 0;
     position: relative;
 }
-
-/* -- Hero: cover + metadata -- */
 
 .book-detail__hero {
     display: flex;
@@ -1507,8 +1323,6 @@ h4 {
     font-weight: 700;
 }
 
-/* -- Meta column -- */
-
 .book-detail__meta {
     flex: 1;
     display: flex;
@@ -1556,15 +1370,11 @@ h4 {
     margin-top: 0.25rem;
 }
 
-/* -- Formats inline in hero -- */
-
 .book-detail__formats {
     margin-top: 0.75rem;
     padding: 0;
     border-top: none;
 }
-
-/* -- Section shared styles -- */
 
 .book-detail__section {
     padding: 2rem 0;
@@ -1578,8 +1388,6 @@ h4 {
     margin-bottom: 1rem;
     letter-spacing: 0.01em;
 }
-
-/* -- About section -- */
 
 .book-detail__about {
     background-color: var(--parchment-cream);
@@ -1605,8 +1413,6 @@ h4 {
     color: var(--parchment-muted);
     font-style: italic;
 }
-
-/* -- Reviews section (What People Think) -- */
 
 .book-detail__reviews-grid {
     display: grid;
@@ -1654,15 +1460,11 @@ h4 {
     font-size: var(--size-sm);
 }
 
-/* -- Prices section (Where to Buy) -- */
-
 .book-detail__prices-grid {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
 }
-
-/* -- Author section (The Author) -- */
 
 .book-detail__author-info {
     display: flex;
@@ -1708,8 +1510,6 @@ h4 {
     line-height: 1.6;
 }
 
-/* -- Writing section (My Writing) -- */
-
 .book-detail__writing-body {
     display: flex;
     flex-direction: column;
@@ -1717,24 +1517,15 @@ h4 {
     align-items: flex-start;
 }
 
-/* -- Shelf actions section -- */
-
 .book-detail__shelf-actions {
     padding: 2rem 0;
     border-top: 1px solid var(--parchment-border);
 }
 
-/* -- Danger zone -- */
-
 .book-detail__danger-zone {
     padding: 1.5rem 0 0;
     border-top: 1px solid var(--parchment-border);
 }
-
-/* -- Multi-shelf notice (#333) --
-   A book on two or more of Library / Antilibrary / Reading Pile / Wish List is
-   a legal state, so this reads as a marginal note in the reader's own book, not
-   as an error: warm parchment, a soft left rule, no red anywhere. */
 
 .book-detail__multi-shelf {
     margin: 1.5rem 0;
@@ -1788,23 +1579,6 @@ h4 {
     flex-shrink: 0;
 }
 
-/* -- "Already yours" notice (#333, extended #343) --
-   Informational, never blocking: an aside above the confirm buttons, in the
-   same muted register as the other upload hints, with nothing disabled. Two
-   surfaces carry it — the verify step (photo path, before the placement) and
-   the completion card (manual path, where the one-shot confirm verb only
-   reports the other bookshelves once the placement is done).
-
-   The provisional-book notice (#344) joins them deliberately rather than
-   getting an alert style of its own. It is the same KIND of thing: a true
-   statement about the book that changes nothing the reader may do. A book whose
-   ISBN nothing has matched yet is a legal state — the ISBN gate passed and only
-   the catalogue lookup is outstanding — so styling it as a warning would say the
-   reader had done something wrong. Muted italic says "aside", which is what it
-   is. `.upload-provisional-notice` is not prefixed per-step because the same
-   sentence appears on four of them (verify, shelf picker, completion, and the
-   multi-book list). */
-
 .book-detail__provisional,
 .upload-complete__already-yours,
 .upload-complete__shelf-hint,
@@ -1817,8 +1591,6 @@ h4 {
     margin: 0 0 0.75rem;
 }
 
-/* -- Rating -- */
-
 .book-detail__rating {
     margin-top: 0.5rem;
     font-size: var(--size-sm);
@@ -1829,8 +1601,6 @@ h4 {
     color: var(--parchment-muted, var(--text-muted));
     font-style: italic;
 }
-
-/* -- Review section enrichment -- */
 
 .book-detail__review-icon {
     width: 1.5rem;
@@ -1847,8 +1617,6 @@ h4 {
     margin-top: 0.5rem;
 }
 
-/* -- Prices section -- */
-
 .book-detail__prices-list {
     display: flex;
     flex-direction: column;
@@ -1860,8 +1628,6 @@ h4 {
     font-style: italic;
     font-size: var(--size-sm);
 }
-
-/* -- Author section links -- */
 
 .book-detail__author-link {
     display: inline-block;
@@ -1875,23 +1641,17 @@ h4 {
     color: #4a351f;
 }
 
-/* -- Writing section -- */
-
 .book-detail__writing-list {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
 }
 
-/* -- Stub notice (shared) -- */
-
 .stub-notice {
     color: var(--parchment-muted, var(--text-muted));
     font-style: italic;
     font-size: var(--size-sm);
 }
-
-/* -- Format picker overrides for parchment context -- */
 
 .book-detail__formats .format-picker {
     gap: 0.5rem;
@@ -1928,8 +1688,6 @@ h4 {
     font-size: var(--size-sm);
 }
 
-/* -- Shelf mover overrides for parchment context -- */
-
 .shelf-mover__label {
     font-size: var(--size-sm);
     color: var(--text-muted);
@@ -1962,8 +1720,6 @@ h4 {
     color: #fff;
 }
 
-/* -- Button overrides inside parchment -- */
-
 .book-detail__parchment .btn--secondary {
     border-color: var(--parchment-accent);
     color: var(--parchment-accent);
@@ -1988,8 +1744,6 @@ h4 {
     color: var(--parchment-text);
 }
 
-/* ===== Settings ===== */
-
 .settings-section {
     padding: 1.5rem 0;
     border-bottom: 1px solid var(--border);
@@ -2010,11 +1764,6 @@ h4 {
 .settings-actions {
     padding-top: 1.5rem;
 }
-
-/* -- Danger zone (Issue #188): a warm-maroon treatment so the destructive
-      account-deletion section reads as dangerous before the eye reaches the
-      button. Extra top separation, a maroon left rail, and a faint tinted
-      panel set it apart from the calm settings sections above. -- */
 
 .settings-section--danger {
     margin-top: 2rem;
@@ -2082,8 +1831,6 @@ h4 {
     color: var(--text-muted);
 }
 
-/* ===== Consent Banner ===== */
-
 .consent-banner {
     position: fixed;
     bottom: 0;
@@ -2114,8 +1861,6 @@ h4 {
     gap: 0.5rem;
 }
 
-/* ===== Home Page ===== */
-
 .page--home {
     display: flex;
     flex-direction: column;
@@ -2145,8 +1890,6 @@ h4 {
     justify-content: center;
 }
 
-/* -- Authenticated home: the doorway into the collection (Wave 8 #318, 8c) -- */
-
 .page--home-collection {
     justify-content: flex-start;
     padding-top: 2rem;
@@ -2161,8 +1904,6 @@ h4 {
     max-width: 1060px;
 }
 
-/* The shelf glimpse reuses the shelf-room family (wallpaper + lighting layers,
- * absolutely positioned), so it needs to be the positioning context. */
 .home-collection__room {
     position: relative;
     display: block;
@@ -2201,8 +1942,6 @@ h4 {
     min-width: 12rem;
 }
 
-/* ===== Not Found ===== */
-
 .page--not-found {
     text-align: center;
     padding: 4rem 2rem;
@@ -2217,8 +1956,6 @@ h4 {
     color: var(--text-muted);
     margin-bottom: 2rem;
 }
-
-/* ===== Slide Transitions ===== */
 
 @keyframes slide-in-left {
     from {
@@ -2284,14 +2021,6 @@ h4 {
     animation: slide-out-right 0.3s ease-in;
 }
 
-/* ===== Room Transitions (fade through dark) ===== */
-/* US-1.2.5: walking down a hallway into a different room. The new space starts
-   dim and slightly contracted, holds a beat of near-stillness in the warm dark,
-   then resolves outward from the centre. 0.4s sits mid-band of the story's
-   300-500ms requirement. The keyframes name matches the class name — Main.elm
-   clears the transition class by matching the animationend event's
-   animationName against it. */
-
 @keyframes fade-through-dark-in {
     0% {
         opacity: 0;
@@ -2316,10 +2045,6 @@ h4 {
     animation: fade-through-dark-in 0.4s ease-out;
 }
 
-/* Reduced motion: suppress the navigation transitions entirely. Declared after
-   the rules above so the equal-specificity override wins. Matches the existing
-   pattern at the `.book-pile__book--selected` and `.book` blocks. */
-
 @media (prefers-reduced-motion: reduce) {
     .slide-in-left,
     .slide-in-right,
@@ -2329,8 +2054,6 @@ h4 {
         animation: none;
     }
 }
-
-/* ===== Responsive ===== */
 
 @media (max-width: 768px) {
     .app-header {
@@ -2398,8 +2121,6 @@ h4 {
     }
 }
 
-/* ===== Cost Transparency Page ===== */
-
 .page--costs {
     padding-bottom: 4rem;
 }
@@ -2423,8 +2144,6 @@ h4 {
     font-size: var(--size-lg);
     margin-bottom: 2.5rem;
 }
-
-/* -- Banner (the human number) -- */
 
 .costs__banner {
     background: linear-gradient(135deg, #2a1f14, #3d2b1f);
@@ -2486,8 +2205,6 @@ h4 {
     opacity: 0.6;
 }
 
-/* -- Section titles -- */
-
 .costs__section-title {
     font-family: var(--font-heading);
     font-size: var(--size-xxl);
@@ -2500,8 +2217,6 @@ h4 {
     flex-direction: column;
     gap: 0;
 }
-
-/* -- Story section (layer 2) -- */
 
 .costs__stories {
     margin-bottom: 3rem;
@@ -2550,8 +2265,6 @@ h4 {
     padding-top: 0.5rem;
     border-top: 1px solid var(--border);
 }
-
-/* -- Category cards (layer 3) -- */
 
 .costs__categories {
     margin-bottom: 3rem;
@@ -2640,8 +2353,6 @@ h4 {
     text-align: right;
 }
 
-/* -- Monthly trend (bar chart) -- */
-
 .costs__trend {
     margin-bottom: 3rem;
 }
@@ -2686,8 +2397,6 @@ h4 {
     color: var(--text);
 }
 
-/* -- Philosophy footer -- */
-
 .costs__philosophy {
     border-top: 1px solid var(--border);
     padding-top: 2rem;
@@ -2704,8 +2413,6 @@ h4 {
     text-align: center;
     margin: 0 auto;
 }
-
-/* -- Cost page responsive -- */
 
 @media (max-width: 768px) {
     .costs__banner {
@@ -2726,16 +2433,6 @@ h4 {
         gap: 0.5rem;
     }
 }
-
-/* ===== Looking-for-a-Home pile-view — face-out cover cards (#390) ===== */
-/* The staged pile inside the shelf-room. Previously `.pile-view__book` /
- * `.pile-view__cover` were sized ONLY inside `@media (max-width: 480px)`, so at
- * desktop the cards rendered as full-width text blocks. These base (all-width)
- * rules give them face-out cover-card form — a wrapping row of portrait cards on
- * a cloth-binding surface — coherent with the shelf-room family (the covers reuse
- * the themed `--shelf-bg` binding tone, `--border`, and `--shadow-*` the other
- * bookshelf surfaces use). The `≤480px` block below narrows the same cards for
- * small screens. Every colour is a `:root`/theme token; only dimensions are px/rem. */
 
 .pile-view {
     display: flex;
@@ -2767,8 +2464,6 @@ h4 {
     transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-/* A coverless book still reads as a book: the grouped title/author rules give the
- * serif heading + muted metadata register; these only fit them to the card. */
 .pile-view__cover .pile-view__title {
     font-size: var(--size-base);
     line-height: 1.2;
@@ -2778,7 +2473,6 @@ h4 {
     margin-top: 0.4rem;
 }
 
-/* Subtle, scoped hover lift — never `transition: all`. */
 .pile-view__book:hover .pile-view__cover {
     transform: translateY(-4px);
     box-shadow: var(--shadow-lg);
@@ -2809,8 +2503,6 @@ h4 {
     }
 }
 
-/* ===== Login Page — Bookshelf Wall / Parchment Card / Dolly Shot ===== */
-
 .page--login {
     position: relative;
     width: 100%;
@@ -2818,8 +2510,6 @@ h4 {
     overflow: hidden;
     background: #0a0806;
 }
-
-/* -- Scene layers (GPU-composited, WAAPI-animated) -- */
 
 .layer-arrival {
     position: fixed; inset: 0; z-index: 0;
@@ -2878,14 +2568,6 @@ h4 {
     pointer-events: none;
 }
 
-/* -- Arrival door: the login dolly-shot rendered from the shell (#364) --
-
-   The same scene `layer-*` children as `.page--login`, but lifted above the
-   whole app so the dolly-shot plays OVER the destination page the reader just
-   landed on (Main.viewArrivalDoor, shown only while `AuthState` is `Arriving`).
-   `pointer-events: none` so a door that lingers past its animation — the
-   occluded-window backstop case — can never intercept a click on the page
-   underneath. It gates nothing, including the pointer. */
 .arrival-door {
     position: fixed;
     inset: 0;
@@ -2894,15 +2576,11 @@ h4 {
     pointer-events: none;
 }
 
-/* A reader who asked for no motion gets no dolly-shot: the door is decoration,
-   and `app.js` settles the arrival immediately under the same query. */
 @media (prefers-reduced-motion: reduce) {
     .arrival-door {
         display: none;
     }
 }
-
-/* -- Login overlay + card -- */
 
 .login-overlay {
     position: fixed; inset: 0; z-index: 10;
@@ -2981,9 +2659,6 @@ h4 {
     border-bottom-color: #8b4513;
 }
 
-/* Generic tab buttons (Groups / Group-detail views), mirroring the `.login-card__tab` treatment:
-   a transparent button, inactive muted, `--active` accented via colour + underline. Tokens only,
-   so it inherits per-theme accent rather than the login card's parchment-specific hex literals. */
 .tab {
     padding: 0.5rem 0.75rem;
     border: none;
@@ -3005,8 +2680,6 @@ h4 {
     border-bottom-color: var(--accent);
 }
 
-/* Keep the active tab's accent on hover — a bare `.tab:hover` (0,2,0) would otherwise defeat the
-   `.tab--active` (0,1,0) colour, same fix as `.login-card__tab--active:hover` / `.admin__tab--active:hover`. */
 .tab--active:hover {
     color: var(--accent);
 }
@@ -3048,8 +2721,6 @@ h4 {
     box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.15);
 }
 
-/* -- Error state -- */
-
 .login-card__error {
     color: #9b2c2c;
     font-family: var(--font-heading);
@@ -3063,18 +2734,6 @@ h4 {
     line-height: 1.5;
 }
 
-/* -- Base login-card notice (#365): the shared "confirmation" panel treatment,
-      the mirror of `.admin__error`. It MUST be defined here, ABOVE its own
-      `--session-expired` / `--account-deleted` / `--stored-session-unreadable`
-      modifiers. Base and modifier are both single-class (0,1,0), so at equal
-      specificity the rule defined LATER wins — a base placed after its
-      modifiers silently overrides them and the modifier is inert. This rule
-      previously sat ~3500 lines below the modifiers (grouped with
-      `.groups-detail__invite-success` / `.marketplace-create__success`), so its
-      accent-green `background`/`color` and its `margin`/`padding` shorthands
-      beat the amber modifiers below — the amber notices never rendered.
-      `scripts/check-css.sh` check G now guards this ordering. -- */
-
 .login-card__notice {
     font-family: var(--font-body);
     font-size: var(--size-sm);
@@ -3085,11 +2744,6 @@ h4 {
     margin: 0 0 1rem;
     border-radius: var(--radius-sm);
 }
-
-/* -- Session-expired notice (calm "lamplight" amber, distinct from the maroon
-      error above): the user did nothing wrong, so it reads as a warm notice,
-      not a warning. Dark brass text on an amber-tinted parchment panel keeps
-      >= 4.5:1 contrast on the login card. -- */
 
 .login-card__notice--session-expired {
     color: var(--warning-text);
@@ -3104,11 +2758,6 @@ h4 {
     line-height: 1.5;
 }
 
-/* -- Account-deleted farewell (Issue #188): a calm, warm goodbye. Reuses the
-      lamplight-amber notice treatment (the user did nothing wrong) but is
-      raised on its own class so the copy and future styling stay independent
-      of the session-expiry surface. -- */
-
 .login-card__notice--account-deleted {
     color: var(--warning-text);
     font-family: var(--font-heading);
@@ -3122,39 +2771,11 @@ h4 {
     line-height: 1.5;
 }
 
-/* -- Unreadable stored sign-in (Issue #360): a saved credential was present at
-      boot and would not decode, so the reader is anonymous without having asked
-      to be.
-
-      ⚠️ Deliberately declares ONLY the two properties that are actually its own.
-      The panel treatment (colour, background, border, padding, font) comes from
-      the base `.login-card__notice` rule further down this file — which, at
-      equal specificity and later in the sheet, WINS over any colour set here.
-      That is measured, not assumed: with a full amber block written here, the
-      computed style of this notice on a live page was
-      `rgba(74, 124, 89, 0.15)` — the base rule's accent green. Writing the
-      amber anyway would be dead declarations that read as intent.
-
-      The same collision silently kills most of `--session-expired` and
-      `--account-deleted` above; that is a PRE-EXISTING defect on two shipped
-      surfaces and is reported as a finding rather than repainted here.
-
-      `cursor` and `text-decoration` are not set by the base rule, so these two
-      do apply: they are the affordance for the `title` attribute, which carries
-      the decoder's own account of the failure. -- */
-
 .login-card__notice--stored-session-unreadable {
     text-decoration: underline dotted rgba(74, 124, 89, 0.5);
     text-underline-offset: 0.25em;
     cursor: help;
 }
-
-/* -- Invite-only gate (US-14.1.3) --
-
-   The closed-beta panel that replaces the Register form for an uninvited
-   visitor, and the invitation field shown above Display Name once a code is
-   accepted. Quiet by intent: prose in the card's own voice, one field, one
-   button — no waitlist theatre. -- */
 
 .login-card__invite-only {
     padding: var(--space-2) var(--space-1) var(--space-1);
@@ -3198,8 +2819,6 @@ h4 {
     font-style: normal;
 }
 
-/* -- Submit button -- */
-
 .login-card__submit {
     width: 100%;
     padding: 0.75rem;
@@ -3225,8 +2844,6 @@ h4 {
     cursor: not-allowed;
 }
 
-/* -- Secondary text-link actions (forgot password, back to sign in) -- */
-
 .login-card__forgot,
 .login-card__back {
     display: block;
@@ -3249,15 +2866,11 @@ h4 {
     text-decoration: underline;
 }
 
-/* -- Field validation -- */
-
 .login-card__field--valid .login-card__input { border-color: #6b7c3f; }
 .login-card__field--error .login-card__input { border-color: #9b6930; }
 .login-card__hint { font-size: 0.8rem; margin-top: 0.3rem; font-style: italic; }
 .login-card__hint--error { color: #9b6930; }
 .login-card__hint--valid { color: #6b7c3f; }
-
-/* -- Spinner inside submit -- */
 
 .login-card__submit .spinner--small {
     width: 18px;
@@ -3265,8 +2878,6 @@ h4 {
     border-width: 2px;
     margin: 0 auto;
 }
-
-/* -- User display in nav -- */
 
 .app-nav__user {
     display: block;
@@ -3276,8 +2887,6 @@ h4 {
     font-style: italic;
     font-family: var(--font-heading);
 }
-
-/* -- Login responsive -- */
 
 @media (max-width: 768px) {
     .login-card {
@@ -3295,8 +2904,6 @@ h4 {
         font-size: 1.5rem;
     }
 }
-
-/* ===== Catalogue Page ===== */
 
 .page--catalogue {
     padding-bottom: 4rem;
@@ -3346,8 +2953,6 @@ h4 {
     font-size: var(--size-sm);
     cursor: pointer;
 }
-
-/* -- Book Card Grid -- */
 
 .catalogue__grid {
     display: grid;
@@ -3439,8 +3044,6 @@ h4 {
     white-space: nowrap;
 }
 
-/* -- Empty state -- */
-
 .catalogue__empty {
     text-align: center;
     padding: 4rem 2rem;
@@ -3449,8 +3052,6 @@ h4 {
     font-family: var(--font-heading);
     font-size: var(--size-lg);
 }
-
-/* -- Pagination -- */
 
 .catalogue__pagination {
     display: flex;
@@ -3466,8 +3067,6 @@ h4 {
     color: var(--text-muted);
     font-family: var(--font-heading);
 }
-
-/* -- Catalogue responsive -- */
 
 @media (max-width: 768px) {
     .catalogue__grid {
@@ -3506,8 +3105,6 @@ h4 {
     }
 }
 
-/* -- Catalogue collection filter -- */
-
 .catalogue__collection-filter {
     display: flex;
     gap: 0.5rem;
@@ -3534,8 +3131,6 @@ h4 {
     border-color: rgba(255, 255, 255, 0.2);
     color: var(--text);
 }
-
-/* -- Catalogue shelf actions -- */
 
 .catalogue__card-link {
     display: block;
@@ -3604,8 +3199,6 @@ h4 {
     outline: 2px solid transparent;
 }
 
-/* ===== Shelf Room (wraps label + bookcase on shelf pages) ===== */
-
 .page--shelf {
     position: relative; /* Contain the absolutely-positioned wallpaper */
     overflow-x: hidden; /* Prevent horizontal scroll from hover-translated books */
@@ -3619,8 +3212,6 @@ h4 {
     overflow: visible;
 }
 
-/* ===== 3D Bookcase & Shelf Structure (from library-mockup.html) ===== */
-
 :root {
     --book-max-h: 290px;
     --book-depth: 160px;
@@ -3628,8 +3219,6 @@ h4 {
     --plank-lip: 10px;
     --side-w: 24px;
 }
-
-/* --- BOOKCASE --- */
 
 .bookcase {
     position: relative;
@@ -3639,8 +3228,6 @@ h4 {
     margin: 0 auto;
     overflow: visible; /* Allow 3D hover to extend outside */
 }
-
-/* Continuous side panels */
 
 .bookcase__side {
     position: absolute;
@@ -3661,8 +3248,6 @@ h4 {
     right: 0;
 }
 
-/* Inner edge shadow */
-
 .bookcase__side--left::after,
 .bookcase__side--right::after {
     content: '';
@@ -3682,23 +3267,16 @@ h4 {
     background: linear-gradient(270deg, transparent, rgba(0, 0, 0, 0.3));
 }
 
-/* Inner content area between sides */
-
 .bookcase__inner {
     margin: 0 var(--side-w);
 }
 
-/* --- SHELF ROW --- */
-
 .shelf-row {
     position: relative;
     padding-bottom: calc(var(--plank-h) + var(--plank-lip));
-    /* Flatten 3D context so pulled-out books don't pierce into adjacent rows */
     transform-style: flat;
     isolation: isolate;
 }
-
-/* Dark recessed back with warm sconce reflection */
 
 .shelf-row__back {
     position: absolute;
@@ -3713,8 +3291,6 @@ h4 {
                 inset 0 -8px 20px rgba(180, 140, 80, 0.04);
 }
 
-/* Book row */
-
 .shelf-row__books {
     position: relative;
     min-height: var(--book-max-h);
@@ -3726,20 +3302,15 @@ h4 {
     perspective: 800px;
 }
 
-/* Plank */
-
 .shelf-row__plank {
     position: absolute;
     bottom: var(--plank-lip);
-    /* Extend under the side panels */
     left: calc(-1 * var(--side-w));
     right: calc(-1 * var(--side-w));
     height: var(--plank-h);
     background: url('/textures/shelf-walnut-plank.png') repeat-x;
     background-size: auto 100%;
     filter: brightness(0.38) saturate(0.45);
-    /* Must sit above hovered books (z-index: 50) to prevent 3D pull-out
-       from visually clipping through the shelf below */
     z-index: 60;
 }
 
@@ -3759,8 +3330,6 @@ h4 {
     );
 }
 
-/* Plank lip / front edge */
-
 .shelf-row__lip {
     position: absolute;
     bottom: 0;
@@ -3773,8 +3342,6 @@ h4 {
     z-index: 60;
 }
 
-/* --- 3D BOOK --- */
-
 .book {
     position: relative;
     flex-shrink: 0;
@@ -3782,36 +3349,25 @@ h4 {
     transform-style: preserve-3d;
     transform: translateZ(0) rotateY(0) rotateX(0) rotateZ(0);
     cursor: pointer;
-    /* Smooth return when mouse leaves */
     transition: transform 0.5s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 .book:hover {
     z-index: 50;
-    /* Two-phase: pull forward then angle.
-       CSS transitions can't do phased motion, so we use a keyframe animation
-       on hover and the transition handles the return. */
     animation: book-pull-out 0.8s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
 }
 
-/* The book stays mostly in the shelf — just pulled out enough to clear
-   its neighbors, then tilted down and to the side to reveal the cover.
-   Like one hand on the top of the spine, angling it toward you. */
 @keyframes book-pull-out {
     0%   { transform: translateZ(0) rotateY(0) rotateX(0) rotateZ(0); }
     35%  { transform: translateZ(40px) rotateY(-2deg) rotateX(0) rotateZ(0); }
     100% { transform: translateZ(50px) rotateX(-25deg) rotateY(-40deg) rotateZ(-15deg); }
 }
 
-/* All three faces share this */
-
 .book__face {
     position: absolute;
     border: 1px solid rgba(0, 0, 0, 0.25);
     border-radius: 2px;
 }
-
-/* --- SPINE --- */
 
 .book__spine {
     width: 100%;
@@ -3823,8 +3379,6 @@ h4 {
     overflow: hidden;
     transform: rotateY(0deg) translateZ(0px);
 }
-
-/* Spine curvature */
 
 .book__spine::before {
     content: '';
@@ -3851,13 +3405,6 @@ h4 {
     z-index: 1;
 }
 
-/* --- Wear: Softened (well-loved) --- */
-
-/* A well-loved book reads as gently muted and worn at the edges: the spine
-   colour is slightly desaturated and darkened, and a soft corner-wear vignette
-   darkens the four corners. Pristine books carry no treatment. Applied to the
-   spine face so the 3D structure and hover animation are untouched; composes
-   with .book--hidden (owner-private opacity lives on the .book wrapper). */
 .book--softened .book__spine {
     filter: saturate(0.8) brightness(0.9);
 }
@@ -3872,41 +3419,11 @@ h4 {
         transparent 55%, rgba(0, 0, 0, 0.22) 100%);
 }
 
-/* --- Owner-private placement (#363) --- */
-
-/* An owner-only book on an otherwise-visible shelf. The whole affordance used to
-   be an INLINE `opacity: 0.35` on the wrapper plus an aria-label suffix — so a
-   screen reader was told and a sighted reader was not, since a faint book says
-   nothing on a shelf that already shades by depth.
-
-   ⛔ There is deliberately NO opacity here. Measured in a browser, on this
-   stylesheet, with getComputedStyle: the spine's own title against its own spine
-   face is 4.71:1 at full opacity — the palette has barely any headroom over the
-   4.5:1 floor — and every point of transparency composites BOTH toward the
-   backdrop, so it eats that headroom directly. 0.35 gave **1.80:1**. Even 0.88
-   gives 4.12:1, and it takes 0.97 to get back over 4.5, at which point the fade
-   is invisible anyway. So the state is carried by a marker (the padlock below)
-   and an outline, never by making the one book whose privacy you might want to
-   check the one book you cannot read.
-
-   The outline goes on the spine FACE, not the wrapper: `.book` carries
-   `transform-style: preserve-3d`, and an outline or filter on that element
-   flattens the 3D book. `--softened` takes the same care.
-
-   Placed AFTER `.book` (line ~3297) deliberately. `.book--hidden` and `.book` are
-   both (0,1,0), so the later rule wins — the same collision that silently killed
-   three login-card notices (#365) when the base was written last. `.book:hover`
-   is (0,2,0) and sets only `z-index` and `animation`, neither of which is touched
-   here, so the treatment survives a hover. */
 .book--hidden .book__spine {
     outline: 1px dashed rgba(214, 178, 94, 0.85);
     outline-offset: -3px;
 }
 
-/* The padlock itself: a direct child of the `.book` wrapper (not the
-   overflow-hidden spine face), same as the bookmark ribbon, so it sits over the
-   spine's foot without being clipped. Decorative — `aria-hidden` in the markup,
-   because the aria-label already says "hidden (only visible to you)". */
 .book__lock {
     position: absolute;
     bottom: 5px;
@@ -3919,14 +3436,6 @@ h4 {
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
-/* --- Bookmark ribbon: books the owner has written about (#287) --- */
-
-/* A slim cloth ribbon tucked into the head of the spine and poking a little
-   above the top edge, marking a book the owner has written about. A direct
-   child of the .book wrapper (not the overflow-hidden spine face) so it can
-   extend past the top edge; decorative only — the ", with your notes" aria
-   suffix on the .book element carries the meaning. The swallowtail foot is a
-   clip-path notch so it reads as a ribbon end, not a plain bar. */
 .book__ribbon {
     position: absolute;
     top: -7px;
@@ -3967,8 +3476,6 @@ h4 {
     opacity: 0.6;
 }
 
-/* --- TOP (page edges) --- */
-
 .book__top {
     width: 100%;
     background:
@@ -3978,15 +3485,11 @@ h4 {
         );
 }
 
-/* --- COVER --- */
-
 .book__cover {
     height: 100%;
     background-size: cover;
     transform-origin: left center;
 }
-
-/* Cover inner shadow (hinge) */
 
 .book__cover::after {
     content: '';
@@ -3997,8 +3500,6 @@ h4 {
     height: 100%;
     background: linear-gradient(90deg, rgba(0, 0, 0, 0.3), transparent);
 }
-
-/* Empty shelf */
 
 .shelf-row--empty .shelf-row__books {
     justify-content: center;
@@ -4020,15 +3521,6 @@ h4 {
     opacity: 0.7;
 }
 
-/* Shelves in flight (#362)
-
-   Deliberately NOT the empty shelf with a spinner on it. An empty bookcase is
-   what "you have no books" looks like, and for a while it was also what "the
-   request has not come back" looked like — offline shelf navigation painted a
-   serene empty bookcase and stopped. These rules give the waiting state its own
-   picture: spine-shaped placeholders on a real plank, catching a slow sweep of
-   sconce light, so the shelf reads as filling rather than as bare. */
-
 .bookshelf--loading {
     position: relative;
 }
@@ -4044,9 +3536,6 @@ h4 {
 }
 
 .shelf-row--loading {
-    /* Held back a little from a settled shelf: the placeholders are not books
-       yet, and reading at full contrast would make the arrival of the real
-       spines look like nothing happened. */
     opacity: 0.85;
 }
 
@@ -4079,17 +3568,11 @@ h4 {
     }
 }
 
-/* Book button wrapper (clickable spine in Library) */
-
 .book-button {
     all: unset;
     display: inline-block;
     cursor: pointer;
 }
-
-/* .book-button:focus-visible moved to accessibility section (line ~3593) with amber outline */
-
-/* ===== Reduced Motion ===== */
 
 @media (prefers-reduced-motion: reduce) {
     .book {
@@ -4100,14 +3583,10 @@ h4 {
         animation: none;
     }
 
-    /* The shimmer is decoration; the loading state's meaning is carried by the
-       `role="status"` text and the placeholder shapes, both of which survive. */
     .book-skeleton {
         animation: none;
     }
 }
-
-/* Wallpaper */
 
 .wallpaper {
     position: absolute;
@@ -4144,8 +3623,6 @@ h4 {
     opacity: 0.4;
 }
 
-/* Lighting overlay */
-
 .lighting {
     position: absolute;
     inset: 0;
@@ -4157,8 +3634,6 @@ h4 {
     z-index: 70;
     mix-blend-mode: soft-light;
 }
-
-/* Shelf Label */
 
 .shelf-label {
     font-family: var(--font-heading);
@@ -4173,8 +3648,6 @@ h4 {
     z-index: 2;
 }
 
-/* Empty Message */
-
 .empty-msg {
     text-align: center;
     padding: 3rem 2rem;
@@ -4183,8 +3656,6 @@ h4 {
     font-family: var(--font-heading);
     font-size: var(--size-lg);
 }
-
-/* Book Overlay (Library quick view — separate from BookDetail page) */
 
 .book-overlay {
     position: fixed;
@@ -4227,14 +3698,6 @@ h4 {
     margin-bottom: 1rem;
 }
 
-/* NB: the BookDetail overlay's round "×" close button (also `.book-overlay__close`)
-   is fully inline-styled in Page.BookDetail.overlayView; only its
-   `:focus-visible` ring below is stylesheet-driven. The block-button rule that
-   once lived here belonged to a removed Library quick-view and only bled unwanted
-   margin/padding onto the "×", so it was deleted (#295 item c). */
-
-/* ===== Skip Link (Accessibility) ===== */
-
 .skip-link {
     position: absolute;
     top: -100%;
@@ -4255,8 +3718,6 @@ h4 {
     outline: 2px solid var(--text);
     outline-offset: 2px;
 }
-
-/* ===== View Mode Toggle ===== */
 
 .view-mode-toggle {
     display: flex;
@@ -4285,8 +3746,6 @@ h4 {
 .view-mode-toggle__btn:hover:not(.view-mode-toggle__btn--active) {
     border-color: var(--text-muted);
 }
-
-/* ===== Book List View ===== */
 
 .book-list {
     width: 100%;
@@ -4345,8 +3804,6 @@ h4 {
     background: rgba(255, 255, 255, 0.08);
     color: var(--text-muted);
 }
-
-/* ===== Admin Pages ===== */
 
 .page--admin {
     padding-bottom: 4rem;
@@ -4429,8 +3886,6 @@ h4 {
     font-family: var(--font-heading);
 }
 
-/* ===== Metrics Dashboard ===== */
-
 .metrics-dashboard {
     background-color: var(--bg);
     font-family: var(--font-body);
@@ -4481,8 +3936,6 @@ h4 {
     color: var(--accent);
 }
 
-/* -- Metrics Table -- */
-
 .metrics-table {
     width: 100%;
     border-collapse: collapse;
@@ -4511,8 +3964,6 @@ h4 {
     background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* -- Status Badges -- */
-
 .status-badge {
     display: inline-block;
     padding: 0.2rem 0.6rem;
@@ -4540,8 +3991,6 @@ h4 {
     border: 1px solid rgba(176, 48, 48, 0.3);
 }
 
-/* -- Philosophy Footer -- */
-
 .metrics-philosophy {
     border-top: 1px solid var(--border);
     padding-top: 2rem;
@@ -4559,8 +4008,6 @@ h4 {
     margin: 0 auto;
 }
 
-/* -- Metrics responsive -- */
-
 @media (max-width: 768px) {
     .metrics-cards {
         grid-template-columns: 1fr;
@@ -4570,8 +4017,6 @@ h4 {
         flex-wrap: wrap;
     }
 }
-
-/* ===== Focus Indicators (Issue #058b) ===== */
 
 *:focus-visible {
     outline: 2px solid #d4a029;
@@ -4600,8 +4045,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* ===== Onboarding Overlay (Issue #057e) ===== */
-
 .onboarding-overlay {
     position: fixed;
     top: 0;
@@ -4620,17 +4063,11 @@ h4 {
     left: 0;
     width: 100%;
     height: 100%;
-    /* Scrim held at ~0.55 with a blur so the bookcase the account is about to
-       fill reads faintly through (US-14.1.2 §1 / #318 TR-2). */
     background: rgba(10, 8, 6, 0.55);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
 }
 
-/* Off-screen focus guard (Components.OnboardingOverlay): a tabbable sentinel
-   after the card whose focus handler pulls focus back into the dialog, so Tab
-   off the last control does not escape to the page behind the modal. Zero-box
-   and aria-hidden so it is invisible to sighted and AT users alike. */
 .onboarding-overlay__focus-guard {
     position: absolute;
     width: 1px;
@@ -4639,9 +4076,6 @@ h4 {
     pointer-events: none;
 }
 
-/* Wrapper for a real product surface embedded inside an onboarding step (the
-   US-1.1.1 upload flow, the Settings consent controls). The card is centred for
-   the Welcome/Done copy; embedded forms read left-aligned and full width. */
 .onboarding-overlay__embed {
     width: 100%;
     text-align: left;
@@ -4705,21 +4139,11 @@ h4 {
     height: 8px;
     border-radius: 50%;
     background: rgba(232, 220, 200, 0.2);
-    /* No transition: a progress indicator must snap between states, not tween
-       (the #316/#319 indicator rule). */
 }
 
 .onboarding-overlay__dot--active {
     background: #d4a029;
 }
-
-/* -- Restored-draft notice (Issue #182): shown atop the Create Listing form
-      when a draft persisted at session-expiry has been restored. Shares the
-      login page's calm "lamplight" amber register (see
-      .login-card__notice--session-expired) so the two expiry surfaces read as
-      one voice — dark brass text on an amber-tinted parchment panel. Laid out
-      as a flex row so the reassurance copy and the Discard action sit sensibly
-      side by side, with clear separation from the form below. -- */
 
 .marketplace-create__draft-notice {
     display: flex;
@@ -4762,20 +4186,10 @@ h4 {
     border-color: rgba(184, 134, 11, 0.8);
 }
 
-
-/* ==========================================================================
-   Public transparency pages — /metrics and /about
-   Mirror the /costs aesthetic (gradient hero banner, titled sections, card
-   grids) using the same design tokens, so the three public pages read as one
-   family. See the .costs__* block above for the reference styling.
-   ========================================================================== */
-
 .page--metrics,
 .page--about {
     padding-bottom: 4rem;
 }
-
-/* -- Shared title / subtitle (match .costs__title / .costs__subtitle) -- */
 
 .metrics__title,
 .about__title {
@@ -4814,8 +4228,6 @@ h4 {
     border-radius: var(--radius-lg);
     background-color: rgba(255, 255, 255, 0.02);
 }
-
-/* -- Flagship costs widget → hero banner (mirror .costs__banner) -- */
 
 .metrics__costs {
     background: linear-gradient(135deg, #2a1f14, #3d2b1f);
@@ -4868,8 +4280,6 @@ h4 {
     margin: 0 auto 1rem;
 }
 
-/* -- Sections (mirror .costs__stories / .costs__section-title) -- */
-
 .metrics__section {
     margin-bottom: 3rem;
 }
@@ -4899,8 +4309,6 @@ h4 {
     border-radius: var(--radius-lg);
     background-color: rgba(255, 255, 255, 0.015);
 }
-
-/* -- Panel grid + cards (mirror .costs__story-grid / .costs__story-card) -- */
 
 .metrics__grid {
     display: grid;
@@ -4944,8 +4352,6 @@ h4 {
     line-height: 1.1;
 }
 
-/* -- Teaching expander (native <details>) -- */
-
 .metrics__teaching {
     border-top: 1px solid var(--border);
     padding-top: 0.75rem;
@@ -4986,8 +4392,6 @@ h4 {
     font-weight: 600;
 }
 
-/* -- Data-rights + dashboards blocks -- */
-
 .metrics__rights,
 .metrics__dashboards {
     margin-top: 1.5rem;
@@ -5026,8 +4430,6 @@ h4 {
     line-height: 1.6;
     max-width: 640px;
 }
-
-/* -- About page: prominent transparency link cards -- */
 
 .about__transparency {
     margin-top: 2.5rem;
@@ -5068,9 +4470,6 @@ h4 {
     box-shadow: var(--shadow-sm);
     transform: translateY(-1px);
 }
-
-/* -- Owner narrative sections (Wave 8 #318, 8c). One block per drafted section;
- *    each maps to a `section.about__section` so a copy edit stays local. -- */
 
 .about__section {
     margin-bottom: 2.5rem;
@@ -5116,8 +4515,6 @@ h4 {
     max-width: 640px;
 }
 
-/* -- Responsive -- */
-
 @media (max-width: 768px) {
     .metrics__costs {
         padding: 1.5rem 1rem;
@@ -5131,8 +4528,6 @@ h4 {
         grid-template-columns: 1fr;
     }
 }
-
-/* ===== Reading Progress (US-1.6.6) ===== */
 
 .placement-card {
     display: flex;
@@ -5151,8 +4546,6 @@ h4 {
     color: var(--text);
 }
 
-/* The status badge is the primary interactive control — a recognisable chip
-   with a comfortable 44px touch target. */
 .placement-card__badge {
     display: inline-flex;
     align-items: center;
@@ -5173,7 +4566,6 @@ h4 {
     opacity: 0.9;
 }
 
-/* Status colour coding, drawn from the existing dark-academic palette. */
 .placement-card__badge--to-read {
     background-color: var(--shelf-bg);
     color: var(--text-muted);
@@ -5246,7 +4638,6 @@ h4 {
     cursor: not-allowed;
 }
 
-/* The progress panel that hosts the cards on the Reading Pile. */
 .reading-pile__progress {
     display: flex;
     flex-direction: column;
@@ -5280,11 +4671,6 @@ h4 {
     gap: 0.75rem;
 }
 
-/* Metadata-register base for the status line — small caps, tracked, muted, matching
-   `.book-detail__visibility` / `.settings-section__note`. Split out of that shared metadata
-   group (which sits later in the file) so this base PRECEDES its --error/--loading/--success
-   modifiers; otherwise the later base `color` overrides them at equal specificity and the
-   status never turns red/green (#365 login-card precedent). */
 .book-detail__status {
     font-family: var(--font-body);
     font-size: var(--size-xs);
@@ -5293,7 +4679,6 @@ h4 {
     color: var(--text-muted);
 }
 
-/* Save-state feedback on the detail overlay, kept consistent with .error. */
 .book-detail__status--error {
     color: var(--error);
     padding: 0.6rem 0.75rem;
@@ -5309,18 +4694,6 @@ h4 {
 .book-detail__status--success {
     color: var(--accent-hover);
 }
-
-/* ===== Shelf Organiser (US-1.7.1 / #190) ===== */
-
-/*
- * Sits below the bookcase on the owner's own bookshelf. A panel rather than a restyling of
- * the spines: the bookcase auto-flows placements into visual rows and deliberately does not
- * surface physical `op.shelves` boundaries (#151), so organisation is managed alongside it.
- *
- * These rules were missing entirely when the component shipped — the BEM classes existed
- * with nothing behind them, so the organiser rendered as raw browser chrome (bulleted list,
- * default grey buttons) on top of the wallpaper.
- */
 
 .bookshelf__organiser {
     max-width: 1040px;
@@ -5358,11 +4731,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* Undo-remove toast (US-1.6.4 extension, #375).
-   Sits at the top of the shelf room rather than floating over a corner: it is
-   read on arrival, and a fixed overlay would land on top of the bookcase the
-   reader has just come back to look at. Auto-dismisses after 8s — see
-   Page.Bookshelf.undoToastMillis. */
 .undo-toast {
     display: flex;
     align-items: center;
@@ -5378,8 +4746,6 @@ h4 {
     box-shadow: var(--shadow-md);
 }
 
-/* The failure state replaces the offer and does NOT auto-dismiss, so it has to
-   read as a different thing at a glance, not just say different words. */
 .undo-toast--failed {
     border-left-color: #9b6930;
     background: rgba(155, 105, 48, 0.18);
@@ -5411,8 +4777,6 @@ h4 {
     color: var(--bg);
 }
 
-/* Shown while the restore is in flight. Disabled rather than removed, so the
-   toast does not change width under the cursor mid-click. */
 .undo-toast__action:disabled {
     opacity: 0.5;
     cursor: default;
@@ -5435,7 +4799,6 @@ h4 {
     background: var(--shelf-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    /* The row is draggable; the grab cursor is the only affordance saying so. */
     cursor: grab;
     transition: background 0.2s, box-shadow 0.2s, opacity 0.2s;
 }
@@ -5445,7 +4808,6 @@ h4 {
     box-shadow: var(--shadow-sm);
 }
 
-/* The dragged row stays visible but recedes, so the gap it will leave is readable. */
 .shelf-organiser__row--dragging {
     opacity: 0.45;
     cursor: grabbing;
@@ -5485,7 +4847,6 @@ h4 {
 }
 
 .shelf-organiser__move {
-    /* Square, and large enough to be a comfortable target — these are the keyboard path. */
     width: 2rem;
     height: 2rem;
     font-size: var(--size-base);
@@ -5516,11 +4877,6 @@ h4 {
     outline-offset: 2px;
 }
 
-/*
- * Disabled is a real state here, not decoration: `up` on the first row, `down` on the last,
- * and `remove` on a shelf that still holds books (the server refuses that with 422). It has
- * to read as unavailable rather than broken.
- */
 .shelf-organiser__move:disabled,
 .shelf-organiser__remove:disabled,
 .shelf-organiser__add:disabled {
@@ -5533,15 +4889,6 @@ h4 {
     font-size: var(--size-sm);
     letter-spacing: 0.04em;
 }
-
-/* ===== Listing Removal — "Is this your business?" (US-2.5.3) ===== */
-
-/*
- * Deliberately unauthenticated: a shop owner who never asked to be listed should not have to
- * create an account in order to leave. Styled as a parchment card in the same family as the
- * login card, because it is the same kind of surface — a single short form for someone who
- * arrived from outside and has one thing to do.
- */
 
 .listing-removal {
     max-width: 34rem;
@@ -5617,8 +4964,6 @@ h4 {
     box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.15);
 }
 
-/* Explains why an address is asked for, so the field reads as the thing that decides how
- * fast the request is honoured rather than as data collection. */
 .listing-removal__hint {
     font-size: var(--size-sm);
     line-height: 1.45;
@@ -5674,12 +5019,6 @@ h4 {
     text-decoration: underline;
 }
 
-/*
- * The two outcomes are styled apart on purpose, matching the copy. Telling a business owner
- * their listing is gone when it is still live is a worse failure than telling them there is
- * a wait — they would stop checking. Green reads as settled; amber reads as in-progress.
- */
-
 .listing-removal__done,
 .listing-removal__pending {
     padding: 1rem 1.25rem;
@@ -5711,19 +5050,6 @@ h4 {
     color: #5c4a32;
 }
 
-/* ===== Profile bookshelf feed link (US-9.4.1, campaign G4) ===== */
-
-/*
- * The "Feed" affordance beside a platform-visible bookshelf on a public profile. An anchor,
- * not a fetch: a feed reader wants the URL, and a reader who clicks gets the Atom document.
- * Only rendered when the bookshelf is platform-visible (`has_feed`), so its presence is
- * itself the signal that the shelf is public.
- *
- * Styled quietly on purpose — it sits next to the bookshelf name and must not compete with
- * it. Discovered unstyled during the 2026-07-28 drive, along with the organiser and the
- * removal form.
- */
-
 .profile__shelf-feed {
     display: inline-block;
     margin-left: 0.5rem;
@@ -5746,15 +5072,6 @@ h4 {
     background: rgba(74, 124, 89, 0.15);
 }
 
-/* ===== Admin: shared states ===== */
-
-/*
- * `admin__error` and `admin__loading` were already used by the source-approval and
- * scraper-health pages with no rules behind them — found by the 2026-07-28 orphan-class
- * sweep, not by any test. Added here rather than scoped to one page because all three admin
- * surfaces render them.
- */
-
 .admin__loading {
     font-family: var(--font-body);
     color: var(--text-muted);
@@ -5771,16 +5088,6 @@ h4 {
     margin: 0 0 1rem;
     border-radius: var(--radius-sm);
 }
-
-/* ===== Admin: removal-request queue (US-2.5.3, campaign G6) ===== */
-
-/*
- * ⚠️ The destructive action here — "Remove the listing" — is the one that takes a real
- * business off the map, and the page sits one nav item away from `/admin/sources`, whose
- * primary button *publishes* a listing. So the two are styled apart deliberately: removal is
- * amber-bordered and needs a second click, keeping is quiet and immediate. Matching their
- * styling would make two opposite actions look interchangeable.
- */
 
 .removal-queue__list {
     list-style: none;
@@ -5832,7 +5139,6 @@ h4 {
     font-family: var(--font-mono);
     font-size: var(--size-sm);
     color: var(--accent-hover);
-    /* A long URL must not push the decision buttons off the row. */
     overflow-wrap: anywhere;
 }
 
@@ -5843,7 +5149,6 @@ h4 {
     margin: 0.4rem 0 0;
 }
 
-/* The address is what the reviewer actually judges, so it is the emphasis in that line. */
 .removal-queue__email {
     color: var(--text);
     font-family: var(--font-mono);
@@ -5869,7 +5174,6 @@ h4 {
     transition: background 0.2s, border-color 0.2s, color 0.2s;
 }
 
-/* Amber, not red: it is a considered action, not an alarm. */
 .removal-queue__remove,
 .removal-queue__confirm-yes {
     background: rgba(155, 105, 48, 0.18);
@@ -5911,7 +5215,6 @@ h4 {
     cursor: not-allowed;
 }
 
-/* The confirmation names the business, so a misplaced click is visible before it lands. */
 .removal-queue__confirm {
     padding: 0.6rem 0.85rem;
     background: rgba(155, 105, 48, 0.12);
@@ -5925,24 +5228,6 @@ h4 {
     font-size: var(--size-sm);
     color: var(--text);
 }
-
-/* ===== Admin sign-in gate (#303) ===== */
-
-/*
- * The surface that made four admin pages reachable. Styled at the same time as it was written,
- * deliberately: #301 exists because three surfaces shipped with correct BEM names and zero rules,
- * and nothing in the test suite can catch that — the classes are present, so every selector
- * assertion passes.
- *
- * Parchment card, same family as `login-card` and `listing-removal`: it is the same kind of
- * surface, a short form for someone who arrived with one thing to do.
- */
-
-/* -- Admin invitations (US-14.1.3) --
-
-   The owner's invitation desk: a small create form, the show-once code
-   reveal, and the issue history. The reveal block is deliberately loud —
-   bordered, monospaced — because its whole message is "this appears once". -- */
 
 .admin-invites {
     max-width: 720px;
@@ -6155,7 +5440,6 @@ h4 {
     box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.15);
 }
 
-/* A six-digit code is easier to check at a glance when it is monospaced and spaced out. */
 .admin-gate__input--code {
     font-family: var(--font-mono);
     font-size: var(--size-xl);
@@ -6171,7 +5455,6 @@ h4 {
     margin: 0 0 1rem;
 }
 
-/* The recovery codes are shown once and never again, so this warning is not decoration. */
 .admin-gate__hint--warning {
     color: #7a3b12;
     background: rgba(155, 105, 48, 0.14);
@@ -6242,13 +5525,11 @@ h4 {
     margin: 0 0 0.5rem;
 }
 
-/* The gate's error text sits on parchment, so the dark-panel `admin__error` colour would vanish. */
 .admin-gate .admin__error {
     color: #7a3b12;
     background: rgba(155, 105, 48, 0.14);
 }
 
-/* A quieter second action on the admin gate — enrolment, next to the primary Continue. */
 .admin-gate__secondary {
     width: 100%;
     margin-top: 0.6rem;
@@ -6274,7 +5555,6 @@ h4 {
     cursor: not-allowed;
 }
 
-/* Good news on the admin gate — distinct from `admin__error` so a success cannot read as a failure. */
 .admin-gate__notice {
     font-family: var(--font-body);
     font-size: var(--size-sm);
@@ -6286,34 +5566,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* ============================================================================
- * Issue #306 — rules for markup that named a style which did not exist
- * ============================================================================
- *
- * 309 class names were written in Elm views with NO matching rule in this file. The classes were
- * present in the DOM, so every `Selector.class` assertion passed and no test could see it; three
- * surfaces reached a preview rendering as raw browser chrome — bulleted lists and default grey
- * buttons on top of the dark-academic wallpaper — before anyone noticed. `scripts/check-orphan-classes.sh`
- * is the ratchet that stops a new one landing; this section clears the backlog it was measuring.
- *
- * ⚠️ **Written by ROLE, not per class, and that is deliberate.** The BEM suffixes carry the
- * semantics — `__list`, `__meta`, `__empty`, `__error`, `__card` — and 309 near-duplicate blocks
- * would be 309 places for the shared vocabulary to drift apart. Grouping by role makes the vocabulary
- * explicit and is why an `__error` on a marketplace page now looks like an `__error` on an admin page.
- *
- * Every declaration uses the `:root` tokens and copies an existing house pattern where one exists
- * (`.admin__error`, `.catalogue__empty`, `.metrics__loading`, `.removal-queue__row`,
- * `.search-bar__input`, `.app-nav__link`), so a per-bookshelf theme override still tints these and
- * nothing here hardcodes a colour outside the palette.
- *
- * ⚠️ **These are sane defaults, not a substitute for looking at the page.** A role-derived rule
- * cannot know that a particular `__title` sits inside a card and wants to be smaller, or that one
- * `__grid` wants two columns rather than auto-fill. Each surface still deserves a visual pass, and
- * the per-group queue in the issue is the order to do it in. What this section guarantees is that no
- * surface renders as unstyled browser default any more.
- * ============================================================================ */
-
-/* Links get the accent and a transparent underline that fills in on hover — the `.app-nav__link` pattern, so hover feedback is consistent. */
 .about__link--costs,
 .about__link--metrics,
 .blog-archive__link,
@@ -6325,16 +5577,12 @@ h4 {
     transition: border-color 0.2s ease-in;
 }
 
-/* Page-width base for the form-input wrapper. Split out of the `.page--*` wrapper group (which
-   sits later in the file) so this base PRECEDES its --textarea modifier; otherwise the later base
-   `padding` overrides the modifier at equal specificity, breaking textarea padding (#365). */
 .form-input {
     max-width: 60rem;
     margin: 0 auto;
     padding: 1.5rem 1rem 3rem;
 }
 
-/* Form inputs, matching `.search-bar__input`. An inset dark well rather than a light field: a white input on this palette is what made several forms look like browser defaults. */
 .admin__search,
 .admin__search-input,
 .book-detail__edition-select,
@@ -6355,7 +5603,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* Action rows. `flex-wrap` because two or three buttons overflow a narrow viewport otherwise. */
 .age-gate__actions,
 .app-nav__logout,
 .block-user__block-action,
@@ -6378,7 +5625,6 @@ h4 {
     margin-top: 1rem;
 }
 
-/* Running prose. `line-height: 1.65` because this is a reading product and 1.2 on a serif-adjacent palette is punishing. */
 .age-gate__content,
 .age-gate__message,
 .blog-archive__content,
@@ -6409,7 +5655,6 @@ h4 {
     color: var(--text);
 }
 
-/* Titles take the display serif — that is the dark-academic register, and body sans here reads like an admin console. */
 .age-gate__heading,
 .blocked-user__name,
 .blog-archive__item-title,
@@ -6438,7 +5683,6 @@ h4 {
     margin: 0 0 0.35rem;
 }
 
-/* Metadata: small caps, tracked out, muted — the register `.removal-queue__type` already uses, which keeps a date from competing with a title. */
 .audit-log__when,
 .blog-archive__item-date,
 .blog-post__byline,
@@ -6477,16 +5721,12 @@ h4 {
     color: var(--text-muted);
 }
 
-/* Page-width base for the feed-item wrapper. Split out of the `.page--*` wrapper group (which sits
-   later in the file) so this base PRECEDES its --blog-post/--placement modifiers; otherwise the
-   later base `padding` overrides them at equal specificity, breaking feed-item padding (#365). */
 .feed-item {
     max-width: 60rem;
     margin: 0 auto;
     padding: 1.5rem 1rem 3rem;
 }
 
-/* The house panel surface, matching `.removal-queue__row`. A translucent white wash rather than a solid colour so the wallpaper reads through and per-bookshelf themes still tint it. */
 .block-user__menu,
 .block-user__modal,
 .blog-archive__item,
@@ -6515,7 +5755,6 @@ h4 {
     border-radius: var(--radius-md);
 }
 
-/* Empty states, matching `.catalogue__empty` / `.admin__empty`. Italic and muted so an empty shelf reads as a considered state rather than a failure. */
 .blog-archive__empty,
 .book-detail__author-empty,
 .book-detail__reviews-empty,
@@ -6533,7 +5772,6 @@ h4 {
     padding: 2rem 1rem;
 }
 
-/* Section headers. `align-items: baseline` lines a heading up with its adjacent meta text rather than centring two different font sizes against each other. */
 .blog-archive__header,
 .blog-archive__item-header,
 .blog-post__header,
@@ -6550,7 +5788,6 @@ h4 {
     border-bottom: 1px solid var(--border);
 }
 
-/* Vertical stacks. `list-style: none` matters: these are semantic <ul>s, and browser bullets on a dark parchment surface is the exact 'shipped unstyled' look this sweep exists to remove. */
 .blog-archive__list,
 .blog-post__comments,
 .book-associations__list,
@@ -6611,11 +5848,6 @@ h4 {
     background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* `:hover` is listed on the selected rule deliberately. A bare
-   `.upload-shelf-picker__shelf--selected` is (0,1,0) and loses to
-   `.upload-shelf-picker__shelf:hover` at (0,2,0) — the exact specificity trap
-   that cost this project seven modifiers their state on hover. Pointing at a
-   chosen shelf must not make it look unchosen. */
 .upload-shelf-picker__shelf--selected,
 .upload-shelf-picker__shelf--selected:hover {
     color: var(--text);
@@ -6624,7 +5856,6 @@ h4 {
     font-weight: 600;
 }
 
-/* Assorted small text and controls that share no structural role. Given the body face at small size, which is the correct default for all of them; each still wants a look on its own surface. */
 .book-detail__author-events,
 .book-detail__author-rss,
 .book-detail__availability,
@@ -6661,7 +5892,6 @@ h4 {
     color: var(--text);
 }
 
-/* Price is the thing a shopper scans for, so it gets the display face and the accent. */
 .book-detail__availability-price,
 .book-detail__price-amount,
 .marketplace-detail__price,
@@ -6672,7 +5902,6 @@ h4 {
     color: var(--accent);
 }
 
-/* Structural wrappers: spacing only. Deliberately not decorated — a wrapper that paints a border it was never meant to have is worse than one with no rule. */
 .book-detail__prices-footer,
 .insights__section,
 .insights__section--deanon,
@@ -6689,7 +5918,6 @@ h4 {
     margin-bottom: 1.5rem;
 }
 
-/* Loading states, matching `.metrics__loading`. */
 .book-detail__prices-loading,
 .book-detail__review-loading,
 .comments__loading,
@@ -6703,7 +5931,6 @@ h4 {
     padding: 1.5rem 1rem;
 }
 
-/* A meter fill (review sentiment, upload progress). Width is set inline from data; this styles the track's contents only. */
 .book-detail__review-sentiment-fill {
     display: block;
     height: 0.4rem;
@@ -6712,7 +5939,6 @@ h4 {
     transition: width 0.3s ease-in-out;
 }
 
-/* The track behind `__review-sentiment-fill`. `overflow: hidden` is what keeps the fill's corners inside the track. */
 .book-detail__review-sentiment-track {
     display: block;
     width: 100%;
@@ -6722,21 +5948,18 @@ h4 {
     overflow: hidden;
 }
 
-/* The affirmative button. Filled, because it is the one the reader is meant to find. */
 .btn--confirm {
     background: var(--accent);
     color: #fff;
     border-color: var(--accent);
 }
 
-/* Dismiss is quiet on purpose: pairing a filled confirm with a filled cancel makes two opposite actions look interchangeable — the mistake `.removal-queue__*` calls out. */
 .btn--dismiss {
     background: transparent;
     color: var(--text-muted);
     border-color: var(--border);
 }
 
-/* A button that must read as a link. Stripped of button chrome entirely, or it reads as a third kind of control. */
 .btn--link {
     background: none;
     border: none;
@@ -6746,13 +5969,11 @@ h4 {
     cursor: pointer;
 }
 
-/* Size only — it inherits every other property from `.btn`. */
 .btn--small {
     padding: 0.3rem 0.6rem;
     font-size: var(--size-xs);
 }
 
-/* Copied deliberately from `.admin__error` rather than re-invented: an error that looks different on every surface teaches a reader nothing. */
 .catalogue__error,
 .comments__error,
 .form-field__error,
@@ -6772,7 +5993,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* Helper text below a control: small, muted, close to what it explains. */
 .empty-shelf__hint,
 .form-field__hint,
 .upload-adults-only__hint {
@@ -6782,7 +6002,6 @@ h4 {
     margin-top: 0.3rem;
 }
 
-/* Forms stack with consistent breathing room. */
 .groups-detail__invite-form,
 .groups__create-form,
 .listing-removal__form,
@@ -6794,7 +6013,6 @@ h4 {
     margin-top: 1rem;
 }
 
-/* Confirmations: the mirror of `.admin__error`, in the accent. Same shape so success and failure are recognisably the same *kind* of message. */
 .groups-detail__invite-success,
 .marketplace-create__success {
     font-family: var(--font-body);
@@ -6807,7 +6025,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* The risk explanation and its caveats. Muted and small: these qualify a headline rather than competing with it, and the caveat matters as much as the claim. */
 .insights__deanon-explanation,
 .insights__deanon-verdict,
 .insights__fact,
@@ -6823,7 +6040,6 @@ h4 {
     margin: 0.5rem 0 0;
 }
 
-/* The re-identification verdict headline. The base; its four `--` variants below carry the colour, because how alarming this should look is entirely a function of the verdict. */
 .insights__deanon-headline {
     font-family: var(--font-heading);
     font-size: var(--size-xl);
@@ -6831,22 +6047,18 @@ h4 {
     margin: 0 0 0.4rem;
 }
 
-/* Common: reassuring, so accent green. */
 .insights__deanon-headline--common {
     color: var(--accent);
 }
 
-/* Not enough data to say. Muted deliberately — neither reassurance nor alarm, because we do not know, and colouring it either way would assert something we cannot support. */
 .insights__deanon-headline--insufficient {
     color: var(--text-muted);
 }
 
-/* Rare: same register as unique. */
 .insights__deanon-headline--rare {
     color: #d99a6c;
 }
 
-/* 'Your shelf is unique' — the highest-risk verdict, and the one that must not look like the others. */
 .insights__deanon-headline--unique {
     color: #d99a6c;
 }
@@ -6864,7 +6076,6 @@ h4 {
     cursor: pointer;
 }
 
-/* Stat rows. */
 .insights__stat,
 .insights__stats {
     display: flex;
@@ -6873,7 +6084,6 @@ h4 {
     margin: 1.25rem 0;
 }
 
-/* A single number, given the display face at scale — this is what the reader came to see. */
 .insights__stat-value {
     display: block;
     font-family: var(--font-heading);
@@ -6882,7 +6092,6 @@ h4 {
     line-height: 1.1;
 }
 
-/* Images. `max-width: 100%` is what stops a cover blowing out the layout on a phone. */
 .marketplace-detail__cover,
 .marketplace__card-cover,
 .upload-verify__cover,
@@ -6894,12 +6103,10 @@ h4 {
     box-shadow: var(--shadow-sm);
 }
 
-/* A profile still loading: dimmed rather than replaced, so the layout does not jump when it arrives. */
 .profile--loading {
     opacity: 0.6;
 }
 
-/* A handle that does not exist. Centred and quiet — this is a dead end, not an error the reader caused. */
 .profile--not-found {
     font-family: var(--font-body);
     color: var(--text-muted);
@@ -6907,7 +6114,6 @@ h4 {
     padding: 3rem 1rem;
 }
 
-/* Inline badges. */
 .rss-link__icon,
 .search-bar__icon {
     display: inline-block;
@@ -6921,10 +6127,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/*
- * Top-level page blocks. A centred column with room to breathe — the measure matters in a reading
- * product, so this caps line length rather than letting prose run the full width of a desktop.
- */
 .book-associations,
 .comment-form,
 .feed-item-row,
@@ -6949,7 +6151,6 @@ h4 {
     padding: 1.5rem 1rem 3rem;
 }
 
-/* Unavailable affordances. `cursor: not-allowed` is the bit a reader actually notices. */
 .insights__deanon-headline--unknown,
 .search-result__year--unknown,
 .writing-assistant--coming-soon,
@@ -6959,7 +6160,6 @@ h4 {
     cursor: not-allowed;
 }
 
-/* States that need a human next: dashed border, muted. A duplicate is not an error and should not wear an error's colour. */
 .login-card--pending,
 .upload-result--duplicate,
 .upload-result--manual {
@@ -6968,30 +6168,17 @@ h4 {
     border-style: dashed;
 }
 
-/* Failure states borrow the `.admin__error` amber rather than red: red on this palette reads as an alarm, and a photo that was not a book is not an alarm. */
 .upload-result--failed,
 .upload-result--not-book {
     color: #d99a6c;
     border-color: #9b6930;
 }
 
-/* Success takes the accent green. */
 .upload-result--identified {
     color: var(--accent);
     border-color: var(--accent);
 }
 
-/*
- * ⚠️ 3D bookcase geometry — given spacing only, ON PURPOSE.
- *
- * These sit inside the bookcase/reading-pile scene, which is built from the `--plank-h`,
- * `--book-depth`, `--side-w` and `--plank-lip` custom properties and real CSS transforms. Inventing
- * a size or a border for a plank or a chair leg from its name alone could break a visual that
- * currently works, and a subtly wrong bookcase is harder to notice than an unstyled one.
- *
- * They are listed here so the per-surface pass in #306 knows exactly which classes still want eyes
- * on the actual scene rather than a rule derived from a name.
- */
 .armchair__leg,
 .book-overlay__focus-sentinel,
 .empty-shelf__dust-motes,
@@ -7001,18 +6188,6 @@ h4 {
     box-sizing: border-box;
 }
 
-/*
- * Hover states for the two roles where hover is the affordance rather than decoration: a link the
- * reader must know is clickable, and the risk gate they must know they can open.
- *
- * ⚠️ **Written as an explicit selector list, NOT `[class$="__link"]:hover`.** The attribute-selector
- * version was the first attempt and it was a live regression: it has the same specificity as
- * `.app-nav__link:hover` and sits later in the file, so it silently took over the **primary
- * navigation's** hover colour — changing it from `--text` to `--accent-hover`. An attribute selector
- * cannot be scoped to "the classes this sweep added", which is exactly the scope wanted here.
- *
- * Classes that already have their own `:hover` are excluded below for the same reason.
- */
 .about__link--costs:hover,
 .about__link--metrics:hover,
 .blog-archive__link:hover,
@@ -7022,68 +6197,35 @@ h4 {
     color: var(--accent-hover);
 }
 
-/* The gate invites a click, so hovering it should look like an opening. */
 .insights__risk-gate:hover,
 .insights__risk-reveal:hover {
     background: rgba(255, 255, 255, 0.06);
     border-color: var(--accent);
 }
 
-
-/*
- * `.btn:hover` sets `text-decoration: none`, and it outranks `.btn--link` (class + pseudo-class beats
- * class), so a button styled as a link *lost* its underline on hover — reading as less interactive
- * exactly when the reader points at it. Restored here, with the accent shift the other links get.
- */
 .btn--link:hover {
     text-decoration: underline;
     color: var(--accent-hover);
     opacity: 1;
 }
 
-/* ============================================================================
- * Specificity repairs: a modifier must not lose its own state to a hover
- * ============================================================================
- *
- * `.b--m` is (0,1,0) and `.b:hover` is (0,2,0), so the base's hover rule outranks the modifier and
- * the modifier's state vanishes the moment a cursor touches it. An *active* tab reverted to inactive
- * colours on hover; a *disabled* button brightened under the cursor as though it were live; an ISBN
- * input showing an error lost its red border as soon as it was focused — i.e. exactly when the reader
- * went to fix the error.
- *
- * Found by generalising a defect introduced on 2026-07-29 (`.btn--link` losing its underline to
- * `.btn:hover`). One instance became eight, which is the argument for `scripts/check-css.sh`
- * enforcing this rather than a person remembering it. Each rule below restates the modifier's OWN
- * declared value — nothing here invents a colour.
- * ============================================================================ */
-
-/* A disabled control must not respond to a cursor at all: brightening on hover is a promise it will
- * do something, and it will not. */
 .btn--disabled:hover {
     opacity: 0.5;
 }
 
-/* Selected format: it is already filled with the accent, and the base hover repaints the border and
- * text as though nothing were selected. */
 .format-picker__btn--selected:hover {
     border-color: var(--accent);
     color: #fff;
 }
 
-/* ⛔ The most consequential of the seven. `.isbn-input:focus` repaints the border, so an ISBN that
- * failed validation lost its error colour the instant the reader clicked into the field to correct
- * it — the feedback disappeared exactly when it was needed. */
 .isbn-input--error:focus {
     border-color: var(--error);
 }
 
-/* The active tab on the parchment login card. */
 .login-card__tab--active:hover {
     color: #5c3a1e;
 }
 
-/* Active filter and active admin tab: both are "you are here" states, and both were erased by hover.
- * A navigation that forgets where you are while you point at it is worse than one with no hover. */
 .catalogue__filter-btn--active:hover {
     border-color: rgba(255, 255, 255, 0.2);
     color: var(--text);
@@ -7094,31 +6236,10 @@ h4 {
     color: var(--text);
 }
 
-/* A row mid-drag keeps its accent outline; the base hover shadow would replace the one affordance
- * telling the reader which row they are holding. */
 .shelf-organiser__row--dragging:hover {
     box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-/* ============================================================================
- * Classes that hid behind a bogus "test hook" exemption (#306 follow-up)
- * ============================================================================
- *
- * `check-orphan-classes.sh` exempted a class from needing a rule if its name appeared anywhere in a
- * test source. That is a substring match, and it handed out **14 exemptions to classes no test ever
- * selects on**: `success` because the string sits inside `successCopy`; `app-nav`, `comment`,
- * `profile`, `blog-post` because they are substrings of longer names and of ordinary prose.
- *
- * `.success` was the one that mattered — **five** call sites across Settings (Privacy ×3, Password,
- * Notifications) rendering a confirmation to a reader with no rule behind it. "Password changed
- * successfully" was appearing as unstyled default text.
- *
- * The check now requires the class to appear in an actual selector. The lesson generalises: an
- * exemption is only as strong as what it verifies, and "the name appears in a test" verifies nothing.
- * ============================================================================ */
-
-/* The generic success message, matching `.marketplace-create__success` and mirroring
- * `.admin__error` — same shape as its failure counterpart so the two read as one family. */
 .success {
     font-family: var(--font-body);
     font-size: var(--size-sm);
@@ -7130,7 +6251,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* Page and component blocks: a centred measure, as with the other top-level blocks. */
 .app-nav,
 .block-user,
 .blog-post,
@@ -7142,8 +6262,6 @@ h4 {
     margin: 0 auto;
 }
 
-/* Metadata-register elements — small caps, tracked, muted, as elsewhere.
-   `.book-detail__status` is styled above (split out so its base precedes its modifiers). */
 .book-detail__visibility,
 .settings-section__note {
     font-family: var(--font-body);
@@ -7153,13 +6271,11 @@ h4 {
     color: var(--text-muted);
 }
 
-/* Author attribution on a post — body face, muted, not a heading. */
 .blog-post__author {
     font-family: var(--font-body);
     color: var(--text-muted);
 }
 
-/* A grouped feed: horizontal, wrapping, with room between items. */
 .groups-detail__feed {
     display: flex;
     flex-wrap: wrap;
@@ -7184,7 +6300,6 @@ h4 {
  * is #310. Until then it stays, narrowed, with these seven removed from it by having actual rules.
  * ============================================================================ */
 
-/* The author card on a book page — a panel, like every other card in the app. */
 .book-detail__author-card {
     display: flex;
     flex-wrap: wrap;
@@ -7196,26 +6311,12 @@ h4 {
     border-radius: var(--radius-md);
 }
 
-/* A per-route page wrapper. The other `page--*` variants were styled in the first sweep; this one was
- * exempt as a hook and so was missed — visible only by loading /marketplace. */
 .page--marketplace-browse {
     max-width: 60rem;
     margin: 0 auto;
     padding: 1.5rem 1rem 3rem;
 }
 
-/* ============================================================================
- * Settings hub navigation (#318 TR-4)
- * ============================================================================
- * ONE grouped nav idiom for every viewport: a left-hand sidebar of You /
- * Privacy / Your-data groups on wide screens that reflows to a stacked, wrapping
- * band below the 768px breakpoint. The old CSS-less mobile `<select>` is gone.
- * The active sub-page is marked with `aria-current="page"`, which is both the
- * accessible "you are here" and the styling hook. */
-
-/* Nav beside content on wide screens; nav stacks above content below the
- * breakpoint (the media query on `.settings-hub__nav` turns the sidebar into a
- * band and `flex-direction: column` here puts it on top). */
 .settings-hub__layout {
     display: flex;
     gap: 2rem;
@@ -7227,9 +6328,6 @@ h4 {
     min-width: 0;
 }
 
-/* The consent controls, folded in from the old /settings/consent page: a plain
- * wrapper so its `.settings-section` children space themselves as on any other
- * settings page. */
 .settings-consent {
     display: contents;
 }
@@ -7241,7 +6339,6 @@ h4 {
     }
 }
 
-/* Sidebar shell: a column of groups on wide screens. */
 .settings-hub__nav {
     display: flex;
     flex-direction: column;
@@ -7256,8 +6353,6 @@ h4 {
     gap: 0.2rem;
 }
 
-/* Group label in the metadata register — small caps, tracked, muted — matching
- * `.settings-section__note`, so the three headings read as quiet signposts. */
 .settings-hub__group-heading {
     font-family: var(--font-body);
     font-size: var(--size-xs);
@@ -7296,19 +6391,11 @@ h4 {
     color: var(--text);
 }
 
-/* "You are here". The attribute selector is (0,2,0), so it outranks
- * `.settings-hub__nav-link:hover` (0,1,1) and the active state survives under the
- * cursor — the specificity trap `check-css.sh` gates, avoided by construction
- * rather than by a restating `:hover` rule. The accent text against the muted
- * list is the "you are here" mark; the brighter panel is the same 0.08 wash the
- * hub already used for its active item. */
 .settings-hub__nav-link[aria-current="page"] {
     color: var(--accent);
     background: rgba(255, 255, 255, 0.08);
 }
 
-/* Groups sit side by side and wrap into a band above the content on narrow
- * screens — same links, no second idiom. */
 @media (max-width: 768px) {
     .settings-hub__nav {
         flex: 1 1 auto;
@@ -7318,16 +6405,6 @@ h4 {
     }
 }
 
-/* The remaining `page--<route>` wrappers.
- *
- * ⚠️ Found as a FAMILY, not one at a time. Driving turned up `page--upload` and `page--search`
- * individually; enumerating every `page--*` in the Elm source against this file found two more
- * (`page--marketplace-create`, `page--marketplace-mine`) on routes nobody had opened yet. Four of 25
- * variants had no rule.
- *
- * They were all exempt from the orphan gate as "test hooks", which is how a whole family of page
- * wrappers went unstyled while the gate read 0. Fixing the family is the fix; fixing them one drive at
- * a time would have left the two unvisited routes broken. */
 .page--marketplace-create,
 .page--marketplace-mine,
 .page--search,
@@ -7337,21 +6414,6 @@ h4 {
     padding: 1.5rem 1rem 3rem;
 }
 
-/* ============================================================================
- * Sibling gaps: a BEM block with SOME members styled and some not
- * ============================================================================
- *
- * 41 classes across 21 blocks. Each sits beside siblings that *are* styled — `audit-log` had one
- * styled member and six unstyled; `profile__name` and `profile__handle` were bare next to thirteen
- * styled `profile__*`. A partly-styled block is an oversight almost by definition: nobody designs a
- * table with a styled wrapper and an unstyled row.
- *
- * This is the generalisation of the seven the drive found. Driving is what proved the hook exemption
- * unsound, but driving every route to find the rest would have missed the ones on pages nobody opens.
- * The sibling-gap test finds them without a browser, and `check-css.sh` now enforces it.
- * ============================================================================ */
-
-/* Tables and rows */
 .audit-log__table {
     width: 100%;
     border-collapse: collapse;
@@ -7370,7 +6432,6 @@ h4 {
     text-align: left;
 }
 
-/* Metadata register — small caps, tracked, muted */
 .audit-log__action,
 .audit-log__resource,
 .audit-log__timestamp,
@@ -7383,7 +6444,6 @@ h4 {
     color: var(--text-muted);
 }
 
-/* Titles */
 .marketplace__card-title,
 .upload-verify__title,
 .blog-post__title,
@@ -7394,7 +6454,6 @@ h4 {
     margin: 0 0 0.35rem;
 }
 
-/* Empty states */
 .audit-log__empty,
 .marketplace__empty,
 .groups-detail__feed-empty {
@@ -7406,8 +6465,6 @@ h4 {
     padding: 2rem 1rem;
 }
 
-/* Buttons and quiet actions. `--back` and `--load-more` are navigational rather than primary, so they
- * stay quiet — a "Back" link styled like a call to action competes with the thing it returns from. */
 .block-user__confirm,
 .block-user__trigger,
 .marketplace-detail__contact,
@@ -7449,8 +6506,6 @@ h4 {
     color: var(--accent-hover);
 }
 
-/* The RSS popover: floats above the page, so it needs a surface of its own rather than a translucent
- * wash — content behind it would otherwise read through. */
 .rss-link__popover {
     position: absolute;
     z-index: 20;
@@ -7479,7 +6534,6 @@ h4 {
     margin-top: 0.3rem;
 }
 
-/* Form parts. `__label` above its control, `__select` matching the house input well. */
 .form-field__label {
     display: block;
     margin-bottom: 0.3rem;
@@ -7506,7 +6560,6 @@ h4 {
     margin-top: 1rem;
 }
 
-/* Grids */
 .marketplace__grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
@@ -7516,7 +6569,6 @@ h4 {
     list-style: none;
 }
 
-/* An "(author)" marker beside a comment name. */
 .comment__author-badge {
     display: inline-block;
     margin-left: 0.4rem;
@@ -7530,23 +6582,17 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* Section modifiers on the search page — the two result groups read as one list otherwise. */
 .search-section--collection,
 .search-section--platform {
     margin-bottom: 2rem;
 }
 
-/* The list-view variant of a bookshelf: rows rather than a 3D bookcase. */
 .bookshelf--list-view {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
 }
 
-/* The last four sibling gaps. */
-
-/* A detail panel, and the card inside the book overlay — both floating surfaces, so both need an
- * opaque background rather than the translucent wash used for inline panels. */
 .third-spaces__detail,
 .book-overlay__card {
     padding: 1.25rem 1.5rem;
@@ -7556,8 +6602,6 @@ h4 {
     box-shadow: var(--shadow-lg);
 }
 
-/* The click-away layer behind the user menu. Transparent on purpose — it exists to catch a click, not
- * to be seen — but it still needs a rule, or it has no size and catches nothing. */
 .user-menu__backdrop {
     position: fixed;
     inset: 0;
@@ -7565,8 +6609,6 @@ h4 {
     background: transparent;
 }
 
-/* "Unblock" — a quiet action. Undoing a block should not be styled as a warning; the reader already
- * decided. */
 .blocked-user__unblock {
     color: var(--accent);
     background: none;
@@ -7577,21 +6619,6 @@ h4 {
     cursor: pointer;
 }
 
-/* ============================================================================
- * Bare block classes whose own children were styled
- * ============================================================================
- *
- * ⚠️ These 20 were hidden by a substring bug **in the check written to find them**. `has_rule` used
- * `f".{cls}" in raw`, so `.marketplace__card` counted as styled because `.marketplace__card-title`
- * contains it. The block was bare while its own children had rules — `.marketplace__card` is the card.
- *
- * That is the third time this exact substring flaw has appeared (14 bogus hook exemptions, a probe that
- * passed when it should have failed, and now this). The fix is always the same: match to a word
- * boundary, `\.cls(?![\w-])`.
- * ============================================================================ */
-
-/* Component wrappers: spacing only. Deliberately undecorated — their children carry the surface, and a
- * wrapper that paints its own border would double every frame on the page. */
 .blocked-user,
 .form-field,
 .reader-card,
@@ -7606,15 +6633,12 @@ h4 {
     margin-bottom: 1.25rem;
 }
 
-/* `rss-link` and `user-menu` contain absolutely-positioned children (`__popover`, `__dropdown`), so
- * they must establish a positioning context or those children escape to the viewport. */
 .rss-link,
 .user-menu {
     position: relative;
     display: inline-block;
 }
 
-/* The age gate and the book overlay are full-surface interruptions. */
 .age-gate {
     display: flex;
     flex-direction: column;
@@ -7624,7 +6648,6 @@ h4 {
     text-align: center;
 }
 
-/* A persistent banner while viewing as someone else — it must not look like page content. */
 .view-as-bar {
     display: flex;
     flex-wrap: wrap;
@@ -7639,22 +6662,18 @@ h4 {
     border-bottom: 1px solid #9b6930;
 }
 
-/* Bookshelf and reading-pile containers. The 3D bookcase geometry lives in the children; these only
- * need to not collapse. */
 .bookshelf,
 .pile-view {
     position: relative;
     margin-bottom: 1.5rem;
 }
 
-/* Sections within a book page and a profile. */
 .book-detail__prices,
 .book-detail__writing,
 .profile__shelf {
     margin-bottom: 1.75rem;
 }
 
-/* The marketplace card itself — its title and author were styled and the card was not. */
 .marketplace__card {
     display: block;
     padding: 1rem 1.25rem;
@@ -7670,9 +6689,6 @@ h4 {
     color: var(--accent);
 }
 
-/* Small pill labels on a marketplace card (listing status, book condition), mirroring the inline-badge
-   pattern (`.rss-link__icon` / `.search-bar__icon`): a bordered, radiused, uppercase, muted chip. The
-   base carries the look; per-status `--<status>` modifiers, where present, tint on top. Tokens only. */
 .marketplace__status-badge,
 .marketplace__condition-badge {
     display: inline-block;
@@ -7686,7 +6702,6 @@ h4 {
     border-radius: var(--radius-sm);
 }
 
-/* "Merge" on the duplicate-upload prompt: the affirmative action. */
 .upload-duplicate__merge {
     display: inline-block;
     padding: 0.4rem 0.8rem;
@@ -7699,15 +6714,6 @@ h4 {
     cursor: pointer;
 }
 
-/* The last two classes with no rule (#310).
- *
- * Both were "verified test hooks" — and both selectors turn out to be the `data-testid` sitting
- * beside them, not the class. The detector matched the class NAME inside the testid string, so the
- * exemption was wrong about its own last two members. Both are user-visible states. With these, every
- * class in the Elm source has a rule, and the hook exemption is deleted from the gate. */
-
-/* A visitor followed a link to a shelf that is private or whose reader does not exist. A dead end,
- * not an error the visitor caused — quiet, centred, matching the profile's not-found state. */
 .shelf-unavailable {
     font-family: var(--font-body);
     font-style: italic;
@@ -7716,8 +6722,6 @@ h4 {
     padding: 3rem 1rem;
 }
 
-/* The signed-out upload page: an invitation to sign in, not a wall. Centred with the button below
- * the sentence, so the one action is the obvious one. */
 .upload-auth-required {
     display: flex;
     flex-direction: column;
@@ -7729,11 +6733,6 @@ h4 {
     color: var(--text);
 }
 
-/* ===== Goodreads library import (US-1.1.9) ===== */
-
-/* The migration desk: one column, reading-width, the same parchment manners as
- * the rest of the site. The page has four phases (choose / uploading / watching
- * / report) and they all live inside this frame. */
 .import-page {
     max-width: 46rem;
     margin: 0 auto;
@@ -7811,8 +6810,6 @@ h4 {
     line-height: 1.6;
 }
 
-/* The four outcomes, side by side — the numbers ARE the summary, so they get
- * the display type and the labels stay small underneath. */
 .import__counts {
     display: flex;
     gap: var(--space-4);
@@ -7885,16 +6882,11 @@ h4 {
     color: var(--text-muted);
 }
 
-/* Sits under the manual-ISBN escape hatch on the upload page. */
 .upload-import-link {
     margin-top: var(--space-2);
     text-align: center;
 }
 
-/* ===== Syndication panel (US-6.2.1) ===== */
-
-/* Below the post body, set off by a hairline rule, typeset small with a
- * subdued brass tint — the panel is reference material, not a call to action. */
 .post__syndication {
     margin-top: var(--space-5);
     padding-top: var(--space-4);
@@ -7984,8 +6976,6 @@ h4 {
     font-size: var(--size-xs);
     color: var(--accent);
 }
-
-/* ===== Author bookstore events (#321 item 4) ===== */
 
 .book-detail__author-events-list {
     list-style: none;

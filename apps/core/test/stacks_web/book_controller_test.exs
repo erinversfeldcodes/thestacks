@@ -4,7 +4,6 @@ defmodule StacksWeb.BookControllerTest do
   POST /api/books/confirm, and POST /api/books/:id/merge-format.
   """
 
-  # async: false because confirm/merge tests swap Application env for mock HTTP client.
   use CoreWeb.ConnCase, async: false
 
   import Ecto.Query
@@ -15,10 +14,6 @@ defmodule StacksWeb.BookControllerTest do
   alias Stacks.Books.MockHttpClient
   alias Stacks.Workers.EnrichBookJob
 
-  # Reset the resolver's circuit breakers before each test. :fuse state is
-  # global, so a fuse blown by an earlier suite test can leak in and turn a
-  # mocked ISBN resolve into :circuit_open → isbn_not_found (an order-dependent
-  # flake observed in the full-suite run but not in isolation).
   setup do
     :fuse.reset(:open_library_fuse)
     :fuse.reset(:google_books_fuse)
@@ -78,21 +73,12 @@ defmodule StacksWeb.BookControllerTest do
       assert is_list(placement["formats"])
     end
 
-    # Regression for the #122 live-E2E placement-greying bug: the shelf-visibility
-    # update endpoint was keyed by UUID `:id`, but every other bookshelf route
-    # (and both the Elm client and the E2E) address shelves by NAME. Setting the
-    # ceiling by name therefore never persisted, so the book-detail placement
-    # payload carried the default "owner" ceiling and the dropdown greyed the
-    # (equal-rank) "platform" option. After the fix the ceiling the client set is
-    # exactly what the greying sees.
     test "shelf ceiling set by name reaches the book-detail placement payload", %{conn: conn} do
       user = insert(:user, profile_visibility: "platform")
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "owner")
       insert(:placement, bookshelf: bookshelf, book: book)
 
-      # Exactly what the client (Api.updateShelfVisibility) and the E2E do: PUT
-      # the visibility route with the shelf NAME in the path.
       put_conn =
         conn
         |> auth_conn(user)
@@ -105,17 +91,6 @@ defmodule StacksWeb.BookControllerTest do
       assert placement["bookshelf_visibility"] == "platform"
     end
 
-    # ── #333 regression: the multi-shelf 500 ────────────────────────────────
-    #
-    # A book may legally sit on several bookshelves at once (owner ruling,
-    # 2026-07-30). The detail lookup fed its query to `Repo.one()`, so the
-    # SECOND placement turned the owner's own book detail into an
-    # `Ecto.MultipleResultsError` — a live 500 driven on 2026-07-30.
-    #
-    # The fixture is a genuine two-shelf state and not a factory artefact:
-    # two bookshelves, ONE book, one placement on each. Factories are honest
-    # since #329 (`insert(:placement)` derives its shelf from its bookshelf),
-    # so this is exactly the row shape `Shelving.place_book/3` writes.
     test "returns 200 carrying BOTH placements when the book sits on two bookshelves",
          %{conn: conn} do
       user = insert(:user)
@@ -127,15 +102,11 @@ defmodule StacksWeb.BookControllerTest do
 
       conn = conn |> auth_conn(user) |> get("/api/books/#{book.id}")
 
-      # The status assertion is the regression: before the fix this raised out
-      # of the controller rather than rendering anything at all.
       assert %{"placements" => placements} = json_response(conn, 200)
       assert length(placements) == 2
 
       assert Enum.sort(Enum.map(placements, & &1["bookshelf_name"])) == ["library", "wishlist"]
 
-      # Every placement carries its own id, so the overlay can offer a remove
-      # per shelf rather than one ambiguous "remove from my collection".
       assert Enum.map(placements, & &1["id"]) |> Enum.uniq() |> length() == 2
     end
 
@@ -268,7 +239,6 @@ defmodule StacksWeb.BookControllerTest do
     test "returns 201 with book when ISBN resolves (mocked)", %{conn: conn} do
       user = insert(:user)
 
-      # Pre-insert the book+edition and test the duplicate-detection path
       {_book, _edition} =
         insert_book_with_edition(isbn: "9780743273565", title: "The Great Gatsby")
 
@@ -277,7 +247,6 @@ defmodule StacksWeb.BookControllerTest do
         |> auth_conn(user)
         |> post("/api/books", %{"isbn" => "9780743273565"})
 
-      # Accept either outcome so the test is not fragile on network availability.
       assert conn.status in [201, 422]
     end
 
@@ -297,10 +266,6 @@ defmodule StacksWeb.BookControllerTest do
       assert json_response(conn, 401)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Gap 2 — POST /api/books HTTP layer with mocked ISBN resolver (US-1.1.5)
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/books — mocked ISBN resolver (US-1.1.5)" do
     setup do
@@ -343,8 +308,6 @@ defmodule StacksWeb.BookControllerTest do
     test "returns 422 when both Open Library and Google Books return no results", %{conn: conn} do
       user = insert(:user)
 
-      # MockHttpClient returns {:ok, %{}} for unregistered patterns — empty body
-      # is treated as not found by ISBNResolver for both Open Library and Google Books.
       MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
 
@@ -357,21 +320,8 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # #344 — a resolver outage is reported as an outage, on every write path
-  # ---------------------------------------------------------------------------
-  #
-  # All three of these endpoints ended in `{:error, _} -> 422 "isbn_not_found"`.
-  # That branch caught the reason nobody had classified, and the one thing it
-  # could not distinguish is the one thing the reader most needs distinguished:
-  # "we asked, and this is not a book" from "we could not ask". The second is a
-  # fault of ours, the ISBN they typed may be perfectly good, and telling them
-  # to check the number sends them to re-read a barcode that was right.
   describe "a resolver outage is a 503, not 'isbn_not_found' (#344)" do
     setup do
-      # A 5xx from BOTH upstreams. `race_resolve/1` hands back the last error,
-      # so `ISBNResolver.resolve/1` returns `{:error, :unexpected_status}` —
-      # `:unavailable`, not `:not_found`.
       MockHttpClient.put_response("openlibrary.org", {:error, :unexpected_status})
       MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
       :ok
@@ -419,8 +369,6 @@ defmodule StacksWeb.BookControllerTest do
     end
 
     test "nothing is written when the resolver could not be reached", %{conn: conn} do
-      # The negative half: an outage must not leave a half-identified book
-      # behind for the catalogue to inherit.
       user = insert(:user)
       before = Core.Repo.aggregate(Stacks.Books.Book, :count)
 
@@ -434,8 +382,6 @@ defmodule StacksWeb.BookControllerTest do
   end
 
   describe "an ISBN the catalogues denied is still 422 isbn_not_found (#344)" do
-    # The control that keeps the 503 honest. When the upstreams DO answer and
-    # neither knows the ISBN, that IS a fact about the ISBN, and 422 is right.
     setup do
       MockHttpClient.put_response("openlibrary.org", {:ok, %{}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
@@ -469,13 +415,6 @@ defmodule StacksWeb.BookControllerTest do
       assert placement["book_id"] == book.id
     end
 
-    # ⚠️ #333 — this test used to assert `source: "collection"` for a book the
-    # user owned on a DIFFERENT bookshelf from the one being confirmed onto.
-    # That encoded the pre-ruling assumption that any existing placement means
-    # "already placed": confirming a library book onto your Wish List quietly
-    # did nothing and reported success. The owner's ruling (2026-07-30) makes
-    # the multi-shelf state legal and says to inform, never block — so the
-    # placement is now made and the OTHER shelves are reported alongside it.
     test "already owning the book elsewhere does not block the requested shelf", %{conn: conn} do
       user = insert(:user)
       {book, _edition} = insert_book_with_edition(isbn: "9780743273565")
@@ -490,10 +429,7 @@ defmodule StacksWeb.BookControllerTest do
                json_response(conn, 200)
 
       assert returned["id"] == book.id
-      # The placement this request produced is the one that was asked for …
       assert placement["bookshelf_name"] == "wishlist"
-      # … and the response tells the reader about the shelf they already had it
-      # on, so the client can inform without having to ask again.
       assert Enum.sort(Enum.map(placements, & &1["bookshelf_name"])) == ["library", "wishlist"]
     end
 
@@ -513,9 +449,6 @@ defmodule StacksWeb.BookControllerTest do
       assert %{"placement" => placement, "placements" => placements, "source" => "collection"} =
                json_response(conn, 200)
 
-      # Same row, not a second copy on the same bookshelf — the state rung 4's
-      # `bookshelf_placements_book_active_idx` forbids and the ruling keeps
-      # forbidden.
       assert placement["id"] == existing.id
       assert length(placements) == 1
     end
@@ -552,19 +485,6 @@ defmodule StacksWeb.BookControllerTest do
           |> auth_conn(user)
           |> post("/api/books/confirm", %{"isbn" => "9780451524935", "shelf_name" => "library"})
 
-        # ⚠️ This was `assert conn.status in [201, 409]` with the comment
-        # "accept 201 (new book created) or 409 (merge required — unlikely with
-        # a new ISBN)" (Issue #330). 201 and 409 are the two OPPOSITE outcomes
-        # of this endpoint — "created it" and "refused, you must merge" — so the
-        # disjunction passed whichever happened and asserted only "not a crash".
-        # It would have gone green if metadata resolution silently started
-        # colliding every new ISBN with an existing work.
-        #
-        # The test means 201: this user's collection is empty, the only seeded
-        # row is the user, and 9780451524935 exists nowhere — so there is no
-        # work for `find_similar_work` to match and a merge can never be
-        # required. The old comment said as much ("unlikely with new ISBN") and
-        # then hedged anyway.
         assert conn.status == 201
 
         assert %{"book" => book, "placement" => placement, "placements" => placements} =
@@ -572,11 +492,6 @@ defmodule StacksWeb.BookControllerTest do
 
         assert book["title"] == "Confirm Test Book"
 
-        # The manual-entry path (#343) has no separate "now file it" call to
-        # fall back on — `confirm/2` creates the work, its primary edition and
-        # the placement in one transaction, so a 201 that resolved the metadata
-        # but placed nothing (or placed it on the default bookshelf rather than
-        # the requested one) would leave the reader's add silently half-done.
         assert placement["bookshelf_name"] == "library"
         assert Enum.map(placements, & &1["bookshelf_name"]) == ["library"]
         assert book["primary_edition"]["isbn"] == "9780451524935"
@@ -588,7 +503,6 @@ defmodule StacksWeb.BookControllerTest do
     test "returns 409 with merge_required when vision finds a matching work", %{conn: conn} do
       user = insert(:user)
 
-      # Insert a book with a known title/author that find_similar_work will find
       author = insert(:author, name: "George Orwell")
       book = insert(:book, title: "Nineteen Eighty-Four", author: author)
       insert(:book_edition, book: book, isbn: "9780141036144")
@@ -598,7 +512,6 @@ defmodule StacksWeb.BookControllerTest do
       try do
         Application.put_env(:core, :isbn_http_client, Stacks.Books.MockHttpClient)
 
-        # Return metadata matching the existing book's title+author but different ISBN
         MockHttpClient.put_response("googleapis.com", {
           :ok,
           %{
@@ -627,16 +540,8 @@ defmodule StacksWeb.BookControllerTest do
         assert %{"error" => "merge_required", "work_id" => work_id} = json_response(conn, 409)
         assert work_id == book.id
 
-        # W-13 (the two-Name-of-the-Rose defect) in its regression form. The
-        # 409 alone only proves the endpoint said "merge"; what the campaign
-        # found live was a SECOND work sitting in the catalogue next to the
-        # first. `merge_required` has to be a refusal, not a warning issued on
-        # the way to creating one anyway.
         assert Core.Repo.aggregate(Stacks.Books.Book, :count) == works_before
 
-        # …and no edition was quietly attached either: merging is the client's
-        # next call (`POST /api/books/:id/merge-format`), not a side effect of
-        # being told to merge.
         refute Core.Repo.exists?(
                  from(e in Stacks.Books.BookEdition, where: e.isbn == "9780451524935")
                )
@@ -761,11 +666,6 @@ defmodule StacksWeb.BookControllerTest do
       assert returned["id"] == book.id
     end
 
-    # #333 — the manual-ISBN path's duplicate awareness. The photo path has had
-    # `is_duplicate` in its SSE payload for a long time; typing the ISBN by hand
-    # told the reader nothing, so they placed a second copy without knowing.
-    # This is informational only: the lookup still succeeds, and nothing here
-    # can refuse the placement that follows.
     test "carries the viewer's existing placements so the client can say 'already yours'",
          %{conn: conn} do
       user = insert(:user)
@@ -888,19 +788,6 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/books/:id — hidden book is not served (Issue #114, punch #3)
-  #
-  # A book's ONLY server-side hidden state is the age gate (a book has no owner,
-  # no block relationship, and its `visibility_tier` always resolves as "public"
-  # for resource visibility — see Stacks.Visibility). `AgeGate.enforce/2`
-  # intercepts an age-gated book for an unverified viewer with a 403 BEFORE the
-  # controller's `resolve_visibility == :hidden -> 404` branch is reached, so the
-  # reachable "hidden book" outcome is a 403 that leaks no book payload.
-  # (The literal :hidden -> 404 branch is defensive/unreachable for books; flagged
-  # in the Phase 2 report.)
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/books/:id — hidden book is not served" do
     test "age-gated book (hidden to an unverified viewer) is refused and leaks no payload", %{
       conn: conn
@@ -917,7 +804,6 @@ defmodule StacksWeb.BookControllerTest do
 
       body = json_response(conn, 403)
       assert body == %{"error" => "age_verification_required"}
-      # The hidden book's detail payload must not appear in a refusal response.
       refute Map.has_key?(body, "book")
       refute conn.resp_body =~ "Restricted"
     end
@@ -930,10 +816,6 @@ defmodule StacksWeb.BookControllerTest do
       assert %{"error" => "age_verification_required"} = json_response(conn, 403)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # GET /api/books/:id — read is side-effect free (Issue #114, punch #4 variant)
-  # ---------------------------------------------------------------------------
 
   describe "GET /api/books/:id — no events on read" do
     test "a successful read emits no event_log rows", %{conn: conn} do
@@ -963,15 +845,6 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/books/:id — controller<->cache integration (Issue #114, punch #6)
-  #
-  # First read is a cache miss that populates BookDetailCache; the second read is
-  # a hit served from cache. Proven via the [:stacks, :book_detail_cache, :*]
-  # telemetry the cache emits (Phase 2 instrumentation), not by inspecting
-  # internal cache state.
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/books/:id — cache miss then hit" do
     setup do
       test_pid = self()
@@ -998,7 +871,6 @@ defmodule StacksWeb.BookControllerTest do
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
       BookDetailCache.invalidate(book.id)
 
-      # First request: cold cache -> miss, then populated.
       conn1 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert json_response(conn1, 200)["book"]["id"] == book.id
 
@@ -1010,7 +882,6 @@ defmodule StacksWeb.BookControllerTest do
 
       assert book_id == book.id
 
-      # Second request: warm cache -> hit.
       conn2 = build_conn() |> auth_conn(user) |> get("/api/books/#{book.id}")
       assert json_response(conn2, 200)["book"]["id"] == book.id
 
@@ -1020,25 +891,9 @@ defmodule StacksWeb.BookControllerTest do
                       }},
                      1_000
 
-      # The warm read must NOT re-query/re-cache: no second miss is emitted.
       refute_receive {:telemetry, [:stacks, :book_detail_cache, :miss], _, _}, 200
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/books/:id/merge-format -> GET /api/books/:id (Issue #355)
-  #
-  # The boundary neither existing test crossed. #343's program tests assert the
-  # merge REQUEST is made; #341's context tests assert `merge_edition/2`
-  # PERSISTS. Both were true and both passed while the reader was shown a book
-  # without the edition they had just merged into it — because BookDetailCache
-  # sits between the two, and nothing invalidated it.
-  #
-  # So the test has to hold all three in one picture: read (which caches),
-  # write, read again. Reading FIRST is the whole point; a test that merges into
-  # a cold cache passes no matter how the invalidation is wired, or whether it
-  # is wired at all.
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/books/:id/merge-format then GET /api/books/:id" do
     test "the merged edition is visible on the next read of the book" do
@@ -1076,9 +931,6 @@ defmodule StacksWeb.BookControllerTest do
           }
         })
 
-        # 1. The reader looks at the work — exactly what the merge prompt does
-        #    (`Api.getBook workId`) to put the title in its sentence. This is
-        #    what puts the pre-merge work in BookDetailCache.
         before_body =
           build_conn()
           |> auth_conn(user)
@@ -1087,7 +939,6 @@ defmodule StacksWeb.BookControllerTest do
 
         assert before_body["book"]["edition_count"] == 1
 
-        # 2. The merge the reader accepts.
         merge_body =
           build_conn()
           |> auth_conn(user)
@@ -1099,19 +950,13 @@ defmodule StacksWeb.BookControllerTest do
 
         assert merge_body["edition"]["isbn"] == "9780099466031"
 
-        # The write landed, and landed on the SAME work — the merge itself was
-        # never the defect and must not become one.
         assert Core.Repo.aggregate(
                  from(e in Stacks.Books.BookEdition, where: e.book_id == ^book.id),
                  :count
                ) == 2
 
-        # 3. Oban delivers `books.edition_merged` to CacheInvalidationHandler.
-        #    In production this is the events queue doing its job; here it is
-        #    the same worker, run inline.
         Oban.drain_queue(queue: :events)
 
-        # 4. "View Book" — the merge prompt's own follow-on action.
         after_body =
           build_conn()
           |> auth_conn(user)
@@ -1129,26 +974,12 @@ defmodule StacksWeb.BookControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # The other two writes that changed a book and evicted nothing (Issue #357)
-  #
-  # Same shape as the merge probe above, for the same reason: read, write, read.
-  # Both were found by driving a live database, and both are invisible to a test
-  # that writes into a cold cache.
-  #
-  # The age-gate half is the serious one — it is an unenforced content-safety
-  # control for the length of a cache TTL, not a stale title — so it is the one
-  # that must pass with no queue drained.
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/books/:id/age-gate then GET /api/books/:id" do
     test "the raised gate is enforced on the very next read, not when the TTL expires" do
       reader = insert(:user, age_verified: false)
       {book, _edition} = insert_book_with_edition(visibility_tier: "public")
       BookDetailCache.invalidate(book.id)
 
-      # 1. The reader looks at the book while it is still public. This is the
-      #    load-bearing step: it puts the PUBLIC work in BookDetailCache.
       before_body =
         build_conn()
         |> auth_conn(reader)
@@ -1157,7 +988,6 @@ defmodule StacksWeb.BookControllerTest do
 
       assert before_body["book"]["visibility_tier"] == "public"
 
-      # 2. Someone marks it adults-only.
       marked =
         build_conn()
         |> auth_conn(insert(:user))
@@ -1166,9 +996,6 @@ defmodule StacksWeb.BookControllerTest do
 
       assert marked["book"]["visibility_tier"] == "age_gated"
 
-      # 3. The same reader comes back — and note what is NOT here: the
-      #    `Oban.drain_queue(queue: :events)` the merge probe needs. The eviction
-      #    is synchronous exactly so the gate does not wait on the queue.
       assert %{"error" => "age_verification_required"} =
                build_conn()
                |> auth_conn(reader)
@@ -1184,8 +1011,6 @@ defmodule StacksWeb.BookControllerTest do
       user = insert(:user)
       isbn = "9780451524935"
 
-      # A barcode fast-path book: stored with a placeholder title, its real
-      # metadata still owed by EnrichBookJob.
       {book, _edition} =
         insert_book_with_edition(title: "ISBN #{isbn}", isbn: isbn, visibility_tier: "public")
 
@@ -1208,19 +1033,14 @@ defmodule StacksWeb.BookControllerTest do
            }}
         )
 
-        # 1. The reader opens the book while enrichment is still in flight —
-        #    which is precisely when this happens, and what caches the placeholder.
         assert build_conn()
                |> auth_conn(user)
                |> get("/api/books/#{book.id}")
                |> json_response(200)
                |> get_in(["book", "title"]) == "ISBN #{isbn}"
 
-        # 2. The job lands the real metadata.
         assert :ok = EnrichBookJob.perform(%Oban.Job{args: %{"isbn" => isbn}})
 
-        # 3. Oban delivers `book.enriched` to CacheInvalidationHandler. Unlike the
-        #    age gate, eventual is the right latency for a title.
         Oban.drain_queue(queue: :events)
 
         assert build_conn()

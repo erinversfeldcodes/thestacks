@@ -234,10 +234,6 @@ defmodule StacksWeb.BlogController do
   def chat(conn, %{"id" => id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    # Ownership check (FF-2): the writing assistant operates on the caller's OWN
-    # post. Without this, any consenting user could chat about another user's post
-    # — harmless while this is a static placeholder, but a cross-user IDOR the
-    # moment real AI (US-12.2.1) reads the post. Mirrors update/delete/publish.
     with {:ok, post} <- fetch_post(id),
          :ok <- check_ownership(post, user) do
       json(conn, %{
@@ -246,10 +242,6 @@ defmodule StacksWeb.BlogController do
       })
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   defp fetch_post(id) do
     case Blog.get_post(id) do

@@ -203,8 +203,6 @@ defmodule StacksWeb.AdminControllerTest do
     test "returns 404 for unknown user", %{conn: conn} do
       {conn, _admin, _session} = setup_full_admin(conn)
 
-      # GDPR export uses get_user! — which raises on missing user.
-      # Pass a valid UUID that doesn't exist, expect 404 or error response.
       conn =
         get(conn, "/api/admin/gdpr_export", %{user_id: Ecto.UUID.generate()})
 

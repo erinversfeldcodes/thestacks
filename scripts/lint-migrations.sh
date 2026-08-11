@@ -54,8 +54,6 @@ for file in "$@"; do
         continue
     fi
 
-    # Use a single python pass so multi-line constructs (split `rename(...)`,
-    # triple-quoted `modify` blocks) are handled deterministically.
     python3 - "$file" <<'PY'
 import re
 import sys
@@ -64,17 +62,7 @@ path = sys.argv[1]
 with open(path) as f:
     src = f.read()
 
-# Strip `def down do ... end` before pattern matching. The down function is
-# the canonical reversal of up — for a `create_table` migration it always
-# contains `drop table(...)`, but that drop only fires on `mix ecto.rollback`,
-# never on a forward deploy. Linting it as destructive would force every
-# create migration to carry `@breaking_ok`, which is wrong: there's no
-# expand/contract phase to attest to. We assume uniform 2-space indentation
-# (enforced by `mix format` + the proto.sync generator) so the `end` that
-# closes `def down` sits in the same column as the `def`.
 def _strip_def_down(text):
-    # `[ \t]*` so the indent capture doesn't cross newlines (re.MULTILINE
-    # makes `^` line-anchored but `\s` still consumes `\n`).
     m = re.search(r'^([ \t]*)def down(?:\([^)]*\))?\s+do\s*$', text, re.MULTILINE)
     if not m:
         return text
@@ -87,11 +75,6 @@ def _strip_def_down(text):
 
 src = _strip_def_down(src)
 
-# Extract the @breaking_ok reason if present. Accepts:
-#   @breaking_ok "reason string"
-#   @breaking_ok """
-#   multi-line reason
-#   """
 reason = None
 m = re.search(
     r'@breaking_ok\s+"""\s*(.*?)\s*"""',
@@ -105,71 +88,43 @@ else:
     if m:
         reason = m.group(1).strip()
 
-# Detect destructive operations. Each tuple is (human label, pattern).
-# Patterns use DOTALL so a split `rename(table, :old, to: :new)` across lines
-# still matches. All patterns are intentionally conservative (word-boundary
-# anchored) so they don't fire on prose in comments elsewhere.
 ops = []
 
-# `remove :col` or `remove(:col, ...)` inside an alter block
 if re.search(r'(^|\s)remove[\s(]\s*:[a-z_][a-z0-9_]*', src):
     ops.append("remove (drop_column)")
 
-# raw `drop_column` function
 if re.search(r'\bdrop_column\b', src):
     ops.append("drop_column")
 
-# `drop table(...)` / `drop_table(...)` / `drop_if_exists`
 if re.search(r'\bdrop(_if_exists)?\b\s*[(\s]*table\b', src) or re.search(r'\bdrop_table\b', src):
     ops.append("drop_table")
 
-# `rename(...)` or `rename table(...)`. Multi-line-friendly.
 if re.search(r'(^|\s)rename\s*[(\s]', src, re.MULTILINE):
     ops.append("rename")
 
-# `modify :col, type, null: false` — tighten column to NOT NULL.
-# Multi-line friendly via [\s\S] to span the argument list.
 if re.search(r'\bmodify\b[\s\S]{0,200}?null:\s*false', src):
     ops.append("modify ..., null: false")
 
-# ── Raw execute("...SQL...") destructive ops (#219) ──────────────────────────
-# The DSL patterns above only catch the Ecto sugar. A migration author can
-# express the SAME destructive change as raw SQL inside `execute(...)`, which
-# previously slipped past this gate entirely (the #210/#219 blind spot: a
-# `NOT NULL` tighten written as raw `ALTER … SET NOT NULL` evaded the linter).
-# Extract the SQL text from every non-interpolated execute() block and scan it
-# for the raw equivalents of the destructive DSL ops. execute() strings are
-# parsed directly (not the whole source) so moduledoc / comment prose can never
-# trigger a false positive.
 def _extract_execute_sql(text):
     blocks = []
     blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"""(.*?)"""', text, re.DOTALL)]
     blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"([^"]+)"', text)]
-    # Skip Elixir string interpolation — the SQL isn't statically knowable.
     return [b for b in blocks if "#{" not in b]
 
 execute_sql = "\n".join(_extract_execute_sql(src))
 
-# `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL` — raw NOT NULL tighten.
 if re.search(r'\bSET\s+NOT\s+NULL\b', execute_sql, re.IGNORECASE):
     ops.append("execute SET NOT NULL")
 
-# `ALTER TABLE ... DROP COLUMN ...` — raw column drop.
 if re.search(r'\bDROP\s+COLUMN\b', execute_sql, re.IGNORECASE):
     ops.append("execute DROP COLUMN")
 
-# `ALTER TABLE ... RENAME COLUMN ...` / `RENAME ... TO ...` — raw rename.
 if re.search(r'\bRENAME\s+(?:COLUMN\b|[^\n;]*?\bTO\b)', execute_sql, re.IGNORECASE):
     ops.append("execute RENAME")
 
-# Strip comments before re-checking `remove` to avoid false positives where
-# `# remove :col` appears in docs. We approximate by removing full-line
-# comments; inline trailing comments are rare in Ecto migrations.
 stripped = "\n".join(
     line for line in src.splitlines() if not line.lstrip().startswith("#")
 )
-# Re-verify with stripped src: if a rule originally matched but no longer
-# matches without comments, drop it.
 def still_matches(label):
     if label == "remove (drop_column)":
         return bool(re.search(r'(^|\s)remove[\s(]\s*:[a-z_][a-z0-9_]*', stripped))
@@ -186,15 +141,12 @@ def still_matches(label):
 ops = [o for o in ops if still_matches(o)]
 
 if not ops:
-    # No destructive ops → file is clean regardless of annotation.
     sys.exit(0)
 
 if reason is not None:
-    # Annotated: echo the reason for reviewer visibility; pass.
     print(f"{path}: destructive ops ({', '.join(ops)}) permitted — @breaking_ok: {reason}")
     sys.exit(0)
 
-# Destructive + no annotation → fail loudly.
 print(
     f"{path}: destructive operation(s) detected: {', '.join(ops)}. "
     f"Add `@breaking_ok \"<reason>\"` module attribute to confirm the expand "

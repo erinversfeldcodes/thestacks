@@ -14,7 +14,6 @@ defmodule CoreWeb.TelemetryFuseStateTest do
   The emitted series feeds the SLO gate's "fuse open count = 0" threshold.
   """
 
-  # async: false — fuses are global, and we mutate their state.
   use ExUnit.Case, async: false
 
   alias Stacks.CircuitBreakers
@@ -26,10 +25,6 @@ defmodule CoreWeb.TelemetryFuseStateTest do
     :google_books_fuse,
     :scraper_fuse
   ]
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   defp attach_state_handler do
     test_pid = self()
@@ -48,7 +43,6 @@ defmodule CoreWeb.TelemetryFuseStateTest do
     handler_id
   end
 
-  # Drain any fuse_state messages left by earlier invocations.
   defp drain_state_messages do
     receive do
       {:fuse_state, _, _} -> drain_state_messages()
@@ -73,7 +67,6 @@ defmodule CoreWeb.TelemetryFuseStateTest do
   end
 
   setup do
-    # Make sure fuses are present and :ok before each test.
     CircuitBreakers.install_all()
     Enum.each(@managed_fuses, &:fuse.reset/1)
 
@@ -81,10 +74,6 @@ defmodule CoreWeb.TelemetryFuseStateTest do
 
     :ok
   end
-
-  # ---------------------------------------------------------------------------
-  # 1. One event per known fuse on each invocation
-  # ---------------------------------------------------------------------------
 
   describe "poll_fuse_state/0" do
     test "emits one [:stacks, :fuse, :state] event per managed fuse" do
@@ -125,16 +114,11 @@ defmodule CoreWeb.TelemetryFuseStateTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # 2. Healthy fuse reports 1, blown fuse reports 0
-  # ---------------------------------------------------------------------------
-
   describe "poll_fuse_state/0 — state value mapping" do
     test "healthy fuse reports state=1" do
       attach_state_handler()
       drain_state_messages()
 
-      # Ensure :vision_fuse is :ok.
       :fuse.reset(:vision_fuse)
       assert :ok = :fuse.ask(:vision_fuse, :sync)
 
@@ -157,10 +141,6 @@ defmodule CoreWeb.TelemetryFuseStateTest do
       attach_state_handler()
       drain_state_messages()
 
-      # Force :scraper_fuse blown. :scraper_fuse threshold is 3/60s so three
-      # melts blow it (melt_count > 3 after 4 melts isn't required; the first
-      # melt after reinstall with threshold=0 blows it). Use the simpler path
-      # of installing with threshold=0 for determinism.
       :fuse.remove(:scraper_fuse)
       :fuse.install(:scraper_fuse, {{:standard, 0, 60_000}, {:reset, 60_000}})
       :fuse.melt(:scraper_fuse)

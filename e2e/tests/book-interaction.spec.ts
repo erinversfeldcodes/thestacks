@@ -17,11 +17,9 @@ test.describe("Book interaction — Library page", () => {
     const books = page.locator(".book");
     await expect(books.first()).toBeAttached({ timeout: 10000 });
 
-    // The book should be wrapped in a button for accessibility
     const bookButton = page.getByTestId('book-spine').first();
     await expect(bookButton).toBeAttached();
 
-    // The button should not be obscured — check it's actually clickable
     const isVisible = await bookButton.isVisible();
     expect(isVisible).toBeTruthy();
   });
@@ -33,15 +31,11 @@ test.describe("Book interaction — Library page", () => {
     const bookButton = page.getByTestId('book-spine').first();
     await expect(bookButton).toBeAttached({ timeout: 10000 });
 
-    // Use evaluate to click because Playwright can't target elements
-    // inside a CSS perspective/3D context (reports "outside viewport")
     await bookButton.evaluate((el) => (el as HTMLElement).click());
 
-    // Should open the book detail overlay (URL does NOT change)
     const overlay = page.locator('[role="dialog"]');
     await expect(overlay).toBeVisible({ timeout: 5000 });
 
-    // The overlay should show the book's title
     const detailTitle = overlay.getByTestId('book-title');
     await expect(detailTitle).toBeVisible({ timeout: 5000 });
     const titleText = await detailTitle.textContent();
@@ -58,8 +52,6 @@ test.describe("Book interaction — Library page", () => {
     const book = page.locator(".book").first();
     await expect(book).toBeAttached({ timeout: 10000 });
 
-    // The hover animation uses @keyframes book-pull-out.
-    // Verify the keyframe animation rule exists in the stylesheet.
     const hasBookPullOut = await page.evaluate(() => {
       for (const sheet of document.styleSheets) {
         try {
@@ -76,7 +68,6 @@ test.describe("Book interaction — Library page", () => {
     console.log(`@keyframes book-pull-out found: ${hasBookPullOut}`);
     expect(hasBookPullOut).toBeTruthy();
 
-    // Also verify .book:hover references the animation
     const hoverAnimation = await page.evaluate(() => {
       for (const sheet of document.styleSheets) {
         try {
@@ -107,11 +98,8 @@ test.describe("Book interaction — Library page", () => {
 
     console.log(`Spine background-image: ${bgImage}`);
 
-    // Should reference a texture file, not be "none"
     expect(bgImage).not.toEqual("none");
-    // Should contain /textures/ path
     expect(bgImage).toContain("/textures/");
-    // Should be a .png file (our generated textures)
     expect(bgImage).toContain(".png");
   });
 
@@ -124,13 +112,11 @@ test.describe("Book interaction — Library page", () => {
     const book = page.locator(".book").first();
     await expect(book).toBeAttached({ timeout: 10000 });
 
-    // Book should have preserve-3d
     const transformStyle = await book.evaluate(
       (el) => getComputedStyle(el).transformStyle
     );
     expect(transformStyle).toEqual("preserve-3d");
 
-    // Should have all three faces
     const spine = book.locator(".book__spine");
     const top = book.locator(".book__top");
     const cover = book.locator(".book__cover");
@@ -139,7 +125,6 @@ test.describe("Book interaction — Library page", () => {
     await expect(top).toBeAttached();
     await expect(cover).toBeAttached();
 
-    // Spine should have title text
     const titleText = await spine
       .locator(".book__title")
       .textContent()

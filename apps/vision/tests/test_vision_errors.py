@@ -79,11 +79,6 @@ def _post(client: TestClient, path: str, body: dict[str, Any]) -> Any:
     return client.post(path, json=body, headers=_make_header(path))
 
 
-# ---------------------------------------------------------------------------
-# 1. The constants are the enum
-# ---------------------------------------------------------------------------
-
-
 def test_error_constants_are_exactly_the_proto_enums_non_zero_values() -> None:
     declared = _proto_enum_values("VisionErrorCode")
     zero_value = "VISION_ERROR_CODE_UNSPECIFIED"
@@ -103,15 +98,8 @@ def test_error_constants_are_exactly_the_proto_enums_non_zero_values() -> None:
 
 
 def test_the_unspecified_sentinel_is_never_a_constant() -> None:
-    # Sending the zero value would mean "a determination was made, but not which
-    # one" — core treats it as unrecognised, so emitting it deliberately would
-    # be a way to look labelled while saying nothing.
     assert "VISION_ERROR_CODE_UNSPECIFIED" not in _sidecar_error_constants()
 
-
-# ---------------------------------------------------------------------------
-# 2. Deterministic failures render as a bare VisionError
-# ---------------------------------------------------------------------------
 
 _DETERMINISTIC_CASES = [
     pytest.param(
@@ -168,8 +156,6 @@ def test_deterministic_failure_returns_a_bare_vision_error(
 def test_every_deterministic_code_is_one_core_recognises(
     client: TestClient, path: str, body: dict[str, Any], expected_code: str
 ) -> None:
-    # Belt to test 1's braces: the constants could match the enum while a call
-    # site sends a bare string that matches neither.
     response = _post(client, path, body)
     assert response.json()["code"] in _sidecar_error_constants()
 
@@ -188,15 +174,7 @@ def test_unreachable_image_url_is_labelled_unreachable(client: TestClient) -> No
     assert response.json()["code"] == "VISION_ERROR_CODE_IMAGE_UNREACHABLE"
 
 
-# ---------------------------------------------------------------------------
-# 3. Non-determinations stay unlabelled, and therefore retryable
-# ---------------------------------------------------------------------------
-
-
 def test_auth_failure_carries_no_code(client: TestClient) -> None:
-    # An auth failure is about us, not about the image. If it arrived labelled,
-    # core would cancel the upload instead of retrying past a clock skew or a
-    # secret rotation.
     response = client.post("/extract", json={"images": [base64.b64encode(b"a").decode()]})
 
     assert response.status_code in (401, 403)
@@ -207,8 +185,6 @@ def test_auth_failure_carries_no_code(client: TestClient) -> None:
 
 
 def test_health_is_unaffected_by_the_error_handler(client: TestClient) -> None:
-    # The exception handler is installed app-wide; this pins that it did not
-    # change the shape of anything that was already working.
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"

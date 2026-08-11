@@ -46,42 +46,16 @@ type alias Model =
     , passwordConfirm : String
     , displayName : String
     , mode : Mode
-
-    -- The whole lifecycle of a submission: `Loading` while the request is in
-    -- flight, `Success authResponse` once the shell has been handed the
-    -- credential, `Failure` otherwise. Deliberately the ONLY record of that
-    -- lifecycle — see `isSubmitDisabled` for why a second flag was removed.
     , submitState : RemoteData SubmitError AuthResponse
     , emailValidation : FieldValidation
     , passwordValidation : FieldValidation
     , passwordConfirmValidation : FieldValidation
     , displayNameValidation : FieldValidation
-
-    -- Why this reader is standing at the door. See `Arrival` — this ONE field
-    -- replaced three independently-settable booleans.
     , arrival : Arrival
-
-    -- Outcome of a forgot-password request (ForgotPasswordMode). The email
-    -- reuses the shared `email` field.
     , forgotState : RemoteData RequestError ()
-
-    -- Outcome of a resend-confirmation request (Issue #373). Reached from two
-    -- places — the "check your inbox" card and `ResendConfirmationMode` — which
-    -- is precisely why it is ONE field: the reader can only be asking once, and
-    -- a second flag per entry point could disagree about whether they had.
     , resendState : RemoteData RequestError ()
-
-    -- The closed-beta invitation (US-14.1.3). `inviteCheck` is the code's whole
-    -- lifecycle: `NotAsked` = the gate panel with an empty field, `Loading` =
-    -- redeeming, `Success` = the gate is UNLOCKED and the Register form shows,
-    -- `Failure` = refused with copy per status. No separate gate-state field —
-    -- "unlocked" IS `Success`, so the two cannot disagree.
     , inviteCode : String
     , inviteCheck : RemoteData Http.Error Api.InviteStatus
-
-    -- Whether registration is invite-gated (US-14.1.3). Set by Main from
-    -- server config via `withInviteOnly` — see that function's note on where
-    -- the fail-closed default lives.
     , inviteOnly : Bool
     }
 
@@ -425,20 +399,8 @@ update msg model =
                 , passwordValidation = Pristine
                 , passwordConfirmValidation = Pristine
                 , displayNameValidation = Pristine
-
-                -- Switching tabs is the reader moving on from whatever brought
-                -- them here, so the arrival is spent. One assignment now clears
-                -- what used to be three, which is why they can no longer be
-                -- cleared unevenly.
                 , arrival = Fresh
                 , forgotState = NotAsked
-
-                -- Cleared alongside `forgotState` for the same reason: a
-                -- succeeded resend leaves the button disabled and its
-                -- acknowledgement on screen, and carrying either across a
-                -- deliberate mode switch would show the reader a notice about a
-                -- request they have already moved on from — and refuse them a
-                -- second one they may now actually want.
                 , resendState = NotAsked
               }
             , Cmd.none
@@ -446,9 +408,6 @@ update msg model =
             )
 
         ForgotSubmitted ->
-            -- Same predicate the button's `disabled` reads, for the same reason
-            -- `ResendRequested` below applies `isResendDisabled` here: one
-            -- definition, so the control and the effect cannot drift.
             if isForgotDisabled model then
                 ( model, Cmd.none, NoOut )
 
@@ -467,11 +426,6 @@ update msg model =
                     ( { model | forgotState = Failure err }, Cmd.none, NoOut )
 
         ResendRequested ->
-            -- Same predicate the button's `disabled` reads. `disabled` is a
-            -- hint, not an enforcement — a keyboard, a screen reader or a
-            -- double-click landing on the same frame can all deliver this
-            -- message anyway — so the rule is applied here too, from one
-            -- definition rather than two that could drift.
             if isResendDisabled model then
                 ( model, Cmd.none, NoOut )
 
@@ -514,26 +468,11 @@ update msg model =
                             Cmd.none
 
                         ResendConfirmationMode ->
-                            -- Its button sends ResendRequested, never
-                            -- FormSubmitted — there are no credentials here.
                             Cmd.none
             in
             ( { model | submitState = Loading, arrival = Fresh }, cmd, NoOut )
 
         GotAuthResponse (Ok authResponse) ->
-            -- ⛔ Persist-first (#359). The credential is handed to the shell on the
-            -- SAME update as the 200 — no port round-trip, no animation, nothing a
-            -- browser is free to decline to run. This branch used to emit
-            -- `StartTransition` and wait for a Web Animations `finished` promise
-            -- before `Main` was allowed to store the token; `requestAnimationFrame`
-            -- never fires while the window is occluded or backgrounded, so the
-            -- promise never settled and the credential was silently discarded —
-            -- three logins returning 200 with nothing in localStorage, driven live
-            -- 2026-07-30. The door animation is decoration and now runs strictly
-            -- after the token is durable.
-            --
-            -- Shape mirrors `GotRegisterResponse (Ok ())` below: decide here, hand
-            -- the outcome up exactly once, leave no half-finished state on the card.
             ( { model | submitState = Success authResponse }
             , Cmd.none
             , LoggedIn authResponse
@@ -543,9 +482,6 @@ update msg model =
             ( { model | submitState = Failure (fromRequestError err) }, Cmd.none, NoOut )
 
         GotRegisterResponse (Ok ()) ->
-            -- Registration succeeded: the backend has sent a confirmation email.
-            -- Do NOT store a JWT, do NOT play the door animation, do NOT navigate.
-            -- Switch to the pending state so the user is told to check their inbox.
             ( { model | mode = RegistrationPending model.email, submitState = NotAsked }
             , Cmd.none
             , RegistrationSucceeded model.email
@@ -555,8 +491,6 @@ update msg model =
             ( { model | submitState = Failure (fromRegisterError registerError) }, Cmd.none, NoOut )
 
         InviteCodeChanged code ->
-            -- Typing resets the lifecycle: a refusal about the OLD string must
-            -- not keep gating the new one.
             ( { model | inviteCode = code, inviteCheck = NotAsked }, Cmd.none, NoOut )
 
         InviteSubmitted ->
@@ -825,35 +759,12 @@ viewForgotForm model =
                     span [ class "spinner spinner--small" ] []
 
                 Success _ ->
-                    -- Past tense, and inert. The label is the second half of the
-                    -- double-send fix: a button that reads "Send reset link"
-                    -- after a send has happened invites the second press even
-                    -- while `disabled` refuses it, and a reader who cannot tell
-                    -- the press registered has been told nothing.
-                    --
-                    -- Says "Reset link sent" for every address, because the
-                    -- server said 200 for every address — see `isForgotDisabled`.
                     text "Reset link sent"
 
                 _ ->
                     text "Send reset link"
             ]
         , -- ⛔ The acknowledgement is a NOTICE, not a subtitle.
-          --
-          -- Sending the reset mail is the entire point of this form, and the only
-          -- evidence it happened is this sentence — the reader's inbox is
-          -- somewhere else, and the endpoint deliberately answers the same way
-          -- whether or not the address is registered, so there is nothing else to
-          -- go on. It was rendered as `login-card__subtitle`: the same class as
-          -- the "Enter your email and we'll send you a link" helper text two
-          -- elements above, in a live region belonging to nobody. A screen-reader
-          -- user pressed the button and was told nothing at all; a sighted one
-          -- got a line of helper text where a confirmation should be.
-          --
-          -- `notice` is the card's own component and already stamps
-          -- `role="status"`, which is why this is an adoption and not an
-          -- invention. The class literal stays here at the call site — see
-          -- `notice`'s own note on #356.
           case model.forgotState of
             Success _ ->
                 notice
@@ -881,9 +792,6 @@ viewCredentialsForm : Model -> List (Html Msg)
 viewCredentialsForm model =
     viewTabs model
         :: (if model.mode == RegisterMode && registerGateLocked model then
-                -- US-14.1.3: an uninvited visitor sees the invite-only panel
-                -- where the Register form would be. The tabs stay — hiding the
-                -- tab would be a small lie about what the platform is.
                 [ viewInviteOnlyPanel model ]
 
             else
@@ -1042,9 +950,6 @@ viewFormFields model =
             Loading ->
                 span [ class "spinner spinner--small" ] []
 
-            -- A handed-over credential keeps spinning: the shell has the token and
-            -- is navigating, so snapping the label back to "Enter the Stacks" would
-            -- read as "nothing happened" for the frame before the page changes.
             Success _ ->
                 span [ class "spinner spinner--small" ] []
 
@@ -1192,10 +1097,6 @@ viewArrivalNotice model =
                 text ""
 
             ConfirmationExpired ->
-                -- No notice, for the same reason ForgotPassword raises none: the
-                -- mode this arrival opens explains itself in its own first line.
-                -- A notice here would say the same thing twice, one above the
-                -- other.
                 text ""
 
             SessionExpired details ->
@@ -1217,13 +1118,6 @@ viewArrivalNotice model =
                     "Your account deletion has been queued. We're sorry to see you go — thank you for the time you spent in The Stacks."
 
             StoredSessionUnreadable reason ->
-                -- ⛔ The reader is TOLD. A stored credential that will not decode
-                -- used to be silently treated as "signed out", which is exactly
-                -- what a real sign-out looks like — so nobody could tell a bug
-                -- from a logout, and the app threw away the one thing that would
-                -- have explained it. The decoder's own account of the failure
-                -- rides along in `title` so it is recoverable from the page
-                -- without a debugger, without putting decoder jargon in the copy.
                 notice
                     [ class "login-card__notice login-card__notice--stored-session-unreadable"
                     , testId "stored-session-unreadable-notice"
@@ -1448,9 +1342,6 @@ errorMessage mode submitError =
         SubmitRateLimited retryAfter ->
             FailureCopy.rateLimited retryAfter
 
-        -- US-14.1.3: the gate refused at REGISTRATION time (the code moved
-        -- between check and submit — revoked, exhausted by a race, or bound to
-        -- a different address). Same vocabulary as the check-time refusals.
         SubmitInviteRefused reason ->
             inviteRefusalMessage reason
 
@@ -1498,13 +1389,6 @@ registerValidationMessage errors =
         "A reader with that email already frequents these halls. Try signing in instead."
 
     else if hasField "password" then
-        -- ⛔ The one branch of this warm, in-world copy that does NOT get its own
-        -- voice. The rest of this function speaks the library's language because
-        -- each message is the only thing the reader is told. This one is not:
-        -- the register card has already shown the length rule inline under the
-        -- field (`validatePassword`, above), so a second, differently-worded
-        -- version of the same requirement — "eight" where the hint said "8" —
-        -- reads as a second, different requirement. One rule, one sentence.
         PasswordRule.tooShort
 
     else if hasField "display_name" then
@@ -1558,9 +1442,6 @@ httpErrorMessage mode err =
             "This account is temporarily locked after too many failed attempts. Please try again in a little while."
 
         Http.BadStatus 429 ->
-            -- Reachable only if a 429 arrives somewhere `Api.RequestError` does
-            -- not classify it. Same sentence, minus the interval we then do not
-            -- have — never a different explanation.
             FailureCopy.rateLimited Nothing
 
         Http.BadStatus 503 ->

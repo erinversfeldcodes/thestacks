@@ -263,9 +263,6 @@ suite =
                     bodyField "handle" unchangedBody |> Expect.err
             , test "an unchanged empty handle (injected session) is omitted, not sent as \"\"" <|
                 \_ ->
-                    -- The injected/minted-session case: the field renders empty
-                    -- because no handle is stored locally, but the user HAS a
-                    -- handle. Sending "" would NULL it (server 500).
                     bodyField "handle" { unchangedBody | handle = "" } |> Expect.err
             , test "an edited handle is included in the payload" <|
                 \_ ->

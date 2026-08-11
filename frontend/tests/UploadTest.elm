@@ -193,8 +193,6 @@ suite =
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
-                    -- Model is in-flight fetching book; result stays NoResult while
-                    -- GotIdentifiedBook request is pending.
                     model.result |> Expect.equal NoResult
             , -- US-1.1.2 | Suite 10: Elm (#160 SSE)
               test "rejected payload sets result to IdentificationFailed" <|
@@ -206,7 +204,6 @@ suite =
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
-                    -- rejection reason "not_a_book" → NotABook result
                     model.result |> Expect.equal NotABook
             , -- US-1.1.1 | Suite 10: Elm (#160 SSE)
               test "heartbeat payload leaves model unchanged" <|
@@ -218,7 +215,6 @@ suite =
                         ( model, _, _ ) =
                             Upload.update (StreamEvent rawJson) modelWithImage (Just "tok")
                     in
-                    -- heartbeat should not alter result or uploadState
                     Expect.all
                         [ \m -> m.result |> Expect.equal NoResult
                         , \m -> m.uploadState |> Expect.equal (Success "img-1")
@@ -247,9 +243,6 @@ suite =
                     in
                     model.result |> Expect.equal (IdentificationFailed IsbnUnreadable)
             , -- US-1.1.2 | Suite 10: Elm (#160 SSE)
-              -- Regression guard: pending IDs and collected books must be cleared on
-              -- rejection so that a retry starts from a clean slate rather than
-              -- inheriting stale state from the previous attempt.
               test "isbn_not_found rejection clears pendingBookIds and collectedBooks" <|
                 \_ ->
                     let
@@ -292,7 +285,6 @@ suite =
                         ( model, _, _ ) =
                             Upload.update StreamError modelWithImage (Just "tok")
                     in
-                    -- uploadState stays as-is; only result changes
                     model.uploadState |> Expect.equal (Success "img-1")
             ]
         , describe "StatusReceived (response-parsing logic, carried over from polling)"
@@ -494,9 +486,6 @@ suite =
                 \_ ->
                     Upload.init.manualIsbn |> Expect.equal ""
             ]
-
-        -- NOTE: GotFile cannot be tested in pure Elm — File values require
-        -- a JS runtime. Use elm-program-test or E2E tests for this branch.
         , describe "DragOver / DragLeave"
             [ -- US-1.1.1 | Suite 10: Elm
               test "DragOver sets isDragging to True" <|
@@ -675,9 +664,6 @@ suite =
                     in
                     model.confirmState |> Expect.equal NotAsked
             , -- US-1.1.5 | Suite 10: Elm — `Books.confirm/2` created the work,
-              -- its primary edition and the placement in one transaction, so
-              -- the manual path lands on the completion card. There is no
-              -- intervening verification step: the reader typed the ISBN.
               test "ConfirmCompleted Ok created lands on Complete for the chosen shelf" <|
                 \_ ->
                     let
@@ -695,9 +681,6 @@ suite =
                         ]
                         model
             , -- US-1.1.6 / #333 | Suite 10: Elm — the duplicate notice. The
-              -- confirm response reports EVERY bookshelf the reader has this
-              -- book on; the ones other than the shelf just used are the
-              -- notice.
               test "ConfirmCompleted Ok records the OTHER bookshelves the book is on" <|
                 \_ ->
                     let
@@ -715,8 +698,6 @@ suite =
                     in
                     model.existingShelves |> Expect.equal [ "library" ]
             , -- #333 — inform, NEVER block: an already-owned book still
-              -- completes the add. If this ever diverges, the notice has
-              -- become a gate.
               test "ConfirmCompleted Ok on an already-owned book still reaches Complete" <|
                 \_ ->
                     let
@@ -739,7 +720,6 @@ suite =
                         ]
                         model
             , -- #333 — a book the reader does not already own leaves the
-              -- notice empty; so does the shelf this very request used.
               test "ConfirmCompleted Ok with only the used shelf records no existing shelves" <|
                 \_ ->
                     let
@@ -751,8 +731,6 @@ suite =
                     in
                     model.existingShelves |> Expect.equal []
             , -- US-1.1.8 | Suite 10: Elm — the 409 is an OUTCOME, not a
-              -- failure. It must not land in confirmState as an error, or the
-              -- reader is told to check a number that was correct.
               test "ConfirmCompleted merge_required opens the same-work prompt, not an error" <|
                 \_ ->
                     let
@@ -783,7 +761,6 @@ suite =
                     in
                     model.result |> Expect.equal (SameWorkFound "work-1" (Just dummyBook))
             , -- A failed title fetch degrades the copy; it must not strand the
-              -- reader on a screen with no merge button.
               test "GotSameWorkBook Err leaves the prompt open without a title" <|
                 \_ ->
                     let
@@ -879,11 +856,6 @@ suite =
                     in
                     model.mergeFormatState |> Expect.equal NotAsked
             , -- US-1.1.6, US-1.1.8 | Suite 10: Elm | #355
-              --
-              -- The transition itself, at the level the screen is decided. The
-              -- test this replaces asserted `editionCount` had been bumped on a
-              -- still-`DuplicateDetected` result — i.e. it pinned the merge
-              -- staying inside the prompt, which is the defect.
               test "MergeFormatCompleted Ok leaves the duplicate prompt for the completion card" <|
                 \_ ->
                     let
@@ -901,10 +873,6 @@ suite =
                             Expect.all
                                 [ \m -> m.workId |> Expect.equal dummyBook.id
                                 , \m -> m.edition |> Expect.equal dummyEdition
-
-                                -- The photo path only offers a merge because
-                                -- the book is already on one of this reader's
-                                -- bookshelves (`is_duplicate`).
                                 , \m -> m.onAReaderShelf |> Expect.equal True
                                 ]
                                 merged
@@ -929,9 +897,6 @@ suite =
                             Expect.all
                                 [ \m -> m.workId |> Expect.equal "work-1"
                                 , \m -> m.work |> Expect.equal (Just dummyBook)
-
-                                -- `confirm/2` answered 409 before placing
-                                -- anything, and a merge places nothing.
                                 , \m -> m.onAReaderShelf |> Expect.equal False
                                 ]
                                 merged

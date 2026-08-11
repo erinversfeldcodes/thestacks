@@ -51,11 +51,6 @@ suite =
         , describe "the Success branch is not a dead end"
             [ test "a saved button still fires its save message when clicked" <|
                 \_ ->
-                    -- ⛔ THE REGRESSION. Six copies of this button had no
-                    -- `onClick` in the `Success` branch: a full-contrast primary
-                    -- button that looked pressable and did nothing. On
-                    -- `Settings.Consent`, where nothing reset the state, that
-                    -- made analytics consent unchangeable after one save.
                     button (Success ())
                         |> Event.simulate Event.click
                         |> Event.expect Save
@@ -78,9 +73,6 @@ suite =
         , describe "the Loading branch really is disabled"
             [ test "an in-flight button carries the disabled attribute, not just the class" <|
                 \_ ->
-                    -- `Settings.Consent` wrote `btn--disabled` without
-                    -- `disabled True`, so its in-flight button was still
-                    -- focusable and still announced as enabled.
                     button Loading
                         |> Query.has
                             [ Selector.attribute (Html.Attributes.disabled True)

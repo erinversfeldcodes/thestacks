@@ -127,9 +127,6 @@ defmodule StacksWeb.UserSettingsControllerTest do
 
     test "saves a display_name change when email equals the current email and no password (CG-1)",
          %{conn: conn} do
-      # The settings UI sends the current email on every profile save; a same-email
-      # payload must NOT be treated as an email change and must NOT demand a
-      # current_password.
       user = insert(:user, email: "same@example.com", display_name: "Old Name")
 
       conn =
@@ -159,10 +156,6 @@ defmodule StacksWeb.UserSettingsControllerTest do
 
     test "handle \"\" is treated as no change and does not 500 (NOT NULL handle column)",
          %{conn: conn} do
-      # Regression: an empty handle casts to a nil change that validate_handle
-      # skips, which — without a guard — writes NULL into the NOT NULL handle
-      # column (Postgrex 23502 → 500). The settings UI always sends handle, so a
-      # display-name-only save must succeed with the handle unchanged.
       user = insert(:user)
       original_handle = user.handle
 
@@ -207,7 +200,6 @@ defmodule StacksWeb.UserSettingsControllerTest do
 
   describe "PUT /api/settings/password" do
     test "changes password with valid current_password", %{conn: conn} do
-      # Factory default password_hash is Argon2 hash of "password123"
       user = insert(:user)
 
       conn =
@@ -263,16 +255,11 @@ defmodule StacksWeb.UserSettingsControllerTest do
       assert json_response(conn, 401)
     end
 
-    # Issue #179, Phase 2b: a successful password change logs the user out
-    # everywhere — every one of the user's tokens (and families) is revoked, so
-    # a stolen/leaked token cannot outlive the credential it was minted under.
     test "logs the user out everywhere (existing token 401s after the change)",
          %{conn: conn} do
-      # Factory default password_hash is Argon2 hash of "password123".
       user = insert(:user)
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
-      # Sanity: the token authenticates BEFORE the password change.
       before_conn =
         conn |> put_req_header("authorization", "Bearer #{token}") |> get("/api/auth/me")
 
@@ -288,7 +275,6 @@ defmodule StacksWeb.UserSettingsControllerTest do
 
       assert %{"ok" => true} = json_response(change_conn, 200)
 
-      # Logged out everywhere: the same token no longer authenticates.
       after_conn =
         conn |> put_req_header("authorization", "Bearer #{token}") |> get("/api/auth/me")
 
@@ -341,9 +327,6 @@ defmodule StacksWeb.UserSettingsControllerTest do
     end
 
     test "returns 422 when a notify_* value is not a boolean", %{conn: conn} do
-      # A non-boolean value is a cast error on notifications_changeset, so the
-      # controller returns 422 with field errors. (Only UNKNOWN keys are silently
-      # ignored — a known key with an uncastable value is a real 422.)
       user = insert(:user)
 
       conn =
@@ -370,9 +353,6 @@ defmodule StacksWeb.UserSettingsControllerTest do
     end
 
     test "reflects stored DB values, not schema defaults", %{conn: conn} do
-      # Invert every field away from its schema default so a hardcoded-default
-      # response would fail: defaults are wishlist=false, marketplace=true,
-      # group_invitations=true, event_matches=false.
       user =
         insert(:user,
           notify_wishlist_availability: true,

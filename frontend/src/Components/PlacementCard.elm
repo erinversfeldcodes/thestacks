@@ -101,9 +101,6 @@ update msg model =
             ( { model | draftPage = s }, NoOut )
 
         SaveClicked ->
-            -- Keep the form OPEN and mark it saving. The host fires the API and,
-            -- on success, re-inits the card (closing the form); on failure it
-            -- calls `stopSaving`, leaving the form open with the draft intact.
             ( { model | saving = True }
             , ProgressUpdateRequested
             )
@@ -232,8 +229,6 @@ viewEditForm : Model -> Html Msg
 viewEditForm model =
     div [ class "placement-card__edit-form", testId "reading-status-form" ]
         [ label [ class "placement-card__field" ]
-            -- The <select> is nested inside its <label>, which associates them
-            -- programmatically (implicit labelling) without needing id/for.
             [ span [ class "placement-card__label" ] [ text "Status" ]
             , select
                 [ class "placement-card__select"
@@ -256,10 +251,6 @@ viewEditForm model =
                     , placeholder "0"
                     , onInput PageChanged
                     , testId "current-page-input"
-
-                    -- Links the input to the host's inline save-error element
-                    -- (id "progress-error"), so a screen reader announces "that
-                    -- page is past the end of the book" against this field.
                     , attribute "aria-describedby" "progress-error"
                     ]
                     []
@@ -291,10 +282,6 @@ viewEditForm model =
                 [ text "Cancel" ]
             ]
         ]
-
-
-
--- HELPERS
 
 
 readingStatusFromString : String -> ReadingStatus

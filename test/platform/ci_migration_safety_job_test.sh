@@ -33,9 +33,6 @@ else
     exit $?
 fi
 
-# Run the structural check in Python so we don't depend on yq (which isn't
-# available on the dev host — the bash harness explicitly chose bash-only
-# tooling for that reason).
 test_case "migration_safety_job" "job exists with the three expected scripts"
 PARSE_OUT=$(python3 - "$CI_YML" <<'PY' 2>&1
 import sys, re
@@ -44,13 +41,6 @@ path = sys.argv[1]
 with open(path) as f:
     txt = f.read()
 
-# Lightweight parse: we don't need full YAML semantics, we just need to know
-# whether a top-level job under `jobs:` is literally called `migration-safety`
-# and whether its body references the three scripts. PyYAML isn't in the
-# stdlib; a regex scan is robust enough for a placeholder test.
-
-# 1. Find the `jobs:` block, then look for a key `migration-safety:` indented
-#    beneath it (2-space or 4-space indent tolerated).
 job_re = re.compile(r"^\s{2,4}migration-safety:\s*$", re.MULTILINE)
 if not job_re.search(txt):
     print("MISSING_JOB")

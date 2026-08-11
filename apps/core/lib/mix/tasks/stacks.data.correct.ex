@@ -44,11 +44,6 @@ defmodule Mix.Tasks.Stacks.Data.Correct do
   def run(argv) do
     {opts, _rest, _invalid} = OptionParser.parse(argv, strict: @switches)
 
-    # `--no-start`, then a repo of our own: the same shape `mix ecto.migrate`
-    # uses, and for the same reason. `scripts/deploy-stack.sh` runs this on the
-    # CI runner under MIX_ENV=prod immediately before migrating, where starting
-    # the full application tree would boot the endpoint, Oban and every circuit
-    # breaker just to update a handful of rows.
     Mix.Task.run("app.start", ["--no-start"])
 
     corrections = select(Keyword.get_values(opts, :only))

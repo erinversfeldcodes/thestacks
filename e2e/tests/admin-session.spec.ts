@@ -78,16 +78,11 @@ async function passTheGate(page: Page, secret: string) {
   await page.getByTestId("admin-password").fill(DEV_PASSWORD);
   await page.getByTestId("admin-continue").click();
 
-  // Presence first, then act: the code field only exists once the session id is in hand.
   await gateAdvances(
     page,
     page.getByTestId("admin-code").waitFor({ state: "visible", timeout: 15000 }),
     "the gate never offered the code field",
   );
-  // freshTotp, not totp: the server accepts exactly the current 30s step, so a
-  // code computed at the tail of a step is stale by the time it is verified —
-  // the #394 intermittent 422, which at THIS call site presents as "the gate
-  // never opened".
   await page.getByTestId("admin-code").fill(await freshTotp(secret));
   await page.getByTestId("admin-verify").click();
   await gateAdvances(
@@ -130,8 +125,6 @@ async function gateAdvances(page: Page, advanced: Promise<unknown>, what: string
 
 test.describe("Admin session gate (#303)", () => {
   test("an owner cannot reach an admin page without an admin session", async ({ page, request }) => {
-    // The ordinary session is NOT enough, and that is the whole point. Being signed in as the owner
-    // used to render the page, whose every request then 401'd.
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");
 
@@ -156,8 +149,6 @@ test.describe("Admin session gate (#303)", () => {
   });
 
   test("a pending source offers Approve and Reject", async ({ page, request }) => {
-    // ⛔ It did not. `status == "pending"` vs the server's `"pending_review"` meant the Actions column
-    // was permanently empty — invisible while the page 401'd, so two defects stacked.
     const secret = readOwnerMfaSecret();
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");
@@ -168,9 +159,6 @@ test.describe("Admin session gate (#303)", () => {
   });
 
   test("an admin ACTION succeeds, not merely the page load", async ({ page, request }) => {
-    // ⛔ The half-wiring bug: `initPage` was repointed to the admin token and the `update` handlers
-    // were not, so the list loaded (200) and every action 401'd. A page that loads and cannot act
-    // passes any "does it render" assertion, which is why this one asserts a STATE CHANGE.
     const secret = readOwnerMfaSecret();
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");
@@ -182,21 +170,12 @@ test.describe("Admin session gate (#303)", () => {
 
     await firstApprove.click();
 
-    // One fewer pending row: the approve was accepted and the row left the pending state.
     await expect(page.getByTestId("source-approve")).toHaveCount(pendingBefore - 1, {
       timeout: 15000,
     });
   });
 
   test("an admin failure does NOT sign the operator out of the app", async ({ page, request }) => {
-    // ⛔ Driven 2026-07-29: honouring a removal request ejected me to "The library closed your
-    // session for safekeeping". The admin pages routed an admin 401 into the ORDINARY session-expiry
-    // path. The admin session is meant to be fragile — MFA lapses after 30 minutes and it is bound to
-    // the client IP and the node's boot_id — so ending the ordinary session on its failure is always
-    // wrong.
-    //
-    // Simulated by corrupting only the admin call: `elm/http` speaks XMLHttpRequest, so `fetch`
-    // patching would be a no-op here.
     const secret = readOwnerMfaSecret();
     await signInOrdinary(page, request);
     await page.goto("/admin/sources");
@@ -208,7 +187,6 @@ test.describe("Admin session gate (#303)", () => {
     );
     await page.getByTestId("source-approve").first().click();
 
-    // Back to the gate on the same route — not the Login page.
     await expect(page.getByTestId("admin-gate")).toBeVisible({ timeout: 15000 });
     expect(page.url(), "an admin 401 must not redirect to /login").toContain("/admin/sources");
 

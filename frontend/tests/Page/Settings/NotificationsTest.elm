@@ -74,8 +74,6 @@ suite =
                     |> Expect.equal Loading
         , test "tokenless init yields NotAsked, not a Loading state nothing will resolve (#324 0h)" <|
             \_ ->
-                -- With no auth token there is no request to await; Loading with
-                -- Cmd.none would render "Loading your preferences…" forever.
                 Notifications.init Nothing
                     |> Tuple.first
                     |> .prefs
@@ -94,8 +92,6 @@ suite =
                     |> Query.hasNot [ Selector.text "Loading your preferences…" ]
         , test "a successful load renders toggles at the saved values, not defaults" <|
             \_ ->
-                -- Defaults would show every toggle Off; loading all-on proves the
-                -- rendered state comes from the server, not the hardcoded default.
                 loadedWith allOn
                     |> toggleButtons
                     |> Query.findAll [ Selector.class "toggle--on" ]
@@ -153,9 +149,6 @@ suite =
                     |> Expect.equal (Success { allOff | eventAlerts = True })
         , test "toggling a loaded preference clears any prior save result" <|
             \_ ->
-                -- flipAndSave resets `saving` to NotAsked as it dispatches the
-                -- auto-save, so a stale "Preferences saved." banner cannot linger
-                -- over a freshly-flipped (not-yet-confirmed) value.
                 loadedWith allOff
                     |> (\model -> Notifications.update (SaveCompleted (Ok ())) model (Just "test-token"))
                     |> modelOf
@@ -188,9 +181,6 @@ suite =
                     |> Query.fromHtml
                     |> Query.has [ Selector.text "The library is unreachable, so your notification preferences were not saved." ]
         , -- ⛔ #374. All three of these were "Could not save notification
-          -- preferences. Please try again." A 422 cannot be fixed by repeating
-          -- the request, and a timeout may already have SAVED — so "try again"
-          -- was, for two of the three, advice that made things worse.
           test "a 422 sends the reader to a reload, not to a repeat" <|
             \_ ->
                 Notifications.update (SaveCompleted (Err (Http.BadStatus 422))) (loadedWith allOff) (Just "test-token")

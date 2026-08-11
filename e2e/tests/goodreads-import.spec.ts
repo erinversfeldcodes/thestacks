@@ -57,22 +57,17 @@ test.describe("Goodreads import", () => {
 
     await expect(page.getByTestId("import-page")).toBeVisible();
 
-    // File.Select opens a native chooser — Playwright intercepts it.
     const chooserPromise = page.waitForEvent("filechooser");
     await page.getByTestId("import-choose-file").click();
     const chooser = await chooserPromise;
     await chooser.setFiles(FIXTURE);
 
-    // The report is the terminal surface; the job is batched server-side, and
-    // real resolver round-trips for ~4 ISBNs take seconds, not minutes.
     await expect(page.getByTestId("import-report")).toBeVisible({ timeout: 90_000 });
 
-    // The three well-known ISBNs shelved.
     const shelved = page.getByTestId("import-count-shelved");
     const shelvedCount = parseInt((await shelved.locator(".import__count-number").innerText()), 10);
     expect(shelvedCount).toBeGreaterThanOrEqual(3);
 
-    // The hard gate held: the no-ISBN zine row is reported, not invented.
     await expect(page.getByTestId("import-rows")).toBeVisible();
     const zineRow = page
       .getByTestId("import-report-row")
@@ -80,11 +75,6 @@ test.describe("Goodreads import", () => {
     await expect(zineRow).toBeVisible();
     await expect(zineRow).toContainText("no valid ISBN");
 
-    // The read book is genuinely on the Library bookshelf — not just counted.
-    // Matched loosely because the TITLE is the real resolver's to choose: Open
-    // Library catalogues this ISBN as "Nineteen eighty-four", not "1984" —
-    // which is itself proof the book came through the live resolver, not a
-    // fixture.
     await page.goto("/library");
     await expect(page.locator("body")).toContainText(/1984|[Nn]ineteen [Ee]ighty/, {
       timeout: 15_000,
@@ -114,7 +104,6 @@ test.describe("Goodreads import", () => {
     await expect(page.getByTestId("import-error")).toContainText(
       "doesn't look like a Goodreads export",
     );
-    // Still on the chooser — the reader can immediately try the right file.
     await expect(page.getByTestId("import-choose-file")).toBeVisible();
   });
 

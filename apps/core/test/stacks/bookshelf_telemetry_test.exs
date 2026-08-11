@@ -23,7 +23,6 @@ defmodule Stacks.BookshelfTelemetryTest do
       the metadata `scripts/check-slo-gate.sh` groups p95 by.
   """
 
-  # async: false — telemetry handlers are global state.
   use CoreWeb.ConnCase, async: false
 
   import Stacks.Factory
@@ -46,9 +45,6 @@ defmodule Stacks.BookshelfTelemetryTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  # Attaches to `event_name` but only forwards events whose conn's request_path
-  # matches — other async test modules share this global handler namespace, and
-  # an unfiltered handler would let a foreign request satisfy assert_receive.
   defp attach_for_path(event_name, path) do
     test_pid = self()
 

@@ -21,7 +21,6 @@ export function suiteAuthFile(slug: string): string {
   if (!E2E_SUITES.includes(slug)) {
     throw new Error(`Unknown E2E suite slug: ${slug}`);
   }
-  // Safe: slug validated against fixed allowlist above, no path traversal possible.
   const filename = "e2e-" + slug + ".json";
   return path.join(AUTH_DIR, filename); // nosemgrep: path-join-resolve-traversal
 }
@@ -68,14 +67,12 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
     const auth = JSON.parse(localStorage.getItem("stacks-auth") || "{}");
     if (!auth.token) return false;
 
-    // Fetch the first page the catalogue UI will render (default per_page=24).
     const firstPageResp = await fetch("/api/catalogue");
     if (!firstPageResp.ok) return false;
     const firstPage = await firstPageResp.json();
     const visibleBooks: { id: string }[] = firstPage.books ?? [];
     if (visibleBooks.length === 0) return false;
 
-    // Set of book IDs already placed by this user across all shelves.
     const mineResp = await fetch("/api/placements/mine", {
       headers: { Authorization: `Bearer ${auth.token}` },
     });
@@ -84,10 +81,8 @@ export async function ensureBookOnLibrary(page: Page): Promise<void> {
       (mineData.placements ?? []).map((p: any) => p.book_id),
     );
 
-    // If any visible book is already placed, the badge will render.
     if (visibleBooks.some((b) => placedIds.has(b.id))) return true;
 
-    // Otherwise, place the first visible-but-unplaced book on the library.
     const unplaced = visibleBooks.find((b) => !placedIds.has(b.id));
     if (!unplaced) return false;
 
@@ -128,13 +123,11 @@ export async function ensureBookOnShelf(
       });
       if (!shelfResp.ok) return false;
       const shelfData = await shelfResp.json();
-      // API returns {shelves: [{placements: [...]}]} after #151 shelf entity change
       const allPlacements = (shelfData.shelves ?? []).flatMap(
         (s: any) => s.placements ?? [],
       );
       if (allPlacements.length > 0) return true;
 
-      // Shelf is empty — find an unplaced book and place it
       const mineResp = await fetch("/api/placements/mine", {
         headers: { Authorization: `Bearer ${auth.token}` },
       });
@@ -193,8 +186,6 @@ export async function apiCallFromPage(
   );
 }
 
-// ── Auth-lifecycle helpers (Issue #124) ────────────────────────────────────
-
 /**
  * Generate a unique, never-before-seen email so registration tests never
  * collide with prior runs or with seeded users. Uses the `.test` TLD, which
@@ -214,9 +205,6 @@ export async function registerViaApi(
   request: APIRequestContext,
   opts: { email: string; password: string; displayName?: string },
 ) {
-  // US-14.1.3: the preview runs invite-gated (the launch posture), so every
-  // registration carries a fresh owner-issued single-use code. Ignored by the
-  // server when the gate is off, so this helper works in both postures.
   const adminToken = await ownerAdminToken(request);
   const created = await request.post("/api/admin/invites", {
     headers: { Authorization: `Bearer ${adminToken}` },
@@ -295,9 +283,6 @@ export async function fetchSentEmails(
       );
     }
     const body = await resp.json();
-    // A real provider (Resend) is configured — mail never lands in the Local
-    // mailbox, so reading it is meaningless. Signal "unavailable" so callers
-    // test.skip rather than failing on an expectedly-empty inbox.
     if (body.mailbox_readable === false) return null;
     if (Array.isArray(body.emails) && body.emails.length > 0) {
       return body.emails as SentEmail[];
@@ -316,8 +301,6 @@ export function extractLink(email: SentEmail, pattern: RegExp): string | null {
   const match = haystack.match(pattern);
   return match ? match[0] : null;
 }
-
-// ── Session-mint helper (Issue #192) ───────────────────────────────────────
 
 export interface MintedSession {
   email: string;
@@ -390,7 +373,6 @@ export async function injectSession(
   page: Page,
   session: MintedSession,
 ): Promise<void> {
-  // Navigate to the app origin first so localStorage is writable for it.
   await page.goto("/");
   await page.evaluate(
     (auth) => {
@@ -440,8 +422,6 @@ export async function mintOrSkip(
 ): Promise<MintedSession> {
   const session = await mintSession(request, opts);
   test.skip(session === null, SESSION_HELPER_SKIP);
-  // `test.skip` throws when the condition holds, so this line is only reached
-  // with a real (non-null) session.
   return session as MintedSession;
 }
 
@@ -464,8 +444,6 @@ export function assertSeedOrSkip(sufficient: boolean, message: string): void {
     test.skip(!sufficient, message);
   }
 }
-
-// ── Per-test shelf provisioning (Issue #294) ───────────────────────────────
 
 /**
  * Mint a fresh, empty-collection user, place one catalogue book on `shelf` via
@@ -502,8 +480,6 @@ export async function provisionBookOnShelf(
   await injectSession(page, session);
   return { session, bookId: book.id };
 }
-
-// ── The owner's admin MFA factor (Issue #371) ──────────────────────────────
 
 /**
  * Where the run's single owner TOTP secret lives. `.auth/` is gitignored and is
@@ -616,9 +592,6 @@ export async function enrolOwnerMfa(request: APIRequestContext): Promise<string>
   });
   expect(setup.status(), "mfa setup").toBe(200);
 
-  // Server-minus-local clock skew from the response's own Date header (1s
-  // granularity; +500ms centres the truncation). Feeds freshTotp so the
-  // confirm code is computed against the SERVER's step, not ours (#394).
   const setupDate = setup.headers()["date"];
   const skewMs = setupDate ? new Date(setupDate).getTime() + 500 - Date.now() : 0;
 

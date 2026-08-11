@@ -323,13 +323,6 @@ defmodule StacksWeb.AdminAuthControllerTest do
     end
 
     test "accepts the secret exactly as `mfa_setup` publishes it — the client's real path" do
-      # ⚠️ The test whose absence let an impossible contract survive. Every other test here calls
-      # `MFA.begin_enrollment/1` directly and gets RAW secret bytes, then encodes them however the
-      # endpoint happened to want. A real client cannot do that: `mfa_setup` returns only
-      # `provisioning_uri`, and the secret inside it is **base32**. So this walks the client's path —
-      # call setup, take the secret out of the URI, confirm with it, unmodified.
-      #
-      # It fails against the old `Base.decode64/1` implementation, which is the point.
       user = insert(:owner_user)
       {:ok, token, _} = Guardian.encode_and_sign(user)
       auth = fn c -> put_req_header(c, "authorization", "Bearer #{token}") end

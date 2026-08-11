@@ -28,8 +28,6 @@ defmodule Core.Repo.Migrations.NullGuardianTokenJwt do
     EXECUTE FUNCTION op.guardian_tokens_null_jwt();
     """)
 
-    # One-time scrub of any raw tokens already persisted (small table — session
-    # tokens, kept trimmed by the sweep job).
     execute("UPDATE op.guardian_tokens SET jwt = NULL WHERE jwt IS NOT NULL;")
   end
 

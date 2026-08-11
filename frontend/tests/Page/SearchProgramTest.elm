@@ -312,15 +312,6 @@ searchNoTokenFiresNoBookRequest =
                     [ Selector.text "Type a title, author, or ISBN to search the stacks." ]
 
 
-
--- SORT / FILTER (view-level) --------------------------------------------------
---
--- These assert the RENDERED order and membership of `.search-results`, not just
--- model state: sort and year-filter are applied by `Page.Search.view` to the
--- Success books list before rendering. Fixtures are chosen so every SortOrder
--- and the year filter produce a distinct visible order from the server order.
-
-
 {-| Three books whose server (insertion) order is Zebra, Middle, Alpha, chosen
 so each sort produces a different visible order:
 
@@ -496,16 +487,6 @@ yearFilterAndClear =
                     [ "Zebra Tales", "Middle Ground", "Alpha Dawn" ]
 
 
-
--- RESULT CLICK-THROUGH (#289) -------------------------------------------------
---
--- Clicking a search result opens the book detail overlay for that book. The
--- OutMsg (`OpenOverlay bookId`) is swallowed by the ProgramTest harness — like
--- readers401RaisesSessionExpired — so the emit contract is asserted directly
--- against `Search.update`; the render test proves the click surface is a real,
--- keyboard-operable <button> carrying the stable focus-return id.
-
-
 {-| Activating a result must emit `OpenOverlay <bookId>` — the OutMsg Main turns
 into an overlay-open with a `search-result-<bookId>` focus-return trigger. The
 harness swallows the OutMsg, so assert the update contract directly.
@@ -546,17 +527,6 @@ resultRendersAsButtonWithStableId =
                                 , Query.index 0 >> Query.has [ Selector.text "Zebra Tales" ]
                                 ]
                     )
-
-
-
--- SECTIONING (#285) -----------------------------------------------------------
---
--- Search results split into "Your Collection" (the viewer's own matching books,
--- each tagged with its shelf) above "On the Platform" (platform-visible books,
--- some carrying a discoverable-by-design label). These drive the full HTTP ->
--- decode -> render path with the REAL sectioned wire shape (collection /
--- platform_hits), so they also prove `Api.searchResponseDecoder` maps both
--- sections and the label metadata.
 
 
 {-| A collection hit and a platform hit both present: both section headings
@@ -772,17 +742,6 @@ collectionResultRendersAsButton =
                     )
 
 
-
--- DEEP SEARCH (#284) ----------------------------------------------------------
---
--- The "Deep search" toggle opts the query into matching book descriptions and
--- reviews (not just titles) via the `scope=deep` API param. Flipping it re-fires
--- the current query with the new scope; a deep-matched result renders a
--- highlighted `ts_headline` snippet excerpt plus a "via deep search" label. These
--- drive the toggle → re-fire → render path, and assert the URL param exactly so
--- the scope wiring can never silently regress.
-
-
 {-| Toggling deep search ON with a non-empty query re-fires the book search with
 `scope=deep` appended — the signal the backend reads to match descriptions.
 -}
@@ -885,10 +844,6 @@ noSnippetNoLabelWhenSnippetEmpty =
                 |> ProgramTest.ensureViewHas [ Selector.text "Title Match" ]
                 |> ProgramTest.ensureViewHasNot [ Selector.text "via deep search" ]
                 |> ProgramTest.expectViewHasNot [ Selector.class "search-result__snippet" ]
-
-
-
--- JSON ENCODING HELPERS
 
 
 {-| A test-side search hit mirroring the proto `SearchHit` wire shape

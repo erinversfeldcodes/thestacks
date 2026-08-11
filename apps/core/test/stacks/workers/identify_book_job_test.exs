@@ -1,7 +1,4 @@
 defmodule Stacks.Workers.IdentifyBookJobTest do
-  # async: false — Core.DataCase's sandbox mode. Vision steering itself is
-  # process-local (Stacks.AI.MockClient), so it is not what serialises this
-  # file; the ISBN resolver's :fuse state and Stacks.Books.MockHttpClient are.
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -19,8 +16,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   setup do
     user = insert(:user)
     image = insert(:uploaded_image)
-    # Pre-insert the book the MockVisionClient returns so store_book finds it via
-    # Books.find_existing/1 without needing to resolve metadata over HTTP.
     book = insert(:book)
     insert(:book_edition, book: book, isbn: "9780743273565")
     {:ok, user: user, image: image, book: book}
@@ -133,24 +128,17 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
                  })
       end)
 
-      # Exactly one image.resolved (the upload succeeded overall) and one
-      # image.rejected per failed candidate (the MultiBookPartialClient
-      # supplies 2 candidates, only the 9780743273565 one resolves).
       assert event_count("image.resolved") == resolved_before + 1
       assert event_count("image.rejected") == rejected_before + 1
 
       events = events_of_type("image.rejected")
       latest = List.last(events)
 
-      # The rejection ties back to the upload via aggregate_id, NOT to a
-      # book row that was never created. Downstream observability tooling
-      # groups by image aggregate to reconstruct the partial outcome.
       assert latest.aggregate_id == image.id
       assert latest.aggregate_type == "image"
       assert latest.payload["isbn"] == "9780000000003"
       assert latest.payload["reason"] != nil
 
-      # Sanity: the resolved book row was still persisted via mark_resolved.
       resolved = Repo.get!(Stacks.Books.UploadedImage, image.id)
       assert resolved.status == "resolved"
       assert resolved.book_ids == [book.id]
@@ -182,10 +170,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   describe "perform/1 — default public tier (classifier removed)" do
     @tag stories: ["US-1.1.4"], suite: :jobs
     test "pipeline creates a public book even for subjects that previously gated", %{user: user} do
-      # The automatic subject→BISAC age-gate classifier was removed: a freshly
-      # identified book enters `public` regardless of its subjects. Age-gating
-      # now happens only when a PERSON marks the book (Books.set_visibility_tier/3).
-      # "romance" used to force the age_gated branch.
       :fuse.reset(:open_library_fuse)
       :fuse.reset(:google_books_fuse)
 
@@ -269,7 +253,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
       user: user,
       image: image
     } do
-      # `:any` — the old ErrorClient failed every endpoint, not just /analyze.
       with_vision(:any, service_error(), fn ->
         assert {:error, :service_unavailable} =
                  perform_job(IdentifyBookJob, %{
@@ -282,12 +265,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   end
 
   describe "perform/1 — excluded_books arg" do
-    # Rejection-retry: when the controller enqueues a fresh job after
-    # the user clicked "No, try again", the cumulative excluded_books
-    # list rides on the Oban args and must be forwarded to
-    # Moderation.run_pipeline via the context, which forwards it to
-    # the vision sidecar as part of the /analyze payload.
-
     test "passes excluded_books from job args into the vision payload", %{
       user: user,
       image: image
@@ -307,10 +284,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
 
     test "forwards excluded_isbns from job args into the moderation context" do
-      # Rejection-retry: excluded_isbns is consumed by the resolver (not
-      # the vision sidecar), so we assert behaviour via a single direct-
-      # ISBN candidate matching an excluded entry — the candidate is
-      # dropped before resolve_and_store runs, yielding isbn_not_found.
       user = insert(:user)
       image = insert(:uploaded_image, user_id: user.id)
 
@@ -342,7 +315,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
 
   describe "perform/1 — image not in DB" do
     test "returns :ok and logs warning when resolved image_id does not exist in DB", %{user: user} do
-      # mark_resolved finds no rows → logs "not found" but still returns :ok
       assert :ok =
                perform_job(IdentifyBookJob, %{
                  "user_id" => user.id,
@@ -365,10 +337,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
-
   defp event_count(event_type) do
     Repo.aggregate(
       from(e in "event_log", prefix: "op", where: e.event_type == ^event_type),
@@ -376,9 +344,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     )
   end
 
-  # Mirrors the helper in upload_pipeline_test.exs — the raw event_log query
-  # returns aggregate_id as binary; we decode to a string UUID so callers
-  # can compare against the original UUID without juggling encodings.
   defp events_of_type(event_type) do
     from(e in "event_log",
       prefix: "op",
@@ -404,15 +369,6 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
     end)
   end
 
-  # ---------------------------------------------------------------------------
-  # Vision scenarios
-  # ---------------------------------------------------------------------------
-  #
-  # Each is a response the real seam (Stacks.AI.MockClient) is steered with —
-  # no bespoke replacement client modules. All use the consolidated /analyze
-  # shape (classification + books in one response), which is what the
-  # post-consolidation Moderation pipeline calls.
-
   defp age_gated_book, do: books_with_isbns(["9780385490818"])
 
   defp multi_book,
@@ -421,13 +377,8 @@ defmodule Stacks.Workers.IdentifyBookJobTest do
   defp multi_book_no_resolve,
     do: books_with_isbns(["9780000000001", "9780000000002"], confidence: 0.95)
 
-  # One resolvable candidate (pre-inserted in setup) plus one that no lookup
-  # can satisfy — the partial-resolve branch.
   defp multi_book_partial,
     do: books_with_isbns(["9780743273565", "9780000000003"], confidence: 0.95)
 
-  # One direct-ISBN candidate — used by the `excluded_isbns` arg test to verify
-  # that the args → context → drop-candidate plumbing works end-to-end through
-  # the worker.
   defp single_isbn_excludable, do: books_with_isbns(["9780743273565"], confidence: 0.95)
 end

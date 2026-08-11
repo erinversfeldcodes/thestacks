@@ -53,9 +53,6 @@ suite =
                         ]
         , test "the acknowledgement is a notice, not helper text" <|
             \() ->
-                -- `login-card__subtitle` is the class of the "Enter your email
-                -- and we'll send you a link" line above it. A confirmation and
-                -- an instruction must not be the same thing.
                 askingForALink
                     |> ProgramTest.simulateHttpOk "POST" "/api/auth/forgot-password" "{}"
                     |> ProgramTest.ensureViewHas
@@ -68,10 +65,6 @@ suite =
                         ]
         , test "positive control — nothing is acknowledged before the request answers" <|
             \() ->
-                -- Pairs with the negative above. `check-prose-assertions.sh`
-                -- cannot see `expectViewHasNot`, so the control is written by
-                -- hand: without it, "the copy is not helper text" would pass
-                -- against a card that never shows the copy at all.
                 ProgramTest.start () loginProgram
                     |> ProgramTest.clickButton "Forgot your password?"
                     |> ProgramTest.expectViewHasNot
@@ -92,11 +85,6 @@ suite =
                     |> ProgramTest.expectViewHas
                         [ Selector.attribute (Html.Attributes.attribute "role" "status")
                         , Selector.class "login-card__error"
-
-                        -- A 500 is the library's fault and says so, rather than
-                        -- the old "Something went wrong. Please try again." —
-                        -- which is what every failure said, including the two
-                        -- below that need different advice entirely (#374).
                         , Selector.text "Something went wrong at our end, and we cannot say what."
                         ]
         , test "a throttled request says to wait, and how long, when the server said" <|
@@ -109,10 +97,6 @@ suite =
                         [ Selector.text "Please wait a minute before trying again." ]
         , test "a throttled request with no retry-after names no interval at all" <|
             \() ->
-                -- ⛔ The interval must come from the response or not be said at
-                -- all. Nothing may fall back to a hard-coded 60: that number
-                -- lives in `StacksWeb.Plugs.RateLimiter`, and copy that repeated
-                -- it would keep claiming it long after the plug was retuned.
                 askingForALink
                     |> ProgramTest.simulateHttpResponse "POST"
                         "/api/auth/forgot-password"

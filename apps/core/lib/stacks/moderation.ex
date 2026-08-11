@@ -91,11 +91,6 @@ defmodule Stacks.Moderation do
     analyze(build_payload(%{image: image_b64}, context), context)
   end
 
-  # Threads the rejection-retry exclusion list through to the vision
-  # sidecar so the model can be steered away from previously-rejected
-  # books. The list is empty for first-attempt jobs; the proto field's
-  # default-empty contract means the payload is wire-compatible either
-  # way. Missing or non-list values fall through to no exclusions.
   defp build_payload(base, context) do
     case Map.get(context, :excluded_books) do
       list when is_list(list) and list != [] -> Map.put(base, :excluded_books, list)
@@ -103,13 +98,6 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # Single-request classify + extract via the vision service's /analyze
-  # endpoint. Replaces the earlier two-call pattern (is_book then
-  # extract_isbn — either sequential or a parallel fan-out that wasted
-  # a Modal call on non-books). One HTTP round-trip, one Modal container
-  # invocation. The service short-circuits internally when classification
-  # is not BOOK, returning an empty books list without running the
-  # expensive extract step.
   defp analyze(payload, context) do
     case AIClient.call_vision("analyze", payload) do
       {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => []}} ->
@@ -120,11 +108,7 @@ defmodule Stacks.Moderation do
       when is_list(books) ->
         emit_classification(:book)
         Logger.info("Moderation: /analyze returned #{length(books)} candidate(s)")
-        # Propagate `model_used` so downstream can tell barcode-sourced
-        # (local_ocr) ISBNs apart from VLM-extracted ones. The fast-path
-        # metadata skip is only safe when the source is local_ocr — the
-        # VLM can produce strings that happen to pass the ISBN-13 check
-        # digit but aren't real books, so we don't trust it unilaterally.
+
         context_with_source =
           Map.put(context, :vision_model_used, Map.get(resp, "model_used"))
 
@@ -137,14 +121,6 @@ defmodule Stacks.Moderation do
       {:error, reason} ->
         {:error, reason}
 
-      # A 200 whose body carries no `classification` is a contract violation by
-      # the sidecar, not a determination about the image — a response that
-      # cannot say what it concluded is not evidence that nothing went wrong.
-      # Reported as a fault so it stays retryable and shows up as one, rather
-      # than falling through as a bare `{:ok, %{}}` the worker's `case` cannot
-      # match. That fall-through was real: it raised CaseClauseError, was
-      # rescued into `{:error, %CaseClauseError{}}`, retried to exhaustion, and
-      # left the image row `pending` for ever.
       {:ok, other} ->
         Logger.error(
           "Moderation: /analyze returned an unrecognised response shape " <>
@@ -155,9 +131,6 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # Step-1 classification funnel counter. `outcome` is a whitelisted atom
-  # (:book / :not_a_book / :ambiguous / :unknown) — NEVER an ISBN, title,
-  # or other user input (GDPR: telemetry is a warehouse-adjacent sink).
   defp emit_classification(outcome) do
     :telemetry.execute([:stacks, :moderation, :classification], %{count: 1}, %{outcome: outcome})
   end
@@ -167,17 +140,12 @@ defmodule Stacks.Moderation do
   defp classification_outcome("CLASSIFICATION_RESULT_AMBIGUOUS"), do: :ambiguous
   defp classification_outcome(_), do: :unknown
 
-  # Expands compound candidates where the vision model joined multiple book titles
-  # with " OR " (e.g. "Things I Don't Want to Know OR The Cost of Living").
-  # Each part becomes its own candidate with the same author/raw_text.
   defp expand_compound_candidates(candidates) do
     Enum.flat_map(candidates, fn candidate ->
       title = candidate["title"] || ""
 
       case String.split(title, ~r/\s+OR\s+/, parts: 2) do
         [part1, part2] ->
-          # Compound-expansion frequency counter: one event per split, with
-          # the number of parts as a measurement. No title/PII in metadata.
           :telemetry.execute(
             [:stacks, :moderation, :compound_expansion],
             %{count: 1, parts: 2},
@@ -195,20 +163,6 @@ defmodule Stacks.Moderation do
     end)
   end
 
-  # For each candidate, resolve to an ISBN (direct or via title search) and
-  # create/find the book. Returns
-  # `{:ok, %{resolved: [books], rejected: [{candidate_id, reason}]}}`.
-  # `candidate_id` is the candidate's potential ISBN if present, otherwise
-  # its title. Fails only if NONE of the candidates resolve.
-  #
-  # Candidates are resolved concurrently via `Task.async_stream`. Each
-  # candidate triggers an Open Library (sometimes Google Books) HTTP
-  # lookup plus DB work; sequential processing of 2+ candidates easily
-  # adds 0.5–1.5s to the overall pipeline. With concurrency, total wait
-  # is bounded by the slowest candidate rather than their sum. Failures
-  # in one candidate don't affect the others — they surface in the
-  # `rejected` list so the caller can emit per-candidate
-  # `image.rejected` events for observability.
   defp resolve_and_store_all(candidates, context) do
     Stacks.Telemetry.phase(
       :isbn_resolution,
@@ -232,9 +186,6 @@ defmodule Stacks.Moderation do
       |> Enum.with_index(1)
       |> Task.async_stream(
         fn {candidate, idx} -> resolve_and_store(candidate, idx, context) end,
-        # Bounded by the vision client's own per-call ceiling, read from it
-        # rather than restated: a genuinely slow candidate should not be killed
-        # before the call it is waiting on has itself given up.
         timeout: AIClient.receive_timeout_ms(),
         max_concurrency: concurrency,
         on_timeout: :kill_task
@@ -259,19 +210,6 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # Nothing resolved — but "we looked and found nothing" and "we never got to
-  # look" are different answers, and only the first is about the image.
-  #
-  # `:isbn_not_found` is terminal: `Stacks.Workers.IdentifyBookJob` rejects the
-  # row with that token and the reader is told their photo had no readable ISBN
-  # in it. Saying that because Open Library and Google Books were both
-  # unreachable would be false, and permanently so — the upload is never retried.
-  # `:resolver_unavailable` is not in `Stacks.AI.VisionError.t/0`, so the worker
-  # retries it and, if the retries run out, records the generic
-  # `processing_failed` rather than a determination nobody made.
-  # No candidate ran at all — every one was dropped as already-rejected, or the
-  # list was empty. `Enum.all?/2` is vacuously true on `[]`, so without this
-  # clause "nothing to do" would be reported as an outage.
   defp no_resolution_reason([]), do: :isbn_not_found
 
   defp no_resolution_reason(outcomes) do
@@ -280,16 +218,6 @@ defmodule Stacks.Moderation do
       else: :isbn_not_found
   end
 
-  # Step-2 ISBN-resolution funnel counter, one per candidate. `outcome` is a
-  # whitelisted atom: :resolved for a resolved book, or the (bounded)
-  # rejection reason (:isbn_not_found / :low_confidence / :invalid_book /
-  # :resolver_unavailable / :store_failed / :task_exit), coerced to :other for
-  # anything unexpected. No ISBN/title/PII ever reaches metadata.
-  #
-  # `:resolver_unavailable` has to be a member rather than fall into `:other`:
-  # the funnel is what an operator reads to tell "readers are photographing
-  # things we cannot identify" from "our metadata providers are down", and a
-  # reason that collapses into `:other` answers neither question.
   @resolution_reasons [
     :isbn_not_found,
     :low_confidence,
@@ -311,18 +239,6 @@ defmodule Stacks.Moderation do
   defp whitelist_resolution_reason(reason) when reason in @resolution_reasons, do: reason
   defp whitelist_resolution_reason(_), do: :other
 
-  # Rejection-retry: a candidate whose direct ISBN matches a previously
-  # rejected book is dropped before any DB/HTTP work. Without this, the
-  # VLM could return the exact ISBN of a book the user already said "no"
-  # to (e.g. a screenshot whose barcode the model misread on round 1
-  # then read the same way on round 2) and we'd resolve it again. The
-  # comparison is hyphen/space- AND ISBN-10/13-form-insensitive (both
-  # sides canonicalised via `Stacks.Books.ISBN.canonical_isbn13/1`) — see
-  # `Stacks.Books.ISBNResolver` `excluded_isbn?/2` for the same match.
-  #
-  # Candidates without a `potential_isbns` field (or with an empty list)
-  # fall through to the title-search path where exclusions are applied
-  # at the resolver layer.
   defp drop_excluded_isbn_candidates(candidates, []), do: candidates
 
   defp drop_excluded_isbn_candidates(candidates, excluded_isbns) do
@@ -339,8 +255,6 @@ defmodule Stacks.Moderation do
     normalised != "" and Enum.any?(excluded_isbns, &(normalise_isbn(&1) == normalised))
   end
 
-  # Canonical ISBN-13 on both sides: a VLM candidate carrying the
-  # ISBN-10 form of a rejected book's ISBN-13 must still be dropped.
   defp normalise_isbn(value) when is_binary(value), do: ISBN.canonical_isbn13(value)
 
   defp normalise_isbn(_), do: ""
@@ -373,16 +287,6 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # Confidence gate (Issue #167): the vision model returns a per-candidate
-  # `confidence` score (0.0–1.0). Candidates below the configured threshold
-  # are skipped here, before any external (Open Library / Google Books) or
-  # internal (EnrichBookJob enqueue) work is done — low-confidence guesses
-  # otherwise inflate API traffic and burn the worker's retry budget on
-  # candidates the model itself flagged as weak.
-  #
-  # Candidates with NO `confidence` field (or `nil`) are treated as
-  # historical (pre-prompt-v2 vision payloads): process normally rather
-  # than fail-closed, so old in-flight jobs don't regress.
   defp check_confidence(candidate, idx) do
     case candidate_confidence(candidate) do
       nil ->
@@ -424,9 +328,6 @@ defmodule Stacks.Moderation do
     Application.get_env(:core, :enrichment_confidence_threshold, 0.5)
   end
 
-  # Best-effort identifier for the rejected list payload. Prefer the candidate's
-  # potential ISBN; fall back to its title; finally fall back to a sentinel
-  # so consumers always see a non-empty string.
   defp candidate_identifier(%{"potential_isbns" => [isbn | _]})
        when is_binary(isbn) and isbn != "",
        do: isbn
@@ -461,14 +362,6 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # The VLM sometimes emits a placeholder STRING instead of omitting a
-  # field: `author: "null"` was observed in production, which went out
-  # as a literal `inauthor:null` Google Books query term and was treated
-  # as a real author name by candidate scoring. Normalise null-ish
-  # author strings to nil at the single point where VLM candidates are
-  # read (`resolve_candidate/3`) — `ISBNResolver.search_by_title/4`
-  # already drops author params for nil, and `CandidateScorer`'s author
-  # component treats a missing author as no-evidence-no-penalty.
   @nullish_author_values ["null", "none", "n/a", "unknown", ""]
 
   defp normalise_author(value) when is_binary(value) do
@@ -477,9 +370,6 @@ defmodule Stacks.Moderation do
 
   defp normalise_author(_), do: nil
 
-  # Title and raw_text get the conservative rule: only the literal
-  # "null" placeholder is dropped. A real book could be titled
-  # "Unknown" or "None", but no book is titled exactly "null".
   defp normalise_nullish_text(value) when is_binary(value) do
     if String.downcase(String.trim(value)) == "null", do: nil, else: value
   end
@@ -492,24 +382,6 @@ defmodule Stacks.Moderation do
   defp title_fallback("", _author, _raw_text, _excluded_isbns, _excluded_descriptors),
     do: {:error, :isbn_not_found}
 
-  # There is still no catch-all clause below, and that is the answer rather than
-  # an oversight (#344 asked which it was; #352 added the third shape).
-  #
-  # `ISBNResolver.search_by_title/4` has exactly three exit shapes, and not
-  # merely by `@spec`: `do_search_by_title/5` folds `try_candidate/4` over the
-  # query variants and ends in `{:ok, _, _}`, `{:error, :not_found}` or
-  # `{:error, :unavailable}`; `try_candidate/4` itself returns `{:ok, isbn,
-  # metadata}`, `:not_found` or `:unavailable`. The cache branch replays a value
-  # `do_search_by_title/5` produced, and the cache is not allowed to hold an
-  # `:unavailable` at all. `moderation_test.exs` records the closed set as a
-  # property of the resolver, so a fourth shape breaks a test rather than
-  # arriving as a `CaseClauseError` in production.
-  #
-  # The catch-all stays absent deliberately. It could only guess, and the only
-  # guess available is `{:error, :isbn_not_found}` — precisely the untruth these
-  # issues exist to remove: an unrecognised failure written down as a property
-  # of the book. A `CaseClauseError` is loud, is retried by Oban, and names the
-  # offending shape in the log; a silent `:isbn_not_found` is neither.
   defp title_fallback(title, author, raw_text, excluded_isbns, excluded_descriptors) do
     case ISBNResolver.search_by_title(title, author, raw_text,
            excluded_isbns: excluded_isbns,
@@ -523,12 +395,6 @@ defmodule Stacks.Moderation do
         Logger.warning("Moderation: title search found no results for '#{title}'")
         {:error, :isbn_not_found}
 
-      # Open Library and/or Google Books never answered, so we do not know that
-      # this title is unknown — only that we could not ask. `:resolver_unavailable`
-      # is the reason #344 introduced for exactly this: it keeps the outage off
-      # the operator's rejection funnel as a book-shaped failure, and it is
-      # retryable where `:isbn_not_found` is terminal
-      # (see `no_resolution_reason/1`).
       {:error, :unavailable} ->
         Logger.warning(
           "Moderation: title search for '#{title}' could not be completed — " <>
@@ -558,10 +424,6 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # The lookup did not happen, so we know nothing new about this ISBN — but we
-  # may already know the book. A catalogue hit needs no metadata at all, and
-  # refusing one because Google Books was down would be the same untruth this
-  # clause exists to stop telling.
   defp persist({:error, :resolver_unavailable}, isbn, _context) do
     case Books.find_existing(isbn) do
       nil -> {:error, :resolver_unavailable}
@@ -569,15 +431,6 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # `used_fast_path` tracks whether the synchronous OL/GB lookup was
-  # skipped because the ISBN checksum was valid. Without this flag we
-  # can't distinguish two `metadata == %{}` cases that must be handled
-  # differently:
-  #   * fast path fired → use placeholder title, enqueue enrichment
-  #   * sync lookup returned :not_found → leave title nil so the
-  #     changeset validation rejects the row (VLM-hallucinated ISBNs
-  #     that are neither checksum-valid nor in OL/GB shouldn't pollute
-  #     the books table)
   defp resolve_metadata(_isbn, prefetched_metadata, _context)
        when not is_nil(prefetched_metadata) do
     {:ok, prefetched_metadata, false}
@@ -595,28 +448,6 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # The `_ -> {%{}, false}` this replaces is the collapse the issue names.
-  #
-  # Both upstreams answering "we do not know this ISBN" and Google Books
-  # returning a 503 arrived here as the same empty metadata map. Empty metadata
-  # means `derive_title/3` leaves the title nil, the create changeset rejects the
-  # row for a missing title, and `store_failure_reason/1` reads that changeset as
-  # `:invalid_book` — so an outage in OUR dependency was recorded, on the
-  # operator's rejection funnel and in the `image.rejected` event, as "this is
-  # not a real book".
-  #
-  # `:not_found` keeps exactly that path, because for `:not_found` it is true:
-  # the VLM produced an ISBN string that is neither checksum-trusted nor known to
-  # Open Library or Google Books, and refusing to mint a row for it is the whole
-  # point of the non-fast path (see `resolve_metadata/3`'s note above).
-  #
-  # The `resolver_error?/1` guard exists for the same reason as the one in
-  # `Stacks.Books.resolver_failure/1`: `determination/1` has no catch-all, on
-  # purpose, so a reason from outside `ISBNResolver.error_reason/0` raises. Here
-  # that raise would be caught by the candidate `Task.async_stream` and land as
-  # `:task_exit` — a reason about our own scheduler, on the funnel, describing an
-  # upstream error. It degrades to `:resolver_unavailable` instead: a failure we
-  # cannot name is not evidence about the book.
   defp resolver_outcome(reason) do
     if ISBNResolver.resolver_error?(reason) do
       case ISBNResolver.determination(reason) do
@@ -633,65 +464,16 @@ defmodule Stacks.Moderation do
     end
   end
 
-  # Fast path: a checksum-valid ISBN that came from local OCR (barcode
-  # decode) is trustworthy — zbar rejects invalid EAN-13 before we ever
-  # see it, so the string in hand is a real ISBN. Skip the synchronous
-  # OL/GB round-trip (~400ms+) on the upload hot path and let
-  # `EnrichBookJob` fill in title/author/cover asynchronously.
-  #
-  # Intentionally NOT applied to VLM-extracted ISBNs: the model can read
-  # garbled text and produce a 13-digit string that passes the check
-  # digit (~10% of random 13-digit strings) but isn't a real book. Only
-  # `model_used == "local_ocr"` gives us scanner-level confidence.
   defp fast_path?(isbn, context) do
     context[:vision_model_used] == "local_ocr" and ISBN.valid_isbn_checksum?(isbn)
   end
 
-  # Books enter the system `public` by default (the schema default on
-  # `op.books.visibility_tier`). We deliberately do NOT set a
-  # `"visibility_tier"` key here: the automatic subject→BISAC age-gate
-  # classifier was removed — a book becomes age-gated only when a PERSON
-  # marks it (see `Stacks.Books.set_visibility_tier/3`), never because
-  # code guessed from metadata. `bisac_codes` carries only real codes the
-  # resolver supplied; it is no longer derived from a fake genre map.
   defp build_book_attrs(isbn, metadata, used_fast_path, context) do
     base_attrs = %{
       "isbn" => isbn,
       "title" => derive_title(isbn, metadata, used_fast_path),
-      # The cross-reference ids the resolver just returned (#346). They were
-      # absent here for as long as this function existed, so EVERY edition
-      # minted from an upload lost them — 40 of 40 rows in production, all of
-      # them with a real resolver-supplied title, i.e. all of them resolved
-      # successfully and then had the answer dropped on the floor. Nothing
-      # noticed because `verification_source` was stated explicitly below and
-      # so never had to read them.
-      #
-      # `Books.edition_attrs/2` is the one place these are persisted (#341);
-      # this map is the only thing standing between the resolver and it.
       "open_library_id" => metadata[:open_library_id],
       "google_books_id" => metadata[:google_books_id],
-      # ISBN provenance (#335 D1). The fast path deliberately skipped the
-      # OL/GB round-trip, so nothing external has confirmed this ISBN — say
-      # so on the row rather than leaving it to be inferred from the
-      # `"ISBN <isbn>"` placeholder title, which `EnrichBookJob` overwrites
-      # the moment enrichment succeeds.
-      #
-      # The fast-path branch is written out even though `resolve_metadata/3`
-      # currently returns `%{}` alongside `used_fast_path == true`, which the
-      # derivation would map to the same answer. That coincidence is not the
-      # reason: `used_fast_path` means "we deliberately skipped the external
-      # lookup", and if the fast path ever carries partial metadata, deriving
-      # from it would silently claim a verification that never happened. It is
-      # the one thing about this row that no column records.
-      #
-      # Every other path leaves this nil for `Books.edition_attrs/2` to derive
-      # (#346). It used to call `Books.verification_source_from/1` here on the
-      # resolver metadata, which is the same answer — but computed from a
-      # DIFFERENT map than the one being written. Two maps allowed to disagree
-      # is exactly how the identifiers above went missing for so long: the
-      # provenance claim looked right while the columns it claims to describe
-      # were empty. Derived downstream, the claim and the ids it reads are
-      # always the same row.
       "verification_source" => if(used_fast_path, do: "barcode_unverified"),
       "subjects" => metadata[:subjects] || [],
       "bisac_codes" => metadata[:bisac_codes] || [],

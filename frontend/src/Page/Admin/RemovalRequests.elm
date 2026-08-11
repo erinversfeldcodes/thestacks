@@ -99,7 +99,6 @@ update msg model maybeToken =
                 ( { model | requests = Failure err }, Cmd.none, NoOut )
 
         RemoveClicked id ->
-            -- Removal is the direction that is awkward to undo by hand, so it is two steps.
             ( { model | confirming = Just id, error = Nothing }, Cmd.none, NoOut )
 
         RemoveCancelled ->
@@ -112,9 +111,6 @@ update msg model maybeToken =
             decide model maybeToken id Api.declineRemovalRequest
 
         DecisionCompleted id (Ok ()) ->
-            -- Drop the row locally rather than refetching: the decision is recorded, and a
-            -- refetch would blank the whole queue for a moment on a page whose entire job
-            -- is showing what is left.
             ( { model
                 | requests = removeById id model.requests
                 , deciding = Nothing
@@ -135,9 +131,6 @@ update msg model maybeToken =
                     , confirming = Nothing
                     , error = Just (decisionError err)
                   }
-                  -- Refetch on failure: a 409 means someone else already decided this one,
-                  -- so the list on screen is stale and leaving it would invite a retry that
-                  -- cannot succeed.
                 , fetch maybeToken
                 , NoOut
                 )
@@ -187,10 +180,6 @@ decisionError err =
             "Could not record that decision. Please try again."
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--admin removal-queue" ]
@@ -225,7 +214,6 @@ viewContent model =
                 [ text "Could not load the queue. Refresh to try again." ]
 
         Success [] ->
-            -- An empty queue is good news and should read as such, not as a failure to load.
             p [ class "admin__empty", testId "removal-queue-empty" ]
                 [ text "Nothing waiting. Every removal request has been dealt with." ]
 
@@ -244,9 +232,6 @@ viewRequest model request =
         [ div [ class "removal-queue__detail" ]
             [ span [ class "removal-queue__name" ] [ text request.name ]
             , span [ class "removal-queue__type" ] [ text request.sourceType ]
-
-            -- The live listing, opened in a new tab. The reviewer is deciding whether this
-            -- page should exist; not being able to look at it would make the decision blind.
             , a
                 [ class "removal-queue__url"
                 , href request.url

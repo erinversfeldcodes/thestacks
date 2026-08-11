@@ -57,8 +57,6 @@ defmodule Stacks.Imports.GoodreadsCsv do
         end
     end
   rescue
-    # NimbleCSV raises on quoting broken beyond recovery — a file-level parse
-    # failure, reported as format rather than a crash.
     _ in NimbleCSV.ParseError -> {:error, :unrecognised_format, []}
   end
 

@@ -90,8 +90,6 @@ update msg model =
         Submit ->
             case validate model of
                 Just _ ->
-                    -- `view` already shows the message; re-submitting must not clear it or
-                    -- fire a request the server would only reject.
                     ( model, Cmd.none )
 
                 Nothing ->
@@ -146,10 +144,6 @@ viewOutcome outcome =
             div [ class "listing-removal__pending", testId "removal-pending" ]
                 [ p [ class "listing-removal__lede" ]
                     [ text "Your request has been received." ]
-
-                -- ⚠️ Says plainly that the listing is still up. A business owner who
-                -- believes it is gone and finds it later has been misled, which is worse
-                -- than being told there is a wait.
                 , p []
                     [ text
                         ("Your contact address is not on the listing's domain, so we check "
@@ -202,9 +196,6 @@ viewForm model =
                 , testId "removal-email"
                 ]
                 []
-
-            -- Explains *why* the address is asked for. Without this the field reads as
-            -- data collection rather than the thing that decides how fast this goes.
             , p [ class "listing-removal__hint" ]
                 [ text
                     ("An address at the same domain as the listing lets us act "

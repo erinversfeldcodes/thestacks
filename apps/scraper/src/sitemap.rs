@@ -96,9 +96,6 @@ const PAGE_TOKENS: &[&str] = &["page"];
 pub fn classify_child(url: &str) -> ChildKind {
     let lower = url.to_ascii_lowercase();
 
-    // ⚠️ Order matters. `product-pages-sitemap.xml` matches both lists, and getting this backwards
-    // is how a catalogue-sized document ends up being requested by a routine that exists to avoid
-    // requesting catalogue-sized documents. When a name is ambiguous, refuse.
     if EXCLUDED_TOKENS.iter().any(|t| lower.contains(t)) {
         return ChildKind::Excluded;
     }
@@ -119,8 +116,6 @@ pub fn classify_child(url: &str) -> ChildKind {
 /// XML entity escapes (a sitemap URL with a query string carries `&amp;`), and whitespace inside
 /// the element.
 pub fn parse(xml: &str) -> SitemapDoc {
-    // Checked in this order because a `<sitemapindex>` document contains the literal text
-    // "sitemap" many times over, while a `<urlset>` never contains "<sitemapindex".
     let kind = if xml.contains("<sitemapindex") {
         DocKind::Index
     } else if xml.contains("<urlset") {
@@ -135,7 +130,6 @@ pub fn parse(xml: &str) -> SitemapDoc {
     while let Some(open) = rest.find("<loc") {
         rest = &rest[open + 4..];
 
-        // Skip any attributes on the tag itself and land after the '>'.
         let Some(gt) = rest.find('>') else { break };
         rest = &rest[gt + 1..];
 
@@ -262,14 +256,8 @@ pub const INTER_DOCUMENT_DELAY: Duration = Duration::from_millis(500);
 mod tests {
     use super::*;
 
-    // ------------------------------------------------------------------
-    // Parsing
-    // ------------------------------------------------------------------
-
     #[test]
     fn an_index_is_distinguished_from_a_urlset() {
-        // The whole walk branches on this. Reading an index as a urlset would report sitemap URLs as
-        // if they were pages, and the caller would go looking for an events page among them.
         let index = r#"<?xml version="1.0"?>
             <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
               <sitemap><loc>https://shop.test/sitemap_pages_1.xml</loc></sitemap>
@@ -297,10 +285,6 @@ mod tests {
 
     #[test]
     fn a_document_that_is_not_a_sitemap_is_unknown_not_empty() {
-        // ⚠️ Load-bearing. #308 established that these shops answer 429 with a 9 KB styled
-        // bot-challenge page. If that parsed as "a sitemap listing zero pages", we would record the
-        // shop as having no events page — a false negative that never re-checks — instead of
-        // recognising that we were never shown a sitemap at all.
         for not_a_sitemap in [
             "<!DOCTYPE html><html><head><title>Verifying your connection...</title></head></html>",
             "",
@@ -317,7 +301,6 @@ mod tests {
 
     #[test]
     fn locs_survive_cdata_entities_attributes_and_whitespace() {
-        // Every one of these appears in real sitemaps, and each would silently corrupt or drop a URL.
         let xml = r#"<sitemapindex>
               <sitemap><loc><![CDATA[https://shop.test/a.xml]]></loc></sitemap>
               <sitemap><loc>
@@ -340,15 +323,12 @@ mod tests {
 
     #[test]
     fn amp_is_unescaped_last_so_no_markup_is_invented() {
-        // `&amp;lt;` must become the literal text `&lt;`, not `<`. Unescaping `&amp;` first produces
-        // markup the document never contained — the classic double-unescape.
         assert_eq!(unescape("&amp;lt;"), "&lt;");
         assert_eq!(unescape("a&amp;b"), "a&b");
     }
 
     #[test]
     fn duplicate_locs_are_reported_once() {
-        // A shop declaring the same child twice should not cost it two fetches.
         let xml = "<sitemapindex><sitemap><loc>https://shop.test/a.xml</loc></sitemap>\
                    <sitemap><loc>https://shop.test/a.xml</loc></sitemap></sitemapindex>";
         assert_eq!(parse(xml).locs, vec!["https://shop.test/a.xml"]);
@@ -356,18 +336,12 @@ mod tests {
 
     #[test]
     fn a_truncated_document_yields_what_it_had_rather_than_panicking() {
-        // Reachable by construction: the byte budget hangs up mid-transfer, so a partial document is
-        // the *expected* input whenever a child is bigger than the allowance.
         let xml = "<sitemapindex><sitemap><loc>https://shop.test/a.xml</loc></sitemap>\
                    <sitemap><loc>https://shop.test/b.xm";
         let doc = parse(xml);
         assert_eq!(doc.kind, DocKind::Index);
         assert_eq!(doc.locs, vec!["https://shop.test/a.xml"]);
     }
-
-    // ------------------------------------------------------------------
-    // Child classification — where the politeness actually lives
-    // ------------------------------------------------------------------
 
     #[test]
     fn shopify_and_yoast_page_sitemaps_are_recognised() {
@@ -387,9 +361,6 @@ mod tests {
 
     #[test]
     fn catalogue_sized_children_are_never_fetched() {
-        // The entire point. An events page cannot be in a product catalogue, and a product sitemap
-        // is the largest document a bookshop serves — asking for one to look for an events page
-        // would make this routine more expensive than the guess it replaces.
         for url in [
             "https://shop.test/sitemap_products_1.xml",
             "https://shop.test/product-sitemap.xml",
@@ -409,9 +380,6 @@ mod tests {
 
     #[test]
     fn an_ambiguous_name_is_excluded_rather_than_fetched() {
-        // `product-pages-sitemap.xml` matches both lists. The exclusion has to win: guessing wrong
-        // towards Page costs the shop a catalogue transfer, while guessing wrong towards Excluded
-        // costs us one missed discovery. Asymmetric, so the tie-break is not arbitrary.
         assert_eq!(
             classify_child("https://shop.test/product-pages-sitemap.xml"),
             ChildKind::Excluded
@@ -420,9 +388,6 @@ mod tests {
 
     #[test]
     fn an_untyped_child_is_unlabelled_rather_than_assumed_either_way() {
-        // Calling these Page would have us fetch a possibly-enormous unknown; calling them Excluded
-        // would make shops with unlabelled sitemaps permanently undiscoverable. They get their own
-        // bucket, fetched last and only within budget.
         for url in [
             "https://shop.test/sitemap1.xml",
             "https://shop.test/sitemap.xml?p=2",
@@ -434,10 +399,6 @@ mod tests {
             );
         }
     }
-
-    // ------------------------------------------------------------------
-    // Budget
-    // ------------------------------------------------------------------
 
     #[test]
     fn a_budget_stops_authorising_requests_when_spent() {
@@ -454,8 +415,6 @@ mod tests {
 
     #[test]
     fn spending_bytes_also_exhausts_the_budget() {
-        // The cap that matters. A request allowance alone would let one 40 MB child through and call
-        // it three polite requests.
         let mut budget = CrawlBudget::new(10, 1_000);
 
         assert!(matches!(
@@ -473,8 +432,6 @@ mod tests {
 
     #[test]
     fn the_byte_limit_shrinks_as_the_walk_proceeds() {
-        // Each fetch is told what is *left*, not the original allowance — otherwise three fetches
-        // against a 2 MB limit could transfer 6 MB while every individual one looked compliant.
         let mut budget = CrawlBudget::new(4, 1_000);
 
         assert!(matches!(
@@ -487,9 +444,6 @@ mod tests {
 
     #[test]
     fn overcharging_bytes_cannot_wrap_around() {
-        // A body slightly larger than the ceiling is normal: we stop reading *after* the chunk that
-        // crosses it. Subtracting past zero on a u64 would wrap to an enormous remaining allowance —
-        // a budget that becomes unlimited precisely when it is exceeded.
         let mut budget = CrawlBudget::new(4, 100);
         budget.charge_bytes(5_000);
 
@@ -499,8 +453,6 @@ mod tests {
 
     #[test]
     fn a_charge_is_not_refunded_when_a_fetch_fails() {
-        // The shop did the work of answering either way. Refunding on failure is how a budget
-        // becomes an unbounded retry loop against a broken store.
         let mut budget = CrawlBudget::new(1, 10_000);
         let _ = budget.spend();
         assert_eq!(budget.requests_left(), 0);

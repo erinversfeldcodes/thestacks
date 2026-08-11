@@ -27,7 +27,6 @@ defmodule Stacks.Workers.GeocodeBookstoresJobTest do
     original_throttle = Application.get_env(:core, :geocode_throttle_ms)
 
     Application.put_env(:core, :geocoder, MockGeocoder)
-    # Without this the suite would sleep 1.1s per bookshop.
     Application.put_env(:core, :geocode_throttle_ms, 0)
 
     on_exit(fn ->
@@ -49,16 +48,12 @@ defmodule Stacks.Workers.GeocodeBookstoresJobTest do
 
   describe "the throttle" do
     test "the documented default stays above Nominatim's ~1 req/sec policy" do
-      # ⚠️ The one assertion that protects a third party's donated service. If someone
-      # lowers @throttle_ms to make a backfill faster, this fails and they have to justify
-      # it — which is the entire point of asserting a constant.
       assert GeocodeBookstoresJob.default_throttle_ms() >= 1_000,
              "the default throttle dropped below 1 req/sec, which breaches Nominatim's " <>
                "usage policy and risks the project's IP being blocked"
     end
 
     test "one run is capped" do
-      # A grown table must not become a long unattended crawl.
       assert GeocodeBookstoresJob.batch_size() <= 50
 
       for i <- 1..30 do
@@ -69,8 +64,6 @@ defmodule Stacks.Workers.GeocodeBookstoresJobTest do
     end
 
     test "requests are made one per bookshop, serially" do
-      # Concurrency here would defeat the throttle entirely, so the count is asserted
-      # exactly: N shops means N requests, never a burst of parallel ones.
       for name <- ["Alpha Books", "Beta Books", "Gamma Books"] do
         insert(:bookstore, name: name, latitude: nil, longitude: nil, has_physical: true)
       end
@@ -95,8 +88,6 @@ defmodule Stacks.Workers.GeocodeBookstoresJobTest do
     end
 
     test "skips an online-only shop — a website is not a place" do
-      # Giving Loot a coordinate would put a phantom shop on the map and let the 500 m rule
-      # pair a third space with a warehouse.
       MockGeocoder.put_point("Loot", -26.2, 28.0)
       store = insert(:bookstore, name: "Loot", has_physical: false, latitude: nil, longitude: nil)
 
@@ -109,7 +100,6 @@ defmodule Stacks.Workers.GeocodeBookstoresJobTest do
     end
 
     test "never overwrites coordinates that already exist" do
-      # An owner correcting a bad geocode must not have their fix reverted on the next run.
       MockGeocoder.put_point("Already Placed", 1.0, 2.0)
 
       store =
@@ -126,8 +116,6 @@ defmodule Stacks.Workers.GeocodeBookstoresJobTest do
     end
 
     test "a shop the geocoder cannot place is left unpositioned, not guessed" do
-      # Excluded from the pairing scan, which is correct. A fabricated coordinate would pair
-      # the wrong things — worse than no coordinate at all.
       store = insert(:bookstore, name: "Nowhere Books", latitude: nil, longitude: nil)
 
       assert :ok = perform_job(GeocodeBookstoresJob, %{})
@@ -161,8 +149,6 @@ defmodule Stacks.Workers.GeocodeBookstoresJobTest do
 
   describe "the pairing rule it unblocks" do
     test "a geocoded bookshop makes nearest_bookshop_km computable" do
-      # The whole reason this job exists. Before it, no bookshop had coordinates, so the
-      # nearest-bookshop scan always returned [] and the 500 m filter could never pass.
       MockGeocoder.put_point("Corner Books", -33.9249, 18.4273)
       insert(:bookstore, name: "Corner Books", latitude: nil, longitude: nil)
 
@@ -189,7 +175,6 @@ defmodule Stacks.Workers.GeocodeBookstoresJobTest do
              "expected the space to be within 500 m of the geocoded shop, " <>
                "got #{space.nearest_bookshop_km} km"
 
-      # And the filter that is the page's premise now returns it.
       assert [_] = Stacks.Enrichment.list_third_spaces(near_bookshop_km: 0.5)
     end
   end

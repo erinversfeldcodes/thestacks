@@ -19,7 +19,6 @@ defmodule Core.Repo.Migrations.AddPublicToVisibilityLevel do
   end
 
   def down do
-    # Postgres cannot remove an enum value; intentionally a no-op.
     :ok
   end
 end

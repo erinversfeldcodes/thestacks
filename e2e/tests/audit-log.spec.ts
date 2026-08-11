@@ -36,10 +36,6 @@ test.describe("Settings — Audit Log (live entries)", () => {
       email: uniqueEmail("e2e-auditlog"),
     });
 
-    // Inject the session and place a book: suppresses the onboarding overlay (a
-    // placement-free user gets a global modal whose backdrop eats clicks
-    // everywhere) and writes a `placement.created` audit entry
-    // (Shelving.place_book → Audit.log).
     await injectSession(page, session);
     await ensureBookOnLibrary(page);
 
@@ -47,23 +43,18 @@ test.describe("Settings — Audit Log (live entries)", () => {
     await page.getByTestId("settings-hub").waitFor({ timeout: 5000 });
     await expect(page.locator(".page__title").last()).toContainText("Audit Log");
 
-    // The table renders with the placement.created entry we just generated.
     const rows = page.locator(".audit-log__row");
     await expect(rows.first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator(".audit-log__table")).toContainText(
       "placement.created"
     );
 
-    // Every row exposes action / resource / when — and a non-empty timestamp.
     await expect(rows.first().locator(".audit-log__action")).not.toBeEmpty();
     await expect(rows.first().locator(".audit-log__resource")).not.toBeEmpty();
     await expect(
       rows.first().locator(".audit-log__timestamp")
     ).not.toBeEmpty();
 
-    // Load-bearing GDPR assertion: the audit table exposes EXACTLY three columns
-    // (Action, Resource, When). The hashed IP the backend stores must never
-    // reach the client, so there is no IP/address column header, ever.
     const headers = await page.getByRole("columnheader").allTextContents();
     expect(headers).toEqual(["Action", "Resource", "When"]);
     expect(headers.join(" ")).not.toMatch(/ip|address/i);
@@ -105,7 +96,6 @@ test.describe("Settings — Audit Log (empty & error states)", () => {
     await page.goto("/settings/audit-log");
     await page.getByTestId("settings-hub").waitFor({ timeout: 5000 });
 
-    // AuditLog.elm:94-96 empty branch.
     await expect(page.locator(".audit-log__empty")).toContainText(
       "No audit entries yet."
     );
@@ -115,8 +105,6 @@ test.describe("Settings — Audit Log (empty & error states)", () => {
   test("error state renders when the audit-log request fails", async ({
     page,
   }) => {
-    // A 500 (not 401) drives the Failure branch; a 401 would instead redirect to
-    // /login via the SessionExpired out-message.
     await page.route("**/api/settings/audit-log**", (route) =>
       route.fulfill({
         status: 500,
@@ -128,7 +116,6 @@ test.describe("Settings — Audit Log (empty & error states)", () => {
     await page.goto("/settings/audit-log");
     await page.getByTestId("settings-hub").waitFor({ timeout: 5000 });
 
-    // AuditLog.elm:90-91 failure branch.
     await expect(page.locator(".error")).toContainText(
       "Failed to load your audit log. Please try again."
     );

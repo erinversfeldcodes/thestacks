@@ -42,9 +42,6 @@ defmodule StacksWeb.SearchController do
     collection_ids = MapSet.new(collection, & &1.book.id)
     labels = discovery_labels(platform_books)
 
-    # Deep search (#284): a `ts_headline` excerpt for every hit — collection or
-    # platform — whose DESCRIPTION matched. Title-only hits (and every hit under
-    # the default title scope) are absent from the map and carry an empty snippet.
     snippets = deep_snippets(scope, query, platform_books, collection)
 
     platform_hits =
@@ -57,14 +54,7 @@ defmodule StacksWeb.SearchController do
 
     json(conn, %{
       query: query,
-      # Total DISTINCT books returned across both sections. `platform_hits`
-      # already excludes the viewer's collection books (de-duped above), so the
-      # two counts never overlap (#298).
       count: length(collection) + length(platform_hits),
-      # Deprecated (#298): `results` (proto field 3) is no longer populated. The
-      # field number stays reserved on the wire — never reused — but the SPA
-      # decodes-and-drops it (it reads only `collection`/`platform_hits` since
-      # #285/#292), so serialising a flat list was pure wasted work.
       results: [],
       collection:
         Enum.map(collection, fn %{book: book, bookshelf_name: name, bookshelf_names: names} ->
@@ -88,20 +78,15 @@ defmodule StacksWeb.SearchController do
     end
   end
 
-  # "Your Collection": only an authenticated viewer has one. `scope` (:title |
-  # :deep) is threaded through so deep search covers the collection section too.
   defp collection_section({:platform_user, user_id}, query, limit, scope) do
     Shelving.search_collection(user_id, query, limit: limit, scope: scope)
   end
 
   defp collection_section(:unauthenticated, _query, _limit, _scope), do: []
 
-  # Only `scope=deep` enables description matching; anything else is title-only.
   defp parse_scope("deep"), do: :deep
   defp parse_scope(_), do: :title
 
-  # Under deep scope, build the `%{book_id => snippet}` map over the union of the
-  # platform + collection hit ids. Title scope skips the extra query entirely.
   defp deep_snippets(:deep, query, platform_books, collection) do
     ids =
       (Enum.map(platform_books, & &1.id) ++ Enum.map(collection, & &1.book.id))
@@ -112,7 +97,6 @@ defmodule StacksWeb.SearchController do
 
   defp deep_snippets(_title, _query, _platform_books, _collection), do: %{}
 
-  # Attach the `:snippet` label only when this book matched on its description.
   defp put_snippet(label, snippets, book_id) do
     case Map.get(snippets, book_id) do
       nil -> label
@@ -120,10 +104,6 @@ defmodule StacksWeb.SearchController do
     end
   end
 
-  # Merges the two discovery-label sources into a `%{book_id => label}` map for
-  # the given platform books. "listed" (active marketplace listing, carries a
-  # price) takes precedence over "looking_for_home" (always-visible advert) when
-  # a book has both — Map.merge/2 lets the listed map win on key collision.
   defp discovery_labels(books) do
     book_ids = Enum.map(books, & &1.id)
     lfh = Shelving.looking_for_home_labels(book_ids)

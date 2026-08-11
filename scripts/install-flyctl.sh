@@ -1,22 +1,10 @@
 #!/usr/bin/env bash
-# scripts/install-flyctl.sh — install the latest flyctl binary from GitHub releases.
-#
-# The superfly/homebrew-tap has not been updated in ~2 years. This script fetches
-# the latest release from GitHub and installs it to ~/.local/bin/flyctl.
-#
-# Usage:
-#   scripts/install-flyctl.sh          # install latest
-#   scripts/install-flyctl.sh --check  # print current vs latest versions, no install
-#
-# Installed to: ~/.local/bin/flyctl (ensure this is on your PATH)
 
 set -euo pipefail
 
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY="${INSTALL_DIR}/flyctl"
 
-# Pinned flyctl version (supply-chain: no floating "latest" download).
-# Override with FLYCTL_VERSION=x.y.z to bump; keep in sync intentionally.
 PINNED_VERSION="${FLYCTL_VERSION:-0.4.69}"
 
 _latest_version() {
@@ -82,7 +70,6 @@ tar -xzf "${tmpdir}/flyctl.tar.gz" -C "${tmpdir}" flyctl
 mkdir -p "${INSTALL_DIR}"
 mv "${tmpdir}/flyctl" "${BINARY}"
 chmod +x "${BINARY}"
-# Also expose as `fly` — both names are used by Fly.io tooling
 ln -sf "${BINARY}" "${INSTALL_DIR}/fly"
 
 echo "Installed flyctl v${latest} to ${BINARY} (also linked as fly)"

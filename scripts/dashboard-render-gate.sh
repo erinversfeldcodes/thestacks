@@ -1,27 +1,4 @@
 #!/usr/bin/env bash
-# Dashboard RENDER gate (ADR-021 / Epic #249 completion requirement).
-#
-# The drift + label-validation tests are STRUCTURAL — they never evaluate a query,
-# so they pass while every panel is blank. This gate closes that: it evaluates
-# EVERY dashboard panel's real PromQL against a live VictoriaMetrics and asserts a
-# non-empty result. It fails the build on any blank panel or malformed PromQL.
-#
-# How it stays deterministic (no app, no scrape timing): it parses each panel's
-# query, harvests the metric names + label matchers + histogram structure the
-# panels themselves declare, synthesizes minimally well-formed series (≥2 timepoints
-# so rate()/increase() evaluate; _bucket/_sum/_count with `le` for histograms),
-# imports them to VM, then runs every panel query. This proves the PromQL is valid
-# and renders given data shaped the way the panel asks for. (Emission FIDELITY —
-# that the app emits those exact label values — is covered by the *_telemetry_test
-# suites + label-validation, and by the CI preview VM emission smoke against the real VM.)
-#
-# Usage:
-#   just observe                 # bring up the local VM+Grafana stack first
-#   scripts/dashboard-render-gate.sh
-#
-# Env:
-#   RENDER_GATE_VM   VictoriaMetrics base URL. Default http://localhost:8428.
-#   DASHBOARD_DIR    Dashboard JSON dir. Default apps/core/priv/grafana.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
@@ -29,10 +6,6 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." >/dev/null 2>&1 && pwd)"
 export RENDER_GATE_VM="${RENDER_GATE_VM:-http://localhost:8428}"
 export DASHBOARD_DIR="${DASHBOARD_DIR:-${REPO_ROOT}/apps/core/priv/grafana}"
 
-# Preflight: wait for VM to be reachable. CI starts the VictoriaMetrics container
-# immediately before this gate, and it needs a moment to accept connections — a
-# single-shot check races startup and FATALs spuriously (main CI run 29742639866).
-# Poll /health for up to ~30s before failing.
 vm_ready=""
 for _ in $(seq 1 30); do
   if curl -sf -o /dev/null "${RENDER_GATE_VM}/health" 2>/dev/null; then
@@ -55,7 +28,6 @@ DASH_DIR = os.environ["DASHBOARD_DIR"]
 APP = "rendergate"
 RATE_INTERVAL = "1m"
 
-# ── extract (dashboard, panel, refId, expr) ───────────────────────────────────
 def walk(node, out):
     if isinstance(node, dict):
         if node.get("type") not in (None, "row", "text"):
@@ -86,12 +58,9 @@ for path in sorted(glob.glob(os.path.join(DASH_DIR, "*.json"))):
 if not panels:
     print("FATAL: no panel queries found under", DASH_DIR); sys.exit(2)
 
-# ── harvest metrics + matchers from the queries ───────────────────────────────
-# metric name: stacks_* / fly_*, optionally followed by {label="v",label=~"a|b"}.
 SEL = re.compile(r'\b((?:stacks|fly)_[a-zA-Z0-9_]+)\b(?:\s*\{([^}]*)\})?')
 MATCH = re.compile(r'(\w+)\s*(=~|!~|!=|=)\s*"([^"]*)"')
 
-# per base-metric → {label: set(values)} and whether it's a histogram (has _bucket)
 metrics = {}          # base_name -> {"labels": {k:set()}, "hist": bool}
 def note(name, labels_str):
     base = name
@@ -115,17 +84,8 @@ def note(name, labels_str):
 
 for p in panels:
     for name, labels in SEL.findall(p["expr"]):
-        # skip promql function-ish tokens that can't be metrics (none start with stacks_/fly_)
         note(name, labels)
 
-# ── synthesize well-formed series & import to VM ──────────────────────────────
-# Seed a DENSE series over the 2 min BEFORE a fixed instant T, then evaluate every
-# panel at time=T. Dense (every 20s) so rate()/increase() over [1m] always has ≥2
-# points strictly inside the (T-60s, T] half-open window. Fixed T (not wall-clock
-# now) so the 52-query loop's duration and any staleness are irrelevant.
-# Seed points at T-150..T-50 and evaluate at QT=T-50. Everything is ≥50s in the
-# past so VM's default 30s -search.latencyOffset never hides it; the newest 3
-# points sit inside the (QT-60, QT] window so rate()/increase() over [1m] compute.
 T = int(time.time())
 QT = T - 50                                  # instant-query evaluation time
 OFFSETS = [150, 130, 110, 90, 70, 50]        # seconds before T → 6 points, newest at QT
@@ -133,7 +93,6 @@ STEPS = list(range(len(OFFSETS)))            # 0..5, monotonically increasing
 HIST_BUCKETS = ["0.005", "0.05", "0.5", "1", "5", "+Inf"]
 
 def labelset(base):
-    # one representative value per label the panels filter on; always app=APP.
     ls = {"app": APP}
     for k, vs in metrics[base]["labels"].items():
         ls[k] = sorted(vs)[0] if vs else "v"
@@ -165,7 +124,6 @@ with urllib.request.urlopen(req, timeout=15) as r:
 print(f"seeded {len(metrics)} metric families ({len(lines)} samples) into VM")
 time.sleep(11)  # VM buffers imports in memory and flushes on a ~5–10s interval
 
-# ── evaluate every panel query, assert non-empty ──────────────────────────────
 def query(expr):
     url = f"{VM}/api/v1/query?" + urllib.parse.urlencode({"query": expr, "time": QT})
     try:

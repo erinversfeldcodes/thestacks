@@ -69,10 +69,6 @@ moduleVisitor schema =
         |> Rule.withDeclarationListVisitor declarationListVisitor
 
 
-
--- CONTEXT
-
-
 type alias ProjectContext =
     { modules :
         Dict
@@ -150,10 +146,6 @@ foldProjectContexts newContext previousContext =
     }
 
 
-
--- PROJECT VISITORS
-
-
 elmJsonVisitor : Maybe { a | project : Project } -> ProjectContext -> ( List nothing, ProjectContext )
 elmJsonVisitor maybeProject projectContext =
     let
@@ -211,10 +203,6 @@ error ( moduleName, { moduleKey, moduleNameLocation } ) =
         moduleNameLocation
 
 
-
--- IMPORT VISITOR
-
-
 importVisitor : Node Import -> ModuleContext -> ( List nothing, ModuleContext )
 importVisitor node context =
     ( []
@@ -228,10 +216,6 @@ moduleNameForImport node =
         |> Node.value
         |> .moduleName
         |> Node.value
-
-
-
--- DECLARATION LIST VISITOR
 
 
 declarationListVisitor : List (Node Declaration) -> ModuleContext -> ( List nothing, ModuleContext )

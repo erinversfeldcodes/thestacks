@@ -252,10 +252,6 @@ simulateModalKeydown eventValue =
         |> Event.toResult
 
 
-
--- SCOPED ESCAPE (ux fix 1): dismiss the top-most surface first
-
-
 escapeClosesRemoveModalFirst : Test
 escapeClosesRemoveModalFirst =
     test "escape_scoped_modal: Escape with the remove modal open closes just the modal, overlay stays (NoOut)" <|
@@ -302,10 +298,6 @@ escapeWithNoNestedSurfaceRequestsClose =
                     BookDetail.update BookDetail.EscapePressed loadedOverlayModel (Just "test-token")
             in
             Expect.equal BookDetail.RequestCloseOverlay out
-
-
-
--- REMOVE-MODAL FOCUS TRAP (ux fix 2)
 
 
 removeModalTrapForwardWrap : Test
@@ -434,10 +426,6 @@ simulateCardKeydown eventValue =
         |> Event.toResult
 
 
-
--- B4 (punch #10): move-failure copy
-
-
 {-| A failed move (`ConfirmMove` → `MoveCompleted (Err (MoveHttpError _))`)
 renders the generic move-failure copy. A 500 maps via `Api.moveResponseToResult`
 to `MoveHttpError` (not the `ReadingPileFull` 422 special-case).
@@ -465,10 +453,6 @@ moveCompletedErrorShowsMessage =
                     )
                 |> ProgramTest.expectViewHas
                     [ Selector.text "Failed to move book. Please try again." ]
-
-
-
--- B5 (punch #10): CloseOverlay → RequestCloseOverlay OutMsg (X + backdrop)
 
 
 startOverlayWithOut : ProgramTest.ProgramTest TestHelpers.BookDetailTestModel BookDetail.Msg (ProgramTest.SimulatedEffect BookDetail.Msg)
@@ -508,10 +492,6 @@ closeOverlayBackdropEmitsRequestClose =
                     Event.click
                 |> ProgramTest.expectModel
                     (\model -> Expect.equal BookDetail.RequestCloseOverlay model.lastOut)
-
-
-
--- FOCUS TRAP (US-1.4.1 a11y contract; kickoff-approved in-scope build)
 
 
 {-| The overlay's two focus-trap anchors are present in the DOM: the close
@@ -753,9 +733,6 @@ pricesRenderPerEdition : Test
 pricesRenderPerEdition =
     test "prices_loaded: a price renders per edition, cheapest store first" <|
         \() ->
-            -- The counterpart to the empty case. Without this the suite would only
-            -- ever prove the placeholder renders — which is what it did while the
-            -- page fetched no prices at all.
             startBookDetail
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001"
@@ -763,8 +740,6 @@ pricesRenderPerEdition =
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/books/book-test-001/prices"
                     (simulateBookPricesResponse "book-test-001")
-                -- Both editions of the work, each named by its own ISBN. Shops stock
-                -- whichever editions they stock, at different prices.
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Paperback (9780749397050)" ]
                 |> ProgramTest.ensureViewHas
@@ -816,10 +791,6 @@ ratingDisplayWithoutPlacement =
                     (simulateBookDetailResponse "book-test-001" testBook)
                 |> ProgramTest.expectViewHas
                     [ Selector.class "book-detail__rating--empty" ]
-
-
-
--- MOVE / REMOVE CONFIRM STATE-MACHINE COVERAGE (Issue #116 punch #15/#16)
 
 
 moveEndpoint : String

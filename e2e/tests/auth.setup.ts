@@ -36,10 +36,8 @@ async function authenticateUser(
 
   const body = await resp.json();
 
-  // Navigate to the app so we can set localStorage on the correct origin
   await page.goto("/");
 
-  // Inject auth into localStorage — same format as the saveAuth port
   await page.evaluate(
     (auth: any) => {
       localStorage.setItem("stacks-auth", JSON.stringify(auth));
@@ -52,7 +50,6 @@ async function authenticateUser(
     }
   );
 
-  // Save the browser context (cookies + localStorage) for reuse
   await page.context().storageState({ path: stateFile });
 }
 

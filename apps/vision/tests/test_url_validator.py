@@ -12,8 +12,6 @@ from app.services.url_validator import validate_image_url
 class TestValidateImageUrl:
     """Test URL validation blocks SSRF vectors and allows safe URLs."""
 
-    # --- Allowed URLs ---
-
     @patch("app.services.url_validator.socket.getaddrinfo")
     async def test_https_url_passes(self, mock_dns: MagicMock) -> None:
         mock_dns.return_value = [(socket.AF_INET, None, None, None, ("93.184.216.34", 0))]
@@ -30,8 +28,6 @@ class TestValidateImageUrl:
         url = "https://52c8577081eb22019d5a36e0a0219fc3.r2.cloudflarestorage.com/uploads/abc"
         await validate_image_url(url)
 
-    # --- Blocked schemes ---
-
     async def test_file_scheme_blocked(self) -> None:
         with pytest.raises(HTTPException) as exc_info:
             await validate_image_url("file:///etc/passwd")
@@ -43,8 +39,6 @@ class TestValidateImageUrl:
             await validate_image_url("ftp://example.com/image.jpg")
         assert exc_info.value.status_code == 422
         assert "scheme" in exc_info.value.detail
-
-    # --- Blocked hostnames ---
 
     async def test_aws_metadata_ip_blocked(self) -> None:
         with pytest.raises(HTTPException) as exc_info:
@@ -69,8 +63,6 @@ class TestValidateImageUrl:
             await validate_image_url("http://anything.local/secret")
         assert exc_info.value.status_code == 422
         assert "blocked" in exc_info.value.detail
-
-    # --- Private/reserved IPs ---
 
     @patch("app.services.url_validator.socket.getaddrinfo")
     async def test_private_ip_10_blocked(self, mock_dns: MagicMock) -> None:
@@ -114,7 +106,6 @@ class TestValidateImageUrl:
 
     @patch("app.services.url_validator.socket.getaddrinfo")
     async def test_ipv6_loopback_blocked(self, mock_dns: MagicMock) -> None:
-        # AF_INET6 sockaddr is a 4-tuple: (host, port, flowinfo, scope_id)
         mock_dns.return_value = [(socket.AF_INET6, None, None, None, ("::1", 0, 0, 0))]
         with pytest.raises(HTTPException) as exc_info:
             await validate_image_url("http://sneaky.example.com/image.jpg")
@@ -131,7 +122,6 @@ class TestValidateImageUrl:
 
     async def test_public_ipv6_literal_passes(self) -> None:
         """A public IPv6 address literal bypasses DNS and is allowed."""
-        # 2606:2800:220:1:248:1893:25c8:1946 is example.com's IPv6 address.
         await validate_image_url("http://[2606:2800:220:1:248:1893:25c8:1946]/image.jpg")
 
     @patch("app.services.url_validator.socket.getaddrinfo")
@@ -150,8 +140,6 @@ class TestValidateImageUrl:
         assert exc_info.value.status_code == 422
         assert "private" in exc_info.value.detail.lower()
 
-    # --- DNS resolution failure ---
-
     @patch(
         "app.services.url_validator.socket.getaddrinfo",
         side_effect=__import__("socket").gaierror("Name resolution failed"),
@@ -161,8 +149,6 @@ class TestValidateImageUrl:
             await validate_image_url("http://nonexistent.example.invalid/image.jpg")
         assert exc_info.value.status_code == 422
         assert "resolved" in exc_info.value.detail
-
-    # --- No hostname ---
 
     async def test_no_hostname_blocked(self) -> None:
         with pytest.raises(HTTPException) as exc_info:

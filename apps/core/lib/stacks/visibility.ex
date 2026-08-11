@@ -1,9 +1,6 @@
 defmodule Stacks.Visibility do
   @moduledoc "Authoritative visibility gate for all content read paths."
 
-  # load_user/1 has a defensive catch-all clause that dialyzer considers
-  # unreachable because the only call site already matches %{user_id: _}.
-  # The fallback is intentional safety — suppress the warning.
   @dialyzer {:nowarn_function, load_user: 1}
 
   import Ecto.Query
@@ -13,21 +10,8 @@ defmodule Stacks.Visibility do
   alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Social
 
-  # Canonical Audience ladder, ordered by EXPOSURE (ascending = more exposed):
-  #   owner (only self) < group (group members) < platform (any authed user)
-  #   < public (anyone, incl. unauthenticated).
-  # This single map (ADR-018 / #209 Phase 2) replaces the former TWO maps — the
-  # ceiling map (which omitted "group", defaulting it to 0 and thereby WRONGLY
-  # rejecting a group child under a platform/owner parent) and the profile
-  # change-direction map. It now drives BOTH the ceiling check and the
-  # tighten/loosen classification. Unknown values default to 0 (owner / least
-  # exposed) — fail-safe: an unrecognised value is never treated as over-exposed.
   @audience_exposure %{"owner" => 0, "group" => 1, "platform" => 2, "public" => 3}
 
-  # The stored, user-settable Audience levels (owner < group < platform < public).
-  # `public` = "anyone with the link, signed in or not" (#225); still `noindex`.
-  # Single source of truth for the per-context validate_inclusion lists (Shelving /
-  # Blog / Accounts), replacing their duplicated `~w(...)`.
   @audience_levels ~w(owner group platform public)
 
   # Audience levels settable on a USER PROFILE — owner / platform / public. `group`
@@ -36,9 +20,6 @@ defmodule Stacks.Visibility do
   # settings-update, keeping them consistent.
   @profile_audience_levels ~w(owner platform public)
 
-  # Whitelist of resource-type tags for the ceiling-rejection counter. Anything
-  # else is coerced to :other so telemetry cardinality stays bounded and no raw
-  # caller-supplied value leaks into a metric label.
   @ceiling_resource_types [:bookshelf, :placement, :post]
 
   @doc """
@@ -90,21 +71,8 @@ defmodule Stacks.Visibility do
 
   def resolve_visibility(_resource, _viewer), do: :hidden
 
-  # ---------------------------------------------------------------------------
-  # Internal resolution logic
-  # ---------------------------------------------------------------------------
-
-  # Placement dispatch shared by the single-resolve public clauses and the batch
-  # entrypoint (`filter_visible_placements/2`). `ctx` is `nil` for a one-off
-  # resolve (the shared block/age gates hit the DB live) or a batch context (the
-  # shared gates are memoized once per request). The DECISION is identical either
-  # way — `ctx` only changes WHERE the shared-gate answers come from, never what
-  # they are.
   defp resolve_placement(%Placement{} = placement, {:platform_user, viewer_id} = viewer, ctx) do
     if marketplace_exception?(placement) do
-      # Marketplace listings are broadly discoverable, but a block still hides
-      # ALL of the owner's content (SEC-2): honour the bidirectional block even
-      # for an active listing, before granting the marketplace exception.
       case check_block(get_owner_id(placement), viewer_id, ctx) do
         :ok -> :visible
         :hidden -> :hidden
@@ -115,8 +83,6 @@ defmodule Stacks.Visibility do
   end
 
   defp resolve_placement(%Placement{} = placement, :platform_preview, ctx) do
-    # A platform-preview has no viewer identity (never the owner, in no groups,
-    # no block relationship), so an active listing is simply visible.
     if marketplace_exception?(placement),
       do: :visible,
       else: do_resolve(placement, :platform_preview, nil, ctx)
@@ -141,14 +107,6 @@ defmodule Stacks.Visibility do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Profile ceiling check
-  #
-  # Only `profile_visibility: "owner"` acts as a ceiling — it hides all content
-  # from any viewer who is not the resource owner. A `"platform"` profile does
-  # not add any restriction beyond the resource's own visibility setting.
-  # ---------------------------------------------------------------------------
-
   defp check_profile_ceiling(_resource, nil, _viewer, _viewer_id), do: :ok
 
   defp check_profile_ceiling(_resource, owner_id, {:platform_user, viewer_id}, _viewer_id_arg)
@@ -159,11 +117,7 @@ defmodule Stacks.Visibility do
     profile_visibility = load_profile_visibility(resource, owner_id)
 
     case {profile_visibility, viewer} do
-      # An owner profile hides all content from non-owners.
       {"owner", _} -> :hidden
-      # A "platform" (Members) profile is signed-in-only: it caps everything away
-      # from logged-out visitors, so a `public` shelf under a Members profile is
-      # NOT leaked to anon (the profile is the ceiling). (#225)
       {"platform", :unauthenticated} -> :hidden
       _ -> :ok
     end
@@ -176,7 +130,6 @@ defmodule Stacks.Visibility do
 
   defp load_profile_visibility(%Placement{} = placement, _owner_id) do
     case placement.bookshelf do
-      # Owner preloaded (bookshelf: :user) — reuse it, no per-placement query.
       %{user: %{profile_visibility: pv}} when is_binary(pv) ->
         pv
 
@@ -191,10 +144,6 @@ defmodule Stacks.Visibility do
 
   defp load_profile_visibility(_resource, _owner_id), do: nil
 
-  # ---------------------------------------------------------------------------
-  # Block check (bidirectional)
-  # ---------------------------------------------------------------------------
-
   defp check_block(_owner_id, nil, _ctx), do: :ok
   defp check_block(nil, _viewer_id, _ctx), do: :ok
 
@@ -206,10 +155,6 @@ defmodule Stacks.Visibility do
     end
   end
 
-  # The (viewer, owner) block status is identical for every resource of one owner
-  # viewed by one viewer, so the batch context memoizes it per owner_id (one query
-  # per distinct owner, not per placement). A nil context resolves live —
-  # unchanged single-resolve behaviour.
   defp blocked_pair?(owner_id, viewer_id, nil), do: Social.blocked?(viewer_id, owner_id)
 
   defp blocked_pair?(owner_id, viewer_id, %{blocks: blocks}) do
@@ -219,20 +164,10 @@ defmodule Stacks.Visibility do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Age gate check
-  # ---------------------------------------------------------------------------
-
-  # A PLACEMENT inherits its BOOK's age gate (#213): the placement itself has no
-  # `visibility_tier`, so an age-gated book on a shelf must be gated via its book.
-  # An age-gated placement is HIDDEN from a viewer who is neither the owner nor
-  # age-verified — so it never reaches the frontend to render (the visible books
-  # simply pack together, no gaps). The owner always sees their own shelf.
   defp check_age_gate(%Placement{} = placement, viewer_id, ctx) do
     placement = maybe_preload_book(placement)
 
     cond do
-      # Shipped dark (ADR-020): flag off → age-gating is inert, gate is :ok.
       not Stacks.FeatureFlags.age_gating_enabled?() -> :ok
       not age_gated_book?(placement.book) -> :ok
       not is_nil(viewer_id) and get_owner_id(placement) == viewer_id -> :ok
@@ -242,7 +177,6 @@ defmodule Stacks.Visibility do
   end
 
   defp check_age_gate(%{visibility_tier: "age_gated"}, viewer_id, ctx) do
-    # Shipped dark (ADR-020): flag off → age-gating is inert, gate is :ok.
     cond do
       not Stacks.FeatureFlags.age_gating_enabled?() -> :ok
       viewer_age_verified?(viewer_id, ctx) -> :ok
@@ -252,8 +186,6 @@ defmodule Stacks.Visibility do
 
   defp check_age_gate(_resource, _viewer_id, _ctx), do: :ok
 
-  # The viewer is constant across a batch, so its age-verification is resolved
-  # ONCE into the context; a nil context resolves live (unchanged single path).
   defp viewer_age_verified?(_viewer_id, %{age_verified: verified?}), do: verified?
   defp viewer_age_verified?(viewer_id, nil), do: viewer_age_verified?(viewer_id)
 
@@ -276,28 +208,13 @@ defmodule Stacks.Visibility do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Resource-level visibility check
-  #
-  # Visibility values:
-  #   "public"   — visible to everyone including unauthenticated
-  #   "platform" — visible to everyone including unauthenticated (open platform)
-  #   "owner"    — visible only to the resource owner
-  #   "group"    — visible to members of the associated group
-  #
-  # For resources with only a `visibility_tier` (Books), treat as "public"
-  # since the age gate handles age-gated restrictions separately.
-  # ---------------------------------------------------------------------------
-
   defp check_resource_visibility(resource, owner_id, viewer, viewer_id) do
     visibility = get_resource_visibility(resource)
 
     case {visibility, viewer} do
-      # public = anyone with the link, signed in or not (#225).
       {"public", _} ->
         :ok
 
-      # platform = "Members" = any SIGNED-IN user; hidden from logged-out visitors.
       {"platform", v} ->
         check_platform_audience(v)
 
@@ -321,8 +238,6 @@ defmodule Stacks.Visibility do
     end
   end
 
-  # "platform" (Members) is visible to any authenticated viewer (incl. the
-  # identity-less platform-preview) but NOT to a logged-out visitor. (#225)
   defp check_platform_audience({:platform_user, _}), do: :ok
   defp check_platform_audience(:platform_preview), do: :ok
   defp check_platform_audience(_), do: :hidden
@@ -330,9 +245,6 @@ defmodule Stacks.Visibility do
   defp check_default_visibility(owner_id, viewer_id) when owner_id == viewer_id, do: :ok
   defp check_default_visibility(_owner_id, _viewer_id), do: :hidden
 
-  # Group visibility: membership in the shelf's target group is the access grant.
-  # The visibility_group_id on the bookshelf identifies which group has access.
-  # visibility_grants is reserved for "specific people" grants (future tier).
   defp check_group_visibility(
          %Placement{bookshelf: %Bookshelf{visibility_group_id: gid}},
          viewer_id
@@ -349,10 +261,6 @@ defmodule Stacks.Visibility do
 
   defp check_group_visibility(_resource, _viewer_id), do: :hidden
 
-  # ---------------------------------------------------------------------------
-  # Marketplace exception
-  # ---------------------------------------------------------------------------
-
   defp marketplace_exception?(%Placement{listing_status: "active"} = placement) do
     case placement.bookshelf do
       %Bookshelf{name: "looking_for_home"} -> true
@@ -361,10 +269,6 @@ defmodule Stacks.Visibility do
   end
 
   defp marketplace_exception?(_), do: false
-
-  # ---------------------------------------------------------------------------
-  # Helpers to extract owner_id and resource visibility
-  # ---------------------------------------------------------------------------
 
   defp get_owner_id(%{user_id: user_id}), do: user_id
 
@@ -377,12 +281,8 @@ defmodule Stacks.Visibility do
 
   defp get_owner_id(_), do: nil
 
-  # Bookshelves and Placements have a `visibility` field.
   defp get_resource_visibility(%{visibility: visibility}), do: visibility
 
-  # Books (and similar catalog resources) have `visibility_tier` instead of
-  # `visibility`. The age gate check handles age restrictions; at the
-  # resource-visibility level, catalog entries are effectively public.
   defp get_resource_visibility(%{visibility_tier: _}), do: "public"
 
   defp get_resource_visibility(_), do: "owner"
@@ -395,10 +295,6 @@ defmodule Stacks.Visibility do
   defp maybe_preload_bookshelf(%Placement{} = placement) do
     Repo.preload(placement, :bookshelf)
   end
-
-  # ---------------------------------------------------------------------------
-  # Public API
-  # ---------------------------------------------------------------------------
 
   @doc """
   Returns true if the viewer can see the resource, false otherwise.
@@ -420,15 +316,11 @@ defmodule Stacks.Visibility do
       viewer_id == owner_id -> true
       pv == "owner" -> false
       Social.blocked?(viewer_id, owner_id) -> false
-      # A signed-in viewer sees "Members" (platform) and public profiles. (group
-      # profiles are #224; not a settable value yet.)
       pv in ["platform", "public"] -> true
       true -> false
     end
   end
 
-  # A logged-out visitor sees ONLY public profiles — "Members" (platform) is
-  # signed-in-only, owner is private. (#225)
   def profile_visible?(%{profile_visibility: pv}, :unauthenticated), do: pv == "public"
   def profile_visible?(_, _), do: false
 
@@ -478,10 +370,6 @@ defmodule Stacks.Visibility do
     Enum.filter(placements, &(resolve_placement(&1, viewer, ctx) == :visible))
   end
 
-  # Precomputes the request-scoped shared gates: the viewer's age-verification
-  # (one lookup) and the (viewer, owner) block status per DISTINCT owner (one
-  # query each). Unauthenticated viewers can neither be blocked nor age-verified,
-  # so both collapse to the empty/false case with no queries.
   defp build_batch_context(placements, viewer) do
     viewer_id = batch_viewer_id(viewer)
 
@@ -570,13 +458,6 @@ defmodule Stacks.Visibility do
   """
   @spec profile_audience_levels() :: [String.t()]
   def profile_audience_levels, do: @profile_audience_levels
-
-  # ---------------------------------------------------------------------------
-  # Telemetry (Issue #197 — visibility/privacy observability)
-  #
-  # All metadata tags are whitelisted atoms — never raw user input — so metric
-  # label cardinality stays bounded.
-  # ---------------------------------------------------------------------------
 
   @doc """
   Classifies a visibility change by movement along the Audience ladder

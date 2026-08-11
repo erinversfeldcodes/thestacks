@@ -3,10 +3,6 @@ import { suiteAuthFile } from "./helpers";
 
 test.use({ storageState: suiteAuthFile("upload") });
 
-// ---------------------------------------------------------------------------
-// Mock data factories
-// ---------------------------------------------------------------------------
-
 const FAKE_IMAGE_ID = "img-abc-123";
 const FAKE_BOOK_ID = "book-001";
 const FAKE_BOOK_ID_2 = "book-002";
@@ -75,15 +71,6 @@ function fakePlacement(bookId: string = FAKE_BOOK_ID) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Route helpers — mock API endpoints
-// ---------------------------------------------------------------------------
-
-// Same-origin path the init mock returns as the presigned PUT target.
-// Same-origin so CSP `connect-src 'self'` doesn't block the request, and
-// outside the `r2.cloudflarestorage.com` pattern the JS shim looks for so
-// the canvas-compression path is skipped (we want the raw mock file to
-// reach Playwright's route handler unchanged).
 const MOCK_R2_PUT_PATH = `/__mock_r2_put__/${FAKE_IMAGE_ID}`;
 
 /**
@@ -181,7 +168,6 @@ async function injectEventSourceMock(
             this.onerror && this.onerror(new Event("error"));
           }, 80);
         } else if (config.type === "pending") {
-          // Stay in loading — never fire
         } else if (config.payload) {
           const data = JSON.stringify(config.payload);
           setTimeout(() => {
@@ -384,10 +370,6 @@ async function mockMergeFormatFailure(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Interaction helpers
-// ---------------------------------------------------------------------------
-
 /**
  * Trigger a file upload via the file picker button.
  * Creates a synthetic 1x1 PNG buffer so Elm's File decoder is satisfied.
@@ -396,7 +378,6 @@ async function triggerFileUpload(page: Page) {
   const fileChooserPromise = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Choose Photo" }).click();
   const fileChooser = await fileChooserPromise;
-  // Minimal valid PNG (1x1 transparent pixel)
   const pngBuffer = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
     "base64"
@@ -418,9 +399,6 @@ async function triggerDragAndDrop(page: Page) {
     "base64"
   );
 
-  // Playwright does not have native DnD file support, so we dispatch
-  // the events programmatically via page.evaluate. The Elm app listens
-  // for the "drop" event on the drop zone and reads dataTransfer.files[0].
   const dataTransfer = await page.evaluateHandle(
     async (b64) => {
       const binary = atob(b64);
@@ -440,12 +418,7 @@ async function triggerDragAndDrop(page: Page) {
   await dropZone.dispatchEvent("drop", { dataTransfer });
 }
 
-// ===========================================================================
-// HAPPY PATHS
-// ===========================================================================
-
 test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
-  // US-1.1.1 | Suite 1: Playwright
   test("single photo drag-and-drop: drop -> processing -> verify -> shelf pick -> success", async ({
     page,
   }) => {
@@ -456,17 +429,14 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
 
     await page.goto("/upload");
 
-    // Drop a file on the drop zone
     await triggerDragAndDrop(page);
 
-    // Processing spinner should appear
     await expect(page.getByTestId("upload-loading")).toBeVisible();
     await expect(page.getByTestId("upload-loading")).toHaveAttribute(
       "role",
       "status"
     );
 
-    // Verification view should appear with book details
     await expect(page.getByTestId("upload-verify")).toBeVisible({
       timeout: 10_000,
     });
@@ -478,18 +448,14 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
     );
     await expect(page.getByTestId("upload-verify")).toContainText("Eco");
 
-    // Confirm identification
     await page.getByTestId("upload-confirm-btn").click();
 
-    // Shelf picker should appear
     await expect(page.getByTestId("upload-shelf-picker")).toBeVisible();
 
-    // Confirm placement (defaults to Wish List)
     await page
       .getByRole("button", { name: /Add to Wish List/ })
       .click();
 
-    // Success view
     await expect(page.getByTestId("upload-complete")).toBeVisible();
     await expect(page.getByTestId("upload-complete")).toContainText(
       "The Name of the Rose"
@@ -502,18 +468,15 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
       "status"
     );
 
-    // "View on shelf" button should be present
     await expect(
       page.getByRole("button", { name: "View on shelf" })
     ).toBeVisible();
 
-    // "Add another" button should be present
     await expect(
       page.getByRole("button", { name: "Add another" })
     ).toBeVisible();
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("file picker flow: click -> select -> same pipeline", async ({
     page,
   }) => {
@@ -524,10 +487,8 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
 
     await page.goto("/upload");
 
-    // Use file picker
     await triggerFileUpload(page);
 
-    // Processing -> Verification (loading may be too brief to observe with fast mock)
     await expect(page.getByTestId("upload-verify")).toBeVisible({
       timeout: 10_000,
     });
@@ -535,7 +496,6 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
       "The Name of the Rose"
     );
 
-    // Confirm -> Shelf -> Complete
     await page.getByTestId("upload-confirm-btn").click();
     await expect(page.getByTestId("upload-shelf-picker")).toBeVisible();
     await page
@@ -544,7 +504,6 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
     await expect(page.getByTestId("upload-complete")).toBeVisible();
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("shelf selection: 5 shelves shown, Wish List pre-selected, change selection", async ({
     page,
   }) => {
@@ -564,7 +523,6 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
     const shelfPicker = page.getByTestId("upload-shelf-picker");
     await expect(shelfPicker).toBeVisible();
 
-    // All 5 shelves should be visible (exact: true to avoid "Library" matching "Antilibrary")
     await expect(
       shelfPicker.getByRole("button", { name: "Library", exact: true })
     ).toBeVisible();
@@ -581,22 +539,18 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
       shelfPicker.getByRole("button", { name: "Looking for a Home", exact: true })
     ).toBeVisible();
 
-    // Default confirm button says "Add to Wish List"
     await expect(
       shelfPicker.getByRole("button", { name: /Add to Wish List/ })
     ).toBeVisible();
 
-    // Change selection to Library
     await shelfPicker
       .getByRole("button", { name: "Library", exact: true })
       .click();
 
-    // Confirm button should update
     await expect(
       shelfPicker.getByRole("button", { name: /Add to Library/ })
     ).toBeVisible();
 
-    // Place on Library
     await shelfPicker
       .getByRole("button", { name: /Add to Library/ })
       .click();
@@ -605,7 +559,6 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
     await expect(page.getByTestId("upload-complete")).toContainText("Library");
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("'View on shelf' navigates to the correct shelf route", async ({
     page,
   }) => {
@@ -617,7 +570,6 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Progress through verify -> shelf pick -> complete
     await expect(page.getByTestId("upload-verify")).toBeVisible({
       timeout: 10_000,
     });
@@ -627,32 +579,21 @@ test.describe("Happy paths", { tag: ["@US-1.1.1"] }, () => {
       .click();
     await expect(page.getByTestId("upload-complete")).toBeVisible();
 
-    // Click "View on shelf" and verify navigation to /wishlist
     await page.getByRole("button", { name: "View on shelf" }).click();
     await expect(page).toHaveURL(/\/wishlist/);
   });
 });
 
-// ===========================================================================
-// SAD PATHS
-// ===========================================================================
-
 test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () => {
-  // US-1.1.1 | Suite 1: Playwright
   test("upload HTTP failure (500) -> error -> retry", { tag: ["@US-1.1.1"] }, async ({ page }) => {
     await mockUploadFailure(page);
 
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Error message should appear
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 10_000,
     });
-    // #374: a 500 on init is a status the app cannot interpret, so the copy
-    // says exactly that rather than claiming a cause. `data-failure-cause`
-    // pins WHICH card this is, so a copy edit cannot silently re-point the
-    // assertion at a different failure.
     await expect(page.getByTestId("upload-error")).toHaveAttribute(
       "data-failure-cause",
       "not-sent"
@@ -661,13 +602,10 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
       "we cannot say why"
     );
 
-    // "Try Again" button should be present
     await expect(
       page.getByRole("button", { name: "Try Again" })
     ).toBeVisible();
 
-    // Click retry — should reset to initial state
-    // First, switch the mock to success for the retry
     await page.unroute("**/api/upload/init");
     await mockUploadAccept(page);
     await mockPollResolved(page);
@@ -675,30 +613,19 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
 
     await page.getByRole("button", { name: "Try Again" }).click();
 
-    // Should be back at the upload area
     await expect(page.getByTestId("upload-drop-zone")).toBeVisible();
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("stream error -> the lost connection is named -> manual ISBN / retry", { tag: ["@US-1.1.1"] }, async ({
     page,
   }) => {
-    // This test would take too long if we waited for 150 polls at 2s each.
-    // Instead, we simulate the IdentificationFailed state by first responding
-    // with pending, then after enough polls, the Elm app will give up.
-    // For efficiency, we mock the status endpoint to return an error after
-    // some polls, which triggers IdentificationFailed.
     await mockUploadAccept(page);
 
-    // Return an error on SSE stream to trigger IdentificationFailed immediately
     await injectEventSourceMock(page, { type: "error" });
 
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // #374: an EventSource error is the STREAM breaking. It used to render
-    // "We couldn't read the ISBN from this photo. Try a clearer image" — advice
-    // about a photograph the pipeline had not looked at yet.
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 15_000,
     });
@@ -710,18 +637,15 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
       "The Library Is Unreachable"
     );
 
-    // "Enter ISBN Manually" button should be present
     await expect(
       page.getByRole("button", { name: /Enter ISBN Manually/ })
     ).toBeVisible();
 
-    // "Try Another Photo" button should also be present
     await expect(
       page.getByRole("button", { name: /Try Another Photo/ })
     ).toBeVisible();
   });
 
-  // US-1.1.2 | Suite 1: Playwright
   test("ISBN not found (hard gate) -> rejection -> manual ISBN / retry", { tag: ["@US-1.1.2"] }, async ({
     page,
   }) => {
@@ -731,8 +655,6 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // `mockPollRejected` sends `rejection_reason: "isbn_not_found"` — the ONE
-    // cause the old single message actually described (#374).
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 10_000,
     });
@@ -744,7 +666,6 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
       "Could Not Read the ISBN"
     );
 
-    // Both options available
     await expect(
       page.getByRole("button", { name: /Enter ISBN Manually/ })
     ).toBeVisible();
@@ -753,7 +674,6 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     ).toBeVisible();
   });
 
-  // US-1.1.3 | Suite 1: Playwright
   test("non-book rejection -> Doesn't Look Like a Book -> retry", { tag: ["@US-1.1.3"] }, async ({
     page,
   }) => {
@@ -763,7 +683,6 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Should show "not a book" error
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 10_000,
     });
@@ -771,13 +690,11 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
       "Doesn't Look Like a Book"
     );
 
-    // "Try Again" button
     await expect(
       page.getByRole("button", { name: "Try Again" })
     ).toBeVisible();
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("placement API failure (422) -> error -> retry", { tag: ["@US-1.1.1"] }, async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page);
@@ -795,22 +712,18 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     const shelfPicker = page.getByTestId("upload-shelf-picker");
     await expect(shelfPicker).toBeVisible();
 
-    // Attempt placement — should fail
     await page
       .getByRole("button", { name: /Add to Wish List/ })
       .click();
 
-    // Error message in shelf picker
     await expect(shelfPicker).toContainText("Failed to add book", {
       timeout: 10_000,
     });
 
-    // Retry button should be available
     await expect(
       shelfPicker.getByRole("button", { name: /Add to/ })
     ).toBeVisible();
 
-    // Switch mock to success and retry
     await page.unroute("**/api/bookshelves/*/placements");
     await mockPlacementSuccess(page);
 
@@ -820,7 +733,6 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     });
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("poll returns HTTP 500 -> IdentificationFailed error view shown -> retry available", { tag: ["@US-1.1.1"] }, async ({
     page,
   }) => {
@@ -830,9 +742,6 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // `mockPollServerError` breaks the EventSource, so this is the same
-    // connection-lost card as the stream-error test above (#374) — not a verdict
-    // on the photo, which the pipeline never reported one for.
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 15_000,
     });
@@ -841,7 +750,6 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
       "connection-lost"
     );
 
-    // Retry options should be available
     await expect(
       page
         .getByRole("button", { name: /Try Another Photo/ })
@@ -849,21 +757,15 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
     ).toBeVisible();
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("unauthenticated -> shows auth gate or redirects", { tag: ["@US-1.1.1"] }, async ({
     browser,
     baseURL,
   }) => {
-    // Create a fresh context without auth storage state
     const context = await browser.newContext({ baseURL });
     const page = await context.newPage();
 
     await page.goto("/upload", { waitUntil: "networkidle" });
 
-    // The Elm SPA checks auth client-side. Without a token, it should
-    // show either: login form (server redirect), auth-required message,
-    // or the upload drop zone (which will fail on API calls with 401).
-    // Confirm the page rendered something meaningful within 15 seconds.
     await page.waitForLoadState("domcontentloaded");
     await expect(
       page
@@ -876,10 +778,6 @@ test.describe("Sad paths", { tag: ["@US-1.1.1", "@US-1.1.2", "@US-1.1.3"] }, () 
   });
 });
 
-// ===========================================================================
-// DUPLICATE DETECTION (US-1.1.6)
-// ===========================================================================
-
 test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
   async function setupDuplicateFlow(page: Page) {
     await mockUploadAccept(page);
@@ -890,18 +788,15 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
     await triggerFileUpload(page);
   }
 
-  // US-1.1.6 | Suite 1: Playwright
   test("Already in Your Library heading and action buttons visible", async ({
     page,
   }) => {
     await setupDuplicateFlow(page);
 
-    // Wait for the duplicate view
     await expect(page.getByText("Already in Your Library")).toBeVisible({
       timeout: 10_000,
     });
 
-    // All four action buttons should be present
     await expect(
       page.getByRole("button", { name: "Yes, merge" })
     ).toBeVisible();
@@ -916,7 +811,6 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
     ).toBeVisible();
   });
 
-  // US-1.1.6 | Suite 1: Playwright
   test("'No, add as separate' proceeds to shelf picker", async ({ page }) => {
     await setupDuplicateFlow(page);
     await mockPlacementSuccess(page);
@@ -929,14 +823,12 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
       .getByRole("button", { name: "No, add as separate" })
       .click();
 
-    // Should go to verify view (as a new placement)
     await expect(page.getByTestId("upload-verify")).toBeVisible();
     await expect(page.getByTestId("upload-verify")).toContainText(
       "The Name of the Rose"
     );
   });
 
-  // US-1.1.6 | Suite 1: Playwright
   test("'Go Back' resets the upload flow", async ({ page }) => {
     await setupDuplicateFlow(page);
 
@@ -946,11 +838,9 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
 
     await page.getByRole("button", { name: "Go Back" }).click();
 
-    // Should return to initial upload area
     await expect(page.getByTestId("upload-drop-zone")).toBeVisible();
   });
 
-  // US-1.1.6 | Suite 1: Playwright
   test("duplicate detection — GET /api/books/:id returns 500 -> error view shown", async ({
     page,
   }) => {
@@ -961,7 +851,6 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Error view should appear — not the "Already in Your Library" duplicate view
     await expect(page.getByTestId("upload-error")).toBeVisible({
       timeout: 10_000,
     });
@@ -970,7 +859,6 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
     ).not.toBeVisible();
   });
 
-  // US-1.1.6 | Suite 1: Playwright
   test("'View Book' links to book detail", async ({ page }) => {
     await setupDuplicateFlow(page);
 
@@ -984,12 +872,7 @@ test.describe("Duplicate detection", { tag: ["@US-1.1.6"] }, () => {
   });
 });
 
-// ===========================================================================
-// MULTI-FORMAT MERGE (US-1.1.8)
-// ===========================================================================
-
 test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
-  // US-1.1.8 | Suite 1: Playwright
   test("merge success names the added edition", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page, { isDuplicate: true });
@@ -1003,13 +886,8 @@ test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
       timeout: 10_000,
     });
 
-    // Click "Yes, merge"
     await page.getByRole("button", { name: "Yes, merge" }).click();
 
-    // The completion card names the edition the server actually wrote — its
-    // ISBN and format from the merge-format response — not a client-side
-    // "N editions" count, which was removed because it was computed as
-    // book.editionCount + 1 off a cache #355 found stale.
     await expect(
       page.getByText(
         /The Paperback edition \(ISBN 9780151446476\) is now listed/
@@ -1018,7 +896,6 @@ test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
       timeout: 10_000,
     });
 
-    // "View book details" link and "Add another" button
     await expect(
       page.getByRole("link", { name: "View book details" })
     ).toBeVisible();
@@ -1027,7 +904,6 @@ test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
     ).toBeVisible();
   });
 
-  // US-1.1.8 | Suite 1: Playwright
   test("merge failure -> retry", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page, { isDuplicate: true });
@@ -1041,15 +917,12 @@ test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
       timeout: 10_000,
     });
 
-    // Click "Yes, merge"
     await page.getByRole("button", { name: "Yes, merge" }).click();
 
-    // Should show merge failure
     await expect(page.getByText("Merge failed")).toBeVisible({
       timeout: 10_000,
     });
 
-    // Retry: switch to success mock and try again
     await page.unroute(`**/api/books/${FAKE_BOOK_ID}/merge-format`);
     await mockMergeFormatSuccess(page);
 
@@ -1065,12 +938,7 @@ test.describe("Multi-format merge", { tag: ["@US-1.1.8"] }, () => {
   });
 });
 
-// ===========================================================================
-// MULTI-BOOK (US-1.1.7)
-// ===========================================================================
-
 test.describe("Multi-book extraction", { tag: ["@US-1.1.7"] }, () => {
-  // US-1.1.7 | Suite 1: Playwright
   test("multi-book: one book returns 500 -> remaining books still shown", async ({
     page,
   }) => {
@@ -1085,20 +953,16 @@ test.describe("Multi-book extraction", { tag: ["@US-1.1.7"] }, () => {
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Wait for the multi-book view to appear
     await expect(page.getByText("Books Identified!")).toBeVisible({
       timeout: 10_000,
     });
 
-    // The two successful book titles should be visible
     await expect(page.getByText("The Name of the Rose")).toBeVisible();
     await expect(page.getByText("Foucault's Pendulum")).toBeVisible();
 
-    // The page should not show a full error state — partial failure is handled gracefully
     await expect(page.getByTestId("upload-error")).not.toBeVisible();
   });
 
-  // US-1.1.7 | Suite 1: Playwright
   test("multiple books rendered in verification view", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page, {
@@ -1111,28 +975,20 @@ test.describe("Multi-book extraction", { tag: ["@US-1.1.7"] }, () => {
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Wait for all books to appear
     await expect(page.getByText("Books Identified!")).toBeVisible({
       timeout: 10_000,
     });
 
-    // All three book titles should be visible
     await expect(page.getByText("The Name of the Rose")).toBeVisible();
     await expect(page.getByText("Foucault's Pendulum")).toBeVisible();
     await expect(page.getByText("Baudolino")).toBeVisible();
 
-    // Each book should have a "View Book" link
     const viewBookLinks = page.getByRole("link", { name: "View Book" });
     await expect(viewBookLinks).toHaveCount(3);
   });
 });
 
-// ===========================================================================
-// AGE-GATED CONTENT (US-1.1.4)
-// ===========================================================================
-
 test.describe("Age-gated content (US-1.1.4)", { tag: ["@US-1.1.4"] }, () => {
-  // US-1.1.4 | Suite 1: Playwright
   test("age-gated book flows through upload normally — gating happens on book detail", async ({
     page,
   }) => {
@@ -1146,7 +1002,6 @@ test.describe("Age-gated content (US-1.1.4)", { tag: ["@US-1.1.4"] }, () => {
     await page.goto("/upload");
     await triggerFileUpload(page);
 
-    // Verification view should appear normally — age gating is transparent during upload
     await expect(page.getByTestId("upload-verify")).toBeVisible({
       timeout: 10_000,
     });
@@ -1158,18 +1013,14 @@ test.describe("Age-gated content (US-1.1.4)", { tag: ["@US-1.1.4"] }, () => {
     );
     await expect(page.getByTestId("upload-verify")).toContainText("Eco");
 
-    // Confirm identification
     await page.getByTestId("upload-confirm-btn").click();
 
-    // Shelf picker should appear — no age gate blocks placement
     await expect(page.getByTestId("upload-shelf-picker")).toBeVisible();
 
-    // Confirm placement (defaults to Wish List)
     await page
       .getByRole("button", { name: /Add to Wish List/ })
       .click();
 
-    // Success view should appear normally
     await expect(page.getByTestId("upload-complete")).toBeVisible();
     await expect(page.getByTestId("upload-complete")).toContainText(
       "The Name of the Rose"
@@ -1178,7 +1029,6 @@ test.describe("Age-gated content (US-1.1.4)", { tag: ["@US-1.1.4"] }, () => {
       "Wish List"
     );
 
-    // "View on shelf" and "Add another" buttons should be present
     await expect(
       page.getByRole("button", { name: "View on shelf" })
     ).toBeVisible();
@@ -1186,26 +1036,17 @@ test.describe("Age-gated content (US-1.1.4)", { tag: ["@US-1.1.4"] }, () => {
       page.getByRole("button", { name: "Add another" })
     ).toBeVisible();
 
-    // NOTE: The age gate itself appears when viewing the book detail page,
-    // which is tested separately in age-gate.spec.ts
   });
 });
 
-// ===========================================================================
-// ARIA / ACCESSIBILITY
-// ===========================================================================
-
 test.describe("ARIA and accessibility", { tag: ["@US-1.1.1"] }, () => {
-  // US-1.1.1 | Suite 1: Playwright
   test("aria-live='polite' on status region", async ({ page }) => {
     await page.goto("/upload");
 
-    // The status region wrapping all upload states should have aria-live="polite"
     const statusRegion = page.locator("[aria-live='polite']");
     await expect(statusRegion).toBeVisible();
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("role='status' on loading state", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollPending(page);
@@ -1218,7 +1059,6 @@ test.describe("ARIA and accessibility", { tag: ["@US-1.1.1"] }, () => {
     await expect(loading).toHaveAttribute("role", "status");
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("role='status' on complete state", async ({ page }) => {
     await mockUploadAccept(page);
     await mockPollResolved(page);
@@ -1241,40 +1081,18 @@ test.describe("ARIA and accessibility", { tag: ["@US-1.1.1"] }, () => {
     await expect(complete).toHaveAttribute("role", "status");
   });
 
-  // US-1.1.1 | Suite 1: Playwright
   test("drop zone is keyboard-accessible via file picker", async ({
     page,
   }) => {
     await page.goto("/upload");
 
-    // The "Choose Photo" button inside the drop zone should be focusable and activatable
     const chooseBtn = page.getByRole("button", { name: "Choose Photo" });
     await expect(chooseBtn).toBeVisible();
 
-    // Tab to it and verify it receives focus
     await chooseBtn.focus();
     await expect(chooseBtn).toBeFocused();
   });
 });
-
-// ===========================================================================
-// FAILURE COPY (Issue #374)
-//
-// Four causes the pipeline can terminate on, four things to say, and a budget
-// on how long the reader waits to be told.
-//
-// ⛔ THE BUDGET IS PART OF THE REQUIREMENT. Before #374 a reader whose upload
-// went wrong watched a spinner and was then told the wrong thing. A correct
-// message that arrives six minutes late is not a fix, so each assertion below
-// is bounded at 5 s from the file being handed over.
-//
-// These use the injected `EventSource` mock, so the terminal frame is delivered
-// on the client — which means the elapsed time measures exactly what this issue
-// owns: the SPA's own latency between "the server said" and "the reader can
-// read it". WHEN the server sends that frame is governed by #315's derived
-// deadline (`IdentifyBookJob.worst_case_lifetime_ms/0`) and is not re-litigated
-// here.
-// ===========================================================================
 
 /** Mock the SSE stream with a rejection carrying a specific reason token. */
 async function mockPollRejectedWith(page: Page, reason: string) {
@@ -1354,15 +1172,10 @@ test.describe(
 
         const error = page.getByTestId("upload-error");
         await expect(error).toBeVisible({ timeout: FAILURE_BUDGET_MS });
-        // Separate from the locator's own timeout on purpose: the locator budget
-        // asks "did it ever appear", this asks "and not on the slow path".
         expect(Date.now() - startedAt).toBeLessThan(FAILURE_BUDGET_MS);
 
         await expect(error).toHaveAttribute("data-failure-cause", c.cause);
         await expect(error).toContainText(c.says);
-        // ⛔ The half that makes this able to fail. Without it, a card that
-        // ignored its cause and always rendered the ISBN message would still
-        // pass whichever leg happened to match.
         await expect(error).not.toContainText(c.doesNotSay);
       });
     }
@@ -1392,9 +1205,6 @@ test.describe(
     test("a 429 on the upload names the wait rather than urging a retry", async ({
       page,
     }) => {
-      // The `:upload` rate-limit bucket. The old copy — "Upload failed. Please
-      // try again." — was the exact wrong instruction: an immediate retry lands
-      // in the same bucket and fails identically.
       await page.route("**/api/upload/init", (route) =>
         route.fulfill({
           status: 429,

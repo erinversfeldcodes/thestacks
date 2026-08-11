@@ -58,8 +58,6 @@ defmodule Stacks.Books.ISBNResolverEditionsTest do
     end
 
     test "drops ISBN-10s rather than returning a mixture" do
-      # The ISBN hard gate is expressed in 13s. Returning both lengths would push the
-      # normalising decision onto every caller, and one of them would get it wrong.
       MockHttpClient.put_response(
         @editions_url,
         {:ok,
@@ -75,8 +73,6 @@ defmodule Stacks.Books.ISBNResolverEditionsTest do
     end
 
     test "caps the result, because a work's edition list is a long tail" do
-      # 60 distinct ISBNs offered; the cap is 50. Without it, one book's arrival fans
-      # out to (editions × stores) price lookups — the planning figure was 76 × 8 = 608.
       many = for i <- 1..60, do: ["978015600#{String.pad_leading("#{i}", 4, "0")}"]
       MockHttpClient.put_response(@editions_url, {:ok, entries(many)})
 
@@ -107,8 +103,6 @@ defmodule Stacks.Books.ISBNResolverEditionsTest do
     end
 
     test "a sparse or unexpected payload yields no editions rather than crashing" do
-      # Open Library returns `null` for absent optional fields on sparse records, and
-      # `Map.get/3`'s default does not fire for a present-but-null key.
       for body <- [%{}, %{"entries" => nil}, %{"entries" => [%{"isbn_13" => nil}, "junk"]}] do
         MockHttpClient.clear()
         MockHttpClient.put_response(@editions_url, {:ok, body})
@@ -119,8 +113,6 @@ defmodule Stacks.Books.ISBNResolverEditionsTest do
     end
 
     test "a blank or non-binary work id is refused without a request" do
-      # Guards the caller that passes a nil work id through — otherwise the URL becomes
-      # `/works//editions.json`, which Open Library answers with something unhelpful.
       MockHttpClient.capture_requests()
 
       assert {:error, :not_found} = ISBNResolver.editions_for_work("")

@@ -103,8 +103,6 @@ suite =
                         |> Expect.equal (Success ())
             , test "a late failure response cannot overwrite a success" <|
                 \_ ->
-                    -- The exact sequence the double-submit produced: 200 first,
-                    -- then a 400 for the now-burned single-use token.
                     succeeded
                         |> update (Completed (Err (Http.BadStatus 400)))
                         |> .submitting
@@ -118,8 +116,6 @@ suite =
                         |> Query.has [ Selector.text "Your password has been reset. Taking you to sign in…" ]
             , test "positive control — the confirmation is genuinely absent before a success" <|
                 \_ ->
-                    -- Pairs with the assertion above: without this, "the copy is
-                    -- present" could pass against a view that always shows it.
                     validModel
                         |> ResetPassword.view
                         |> Query.fromHtml
@@ -136,10 +132,6 @@ suite =
                         |> Expect.equal NotAsked
             , test "typing mid-flight does NOT re-arm the submit button" <|
                 \_ ->
-                    -- The defect: `submitting = NotAsked` on every keystroke put
-                    -- an in-flight request back into a submittable state, so a
-                    -- second press burned the single-use token behind a reset
-                    -- that had already worked.
                     validModel
                         |> update Submit
                         |> update (SetConfirmPassword "new-password!")
@@ -179,12 +171,6 @@ suite =
                         |> Expect.equalLists [ NoOut, NoOut, NoOut, NoOut, NoOut ]
             , test "THE WIRE — Main sends AdvanceToLogin to the sign-in page" <|
                 \_ ->
-                    -- ⛔ `Main.update`'s ResetPasswordMsg branch calls
-                    -- `Main.resetPasswordDestination` rather than deciding the
-                    -- destination inline, so this test covers the code that
-                    -- ships. `Main.Model` embeds an unconstructable `Nav.Key`,
-                    -- which is exactly how a wire like this ends up with two
-                    -- correct ends and an untested join.
                     Main.resetPasswordDestination AdvanceToLogin
                         |> Expect.equal (Just Route.Login)
             , test "THE WIRE — NoOut navigates nowhere" <|

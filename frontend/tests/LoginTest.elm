@@ -161,10 +161,6 @@ suite =
                     model.submitState |> Expect.equal (Success fakeAuthResponse)
             , test "persist_first: GotAuthResponse Ok hands the credential up on the SAME update (#359)" <|
                 \_ ->
-                    -- The regression this replaces: the card used to answer
-                    -- `StartTransition`, and the shell only learned the token
-                    -- after a Web Animations promise resolved — which never
-                    -- happens on an occluded window.
                     let
                         ( _, _, outMsg ) =
                             Login.update (GotAuthResponse (Ok fakeAuthResponse)) (Login.init Login.Fresh)
@@ -188,11 +184,6 @@ suite =
                     Login.isSubmitDisabled succeeded |> Expect.equal True
             , test "submit_lock_resets: switching mode after a success unlocks the card" <|
                 \_ ->
-                    -- The old `transitionState` latched on success and NOTHING
-                    -- cleared it — not `ModeSwitched`, not a keystroke — so a
-                    -- login whose door animation never finished left the card
-                    -- permanently unable to submit. The lock now lives on
-                    -- `submitState`, which `ModeSwitched` already resets.
                     let
                         ( succeeded, _, _ ) =
                             Login.update (GotAuthResponse (Ok fakeAuthResponse)) validLoginModel

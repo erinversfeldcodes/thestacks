@@ -27,16 +27,6 @@ defmodule StacksWeb.FeedController do
   Returns 403 if the bookshelf is not platform-visible.
   """
   def show(conn, %{"handle" => handle, "bookshelf_name" => bookshelf_name}) do
-    # Handle-addressed, and this is the clause the SPA uses.
-    #
-    # ⚠️ The reason G4 had no client call was not that nobody wrote one: profiles are
-    # addressed by **handle** everywhere (`/u/:handle`, `GET /api/u/:handle`), while this
-    # controller was keyed only by **user_id**. A page showing someone's bookshelves has
-    # their handle and not their UUID, so it could not construct a feed URL at all — the
-    # chain was broken at the *contract*, one layer below the missing call.
-    #
-    # It is also the better URL to hand a person: `/api/feeds/u/erin/library` is legible
-    # and checkable, where a UUID is neither.
     case Accounts.get_user_by_handle(handle) do
       nil ->
         conn
@@ -49,9 +39,6 @@ defmodule StacksWeb.FeedController do
   end
 
   def show(conn, %{"user_id" => user_id, "bookshelf_name" => bookshelf_name}) do
-    # `:optional_auth` populates this when a token is present, and leaves it nil otherwise. A
-    # `platform` bookshelf's feed needs a viewer; a `public` one does not (owner decision
-    # 2026-07-29). Passed explicitly rather than defaulted, so "anonymous" is never implicit.
     viewer = Guardian.Plug.current_resource(conn)
 
     case Feeds.fetch_feed(user_id, bookshelf_name, viewer) do

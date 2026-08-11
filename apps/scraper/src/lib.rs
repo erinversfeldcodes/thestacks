@@ -1,5 +1,3 @@
-// Stacks scraper library — public module exports.
-
 pub mod auth;
 pub mod config;
 pub mod error;

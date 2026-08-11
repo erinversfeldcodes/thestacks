@@ -18,7 +18,6 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
     Application.put_env(:core, :persistent_cache_enabled, true)
     on_exit(fn -> Application.put_env(:core, :persistent_cache_enabled, original) end)
 
-    # Clear both tiers so tests can't see leftovers from neighbouring tests.
     ISBNResolverCache.invalidate_all()
 
     :ok
@@ -51,14 +50,11 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
 
     test ":circuit_open is not written to Postgres" do
       :ok = ISBNResolverCache.put("9780441172719", {:error, :circuit_open})
-      # No task is spawned for :circuit_open (the put/2 head short-circuits),
-      # but calling await is a no-op and keeps the pattern uniform.
       ISBNResolverCache.await_pending_writes()
       assert Repo.get_by(IsbnResolverCacheEntry, isbn: "9780441172719") == nil
     end
 
     test "get falls through to Postgres on ETS miss and returns atom-keyed map" do
-      # Seed DB directly, bypassing put/2 (which would also populate ETS).
       now = DateTime.utc_now()
 
       {1, _} =
@@ -77,7 +73,6 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
           }
         ])
 
-      # ETS is empty — make sure the L1 rescue path won't hide the L2 behaviour.
       :ets.delete(:isbn_resolver_cache, "9780316556347")
 
       assert {:ok, {:ok, meta}} = ISBNResolverCache.get("9780316556347")
@@ -90,16 +85,12 @@ defmodule Stacks.Books.ISBNResolverCachePersistentTest do
       :ok =
         ISBNResolverCache.put("9780316556347", {:ok, %{title: "Circe", source: :google_books}})
 
-      # The async DB upsert must complete before we can rely on the L2
-      # read falling through to a populated row.
       ISBNResolverCache.await_pending_writes()
 
-      # Wipe ETS but leave the DB row behind.
       :ets.delete_all_objects(:isbn_resolver_cache)
 
       assert {:ok, {:ok, _}} = ISBNResolverCache.get("9780316556347")
 
-      # ETS should now carry the hydrated entry.
       assert [{_, {:ok, hydrated}, _}] = :ets.lookup(:isbn_resolver_cache, "9780316556347")
       assert hydrated.title == "Circe"
       assert hydrated.source == :google_books

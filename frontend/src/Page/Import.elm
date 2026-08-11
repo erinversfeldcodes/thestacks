@@ -111,8 +111,6 @@ update msg model maybeToken =
                     ( model, Api.getImport token libraryImport.id GotImport, NoOut )
 
                 _ ->
-                    -- Idle on every other phase: the subscription is always on
-                    -- while this page shows, so the no-op must be free.
                     ( model, Cmd.none, NoOut )
 
         GotImport (Ok libraryImport) ->
@@ -135,8 +133,6 @@ update msg model maybeToken =
                 ( model, Cmd.none, SessionExpired )
 
             else
-                -- A dropped poll is not a failed import — the job is server-side
-                -- and unbothered. Keep watching; the next tick asks again.
                 ( model, Cmd.none, NoOut )
 
         GotRows (Ok rows) ->
@@ -159,10 +155,6 @@ update msg model maybeToken =
 terminal : LibraryImport -> Bool
 terminal libraryImport =
     libraryImport.status == "complete" || libraryImport.status == "failed"
-
-
-
--- VIEW
 
 
 view : Model -> Html Msg

@@ -73,9 +73,6 @@ defmodule StacksWeb.UploadController do
         conn |> put_status(409) |> json(%{error: "already_committed"})
 
       {:error, :image_too_small} ->
-        # The PUT landed but the object cannot be a real book photo. The row
-        # has already been marked rejected, so the SSE stream reports it like
-        # any other rejection — 422, not a retryable 5xx.
         conn |> put_status(422) |> json(%{error: "image_too_small"})
 
       {:error, _reason} ->
@@ -207,12 +204,6 @@ defmodule StacksWeb.UploadController do
 
   defp resolve_excluded_books(_), do: []
 
-  # Resolve the cumulative rejected_book_ids list to the primary edition
-  # ISBN for each book. These ISBNs are forwarded as `excluded_isbns` to
-  # the IdentifyBookJob → Moderation → ISBNResolver so the resolver layer
-  # can skip OL/GB search results whose ISBN matches a rejected book —
-  # without this, a slightly-different VLM title variant can collapse to
-  # the same wrong ISBN on every retry.
   defp resolve_excluded_isbns(book_ids) when is_list(book_ids) do
     book_ids
     |> Enum.uniq()
@@ -261,12 +252,6 @@ defmodule StacksWeb.UploadController do
 
   defp describe_book(_), do: nil
 
-  # Kill the poisoned title-search memo(s) for the rejected book(s).
-  # Uses ALL edition ISBNs (not just the primary) so an entry cached
-  # against any edition of the rejected work is invalidated too.
-  # Best-effort by design: cache invalidation failing must not fail the
-  # user-facing 202 — the retry job carries excluded_isbns and bypasses
-  # the cache regardless; this protects the FIRST round of future uploads.
   defp invalidate_title_search_cache(book_ids) when is_list(book_ids) do
     book_ids
     |> Enum.uniq()
@@ -358,7 +343,6 @@ defmodule StacksWeb.UploadController do
   defp render_stream(conn, image_id) do
     user = Guardian.Plug.current_resource(conn)
 
-    # Subscribe to PubSub BEFORE reading DB status to avoid race condition
     Phoenix.PubSub.subscribe(Core.PubSub, "upload:#{image_id}")
 
     result =
@@ -437,24 +421,6 @@ defmodule StacksWeb.UploadController do
     sse_receive_loop(conn, image_id, user, deadline)
   end
 
-  # How long to hold the stream open before telling the reader we gave up.
-  #
-  # Derived from the job, not chosen to sit near it. `IdentifyBookJob` bounds
-  # every attempt with `timeout/1` and every gap with a deterministic
-  # `backoff/1`, so `worst_case_lifetime_ms/0` is the exact moment after which
-  # the job cannot still be working — and the job's final-attempt wrapper
-  # guarantees that by then the row is terminal and a result has been broadcast.
-  # Waiting for it is therefore waiting for an answer that is coming, and
-  # stopping earlier means reporting a timeout to a reader whose book is about
-  # to be identified. That was the old failure in both directions: the hardcoded
-  # 360s both outlived a job that had already died silently (the reader watched
-  # a spinner for six minutes after the fact) and expired while a slow job was
-  # still alive.
-  #
-  # `+ 5s` covers the marking and broadcast that happen after the last attempt
-  # returns. The `:sse_max_timeout_ms` key remains an override for tests, which
-  # need a deadline measured in milliseconds; setting it in a deployed
-  # environment re-introduces the divergence this derivation removes.
   defp sse_max_timeout_ms do
     Application.get_env(:core, :sse_max_timeout_ms) ||
       IdentifyBookJob.worst_case_lifetime_ms() + 5_000

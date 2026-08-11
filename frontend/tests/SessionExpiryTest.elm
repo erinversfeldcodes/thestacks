@@ -85,10 +85,6 @@ suite =
         ]
 
 
-
--- SCENARIO 1
-
-
 {-| RED: an authenticated 401 from the bookshelf load must NOT be swallowed as
 `NoOut`. Today `Bookshelf.update` routes `Err (BadStatus 401)` through the
 catch-all `Err err ->` branch and returns `NoOut` (Bookshelf.elm:162), so the
@@ -175,10 +171,6 @@ bookshelf403StaysLocal =
             outMsg |> Expect.equal Bookshelf.NoOut
 
 
-
--- SCENARIO 2 (exclusion)
-
-
 {-| Exclusion guard: a 401 from `/api/auth/login` is invalid-credentials, NOT a
 session expiry. It must be handled LOCALLY by `Page.Login` — the login form
 stays put, shows its themed invalid-credentials copy, and never surfaces the
@@ -202,10 +194,6 @@ loginPage401StaysLocalInvalidCredentials =
                     [ Selector.text "Present your credentials to enter" ]
                 |> ProgramTest.expectViewHasNot
                     [ Selector.text "closed your session" ]
-
-
-
--- SCENARIO 3 & 4 — SILENT RENEWAL (via a POST /api/auth/refresh harness)
 
 
 {-| A user whose token is nearing expiry. The renewal harness starts here.
@@ -320,10 +308,6 @@ renewalSuccessKeepsUserLoggedIn =
                 |> ProgramTest.simulateHttpResponse "POST"
                     "/api/auth/refresh"
                     (simulateAuthResponse "new.token" "user-1" "reader@stacks.dev" "A Reader")
-                -- ⚠️ Was `Selector.text "signed-out"`, which appears nowhere in `frontend/src/` — so
-                -- this could never fail. The guarantee it exists for is real and important: a
-                -- SUCCESSFUL token renewal must not eject the reader. Anchored on the expiry banner's
-                -- actual copy, which the app does render on a real expiry.
                 |> ProgramTest.expectViewHasNot [ Selector.text "closed your session" ]
 
 
@@ -378,10 +362,6 @@ loginArmsRenewal =
                 |> Expect.equal True
 
 
-
--- NOTICE — the distinct session-expired message on the redirect target
-
-
 {-| The redirect target of the expiry path — a login card built with the
 `SessionExpired` arrival — renders a notice distinct from invalid-credentials.
 -}
@@ -421,28 +401,6 @@ loginModelProgram startModel =
 sansEffect : ( Login.Model, cmd, out ) -> Login.Model
 sansEffect ( model, _, _ ) =
     model
-
-
-
--- #361 — THE EXPIRY BOUNCE'S OWN REDIRECT
---
--- Found while building #359 and fixed here because it is expiry routing, not
--- login routing. `forceSessionExpiry` pushes `/login`; the `UrlChanged` that
--- consumes the push used to recompute `redirectAfterLogin` from the ARRIVING
--- route, which is `/login`, which requires no auth — so the answer was `Nothing`
--- and the page the reader was mid-way through was forgotten. They signed back in
--- and landed on the home page.
---
--- `Main.redirectAfterNavigation` is the whole decision, key-free so it is
--- reachable at all: `Main.Model` embeds an unconstructable `Nav.Key` (see the
--- seam note at the top of this module), so nothing left inline in `update` can
--- be tested.
---
--- Mutation probe (run 2026-08-01): deleting the `sessionExpiring` branch — i.e.
--- restoring the bare `loginRedirectFor navigation.arrivingAt navigation.auth` —
--- reddens `expiry_captures_the_page_the_reader_was_on` and
--- `expiry_capture_survives_the_redirect_to_login`, and leaves the three controls
--- green. That is the defect, verbatim.
 
 
 {-| The reader was on `/settings/password` when the session died.

@@ -62,8 +62,6 @@ suite =
                 \_ -> GridNav.nextFocus ArrowDown "F" grid |> Expect.equal Nothing
             , test "an exact x tie goes to the earlier spine, so ↑↓ does not drift" <|
                 \_ ->
-                    -- current center 100; targets G (center 50) and H (center
-                    -- 150) are equidistant — the earlier book wins.
                     GridNav.nextFocus ArrowDown
                         "X"
                         [ [ ( "X", 200 ) ]

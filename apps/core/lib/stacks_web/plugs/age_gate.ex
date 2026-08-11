@@ -40,9 +40,6 @@ defmodule StacksWeb.Plugs.AgeGate do
   """
   @spec enforce(Plug.Conn.t(), map() | nil) :: Plug.Conn.t()
   def enforce(conn, %{visibility_tier: "age_gated"}) do
-    # Shipped dark (ADR-020): when age-gating is disabled the gate is a pure
-    # passthrough — the conn is returned unhalted (no 403), and NO enforce
-    # telemetry is emitted (the counter must only reflect real gate decisions).
     if Stacks.FeatureFlags.age_gating_enabled?() do
       user = Guardian.Plug.current_resource(conn)
 
@@ -62,13 +59,8 @@ defmodule StacksWeb.Plugs.AgeGate do
     end
   end
 
-  # Non-age-gated books are the common case; count only age-gate decisions
-  # so the counter reflects the gate's block/pass ratio, not overall traffic.
   def enforce(conn, _book), do: conn
 
-  # Operational counter for age-gate decisions (Issue #228). `outcome` is a
-  # whitelisted atom (:blocked / :passed) — no user id, email, or book
-  # identifier in metadata (GDPR: telemetry is warehouse-adjacent).
   defp emit_enforce(outcome) do
     :telemetry.execute([:stacks, :age_gate, :enforce], %{count: 1}, %{outcome: outcome})
   end

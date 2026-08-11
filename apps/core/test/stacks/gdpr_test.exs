@@ -11,23 +11,15 @@ defmodule Stacks.GDPRTest do
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Workers.ImageRetentionJob
 
-  # op.users columns deliberately NOT in the GDPR export (mirrors the
-  # exclusion rationale in Stacks.GDPR.Export's user map). Secrets, account-
-  # security mechanics, and internal UX progress flags — none are user-provided
-  # personal data the subject is entitled to receive. Every OTHER real schema
-  # field MUST appear in the export or this guard fails.
   @export_excluded_fields [
-    # Secrets — exporting would leak credentials / defeat their purpose.
     :password_hash,
     :email_confirmation_token,
     :password_reset_token,
-    # Account-security mechanics — internal auth state, not personal data.
     :email_confirmed,
     :password_reset_sent_at,
     :failed_login_count,
     :failed_login_first_at,
     :locked_until,
-    # Internal UX progress flags — app state, not personal data.
     :onboarding_completed,
     :onboarding_steps
   ]
@@ -38,7 +30,6 @@ defmodule Stacks.GDPRTest do
       assert {:ok, export} = Export.export_user_data(user.id)
       assert export.user.id == user.id
       assert export.user.email == user.email
-      # Both consent flags are portable (writing-assistant added alongside analytics).
       assert Map.has_key?(export.user, :consent_analytics)
       assert Map.has_key?(export.user, :consent_writing_assistant)
       assert Map.has_key?(export.user, :consent_writing_assistant_at)
@@ -51,7 +42,6 @@ defmodule Stacks.GDPRTest do
       post = insert(:post, user: author, title: "My Post", body: "My own words.")
       insert(:post_comment, author: author, post: post, body: "My comment.")
 
-      # Someone else's comment on the same post must not leak into this export.
       other = insert(:user)
       insert(:post_comment, author: other, post: post, body: "Not mine.")
 
@@ -75,15 +65,6 @@ defmodule Stacks.GDPRTest do
       assert length(export.placements) == 1
     end
 
-    # ── #375: soft-deleted placements are still the subject's data ──────────
-    #
-    # `remove_book/2` stamps `removed_at` and leaves the row; #375's undo clears
-    # it again. Both states are personal data the subject is entitled to receive,
-    # and a removed row is the one most easily forgotten — it is invisible to
-    # every browse query in the app (`is_nil(removed_at)` filters). Asserted
-    # rather than reasoned from `Export`'s query having no filter, because "the
-    # query looks right" is how the #185 post_comments gap survived seven
-    # reviews.
     test "includes SOFT-DELETED placements — a removal does not put data beyond export" do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -96,7 +77,6 @@ defmodule Stacks.GDPRTest do
       assert [exported] = export.placements
       assert exported.id == placement.id
       assert exported.removed_at != nil
-      # The free text on the removed row is exported too, not silently dropped.
       assert exported.notes == "a margin note"
     end
 
@@ -104,7 +84,6 @@ defmodule Stacks.GDPRTest do
       assert {:error, _} = Export.export_user_data(Ecto.UUID.generate())
     end
 
-    # ── US-1.1.9 ────────────────────────────────────────────────────────────
     test "includes library imports with their raw rows while in retention" do
       user = insert(:user)
 
@@ -119,7 +98,6 @@ defmodule Stacks.GDPRTest do
       assert import_export.filename == "export.csv"
       assert import_export.row_count == 1
 
-      # The reader's own free text is portable while it exists.
       assert [row] = import_export.rows
       assert row.review == "my honest review"
       assert row.private_notes == "my private note"
@@ -142,24 +120,12 @@ defmodule Stacks.GDPRTest do
                  :uploaded_images,
                  :blog_posts,
                  :blog_comments,
-                 # US-14.1.3: invitations the user redeemed (prefix-only).
                  :invitations,
-                 # US-1.1.9: import summaries + raw rows still in retention.
                  :library_imports,
-                 # US-6.2.1: where the user's posts went (ids + URLs, no text).
                  :blog_syndications
                ])
     end
 
-    # ── #353: uploaded images are exportable metadata, never the bytes/URL ──
-    #
-    # Decision (recorded in Export.export_user_data/2): the user's uploaded
-    # images ARE listed — id + uploaded_at + status only — so the subject can
-    # see which uploads the system holds. The image bytes and the storage key /
-    # any presigned URL are deliberately EXCLUDED: bytes are not portable
-    # structured data, and emitting a fetchable pointer would leak the raw
-    # image. Asserted here so a regression that starts dumping storage_path or
-    # bytes reddens.
     test "includes the user's uploaded images as metadata only — never storage_path or a URL" do
       user = insert(:user)
 
@@ -172,7 +138,6 @@ defmodule Stacks.GDPRTest do
           expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
         })
 
-      # Another user's image must NOT leak in.
       other = insert(:user)
 
       Repo.insert!(%Stacks.Books.UploadedImage{
@@ -186,16 +151,13 @@ defmodule Stacks.GDPRTest do
       assert {:ok, export} = Export.export_user_data(user.id)
       assert [entry] = export.uploaded_images
 
-      # Exactly the three documented fields — nothing else.
       assert MapSet.new(Map.keys(entry)) == MapSet.new([:id, :uploaded_at, :status])
       assert entry.id == image.id
       assert entry.status == "resolved"
       assert entry.uploaded_at == ~U[2026-01-02 03:04:05.000000Z]
 
-      # The storage key must not appear under any key…
       refute Map.has_key?(entry, :storage_path)
 
-      # …nor anywhere in the JSON the user downloads (no bytes, no fetchable key).
       assert {:ok, json} = Jason.encode(export)
       refute json =~ "secret-key"
       refute json =~ "uploads/"
@@ -206,7 +168,6 @@ defmodule Stacks.GDPRTest do
       session = insert(:blog_assistant_session, user: user, topic: "My draft post")
       insert(:turn_feedback, session: session, rating: "up", comment: "Great help.")
 
-      # Another user's data must NOT leak in.
       other = insert(:user)
       other_session = insert(:blog_assistant_session, user: other)
       insert(:turn_feedback, session: other_session)
@@ -225,7 +186,6 @@ defmodule Stacks.GDPRTest do
 
     test "embeddings_summary lists metadata but NEVER the raw vector" do
       user = insert(:user)
-      # Seed a real, distinctive vector so the no-leak assertion is non-vacuous.
       sentinel = 0.4242
       vector = List.duplicate(sentinel, 1024)
 
@@ -241,7 +201,6 @@ defmodule Stacks.GDPRTest do
       assert {:ok, export} = Export.export_user_data(user.id)
       assert [entry] = export.embeddings_summary
 
-      # Only the four documented, human-readable fields — nothing else.
       assert MapSet.new(Map.keys(entry)) ==
                MapSet.new([:source_type, :source_title, :shelf, :date_embedded])
 
@@ -250,14 +209,12 @@ defmodule Stacks.GDPRTest do
       assert entry.shelf == "library"
       assert entry.date_embedded == ~U[2026-01-02 03:04:05.000000Z]
 
-      # The raw vector must not appear under any key…
       refute Map.has_key?(entry, :embedding)
 
       refute Enum.any?(Map.values(entry), fn v ->
                match?(%Pgvector{}, v) or (is_list(v) and sentinel in v)
              end)
 
-      # …nor anywhere in the JSON-serialised export the user downloads.
       assert {:ok, json} = Jason.encode(export)
       refute json =~ "0.4242"
     end
@@ -271,10 +228,6 @@ defmodule Stacks.GDPRTest do
     end
 
     test "exports the settings personal-data fields verbatim (#299)" do
-      # The four notify_* prefs, website_url, country_code, city and handle are
-      # all written by the settings screens; a data export must return them.
-      # Each value below is NON-DEFAULT (flips the schema default) so the
-      # assertion fails against a map that omits the field OR hardcodes a default.
       user =
         insert(:user,
           handle: "night_reader",
@@ -333,7 +286,6 @@ defmodule Stacks.GDPRTest do
       assert nil == Repo.get(User, user.id)
     end
 
-    # ── #375 ──────────────────────────────────────────────────────────────
     test "erases SOFT-DELETED placements too — a removal does not hide a row from erasure" do
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library")
@@ -341,13 +293,10 @@ defmodule Stacks.GDPRTest do
       placement = insert(:placement, bookshelf: bookshelf, book: book, notes: "a margin note")
 
       {:ok, _} = Stacks.Shelving.remove_book(placement.id, user.id)
-      # Pre-condition: the row survived the removal (that is what soft-delete
-      # means), so erasure has something left to erase.
       assert Repo.get(Stacks.Shelving.Placement, placement.id) != nil
 
       assert {:ok, _} = Deletion.delete_user_data(user.id)
 
-      # The row — and the free text on it — is gone, not merely author-nulled.
       assert nil == Repo.get(Stacks.Shelving.Placement, placement.id)
     end
 
@@ -380,7 +329,6 @@ defmodule Stacks.GDPRTest do
       assert {:ok, _} = Deletion.delete_user_data(user.id)
     end
 
-    # ── US-1.1.9 ──────────────────────────────────────────────────────────
     test "erases library imports AND their raw rows — the reader's Goodreads free text" do
       user = insert(:user)
 
@@ -390,20 +338,14 @@ defmodule Stacks.GDPRTest do
 
       {:ok, import} = Stacks.Imports.create_import(user.id, "export.csv", csv)
 
-      # The preview names the imports before they go (its query is independent
-      # of the deletion step, so the two cross-check each other).
       assert {:ok, preview} = Deletion.preview_user_data(user.id)
       assert preview.library_imports == 1
 
       assert {:ok, result} = Deletion.delete_user_data(user.id)
       assert result.delete_library_imports == 1
 
-      # Erasure is DOUBLY enforced: the explicit step above, and the user_id
-      # ON DELETE CASCADE FK (probed 2026-08-10 — either alone suffices).
       assert nil == Repo.get(Stacks.Imports.LibraryImport, import.id)
 
-      # The rows went with the import (cascade), not merely lost their FK —
-      # free text must be deleted, never author-nulled.
       assert [] ==
                Repo.all(
                  from(r in Stacks.Imports.LibraryImportRow, where: r.import_id == ^import.id)
@@ -525,7 +467,6 @@ defmodule Stacks.GDPRTest do
 
   describe "ImageRetentionJob" do
     test "perform/1 calls cleanup_stuck_images and cleanup_expired_images" do
-      # No images to clean up — should return :ok without error
       assert :ok = ImageRetentionJob.perform(%Oban.Job{args: %{}})
     end
   end

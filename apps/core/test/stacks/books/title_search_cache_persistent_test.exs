@@ -64,10 +64,6 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
       assert Repo.all(TitleSearchCacheEntry) == []
     end
 
-    # #352, and this is the tier that makes the defect durable: L1 is per-node
-    # and dies with the machine, but an L2 row is shared across every Fly
-    # machine and survives deploys, so an outage written here is served to
-    # every reader on every node for the full hour.
     test ":unavailable is not persisted" do
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :unavailable})
       TitleSearchCache.await_pending_writes()
@@ -154,29 +150,21 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
 
       :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
 
-      # Poisoned row is gone from Postgres; unrelated row survives.
       assert [row] = Repo.all(TitleSearchCacheEntry)
       assert row.isbn == "9780441172719"
 
-      # Both tiers now miss — even after the ETS entry is wiped, L2
-      # fallthrough cannot resurrect the invalidated result.
       :ets.delete_all_objects(:title_search_cache)
       assert :miss = TitleSearchCache.get("Crystal City", "Card", nil)
       assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
     end
 
     test "invalidating by ISBN-13 deletes an L2 row stored in ISBN-10 form (and vice versa)" do
-      # L2 replays the live production no-op: the memoised OL doc yielded
-      # ISBN-10, the rejection passed the edition's ISBN-13. Matching is
-      # canonical-13 on both sides (fetch-then-delete-by-id, since the
-      # 10 -> 13 conversion runs in Elixir, not SQL).
       :ok = TitleSearchCache.put("Heartfire", "Card", nil, {:ok, "0312864833", %{}})
       TitleSearchCache.await_pending_writes()
 
       :ok = TitleSearchCache.invalidate_by_isbn("9780312864835")
       assert Repo.all(TitleSearchCacheEntry) == []
 
-      # Vice versa: stored as 13, invalidated by the 10 form.
       :ok = TitleSearchCache.put("Heartfire", "Card", nil, {:ok, "9780312864835", %{}})
       TitleSearchCache.await_pending_writes()
 
@@ -214,7 +202,6 @@ defmodule Stacks.Books.TitleSearchCachePersistentTest do
 
       :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
 
-      # One ETS entry + one Postgres row.
       assert_receive {:invalidated, ^ref, %{count: 2}, metadata}
       assert metadata.l1_count == 1
       assert metadata.l2_count == 1

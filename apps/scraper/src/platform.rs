@@ -88,8 +88,6 @@ pub fn shopify_product_js(
         .and_then(|v| v.first())
         .ok_or_else(|| ScraperError::PriceParse("product.js has no variants".to_string()))?;
 
-    // Integer cents on this endpoint. Reject a string outright rather than trying
-    // to be helpful: silently accepting "400.00" here would record R4.00.
     let price_cents = variant
         .get("price")
         .and_then(Value::as_i64)
@@ -252,8 +250,6 @@ pub fn isbn_from_listing(listing: &ShopifyListing) -> Option<(String, IsbnLocati
     if let Some(isbn) = listing.sku.as_deref().and_then(isbn13_in) {
         return Some((isbn, IsbnLocation::Sku));
     }
-    // Last and least trustworthy: free text may mention an ISBN that is not this
-    // product's (a "see also", a box-set component).
     if let Some(isbn) = listing.body.as_deref().and_then(isbn13_in) {
         return Some((isbn, IsbnLocation::Body));
     }
@@ -348,13 +344,8 @@ pub fn classify_shopify(listings: &[ShopifyListing]) -> Capability {
         return Capability::none();
     }
 
-    // 0.9 rather than 1.0: a single oddly-named product should not demote a store
-    // that is otherwise addressable by ISBN.
     let direct = handle_is_isbn_ratio(listings) >= 0.9;
 
-    // Where the ISBN most often lives, across the sample. Counting beats trusting
-    // the first product, since coverage is partial almost everywhere (Clarke's has
-    // one in 35/50 bodies; Wordsworth in 46/50 skus).
     let found_at = |loc: IsbnLocation| {
         listings
             .iter()
@@ -378,10 +369,6 @@ pub fn classify_shopify(listings: &[ShopifyListing]) -> Capability {
     Capability {
         price_source: PriceSource::ShopifyProductsJson,
         isbn_location: location,
-        // Only a handle that *is* the ISBN allows a stateless per-ISBN request.
-        // Everything else needs a local ISBN→handle index first, including the case
-        // where no ISBN is present at all — there the index cannot be built either,
-        // and fuzzy title matching takes over further up the stack.
         lookup_mode: if direct {
             LookupMode::Direct
         } else {
@@ -413,8 +400,6 @@ pub fn classify_woo(sample: &str) -> Capability {
             lookup_mode: LookupMode::NativeSearch,
         }
     } else {
-        // The API works but its products carry no ISBN, so we cannot ask it for one.
-        // Love Books measured 0/30.
         Capability {
             price_source: PriceSource::WooStoreApi,
             isbn_location: IsbnLocation::None,
@@ -491,7 +476,6 @@ fn decimal_string_to_cents(s: &str) -> Option<i64> {
     };
 
     let whole: i64 = whole.parse().ok()?;
-    // Pad or truncate to exactly two decimal places. "215.5" is 21550, not 21505.
     let cents: i64 = match frac.len() {
         0 => 0,
         1 => frac.parse::<i64>().ok()? * 10,
@@ -538,7 +522,6 @@ fn isbn13_in(s: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    // Shaped after the real payloads measured on 2026-07-27.
     const EB_PRODUCT_JS: &str = r#"{
       "id": 1, "title": "Name of the Rose", "handle": "9780749397050",
       "variants": [{"id": 2, "price": 40000, "sku": "9780749397050",
@@ -573,14 +556,6 @@ mod tests {
 
     #[test]
     fn shopify_product_js_refuses_any_string_price_even_a_numeric_one() {
-        // The trap: /products.json reports the same price as a decimal string
-        // ("400.00") that /products/<h>.js reports as the integer 40000. A *string*
-        // price means we are looking at the other endpoint's payload, so the unit is
-        // unknown and must not be guessed.
-        //
-        // Note "400.00" alone does not test this — it fails an integer parse anyway,
-        // so a permissive implementation rejects it too and the assertion is
-        // vacuous. A numeric string is what discriminates.
         for price in [r#""40000""#, r#""400.00""#, "null", "true"] {
             let body = format!(r#"{{"title":"X","handle":"h","variants":[{{"price":{price}}}]}}"#);
 
@@ -593,7 +568,6 @@ mod tests {
             );
         }
 
-        // ...and the integer form is accepted.
         let ok = shopify_product_js(
             r#"{"title":"X","handle":"h","variants":[{"price":40000}]}"#,
             "ZAR",
@@ -607,7 +581,6 @@ mod tests {
         let listings = shopify_products_json(WORDSWORTH_PRODUCTS_JSON).unwrap();
         assert_eq!(listings.len(), 2);
         assert_eq!(listings[0].price_cents, Some(21_500), "\"215.00\" → 21500");
-        // One decimal place must pad, not truncate: 215.5 is R215.50.
         assert_eq!(listings[1].price_cents, Some(21_550), "\"215.5\" → 21550");
     }
 
@@ -620,7 +593,6 @@ mod tests {
             Some(("9780723263661".to_string(), IsbnLocation::Sku))
         );
 
-        // Only prose carries one here — accepted, but as the least trusted rung.
         assert_eq!(
             isbn_from_listing(&listings[1]),
             Some(("9780099590088".to_string(), IsbnLocation::Body))
@@ -638,7 +610,6 @@ mod tests {
             body: None,
         };
 
-        // Handle wins over a (here deliberately different) sku.
         assert_eq!(
             isbn_from_listing(&listing),
             Some(("9780749397050".to_string(), IsbnLocation::Handle))
@@ -647,9 +618,6 @@ mod tests {
 
     #[test]
     fn handle_is_isbn_requires_the_whole_handle_not_a_substring() {
-        // Bridge Books has an ISBN *inside* 37/50 handles without the handle being
-        // the ISBN. Treating that as addressable-by-ISBN yields 404s — measured:
-        // /products/9781049281483.js returned 404 there.
         let embedded = ShopifyListing {
             handle: "some-title-9781049281483-paperback".to_string(),
             title: "T".to_string(),
@@ -668,7 +636,6 @@ mod tests {
         assert_eq!(handle_is_isbn_ratio(&[exact, embedded]), 0.5);
         assert_eq!(handle_is_isbn_ratio(&[]), 0.0);
 
-        // ...but the ISBN is still extractable from that handle for indexing.
         let listing = ShopifyListing {
             handle: "some-title-9781049281483-paperback".to_string(),
             title: "T".to_string(),
@@ -695,8 +662,6 @@ mod tests {
 
     #[test]
     fn woo_matches_the_requested_isbn_not_merely_the_first_result() {
-        // A search can return several products; taking [0] would attribute one
-        // book's price to another.
         let body = r#"[
           {"name":"Wrong Book","sku":"9789999999999","is_in_stock":true,
            "prices":{"price":"9900","currency_code":"ZAR"}},
@@ -711,8 +676,6 @@ mod tests {
 
     #[test]
     fn woo_reports_no_match_rather_than_an_error() {
-        // "This shop does not carry this ISBN" is an answer, not a failure — the
-        // caller turns it into NOT_STOCKED.
         assert_eq!(
             woo_search(BOOKLOUNGE_SEARCH, "9789999999999", "ZAR").unwrap(),
             None
@@ -721,7 +684,6 @@ mod tests {
 
     #[test]
     fn woo_falls_back_when_currency_code_is_missing() {
-        // Documented upstream WooCommerce bug (open issue, May 2025).
         let body = r#"[{"name":"X","sku":"9780008717360","prices":{"price":"1000"}}]"#;
         let p = woo_search(body, "9780008717360", "ZAR").unwrap().unwrap();
         assert_eq!(p.currency, "ZAR");
@@ -736,9 +698,6 @@ mod tests {
 
     #[test]
     fn classify_shopify_promises_direct_only_when_handles_are_isbns() {
-        // Exclusive Books: handle == sku == ISBN on 50/50 sampled products, and
-        // /products/<isbn>.js returned 200. Direct lookup is available, and a 404
-        // there means "not stocked".
         let eb: Vec<_> = (0..10)
             .map(|i| ShopifyListing {
                 handle: format!("978074939705{i}"),
@@ -758,8 +717,6 @@ mod tests {
 
     #[test]
     fn classify_shopify_demands_an_index_when_the_isbn_only_lives_in_sku() {
-        // Wordsworth / Stellenbosch: sku carries it, handle does not. Promising
-        // Direct here would 404 on every lookup — measured.
         let sku_only: Vec<_> = (0..10)
             .map(|i| ShopifyListing {
                 handle: format!("some-book-title-{i}"),
@@ -778,8 +735,6 @@ mod tests {
 
     #[test]
     fn classify_shopify_reports_none_when_no_product_carries_an_isbn() {
-        // Ike's Books: 0/50 sampled products had an ISBN anywhere. Recording that as
-        // a fact stops it being retried as a misconfiguration.
         let no_isbn: Vec<_> = (0..5)
             .map(|i| ShopifyListing {
                 handle: format!("second-hand-find-{i}"),
@@ -798,8 +753,6 @@ mod tests {
 
     #[test]
     fn classify_shopify_prefers_the_location_that_covers_most_products() {
-        // Coverage is partial nearly everywhere, so the winner is the most common
-        // location rather than whichever the first product happened to use.
         let mut listings = vec![ShopifyListing {
             handle: "odd-one-out".to_string(),
             title: "T".to_string(),
@@ -830,8 +783,6 @@ mod tests {
 
     #[test]
     fn classify_woo_uses_native_search_when_skus_are_isbns() {
-        // Book Lounge: sku is an ISBN on 30/30, and ?search=<isbn> returned exactly
-        // one correct hit. No local index needed.
         let cap = classify_woo(BOOKLOUNGE_SEARCH);
         assert_eq!(cap.price_source, PriceSource::WooStoreApi);
         assert_eq!(cap.isbn_location, IsbnLocation::Sku);
@@ -840,8 +791,6 @@ mod tests {
 
     #[test]
     fn classify_woo_cannot_search_by_isbn_when_skus_are_not_isbns() {
-        // Love Books: the Store API works but 0/30 skus were ISBNs, so there is
-        // nothing to search by.
         let body = r#"[{"name":"X","sku":"LB-00123","prices":{"price":"1000"}}]"#;
         let cap = classify_woo(body);
         assert_eq!(cap.price_source, PriceSource::WooStoreApi);
@@ -851,8 +800,6 @@ mod tests {
 
     #[test]
     fn index_retains_only_isbns_we_hold() {
-        // The owner's constraint made mechanical: the sweep is transient and only
-        // pointers for books we already have survive it.
         let listings = shopify_products_json(WORDSWORTH_PRODUCTS_JSON).unwrap();
         let held = |isbn: &str| isbn == "9780723263661";
 
@@ -866,15 +813,10 @@ mod tests {
 
     #[test]
     fn index_entries_carry_no_catalogue_content() {
-        // A pointer is 60-odd bytes: an ISBN, a path, and which rung found it. There
-        // is deliberately nowhere to put a title, price or description, so a future
-        // change cannot quietly start retaining them.
         let listings = shopify_products_json(WORDSWORTH_PRODUCTS_JSON).unwrap();
         let entries = index_entries(&listings, &|_| true);
 
         assert_eq!(entries.len(), 2);
-        // Compile-time guarantee, asserted here so the intent is documented: the
-        // struct's whole surface is these three fields.
         let IndexEntry {
             isbn,
             product_path,
@@ -900,8 +842,6 @@ mod tests {
 
     #[test]
     fn unmatched_titles_are_the_residual_for_fuzzy_matching() {
-        // Ike's Books had no ISBN on any of 50 sampled products, so title matching is
-        // the only path left there.
         let listings = vec![
             ShopifyListing {
                 handle: "has-isbn".to_string(),

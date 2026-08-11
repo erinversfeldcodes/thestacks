@@ -86,8 +86,6 @@ suite =
                         |> Expect.equal (Session.Authenticated "admin-token-abc")
             , test "nothing else emits a token" <|
                 \_ ->
-                    -- If any other transition could emit one, Main would hold a token obtained
-                    -- without a second factor.
                     [ out (Session.SetEmail "x") Session.init
                     , out (Session.SetCode "123456") awaitingCode
                     , out (Session.LoggedIn (Ok { sessionId = "s" })) filled
@@ -99,8 +97,6 @@ suite =
         , describe "the step machine"
             [ test "the password is dropped once it has been spent" <|
                 \_ ->
-                    -- It is not needed after step 1, and keeping it in the model past that point is
-                    -- gratuitous exposure.
                     awaitingCode.password |> Expect.equal ""
             , test "submitting a code before a session exists does nothing" <|
                 \_ ->
@@ -113,8 +109,6 @@ suite =
                         |> Expect.equal Cmd.none
             , test "a short code fires no request" <|
                 \_ ->
-                    -- Guards against the button being bypassed by a keyboard submit: `update` has
-                    -- to refuse too, not rely on `disabled`.
                     let
                         shortCode =
                             run (Session.SetCode "12") awaitingCode
@@ -129,8 +123,6 @@ suite =
                         |> Expect.equal Cmd.none
             , test "a rejected code clears the code but keeps the session" <|
                 \_ ->
-                    -- The operator retries with a fresh code; making them re-enter the password
-                    -- would be punishing them for a 30-second window.
                     let
                         rejected =
                             run (Session.Verified (Err InvalidCode)) awaitingCode
@@ -152,9 +144,6 @@ suite =
                         |> Query.has [ Selector.text "not an owner" ]
             , test "an invalidated session explains WHY, not just that it ended" <|
                 \_ ->
-                    -- ⚠️ The admin session is bound to the client IP and the node's boot_id, so a
-                    -- network change or a deploy ends it. An operator told only "signed out" goes
-                    -- looking for the wrong problem.
                     render (run (Session.Verified (Err InvalidSession)) awaitingCode)
                         |> Query.has [ Selector.text "network change or a deploy" ]
             , test "a stale code mentions the 30-second window" <|
@@ -163,8 +152,6 @@ suite =
                         |> Query.has [ Selector.text "30 seconds" ]
             , test "a dead network is distinguished from a slow one" <|
                 \_ ->
-                    -- The `Http.Error` payload is carried for this: "no connection" and "too slow"
-                    -- lead to different actions.
                     Expect.notEqual
                         (errorText (Session.Verified (Err (AdminAuthTransport Http.NetworkError))))
                         (errorText (Session.Verified (Err (AdminAuthTransport Http.Timeout))))
@@ -172,10 +159,6 @@ suite =
         , describe "enrolment"
             [ test "reads the base32 secret out of the provisioning URI, unmodified" <|
                 \_ ->
-                    -- ⚠️ Pins the encoding direction. `mfa_confirm` used to demand base64 of the raw
-                    -- bytes while `mfa_setup` published base32 — an impossible contract for any
-                    -- client. The endpoint now takes what it publishes; this asserts we pass it
-                    -- through rather than "helpfully" converting.
                     Session.enrolmentSecret
                         { provisioningUri =
                             "otpauth://totp/The%20Stacks:owner?secret=JBSWY3DPEHPK3PXP&issuer=Stacks"
@@ -191,16 +174,10 @@ suite =
                         |> Expect.equal Nothing
             , test "enrolment is reachable without failing a sign-in first" <|
                 \_ ->
-                    -- Signing in only to be told "you have no second factor" is a detour when the
-                    -- operator already knows.
                     render Session.init
                         |> Query.has [ testId "admin-enrol-start" ]
             , test "confirming enrolment returns to the sign-in form, not a dead end" <|
                 \_ ->
-                    -- ⛔ It used to render a terminal panel saying "Sign in above to open an admin
-                    -- session" while BEING the only thing on the page — the form it referred to had
-                    -- been replaced. The operator finished enrolling and had nowhere to go but a
-                    -- manual reload, actively misdirected by the copy. Found by driving it.
                     let
                         after =
                             run (Session.EnrolmentConfirmed (Ok ())) Session.init
@@ -216,8 +193,6 @@ suite =
                         |> Query.has [ testId "admin-email" ]
             , test "the success notice is not rendered as an error" <|
                 \_ ->
-                    -- Separate fields, separate elements: a success shown in the error slot trains
-                    -- the operator to ignore the error slot.
                     render (run (Session.EnrolmentConfirmed (Ok ())) Session.init)
                         |> Query.has [ testId "admin-gate-notice" ]
             , test "the recovery codes are shown with the warning that they are shown once" <|

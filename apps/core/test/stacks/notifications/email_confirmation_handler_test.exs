@@ -8,8 +8,6 @@ defmodule Stacks.Notifications.EmailConfirmationHandlerTest do
 
   describe "handle_event/1" do
     test "enqueues EmailDeliveryJob on user.registered" do
-      # The handler delivers the token Accounts.register/1 persisted; mirror that
-      # post-registration state by persisting a signed token first.
       user = insert(:user, email_confirmed: false)
       token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
 
@@ -38,13 +36,6 @@ defmodule Stacks.Notifications.EmailConfirmationHandlerTest do
     end
 
     test "no-ops (ok, nothing enqueued) when the user is already confirmed" do
-      # Race covered by Issue #192's session-mint helper: register emits
-      # user.registered, then mark_confirmed/1 nils the confirmation token
-      # BEFORE this async handler runs. A confirmation email to an
-      # already-confirmed user is pointless regardless of how the race
-      # happened (a real user confirming extremely fast hits it too), so the
-      # handler must treat it as success — not surface
-      # :missing_confirmation_token and put the SubscriberWorker into retry.
       user = insert(:user, email_confirmed: true, email_confirmation_token: nil)
 
       assert :ok =

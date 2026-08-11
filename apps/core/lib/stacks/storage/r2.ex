@@ -79,11 +79,6 @@ defmodule Stacks.Storage.R2 do
   @spec presigned_put_url(String.t(), pos_integer(), keyword()) ::
           {:ok, String.t()} | {:error, term()}
   def presigned_put_url(key, ttl_seconds \\ 900, _opts \\ []) do
-    # Presigned PUT is a local SigV4 signing op — no network call — so
-    # no fuse gate here. The actual upload is client → R2 directly, not
-    # client → us → R2, so our fuse would see no traffic to melt on
-    # anyway. The fuse still protects `put/3` for any server-side
-    # writes we do (e.g. migrations, admin tools).
     config = ExAws.Config.new(:s3)
 
     case ExAws.S3.presigned_url(config, :put, bucket(), key, expires_in: ttl_seconds) do

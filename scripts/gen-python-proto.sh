@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# scripts/gen-python-proto.sh — Generate Pydantic models from proto definitions.
-#
-# Proto is the source of truth. Python types are generated, not hand-written.
-# This is the Python equivalent of `mix proto.sync`.
-#
-# Usage:
-#   scripts/gen-python-proto.sh          # generate all targets
-#   scripts/gen-python-proto.sh --check  # verify generated files match proto; exit 1 on drift
 
 set -euo pipefail
 
@@ -17,7 +9,6 @@ if ! command -v buf &>/dev/null; then
     exit 1
 fi
 
-# Only --check is accepted; --language is fixed to this wrapper's language.
 CHECK_FLAG=""
 for arg in "$@"; do
     if [[ "$arg" == "--check" ]]; then

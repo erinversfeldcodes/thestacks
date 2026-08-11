@@ -63,8 +63,6 @@ defmodule Stacks.Geocoding do
     query = String.trim(query)
 
     if query == "" do
-      # Guarded here rather than in each adapter: an empty query is a caller bug, and
-      # every provider would answer it with an unhelpful match or a wasted request.
       {:error, :not_found}
     else
       provider().geocode(query)

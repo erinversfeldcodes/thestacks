@@ -26,8 +26,6 @@ defmodule Core.PromEx.DiscoveryDriftTest do
 
   @dashboard_relative_path "grafana/discovery.json"
 
-  # The NEW families this dashboard exists to surface (#239). Each MUST be
-  # queried by at least one panel — an unwatched discovery counter is a gap.
   @new_family_prefixes [
     "stacks_search_people",
     "stacks_profile_view",
@@ -38,8 +36,6 @@ defmodule Core.PromEx.DiscoveryDriftTest do
   defp dashboard_path,
     do: Application.app_dir(:core, Path.join("priv", @dashboard_relative_path))
 
-  # Registered Prometheus family names, derived from the plugin's declared
-  # Telemetry.Metrics structs — the same join TelemetryMetricsPrometheus uses.
   defp registered_families do
     StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
@@ -47,15 +43,12 @@ defmodule Core.PromEx.DiscoveryDriftTest do
     |> MapSet.new()
   end
 
-  # Recursively collect every panel (including panels nested inside Grafana
-  # "row" panels) from a decoded dashboard.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel -> [panel | all_panels(panel)] end)
   end
 
   defp all_panels(_), do: []
 
-  # Only panels that actually render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
@@ -66,7 +59,6 @@ defmodule Core.PromEx.DiscoveryDriftTest do
     dashboard_path() |> File.read!() |> Jason.decode!()
   end
 
-  # All `stacks_*` metric names referenced by any panel target `expr`.
   defp panel_metric_names(dashboard) do
     for panel <- data_panels(dashboard),
         target <- panel["targets"] || [],
@@ -118,8 +110,6 @@ defmodule Core.PromEx.DiscoveryDriftTest do
       referenced = panel_metric_names(decoded_dashboard())
 
       for prefix <- @new_family_prefixes do
-        # Sanity: the family is actually registered (guards against the plugin
-        # being changed without this test noticing).
         registered_matches =
           Enum.filter(registered, &String.starts_with?(&1, prefix))
 
@@ -127,7 +117,6 @@ defmodule Core.PromEx.DiscoveryDriftTest do
                "expected a registered family under prefix #{inspect(prefix)}, " <>
                  "registered: " <> inspect(Enum.sort(MapSet.to_list(registered)))
 
-        # Every registered family under this new prefix must be on a panel.
         missing =
           registered_matches
           |> MapSet.new()

@@ -78,7 +78,6 @@ suite =
         , describe "Collection face (authenticated) — the drift oracle"
             [ test "renders a persistent Add-Book CTA into the upload flow" <|
                 \() ->
-                    -- Fails on the pre-8c static home, which never had this.
                     authedHome (Success [])
                         |> Query.find [ Selector.class "home-collection__add" ]
                         |> Expect.all
@@ -92,7 +91,6 @@ suite =
                         |> Query.has [ Selector.attribute (Attr.href "/reading-pile") ]
             , test "does NOT render the unauth Marketplace landing CTA" <|
                 \() ->
-                    -- Fails on the old always-static home (which always showed it).
                     authedHome (Success [ namedPlacement "b1" "Dune" ])
                         |> Query.hasNot [ Selector.class "home__link--marketplace" ]
             , test "with placements, stages a shelf glimpse in the shelf-room aesthetic" <|

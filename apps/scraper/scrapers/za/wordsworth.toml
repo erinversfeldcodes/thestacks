@@ -2,15 +2,10 @@
 name = "Wordsworth Books"
 type = "bookshop"
 country = "ZA"
-# Shopify. Measured 2026-07-28: sku carries the ISBN on 46/50 sampled products but
-# the handle does not, so products cannot be addressed by ISBN directly — the engine
-# builds an ISBN→path index instead. robots.txt restricts nothing here.
 url = "https://www.wordsworth.co.za"
 has_physical_location = true
 currency = "ZAR"
 
-# ⚠️ DEAD for this store: it is Shopify, so lookups go through the product API.
-# [selectors].price is still a required field for stores that have no product API.
 [search]
 method = "GET"
 path = "/search"

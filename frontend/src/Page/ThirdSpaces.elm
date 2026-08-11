@@ -171,11 +171,6 @@ viewSpaceDetail space =
                     space.upcomingEvents
                 )
         , button [ class "btn btn--ghost", onClick CloseDetail ] [ text "Close" ]
-
-        -- US-2.5.3: "Every listing carries a discreet 'Is this your business?' link."
-        -- Discreet is the specification, not a style preference — this is a listing the
-        -- business never asked for, so the way out should be findable without being an
-        -- apology plastered across the card.
         , a
             [ class "third-spaces__claim"
             , href (Route.toPath Route.ListingRemoval)

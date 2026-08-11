@@ -73,9 +73,6 @@ impl RateLimiter {
         let window = Duration::from_secs(60);
         let now = Instant::now();
 
-        // The shop's instruction is checked FIRST, and before the window is touched. Checking it
-        // second would mean a domain whose 60-second window has drained is let through mid-cooldown
-        // — which is most of the time, since a cooldown typically outlasts the window.
         if let Some(until) = self.cooldowns.get(domain).map(|r| *r.value()) {
             if now < until {
                 return Err(ScraperError::UpstreamBackoff {
@@ -83,13 +80,11 @@ impl RateLimiter {
                     seconds_remaining: (until - now).as_secs(),
                 });
             }
-            // Expired. Drop it so the map does not grow without bound across a long-lived process.
             self.cooldowns.remove(domain);
         }
 
         let mut entry = self.state.entry(domain.to_string()).or_default();
 
-        // Evict timestamps older than the sliding window.
         while let Some(&front) = entry.front() {
             if now.duration_since(front) >= window {
                 entry.pop_front();
@@ -157,7 +152,6 @@ mod tests {
     #[test]
     fn test_allows_requests_under_limit() {
         let limiter = RateLimiter::new();
-        // 5 requests/min limit, fire 5 — all should succeed.
         for _ in 0..5 {
             assert!(limiter.check_and_record("example.com", 5).is_ok());
         }
@@ -166,11 +160,9 @@ mod tests {
     #[test]
     fn test_rejects_request_over_limit() {
         let limiter = RateLimiter::new();
-        // Fill up the limit.
         for _ in 0..3 {
             limiter.check_and_record("example.com", 3).unwrap();
         }
-        // Next request should be rejected.
         let result = limiter.check_and_record("example.com", 3);
         assert!(result.is_err());
         assert!(matches!(
@@ -182,25 +174,15 @@ mod tests {
     #[test]
     fn test_separate_domains_tracked_independently() {
         let limiter = RateLimiter::new();
-        // Fill up domain A.
         for _ in 0..2 {
             limiter.check_and_record("a.com", 2).unwrap();
         }
-        // Domain A is exhausted.
         assert!(limiter.check_and_record("a.com", 2).is_err());
-        // Domain B is unaffected.
         assert!(limiter.check_and_record("b.com", 2).is_ok());
     }
 
-    // ------------------------------------------------------------------
-    // Shop-imposed backoff — the channel the limiter used to lack entirely
-    // ------------------------------------------------------------------
-
     #[test]
     fn a_cooldown_refuses_a_domain_whose_own_window_is_empty() {
-        // The load-bearing case: a cooldown typically outlasts the 60-second window, so by the time
-        // we would next consider asking, our own limiter has nothing against it. Without the
-        // cooldown the request goes straight out in the middle of a backoff we were told to observe.
         let limiter = RateLimiter::new();
         limiter.back_off("example.com", Instant::now() + Duration::from_secs(60));
 
@@ -216,8 +198,6 @@ mod tests {
 
     #[test]
     fn a_backoff_is_distinguishable_from_our_own_ceiling() {
-        // Two different operator responses: widen our config, versus wait. Collapsing them into one
-        // error would have someone tuning `requests_per_minute` at a signal unrelated to it.
         let limiter = RateLimiter::new();
 
         limiter.back_off("paced.com", Instant::now() + Duration::from_secs(30));
@@ -237,17 +217,8 @@ mod tests {
 
     #[test]
     fn the_shops_instruction_is_reported_ahead_of_our_own_ceiling() {
-        // This is the test that actually pins the ORDER of the two checks, which the one above does
-        // not: with an empty window, either order returns `UpstreamBackoff`. Only when BOTH would
-        // refuse does the order become observable.
-        //
-        // Why it matters is diagnostic honesty. Reporting `RateLimitExceeded` here sends an operator
-        // to widen `requests_per_minute` — the exact wrong move against a shop that has just told us
-        // there are already too many requests.
         let limiter = RateLimiter::new();
 
-        // Fill our own window first; it has to be done before the cooldown, since a cooldown would
-        // refuse these very calls.
         for _ in 0..2 {
             limiter.check_and_record("example.com", 2).unwrap();
         }
@@ -262,10 +233,6 @@ mod tests {
 
     #[test]
     fn back_off_extends_but_never_shortens() {
-        // A burst can have several requests refused at once, and a later response may carry a
-        // shorter `Retry-After` purely because it was computed a moment later. Taking the smaller
-        // value would let the tail of the burst talk us down from the wait we were actually asked
-        // for — the bug being pre-empted here, not a hypothetical.
         let limiter = RateLimiter::new();
         let long = Instant::now() + Duration::from_secs(600);
 
@@ -298,9 +265,6 @@ mod tests {
 
     #[test]
     fn a_cooldown_is_per_domain() {
-        // One shop pacing us must not stop us talking to any other. This is the same guarantee the
-        // sliding window has, and the reason `:scraper_fuse` being shared across stores is such a
-        // hazard on this path.
         let limiter = RateLimiter::new();
         limiter.back_off("paced.com", Instant::now() + Duration::from_secs(60));
 
@@ -310,8 +274,6 @@ mod tests {
 
     #[test]
     fn retry_after_reads_delta_seconds_and_falls_back_otherwise() {
-        // The fallback cases matter more than the happy one: every one of them must still produce a
-        // WAIT. A header we cannot read is not permission to carry on at full speed.
         let cases: [(Option<&str>, u64, u64, &str); 6] = [
             (Some("120"), 60, 120, "plain delta-seconds"),
             (Some("  90 "), 60, 90, "surrounding whitespace"),

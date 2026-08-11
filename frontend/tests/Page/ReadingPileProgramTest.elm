@@ -77,10 +77,6 @@ suite =
         ]
 
 
-
--- HAPPY PATH (punch #7)
-
-
 initFiresPileRequest : Test
 initFiresPileRequest =
     test "reading_pile_init_fires_request: init issues GET /api/bookshelves/reading_pile" <|
@@ -101,8 +97,6 @@ booksLoadedFlattensAcrossShelves =
                         , { id = "shelf-2", position = 2, placements = [ solarisP ] }
                         ]
                     )
-                -- Both shelves' books land in the single pile: a page that read
-                -- only the first shelf would render one book, not two.
                 |> ProgramTest.ensureView
                     (Query.findAll [ Selector.class "book-pile__book" ]
                         >> Query.count (Expect.equal 2)
@@ -121,8 +115,6 @@ bookHoveredSelectsThatBook =
                     (Query.findAll [ Selector.class "book-pile__book--selected" ]
                         >> Query.count (Expect.equal 1)
                     )
-                -- The selected class must land on the *hovered* book. Asserting
-                -- only the count would pass if it landed on Dune instead.
                 |> ProgramTest.expectView
                     (findPiledBook "Solaris"
                         >> Query.has [ Selector.class "book-pile__book--selected" ]
@@ -162,12 +154,7 @@ deselectClearsTheSelection =
         \() ->
             loadedPile
                 |> ProgramTest.simulateDomEvent (findPiledBook "Dune") Event.mouseEnter
-                -- Pre-condition: a book really is selected, so the assertion
-                -- below is not satisfied by an already-empty selection.
                 |> ProgramTest.ensureViewHas [ Selector.class "book-pile__book--selected" ]
-                -- `Deselect` is wired to the page root (`reading-pile-page`),
-                -- which is the query root itself — `Query.find` only searches
-                -- descendants, so target it with `identity`.
                 |> ProgramTest.simulateDomEvent identity Event.click
                 |> ProgramTest.expectViewHasNot [ Selector.class "book-pile__book--selected" ]
 
@@ -190,9 +177,6 @@ grandfatheredPileRendersEverything : Test
 grandfatheredPileRendersEverything =
     test "reading_pile_grandfather_renders_all: an over-limit (grandfathered) pile renders every book — none are silently hidden" <|
         \() ->
-            -- #276: the 50 cap is enforced at the WRITE path. Piles that
-            -- already exceed 50 are grandfathered, so the view must render
-            -- all of them — silent truncation was the original defect.
             startPile
                 |> ProgramTest.simulateHttpResponse "GET"
                     pileEndpoint
@@ -213,10 +197,6 @@ numberedPile count =
             )
 
 
-
--- SAD PATHS (punch #8)
-
-
 forbiddenRaisesAgeGate : Test
 forbiddenRaisesAgeGate =
     test "reading_pile_403_age_gate: a 403 replaces the pile with the age gate" <|
@@ -227,7 +207,6 @@ forbiddenRaisesAgeGate =
                     (pileErrorResponse 403)
                 |> ProgramTest.ensureViewHas [ Selector.class "age-gate" ]
                 |> ProgramTest.ensureViewHas [ Selector.text "Age Verification Required" ]
-                -- The gate replaces the scene rather than sitting alongside it.
                 |> ProgramTest.expectViewHasNot [ Selector.class "reading-pile__scene" ]
 
 
@@ -256,10 +235,6 @@ emptyPileShowsEmptyMessage =
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "Nothing on the pile right now. Move a book from your Antilibrary to start reading." ]
                 |> ProgramTest.expectViewHasNot [ Selector.class "book-pile" ]
-
-
-
--- HELPERS
 
 
 {-| A pile already loaded with two distinguishable books.

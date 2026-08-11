@@ -54,7 +54,6 @@ defmodule Stacks.Audit do
       latency_ms: Keyword.get(opts, :latency_ms),
       success: Keyword.get(opts, :success),
       row_count: Keyword.get(opts, :row_count),
-      # Stored as text (not binary UUID) so raw SQL queries return the UUID string.
       operator_session_id: operator_session_id
     }
 
@@ -67,11 +66,6 @@ defmodule Stacks.Audit do
 
     case Repo.insert_all("audit_log", [params], prefix: "audit") do
       {1, _} ->
-        # GDPR telemetry: audit-log write throughput. One event per successful
-        # audit insert so operators can watch the write rate and spot both
-        # throughput anomalies and silent audit-logging stalls. Tagged by
-        # `:action` and `:resource_type`. Registered in
-        # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_audit_write_count_total`.
         :telemetry.execute([:stacks, :gdpr, :audit, :write], %{count: 1}, %{
           action: action,
           resource_type: resource_type
@@ -170,21 +164,12 @@ defmodule Stacks.Audit do
 
     user_id_binary = Ecto.UUID.dump!(user_id)
 
-    # Graceful on query error (e.g. a pathologically large page whose offset
-    # overflows bigint): return an empty page rather than crashing the request
-    # with a MatchError/500. Mirrors Stacks.Admin.Data.list_audit_log.
     total =
       case Repo.query("SELECT COUNT(*) FROM audit.audit_log WHERE user_id = $1", [user_id_binary]) do
         {:ok, %{rows: [[count]]}} -> count
         _ -> 0
       end
 
-    # NOTE: ip_address is deliberately NOT selected — hashed IPs must never
-    # be surfaced to the read API/UI.
-    # ORDER BY includes id as a tiebreaker: rows sharing an occurred_at (bulk/
-    # transactional audit writes can collide at microsecond resolution) would
-    # otherwise order nondeterministically across page boundaries, duplicating
-    # or skipping rows.
     sql = """
     SELECT id, action, resource_type, resource_id, metadata, occurred_at
     FROM audit.audit_log
@@ -199,11 +184,6 @@ defmodule Stacks.Audit do
         _ -> []
       end
 
-    # GDPR telemetry (Issue #238): audit-log READ throughput. One event per
-    # user audit-log listing so "who looked at the audit log" is observable,
-    # not just writes. Deliberately UNTAGGED — no user-id/handle/IP reaches the
-    # sink (GDPR: telemetry is warehouse-adjacent). Registered in
-    # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_audit_read_count_total`.
     :telemetry.execute([:stacks, :gdpr, :audit, :read], %{count: 1}, %{})
 
     {Enum.map(rows, &decode_read_row/1), total, page, per_page}
@@ -238,9 +218,6 @@ defmodule Stacks.Audit do
   defp decode_read_timestamp(%NaiveDateTime{} = naive), do: DateTime.from_naive!(naive, "Etc/UTC")
   defp decode_read_timestamp(other), do: other
 
-  # Old rows (pre-encryption) and metadata-less rows have a nil column; treat
-  # as an empty map. Decryption/JSON failures are swallowed to a safe empty map
-  # so a single bad row can never break the whole listing.
   defp decrypt_metadata(nil), do: %{}
 
   defp decrypt_metadata(bin) when is_binary(bin) do

@@ -90,9 +90,6 @@ suite =
                         |> Query.count (Expect.equal 2)
             , test "shows the contact address, which is what the reviewer judges" <|
                 \_ ->
-                    -- Without it the queue is a list of names and the decision is blind:
-                    -- the whole reason this request needs a human is that the address did
-                    -- not match the listing's domain.
                     render (loaded [ request "truth" ])
                         |> Query.has [ Selector.text "owner@truth.example" ]
             , test "shows the listing URL so the reviewer can look at it" <|
@@ -101,7 +98,6 @@ suite =
                         |> Query.has [ Selector.text "https://truth.example" ]
             , test "says plainly that the listings are still live" <|
                 \_ ->
-                    -- A reviewer who thinks these are already gone will not hurry.
                     render (loaded [ request "truth" ])
                         |> Query.has [ Selector.text "still live" ]
             ]
@@ -112,9 +108,6 @@ suite =
                         |> Query.has [ testId "removal-queue-empty" ]
             , test "a failed load does NOT look like an empty queue" <|
                 \_ ->
-                    -- ⚠️ The two states are one character apart in the model and would be
-                    -- indistinguishable on screen. Reading a broken fetch as "nothing
-                    -- waiting" means businesses wait forever and nobody knows.
                     render
                         { requests = Failure Http.NetworkError
                         , deciding = Nothing
@@ -126,8 +119,6 @@ suite =
         , describe "the two decisions cannot be confused with publishing a listing"
             [ test "no control is labelled approve or reject" <|
                 \_ ->
-                    -- `/admin/sources` uses those words for the opposite effect on the same
-                    -- row. Reusing them here is the mistake this test exists to block.
                     render (loaded [ request "truth" ])
                         |> Query.hasNot [ Selector.text "Approve" ]
             , test "the destructive action names what happens to the listing" <|
@@ -156,8 +147,6 @@ suite =
                         model
             , test "the confirmation names the business" <|
                 \_ ->
-                    -- A confirmation that says "are you sure?" is a click-through; one that
-                    -- says which business is about to be delisted is a check.
                     render (confirmingModel "req-truth" [ request "truth" ])
                         |> Query.has [ Selector.text "Remove truth from the map?" ]
             , test "confirming is what fires the request" <|
@@ -182,8 +171,6 @@ suite =
                         model
             , test "keeping the listing needs no confirmation" <|
                 \_ ->
-                    -- Only the destructive direction is worth a second click. Making both
-                    -- two-step trains the reviewer to click through confirmations.
                     let
                         ( model, _ ) =
                             updateQueue (Queue.KeepClicked "req-truth") (loaded [ request "truth" ])
@@ -211,8 +198,6 @@ suite =
         , describe "a rejected decision is explained in the reviewer's terms"
             [ test "409 says it was already decided, not that it vanished" <|
                 \_ ->
-                    -- The 409 case is a real one: a double-click, or two reviewers. Reading
-                    -- it as 'not found' would suggest data loss where there is none.
                     let
                         ( model, _ ) =
                             updateQueue
@@ -227,7 +212,6 @@ suite =
                         |> Query.has [ testId "removal-queue-error" ]
             , test "a failed decision does not drop the row" <|
                 \_ ->
-                    -- Dropping it would hide a request that is still pending.
                     let
                         ( model, _ ) =
                             updateQueue

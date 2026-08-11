@@ -19,7 +19,6 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
     UserBookContentAccess
   }
 
-  # 1024-dim vector — Together AI BAAI/bge-m3 (US-12.2.1).
   @vec List.duplicate(1.0, 1024)
 
   defp columns(table) do
@@ -46,8 +45,6 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
     fmt
   end
 
-  # Inserts a full graph of writing-assistant rows owned by `user` (+ `book`),
-  # plus one SHARED book_content_chunks row. Returns the inserted structs.
   defp seed_graph(user, book) do
     session = Repo.insert!(%Session{user_id: user.id, status: "active"})
 
@@ -182,7 +179,6 @@ defmodule Stacks.WritingAssistant.GdprDataModelTest do
       refute Repo.get(RetrievalLog, g.retrieval.id)
       refute Repo.get(UserBookContentAccess, g.access.id)
 
-      # PRESERVED — shared, non-personal.
       assert Repo.get(BookContentChunk, g.chunk.id)
     end
   end

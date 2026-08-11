@@ -25,10 +25,6 @@ startBookDetail =
     ProgramTest.start () (bookDetailProgram "book-test-001" (Just "test-token"))
 
 
-
--- JSON HELPERS
-
-
 availabilityJson : String
 availabilityJson =
     Encode.encode 0
@@ -61,10 +57,6 @@ emptyAvailabilityJson =
         (Encode.object
             [ ( "availability", Encode.list identity [] ) ]
         )
-
-
-
--- TESTS
 
 
 suite : Test

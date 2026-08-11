@@ -185,9 +185,6 @@ viewRow shelves state busy index shelf =
     li
         [ class "shelf-organiser__row"
         , classIf (state.dragging == Just shelf.id) "shelf-organiser__row--dragging"
-
-        -- Drag affordance. HTML5 drag events need no port, which keeps this out of the
-        -- "no ports unless absolutely necessary" conversation entirely.
         , draggable "true"
         , on "dragstart" (Decode.succeed (DragStart shelf.id))
         , on "dragend" (Decode.succeed DragEnd)
@@ -200,10 +197,6 @@ viewRow shelves state busy index shelf =
             [ text ("Shelf " ++ String.fromInt (index + 1))
             , span [ class "shelf-organiser__count" ] [ text (bookLabel bookCount) ]
             ]
-
-        -- The keyboard path, and also the faster one for a single step. Real buttons
-        -- rather than ARIA on a div: focus, Enter/Space and screen-reader semantics all
-        -- come for free and cannot be got subtly wrong.
         , button
             [ class "shelf-organiser__move"
             , onClick (MoveUp shelf.id)
@@ -222,9 +215,6 @@ viewRow shelves state busy index shelf =
             , testId "shelf-move-down"
             ]
             [ text "↓" ]
-
-        -- Disabled while the shelf holds books: the server refuses with 422, and offering
-        -- an action that cannot succeed is worse than not offering it. The title says why.
         , button
             [ class "shelf-organiser__remove"
             , onClick (RemoveShelf shelf.id)

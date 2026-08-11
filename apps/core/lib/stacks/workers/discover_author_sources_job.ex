@@ -117,10 +117,6 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
     Enum.any?(@social_domains, fn domain -> String.contains?(host, domain) end)
   end
 
-  # ⚠️ Fans out over SIX candidate paths sequentially, so every per-request
-  # bound in the fetcher is multiplied by six in the worst case. Measured
-  # against a black-holed host (2026-08-03): 6 × 5s connect = 30_071ms for a
-  # single author. Keep the path list short and the fetcher's bounds tight.
   @feed_paths ["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/blog/feed"]
 
   defp discover_rss_feed(website_url) do
@@ -150,8 +146,6 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJob do
     Application.get_env(:core, :brave_client, Stacks.Discovery.BraveClient)
   end
 
-  # Same swappable seam RSS polling uses (419da150). Without it this job's
-  # tests issue live HEAD requests to whatever host the mocked search returns.
   defp rss_fetcher do
     Application.get_env(:core, :rss_fetcher, Stacks.Enrichment.RssFetcher)
   end

@@ -1,58 +1,6 @@
 #!/usr/bin/env bash
-#
-# preflight-resolver-health.sh — gate the deployed E2E run on the external
-# ISBN resolvers that the upload pipeline depends on at enrichment time.
-#
-# Why this exists:
-#   The upload Playwright suite (e2e/tests/upload.spec.ts) polls for up to
-#   60 s expecting EnrichBookJob to replace a placeholder "ISBN 978..."
-#   title with real metadata from Open Library / Google Books. If OL is
-#   down or rate-limiting when the preview deploy happens, that poll burns
-#   ~6 minutes only to fail on a known external cause. Running this script
-#   immediately before the E2E step makes the failure fast (~5–10 s) and
-#   gives the operator a curl command they can rerun manually.
-#
-# Sources:
-#   - Open Library  → hard required. Any miss FAILS the script.
-#   - Google Books  → advisory only. Misses are WARN but do not fail.
-#
-# Two layers of checks:
-#   1. Endpoint health — the exact endpoints ISBNResolver.search_by_title/4
-#      hits (OL /search.json, GB /volumes). Catches whole-upstream outages
-#      and, for Google Books, quota exhaustion: GB returns 429/403 with
-#      quota_limit_value: "0" when the daily quota is dead (observed on
-#      this branch), which silently degrades the resolver to OL-only.
-#      GB being down/quota-dead is a WARN — it is the fallback source and
-#      E2E can pass without it — but the operator should know the run's
-#      resolution quality is degraded.
-#   2. ISBN resolution — the specific ISBNs the E2E upload suite depends on.
-#
-# Exit codes:
-#   0  Open Library healthy (search endpoint up + every ISBN resolved);
-#      Google Books issues are WARN-only
-#   1  Open Library search endpoint down or one or more ISBNs failed to
-#      resolve from Open Library
-#
 set -euo pipefail
 
-# ISBNs the real-pipeline tests in e2e/tests/upload.spec.ts depend on the
-# external resolver chain to enrich. Reconciliation:
-#
-#   9780156001311  The Name of the Rose
-#                  → barcode_isbn_clean.jpg (lines 11, 165 — barcode OCR
-#                    fast path: pipeline emits ISBN 978... placeholder
-#                    title then EnrichBookJob polls OL within 60 s).
-#
-#   9781282763074  Born Again Bodies
-#                  → screenshot_mildly_obscured.jpg (line 420 — vision
-#                    pipeline OCRs cover, resolves this ISBN, enriches
-#                    via OL).
-#
-# Other real-pipeline tests in upload.spec.ts (Flyboys, Train to Crystal
-# City, screenshot_mixed_text 5-book identification, manual ISBN entry
-# for The Dispossessed) do NOT hardcode an ISBN literal in the test, and
-# the seeded Dispossessed lookups hit the internal DB rather than OL.
-# Adding ISBNs that no test depends on adds noise without value.
 ISBNS=(
   "9780156001311"
   "9781282763074"
@@ -61,24 +9,11 @@ ISBNS=(
 OL_FAILED=()
 GB_WARN=()
 
-# ── Layer 1: endpoint health ─────────────────────────────────────────────────
-# Query terms are arbitrary well-known books — these checks assert the
-# ENDPOINTS answer sanely, not that a specific record exists.
-
-# curl helper: prints the response body followed by a final line holding
-# the HTTP status code. "000" on transport-level failure.
 fetch_with_code() {
   local url="$1"
   curl -sS -w '\n%{http_code}' --max-time 10 "${url}" 2>/dev/null || printf '\n000'
 }
 
-# Retrying fetch for the REQUIRED Open Library per-ISBN checks. OL latency
-# currently sits at 4-7s and spikes past a single 10s ceiling under load, so one
-# slow response must not fail the whole deploy gate (especially when Google
-# Books — the only fallback — is quota-exhausted). Retries transport/timeout
-# errors (curl rc != 0) up to 3 attempts with 3s backoff, per-attempt max 15s.
-# On success prints the body and returns 0; on exhaustion prints the last curl
-# error text and returns 1.
 ol_fetch_with_retry() {
   local url="$1" attempt body
   for attempt in 1 2 3; do
@@ -136,9 +71,6 @@ check_google_books_volumes_endpoint() {
       fi
       ;;
     429|403)
-      # GB signals quota exhaustion as 429 (rateLimitExceeded) or 403
-      # (quotaExceeded/dailyLimitExceeded). Say so explicitly — this is
-      # the "quota-dead 503s" failure mode that poisons E2E tuning runs.
       reason=$(printf '%s' "${body}" | jq -r '.error.errors[0].reason // .error.status // "unknown"' 2>/dev/null || echo "unknown")
       echo "WARN preflight: Google Books QUOTA EXHAUSTED — HTTP ${http_code} (reason: ${reason})."
       echo "  The resolver will run OL-only this cycle: GB fallback + subtitle evidence unavailable."
@@ -159,8 +91,6 @@ echo
 check_open_library_search_endpoint || true
 check_google_books_volumes_endpoint
 echo
-
-# ── Layer 2: per-ISBN resolution ─────────────────────────────────────────────
 
 check_open_library() {
   local isbn="$1"

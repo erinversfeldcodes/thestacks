@@ -18,15 +18,9 @@ defmodule StacksWeb.Plugs.RouteGroupTest do
     * `:other`        — anything else
   """
 
-  # async: false — the integrated test attaches a global telemetry handler and
-  # sends a real HTTP request through the endpoint.
   use CoreWeb.ConnCase, async: false
 
   alias StacksWeb.Plugs.RouteGroup
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   defp run_plug(path) do
     :get
@@ -34,9 +28,6 @@ defmodule StacksWeb.Plugs.RouteGroupTest do
     |> RouteGroup.call(RouteGroup.init([]))
   end
 
-  # Read the tag regardless of whether the plug chose to stash it in
-  # `conn.private` or `conn.assigns`. Production must settle on one; the test
-  # just needs to see the value wherever it lives.
   defp read_group(conn) do
     cond do
       is_map(conn.private) and Map.has_key?(conn.private, :route_group) ->
@@ -52,10 +43,6 @@ defmodule StacksWeb.Plugs.RouteGroupTest do
         nil
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Per-group tagging
-  # ---------------------------------------------------------------------------
 
   describe "RouteGroup.call/2 — per-group tagging" do
     test "tags /api/auth/login as :auth" do
@@ -144,18 +131,8 @@ defmodule StacksWeb.Plugs.RouteGroupTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Integration: the tag reaches the Stacks-namespaced router_dispatch event
-  # ---------------------------------------------------------------------------
-
   describe "RouteGroup — telemetry integration" do
     test "stacks.router_dispatch.stop carries :route_group in metadata", %{conn: conn} do
-      # `CoreWeb.Telemetry.handle_router_dispatch_stop/4` listens on Phoenix's
-      # native `[:phoenix, :router_dispatch, :stop]` and re-emits a
-      # Stacks-namespaced `[:stacks, :router_dispatch, :stop]` event with
-      # `:route_group` merged into metadata. The rename (vs. re-emitting
-      # Phoenix's own event) prevents any reporter attached to the Stacks
-      # series from double-counting Phoenix's original emission.
       test_pid = self()
       handler_id = "rg-test-#{System.unique_integer([:positive])}"
 
@@ -170,9 +147,6 @@ defmodule StacksWeb.Plugs.RouteGroupTest do
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
-      # Exercise a real Phoenix request — the endpoint must run the RouteGroup
-      # plug and whatever wiring publishes the tag into the dispatch metadata.
-      # /api/health is a public, always-available route.
       get(conn, "/api/health")
 
       assert_receive {:rd_stop, metadata}, 2_000

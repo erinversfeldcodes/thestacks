@@ -219,7 +219,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      # Non-WKT message types fall back to :map (JSONB) instead of raising
       assert TypeMapper.ecto_type(field) == :map
     end
 
@@ -333,7 +332,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
         label: "LABEL_OPTIONAL"
       }
 
-      # Non-WKT message types fall back to :map instead of raising
       assert TypeMapper.migration_type(field) == :map
     end
 
@@ -521,16 +519,7 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert msg =~ "file not found"
     end
 
-    # Issue #354. Drift in a GITIGNORED generated file can only ever be local
-    # staleness — CI builds those from scratch every run — so failing the gate
-    # for it cost two full `just ci` re-runs and reported three failing groups
-    # that were one cause and zero real. Drift in a TRACKED one is the real
-    # thing this check exists for and must still fail.
-    #
-    # These drive the actual working tree, not a mock: the whole point is that
-    # git is the oracle, so a stubbed classifier would prove nothing.
     test "regenerates a stale GITIGNORED generated file instead of failing" do
-      # Inside apps/core/lib/stacks/gen/, which .gitignore covers.
       path =
         Path.join(
           @repo_root,
@@ -548,10 +537,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
 
     test "still fails for a TRACKED generated file that has drifted" do
-      # The assertion is "the implementation must NOT write here", so a broken
-      # implementation writes here anyway — which means the file has to be
-      # disposable. Aiming this at a real committed artefact is not a stricter
-      # test, it is a test that corrupts the working tree when it fails.
       path = Path.join(@repo_root, "drift_probe_tracked_#{:erlang.phash2(self())}.tmp")
       File.write!(path, "committed\n")
       {_, 0} = System.cmd("git", ["-C", @repo_root, "add", "-f", "--", path])
@@ -577,8 +562,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       File.write!(path, "# stale\n")
 
       try do
-        # Same gitignored file as the self-heal case above — without a root to
-        # classify against, the answer must be the conservative one.
         assert {:drift, ^path, _diff} = DriftChecker.check("# fresh\n", path)
         assert File.read!(path) == "# stale\n"
       after
@@ -588,11 +571,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
   end
 
   describe "MigrationGenerator.add_columns_slug" do
-    # A filename is capped at 255 bytes by the filesystem and the module name
-    # becomes an atom, which the BEAM caps at 255 bytes. The slug is derived from
-    # every added column, so a wide table used to blow both: proto.sync died with
-    # `File.Error … file name too long` building a name out of all ~35 `users`
-    # columns.
     defp fields_named(names), do: Enum.map(names, &%{name: &1})
 
     test "leaves a short column list fully descriptive" do
@@ -620,13 +598,10 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       slug = MigrationGenerator.add_columns_slug(fields_named(names), "users")
 
-      # The real ceiling: timestamp + slug + ".exs" must clear 255 bytes, and so
-      # must the module atom.
       filename = "20260728000000_#{slug}.exs"
       assert byte_size(filename) < 255
       assert byte_size("Elixir.Core.Repo.Migrations." <> Macro.camelize(slug)) < 255
 
-      # Still descriptive and still honest about what it dropped.
       assert String.starts_with?(slug, "add_email_")
       assert slug =~ ~r/_and_\d+_more_to_users$/
     end
@@ -679,19 +654,10 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "add :published_at, :utc_datetime_usec"
       refute output =~ "timestamps("
       assert output =~ "idx_event_log_type_agg"
-      # Every generated index uses CONCURRENTLY so squawk stays clean in CI.
       assert output =~ "concurrently: true"
-      # DESC columns render as Ecto's `desc: :col` keyword form, not raw SQL.
       assert output =~ "desc: :occurred_at"
-      # CONCURRENTLY requires running outside a transaction.
       assert output =~ "@disable_ddl_transaction true"
-      # Ecto holds its migration lock on its own connection, but in the
-      # non-disabled path that lock lives long enough during a
-      # CONCURRENTLY build that Neon's TCP idle-keepalive drops the
-      # socket (observed: 300s hang + `ssl send: closed`). Disable the
-      # lock for CONCURRENTLY-bearing migrations.
       assert output =~ "@disable_migration_lock true"
-      # The raw-SQL index escape hatch is gone — use Ecto's `create index`.
       refute output =~ "CREATE INDEX idx_event_log"
       assert output =~ "DO NOT EDIT MANUALLY"
       assert output =~ "def down"
@@ -727,17 +693,11 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       output = MigrationGenerator.generate_create_table(feed_cache, fields, "20260320000004")
 
-      # The explicit unique index (upsert conflict target) is kept.
       assert output =~ "feed_cache_bookshelf_id_unique_index"
-      # The redundant auto FK index on the same single column is suppressed —
-      # a unique index on `[:bookshelf_id]` already covers FK lookups.
       refute output =~ ~s|create index(:feed_cache, [:bookshelf_id]|
     end
 
     test "still emits the auto FK index when no single-column index covers the column" do
-      # post_comments has references_table overrides for post_id + author_id and
-      # no explicit index, so the auto FK indexes must still be emitted — the
-      # suppression is scoped to columns an explicit single-column index covers.
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
       post_comments = Enum.find(manifest.tables, &(&1.table_name == "post_comments"))
@@ -798,7 +758,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert "source_name" in existing
       assert "source_type" in existing
       assert "status" in existing
-      # These belong to other tables in the same migration file
       refute "buyer_id" in existing
       refute "amount_cents" in existing
       refute "placement_id" in existing
@@ -823,7 +782,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
         }
       ]
 
-      # Create a temp migrations dir with a migration that has "name" but not "created_at"
       tmp_dir = Path.join(System.tmp_dir!(), "test_migrations_ts_#{System.unique_integer()}")
       File.mkdir_p!(tmp_dir)
 
@@ -842,7 +800,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       existing = MigrationGenerator.existing_columns(tmp_dir, "test_timestamps")
       assert "name" in existing
 
-      # The delta logic filters out timestamp columns when timestamps: :standard
       new_fields = Enum.filter(fields, fn field -> field.name not in existing end)
 
       new_fields =
@@ -857,13 +814,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
   describe "generate mode writes into the root it is given" do
     @tag :tmp_dir
     test "generates ecto schemas, dbt models, schema.yml and migrations", %{tmp_dir: tmp_dir} do
-      # Reads come from the real repo (buf needs the actual .proto files); every
-      # *write* goes to tmp_dir. The predecessor of this test instead ran the
-      # whole task with `File.cd!(@repo_root)`, which generated into the working
-      # tree and then deleted untracked `_add_*_to_*` migrations to tidy up —
-      # silently destroying migrations a developer had just generated for an
-      # in-flight proto change. It also asserted nothing about migrations
-      # despite saying it did.
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       descriptor = Descriptor.parse!(@repo_root)
 
@@ -871,21 +821,11 @@ defmodule Mix.Tasks.Proto.SyncTest do
       dbt_root = Path.join(tmp_dir, "dbt/models/staging")
       migrations_dir = Path.join(core_root, "priv/repo/migrations")
 
-      # Seed the real migrations so the run sees the true drift state (none).
-      # Two reasons this matters: the migration writer does not mkdir_p its own
-      # output directory (`generate_delta_migration/3` calls File.write! directly),
-      # and against an *empty* directory every column of every table reads as
-      # missing — which builds a delta filename out of all ~35 `users` columns and
-      # dies with :enametoolong. Migration naming and content are covered by the
-      # "generate_migration paths" and "delta migration orchestration" blocks;
-      # this test is about run_generate writing where it is told to.
       File.mkdir_p!(migrations_dir)
 
       Path.join(@repo_root, "apps/core/priv/repo/migrations")
       |> File.cp_r!(migrations_dir)
 
-      # schema.yml is merge-only: it carries hand-written descriptions, so an
-      # absent file is skipped rather than created. Seed it so the merge path runs.
       File.mkdir_p!(dbt_root)
 
       File.cp!(
@@ -914,19 +854,12 @@ defmodule Mix.Tasks.Proto.SyncTest do
         end
       end)
 
-      # Assert the merge produced real content, not merely that a file is present
-      # — it was seeded, so existence alone would pass even if the merge no-oped.
       schema_yml = Path.join(dbt_root, "schema.yml") |> File.read!()
       assert schema_yml =~ "stg_price_snapshots"
       assert schema_yml =~ "book_edition_id"
 
       assert File.exists?(Path.join(core_root, "lib/stacks/gen/proto_json.ex"))
 
-      # With the committed migrations seeded there is no drift, so no new
-      # migration should appear. That is the same property `--check` asserts, and
-      # it is worth asserting on the *write* path too: a generator that emitted a
-      # spurious ADD COLUMN here would produce a mystery migration on every
-      # developer's `mix proto.sync`.
       seeded =
         Path.join(@repo_root, "apps/core/priv/repo/migrations") |> File.ls!() |> Enum.sort()
 
@@ -936,15 +869,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
     @tag :tmp_dir
     test "every write lands under the given root, never in the working tree", %{tmp_dir: tmp_dir} do
-      # The discriminating assertion is on the *paths the generator reports*, not
-      # on the working tree afterwards. Comparing the tree before and after would
-      # be vacuous: with no drift, a run against the real root rewrites generated
-      # files byte-identically and adds no migration, so `git status` is unchanged
-      # and the check passes even when the root argument is being ignored.
-      #
-      # Note tmp_dir lives *inside* @repo_root (apps/core/tmp/…), so "contains the
-      # repo root" proves nothing either — the test requires each path to be under
-      # tmp_dir specifically.
       real_migrations = Path.join(@repo_root, "apps/core/priv/repo/migrations")
       File.mkdir_p!(Path.join(tmp_dir, "apps/core/priv/repo/migrations"))
       File.cp_r!(real_migrations, Path.join(tmp_dir, "apps/core/priv/repo/migrations"))
@@ -988,7 +912,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       try do
         File.cd!(@repo_root)
-        # Should not raise when files are up to date
         ProtoSync.run(["--check"])
       after
         File.cd!(original_cwd)
@@ -996,9 +919,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
     end
 
     test "DriftChecker detects when ecto schema has drifted" do
-      # Instead of corrupting the real generated file (which causes CI race
-      # conditions), we test the DriftChecker module directly by writing a
-      # drifted file to a temp directory and comparing against expected content.
       manifest = Manifest.load!(Path.join(@repo_root, "proto/persisted.exs"))
       [table | _] = manifest.tables
       ecto_path = Path.join([@repo_root, "apps/core", table.ecto_path])
@@ -1051,8 +971,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
         %{name: "name", number: 1, type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}
       ]
 
-      # Call the private generate_migration through run_generate indirectly
-      # by using the MigrationGenerator directly (it's what generate_migration delegates to)
       timestamp = MigrationGenerator.generate_timestamp()
       content = MigrationGenerator.generate_create_table(table, fields, timestamp)
       filename = "#{timestamp}_create_#{table.table_name}.exs"
@@ -1070,7 +988,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       tmp_dir = Path.join(System.tmp_dir!(), "test_mig_delta_#{System.unique_integer()}")
       File.mkdir_p!(tmp_dir)
 
-      # Create an existing migration
       File.write!(Path.join(tmp_dir, "20260101000001_create_delta_test.exs"), """
       defmodule Test do
         use Ecto.Migration
@@ -1128,8 +1045,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       existing = MigrationGenerator.existing_columns(tmp_dir, "warn_test")
       assert "old_field" in existing
 
-      # Proto only has "name", not "old_field" — per additive-only convention, no DROP
-      # The main task's generate_delta_migration handles this, we just verify existing_columns works
       proto_field_names = ["name"]
       removed = Enum.reject(MapSet.to_list(existing), fn col -> col in proto_field_names end)
       assert "old_field" in removed
@@ -1154,12 +1069,10 @@ defmodule Mix.Tasks.Proto.SyncTest do
       end
       """)
 
-      # The table has migration_exists: true but proto has a field not in the migration
       existing = MigrationGenerator.existing_columns(tmp_dir, "drift_table")
       assert "name" in existing
       refute "email" in existing
 
-      # Simulate check_migration_drift logic for existing table
       fields = [
         %{name: "name", number: 1, type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"},
         %{name: "email", number: 2, type: "TYPE_STRING", type_name: nil, label: "LABEL_OPTIONAL"}
@@ -1176,7 +1089,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       tmp_dir = Path.join(System.tmp_dir!(), "test_drift_new_#{System.unique_integer()}")
       File.mkdir_p!(tmp_dir)
 
-      # No migration file exists for "brand_new_table"
       files = if File.dir?(tmp_dir), do: File.ls!(tmp_dir), else: []
 
       has_migration =
@@ -1223,8 +1135,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       try do
         File.cd!(@repo_root)
-        # run/1 calls find_repo_root internally, and it works from repo root
-        # We verify by calling run successfully (which depends on find_repo_root)
         ProtoSync.run(["--check"])
       after
         File.cd!(original_cwd)
@@ -1324,7 +1234,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "      - name: payload"
       assert output =~ "      - name: occurred_at"
       assert output =~ "      - name: published_at"
-      # event_log has no timestamps
       refute output =~ "      - name: created_at"
       refute output =~ "      - name: updated_at"
     end
@@ -1344,8 +1253,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
       assert output =~ "      - name: created_at"
       assert output =~ "      - name: updated_at"
 
-      # accepted_values no longer auto-generated for enum fields — proto enums
-      # can be a superset of DB enums, causing false failures.
       refute output =~ "accepted_values"
     end
 
@@ -1362,15 +1269,12 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       output = SchemaYmlGenerator.generate(event_log_table, fields, descriptor)
 
-      # event_type has null: false in overrides
-      # Extract the event_type column block
       lines = String.split(output, "\n")
 
       event_type_idx =
         Enum.find_index(lines, fn l -> String.contains?(l, "- name: event_type") end)
 
       assert event_type_idx != nil
-      # The tests section should follow with not_null
       assert Enum.at(lines, event_type_idx + 2) =~ "tests:"
       assert Enum.at(lines, event_type_idx + 3) =~ "- not_null"
     end
@@ -1390,7 +1294,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       output = SchemaYmlGenerator.generate(event_log_table, fields, descriptor)
 
-      # relationships tests are no longer auto-generated
       refute output =~ "relationships:"
     end
   end
@@ -1424,11 +1327,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       merged = SchemaYmlGenerator.merge(existing, %{"stg_event_log" => new_block})
 
-      # stg_books is preserved
       assert merged =~ "stg_books"
       assert merged =~ "Hand-written books model."
 
-      # stg_event_log is replaced
       assert merged =~ "Proto-synced staging model for event_log."
       refute merged =~ "Old description."
     end
@@ -1513,7 +1414,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       File.write!(tmp_path, content)
 
-      # No proto models -> merge is a no-op
       assert :ok == SchemaYmlGenerator.check_drift(tmp_path, %{})
 
       File.rm!(tmp_path)
@@ -1570,9 +1470,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
           fields =
             Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
-          # `skip_ecto: true` tables have a hand-written schema (e.g. a pgvector
-          # column proto cannot express) — don't drift-check a file the codegen
-          # does not own. Mirrors Mix.Tasks.Proto.Sync's run_check.
           ecto_results =
             if Map.get(table, :skip_ecto, false) do
               []
@@ -1585,8 +1482,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
               ]
             end
 
-          # `skip_dbt: true` tables intentionally have no staging model —
-          # don't drift-check a file that by design doesn't exist.
           if Map.get(table, :skip_dbt, false) do
             ecto_results
           else
@@ -1625,11 +1520,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
           {model_name, block}
         end)
 
-      # After merge, check_drift should return :ok
       existing = File.read!(schema_yml_path)
       merged = SchemaYmlGenerator.merge(existing, generated_blocks)
 
-      # Write merged content to a temp file and check drift
       tmp_path = Path.join(System.tmp_dir!(), "schema_roundtrip_#{System.unique_integer()}.yml")
       File.write!(tmp_path, merged)
 
@@ -1654,7 +1547,6 @@ defmodule Mix.Tasks.Proto.SyncTest do
 
       assert output =~ "defmodule StacksWeb.ProtoJSON.Gen do"
 
-      # One function per config entry
       for config <- manifest.proto_json do
         assert output =~ "def #{config.function_name}(struct) do"
         assert output =~ "def #{config.function_name}(nil), do: nil"
@@ -1668,11 +1560,8 @@ defmodule Mix.Tasks.Proto.SyncTest do
     } do
       output = ProtoJsonGenerator.generate(manifest, descriptor)
 
-      # Proto field is website_url with json_name="website" — Author uses the json_name
       assert output =~ "website: struct.website_url"
 
-      # The Author function should NOT have "website_url:" as a map key (only "website:")
-      # Split output by function boundaries and check the author section
       author_section =
         output
         |> String.split("@doc")
@@ -1688,11 +1577,9 @@ defmodule Mix.Tasks.Proto.SyncTest do
     } do
       output = ProtoJsonGenerator.generate(manifest, descriptor)
 
-      # Book skips author, editions, edition_count, primary_edition, community_read_count
       refute output =~ "author: struct.author"
       refute output =~ "edition_count: struct.edition_count"
 
-      # User skips password_hash
       refute output =~ "password_hash: struct.password_hash"
     end
   end

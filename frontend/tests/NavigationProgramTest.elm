@@ -52,10 +52,6 @@ suite =
         ]
 
 
-
--- NAVIGATE AWAY MID-LOAD (Issue #274, US-1.2.5 sad path)
-
-
 {-| A shelf payload carrying one recognisable book, standing in for the
 response to the bookshelf the user has just navigated AWAY from.
 -}
@@ -101,17 +97,12 @@ staleSiblingShelfResponseIsDiscarded =
     test "navigate_away_mid_load: a Library response arriving after routing to the Antilibrary is discarded" <|
         \() ->
             let
-                -- 1. The user is on /library. Its GET is issued and left UNRESOLVED.
                 ( libraryModel, _ ) =
                     Bookshelf.init Bookshelf.libraryConfig (Just "test-token") "test-user-id"
 
-                -- 2. The user routes to /antilibrary. Main.elm builds a fresh
-                --    PageBookshelf model with its own in-flight GET.
                 ( antiLibraryModel, _ ) =
                     Bookshelf.init Bookshelf.antiLibraryConfig (Just "test-token") "test-user-id"
 
-                -- 3. NOW the library response lands. Main.elm routes it to whichever
-                --    PageBookshelf is current -- which is the antilibrary.
                 ( afterStale, _, _ ) =
                     Bookshelf.update
                         (Bookshelf.ShelvesLoaded
@@ -121,10 +112,7 @@ staleSiblingShelfResponseIsDiscarded =
                         antiLibraryModel
             in
             Expect.all
-                -- The premise: the library GET really was still in flight.
                 [ \_ -> libraryModel.shelves |> Expect.equal Loading
-
-                -- The invariant: the antilibrary keeps waiting on its OWN request.
                 , \_ -> afterStale.shelves |> Expect.equal Loading
                 ]
                 ()

@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# scripts/warmup-vision.sh — warm the vision pipeline before E2E tests.
-#
-# Uploads 4 cover-photo images as the seed user and streams their SSE pipelines
-# in parallel. This triggers a Modal cold-start (if needed) before the E2E suite
-# runs, so the first real upload test doesn't pay the cold-start penalty.
-#
-# Usage:
-#   scripts/warmup-vision.sh <core_url> <core_app>
-#
-# Exit codes:
-#   0 — warmup ran (pipelines may have timed out — that's a warning, not fatal)
-#   1 — could not authenticate or all uploads failed (app is broken)
 
 set -euo pipefail
 
@@ -35,9 +23,6 @@ if [[ -z "${smoke_token}" ]]; then
     exit 1
 fi
 
-# One barcode image is enough to wake the GPU (triggers classify → GPU, then
-# extract → pyzbar short-circuit, then a single ISBN resolve call).
-# Using screenshot images here burns the Google Books rate limit before E2E.
 warmup_images=(
     "${REPO_ROOT}/images/not_a_book.jpg"
 )

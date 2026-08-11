@@ -32,8 +32,6 @@ defmodule Core.PromEx.DashboardCompletenessTest do
 
   defp all_panels(_), do: []
 
-  # Every family referenced by any panel across ALL registered dashboards,
-  # normalised to the registered family key.
   defp displayed_families do
     for {:core, rel} <- Core.PromEx.dashboards(),
         path = Application.app_dir(:core, Path.join("priv", rel)),

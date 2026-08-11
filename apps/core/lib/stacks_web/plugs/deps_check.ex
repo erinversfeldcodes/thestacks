@@ -62,10 +62,6 @@ defmodule StacksWeb.Plugs.DepsCheck do
     ]
   end
 
-  # SearXNG: a tiny query with `limit: 1` exercises the real HTTP path and
-  # keeps response-body parsing cost minimal. A failure returns
-  # `error:<reason>` so operators can tell "not configured" (deploy gap)
-  # from "unreachable" (Fly networking gap) without opening the container.
   defp check_searxng do
     case searxng_client().search("probe", limit: 1) do
       {:ok, _results} ->

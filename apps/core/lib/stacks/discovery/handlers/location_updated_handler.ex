@@ -56,8 +56,6 @@ defmodule Stacks.Discovery.Handlers.LocationUpdatedHandler do
     end
   end
 
-  # Catch-all: ignore events we don't care about (and malformed
-  # location-updated events without a usable aggregate_id).
   def handle_event(_event), do: :ok
 
   defp enqueue_discovery(city, country_code) do

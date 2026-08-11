@@ -28,8 +28,6 @@ defmodule Core.Repo.Migrations.RekeyPriceSnapshotsIndexes do
                            concurrently: true
                          )
 
-    # The uniqueness grain moves with the key. Dropping the old index is what
-    # allows two editions of one work to hold separate prices at the same store.
     drop_if_exists unique_index(:price_snapshots, [:book_id, :store_id],
                      prefix: "op",
                      concurrently: true

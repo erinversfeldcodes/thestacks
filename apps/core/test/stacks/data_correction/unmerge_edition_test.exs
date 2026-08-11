@@ -31,10 +31,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
 
   @new_title "Dune Messiah"
 
-  # A work carrying a wrongly merged edition, plus two readers who put the work
-  # on a shelf. `merge_edition/2` inserts every merged edition with
-  # `is_primary: false`, which is the whole reason no placement can ever name
-  # one — so the fixture builds that shape rather than a convenient one.
   defp wrongly_merged(work_attrs \\ []) do
     work = insert(:book, work_attrs)
     [primary] = work.editions
@@ -69,8 +65,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
     end)
   end
 
-  # ── Casting the operator's argument ───────────────────────────────────────
-
   describe "cast_argument/1" do
     test "accepts the two keys it documents and nothing else" do
       id = Ecto.UUID.generate()
@@ -99,8 +93,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
     end
   end
 
-  # ── Planning refuses what it should not touch ─────────────────────────────
-
   describe "planning" do
     test "refuses an edition that does not exist" do
       id = Ecto.UUID.generate()
@@ -117,9 +109,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
     end
 
     test "refuses the only edition of a work — the work must keep one" do
-      # Deliberately an `:editionless_book` plus one NON-primary edition. A
-      # `:book` factory work's sole edition is its primary, so it would be
-      # refused by the guard above and this one would never run.
       work = insert(:editionless_book)
       only = Repo.insert!(build(:book_edition, book: work, is_primary: false))
 
@@ -149,8 +138,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
                }
              ] = outcome.changes
 
-      # The blast radius the operator needs before deciding: how many readers
-      # are left holding the work this edition is leaving.
       assert because =~ "2 placement(s) stay on"
       assert because =~ merged.isbn
     end
@@ -165,8 +152,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       assert audit_rows() == []
     end
   end
-
-  # ── The split itself ──────────────────────────────────────────────────────
 
   describe "applying" do
     setup do
@@ -187,7 +172,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       refute new_work_id == ctx.work.id
       assert Repo.get!(Book, new_work_id).title == @new_title
 
-      # The work it left keeps its own identity and its own edition.
       assert work_id_of(ctx.primary.id) == ctx.work.id
       assert Repo.get!(Book, ctx.work.id).title == ctx.work.title
     end
@@ -201,7 +185,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       )
 
       assert primary?(ctx.merged.id)
-      # And the work it left still has exactly one primary — its own.
       assert primary?(ctx.primary.id)
     end
 
@@ -219,11 +202,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       assert resolved.title == @new_title
     end
 
-    # Idempotence is not claimed for a targeted correction (see
-    # `Stacks.DataCorrection.Targeted`), so what has to hold is that a second
-    # run refuses rather than compounds. It refuses at the *first* guard: the
-    # split promoted the edition to its new work's primary, and a primary
-    # edition is never a merged one. A second work is not minted either.
     test "refuses a second run — the edition is now its own work's primary", ctx do
       opts = [apply: true, invoked_by: "test"]
 
@@ -240,8 +218,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
     end
   end
 
-  # ── The age gate may not be widened by a repair ───────────────────────────
-
   describe "visibility" do
     test "the new work inherits the age gate rather than defaulting to public" do
       %{merged: merged} = wrongly_merged(visibility_tier: "age_gated")
@@ -255,17 +231,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
     end
   end
 
-  # ── The disposition decision ──────────────────────────────────────────────
-
-  # #376's actual hard question. The decision is that placements stay, because
-  # no placement has ever named a merged edition — `Shelving.place_book/3`
-  # writes the work's PRIMARY edition and `merge_edition/2` never creates a
-  # primary — so which readers acquired the split-out edition is not recorded
-  # and cannot be derived.
-  #
-  # Asserted in both directions on purpose: "the old work still has both" alone
-  # would pass if the code copied placements, and "the new work has none" alone
-  # would pass if the code deleted them.
   describe "placements" do
     setup do
       {:ok, wrongly_merged()}
@@ -300,11 +265,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       refute ctx.merged.id in edition_ids
     end
 
-    # #396 — the post-#378 case: place_book/4 records the SCANNED edition, so a
-    # placement can name the edition being split. That row is evidence, not a
-    # guess: the reader's copy IS the split-out book, and the placement follows
-    # it — or the reparent would leave book_id and book_edition_id naming
-    # different works.
     test "a placement naming the split edition follows it to the new work (#396)", ctx do
       scanner = insert(:placement, book: ctx.work, book_edition_id: ctx.merged.id)
 
@@ -316,11 +276,9 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       new_work_id = work_id_of(ctx.merged.id)
       moved = Repo.reload!(scanner)
 
-      # Internally consistent: both FKs on the SAME (new) work…
       assert moved.book_id == new_work_id
       assert moved.book_edition_id == ctx.merged.id
 
-      # …while the two primary-edition readers stay put, untouched.
       assert Repo.aggregate(from(p in Placement, where: p.book_id == ^ctx.work.id), :count) == 2
     end
 
@@ -333,8 +291,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       assert change.because =~ "2 placement(s) stay on"
     end
   end
-
-  # ── The audit ─────────────────────────────────────────────────────────────
 
   describe "the audit row" do
     setup do
@@ -364,9 +320,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
       assert metadata["from"]["work_id"] == ctx.work.id
       assert metadata["to"]["work_title"] == @new_title
 
-      # The destination did not exist when the plan was made, so only the
-      # applied run can say where the edition went. Without it the trail names
-      # a row that cannot be found.
       assert metadata["new_work_id"] == work_id_of(ctx.merged.id)
     end
 
@@ -381,13 +334,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
     end
   end
 
-  # ── The audit shares the change's transaction ─────────────────────────────
-
-  # Copied from #340's test of the same name. The targeted path must inherit
-  # that guarantee rather than reimplement it, and the proof is that it fails
-  # identically: `{:error, {the row's id, the audit's own error}}`. A
-  # best-effort audit — one that logs and carries on — cannot produce that
-  # shape, and neither can a second audit path that only looks like the first.
   describe "a correction that cannot be recorded" do
     setup do
       {:ok, wrongly_merged()}
@@ -408,7 +354,6 @@ defmodule Stacks.DataCorrection.UnmergeEditionTest do
 
       assert {:error, {^id, %Postgrex.Error{postgres: %{code: :undefined_table}}}} = result
 
-      # Not the edition's move, and not the work minted to receive it.
       assert work_id_of(ctx.merged.id) == ctx.work.id
       refute primary?(ctx.merged.id)
       assert Repo.aggregate(Book, :count) == 1

@@ -21,7 +21,6 @@ defmodule Stacks.SeedHonestyTest do
 
   @seeds_path Path.expand("../../priv/repo/seeds.exs", __DIR__)
 
-  # `{1076, "9780156030359", "A Room of One's Own", 108, …}` — index, then ISBN.
   @edition_tuple ~r/^\s*\{\d+,\s*"(\d+)"/m
 
   defp seeds_source, do: File.read!(@seeds_path)
@@ -34,8 +33,6 @@ defmodule Stacks.SeedHonestyTest do
 
   describe "the values in seeds.exs" do
     test "the ISBN literals are actually found (this test can fail)" do
-      # Without this the regex could silently stop matching and every assertion
-      # below would pass over an empty list.
       assert length(seeded_isbns()) > 150
     end
 
@@ -133,8 +130,6 @@ defmodule Stacks.SeedHonestyTest do
       vetted =
         Books.vet_edition_row!(row(%{isbn: "0062028510", book_id: Ecto.UUID.dump!(book.id)}))
 
-      # The string table name, exactly as seeds.exs writes it — that is the call
-      # whose rows are unchecked, so it is the call this has to survive.
       assert {1, _} = Core.Repo.insert_all("book_editions", [vetted], prefix: "op")
       assert Core.Repo.get_by(BookEdition, isbn: "9780062028518")
     end

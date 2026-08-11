@@ -26,12 +26,6 @@ defmodule Core.Repo.Migrations.CreateUserMfa do
       END IF;
     END $$;
     """)
-
-    # stacks_dbt intentionally NOT granted SELECT on op.user_mfa.
-    # The totp_secret column stores Cloak-encrypted ciphertext (bytea) and the
-    # recovery_codes column stores SHA-256 hashes of sensitive one-time codes.
-    # dbt has no legitimate analytics use for this table, so access is withheld
-    # to reduce the blast radius of a warehouse credential compromise.
   end
 
   def down do

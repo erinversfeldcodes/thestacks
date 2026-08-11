@@ -52,12 +52,8 @@ defmodule Stacks.Workers.GeocodeBookstoresJob do
   alias Stacks.Enrichment.Bookstore
   alias Stacks.Geocoding
 
-  # Above Nominatim's ~1 req/sec policy, not exactly at it: "1 per second" measured from
-  # our side and measured from theirs are not the same number.
   @throttle_ms 1_100
 
-  # One run's ceiling. Eleven shops today, but the cap is what stops a grown table turning
-  # into an unattended crawl against a donated service.
   @batch_size 25
 
   @impl true
@@ -83,9 +79,7 @@ defmodule Stacks.Workers.GeocodeBookstoresJob do
     Repo.all(
       from b in Bookstore,
         where: is_nil(b.latitude) or is_nil(b.longitude),
-        # A website is not a place. See the moduledoc.
         where: b.has_physical == true,
-        # A website is not a place. See the moduledoc.
         order_by: [asc: b.name],
         limit: @batch_size
     )
@@ -103,16 +97,11 @@ defmodule Stacks.Workers.GeocodeBookstoresJob do
   @spec batch_size() :: pos_integer()
   def batch_size, do: @batch_size
 
-  # Serial by construction: a reduce, with the sleep inside it. Written this way rather than
-  # as an async stream precisely so that concurrency cannot be introduced by accident.
   defp geocode_one(store, count) do
     query = Geocoding.query_for(%{name: store.name, country_code: store.country_code})
 
     result = Geocoding.geocode(query)
 
-    # Sleep after every attempt, including failures: a 429 or a timeout still cost the
-    # service a request, so backing off only on success would defeat the throttle exactly
-    # when it matters most.
     Process.sleep(throttle_ms())
 
     case result do
@@ -133,8 +122,6 @@ defmodule Stacks.Workers.GeocodeBookstoresJob do
         end
 
       {:error, reason} ->
-        # Left unpositioned, not guessed. A shop with no coordinates is excluded from the
-        # pairing scan, which is correct; a fabricated coordinate would pair the wrong things.
         Logger.info("GeocodeBookstoresJob: no coordinates for #{store.name} (#{inspect(reason)})")
 
         count

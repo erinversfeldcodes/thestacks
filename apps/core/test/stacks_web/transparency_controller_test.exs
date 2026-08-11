@@ -66,7 +66,6 @@ defmodule StacksWeb.TransparencyControllerTest do
         refute String.contains?(body, forbidden)
       end
 
-      # A per-user identifier field would leak as a JSON key; assert none exist.
       for forbidden_key <- ~w(handle user ip name) do
         refute String.contains?(body, "\"#{forbidden_key}\":")
       end

@@ -14,7 +14,6 @@ defmodule StacksWeb.BookshelfControllerTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  # Flatten placements across all shelves for assertions that care about placement content.
   defp all_placements(resp) do
     resp
     |> Map.get("shelves", [])
@@ -122,7 +121,6 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> auth_conn(other)
         |> get("/api/bookshelves/library")
 
-      # Other user gets an empty response (their own non-existent library), not the owner's
       resp = json_response(conn, 200)
       assert resp["count"] == 0
       assert all_placements(resp) == []
@@ -158,7 +156,6 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> auth_conn(user)
         |> get("/api/bookshelves/library")
 
-      # Owner can see all their own placements (owner bypass in visibility module)
       assert %{"count" => count} = json_response(conn, 200)
       assert count == 2
     end
@@ -349,11 +346,6 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
-  # The spine bookmark ribbon (#287): each placement carries a server-computed
-  # `has_user_writing` flag — true when the owner has a visible blog-post
-  # association to that book — so the SPA can render the ribbon without a
-  # per-book lookup. The flag is layered onto PlacementDetail (not a proto
-  # field), so it must survive the ProtoJSON serialization for every placement.
   describe "GET /api/bookshelves/:bookshelf_name — has_user_writing flag (#287)" do
     test "is true for a book the owner has written a visible association about", %{conn: conn} do
       user = insert(:user)
@@ -392,10 +384,6 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
   end
 
-  # Punch #1 (Issue #112, L1 US-1.2.4): the "returns all valid bookshelf names"
-  # loop only asserts the echoed name — it seeds nothing, so a reading_pile
-  # response body has never been asserted. These tests seed placements and
-  # assert the full nested shape and the documented ordering.
   describe "GET /api/bookshelves/reading_pile — populated response (US-1.2.4)" do
     setup %{conn: conn} do
       user = insert(:user)
@@ -500,13 +488,10 @@ defmodule StacksWeb.BookshelfControllerTest do
       bookshelf: bookshelf,
       shelf: shelf
     } do
-      # Second shelf, deliberately inserted first at a LATER position so an
-      # unordered query would surface it before shelf 0.
       shelf_two = insert(:shelf, bookshelf: bookshelf, position: 1)
       third = insert(:book, title: "Third")
       insert(:placement, bookshelf: bookshelf, shelf: shelf_two, book: third, position: 0)
 
-      # Two more on shelf 0, inserted out of position order.
       second = insert(:book, title: "Second")
       insert(:placement, bookshelf: bookshelf, shelf: shelf, book: second, position: 1)
 
@@ -569,10 +554,9 @@ defmodule StacksWeb.BookshelfControllerTest do
         |> auth_conn(other)
         |> get("/api/bookshelves/library?view_as=unauthenticated")
 
-      # Non-owner cannot use view_as; either gets 403 or their own (empty) bookshelf
       response = json_response(conn, conn.status)
       assert conn.status in [200, 403]
-      # If 200, should be their own empty bookshelf
+
       if conn.status == 200 do
         assert response["count"] == 0
       end
@@ -602,7 +586,6 @@ defmodule StacksWeb.BookshelfControllerTest do
         visibility: "owner"
       )
 
-      # Baseline: as the owner (no view_as) both placements are visible.
       baseline =
         conn
         |> auth_conn(user)
@@ -611,8 +594,6 @@ defmodule StacksWeb.BookshelfControllerTest do
 
       assert baseline["count"] == 2
 
-      # With ?view_as=unauthenticated the payload is FILTERED to the simulated
-      # audience: the owner-only placement is dropped, the public one remains.
       filtered =
         build_conn()
         |> auth_conn(user)
@@ -639,8 +620,6 @@ defmodule StacksWeb.BookshelfControllerTest do
     end
 
     test "lazily creates the named shelf when it does not exist yet", %{conn: conn} do
-      # A user can set visibility on any of their 5 named shelves even before
-      # placing a book there (bookshelves are created lazily).
       user = insert(:user, profile_visibility: "platform")
 
       conn =
@@ -655,8 +634,6 @@ defmodule StacksWeb.BookshelfControllerTest do
     test "returns 422 when the new visibility exceeds the profile ceiling (US-10.2.1)", %{
       conn: conn
     } do
-      # profile_visibility "owner" is the most restrictive ceiling: no bookshelf
-      # may be made more visible than the profile.
       user = insert(:user, profile_visibility: "owner")
       insert(:bookshelf, user: user, name: "library", visibility: "owner")
 
@@ -680,8 +657,6 @@ defmodule StacksWeb.BookshelfControllerTest do
       |> put("/api/bookshelves/library/visibility", %{visibility: "platform"})
       |> json_response(200)
 
-      # The other user's identically-named shelf is untouched — name-based routing
-      # is user-scoped by construction (get_or_create keys on the caller's id).
       assert Stacks.Shelving.get_bookshelf(other_user.id, "library").visibility == "owner"
     end
 

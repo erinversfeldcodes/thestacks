@@ -13,7 +13,6 @@ defmodule Core.Repo.Migrations.EnableRlsPolicies do
   use Ecto.Migration
 
   def up do
-    # bookshelves
     execute("ALTER TABLE op.bookshelves ENABLE ROW LEVEL SECURITY")
     execute("ALTER TABLE op.bookshelves FORCE ROW LEVEL SECURITY")
 
@@ -35,7 +34,6 @@ defmodule Core.Repo.Migrations.EnableRlsPolicies do
       USING (visibility = 'platform')
     """)
 
-    # bookshelf_placements
     execute("ALTER TABLE op.bookshelf_placements ENABLE ROW LEVEL SECURITY")
     execute("ALTER TABLE op.bookshelf_placements FORCE ROW LEVEL SECURITY")
 
@@ -68,7 +66,6 @@ defmodule Core.Repo.Migrations.EnableRlsPolicies do
       )
     """)
 
-    # user_blocks
     execute("ALTER TABLE op.user_blocks ENABLE ROW LEVEL SECURITY")
     execute("ALTER TABLE op.user_blocks FORCE ROW LEVEL SECURITY")
 
@@ -84,7 +81,6 @@ defmodule Core.Repo.Migrations.EnableRlsPolicies do
       )
     """)
 
-    # visibility_grants
     execute("ALTER TABLE op.visibility_grants ENABLE ROW LEVEL SECURITY")
     execute("ALTER TABLE op.visibility_grants FORCE ROW LEVEL SECURITY")
 

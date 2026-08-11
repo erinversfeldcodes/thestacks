@@ -1,29 +1,16 @@
 name: Dependabot lock auto-regen
 
-# When Dependabot bumps a Python dep that feeds the hash-pinned vision locks
-# (requirements/** or apps/vision/requirements*.txt), the committed lockfiles go
-# stale and the `vision-lock-drift` guard in ci.yml would fail the PR. This
-# workflow regenerates the locks (same pinned pip-tools + flags as
-# `just lock-vision`) and commits them back to the Dependabot PR branch, so the
-# PR converges without any manual `just lock-vision`.
-#
-# Only runs for Dependabot-authored PRs. The triggering paths deliberately
-# EXCLUDE the *.lock files, so the auto-commit can't retrigger this workflow
-# (a GITHUB_TOKEN push wouldn't retrigger CI anyway — belt and suspenders).
 on:
   pull_request:
     paths:
       - 'requirements/**'
       - 'apps/vision/requirements*.txt'
 
-# Least-privilege: only the write needed to push the regenerated lock back.
 permissions:
   contents: read
 
 jobs:
   regen:
-    # Dependabot-authored PRs only. GitHub gives Dependabot runs a read-only
-    # token by default; the job-level permission below grants the write we need.
     if: ${{ github.actor == 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -39,7 +26,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.head_ref }}
-          # persist-credentials (default) keeps the token so `git push` works.
       - name: Regenerate vision locks
         run: |
           set -euo pipefail

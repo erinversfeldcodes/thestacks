@@ -12,10 +12,6 @@ import Types.RemoteData exposing (RemoteData(..))
 import Types.Visibility
 
 
-
--- Helpers
-
-
 libraryInit : Bookshelf.Model
 libraryInit =
     { shelves = Loading
@@ -27,18 +23,10 @@ libraryInit =
     , viewMode = SpineView
     , sortState = { column = BookList.Title, direction = BookList.Asc }
     , token = Nothing
-
-    -- Shelf organisation starts idle with nothing dragging. `token = Nothing` above means
-    -- the organiser is not rendered for this fixture anyway — its controls need a token.
     , organiser = { dragging = Nothing }
     , organiserBusy = False
     , organiserError = Nothing
-
-    -- No pending undo: this fixture is a plain visit, not an arrival off a
-    -- removal. `Bookshelf.withPendingUndo` is the only thing that changes it.
     , undoToast = Bookshelf.ToastHidden
-
-    -- No spine has taken arrow-key focus yet (#388).
     , focusedSpine = Nothing
     }
 
@@ -72,8 +60,6 @@ bookDetailInit =
     , progressCard = Nothing
     , progressSaveState = NotAsked
     , finishedReadPrompt = False
-
-    -- Nothing has been removed yet; only `RemoveCompleted (Ok _)` sets this.
     , undoableRemoval = Nothing
     }
 
@@ -99,10 +85,6 @@ sampleBook =
     , subjects = []
     , visibilityTier = Public
     }
-
-
-
--- Library update tests
 
 
 suite : Test

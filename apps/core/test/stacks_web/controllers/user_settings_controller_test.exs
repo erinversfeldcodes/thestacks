@@ -57,8 +57,6 @@ defmodule StacksWeb.UserSettingsPrivacyReadControllerTest do
         |> get("/api/settings/privacy")
         |> json_response(200)
 
-      # #367: the page seeds these from the login blob but must hydrate the live
-      # value from this endpoint — so they have to be present here.
       assert body["consent_analytics"] == true
       assert body["consent_writing_assistant"] == false
     end

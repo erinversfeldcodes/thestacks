@@ -49,7 +49,6 @@ test("drive 11b: import journey with screenshots", async ({ page, request }) => 
   await page.getByTestId("import-choose-file").click();
   (await chooserPromise).setFiles(FIXTURE);
 
-  // Catch the progress phase if the job is slow enough to show it.
   const progress = page.getByTestId("import-progress");
   const sawProgress = await progress
     .waitFor({ state: "visible", timeout: 8000 })
@@ -104,7 +103,6 @@ test("drive 11c: syndication panel with screenshots", async ({ page, request, co
   await expect(page.getByTestId("syndication-backlink")).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/11c-2-loop-closed.png`, fullPage: true });
 
-  // The feed as Substack sees it (anonymous).
   const me = await request.get("/api/auth/me", { headers: auth });
   const handle = (await me.json()).user.handle as string;
   await page.goto(`/api/feeds/u/${handle}/blog`);
@@ -116,13 +114,10 @@ test("drive 11e: author card shows live bookstore events", async ({ page, reques
   test.skip(session === null, "helper off");
   if (!session) return;
 
-  // The seeded book may be age-gated on the preview (AGE_GATING_ENABLED=true);
-  // flip the drive user's verification via the gated test helper first.
   await request.put("/api/test/age-verification", {
     data: { email: session.email, verified: true },
   });
 
-  // Umberto Eco's seeded book; the event was written to op.bookstore_events.
   await landOn(page, session, "/books/a1b2c3d4-0000-0000-0000-000000001037");
   const events = page.getByTestId("author-events");
   await events.scrollIntoViewIfNeeded();

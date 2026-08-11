@@ -42,7 +42,6 @@ import sys
 
 
 def _extract_execute_blocks(src: str) -> list[str]:
-    # Raw SQL text from triple-quoted and single-quoted execute(...) forms.
     blocks: list[str] = []
     blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"""(.*?)"""', src, re.DOTALL)]
     blocks += [m.group(1) for m in re.finditer(r'execute\s*\(\s*"([^"]+)"\s*\)', src)]
@@ -80,7 +79,6 @@ def _parse_index_call(args: str) -> dict:
     if m:
         prefix = m.group(1)
 
-    # Table: either `table(:users, ...)` or a bare `:users` first argument.
     table = None
     m = re.search(r"table\(\s*:([a-z_][a-z0-9_]*)", args)
     if m:
@@ -90,7 +88,6 @@ def _parse_index_call(args: str) -> dict:
         if m:
             table = m.group(1)
 
-    # Column list: first bracketed group. Items are `:atom` or "expr" strings.
     columns: list[str] = []
     m = re.search(r"\[(.*?)\]", args, re.DOTALL)
     if m:
@@ -151,34 +148,23 @@ def _translate_create_table_dsl(src: str) -> list[str]:
 def _translate_index_dsl(src: str) -> list[str]:
     """Synthesise CREATE INDEX SQL for each create (unique_)index DSL call."""
     out: list[str] = []
-    # `create_if_not_exists` must be matched as well as `create`. It was not,
-    # which silently re-opened the whole #219 DSL blind spot for anyone who
-    # reached for the idempotent form: `create_if_not_exists index(...,
-    # concurrently: false)` was invisible to squawk. Found while auditing #337's
-    # own evidence — 20260730200500 builds two indexes this way and the gate
-    # extracted zero statements from it.
     for m in re.finditer(r"\bcreate(?:_if_not_exists)?\s+(unique_)?index\s*\(", src):
         unique = bool(m.group(1))
         args = _balanced_args(src, m.end())
         info = _parse_index_call(args)
         table = info["table"]
         if not table or not info["columns"]:
-            # Can't render a meaningful statement — leave it to other gates.
             continue
         qualified = f"{info['prefix']}.{table}" if info["prefix"] else table
         cols = ", ".join(info["columns"])
         name = info["name"] or f"{table}_idx"
         unique_kw = "UNIQUE " if unique else ""
         if info["concurrently"]:
-            # Genuinely safe build: explicit name + IF NOT EXISTS keeps squawk's
-            # prefer-robust-stmts happy so a correct migration is not flagged.
             out.append(
                 f"CREATE {unique_kw}INDEX CONCURRENTLY IF NOT EXISTS "
                 f"{name} ON {qualified} ({cols});"
             )
         else:
-            # Non-concurrent build locks writes — trips
-            # require-concurrent-index-creation, which is the whole point.
             out.append(f"CREATE {unique_kw}INDEX {name} ON {qualified} ({cols});")
     return out
 
@@ -189,13 +175,7 @@ def extract(path: str) -> list[str]:
     subject: list[str] = []
     subject += _extract_execute_blocks(src)
     subject += _translate_index_dsl(src)
-    # The CREATE TABLE stanzas are context, not subject matter: they exist only
-    # so squawk can tell "new table" from "live table" while judging the
-    # statements above. On their own they assert nothing, so a migration that
-    # *only* creates tables still reports as having no analysable SQL rather
-    # than as a vacuous green.
     statements = (_translate_create_table_dsl(src) + subject) if subject else []
-    # Normalise trailing semicolons.
     return [s if s.rstrip().endswith(";") else s + ";" for s in statements]
 
 

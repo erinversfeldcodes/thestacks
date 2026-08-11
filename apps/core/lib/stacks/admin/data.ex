@@ -104,8 +104,6 @@ defmodule Stacks.Admin.Data do
     {:ok, stats}
   end
 
-  # Private helpers
-
   defp decode_audit_row(columns, row) do
     columns
     |> Enum.zip(row)

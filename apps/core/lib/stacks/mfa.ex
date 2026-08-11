@@ -17,10 +17,6 @@ defmodule Stacks.MFA do
   @issuer "The Stacks"
   @recovery_code_count 10
 
-  # ---------------------------------------------------------------------------
-  # Enrollment
-  # ---------------------------------------------------------------------------
-
   @doc """
   Begin MFA enrollment for a user.
 
@@ -80,10 +76,6 @@ defmodule Stacks.MFA do
       {:error, :invalid_code}
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Verification
-  # ---------------------------------------------------------------------------
 
   @doc """
   Verify a TOTP code for an enrolled user.
@@ -161,15 +153,6 @@ defmodule Stacks.MFA do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
-
-  # MFA verify-outcome counter (Issue #237). Fires on both the TOTP and the
-  # recovery-code verification paths so every code-checking route an attacker
-  # brute-forces (and every legitimate friction point) is observable. `outcome`
-  # is a bounded whitelisted atom (:success | :failure) — never the code,
-  # secret, or user-id (telemetry is warehouse-adjacent, GDPR).
   defp emit_verify(outcome) when outcome in [:success, :failure] do
     :telemetry.execute([:stacks, :auth, :mfa, :verify], %{count: 1}, %{outcome: outcome})
   end

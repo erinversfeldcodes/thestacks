@@ -18,8 +18,6 @@ defmodule Stacks.AI.BudgetTracker do
 
   defstruct providers: %{}, daily_total_cents: 0, monthly_total_cents: 0
 
-  # Client API
-
   @doc "Starts the BudgetTracker GenServer."
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, :ok, name: Keyword.get(opts, :name, __MODULE__))
@@ -45,8 +43,6 @@ defmodule Stacks.AI.BudgetTracker do
   def current_state do
     GenServer.call(__MODULE__, :current_state)
   end
-
-  # Server callbacks
 
   @impl true
   def init(:ok) do

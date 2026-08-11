@@ -15,10 +15,6 @@ defmodule Stacks.AI.VisionErrorTest do
   alias Stacks.AI.VisionError
   alias Stacks.Proto.Enums.VisionErrorCode
 
-  # The sidecar's half of this contract is `apps/vision/tests/test_vision_errors.py`,
-  # which asserts the codes FastAPI actually puts on the wire are exactly these.
-  # Both halves read the enum from the generated proto rather than from a literal
-  # list, so the only way they can disagree is if one of them stops being run.
   @wire_codes VisionErrorCode.values() -- ["VISION_ERROR_CODE_UNSPECIFIED"]
 
   describe "sidecar contract — every wire code is a named determination" do
@@ -51,9 +47,6 @@ defmodule Stacks.AI.VisionErrorTest do
     end
 
     test "the enum is fully consumed — no code is handled only by accident" do
-      # Guards the direction the coverage gate cannot: a clause could exist but
-      # be unreachable (shadowed by an earlier one), and the gate only greps for
-      # the literal.
       for code <- @wire_codes do
         body = Jason.encode!(%{"code" => code, "message" => "x"})
         assert {:undecodable_image, _token} = VisionError.from_http_error(422, body)
@@ -98,9 +91,6 @@ defmodule Stacks.AI.VisionErrorTest do
     end
 
     test "every path out of from_http_error emits exactly one counter" do
-      # Silence is the failure mode the catch-all is accused of. Asserting the
-      # count (not merely that something was emitted) is what makes this a claim
-      # about observability rather than about a happy path.
       attach_error_telemetry()
 
       VisionError.from_http_error(422, ~s({"code":"VISION_ERROR_CODE_UNDECODABLE_IMAGE"}))
@@ -116,8 +106,6 @@ defmodule Stacks.AI.VisionErrorTest do
     end
 
     test "the counter's metadata carries no service-supplied text" do
-      # GDPR: telemetry is a warehouse-adjacent sink, so `code` must stay a
-      # whitelisted atom and never echo the message the sidecar sent.
       attach_error_telemetry()
 
       VisionError.from_http_error(
@@ -145,7 +133,6 @@ defmodule Stacks.AI.VisionErrorTest do
             {:transport, :closed}
           ] do
         assert VisionError.vision_error?(error), "#{inspect(error)} should be in the set"
-        # Total over the set: neither call may raise for any member.
         assert VisionError.determination(error) in [:deterministic, :transient]
         assert is_binary(VisionError.reason_token(error))
         assert is_binary(VisionError.message(error))
@@ -153,9 +140,6 @@ defmodule Stacks.AI.VisionErrorTest do
     end
 
     test "rejects reasons from elsewhere, so callers do not read them as vision verdicts" do
-      # The worker sees storage errors and raised exceptions too; if those looked
-      # like vision errors it would ask a module that knows nothing about them
-      # what to tell the reader.
       for other <- [
             :signing_key_unavailable,
             :not_a_book,

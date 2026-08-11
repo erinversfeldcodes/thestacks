@@ -37,12 +37,6 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  # 503, not 422 (#344). A 4xx says "your request was wrong" and `isbn_not_found`
-  # says "that is not a book" — both are false when Open Library and Google Books
-  # simply did not answer. The ISBN the reader typed may be perfectly good; we
-  # could not check. `retry_after` is advisory and matches the shortest fuse
-  # reset, so a client that honours it does not hammer a service that is already
-  # struggling.
   defp resolver_unavailable(conn) do
     conn
     |> put_resp_header("retry-after", "30")
@@ -69,10 +63,6 @@ defmodule StacksWeb.BookController do
     case Books.confirm(user.id, params) do
       {:ok, :created, book} ->
         book = Books.get_book_detail(book.id)
-        # Decision (#333): the book was created by this very request, so there
-        # is exactly one placement by construction — but asking for "the one"
-        # is the assumption that broke `show`. Ask for the list and serialise
-        # all of it; the 201 then carries the same shape as every other branch.
         placements = Shelving.get_placements_for_book(user.id, book.id)
 
         conn
@@ -110,9 +100,6 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  # `placement` is the one this request produced or matched; `placements` is
-  # every active placement the user now has of this book. When there is more
-  # than one the client informs ("also on your Wish List") — it never blocks.
   defp confirm_payload(book, placements, placement, source) do
     payload = %{
       book: ProtoJSON.book(book),
@@ -200,9 +187,6 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  # The endpoint's purpose is marking a book adults-only, so a missing flag
-  # defaults to raising the gate. An explicit falsey flag on an age-gated
-  # book is a lower attempt, which the raise-only guard rejects with 403.
   defp age_gate_requested?(%{"adults_only" => value}), do: truthy?(value)
   defp age_gate_requested?(%{"age_gated" => value}), do: truthy?(value)
   defp age_gate_requested?(_params), do: true
@@ -239,7 +223,6 @@ defmodule StacksWeb.BookController do
       conn.halted ->
         conn
 
-      # Defense-in-depth (#295 d): upstream filter/age-gate should keep :hidden unreachable here; 404 rather than leak.
       Visibility.resolve_visibility(book, viewer) == :hidden ->
         conn |> put_status(404) |> json(%{error: "not_found"})
 
@@ -317,12 +300,6 @@ defmodule StacksWeb.BookController do
     end
   end
 
-  # Decision (#333): the detail response carries ALL of the viewer's placements
-  # of this book. This call site is the live 500 — it fed `Repo.one()`, so the
-  # owner of a book sitting on two bookshelves got `Ecto.MultipleResultsError`
-  # on their own book detail. It is also the surface that must *show* the
-  # multi-shelf state, so a list is what it wanted all along; the singular
-  # `placement` key stays as the first (oldest) entry for wire compatibility.
   defp lookup_placements(conn, book_id) do
     case Guardian.Plug.current_resource(conn) do
       nil -> []

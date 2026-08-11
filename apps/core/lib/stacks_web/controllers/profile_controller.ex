@@ -20,11 +20,6 @@ defmodule StacksWeb.ProfileController do
 
   @valid_bookshelves ~w(antilibrary library wishlist reading_pile looking_for_home)
 
-  # Hard cap on the number of placements a single public shelf-browse request may
-  # return (#221). Bounds an optional-auth surface so one request cannot walk an
-  # unbounded collection; applied ONLY to the public path, never to the owner's
-  # own full-shelf view. Overridable via `:core, :public_shelf_cap` (used by the
-  # bound test to exercise the cap without inserting hundreds of rows).
   @default_public_shelf_cap 500
 
   @doc "GET /api/u/:handle — a user's public profile + their viewer-visible shelves."
@@ -46,14 +41,9 @@ defmodule StacksWeb.ProfileController do
     end
   end
 
-  # Resolve the handle + apply the profile ghost/block gate, then run `fun`.
   defp with_visible_profile(conn, handle, fun) do
     viewer = build_viewer(conn)
 
-    # NO-PII: tag only the bounded `outcome` atom (ok|not_found). NEVER the
-    # handle (PII + unbounded cardinality). `:not_found` covers BOTH the
-    # absent-handle branch and the ghost/block 404 branch so the 404 rate is a
-    # single enumeration/broken-link signal. Telemetry is warehouse-adjacent.
     case Accounts.get_user_by_handle(handle) do
       nil ->
         emit_profile_view(:not_found)
@@ -77,32 +67,17 @@ defmodule StacksWeb.ProfileController do
   defp render_shelf(conn, target, bookshelf_name, viewer) do
     bookshelf = Shelving.get_bookshelf(target.id, bookshelf_name)
 
-    # A hidden bookshelf and an absent one return the SAME 200-empty shape, so a
-    # hidden shelf is indistinguishable from an empty/nonexistent one — the same
-    # indistinguishability principle as the ghost-profile gate (never leak that a
-    # hidden thing exists). The profile-level ghost/block gate has already run.
     if is_nil(bookshelf) or Visibility.resolve_visibility(bookshelf, viewer) == :hidden do
       json(conn, %{bookshelf: bookshelf_name, count: 0, shelves: []})
     else
       shelves = Shelving.get_bookshelf_shelves(target.id, bookshelf_name)
 
-      # Resolve visibility for EVERY placement on the bookshelf in ONE batch: the
-      # (viewer, owner) block status and the viewer's age-verification are shared
-      # across all placements and resolved once per request (not per row —
-      # #221). The public response is then HARD-CAPPED at public_shelf_cap/0 so a
-      # single request cannot walk thousands of placements. The owner's own
-      # full-shelf view (BookshelfController) is unaffected: it does not use this
-      # path and applies no cap.
       visible =
         shelves |> Enum.flat_map(& &1.placements) |> Visibility.filter_visible_placements(viewer)
 
       cap = public_shelf_cap()
       visible_ids = visible |> Enum.take(cap) |> MapSet.new(& &1.id)
 
-      # NO-PII: untagged occurrence counter — emitted ONLY when the cap actually
-      # truncated rows (visible-placement count exceeded the cap), never per
-      # placement. No handle/user-id/shelf name reaches the sink (telemetry is
-      # warehouse-adjacent). Frequent hits = very large shelves or scraping.
       if length(visible) > cap do
         :telemetry.execute([:stacks, :shelf, :browse_capped], %{count: 1}, %{})
       end

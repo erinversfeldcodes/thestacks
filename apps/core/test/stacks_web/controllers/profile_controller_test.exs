@@ -33,7 +33,6 @@ defmodule StacksWeb.ProfileControllerTest do
 
       assert body["handle"] == "adalovelace"
       assert body["display_name"] == "Ada"
-      # REDACTED — no account/PII fields leak through the public serializer.
       refute Map.has_key?(body, "email")
       refute Map.has_key?(body, "consent_analytics")
       refute Map.has_key?(body, "role")
@@ -58,8 +57,6 @@ defmodule StacksWeb.ProfileControllerTest do
       viewer = insert(:user)
 
       body = conn |> auth_conn(viewer) |> get("/api/u/nameless") |> json_response(200)
-      # The redacted profile decoders take a string; the serializer must coalesce
-      # nil -> "" so a real discoverable profile never fails to decode.
       assert body["display_name"] == ""
     end
 
@@ -94,7 +91,6 @@ defmodule StacksWeb.ProfileControllerTest do
     } do
       insert(:user, handle: "members_ada", profile_visibility: "platform")
 
-      # "Members" is signed-in-only — a logged-out visitor cannot tell it exists.
       conn |> get("/api/u/members_ada") |> json_response(404)
     end
 
@@ -135,7 +131,6 @@ defmodule StacksWeb.ProfileControllerTest do
         |> get("/api/u/shelf_owner/bookshelves/library")
         |> json_response(200)
 
-      # The platform placement is visible; the owner-only one is filtered out.
       assert body["count"] == 1
     end
 
@@ -161,8 +156,6 @@ defmodule StacksWeb.ProfileControllerTest do
     end
   end
 
-  # #213 punch items: the group-visibility and unauthenticated rows of the
-  # visibility matrix, asserted on the endpoints (not just the resolver unit).
   describe "visibility matrix — group + unauthenticated" do
     test "a group-visibility shelf shows to a member and hides from a non-member (hub)", %{
       conn: conn
@@ -272,7 +265,6 @@ defmodule StacksWeb.ProfileControllerTest do
         |> json_response(200)
         |> Map.get("count")
 
-      # The public placement is visible to anon; the owner-only one is filtered out.
       assert count == 1
     end
 
@@ -296,17 +288,10 @@ defmodule StacksWeb.ProfileControllerTest do
         |> Map.get("count")
       end
 
-      # A signed-in viewer sees the platform placement; a logged-out one does not.
       assert count_for.(auth_conn(conn, insert(:user))) == 1
       assert count_for.(conn) == 0
     end
 
-    # #229 REGRESSION LOCK — the public-profile shelf already hides age-gated books
-    # from an authenticated-but-unverified viewer via `Stacks.Visibility`
-    # (`filter_visible_placements`). This test asserts all three viewer classes
-    # explicitly (verified: 1, authed-unverified: 0, anon: 0) so a future Visibility
-    # change can't silently re-expose age-gated books on the shelf surface — the
-    # sibling of the catalogue gap #229 closed.
     test "an age-gated book is hidden from unverified/unauthenticated viewers, shown to verified",
          %{
            conn: conn
@@ -329,8 +314,6 @@ defmodule StacksWeb.ProfileControllerTest do
         |> Map.get("count")
       end
 
-      # Verified viewer sees it; unverified and unauthenticated do NOT — the
-      # age-gated book never reaches the payload (no gap on the shelf).
       assert count_for.(auth_conn(conn, insert(:user, age_verified: true))) == 1
       assert count_for.(auth_conn(conn, insert(:user, age_verified: false))) == 0
       assert count_for.(conn) == 0
@@ -361,18 +344,8 @@ defmodule StacksWeb.ProfileControllerTest do
     end
   end
 
-  # #226 item 6: the marketplace ceiling-punch — an ACTIVE listing on a
-  # `looking_for_home` placement makes that placement visible to a signed-in
-  # (platform) viewer even when the placement's own rung would hide it, but NOT
-  # to an anonymous viewer, and a bidirectional block still wins. Proven at the
-  # resolver unit (visibility_test.exs) — this asserts it survives the profile
-  # shelf ENDPOINT (`filter_visible_placements` batch path), not just the resolver.
   describe "marketplace exception — looking_for_home shelf endpoint (#226)" do
     setup %{conn: conn} do
-      # A discoverable owner with a visible looking_for_home shelf holding a single
-      # owner-rung placement (restrictive) that is ACTIVELY listed. The shelf and
-      # profile are public so the shelf itself is reachable; only the placement's
-      # rung is punched through by the active listing.
       owner = insert(:user, handle: "lfh_owner", profile_visibility: "public")
 
       bookshelf =
@@ -409,9 +382,6 @@ defmodule StacksWeb.ProfileControllerTest do
 
     test "a blocked viewer does not see it — block beats the marketplace exception (SEC-2)",
          %{conn: conn, owner: owner} do
-      # A block hides the WHOLE profile at the ghost/block gate (404), which is
-      # strictly stronger than suppressing the single placement — the marketplace
-      # punch never even reaches the shelf resolver.
       blocked = insert(:user)
       {:ok, _} = Stacks.Social.block_user(owner.id, blocked.id)
 
@@ -422,13 +392,8 @@ defmodule StacksWeb.ProfileControllerTest do
     end
   end
 
-  # #221: the public browse must be BOUNDED and must resolve the shared gates
-  # (block status + viewer age-verification) ONCE per request, not per placement.
   describe "public browse bounding + O(1) shared-gate queries (#221)" do
     test "the public response is hard-capped while the owner's own view is not", %{conn: conn} do
-      # Shrink the public cap so the bound is exercised without inserting hundreds
-      # of rows. Within this module tests run sequentially, so the global override
-      # cannot race other tests; restore it afterwards regardless.
       prev = Application.get_env(:core, :public_shelf_cap)
       Application.put_env(:core, :public_shelf_cap, 2)
 
@@ -461,11 +426,9 @@ defmodule StacksWeb.ProfileControllerTest do
         |> json_response(200)
 
       returned = body["shelves"] |> Enum.flat_map(& &1["placements"]) |> length()
-      # Five visible placements exist, but the public path returns at most the cap.
       assert body["count"] == 2
       assert returned == 2
 
-      # The owner's OWN full-shelf view (BookshelfController) is uncapped.
       owner_body =
         conn
         |> auth_conn(owner)
@@ -512,18 +475,10 @@ defmodule StacksWeb.ProfileControllerTest do
 
       assert small_body["count"] == 1
       assert large_body["count"] == 20
-      # The (viewer, owner) block check and the viewer's age-verification are
-      # resolved once per request — not per row — and Ecto batches the placement
-      # preloads, so the query count does not grow with placement count. Before
-      # #221 the 20-placement shelf would have fired ~19 extra block/user queries.
       assert large_q == small_q
     end
   end
 
-  # Counts Repo query telemetry events emitted IN THIS TEST PROCESS while `fun`
-  # runs. Phoenix.ConnTest drives the endpoint synchronously in the test process,
-  # so the request's queries emit here; the `self() == test_pid` guard keeps the
-  # count isolated from other async modules whose queries run in their processes.
   defp with_query_count(fun) do
     test_pid = self()
     ref = make_ref()
@@ -558,9 +513,6 @@ defmodule StacksWeb.ProfileControllerTest do
 
   describe "has_feed on each bookshelf summary (G4)" do
     test "true for a platform-visible bookshelf", %{conn: conn} do
-      # The client uses this to decide whether to offer a subscribe link. Sent rather than
-      # derived, so the rule lives beside `Feeds.resolve_platform_bookshelf/2` instead of
-      # being duplicated in Elm.
       target = insert(:user, handle: "feedreader", profile_visibility: "platform")
       insert(:bookshelf, user: target, name: "library", visibility: "platform")
       viewer = insert(:user)
@@ -571,13 +523,6 @@ defmodule StacksWeb.ProfileControllerTest do
     end
 
     test "true for a public bookshelf — the flag tracks the feed, not one visibility string" do
-      # ⛔ Was `false`, while `GET /api/feeds/u/:handle/library` for the same shelf 403'd. Both
-      # sides hardcoded `visibility == "platform"`, so the *most* shared tier was told it had no
-      # feed and refused one if it asked anyway.
-      #
-      # Both now call `Feeds.feed_eligible?/1`. Asserting through the **controller** rather than
-      # the predicate is deliberate: the defect was two call sites agreeing on a wrong rule, and
-      # a unit test on the shared function cannot detect a caller that stops using it.
       target = insert(:user, handle: "public_reader", profile_visibility: "platform")
       shelf = insert(:bookshelf, user: target, name: "library", visibility: "public")
       viewer = insert(:user)
@@ -589,18 +534,12 @@ defmodule StacksWeb.ProfileControllerTest do
              "a public bookshelf was advertised as having no feed: " <>
                inspect(body["bookshelves"])
 
-      # And the advertised link actually resolves — the pairing is the guarantee.
       feed = build_conn() |> get("/api/feeds/u/public_reader/library")
       assert response(feed, 200)
       assert shelf.visibility == "public"
     end
 
     test "false for a group-visible bookshelf the viewer can see", %{conn: conn} do
-      # ⚠️ The case that makes the flag necessary rather than decorative. An
-      # owner-visible shelf is dropped from the payload entirely, so a stranger never
-      # sees one — but a *group*-visible shelf IS shown to a member and has **no feed**,
-      # because only platform visibility produces one. Without the flag the client would
-      # offer that member a subscribe link that 403s.
       owner = insert(:user, handle: "group_reader", profile_visibility: "platform")
       group = insert(:group, owner: owner)
       member = insert(:user)
@@ -621,8 +560,6 @@ defmodule StacksWeb.ProfileControllerTest do
     end
 
     test "the payload does not leak the visibility tier itself", %{conn: conn} do
-      # A stranger has no business learning that a shelf is group-visible rather than
-      # simply absent. `has_feed` answers the client's question without saying more.
       target = insert(:user, handle: "discreet", profile_visibility: "platform")
       insert(:bookshelf, user: target, name: "library", visibility: "platform")
       viewer = insert(:user)

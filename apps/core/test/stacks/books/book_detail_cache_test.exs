@@ -3,8 +3,6 @@ defmodule Stacks.Books.BookDetailCacheTest do
 
   alias Stacks.Books.BookDetailCache
 
-  # The cache GenServer is started by the application supervisor, so the ETS
-  # table already exists. We just clear it between tests.
   setup do
     BookDetailCache.invalidate_all()
     :ok
@@ -58,7 +56,6 @@ defmodule Stacks.Books.BookDetailCacheTest do
   describe "TTL expiry" do
     test "expired entries return :miss" do
       id = Ecto.UUID.generate()
-      # Insert an entry with an expired timestamp (6 minutes ago)
       expired_at = System.monotonic_time(:millisecond) - 360_000
       :ets.insert(:book_detail_cache, {id, %{title: "Old"}, expired_at})
 

@@ -14,8 +14,6 @@ defmodule Stacks.Enrichment.Events do
   alias Stacks.Enrichment
   alias Stacks.Enrichment.{BookstoreEvent, ThirdSpaceEvent}
 
-  # ── Bookstore Events ────────────────────────────────────────────────────────
-
   @doc """
   Inserts a new bookstore event or updates the existing one for the same
   `(store_id, title, event_date)` triple.
@@ -84,8 +82,6 @@ defmodule Stacks.Enrichment.Events do
     |> order_by([e], asc_nulls_last: e.event_date)
     |> Repo.all()
   end
-
-  # ── Third Space Events ──────────────────────────────────────────────────────
 
   @doc """
   Inserts a new third space event or updates the existing one for the same

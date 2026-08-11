@@ -51,7 +51,6 @@ defmodule Stacks.DiscoveryRemovalReviewTest do
     approved
   end
 
-  # An unverified request: the address is not on the listing's domain.
   defp parked_request(url \\ "https://readingroom.test") do
     source = approved_source(url)
     {:ok, :pending_review, parked} = Discovery.opt_out(url, %{email: "someone@gmail.test"})
@@ -118,8 +117,6 @@ defmodule Stacks.DiscoveryRemovalReviewTest do
     end
 
     test "ends in the same state as an auto-verified removal" do
-      # There must be one notion of "removed". If a hand-reviewed removal left a different
-      # state, some later query would treat the two differently.
       {_source, parked} = parked_request("https://byhand.test")
       assert {:ok, by_hand} = Discovery.honour_removal_request(parked.id)
 
@@ -133,8 +130,6 @@ defmodule Stacks.DiscoveryRemovalReviewTest do
     end
 
     test "refuses a request that was already decided" do
-      # 409, not 404: a double-click or a second reviewer must not silently re-run a
-      # decision, and must not read as "never existed".
       {_source, parked} = parked_request()
       assert {:ok, _} = Discovery.honour_removal_request(parked.id)
       assert {:error, :not_pending} = Discovery.honour_removal_request(parked.id)
@@ -169,8 +164,6 @@ defmodule Stacks.DiscoveryRemovalReviewTest do
     end
 
     test "keeps the contact address on record" do
-      # A declined request is worth remembering: if the same business asks again, a repeat
-      # should not look like a first contact.
       {_source, parked} = parked_request()
       assert {:ok, declined} = Discovery.decline_removal_request(parked.id)
 
@@ -179,7 +172,6 @@ defmodule Stacks.DiscoveryRemovalReviewTest do
     end
 
     test "cannot un-exclude a listing that was already removed" do
-      # The dangerous direction: decline must not be a way to resurrect a removed business.
       {_source, parked} = parked_request()
       assert {:ok, _} = Discovery.honour_removal_request(parked.id)
 
@@ -191,15 +183,11 @@ defmodule Stacks.DiscoveryRemovalReviewTest do
 
   describe "the two decisions are not confusable with approving a listing" do
     test "approve_source publishes; honour_removal_request unpublishes" do
-      # ⚠️ Both were nearly called "approve". `approve_source/1` means *publish this
-      # listing*; honouring a removal means *take it down*. Same word, opposite effect, on
-      # the same row — so the names differ and this test says why.
       {_source, parked} = parked_request()
 
       assert {:ok, honoured} = Discovery.honour_removal_request(parked.id)
       assert honoured.status == "excluded"
 
-      # And approving is still refused afterwards: an excluded source is not pending_review.
       assert {:error, :invalid_transition} = Discovery.approve_source(parked.id)
     end
 
@@ -207,7 +195,6 @@ defmodule Stacks.DiscoveryRemovalReviewTest do
       {_source, parked} = parked_request()
       assert {:ok, _} = Discovery.honour_removal_request(parked.id)
 
-      # Even calling the producer directly must not resurrect it.
       Discovery.create_third_space(Discovery.get_source(parked.id))
 
       assert length(Repo.all(from(s in ThirdSpace))) == 1

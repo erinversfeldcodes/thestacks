@@ -44,10 +44,6 @@ defmodule StacksWeb.GDPRController do
     |> json(%{status: "accepted", message: "Account deletion has been queued."})
   end
 
-  # Bounded whitelist of consent features. A raw user-supplied string must NEVER
-  # reach Stacks.GDPR.Consent — it is fired as a `:telemetry` metadata tag, so an
-  # unbounded value would blow up Prometheus label cardinality (PE P3). Anything
-  # not in this map is rejected with 422 before we touch Consent.
   @consent_types %{"analytics" => "analytics", "writing_assistant" => "writing_assistant"}
 
   @doc """

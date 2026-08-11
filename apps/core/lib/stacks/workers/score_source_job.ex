@@ -68,7 +68,6 @@ defmodule Stacks.Workers.ScoreSourceJob do
         0.0
 
       _ ->
-        # Default to moderate confidence if parsing fails
         0.5
     end
   end

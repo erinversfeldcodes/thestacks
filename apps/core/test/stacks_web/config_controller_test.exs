@@ -27,9 +27,6 @@ defmodule StacksWeb.ConfigControllerTest do
       original = Application.get_env(:core, :invite_only_registration)
       Application.put_env(:core, :invite_only_registration, true)
 
-      # ⚠️ Restore by DELETING when the key was unset: put_env(…, nil) stores an
-      # explicit nil, and get_env's `false` default never fires for a stored
-      # nil — so the sibling tests read inviteOnly: nil depending on seed order.
       on_exit(fn ->
         case original do
           nil -> Application.delete_env(:core, :invite_only_registration)

@@ -4,10 +4,8 @@ test.describe("Cost Transparency", () => {
   test("page loads without authentication and shows cost breakdown", async ({
     page,
   }) => {
-    // /costs is a public page — no login required
     await page.goto("/costs");
 
-    // Page title and subtitle should be visible
     await expect(page.locator(".costs__title")).toHaveText(
       "Cost Transparency"
     );
@@ -15,31 +13,22 @@ test.describe("Cost Transparency", () => {
       "honest look"
     );
 
-    // Wait for cost data to load (replaces loading indicator)
     await expect(page.getByTestId('costs-content')).toBeVisible({
       timeout: 10_000,
     });
 
-    // Cost data is guaranteed by #110's seed fixture
-    // (Stacks.Costs.seed_current_period_costs/0, called from seeds.exs), so these
-    // assert unconditionally — no dependency on RefreshCostsJob having fired.
-
-    // Total banner should show a dollar amount
     await expect(page.locator(".costs__banner-amount")).toBeVisible();
     await expect(page.locator(".costs__banner-amount")).toContainText("$");
 
-    // At least one category card should render
     await expect(
       page.getByTestId('costs-category-card').first()
     ).toBeVisible();
 
-    // Story cards should be present
     await expect(page.locator(".costs__story-card")).toHaveCount(3);
     await expect(
       page.locator(".costs__story-card").first()
     ).toContainText("$");
 
-    // Philosophy note at the bottom
     await expect(page.locator(".costs__philosophy-text")).toContainText(
       "Every number"
     );
@@ -55,9 +44,6 @@ test.describe("Cost Transparency", () => {
   });
 });
 
-// /costs must be REACHABLE by clicking, not just by knowing the URL. These drive
-// the real UI as a logged-out visitor: the tests above page.goto("/costs")
-// directly, which proves the page renders but never that a user can find it.
 test.describe("Cost Transparency — reachable via UI (logged out)", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
@@ -80,8 +66,6 @@ test.describe("Cost Transparency — reachable via UI (logged out)", () => {
   }) => {
     await page.goto("/");
 
-    // The home page links straight to About (a visible call-to-action button),
-    // so a visitor reaches it without the brand-logo hover dropdown.
     const aboutLink = page.locator('.page--home a[href="/about"]');
     await expect(aboutLink).toBeVisible({ timeout: 10_000 });
     await aboutLink.click();

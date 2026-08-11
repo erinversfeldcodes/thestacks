@@ -174,7 +174,6 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
   module runs `async: false` and restores `Stacks.Storage.Mock` on exit.
   """
 
-  # async: false — swaps the global :storage Application env.
   use Core.DataCase, async: false
 
   import Stacks.Factory
@@ -257,7 +256,6 @@ defmodule Stacks.GDPR.ImageRetentionStorageTest do
       assert log =~ "failed to delete storage object uploads/doomed-expired"
       assert log =~ "simulated_storage_outage"
 
-      # Storage failure must not resurrect the DB row — no infinite retry.
       assert Repo.get(UploadedImage, expired.id) == nil
     end
 

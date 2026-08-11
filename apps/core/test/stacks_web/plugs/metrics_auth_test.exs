@@ -23,8 +23,6 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
        status code — 200 for authorised callers, 401 for unauthorised.
   """
 
-  # async: false — we mutate Application env for the configured token and
-  # the endpoint is a shared process.
   use CoreWeb.ConnCase, async: false
 
   alias StacksWeb.Plugs.MetricsAuth
@@ -32,9 +30,6 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
   @valid_token "test-metrics-scrape-token-for-issue-136"
 
   @public_ipv4 {203, 0, 113, 7}
-  # A representative Fly 6PN address in the fdaa::/16 block that the old
-  # allowlist would have matched. Kept so we can assert the plug does NOT
-  # treat it as authorized without a bearer.
   @fly_6pn_ip {0xFDAA, 0, 0, 0, 0, 0, 0, 0x1}
 
   setup do
@@ -60,17 +55,8 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
     Phoenix.ConnTest.build_conn(:get, "/internal/metrics")
   end
 
-  # ---------------------------------------------------------------------------
-  # Unit tests — the plug itself
-  # ---------------------------------------------------------------------------
-
   describe "MetricsAuth.call/2 — no IP-based bypass (former 6PN bypass removed, #393)" do
     test "a bearer-less 6PN scrape of /internal/metrics is now 401" do
-      # The Fly managed-Prometheus 6PN bypass (Issue #232) was removed in #393:
-      # post-ADR-021 nothing scrapes this route (metrics are pushed to VM), so a
-      # request that used to be waved through — fdaa::/16 remote_ip, no
-      # fly-client-ip, no bearer — must now be rejected like any other. This is
-      # the inverted assertion: the DoD is that the dead bypass is gone.
       result =
         base_conn()
         |> Map.put(:remote_ip, @fly_6pn_ip)
@@ -159,10 +145,6 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Integration — GET /internal/metrics through the endpoint
-  # ---------------------------------------------------------------------------
-
   describe "GET /internal/metrics (integration)" do
     test "200 when the request carries the configured Bearer token", %{conn: conn} do
       conn =
@@ -183,8 +165,6 @@ defmodule StacksWeb.Plugs.MetricsAuthTest do
     end
 
     test "401 when a public-IP request carries no authorization", %{conn: conn} do
-      # Phoenix.ConnTest.build_conn/0 uses 127.0.0.1 by default which is NOT a
-      # 6PN address, so the plug should reject without a bearer.
       conn = get(conn, "/internal/metrics")
 
       assert conn.status == 401

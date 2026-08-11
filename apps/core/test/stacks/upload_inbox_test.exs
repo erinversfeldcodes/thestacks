@@ -199,15 +199,6 @@ defmodule Stacks.UploadInboxTest do
 
   describe "the invariant: reading the inbox places nothing" do
     @doc false
-    # ⛔ The owner's non-negotiable half: "incorrect classifications should never
-    # end up on shelves they are not intended for". The async half of #351 makes
-    # a resolved upload reachable long after the reader left — the temptation
-    # (and the shortcut a future change might take) is to file it for them.
-    #
-    # This asserts the absence directly rather than trusting that no code does
-    # it: build a resolved upload with a candidate, read the inbox as many times
-    # as you like, and the reader's bookshelves must be exactly as empty as they
-    # were. A `list_awaiting_attention/1` that auto-placed would redden here.
     test "listing an awaiting-confirmation upload creates no placement", %{user: user} do
       book = insert(:book)
       resolved_upload(user, [book.id])

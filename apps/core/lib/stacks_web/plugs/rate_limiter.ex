@@ -53,34 +53,11 @@ defmodule StacksWeb.Plugs.RateLimiter do
   @window_ms 60_000
   @global_limit 1_000
   @auth_limit 60
-  # Uploads per user per minute. 10 was too tight — real users populating
-  # a shelf routinely hit it, and our gate probe (24/min sustained)
-  # couldn't run without 429s. 120 is set by the Oban :vision queue
-  # ceiling (concurrency=60, ~3s/job ≈ ~100 jobs/min in steady state);
-  # above 120 one user can flood the queue and starve others. 120 is
-  # comfortable for ~2 concurrent heavy users, graceful backpressure
-  # beyond. Real users won't approach this.
   @upload_limit 120
   @password_change_limit 20
   @social_limit 20
-  # Public read endpoints (:public bucket — catalogue, search, public profiles,
-  # transparency, /api/config), keyed per-IP. 30 was too tight: a single engaged
-  # browse fires several public calls per interaction (config + catalogue +
-  # pagination + search + profile), and per-IP keying means a shared NAT/CGNAT
-  # (offices, mobile carriers, campuses) exhausts one bucket across many real
-  # users — the same false-429 hazard the auth sizing note above calls out. It
-  # was also inverted: lower than :auth (60) despite being cheaper, lower-risk
-  # read traffic. 200/60s bounds scraping/DoS (well under the 1000 global) while
-  # not throttling normal browsing or NAT-shared users. Env-tunable so preview/
-  # E2E can raise it further and ops can adjust prod without a deploy.
   @public_limit 200
-  # Admin endpoints — tighter than auth; break-glass access is not high-throughput.
   @admin_limit 30
-  # E2E test-helper endpoints (Issue #124). These leak account-activation
-  # tokens for `.test`-domain accounts and are reachable on public preview
-  # apps, so keep the per-IP cap very tight to bound brute-force
-  # enumeration / token harvesting. The E2E suite only calls this a handful
-  # of times per run, so 10/min is ample headroom for legitimate use.
   @e2e_helper_limit 10
 
   def init(opts), do: opts
@@ -107,14 +84,6 @@ defmodule StacksWeb.Plugs.RateLimiter do
         conn
 
       rate_limited?(key, bucket, limit) ->
-        # Rate-limit rejection counter (canonical event, Issue #206; supersedes
-        # the earlier `:hit` name from #197 — one event, not two). `bucket` is a
-        # bounded, whitelisted atom (:auth, :upload, :password_change, :social,
-        # :e2e_helper, :global) set at the plug call site — never derived from
-        # request input — so `stacks_rate_limit_rejected_count_total{bucket=…}`
-        # stays low-cardinality. For the `:auth` bucket this is the 429
-        # login-failure-by-type signal (the request is halted here before it ever
-        # reaches AuthController.login/2); `:social` is the visibility epic bucket.
         :telemetry.execute([:stacks, :rate_limit, :rejected], %{count: 1}, %{bucket: bucket})
 
         conn
@@ -143,7 +112,6 @@ defmodule StacksWeb.Plugs.RateLimiter do
 
   defp get_limit(_), do: @global_limit
 
-  # Upload and social buckets key on user ID so the limit is per-user, not per-IP.
   defp get_key(conn, bucket) when bucket in [:upload, :social] do
     case conn.assigns[:guardian_default_resource] do
       nil -> get_ip(conn)
@@ -180,35 +148,16 @@ defmodule StacksWeb.Plugs.RateLimiter do
     end
   end
 
-  # Key per-IP buckets on the *trusted* client IP. Fly sets and overwrites the
-  # `fly-client-ip` header at the edge with the real client address, so it
-  # cannot be spoofed by the client. `x-forwarded-for` is deliberately NOT
-  # consulted — behind Fly its first hop is client-supplied and trivially
-  # rotated, which would let an attacker reset every per-IP counter (Issue
-  # #176). When the header is absent or empty (local dev / ExUnit conns) we
-  # fall back to `conn.remote_ip`.
   defp get_ip(conn) do
     {ip, source} =
       case get_req_header(conn, "fly-client-ip") do
         [ip | _] when ip != "" ->
-          # Trusted Fly edge header present → this is the real client IP.
           {ip, :trusted_proxy}
 
         _ ->
-          # Header absent/empty → fall back to the socket peer IP. `conn.remote_ip`
-          # is always a resolved tuple (Plug guarantees it), so there is no nil
-          # case to handle here.
           {conn.remote_ip |> :inet.ntoa() |> to_string(), :remote_ip}
       end
 
-    # Trusted-client-IP source meter (Issue #240, closes the #176 gap): which
-    # resolution path produced the rate-limit key. NO-PII: the tag is ONLY the
-    # bounded `source` atom (:trusted_proxy | :remote_ip) — NEVER the IP value
-    # itself. An IP is personal data (GDPR); the source-kind is not, and tagging
-    # the IP would also explode label cardinality. Unexpected `:remote_ip` on a
-    # Fly deploy signals the fly-client-ip edge header isn't arriving, so
-    # rate-limit keying may be bypassed/mis-attributed. Exported as
-    # `stacks_rate_limit_client_ip_count_total{source=…}`.
     :telemetry.execute([:stacks, :rate_limit, :client_ip], %{count: 1}, %{source: source})
 
     ip
@@ -236,10 +185,6 @@ defmodule StacksWeb.Plugs.RateLimiter do
     def init(:ok) do
       :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
 
-      # runtime.exs runs before Fly.io secrets are injected into the process
-      # environment, so Application.get_env(:core, :rate_limit_*) is not set
-      # by the time the plug reads it. Apply overrides here, where secrets
-      # are guaranteed to be present.
       if limit = System.get_env("RATE_LIMIT_AUTH") do
         Application.put_env(:core, :rate_limit_auth, String.to_integer(limit))
       end

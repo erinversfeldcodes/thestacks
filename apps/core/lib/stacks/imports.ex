@@ -36,7 +36,6 @@ defmodule Stacks.Imports do
 
   @active_statuses ~w(enqueued running)
   @row_retention_days 30
-  # 21 columns per row; Postgres caps a single statement at 65_535 parameters.
   @insert_chunk 500
 
   @doc "How long raw import rows are kept before the retention sweep deletes them."
@@ -160,8 +159,6 @@ defmodule Stacks.Imports do
     end
   end
 
-  # ── Job-facing persistence ────────────────────────────────────────────
-
   @doc "Marks an import running and stamps `started_at` (first batch only)."
   @spec mark_running(LibraryImport.t()) :: LibraryImport.t()
   def mark_running(%LibraryImport{status: "enqueued"} = import) do
@@ -249,8 +246,6 @@ defmodule Stacks.Imports do
     {:ok, touched_bookshelves(import.id)}
   end
 
-  # The bookshelves this import actually placed books on — derived from the
-  # shelved rows' own Goodreads shelf values (deterministic, no join needed).
   defp touched_bookshelves(import_id) do
     LibraryImportRow
     |> where([r], r.import_id == ^import_id and r.outcome == "shelved")

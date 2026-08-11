@@ -38,7 +38,6 @@ defmodule StacksWeb.AuditLogController do
     })
   end
 
-  # Only display-safe fields. No ip_address (hashed) is ever included.
   defp render_entry(entry) do
     %{
       id: entry.id,

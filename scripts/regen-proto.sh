@@ -47,10 +47,6 @@ bash "$REPO_ROOT/scripts/gen-rust-proto.sh"
 echo "==> 5/5  Elm decoders"
 bash "$REPO_ROOT/scripts/gen-elm-proto.sh"
 
-# A generated migration is UNTRACKED, and `mix test` deletes untracked
-# `_add_*_to_*` migrations. Staging immediately is the only reliable protection.
-# The pathspec is explicit per file so this can never sweep up someone else's
-# staged work.
 while IFS= read -r migration; do
     [[ -n "$migration" ]] || continue
     git -C "$REPO_ROOT" add -- "$migration"
@@ -58,8 +54,6 @@ while IFS= read -r migration; do
 done < <(git -C "$REPO_ROOT" status --porcelain -- apps/core/priv/repo/migrations/ |
     awk '/^\?\?/ {print $2}')
 
-# Prove it. This is the same check the gate runs, so a green line here means the
-# gate cannot fail for staleness.
 echo "==> Verifying no codegen drift"
 (cd "$REPO_ROOT/apps/core" && mix proto.sync --check)
 bash "$REPO_ROOT/scripts/gen-elixir-proto.sh" --check

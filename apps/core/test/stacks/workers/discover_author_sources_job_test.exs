@@ -13,17 +13,6 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJobTest do
     :ok
   end
 
-  # Attaches to Finch's own telemetry so the assertion is about the REAL
-  # transport, not about the mock. `[:finch, :request, :start]` fires inside
-  # `Finch.request/3` before any pool checkout, so it is reached whether or not
-  # the host resolves. Returns the URLs Finch was asked to dial.
-  #
-  # ⚠️ Telemetry handlers are GLOBAL and run in the caller's process, so with
-  # `async: true` a concurrently running test that legitimately uses Finch
-  # (e.g. `Stacks.Enrichment.RssFetcherTest`) would otherwise land in this
-  # mailbox and fail us for someone else's traffic. `perform_job/2` runs the
-  # worker inline in the test process, so filtering on `self() == test_pid`
-  # keeps the observation to our own call tree.
   defp record_finch_requests(fun) do
     test_pid = self()
     handler_id = {__MODULE__, System.unique_integer()}
@@ -96,10 +85,7 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJobTest do
 
       updated = Core.Repo.get!(Stacks.Books.Author, author.id)
 
-      # The mocked probe's result reached the database, proving the seam is the
-      # path the job actually takes...
       assert updated.rss_feed_url == "https://authorsite.com/feed"
-      # ...and no real request was issued while doing it.
       assert dialled == []
     end
 

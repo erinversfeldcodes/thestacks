@@ -1,13 +1,5 @@
 {{ config(materialized='view') }}
 
--- Recency is ranked per (edition, store), not per (work, store).
---
--- A price is a fact about an edition: shops stock whichever edition they
--- stock, at different prices. Exclusive Books carries six ISBNs of The Name
--- of the Rose at prices from R400 to R411. Partitioning by book_id blended
--- those into one series, so `recency_rank = 1` kept whichever edition happened
--- to be scraped last and the rest disappeared from mart_book_prices entirely.
-
 select
     ps.id,
     ps.book_id,

@@ -65,10 +65,6 @@ suite =
         ]
 
 
-
--- FIXTURES
-
-
 aReader : User
 aReader =
     { id = "user-1"
@@ -106,10 +102,6 @@ storedAuthValue token =
                 ]
             )
         )
-
-
-
--- CROSS-TAB PROPAGATION
 
 
 differentTokenWhileAuthedAdopts : Test
@@ -184,16 +176,10 @@ validAuthWhileSignedOutIsIgnored =
                 |> Expect.equal Main.IgnoreExternal
 
 
-
--- 401 RE-CHECK NET (same pure helper)
-
-
 recheckNewerStoredTokenAdopts : Test
 recheckNewerStoredTokenAdopts =
     test "recheck_newer_stored_token_adopts: on a 401, a newer stored token is adopted instead of logging out" <|
         \() ->
-            -- in-memory token is the dead one that just 401'd; localStorage holds
-            -- the fresh token a sibling tab rotated in.
             Main.adoptExternalAuth (storedAuthValue "T1") (Just (authWith "T0-dead"))
                 |> Expect.equal (Main.AdoptAuth (authWith "T1"))
 
@@ -202,14 +188,8 @@ recheckSameStoredTokenProceedsToLogout : Test
 recheckSameStoredTokenProceedsToLogout =
     test "recheck_same_stored_token_proceeds_to_logout: nothing newer stored -> not adopted (caller logs out)" <|
         \() ->
-            -- stored token equals the in-memory (dead) token: no newer credential,
-            -- so the helper does NOT adopt and the caller proceeds to sessionExpiry.
             Main.adoptExternalAuth (storedAuthValue "T0-dead") (Just (authWith "T0-dead"))
                 |> Expect.equal Main.IgnoreExternal
-
-
-
--- resolveRecheck — the pure GotStoredAuth decision (P1a + P1b)
 
 
 renewalOrigin : Main.PendingLogout
@@ -289,20 +269,13 @@ interleaveExternalAdoptCancelsParkedLogout =
         \() ->
             Expect.all
                 [ \() ->
-                    -- FIX: parked intent cleared by the cross-tab adopt -> no-op.
                     Main.resolveRecheck Nothing Main.IgnoreExternal
                         |> Expect.equal Main.ResolveNoop
                 , \() ->
-                    -- BUG it guards: had the intent NOT been cleared, the same
-                    -- late answer would have forced a logout.
                     Main.resolveRecheck (Just pageOrigin) Main.IgnoreExternal
                         |> Expect.equal (Main.ResolveForceLogout False)
                 ]
                 ()
-
-
-
--- parkPending — P2 sticky flags across overlapping expiry
 
 
 plainExpiryDoesNotDowngradeDraftSaved : Test

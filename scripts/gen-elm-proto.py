@@ -15,10 +15,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Type mapping: proto type string -> (Elm type, decoder expression, encoder fn)
-# ---------------------------------------------------------------------------
-
 SCALAR_TYPE_MAP: dict[str, tuple[str, str, str]] = {
     "TYPE_STRING": ("String", "D.string", "E.string"),
     "TYPE_BYTES": ("String", "D.string", "E.string"),
@@ -37,14 +33,8 @@ SCALAR_TYPE_MAP: dict[str, tuple[str, str, str]] = {
     "TYPE_BOOL": ("Bool", "D.bool", "E.bool"),
 }
 
-# Well-known types that get special treatment
 WKT_TIMESTAMP = ".google.protobuf.Timestamp"
 WKT_STRUCT = ".google.protobuf.Struct"
-
-
-# ---------------------------------------------------------------------------
-# Data model for parsed proto descriptors
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -85,11 +75,6 @@ class FileDef:
     enums: list[EnumDef]
     messages: list[MessageDef]
     is_import: bool
-
-
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
 
 
 def _parse_enums_recursive(container: dict, package: str, parent_prefix: str = "") -> list[EnumDef]:
@@ -135,7 +120,6 @@ def _parse_messages_recursive(
         fqn = f".{package}.{qualified_name}" if package else f".{qualified_name}"
         messages.append(MessageDef(name=m["name"], fields=fields, fqn=fqn))
 
-        # Recurse into nested types
         nested_enums.extend(_parse_enums_recursive(m, package, f"{qualified_name}."))
         sub_msgs, sub_enums = _parse_messages_recursive(
             m, package, f"{qualified_name}.", key="nestedType"
@@ -153,10 +137,8 @@ def parse_descriptor(data: dict) -> list[FileDef]:
         is_import = f.get("bufExtension", {}).get("isImport", False)
         package = f.get("package", "")
 
-        # Top-level enums
         enums: list[EnumDef] = _parse_enums_recursive(f, package)
 
-        # Top-level messages (with recursive nested parsing)
         messages, nested_enums = _parse_messages_recursive(f, package, key="messageType")
         enums.extend(nested_enums)
 
@@ -170,11 +152,6 @@ def parse_descriptor(data: dict) -> list[FileDef]:
             )
         )
     return files
-
-
-# ---------------------------------------------------------------------------
-# Name conversion utilities
-# ---------------------------------------------------------------------------
 
 
 def screaming_snake_to_pascal(s: str) -> str:
@@ -194,24 +171,18 @@ def enum_value_to_elm_ctor(enum_name: str, value_name: str) -> str:
         VisibilityTier, VISIBILITY_TIER_PUBLIC -> VisibilityTierPublic
         HealthStatus, HEALTH_STATUS_HEALTHY -> HealthStatusHealthy
     """
-    # Derive the SCREAMING_SNAKE prefix from the enum type name
-    # ISBNFormat -> ISBN_FORMAT, VisibilityTier -> VISIBILITY_TIER
     prefix = _pascal_to_screaming_snake(enum_name)
 
-    # Strip the prefix from the value name
     if value_name.startswith(prefix + "_"):
         suffix = value_name[len(prefix) + 1 :]
     elif value_name == prefix:
-        # Edge case: value name IS the prefix (shouldn't happen in practice)
         suffix = ""
     else:
-        # Fallback: just PascalCase the whole thing
         return screaming_snake_to_pascal(value_name)
 
     if not suffix:
         return enum_name
 
-    # PascalCase the suffix
     suffix_pascal = screaming_snake_to_pascal(suffix)
     return enum_name + suffix_pascal
 
@@ -301,7 +272,6 @@ def part_to_pascal(s: str) -> str:
 
     v1 -> V1, book -> Book, common -> Common, event_bus -> EventBus
     """
-    # Handle version strings like v1, v2
     if re.match(r"^v\d+$", s):
         return s.upper()
     return screaming_snake_to_pascal(s.upper()) if "_" in s else s[0].upper() + s[1:]
@@ -310,11 +280,6 @@ def part_to_pascal(s: str) -> str:
 def elm_module_to_path(module_name: str) -> str:
     """Stacks.Common.V1.Book -> Stacks/Common/V1/Book.elm"""
     return module_name.replace(".", "/") + ".elm"
-
-
-# ---------------------------------------------------------------------------
-# Elm type resolution
-# ---------------------------------------------------------------------------
 
 
 class TypeResolver:
@@ -367,7 +332,6 @@ class TypeResolver:
         if self._is_defaultable(fld):
             default = self._default_value(fld)
             return f'D.oneOf [ D.field "{json_key}" {inner_decoder}, D.succeed {default} ]'
-        # Non-optional message fields: use oneOf with named default function (Finding #3)
         if (
             fld.type_str == "TYPE_MESSAGE"
             and not self.is_wkt_timestamp(fld.type_name)
@@ -446,7 +410,6 @@ class TypeResolver:
             if self.is_wkt_timestamp(fld.type_name):
                 return "E.string"
             if self.is_wkt_struct(fld.type_name):
-                # Finding #7: Struct fields are already E.Value, use identity
                 return "identity"
             msg_def = self.message_map.get(fld.type_name)
             if msg_def:
@@ -461,7 +424,6 @@ class TypeResolver:
         """
         if fld.proto3_optional:
             return False
-        # WKTs that map to scalars still get defaults
         if fld.type_str == "TYPE_MESSAGE":
             if self.is_wkt_timestamp(fld.type_name):
                 return True
@@ -523,7 +485,6 @@ class TypeResolver:
             if not type_name or self.is_wkt_timestamp(type_name) or self.is_wkt_struct(type_name):
                 continue
             result.add(type_name)
-            # Recurse into message-typed fields for their default record deps
             if fld.type_str == "TYPE_MESSAGE" and type_name not in visited:
                 visited.add(type_name)
                 sub_msg = self.message_map.get(type_name)
@@ -548,10 +509,8 @@ class TypeResolver:
         is cosmetic only.
         """
         this_module = proto_file_to_elm_module(file_def.name)
-        # Collect: module_name -> set of items to expose
         import_map: dict[str, set[str]] = {}
 
-        # Collect all type references, including transitive ones from default records
         all_type_refs: set[str] = set()
         for msg in file_def.messages:
             all_type_refs.update(self._collect_transitive_types(msg))
@@ -585,7 +544,6 @@ class TypeResolver:
                         import_map[source_module] = set()
                     import_map[source_module].update(expose_items)
 
-        # Build sorted import lines
         import_lines: list[str] = []
         for module_name in sorted(import_map.keys()):
             items = sorted(import_map[module_name])
@@ -640,11 +598,6 @@ def _generate_default_function(msg_def: MessageDef, resolver: TypeResolver) -> l
     return lines
 
 
-# ---------------------------------------------------------------------------
-# Elm code generation
-# ---------------------------------------------------------------------------
-
-
 def generate_elm_module(file_def: FileDef, resolver: TypeResolver) -> str:
     """Generate a complete Elm module for one .proto file."""
     module_name = proto_file_to_elm_module(file_def.name)
@@ -653,19 +606,15 @@ def generate_elm_module(file_def: FileDef, resolver: TypeResolver) -> str:
 
     lines: list[str] = []
 
-    # Collect all exposing items
     exposing_items = _build_exposing_list(file_def)
 
-    # Module declaration
     lines.append(f"module {module_name} exposing")
-    # Format exposing list
     for i, item in enumerate(exposing_items):
         prefix = "    ( " if i == 0 else "    , "
         lines.append(f"{prefix}{item}")
     lines.append("    )")
     lines.append("")
 
-    # Doc comment (Finding #9: use -- instead of \u2014)
     lines.append(f"{{-| Generated Elm JSON decoders/encoders for {package_display} {proto_short}.")
     lines.append("")
     lines.append(
@@ -682,7 +631,6 @@ def generate_elm_module(file_def: FileDef, resolver: TypeResolver) -> str:
         " the .proto file determine keys."
     )
 
-    # Check if WKTs are used and add notes
     has_timestamp = False
     has_struct = False
     for msg in file_def.messages:
@@ -707,11 +655,9 @@ def generate_elm_module(file_def: FileDef, resolver: TypeResolver) -> str:
     lines.append("-}")
     lines.append("")
 
-    # Imports
     lines.append("import Json.Decode as D")
     lines.append("import Json.Encode as E")
 
-    # Cross-module imports (Finding #1)
     cross_imports = resolver.compute_imports(file_def)
     if cross_imports:
         for imp in cross_imports:
@@ -722,21 +668,18 @@ def generate_elm_module(file_def: FileDef, resolver: TypeResolver) -> str:
     lines.append("")
     lines.append("")
 
-    # Enums
     if file_def.enums:
         for enum_def in file_def.enums:
             lines.extend(_generate_enum(enum_def))
             lines.append("")
             lines.append("")
 
-    # Messages (type alias + default + decoder + encoder)
     if file_def.messages:
         for msg_def in file_def.messages:
             lines.extend(_generate_message(msg_def, resolver))
             lines.append("")
             lines.append("")
 
-    # Remove trailing blank lines, ensure single newline at end
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
@@ -746,25 +689,20 @@ def _build_exposing_list(file_def: FileDef) -> list[str]:
     """Build the sorted exposing list."""
     items: list[str] = []
 
-    # Type aliases (messages) - just expose the name
     for msg in file_def.messages:
         items.append(msg.name)
 
-    # Enum types - expose with constructors
     for enum_def in file_def.enums:
         items.append(f"{enum_def.name}(..)")
 
-    # Default functions for messages
     for msg in file_def.messages:
         items.append(f"default{msg.name}")
 
-    # Decoders
     for enum_def in file_def.enums:
         items.append(f"decode{enum_def.name}")
     for msg in file_def.messages:
         items.append(f"decode{msg.name}")
 
-    # Encoders
     for enum_def in file_def.enums:
         items.append(f"encode{enum_def.name}")
     for msg in file_def.messages:
@@ -778,7 +716,6 @@ def _generate_enum(enum_def: EnumDef) -> list[str]:
     """Generate Elm type, decoder, and encoder for an enum."""
     lines: list[str] = []
 
-    # Type definition
     constructors = [enum_value_to_elm_ctor(enum_def.name, v.name) for v in enum_def.values]
     lines.append(f"type {enum_def.name}")
     for i, ctor in enumerate(constructors):
@@ -787,7 +724,6 @@ def _generate_enum(enum_def: EnumDef) -> list[str]:
     lines.append("")
     lines.append("")
 
-    # Decoder (Finding #5: add lowercase alternatives)
     unspecified_ctor = constructors[0] if constructors else "Unknown"
     lines.append(f"decode{enum_def.name} : D.Decoder {enum_def.name}")
     lines.append(f"decode{enum_def.name} =")
@@ -796,7 +732,6 @@ def _generate_enum(enum_def: EnumDef) -> list[str]:
     lines.append("            (\\s ->")
     lines.append("                case s of")
 
-    # Non-unspecified values get explicit matches for both SCREAMING_SNAKE and lowercase
     for v in enum_def.values:
         if v.number == 0:
             continue
@@ -809,15 +744,12 @@ def _generate_enum(enum_def: EnumDef) -> list[str]:
         lines.append(f"                        D.succeed {ctor}")
         lines.append("")
 
-    # Wildcard falls through to unspecified
     lines.append("                    _ ->")
     lines.append(f"                        D.succeed {unspecified_ctor}")
     lines.append("            )")
     lines.append("")
     lines.append("")
 
-    # Encoder (Finding #8: don't add _ suffix to e and d)
-    # Pick a short parameter name from the first letter of the enum type name
     param = enum_def.name[0].lower()
     lines.append(f"encode{enum_def.name} : {enum_def.name} -> E.Value")
     lines.append(f"encode{enum_def.name} {param} =")
@@ -829,7 +761,6 @@ def _generate_enum(enum_def: EnumDef) -> list[str]:
         lines.append(f'            E.string "{lowercase_form}"')
         lines.append("")
 
-    # Remove last blank line inside case
     if lines and lines[-1] == "":
         lines.pop()
 
@@ -842,7 +773,6 @@ def _generate_message(msg_def: MessageDef, resolver: TypeResolver) -> list[str]:
     fields = msg_def.fields
 
     if not fields:
-        # Empty message
         lines.append(f"type alias {msg_def.name} =")
         lines.append("    {}")
         lines.append("")
@@ -863,7 +793,6 @@ def _generate_message(msg_def: MessageDef, resolver: TypeResolver) -> list[str]:
         lines.append("    E.object []")
         return lines
 
-    # Type alias
     lines.append(f"type alias {msg_def.name} =")
     for i, fld in enumerate(fields):
         elm_field_name = snake_to_camel(fld.name)
@@ -874,19 +803,16 @@ def _generate_message(msg_def: MessageDef, resolver: TypeResolver) -> list[str]:
     lines.append("")
     lines.append("")
 
-    # Default function
     lines.extend(_generate_default_function(msg_def, resolver))
     lines.append("")
     lines.append("")
 
-    # Decoder
     lines.append(f"decode{msg_def.name} : D.Decoder {msg_def.name}")
     lines.append(f"decode{msg_def.name} =")
     lines.extend(_generate_decoder_body(msg_def, resolver))
     lines.append("")
     lines.append("")
 
-    # Encoder
     lines.extend(_generate_encoder(msg_def, resolver))
 
     return lines
@@ -903,10 +829,8 @@ def _generate_decoder_body(msg_def: MessageDef, resolver: TypeResolver) -> list[
         return lines
 
     if n <= 8:
-        # Use D.mapN directly
         map_fn = f"D.map{n}" if n > 1 else "D.map"
         if n == 1:
-            # D.map needs a constructor function
             elm_field = snake_to_camel(fields[0].name)
             lines.append(f"    {map_fn} (\\{elm_field} -> {{ {elm_field} = {elm_field} }})")
         else:
@@ -917,15 +841,12 @@ def _generate_decoder_body(msg_def: MessageDef, resolver: TypeResolver) -> list[
             lines.append(f"        ({decoder_expr})")
         return lines
 
-    # >8 fields: use map8 for first 8, then andThen for the rest
     first_8 = fields[:8]
     rest = fields[8:]
 
-    # Build the partial record constructor for first 8 fields
     all_field_names = [snake_to_camel(f.name) for f in fields]
     first_8_names = all_field_names[:8]
 
-    # Lambda that creates a partial record with first 8 fields, rest get defaults
     lines.append(f"    D.map8 (\\{' '.join(first_8_names)} ->")
     record_fields = []
     for i, fld in enumerate(fields):
@@ -935,19 +856,16 @@ def _generate_decoder_body(msg_def: MessageDef, resolver: TypeResolver) -> list[
         else:
             record_fields.append(f"{elm_name} = {_elm_zero_value(fld, resolver)}")
 
-    # Format as multi-line record
     lines.append("            { " + record_fields[0])
     for rf in record_fields[1:]:
         lines.append(f"            , {rf}")
     lines.append("            }")
     lines.append("        )")
 
-    # First 8 field decoders
     for fld in first_8:
         decoder_expr = resolver.decoder_for_field(fld)
         lines.append(f"        ({decoder_expr})")
 
-    # Chain andThen for remaining fields
     for fld in rest:
         elm_name = snake_to_camel(fld.name)
         decoder_expr = resolver.decoder_for_field(fld)
@@ -988,7 +906,6 @@ def _elm_zero_value(fld: FieldDef, resolver: TypeResolver) -> str:
             return '""'
         if resolver.is_wkt_struct(fld.type_name):
             return "(E.object [])"
-        # Finding #2: For non-WKT message fields, reference the named default function
         msg_def = resolver.message_map.get(fld.type_name)
         if msg_def:
             return _default_function_name(msg_def)
@@ -1000,7 +917,6 @@ def _generate_encoder(msg_def: MessageDef, resolver: TypeResolver) -> list[str]:
     lines: list[str] = []
     fields = msg_def.fields
 
-    # Pick a short parameter name for the encoder function argument
     param = msg_def.name.lower() if len(msg_def.name) <= 4 else _abbreviate(msg_def.name)
 
     lines.append(f"encode{msg_def.name} : {msg_def.name} -> E.Value")
@@ -1012,7 +928,6 @@ def _generate_encoder(msg_def: MessageDef, resolver: TypeResolver) -> list[str]:
         accessor = f"{param}.{elm_name}"
         encoder_expr = resolver.encoder_for_field(fld, accessor)
 
-        # For struct (E.Value) fields, the encoder is just the value itself
         if (
             fld.type_str == "TYPE_MESSAGE"
             and resolver.is_wkt_struct(fld.type_name)
@@ -1034,15 +949,12 @@ def _abbreviate(name: str) -> str:
 
     EventEnvelope -> env, SourceHealthCheck -> check, Book -> book
     """
-    # Split PascalCase into words
     words = re.findall(r"[A-Z][a-z]*", name)
     if not words:
         return name.lower()
     if len(words) == 1:
         return words[0].lower()
-    # Use last word, lowercased
     last = words[-1].lower()
-    # Avoid Elm keywords
     if last in (
         "type",
         "let",
@@ -1060,11 +972,6 @@ def _abbreviate(name: str) -> str:
     ):
         return words[-2].lower() + last.capitalize()
     return last
-
-
-# ---------------------------------------------------------------------------
-# Main: read JSON from stdin, write .elm files
-# ---------------------------------------------------------------------------
 
 
 def main():
@@ -1089,10 +996,8 @@ def main():
 
     generated: list[str] = []
     for file_def in files:
-        # Skip imports (google WKTs, etc.)
         if file_def.is_import:
             continue
-        # Skip files with no enums and no messages
         if not file_def.enums and not file_def.messages:
             continue
 

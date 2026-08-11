@@ -30,9 +30,6 @@ defmodule Stacks.Workers.GuardianTokenSweepJob do
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Duration
 
-  # Grace period kept AFTER a family becomes dead before it is physically
-  # removed. Conservative: a revoked family is already rejected by the
-  # verify_claims gate, so retention only affects table size, not security.
   @family_retention_seconds 7 * 86_400
 
   @impl true
@@ -48,13 +45,6 @@ defmodule Stacks.Workers.GuardianTokenSweepJob do
     :ok
   end
 
-  # Delete families that are provably dead:
-  #   * revoked more than @family_retention_seconds ago, OR
-  #   * started so long ago that they are past the absolute session cap plus the
-  #     retention grace (past the cap the session can no longer be refreshed and
-  #     the last access token's 8h ttl is long gone, so no live token remains).
-  # A live family (revoked_at IS NULL and session within the cap) matches
-  # neither predicate and is preserved.
   defp prune_dead_families do
     now = DateTime.utc_now()
     revoked_cutoff = DateTime.add(now, -@family_retention_seconds, :second)
@@ -71,10 +61,6 @@ defmodule Stacks.Workers.GuardianTokenSweepJob do
     count
   end
 
-  # Absolute session cap in seconds. Reads the same config key as
-  # `StacksWeb.AuthController` and converts it through the same
-  # `Stacks.Duration.to_seconds/1`, so "the two never disagree on how long a
-  # session may live" is now structural rather than a comment asking politely.
   defp session_cap_seconds do
     :core
     |> Application.get_env(:session_absolute_cap, {7, :day})

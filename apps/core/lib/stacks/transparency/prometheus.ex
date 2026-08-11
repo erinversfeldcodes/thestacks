@@ -40,8 +40,6 @@ defmodule Stacks.Transparency.Prometheus do
 
     req = Finch.build(:get, url, [{"Accept", "application/json"}])
 
-    # request_timeout bounds the WHOLE response (receive_timeout is
-    # per-chunk — #381d); an instant-query scalar is tiny.
     case Finch.request(req, Stacks.Finch,
            receive_timeout: @receive_timeout,
            request_timeout: @receive_timeout
@@ -59,10 +57,6 @@ defmodule Stacks.Transparency.Prometheus do
     end
   end
 
-  # Prometheus instant-query response:
-  #   {"status":"success","data":{"resultType":"vector",
-  #     "result":[{"metric":{...},"value":[<ts>,"<scalar>"]}]}}
-  # A scalar result type is {"resultType":"scalar","result":[<ts>,"<scalar>"]}.
   defp parse_scalar(body) do
     case Jason.decode(body) do
       {:ok, %{"status" => "success", "data" => %{"result" => result}}} ->
@@ -76,9 +70,7 @@ defmodule Stacks.Transparency.Prometheus do
     end
   end
 
-  # Vector: take the first series' sample value.
   defp extract_value([%{"value" => [_ts, raw]} | _]), do: cast_number(raw)
-  # Scalar: [ts, "value"].
   defp extract_value([_ts, raw]) when is_binary(raw), do: cast_number(raw)
   defp extract_value(_), do: {:error, :no_data}
 

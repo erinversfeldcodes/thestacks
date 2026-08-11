@@ -61,10 +61,6 @@ defmodule Stacks.AI.MockClient do
     :ok
   end
 
-  # ---------------------------------------------------------------------------
-  # Steering lookup
-  # ---------------------------------------------------------------------------
-
   defp steered_response(endpoint) do
     responses = lookup_responses()
 
@@ -74,12 +70,6 @@ defmodule Stacks.AI.MockClient do
     end
   end
 
-  # Walk the `$callers` chain so responses registered in the test process are
-  # visible to Tasks spawned from it (Stacks.Moderation resolves candidates via
-  # Task.async_stream, and run_pipeline farms work out to Task.await_many).
-  # Elixir puts the caller hierarchy in `$callers` when a Task is started, so we
-  # can check each ancestor's dictionary. Local dict wins; fall through to
-  # ancestors only on miss. Same idiom as Stacks.Books.MockHttpClient.
   defp lookup_responses do
     case Process.get(__MODULE__, :undefined) do
       :undefined -> find_in_callers(Process.get(:"$callers", []))
@@ -103,10 +93,6 @@ defmodule Stacks.AI.MockClient do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Canned defaults — used when a test has not steered the endpoint
-  # ---------------------------------------------------------------------------
-
   defp default_response("is_book", _payload) do
     {:ok,
      %{
@@ -124,8 +110,6 @@ defmodule Stacks.AI.MockClient do
      }}
   end
 
-  # Consolidated endpoint — composes classify + extract server-side.
-  # Mirrors the shape of AnalyzeResponse from vision.proto.
   defp default_response("analyze", payload) do
     {:ok,
      %{

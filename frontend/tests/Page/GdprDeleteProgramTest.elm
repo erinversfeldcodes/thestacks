@@ -245,10 +245,6 @@ singleFlightBlocksSecondRequest =
     test "single_flight: editing the field and re-clicking mid-flight fires no second DELETE" <|
         \() ->
             submitted
-                -- The attack: a keystroke that keeps the confirmation valid
-                -- ("DELETE"). In the pre-fix code this reset `deleting` to
-                -- NotAsked, re-enabling the still-confirmed submit, so a second
-                -- click fired a second DELETE. The handler guard must block it.
                 |> ProgramTest.update (UserTypesDeleteConfirmation "DELETE")
                 |> ProgramTest.update UserClicksDeleteAccount
                 |> ProgramTest.expectHttpRequests "DELETE"

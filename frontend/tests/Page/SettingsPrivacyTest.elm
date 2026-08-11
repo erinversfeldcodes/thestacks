@@ -171,10 +171,6 @@ suite =
                         |> Query.fromHtml
                         |> Query.has [ Selector.text "and we cannot say why" ]
             , -- ⛔ #374. The 422 here is the ceiling rule this module documents
-              -- in `shelfOptionExceedsCeiling` — the ONE failure on this form a
-              -- reader can act on — and it was reported with the same six words
-              -- as a dropped connection ("Could not save. Please try again."),
-              -- which for this cause is advice that can never work.
               test "a 422 names the ceiling rule rather than saying 'try again'" <|
                 \_ ->
                     { init0 | savingShelf = Failure (Http.BadStatus 422) }
@@ -200,7 +196,6 @@ suite =
                                 Privacy.init
                                 token
                     in
-                    -- Persisted "platform" is reflected, not the hardcoded "owner" default.
                     model.profileVisibility |> Expect.equal "platform"
             , test "GotPrivacySettings Ok seeds shelf rows from the payload" <|
                 \_ ->
@@ -217,7 +212,6 @@ suite =
                                 |> List.head
                                 |> Maybe.map .visibility
                     in
-                    -- Default is "platform"; the payload persists "owner".
                     wishlistVis |> Expect.equal (Just "owner")
             , test "GotPrivacySettings Ok keeps default label + full shelf set" <|
                 \_ ->
@@ -238,17 +232,11 @@ suite =
                                 Privacy.init
                                 token
                     in
-                    -- Privacy.init defaults consent to False/False; the payload
-                    -- says analytics = True. The init fetch is the source of
-                    -- truth, so the toggle must reflect the server value — this is
-                    -- the read-after-write staleness #367 fixes.
                     model.consent.analyticsConsent |> Expect.equal True
             ]
         , describe "consent folded into Privacy (#318 TR-4)"
             [ test "the consent toggles now render within the Privacy page" <|
                 \_ ->
-                    -- ORACLE for the fold: before TR-4 these toggles lived on a
-                    -- separate /settings/consent page and were absent here.
                     Privacy.init
                         |> Privacy.view
                         |> Query.fromHtml
@@ -296,8 +284,6 @@ suite =
         , describe "shelf ceiling greying (FE-2)"
             [ test "an owner profile greys shelf options above the ceiling" <|
                 \_ ->
-                    -- The "group" option is shelf-only (no such option in the
-                    -- profile select), so this isolates the shelf-row greying.
                     { init0 | profileVisibility = "owner" }
                         |> Privacy.view
                         |> Query.fromHtml

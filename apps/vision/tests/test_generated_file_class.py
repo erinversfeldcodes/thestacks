@@ -32,8 +32,6 @@ from gen_python_proto import _resolve_drift, classify  # noqa: E402
 
 CLASSIFIER = REPO_ROOT / "scripts" / "generated-file-class.sh"
 
-# Both probes are suffixed with the pid so parallel runs cannot collide.
-# Under apps/core/lib/stacks/gen/, which .gitignore covers.
 IGNORED_PROBE = REPO_ROOT / f"apps/core/lib/stacks/gen/proto/drift_probe_{os.getpid()}.ex"
 TRACKED_PROBE = REPO_ROOT / f"drift_probe_tracked_{os.getpid()}.tmp"
 

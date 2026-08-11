@@ -3,8 +3,6 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
 
   alias Mix.Tasks.ProtoSync.TypeMapper
 
-  # Ecto DSL macros that the formatter should leave without parentheses.
-  # Mirrors the `locals_without_parens` exported by :ecto and :ecto_sql .formatter.exs.
   @ecto_locals_without_parens [
     field: 1,
     field: 2,
@@ -40,7 +38,6 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
     module_name = inspect(table.ecto_module)
     ts_fields = timestamp_field_names(table)
 
-    # Partition fields into: belongs_to associations, regular fields, and skipped
     {belongs_to_lines, field_lines} =
       fields
       |> Enum.reject(fn field ->
@@ -63,10 +60,8 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
     belongs_to_str = belongs_to_lines |> Enum.reverse() |> Enum.join("\n")
     fields_str = field_lines |> Enum.reverse() |> Enum.join("\n")
 
-    # has_many associations from table-level config
     has_many_lines = has_many_block(table)
 
-    # Combine: belongs_to first, then has_many, then fields
     schema_body =
       [belongs_to_str, has_many_lines, fields_str]
       |> Enum.reject(&(&1 == ""))
@@ -107,7 +102,6 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
     assoc_name = Map.get(override, :assoc_name, default_name)
     fk_atom = String.to_atom(field.name)
 
-    # When assoc_name differs from default, Ecto can't derive the FK — specify it explicitly.
     opts =
       if assoc_name != default_name,
         do: "type: :binary_id, foreign_key: :#{fk_atom}",
@@ -122,7 +116,6 @@ defmodule Mix.Tasks.ProtoSync.EctoGenerator do
     field_name = String.to_atom(field.name)
     override = Map.get(overrides, field_name, %{})
 
-    # ecto_name: rename the proto field to a different Ecto/DB column name
     ecto_name = Map.get(override, :ecto_name, field_name)
 
     default_opt =

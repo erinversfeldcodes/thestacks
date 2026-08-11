@@ -54,16 +54,8 @@ defmodule Stacks.Uploads do
     :user_id
   ]
 
-  # Image lifecycle:
-  #   awaiting_upload → client has been issued a presigned PUT URL but
-  #     hasn't yet committed. The bytes may or may not be in R2.
-  #   pending         → bytes verified in R2, IdentifyBookJob enqueued.
-  #   resolved        → pipeline identified one or more books.
-  #   rejected        → pipeline rejected (not-a-book, isbn-not-found, etc).
   @valid_image_statuses ~w(awaiting_upload pending resolved rejected)
 
-  # No sub-1KB blob is a real book photo, and each accepted image costs a GPU
-  # call — undersized objects are rejected at commit, before vision work exists.
   @min_image_bytes 1_024
 
   @doc """
@@ -94,7 +86,6 @@ defmodule Stacks.Uploads do
       {:ok, image}
     else
       {:error, reason} ->
-        # Clean up stored object if DB insert fails (no-op if upload never happened)
         Stacks.Storage.delete_image(storage_key)
         {:error, reason}
     end
@@ -156,13 +147,6 @@ defmodule Stacks.Uploads do
     storage_key = "uploads/#{image_id}"
     ttl_seconds = Keyword.get(opts, :ttl_seconds, 900)
 
-    # Use a Phoenix-served upload URL rather than an R2 presigned URL.
-    # Direct browser→R2 PUT requires the R2 bucket to allow the request
-    # origin in its CORS policy. Preview deployments use *.fly.dev origins
-    # which may not be in the bucket allowlist, causing silent CORS failures.
-    # Proxying through Phoenix is same-origin from the browser's perspective,
-    # so no CORS preflight is needed. Phoenix then stores to the configured
-    # backend (R2 in production, Local in dev/preview).
     upload_url = "/api/upload/#{image_id}/data"
 
     with {:ok, _image} <-
@@ -210,9 +194,6 @@ defmodule Stacks.Uploads do
       {:ok, %{image_id: updated.id, job_id: job.id}}
     else
       {:error, :image_too_small} ->
-        # The same rejection path an invalid image takes downstream: terminal
-        # row state + SSE notification + image.rejected event — never a bare
-        # error the client would be told to retry.
         reject_image(image_id, "image_too_small")
         {:error, :image_too_small}
 
@@ -282,10 +263,6 @@ defmodule Stacks.Uploads do
       :ok
   end
 
-  # Translate the storage backend's :not_found into :not_yet_uploaded so
-  # the controller can distinguish "no such row" from "row exists but
-  # the client PUT hasn't landed yet" — the latter is a race condition
-  # clients can retry, the former is a hard 404.
   defp verify_object_exists(storage_path) do
     case Stacks.Storage.head_image(storage_path) do
       {:ok, size} when size >= @min_image_bytes -> :ok
@@ -368,11 +345,6 @@ defmodule Stacks.Uploads do
       )
       |> Repo.all()
 
-    # ⚠️ `MapSet.new/1` is called HERE, not in `Shelving`, and that placement is the fix for an OTP 28
-    # dialyzer failure rather than a style choice. `MapSet.t/1` is opaque; dialyzer's success typing
-    # sees through the producing function to a structural `%MapSet{map: ...}`, and passing that across
-    # a module boundary into `MapSet.member?/2` is `call_without_opaque`. Building the set in the same
-    # module that queries it keeps the opacity from ever travelling. Same class as b76fa3f3.
     candidate_ids = rows |> Enum.flat_map(&candidate_ids/1) |> Enum.uniq()
 
     shelved =
@@ -385,10 +357,6 @@ defmodule Stacks.Uploads do
     |> Enum.reject(&is_nil/1)
   end
 
-  # `book_ids` is the multi-candidate array; `book_id` is the single-match
-  # column the pipeline wrote before the array existed. The SSE stream prefers
-  # the array and falls back to the singleton, and so must this — otherwise an
-  # older resolved row is an inbox item with nothing in it.
   defp candidate_ids(%UploadedImage{book_ids: ids}) when is_list(ids) and ids != [], do: ids
   defp candidate_ids(%UploadedImage{book_id: nil}), do: []
   defp candidate_ids(%UploadedImage{book_id: id}), do: [id]
@@ -401,13 +369,8 @@ defmodule Stacks.Uploads do
     case Enum.reject(candidate_ids(image), &MapSet.member?(shelved, &1)) do
       [] ->
         if candidate_ids(image) == [] do
-          # Resolved with nothing identified. The reader is owed the news, and
-          # the client's `CauseUnknown` copy is the honest one: we cannot say
-          # why, and a nil token asks for exactly that sentence.
           failed_item(image)
         else
-          # Every candidate is already on a bookshelf — finished, by whatever
-          # route. This is the branch that stops the inbox nagging.
           nil
         end
 

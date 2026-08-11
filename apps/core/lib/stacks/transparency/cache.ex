@@ -17,8 +17,6 @@ defmodule Stacks.Transparency.Cache do
   @table :transparency_cache
   @cleanup_interval 60_000
 
-  # ── Public API ─────────────────────────────────────────────────────────────
-
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
@@ -64,8 +62,6 @@ defmodule Stacks.Transparency.Cache do
     :ok
   end
 
-  # ── GenServer callbacks ─────────────────────────────────────────────────────
-
   @impl true
   def init(_) do
     table = :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
@@ -75,8 +71,6 @@ defmodule Stacks.Transparency.Cache do
 
   @impl true
   def handle_info(:cleanup, state) do
-    # Evict entries older than the longest plausible TTL (10 min) so the table
-    # never grows unbounded; per-read freshness is enforced in get/2.
     cutoff = System.monotonic_time(:millisecond) - 600_000
 
     :ets.select_delete(@table, [
@@ -89,9 +83,6 @@ defmodule Stacks.Transparency.Cache do
 
   defp schedule_cleanup, do: Process.send_after(self(), :cleanup, @cleanup_interval)
 
-  # The GenServer owns the table; reads/writes from other processes are safe
-  # (`:public`), but a lookup before init or after shutdown must not crash a
-  # request — fall back to a miss.
   defp safe_lookup(key) do
     if table_exists?(), do: :ets.lookup(@table, key), else: []
   rescue

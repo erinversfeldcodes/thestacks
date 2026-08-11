@@ -38,9 +38,6 @@ type CopyTarget
 type CopyState
     = Idle
     | Copied CopyTarget
-      -- The clipboard refused (no permission, older browser): the text is
-      -- revealed in a readonly textarea instead. A copy button that silently
-      -- fails is worse than a textarea.
     | CopyUnavailable String
 
 
@@ -89,7 +86,6 @@ type Msg
 
 type OutMsg
     = NoOut
-      -- Main owns the clipboard port; the panel asks.
     | RequestCopy String
     | SyndicatedChanged Bool
     | AuthLost
@@ -112,8 +108,6 @@ update msg model maybeToken =
             requestCopy model Canonical (canonicalUrl model)
 
         ClickedCopyFeedUrl url ->
-            -- The handle-bearing URL is computed at view time, so the click
-            -- carries it.
             requestCopy model FeedUrl url
 
         ClickedCopyExport format ->
@@ -128,9 +122,6 @@ update msg model maybeToken =
                     ( model, Cmd.none, AuthLost )
 
         GotExport format (Ok export) ->
-            -- Copy first; the syndication row is recorded only AFTER the
-            -- writer actually received the text (a record for an export they
-            -- never got would be a lie in the record) — see CopyOutcome.
             ( { model
                 | exportState = Success export
                 , pendingCopy = Just { target = Export format, payload = export.body }
@@ -149,8 +140,6 @@ update msg model maybeToken =
             )
 
         SyndicationRecorded (Err _) ->
-            -- The copy still happened; the record is bookkeeping. Nothing to
-            -- take back from the writer.
             ( model, Cmd.none, NoOut )
 
         UrlChanged value ->
@@ -197,11 +186,9 @@ update msg model maybeToken =
                     ( model, Cmd.none, AuthLost )
 
         ToggleSaved (Ok syndicated) ->
-            -- The parent's copy of the post must not go stale under the tickbox.
             ( { model | includeInFeed = syndicated }, Cmd.none, SyndicatedChanged syndicated )
 
         ToggleSaved (Err _) ->
-            -- The save failed — the tickbox snaps back to the truth.
             ( { model | includeInFeed = not model.includeInFeed }, Cmd.none, NoOut )
 
         CopyOutcome True ->
@@ -273,10 +260,6 @@ replaceSyndication updated =
             else
                 s
         )
-
-
-
--- VIEW
 
 
 {-| `handle` is the author's public handle (the feed URL needs it);
@@ -408,7 +391,6 @@ viewAlsoPublishedAt model =
 
         Nothing ->
             if model.syndications == [] then
-                -- Nothing recorded yet — nowhere to hang a backlink.
                 text ""
 
             else

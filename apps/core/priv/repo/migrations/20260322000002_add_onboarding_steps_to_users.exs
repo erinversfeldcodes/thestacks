@@ -12,8 +12,6 @@ defmodule Core.Repo.Migrations.AddOnboardingStepsToUsers do
 
   use Ecto.Migration
 
-  # Recreated after each column swap. The DO block guards on schema existence so
-  # the migration is a no-op in the test database (which has no staging schema).
   @recreate_stg_users_view """
   DO $body$
   BEGIN

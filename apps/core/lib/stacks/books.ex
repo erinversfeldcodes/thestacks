@@ -37,8 +37,6 @@ defmodule Stacks.Books do
   alias Stacks.Events
   alias Stacks.Shelving
 
-  # ── Field lists for changesets (moved from schemas) ──────────────────────
-
   @book_required_fields [:title]
   @book_optional_fields [
     :author_id,
@@ -63,9 +61,6 @@ defmodule Stacks.Books do
     :is_primary
   ]
 
-  # The closed set of ISBN-verification provenances (#335 D1). Mirrored by the
-  # `book_editions_verification_source_check` CHECK constraint and the
-  # `accepted_values` dbt test on stg_book_editions.
   @verification_sources ~w(open_library google_books barcode_unverified)
 
   @doc """
@@ -133,11 +128,6 @@ defmodule Stacks.Books do
     |> Repo.one()
   end
 
-  # Sort key mirroring the query clause's `desc: is_primary, asc: created_at,
-  # asc: id`. `is_primary != true` maps the primary edition to `false` (0) so it
-  # sorts ahead of the non-primary ones; `created_at` is compared chronologically
-  # via Unix microseconds (Erlang term order over %DateTime{} is NOT
-  # chronological), with `id` as the final tiebreak.
   defp edition_sort_key(edition) do
     {edition.is_primary != true, edition_time_key(edition.created_at), edition.id}
   end
@@ -185,28 +175,7 @@ defmodule Stacks.Books do
   @spec create(map()) :: {:ok, Book.t()} | {:error, Ecto.Changeset.t()}
   def create(attrs), do: create_work(attrs, event: &book_created_event/2)
 
-  # ── The one create transaction (#341) ────────────────────────────────────
-  #
-  # Every path that mints a work and its first edition arrives here. There used
-  # to be two — `create/1` and a private `create_confirmed_book/4` — and they had
-  # drifted: the confirmed one silently dropped `google_books_id`, so an edition
-  # the platform had just paid a Google Books round-trip for lost both the
-  # cross-reference AND (since `verification_source_from/1` reads provenance off
-  # exactly those identifiers) its claim to have been verified at all.
-  #
-  # The two callers differ only in what they ADD to the create — a bookshelf
-  # placement, and which event they emit — so those are options, not a reason for
-  # a second implementation.
-  #
-  # `opts`:
-  #   * `:event` — `(book, edition -> map)` building the event to emit.
-  #   * `:place` — `{user_id, shelf_name}` to place the new book inside the same
-  #     transaction, or absent for a catalogue-only create.
   defp create_work(attrs, opts) do
-    # Resolved before the Multi so an author-insert failure is reported as
-    # itself rather than as an aborted transaction. `create/1` used to swallow
-    # this error and mint an author-less book; the confirmed path already
-    # propagated it, and propagating is the answer that cannot lose data.
     with {:ok, author} <- find_or_create_author(attrs["author"]) do
       Multi.new()
       |> Multi.insert(:book, book_changeset(%Book{}, book_attrs(attrs, author)))
@@ -238,8 +207,6 @@ defmodule Stacks.Books do
   defp book_attrs(attrs, nil), do: attrs
   defp book_attrs(attrs, author), do: Map.put(attrs, "author_id", author.id)
 
-  # The edition columns the create transaction writes. This list IS the contract
-  # the two former implementations disagreed about — keep it exhaustive.
   defp edition_attrs(attrs, book) do
     %{
       "isbn" => attrs["isbn"],
@@ -252,9 +219,6 @@ defmodule Stacks.Books do
       "open_library_id" => attrs["open_library_id"],
       "google_books_id" => attrs["google_books_id"],
       "is_primary" => true,
-      # Callers that KNOW the provenance say so (Moderation's barcode fast
-      # path); everyone else has it read off the identifiers the resolver
-      # returned.
       "verification_source" => attrs["verification_source"] || verification_source_from(attrs)
     }
   end
@@ -328,7 +292,6 @@ defmodule Stacks.Books do
 
     cond do
       book.visibility_tier == tier ->
-        # No-op: the tier already matches. Succeed without emitting telemetry.
         {:ok, book}
 
       raise_only and not raising_gate?(book.visibility_tier, tier) ->
@@ -386,15 +349,9 @@ defmodule Stacks.Books do
     :ok
   end
 
-  # Raising the gate is only public → age_gated. Everything else (already
-  # age_gated, or a lower) is not a raise.
   defp raising_gate?("public", "age_gated"), do: true
   defp raising_gate?(_from, _to), do: false
 
-  # Repointed age-gate tiering counter (formerly emitted by the removed
-  # pipeline classifier). `tier` is a whitelisted atom (:public /
-  # :age_gated) and `source` is :user / :owner — no BISAC code, ISBN,
-  # title, or id in metadata (GDPR: telemetry is a warehouse-adjacent sink).
   defp emit_tiering(tier, source) when source in [:user, :owner] do
     :telemetry.execute(
       [:stacks, :moderation, :tiering],
@@ -424,12 +381,6 @@ defmodule Stacks.Books do
     end
   end
 
-  # The one place a resolver result becomes this context's vocabulary.
-  #
-  # Every write path that needs metadata (`create_from_isbn/1`, `confirm/2`,
-  # `merge_edition/2`) goes through here, so none of them can reintroduce the
-  # `{:error, _}` collapse that made a Google Books outage indistinguishable
-  # from an ISBN nobody has ever heard of.
   defp resolve_for_write(isbn) do
     case ISBNResolver.resolve(isbn) do
       {:ok, metadata} -> {:ok, metadata}
@@ -437,23 +388,6 @@ defmodule Stacks.Books do
     end
   end
 
-  # `:isbn_not_found` is a claim about the ISBN and is only made when the
-  # upstreams actually made it. `:resolver_unavailable` says the lookup did not
-  # happen — nothing was learned about this book, so nothing about this book is
-  # recorded. Callers map the two to different HTTP answers (422 vs 503).
-  #
-  # The `resolver_error?/1` guard is not ceremony. `determination/1` is written
-  # without a catch-all so that a NEW `error_reason/0` cannot ship unclassified,
-  # and that property is worth keeping — but it means an atom from outside the
-  # contract raises, and this runs inside a Phoenix action, where a raise is a
-  # 500. An HTTP client that breaks its behaviour (or a test double that invents
-  # a reason, which is how this was found: `:service_unavailable`, a value
-  # `Stacks.Books.HttpClient` cannot produce) then costs the reader a crash.
-  #
-  # It degrades to `:resolver_unavailable`, never to `:isbn_not_found`, because
-  # that is the whole rule: a failure we cannot even name is certainly not
-  # evidence about the book. Same shape as
-  # `Stacks.Workers.IdentifyBookJob.rejection_token/1`.
   @spec resolver_failure(term()) :: :isbn_not_found | :resolver_unavailable
   defp resolver_failure(reason) do
     if ISBNResolver.resolver_error?(reason) do
@@ -596,12 +530,6 @@ defmodule Stacks.Books do
   defp maybe_search(query, ""), do: query
 
   defp maybe_search(query, search) do
-    # Raw query straight to `plainto_tsquery` via the bound param — same rationale
-    # as `search_books/2` (#291): injection-safety comes from Ecto binding +
-    # plainto_tsquery treating input as plain text, NOT from stripping characters.
-    # This path uses `plainto_tsquery` (not `ilike`), so there are no `%`/`_`
-    # wildcard semantics to escape. A prior `String.replace(~r/[^\w\s]/)` sanitiser
-    # was lossy — "O'Brien" → "OBrien", "spider-man" → "spiderman" (#296).
     where(
       query,
       [b],
@@ -616,21 +544,9 @@ defmodule Stacks.Books do
     where(query, [b], ^subject in b.subjects)
   end
 
-  # #229: age-gated books are hidden from listing surfaces for any viewer who is
-  # not age-verified — anonymous OR authenticated-but-unverified. This must stay a
-  # SQL-level predicate so `total`/pagination (see list_catalogue/1) counts stay
-  # correct; an in-memory post-filter would break paging.
-  #
-  # Fail closed: ONLY a verified platform user (`{:platform_user, _id, true}`) is
-  # left unfiltered. Every other viewer shape — anonymous, unverified, or any
-  # unexpected/legacy tuple — has age-gated books excluded by default, so a future
-  # caller passing a stale 2-tuple can never silently leak age-gated content.
   defp maybe_exclude_age_gated(query, {:platform_user, _id, true}), do: query
 
   defp maybe_exclude_age_gated(query, _viewer) do
-    # Shipped dark (ADR-020): when age-gating is disabled the listing filter is a
-    # no-op for EVERY viewer — age-gated books are shown like public ones. Only
-    # `list_for_moderation`/`maybe_filter_tier` (owner-only) stays tier-aware.
     if Stacks.FeatureFlags.age_gating_enabled?() do
       where(query, [b], b.visibility_tier != "age_gated")
     else
@@ -700,9 +616,6 @@ defmodule Stacks.Books do
     where(query_ast, [b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
   end
 
-  # Under deep scope, rank title matches ahead of description-only matches: the
-  # boolean `title_tsv @@ ...` sorts `true` before `false` under DESC, then title
-  # breaks ties alphabetically. Title scope keeps its implicit (unordered) shape.
   defp search_scope_order(query_ast, :deep, query) do
     order_by(
       query_ast,
@@ -763,12 +676,6 @@ defmodule Stacks.Books do
 
         case Repo.update(changeset) do
           {:ok, updated} ->
-            # `book_id` is here because the aggregate is the EDITION, and the
-            # one subscriber (CacheInvalidationHandler) is keyed by WORK. It
-            # used to evict under `aggregate_id`, i.e. under an edition id,
-            # which is never a cache key — so a confirmed cover stayed
-            # invisible for the full BookDetailCache TTL. Found by #355's
-            # sibling sweep. Public bibliographic identifier, no PII.
             Events.emit_safe(%{
               event_type: "book.cover_confirmed",
               aggregate_type: "book_edition",
@@ -786,8 +693,6 @@ defmodule Stacks.Books do
   end
 
   defp maybe_store_cover_in_r2(isbn, cover_url) when is_binary(isbn) do
-    # Covers are permanent — use a long-lived presigned URL (7 days).
-    # In production, R2 public bucket access or CDN would serve these.
     with {:ok, image_data} <- download_cover(cover_url),
          {:ok, storage_key} <- Stacks.Storage.store_cover(isbn, image_data),
          {:ok, r2_url} <- Stacks.Storage.get_image_url(storage_key, 604_800) do
@@ -799,10 +704,6 @@ defmodule Stacks.Books do
 
   defp maybe_store_cover_in_r2(_isbn, cover_url), do: cover_url
 
-  # Routed through the configured Books HTTP client (#381a) rather than a bare
-  # `Finch.build/request`, so tests mock it via `:isbn_http_client` and never
-  # dial the cover host. Any non-200 / transport error surfaces as `{:error, _}`,
-  # which `maybe_store_cover_in_r2/2` falls back on (keeps the source URL).
   defp download_cover(url) when is_binary(url) do
     books_http_client().get_binary(url)
   end
@@ -844,8 +745,6 @@ defmodule Stacks.Books do
     |> Enum.sort_by(& &1.similarity, :desc)
   end
 
-  # Jaro-Winkler similarity: jaro + prefix_len * p * (1 - jaro)
-  # p = 0.1, prefix length capped at 4.
   defp jaro_winkler(s1, s2) do
     jaro = String.jaro_distance(s1, s2)
 
@@ -910,17 +809,6 @@ defmodule Stacks.Books do
     end
   end
 
-  # Decision (#333): branch on "is it already on the bookshelf they asked for?",
-  # not on "does a placement exist anywhere?".
-  #
-  # The old `nil | placement` branch treated ANY existing placement as
-  # already-placed, so asking to add a wish-listed book to your Library quietly
-  # did nothing and reported success — a block dressed up as a no-op. The owner's
-  # ruling (2026-07-30) makes a book on several bookshelves a legal state, so the
-  # only genuine "already placed" is a placement on the *requested* bookshelf —
-  # which is also the one the rung-4 unique index would reject. Everything else
-  # gets its placement, and the caller is *informed* of the others via the
-  # returned list.
   defp place_or_return_existing(user_id, book, shelf_name, book_edition_id) do
     placements = Shelving.get_placements_for_book(user_id, book.id)
 
@@ -930,12 +818,6 @@ defmodule Stacks.Books do
     end
   end
 
-  # Decision (#333): take the placement `place_book/3` just created rather than
-  # re-querying for "the" placement. The re-query ended in `Repo.one()` and so
-  # raised the moment the book was already on another bookshelf — precisely the
-  # multi-shelf add this branch exists to perform. `place_book/3` hands back the
-  # row it inserted, so the answer is unambiguous and one query cheaper; only
-  # the bookshelf needs preloading for serialisation.
   defp create_placement_for_existing(user_id, book, shelf_name, existing, book_edition_id) do
     case Shelving.place_book(user_id, book.id, shelf_name, book_edition_id) do
       {:ok, placement} ->
@@ -950,9 +832,6 @@ defmodule Stacks.Books do
   defp require_isbn(isbn) when is_nil(isbn) or isbn == "", do: {:error, :missing_isbn}
   defp require_isbn(isbn), do: {:ok, isbn}
 
-  # The confirmed path is `create_work/2` plus a placement and its own event —
-  # nothing more. All it has to do first is translate the resolver's atom-keyed
-  # metadata into the string-keyed attrs the create transaction speaks.
   defp create_confirmed_book(user_id, isbn, metadata, shelf_name) do
     attrs = attrs_from_resolved(isbn, metadata)
 
@@ -985,38 +864,11 @@ defmodule Stacks.Books do
          book when not is_nil(book) <- Repo.get(Book, work_id) do
       insert_edition(book, isbn, format_label, work_id, meta)
     else
-      # `resolve_for_write/1` has already said which of the two this is; the
-      # old clause here overwrote both with `:isbn_not_found`, so a merge
-      # attempted during a Google Books outage told the reader their ISBN was
-      # not a book.
       {:error, reason} -> {:error, reason}
       nil -> {:error, :not_found}
     end
   end
 
-  # Conflict rule (#341): the CALLER states `isbn` and `format_label`; the
-  # RESOLVER fills everything else.
-  #
-  # This function used to keep only the ISBN, the work id, the caller's format
-  # label and the provenance, throwing away every other field of the metadata it
-  # had just paid an Open Library / Google Books round-trip for — so a merged
-  # edition had no cover, publisher, page count or cross-reference id, and
-  # nothing downstream could tell "this edition has no publisher" from "nobody
-  # ever asked".
-  #
-  # The rule is the conservative one — fill only what would otherwise be null.
-  # It cannot destroy anything: the insert only ever creates a NEW row (a
-  # duplicate ISBN is rejected as `:duplicate_isbn`, never updated), so no value
-  # a reader or an earlier resolve established is reachable from here.
-  #
-  # The caller's half is deliberately narrow rather than "caller wins on every
-  # field". `StacksWeb.BookController.merge_format/2` hands this function the
-  # raw request params, so honouring a caller-supplied `publisher`,
-  # `open_library_id` or `google_books_id` would make
-  # `POST /api/books/:id/merge-format` a mass-assignment hole over exactly the
-  # columns that record where an ISBN's verification came from. `format_label`
-  # ("Hardcover", "Slipcased") is the one field the endpoint documents as the
-  # caller's to choose, and the resolver never supplies it.
   defp insert_edition(book, isbn, format_label, work_id, meta) do
     %BookEdition{}
     |> book_edition_changeset(%{
@@ -1030,8 +882,6 @@ defmodule Stacks.Books do
       "open_library_id" => meta[:open_library_id],
       "google_books_id" => meta[:google_books_id],
       "is_primary" => false,
-      # merge_edition/2 only gets here after ISBNResolver.resolve/1 succeeded,
-      # so the provenance is whichever source answered.
       "verification_source" => verification_source_from(meta)
     })
     |> Repo.insert()
@@ -1093,15 +943,6 @@ defmodule Stacks.Books do
     end
   end
 
-  # `ISBNResolver.resolve/1` hands back atom-keyed metadata; the create
-  # transaction speaks string-keyed attrs. Translating here — rather than
-  # keeping a second copy of the insert — is what makes ONE create transaction
-  # possible, and it is the single place a newly-resolved field has to be added
-  # for every create path to carry it.
-  #
-  # `verification_source` is deliberately absent: `edition_attrs/2` derives it
-  # from the `open_library_id` / `google_books_id` copied above, which is the
-  # same answer `verification_source_from/1` gives for the metadata itself.
   defp attrs_from_resolved(isbn, metadata) do
     %{
       "isbn" => isbn,
@@ -1118,8 +959,6 @@ defmodule Stacks.Books do
       "google_books_id" => metadata[:google_books_id]
     }
   end
-
-  # ── Changeset functions (moved from schema modules) ────────────────────
 
   @doc false
   def book_changeset(book, attrs) do
@@ -1247,9 +1086,6 @@ defmodule Stacks.Books do
     |> validate_isbn_checksum()
     |> normalize_edition_isbn()
     |> unique_constraint(:isbn)
-    # Rung-4 backstops. The validations above already reject both, so these only
-    # fire when a value slips past them (a `put_change`, a future write path) —
-    # turning what would be a raised Postgrex error into a changeset error.
     |> check_constraint(:isbn,
       name: :book_editions_isbn_ean13_checksum,
       message: "must be a valid ISBN-13 with a correct check digit"
@@ -1260,12 +1096,6 @@ defmodule Stacks.Books do
     )
   end
 
-  # Normalise any ISBN-10 input to ISBN-13 before storage so that
-  # find_existing/1 (which always searches by ISBN-13) can round-trip
-  # correctly. Without this, a title-search returning an ISBN-10 would be
-  # stored as-is, find_existing would miss it, and re-inserts would hit the
-  # unique constraint instead of deduplicating cleanly.
-  # Only runs when the changeset is still valid (format + checksum already passed).
   defp normalize_edition_isbn(%{valid?: false} = changeset), do: changeset
 
   defp normalize_edition_isbn(changeset) do

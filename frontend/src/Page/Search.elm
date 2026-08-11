@@ -55,10 +55,6 @@ type Msg
 type OutMsg
     = NoOut
     | SessionExpired
-      -- A search result was activated: open the book detail overlay for this
-      -- book id. Main handles this by opening the overlay over /search (URL
-      -- unchanged, per the overlay convention / ADR-005), with the clicked row
-      -- as the focus-return trigger (see #114, #289).
     | OpenOverlay String
 
 
@@ -91,10 +87,6 @@ update msg model maybeToken =
                 | query = query
                 , debounceCount = newCount
                 , results =
-                    -- Book search is authenticated-only; with no token it never
-                    -- fires, so stay on the hint rather than a spinner that would
-                    -- never resolve for an anonymous visitor. People search below
-                    -- still runs (optional-auth).
                     if String.isEmpty query || maybeToken == Nothing then
                         NotAsked
 
@@ -117,9 +109,6 @@ update msg model maybeToken =
         DebounceExpired count ->
             if count == model.debounceCount && not (String.isEmpty model.query) then
                 let
-                    -- Book search is authenticated; people search is optional-auth
-                    -- so it fires with or without a token. The scope (title-only vs
-                    -- deep) follows the current toggle state (#284).
                     bookCmd =
                         case maybeToken of
                             Just token ->
@@ -209,10 +198,6 @@ update msg model maybeToken =
                 newModel =
                     { model | deepSearch = deep }
             in
-            -- Re-fire the current query under the new scope so the results
-            -- update immediately (no re-typing). Only the book search re-runs —
-            -- deep scope affects books, not people — and only when there is a
-            -- token and a non-empty query; otherwise just flip the flag (#284).
             case ( maybeToken, String.isEmpty model.query ) of
                 ( Just token, False ) ->
                     ( { newModel | results = Loading }
@@ -262,11 +247,6 @@ view model =
 
             Success sections ->
                 let
-                    -- Sort and the year filter apply WITHIN each section: the same
-                    -- `applyYearFilter`/`sortBooks` are run independently over the
-                    -- collection hits and the platform hits (they are generic over
-                    -- any `{ a | book : Book }`), so a section's ordering never
-                    -- bleeds across the boundary.
                     visibleCollection =
                         sections.collection
                             |> applyYearFilter model.filters
@@ -284,9 +264,6 @@ view model =
                         List.isEmpty visibleCollection && List.isEmpty visiblePlatform
                 in
                 if visibleEmpty then
-                    -- Distinguish "the query found nothing" from "the query found
-                    -- books but the year filter hid them all" — the latter is
-                    -- fixable by widening/clearing the filter, so say so.
                     if not rawEmpty && yearFilterActive model.filters then
                         p [ class "search-empty" ] [ text "No books in that year range — widen it or clear filters" ]
 
@@ -702,8 +679,6 @@ parseSnippet input =
             in
             case List.head (String.indexes markClose afterOpen) of
                 Nothing ->
-                    -- Unbalanced: an open with no close. Emit the whole remaining
-                    -- input verbatim as plain text — no false highlight.
                     plainSegment input
 
                 Just closeIdx ->

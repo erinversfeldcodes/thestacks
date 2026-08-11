@@ -13,10 +13,6 @@ defmodule Stacks.BlogCommentTest do
     insert(:post, user: user, published_at: DateTime.utc_now())
   end
 
-  # ---------------------------------------------------------------------------
-  # list_comments/2
-  # ---------------------------------------------------------------------------
-
   describe "list_comments/2" do
     test "returns top-level comments with nested replies" do
       user = insert(:user)
@@ -58,13 +54,10 @@ defmodule Stacks.BlogCommentTest do
       blocked = insert(:user)
       post = published_post(insert(:user))
 
-      # Set up a block relationship
       insert(:user_block, blocker: blocker, blocked: blocked)
 
-      # Blocked user's comment should still appear for anonymous viewers
       insert(:post_comment, post: post, author: blocked, body: "Should be visible anonymously")
 
-      # Anonymous viewer (nil) — no filtering
       comments = Blog.list_comments(post.id, nil)
       assert length(comments) == 1
       assert hd(comments).body == "Should be visible anonymously"
@@ -77,10 +70,6 @@ defmodule Stacks.BlogCommentTest do
       assert [] = Blog.list_comments(post.id, nil)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # create_comment/3
-  # ---------------------------------------------------------------------------
 
   describe "create_comment/3" do
     test "creates a comment on a published post" do
@@ -168,10 +157,6 @@ defmodule Stacks.BlogCommentTest do
       assert reply.body == "A reply"
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # delete_comment/2
-  # ---------------------------------------------------------------------------
 
   describe "delete_comment/2" do
     test "comment author can delete their own comment" do

@@ -34,10 +34,6 @@ import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
 
-
--- MODEL
-
-
 type alias CostItem =
     { service : String
     , description : Maybe String
@@ -92,10 +88,6 @@ init =
     )
 
 
-
--- UPDATE
-
-
 type Msg
     = CostsReceived (Result Http.Error CostBreakdown)
 
@@ -107,10 +99,6 @@ update msg model =
             ( { model | costs = Types.RemoteData.fromResult result }
             , Cmd.none
             )
-
-
-
--- HTTP
 
 
 {-| `Http.request` rather than the shorter `Http.get`, because `Http.get` has no
@@ -186,10 +174,6 @@ costBreakdownDecoder =
         (Decode.map fromProtoCostBreakdown ProtoAdmin.decodeCostBreakdown)
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--costs curator-desk" ]
@@ -222,10 +206,6 @@ viewBreakdown breakdown =
         ]
 
 
-
--- LAYER 1: The Human Number
-
-
 viewTotalBanner : CostBreakdown -> Html Msg
 viewTotalBanner breakdown =
     div [ class "costs__banner" ]
@@ -243,10 +223,6 @@ viewTotalBanner breakdown =
                 |> List.intersperse (span [ class "costs__banner-plus" ] [ text " + " ])
             )
         ]
-
-
-
--- LAYER 2: Story-driven breakdown
 
 
 viewStorySection : CostBreakdown -> Html Msg
@@ -295,10 +271,6 @@ viewStoryCard title narrative cents =
         ]
 
 
-
--- LAYER 3: Per-service detail
-
-
 viewCategoryCards : List CostCategory -> Html Msg
 viewCategoryCards categories =
     div [ class "costs__categories" ]
@@ -328,10 +300,6 @@ viewServiceItem item =
             [ text (Maybe.withDefault "" item.description) ]
         , div [ class "costs__service-amount" ] [ text (formatCents item.amountCents) ]
         ]
-
-
-
--- LAYER 4: Monthly trend
 
 
 viewMonthlyTrend : List MonthlyTotal -> Html Msg
@@ -374,10 +342,6 @@ viewTrendBar maxCents total =
         ]
 
 
-
--- LAYER 5: Philosophy
-
-
 viewPhilosophy : Html Msg
 viewPhilosophy =
     div [ class "costs__philosophy" ]
@@ -391,10 +355,6 @@ viewPhilosophy =
                 )
             ]
         ]
-
-
-
--- HELPERS
 
 
 formatCents : Int -> String

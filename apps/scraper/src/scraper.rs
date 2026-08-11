@@ -48,9 +48,6 @@ fn price_result(
             .as_deref()
             .map(|h| format!("{base}/products/{h}")),
         title: price.title,
-        // Meaningless without selectors: nothing was matched by CSS. Left None rather
-        // than a fabricated 1.0, which would report perfect extraction health for a
-        // path that has no selectors to match.
         selector_match_rate: None,
     }
 }
@@ -199,8 +196,6 @@ fn path_within(url: &str, domain: &str) -> Option<String> {
     match rest {
         "" => Some("/".to_string()),
         r if r.starts_with('/') => Some(r.to_string()),
-        // `https://shop.test.evil.com/...` starts with `https://shop.test` as a *string* while being
-        // an entirely different host. The boundary check is the whole guard.
         _ => None,
     }
 }
@@ -264,10 +259,6 @@ impl Engine {
             .user_agent(USER_AGENT)
             .build()
             .map_err(ScraperError::Http)?;
-        // One limiter, shared with the robots checker. A 429 on `/robots.txt` must pace our *page*
-        // requests too — it is the same shop, and it is behind the same bot-protection front that
-        // issued it. Two independent limiters would let a domain that had just refused robots.txt
-        // keep taking page requests at full configured rate.
         let rate_limiter = RateLimiter::new();
         Ok(Self {
             robots: RobotsChecker::new(client.clone(), rate_limiter.clone()),
@@ -297,7 +288,6 @@ impl Engine {
     /// Create an engine that serves HTML from a pre-loaded fixture map.
     #[cfg(test)]
     pub fn new_mock(fixtures: HashMap<String, String>) -> Self {
-        // Mock engine never makes real HTTP requests; use a minimal client for RobotsChecker API compat.
         let client = reqwest::Client::new();
         let rate_limiter = RateLimiter::new();
         Self {
@@ -324,22 +314,9 @@ impl Engine {
         let domain =
             extract_domain(&config.source.url).unwrap_or_else(|| config.source.url.clone());
 
-        // robots.txt is consulted FIRST, before the rate limiter.
-        //
-        // The order used to be reversed, which spent a rate-limit slot on a request
-        // we then refused to make — so a disallowed store could exhaust its own
-        // budget without ever reaching the network. Asking permission before taking
-        // a ticket is also the only order in which the returned `Crawl-delay` can
-        // inform the rate-limit decision below.
-        //
-        // There is deliberately no config flag to skip this: compliance with
-        // robots.txt is a hard rule, and a rule a TOML can switch off is not one.
-        // Mock mode skips it because it never touches the network at all.
         let policy = if self.mock {
             crate::robots::RobotsPolicy::unrestricted()
         } else {
-            // Normalise the base URL before stripping so a trailing slash doesn't
-            // cause strip_prefix to fail (e.g. "https://store.com/" vs "/search?q=…").
             let base = config.source.url.trim_end_matches('/');
             let path = search_url.strip_prefix(base).ok_or_else(|| {
                 ScraperError::InvalidConfig(format!(
@@ -356,9 +333,6 @@ impl Engine {
         };
 
         if !policy.allowed {
-            // Stop here. Per the owner's rule the store's configuration stays in
-            // place, so if the disallow is ever lifted this simply starts working
-            // again — we do not fall back to another path or another tier.
             return Err(ScraperError::RobotsDisallowed {
                 url: search_url.clone(),
                 rule: policy.blocked_by.clone().unwrap_or_default(),
@@ -366,11 +340,6 @@ impl Engine {
             });
         }
 
-        // A declared `Crawl-delay` wins whenever it is stricter than our own
-        // configured rate. Previously it was parsed and discarded on the grounds
-        // that the TOML's `requests_per_minute` was authoritative — but that let a
-        // config out-request what the site asked for. Exclusive Books declares
-        // `Crawl-delay: 10`, i.e. 6 req/min, while its TOML asks for 10.
         let effective_rpm = effective_rpm(&policy, config.rate_limit.requests_per_minute);
 
         self.rate_limiter.check_and_record(&domain, effective_rpm)?;
@@ -400,8 +369,6 @@ impl Engine {
         let capability = self.capability_for(store_id, config).await?;
 
         match capability.price_source {
-            // A supplied path still needs the platform parser, so it takes priority
-            // over the legacy fallback even where no product API was detected.
             PriceSource::None if product_path.is_none() => {
                 self.scrape(isbn, store_id, config).await
             }
@@ -426,8 +393,6 @@ impl Engine {
         store_id: &str,
         config: &ScraperConfig,
     ) -> Result<Capability, ScraperError> {
-        // Mock mode must keep exercising the legacy fixture path: detection would
-        // make real requests, and the fixtures are HTML, not product JSON.
         if self.mock {
             return Ok(Capability::none());
         }
@@ -436,16 +401,6 @@ impl Engine {
             return Ok(cached.value().clone());
         }
 
-        // Errors are propagated, never folded into `Capability::none()`.
-        //
-        // That fold was a silent-wrong-behaviour bug, observed live: a rate-limited
-        // detection became "this store has no product API", which routed the scrape
-        // to the legacy CSS-selector path, produced a price-parse failure against
-        // HTML, melted the store's fuse, and persisted `price_source: "none"` as a
-        // fact about a shop that demonstrably has a Shopify API.
-        //
-        // "We could not observe" and "we observed nothing" are different claims, and
-        // only the second is worth recording.
         let detected = self.detect_capability(config).await?;
 
         self.capabilities
@@ -476,15 +431,7 @@ impl Engine {
         capability: &Capability,
         product_path: Option<&str>,
     ) -> Result<PriceResult, ScraperError> {
-        // A caller-supplied path short-circuits ISBN resolution entirely. This is the
-        // only way to price the two shops that carry no ISBN on any product: the
-        // caller matched a title against its own catalogue and is telling us where to
-        // look. We do not second-guess it — the match was made with information this
-        // service does not have.
         if let Some(path) = product_path {
-            // No validators: this is a price lookup, and a stale price is worse than a redundant
-            // transfer. Conditional requests are for pages we re-read on a schedule and expect to be
-            // unchanged, which a product's price emphatically is not.
             let page = self
                 .fetch_path(config, &format!("{path}.js"), Validators::default())
                 .await?;
@@ -506,8 +453,6 @@ impl Engine {
         }
 
         let price = match (capability.price_source, capability.lookup_mode) {
-            // The handle *is* the ISBN, so one request addresses the product and a
-            // 404 is the store telling us it does not carry this edition.
             (PriceSource::ShopifyProductsJson, LookupMode::Direct) => {
                 let page = self
                     .fetch_path(
@@ -534,8 +479,6 @@ impl Engine {
                 }
             }
 
-            // WooCommerce's Store API search matches `sku`, so no local index is
-            // needed. An empty result set means not stocked.
             (PriceSource::WooStoreApi, LookupMode::NativeSearch) => {
                 let page = self
                     .fetch_path(
@@ -563,10 +506,6 @@ impl Engine {
                 }
             }
 
-            // The ISBN is on the product but the handle is not it, so the product
-            // cannot be addressed directly. Build an ISBN→path index once, then use
-            // it. Four of the six Shopify targets are in this category (Wordsworth,
-            // Stellenbosch, Bridge, Clarke's).
             (PriceSource::ShopifyProductsJson, LookupMode::LocalIndex)
                 if capability.isbn_location != platform::IsbnLocation::None =>
             {
@@ -579,9 +518,6 @@ impl Engine {
 
                         match status {
                             200 => platform::shopify_product_js(&body, config.currency())?,
-                            // The index said this path exists and it no longer does —
-                            // the catalogue moved under us. Not "not stocked": we
-                            // cannot tell, and guessing would write a false negative.
                             404 => {
                                 self.indexes.remove(store_id);
 
@@ -598,8 +534,6 @@ impl Engine {
                         }
                     }
 
-                    // The whole catalogue was enumerated and this ISBN is not in it.
-                    // That is a real answer: the shop does not carry this edition.
                     None => {
                         return Err(ScraperError::NotStocked {
                             store: store_id.to_string(),
@@ -609,11 +543,6 @@ impl Engine {
                 }
             }
 
-            // No ISBN anywhere on this store's products, or no product API at all.
-            // Explicitly *not* reported as "not stocked": we do not know whether the
-            // shop has the book, only that we cannot ask. Fuzzy title matching is the
-            // remaining path and it needs our catalogue, which this service does not
-            // have — so it belongs a layer up.
             _ => {
                 return Err(ScraperError::IndexRequired {
                     store: store_id.to_string(),
@@ -640,8 +569,6 @@ impl Engine {
         for page in 1..=MAX_INDEX_PAGES {
             let path = format!("/products.json?limit=250&page={page}");
 
-            // Bulk sweep: waits on the rate limit rather than failing, as the index
-            // build does and for the same reason.
             let page_result = loop {
                 match self.fetch_path(config, &path, Validators::default()).await {
                     Ok(response) => break response,
@@ -715,19 +642,11 @@ impl Engine {
         store_id: &str,
         config: &ScraperConfig,
     ) -> Result<usize, ScraperError> {
-        // Paginated over /products.json, which is the only way to reach a product whose
-        // handle is not its ISBN. Pagination confirmed at 250 per page.
         let mut index = std::collections::HashMap::new();
 
         for page in 1..=MAX_INDEX_PAGES {
             let path = format!("/products.json?limit=250&page={page}");
 
-            // A bulk sweep must *wait* for the rate limit, not fail on it. A single
-            // price lookup rightly returns an error and lets the caller back off, but
-            // a 20-page walk against a shop limited to a few requests a minute will
-            // hit the limit by design — treating that as failure is what made an
-            // inline build impossible. Measured against Wordsworth: capability
-            // detection plus one page exhausted the budget.
             let page_result = loop {
                 match self.fetch_path(config, &path, Validators::default()).await {
                     Ok(response) => break response,
@@ -750,10 +669,6 @@ impl Engine {
                 break;
             }
 
-            // Retain everything *found* here, but only as (isbn → path): no titles,
-            // prices or descriptions, and nothing is persisted. Filtering to ISBNs we
-            // hold is impossible in this service — it does not know our catalogue —
-            // so minimality is achieved by what the entry can hold, not by the filter.
             for entry in platform::index_entries(&listings, &|_| true) {
                 index.insert(entry.isbn, entry.product_path);
             }
@@ -786,12 +701,6 @@ impl Engine {
         &self,
         config: &ScraperConfig,
     ) -> Result<Capability, ScraperError> {
-        // Shopify first: it is 6 of 10 targets, so it is the likelier hit.
-        //
-        // A transport or rate-limit failure is propagated rather than treated as
-        // "not Shopify" — concluding absence from a failed question is how a
-        // rate-limited probe came to be recorded as a shop having no product API.
-        // Only a genuine non-200, or a 200 with nothing usable in it, is evidence.
         let shopify = self
             .fetch_path(config, "/products.json?limit=50", Validators::default())
             .await?;
@@ -818,9 +727,6 @@ impl Engine {
             return Ok(platform::classify_woo(&woo_body));
         }
 
-        // Neither API answered. Recorded as a fact about the store rather than
-        // retried as a misconfiguration — loot.co.za and fortunatefinds.co.za are
-        // genuinely in this category.
         Ok(Capability::none())
     }
 
@@ -854,8 +760,6 @@ impl Engine {
         let domain =
             extract_domain(&config.source.url).unwrap_or_else(|| config.source.url.clone());
 
-        // robots.txt first, then the rate limit — see `scrape` for why that order
-        // matters and why there is no flag to skip it.
         let policy = if self.mock {
             crate::robots::RobotsPolicy::unrestricted()
         } else {
@@ -882,13 +786,6 @@ impl Engine {
 
         let mut request = self.client.get(&url);
 
-        // Conditional headers, when the caller has validators from last time. This is the cheapest
-        // courtesy available: the shop answers 304 with no body instead of rendering and transmitting
-        // a page we already hold.
-        //
-        // Sent exactly as received. An ETag is an opaque byte string — weak (`W/"..."`), quoted, or
-        // whatever the origin chose — so any normalisation here would make it stop matching, and the
-        // failure is invisible: everything keeps working, just at full cost.
         if !validators.if_none_match.is_empty() {
             request = request.header("if-none-match", &validators.if_none_match);
         }
@@ -902,9 +799,6 @@ impl Engine {
         let etag = header_string(&response, "etag");
         let last_modified = header_string(&response, "last-modified");
 
-        // Before the body, and that order matters: a 429 body is a styled challenge page (9 KB from
-        // both target shops) and reading it would both cost the transfer and hand a caller something
-        // that parses cleanly and means nothing.
         if let Some(err) = self.note_pacing(
             &domain,
             status,
@@ -917,9 +811,6 @@ impl Engine {
             return Err(err);
         }
 
-        // 304 carries no body by definition, and asking for one would be reading a body the origin
-        // deliberately did not send. Returned with the validators echoed so a caller can refresh them
-        // if the origin rotated them alongside a 304.
         if status == 304 {
             return Ok(FetchedPage {
                 status,
@@ -982,9 +873,6 @@ impl Engine {
         let domain = extract_domain(&config.source.url).unwrap_or_else(|| base.clone());
         let mut harvest = SitemapHarvest::default();
 
-        // robots.txt is read for compliance anyway, and it is what declares the index. Permission is
-        // checked for the sitemap path itself, not for "/" — a shop may disallow one and not the
-        // other, and assuming otherwise is how a compliance check becomes decorative.
         let policy = self.policy_for(&base, "/robots.txt", config).await?;
 
         if policy.sitemaps.is_empty() {
@@ -1004,10 +892,6 @@ impl Engine {
             }
             seen.push(url.clone());
 
-            // ⚠️ Cross-host sitemaps are refused, not followed. robots.txt is attacker-controlled
-            // input as far as this service is concerned — a `Sitemap:` line naming another host would
-            // otherwise steer our egress at it while the robots check and rate limit still applied to
-            // the *configured* domain. The same hole `/fetch` guards against for `path`.
             let Some(path) = path_within(&url, &domain) else {
                 harvest.skipped.push(format!("{url} (not on {domain})"));
                 continue;
@@ -1030,8 +914,6 @@ impl Engine {
                     harvest.documents_fetched += 1;
                     harvest.bytes_read += bytes;
 
-                    // A document we only partly read cannot yield a complete answer, whether or not
-                    // the walk later runs out of requests.
                     if hung_up {
                         harvest.truncated = true;
                     }
@@ -1078,15 +960,11 @@ impl Engine {
         url: &str,
         budget: &mut CrawlBudget,
     ) -> HarvestStep {
-        // The budget is asked FIRST, and it is what yields the byte ceiling — so there is no way to
-        // reach the fetch below without having been given an allowance for it.
         let byte_limit = match budget.spend() {
             Spend::Allowed { byte_limit } => byte_limit,
             Spend::Exhausted => return HarvestStep::Stop,
         };
 
-        // The match YIELDS the spacing rather than assigning into a pre-declared binding: every other
-        // arm returns, so an initial value would be dead code.
         let spacing = match self.policy_for(domain, path, config).await {
             Ok(policy) if !policy.allowed => {
                 return HarvestStep::Skipped(format!(
@@ -1097,9 +975,6 @@ impl Engine {
             Ok(policy) => {
                 let rpm = effective_rpm(&policy, config.rate_limit.requests_per_minute);
                 if let Err(e) = self.rate_limiter.check_and_record(domain, rpm) {
-                    // Includes a cooldown the shop asked for. Stopping the whole walk rather than
-                    // skipping this one document is the point: the next fetch would be refused too,
-                    // and a walk that keeps asking during a backoff is not a polite walk.
                     tracing::info!("sitemap walk stopping at {}: {}", url, e);
                     return HarvestStep::Stop;
                 }
@@ -1117,8 +992,6 @@ impl Engine {
             Ok(read) => {
                 budget.charge_bytes(read.bytes);
 
-                // Only a 2xx body is parsed. A 404 is data about the shop; a 429 is a challenge page
-                // that would parse cleanly and mean nothing.
                 if !(200..300).contains(&read.status) {
                     return HarvestStep::Skipped(format!("{url} (HTTP {})", read.status));
                 }
@@ -1145,10 +1018,6 @@ impl Engine {
     /// than for what was permitted. The body may be truncated mid-element; `sitemap::parse` is built
     /// to return what it had rather than fail, and there is a test for that shape.
     async fn fetch_capped(&self, url: &str, byte_limit: u64) -> Result<CappedBody, ScraperError> {
-        // Mock mode serves documents from `http_fixtures`, keyed by URL. This is the seam that makes
-        // the *assembly* of the walk testable — queue refill, budget threading, `Stop` propagation —
-        // rather than only its pieces. The cap applies to fixtures too, so budget exhaustion is
-        // drivable without a huge fixture.
         if self.mock {
             let (status, body) = self
                 .http_fixtures
@@ -1192,8 +1061,6 @@ impl Engine {
             }
         }
 
-        // Lossy rather than an error: a sitemap is XML and should be UTF-8, but a body truncated
-        // mid-codepoint by the cap above is normal, not a defect worth failing the walk over.
         Ok(CappedBody {
             status,
             bytes: body.len() as u64,
@@ -1285,10 +1152,6 @@ impl Engine {
             .await
             .map_err(ScraperError::Http)?;
 
-        // Pacing is checked before `error_for_status`, because that call would fold a 429 into a
-        // generic `ScraperError::Http` — which `outcome_for_error` classifies as a *failure*, and a
-        // failure melts the fuse shared by every store. So a single shop pacing us used to take
-        // price scraping down everywhere, repeatedly, since a 429 recurs on every attempt.
         let domain =
             extract_domain(&config.source.url).unwrap_or_else(|| config.source.url.clone());
         if let Some(err) = self.note_pacing(
@@ -1303,7 +1166,6 @@ impl Engine {
             return Err(err);
         }
 
-        // Surface remaining HTTP 4xx/5xx as errors so they don't silently produce empty results.
         let response = response.error_for_status().map_err(ScraperError::Http)?;
         response.text().await.map_err(ScraperError::Http)
     }
@@ -1338,14 +1200,11 @@ impl Engine {
         };
 
         let url = if let Some(sel) = &config.selectors.product_url {
-            // Try to extract a canonical URL from the page.
             extract_text(html, sel)?.or_else(|| Some(page_url.to_string()))
         } else {
             Some(page_url.to_string())
         };
 
-        // Compute selector match rate: fraction of defined selectors that
-        // matched at least one element in the scraped HTML.
         let mut total: u32 = 1; // price is always defined
         let mut matched: u32 = if selector_matches_any(html, &config.selectors.price) {
             1
@@ -1416,22 +1275,12 @@ mod tests {
     use super::*;
     use crate::config::ScraperConfig;
 
-    // ------------------------------------------------------------------
-    // Pacing — the shop's 429 reaching our limiter
-    // ------------------------------------------------------------------
-
     #[test]
     fn a_429_records_a_cooldown_the_next_request_actually_observes() {
-        // The end-to-end wiring assertion, and the one worth having: it is not enough for
-        // `note_pacing` to *return* the determination. It has to write the cooldown into the very
-        // limiter the next egress consults, under the very same key. A mismatched domain key here
-        // would leave every test passing and the backoff a silent no-op — this project's dominant
-        // defect class.
         let engine = Engine::new_mock(HashMap::new());
         let config = exclusive_books_config();
         let domain = extract_domain(&config.source.url).unwrap();
 
-        // Nothing is in force to begin with, so a refusal below cannot be a pre-existing condition.
         assert!(
             engine.rate_limiter.check_and_record(&domain, 10).is_ok(),
             "the domain was already paced before the 429 — the test would pass vacuously"
@@ -1452,22 +1301,6 @@ mod tests {
             other => panic!("the 429 left no cooldown the next request could see: {other:?}"),
         }
     }
-
-    // ------------------------------------------------------------------
-    // The sitemap walk's own two decisions
-    // ------------------------------------------------------------------
-
-    // ------------------------------------------------------------------
-    // The sitemap walk, END TO END — the assembly, not its pieces
-    // ------------------------------------------------------------------
-    //
-    // ⛔ Every piece of `sitemap_urls` was unit-tested and the loop joining them had **never run
-    // once**: queue refill from a parsed index, budget threading, robots/rate-limit ordering, and
-    // `Stop` becoming `truncated`. That is exactly the defect #307 exists to fix — stages that each
-    // pass while the chain does nothing — reproduced one layer above it.
-    //
-    // These run through `Engine::new_mock_http`, which serves `(status, body)` per URL, so the whole
-    // walk executes with no network.
 
     fn walk_engine(pairs: Vec<(&str, u16, &str)>, declared: &[&str]) -> Engine {
         Engine::new_mock_http(
@@ -1516,13 +1349,6 @@ requests_per_minute = 60
 
     #[test]
     fn a_declared_crawl_delay_spaces_the_walk_rather_than_only_rate_limiting_it() {
-        // ⛔ `Crawl-delay` is a SPACING and we honoured only the rate. `effective_rpm` turns
-        // `Crawl-delay: 10` into 6/min, and `check_and_record`'s sliding *window* permits all six
-        // inside two seconds — which passes the limiter while doing exactly what the shop asked us not
-        // to. Measured against the real file: exclusivebooks.co.za declares `Crawl-delay: 10`, and a
-        // four-document walk at the old fixed 500 ms would have burst all four at it in under 2s.
-        //
-        // `RateLimiter::min_delay` already existed with tests and was called by NO production code.
         let asks_for_ten = crate::robots::RobotsPolicy {
             crawl_delay_secs: Some(10),
             ..crate::robots::RobotsPolicy::unrestricted()
@@ -1533,9 +1359,6 @@ requests_per_minute = 60
             "a declared Crawl-delay was not honoured as spacing between documents"
         );
 
-        // No declared delay: the spacing implied by our own rate, never below the courtesy floor.
-        // 60/min is one second apart, which already exceeds the 500 ms floor — so the floor only binds
-        // for rates above 120/min, which no store config sets.
         let silent = crate::robots::RobotsPolicy::unrestricted();
         assert_eq!(
             document_spacing(&silent, 60),
@@ -1546,13 +1369,11 @@ requests_per_minute = 60
             "a high configured rate must not drop the spacing below our own floor"
         );
 
-        // A very low rate implies wide spacing even with no Crawl-delay line — 1/min is 60s apart.
         assert_eq!(
             document_spacing(&silent, 1),
             std::time::Duration::from_secs(60)
         );
 
-        // Never SHORTER than what the shop asked for, whatever our own numbers say.
         let asks_for_thirty = crate::robots::RobotsPolicy {
             crawl_delay_secs: Some(30),
             ..crate::robots::RobotsPolicy::unrestricted()
@@ -1565,9 +1386,6 @@ requests_per_minute = 60
 
     #[tokio::test]
     async fn the_walk_follows_an_index_to_its_page_child_and_refuses_the_catalogue() {
-        // The whole feature in one assertion: index → page child → URLs, catalogue never requested.
-        // A broken queue refill leaves the page child unread; a bypassed classification fetches the
-        // catalogue.
         let engine = walk_engine(
             vec![
                 ("https://shop.test/sitemap.xml", 200, INDEX),
@@ -1603,10 +1421,6 @@ requests_per_minute = 60
 
     #[tokio::test]
     async fn an_exhausted_budget_reports_truncated_rather_than_looking_complete() {
-        // ⛔ `truncated` was set in the code and asserted nowhere, and writing this test found a real
-        // defect: a byte cap that cut a document short did NOT set it. The index was truncated
-        // mid-`<loc>`, parsed to zero children, and the walk ended *normally* — reporting a complete
-        // result for a document it had only partly read.
         let engine = walk_engine(
             vec![
                 ("https://shop.test/sitemap.xml", 200, INDEX),
@@ -1629,8 +1443,6 @@ requests_per_minute = 60
 
     #[tokio::test]
     async fn a_cross_host_sitemap_line_is_skipped_by_the_walk_itself() {
-        // `path_within` is unit-tested; this proves the WALK consults it. A guard that exists and is
-        // never called is the same as no guard.
         let engine = walk_engine(
             vec![(
                 "https://evil.test/sitemap.xml",
@@ -1656,8 +1468,6 @@ requests_per_minute = 60
 
     #[tokio::test]
     async fn a_response_that_is_not_a_sitemap_is_reported_not_treated_as_empty() {
-        // The 429 bot-challenge case, end to end. Reporting it as "the shop lists no pages" is the
-        // false negative that never re-checks.
         let engine = walk_engine(
             vec![(
                 "https://shop.test/sitemap.xml",
@@ -1699,11 +1509,6 @@ requests_per_minute = 60
 
     #[test]
     fn a_sitemap_on_another_host_is_refused_not_followed() {
-        // ⛔ robots.txt is attacker-controlled input as far as this service is concerned. A
-        // `Sitemap:` line naming another host would send our requests there while the robots check
-        // and rate limit still applied to the CONFIGURED domain — the compliant egress turned into an
-        // open proxy. `/fetch` already guards its `path` parameter against exactly this; the sitemap
-        // list is a second door into the same room.
         let domain = "https://shop.test";
 
         assert_eq!(
@@ -1716,11 +1521,9 @@ requests_per_minute = 60
         );
 
         for hostile in [
-            // The prefix-match trap: a string that begins with the domain and is a different host.
             "https://shop.test.evil.com/sitemap.xml",
             "https://shop.testevil.com/sitemap.xml",
             "https://evil.com/sitemap.xml",
-            // Scheme downgrade is a different origin too.
             "http://shop.test/sitemap.xml",
         ] {
             assert_eq!(
@@ -1733,9 +1536,6 @@ requests_per_minute = 60
 
     #[test]
     fn known_page_sitemaps_are_read_before_unlabelled_ones() {
-        // The budget is finite, so ordering IS allocation: spending the last request on a sitemap we
-        // merely could not classify, while a known pages sitemap waits, is how a walk comes back
-        // empty from a shop that told us exactly where its pages were.
         let mut queue = vec!["pages-a".to_string(), "pages-b".to_string()];
         let mut deferred = vec!["unlabelled".to_string()];
 
@@ -1756,9 +1556,6 @@ requests_per_minute = 60
 
     #[test]
     fn a_child_queued_mid_walk_still_precedes_the_deferred_ones() {
-        // The queue is refilled as an index is parsed, so this is the real shape rather than a
-        // static list: a pages child discovered on the second document must still outrank an
-        // unlabelled one discovered on the first.
         let mut queue = vec!["index".to_string()];
         let mut deferred = vec!["unlabelled-from-index".to_string()];
 
@@ -1777,8 +1574,6 @@ requests_per_minute = 60
 
     #[test]
     fn an_ordinary_status_is_not_treated_as_pacing() {
-        // The other half, without which the test above is satisfied by a function that backs off on
-        // everything. A 200 and a 404 are both perfectly ordinary answers.
         let engine = Engine::new_mock(HashMap::new());
 
         for status in [200, 301, 404, 418, 500] {
@@ -1929,7 +1724,6 @@ requests_per_minute = 10
 
     #[tokio::test]
     async fn test_scrape_missing_price_returns_none() {
-        // HTML with no price element.
         let html = r#"<html><body><h1 class="product-title">A Book</h1></body></html>"#;
         let mut fixtures = HashMap::new();
         fixtures.insert("za/exclusive_books".to_string(), html.to_string());
@@ -1943,10 +1737,6 @@ requests_per_minute = 10
 
         assert_eq!(result.price_cents, None);
     }
-
-    // ------------------------------------------------------------------
-    // selector_match_rate tests
-    // ------------------------------------------------------------------
 
     /// Helper: build a config with only the price selector.
     fn price_only_config() -> ScraperConfig {
@@ -2153,7 +1943,6 @@ requests_per_minute = 60
 
     #[tokio::test]
     async fn test_rate_limiter_enforced() {
-        // Config with limit of 2 requests/min.
         let config = ScraperConfig::from_toml_str(
             r#"
 [source]
@@ -2181,7 +1970,6 @@ requests_per_minute = 2
 
         let engine = Engine::new_mock(fixtures);
 
-        // First two requests succeed.
         engine
             .scrape("isbn1", "test/rate_store", &config)
             .await
@@ -2191,7 +1979,6 @@ requests_per_minute = 2
             .await
             .unwrap();
 
-        // Third request should be rate-limited.
         let result = engine.scrape("isbn3", "test/rate_store", &config).await;
         assert!(result.is_err());
         assert!(matches!(

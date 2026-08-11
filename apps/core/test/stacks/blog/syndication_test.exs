@@ -46,7 +46,6 @@ defmodule Stacks.Blog.SyndicationTest do
 
       canonical = Syndication.canonical_url(post)
       assert xml =~ ~s(<link rel="alternate" type="text/html" href="#{canonical}" />)
-      # Inside <content>, escaped — a visible sentence survives any importer.
       assert xml =~ "Originally published on"
       assert xml =~ "The Anatomy of Melancholy"
       assert etag == Stacks.Feeds.compute_etag(xml)
@@ -140,8 +139,6 @@ defmodule Stacks.Blog.SyndicationTest do
       post = public_post(user: user)
       {:ok, syndication} = Syndication.record(post, "export")
 
-      # The two-hop cascade the story warns about: true today, and this test is
-      # what keeps it from going silently untrue if someone weakens an FK.
       assert {:ok, _} = Deletion.delete_user_data(user.id)
       assert nil == Repo.get(PostSyndication, syndication.id)
     end

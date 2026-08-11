@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
-# scripts/lib/postgres.sh — sourced helper; do not execute directly.
-#
-# Exports: ensure_postgres
-#
-# Checks that PostgreSQL is accepting connections on localhost:5432 and
-# starts it if not. Works whether or not pg_isready is in PATH (Homebrew
-# keg-only installs keep it under opt/<formula>/bin).
 
-# Locate pg_isready: prefer PATH, then Homebrew opt dirs, then give up.
 _find_pg_isready() {
     if command -v pg_isready &>/dev/null; then
         echo "pg_isready"
         return
     fi
-    # Homebrew on Apple Silicon and Intel
     local brew_prefix
     brew_prefix="$(brew --prefix 2>/dev/null)" || brew_prefix=""
     if [[ -n "$brew_prefix" ]]; then
@@ -28,14 +19,12 @@ _find_pg_isready() {
     echo ""
 }
 
-# Returns 0 if postgres is accepting TCP connections on localhost:5432.
 _postgres_ready() {
     local pg_isready
     pg_isready="$(_find_pg_isready)"
     if [[ -n "$pg_isready" ]]; then
         "$pg_isready" -h localhost -p 5432 -q 2>/dev/null
     else
-        # Fall back to a plain TCP probe when pg_isready is unavailable.
         nc -z localhost 5432 2>/dev/null
     fi
 }

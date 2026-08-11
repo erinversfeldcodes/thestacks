@@ -27,14 +27,11 @@ defmodule Core.PromEx.DashboardDriftTest do
 
   @dashboard_relative_path "grafana/moderation_agegate.json"
 
-  # #228 families live under these Prometheus name prefixes.
   @issue_228_prefixes ["stacks_moderation_", "stacks_age_gate_", "stacks_age_verification_"]
 
   defp dashboard_path,
     do: Application.app_dir(:core, Path.join("priv", @dashboard_relative_path))
 
-  # Registered Prometheus family names, derived from the plugin's declared
-  # Telemetry.Metrics structs — the same join TelemetryMetricsPrometheus uses.
   defp registered_families do
     StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
@@ -42,8 +39,6 @@ defmodule Core.PromEx.DashboardDriftTest do
     |> MapSet.new()
   end
 
-  # Recursively collect every panel (including panels nested inside Grafana
-  # "row" panels) from a decoded dashboard.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel ->
       [panel | all_panels(panel)]
@@ -52,7 +47,6 @@ defmodule Core.PromEx.DashboardDriftTest do
 
   defp all_panels(_), do: []
 
-  # Only panels that actually render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
@@ -63,7 +57,6 @@ defmodule Core.PromEx.DashboardDriftTest do
     dashboard_path() |> File.read!() |> Jason.decode!()
   end
 
-  # All `stacks_*` metric names referenced by any panel target `expr`.
   defp panel_metric_names(dashboard) do
     for panel <- data_panels(dashboard),
         target <- panel["targets"] || [],
@@ -121,8 +114,6 @@ defmodule Core.PromEx.DashboardDriftTest do
         end)
         |> MapSet.new()
 
-      # Sanity: the six #228 families are actually registered (guards against
-      # the plugin being gutted without this test noticing).
       assert MapSet.size(issue_228) == 6,
              "expected 6 registered #228 moderation/age-gate families, found: " <>
                inspect(MapSet.to_list(issue_228))

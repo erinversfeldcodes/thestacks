@@ -57,8 +57,6 @@ defmodule Stacks.Enrichment.EventPages do
   )
   def event_phrases, do: @event_phrases
 
-  # One run may fetch at most this many candidate pages per store. The real shop yields exactly one
-  # candidate from 45 pages; five is generous headroom, not a target.
   @max_candidates_per_run 5
 
   @doc """
@@ -95,7 +93,6 @@ defmodule Stacks.Enrichment.EventPages do
     over = length(candidates) - @max_candidates_per_run
 
     if over > 0 do
-      # Never a silent cap: dropped candidates are named, or the run reads as complete.
       Logger.warning(
         "EventPages: #{store.name || store.id} has #{length(candidates)} event-page candidates; " <>
           "fetching #{@max_candidates_per_run} and leaving #{over} for the next run"
@@ -133,18 +130,11 @@ defmodule Stacks.Enrichment.EventPages do
   end
 
   defp store_event(url, body, store) do
-    # Structured tier first (#321 item 4): a page declaring its event as
-    # schema.org JSON-LD names its own title/date/location, which beats both
-    # the <title> heuristic and the single-unambiguous-date rule. The text
-    # tiers keep serving the pages (like the known live fixture) that declare
-    # nothing.
     structured = body |> EventExtractor.events() |> List.first()
 
     attrs = %{
       store_id: store.id,
       title: (structured && structured.title) || title_of(body, url),
-      # nil unless the page states a date unambiguously. The real page states none, and "the shop's
-      # own page has the details" is the honest payload — see `event_date`'s changeset note.
       event_date: (structured && structured.event_date) || date_of(body),
       description: structured && structured.description,
       location: structured && structured.location,
@@ -189,10 +179,6 @@ defmodule Stacks.Enrichment.EventPages do
   end
 
   defp strip_shop_suffix(title) do
-    # The LAST separator, so an em dash inside the event's own name survives. The `u` flag is
-    # load-bearing: an em dash is multibyte, and without Unicode mode the character class matches its
-    # individual BYTES — the suffix quietly stops being stripped and every title gains
-    # " — Wordsworth Books". Caught by the test asserting on the real page's title.
     case Regex.split(~r/\s+[—–|]\s+/u, title) do
       [only] -> only
       parts -> parts |> Enum.drop(-1) |> Enum.join(" — ")

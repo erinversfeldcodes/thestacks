@@ -8,8 +8,6 @@ defmodule CoreWeb.Telemetry do
   use Supervisor
   import Telemetry.Metrics
 
-  # Fuses whose state is exported as a gauge. Must match the keys installed by
-  # `Stacks.CircuitBreakers` — update both lists in lockstep.
   @managed_fuses [
     :vision_fuse,
     :together_ai_fuse,
@@ -25,19 +23,8 @@ defmodule CoreWeb.Telemetry do
   @slow_query_handler_id "stacks-slow-query-log"
   @oban_worker_tag_handler_id "stacks-oban-worker-tag"
 
-  # Process-dict key used to tag the current Oban worker. Set at
-  # [:oban, :job, :start] and cleared at [:oban, :job, :stop] /
-  # [:oban, :job, :exception] so any Ecto query fired from within
-  # Oban.Worker.perform/1 is tagged with the worker module name.
-  # HTTP paths (no job in scope) get tagged as "http".
   @current_worker_key :stacks_current_oban_worker
 
-  # Threshold for slow-query logging. Queries with Ecto total_time
-  # (queue + query + decode) above this fire a Logger.warning with the
-  # SQL source + params-size + pool queue time. Chosen to match Ecto's
-  # own default "slow" perception: anything 500ms+ is noteworthy on a
-  # primarily-OLTP workload. Override via the `:slow_query_threshold_ms`
-  # application env at startup for tuning without a code change.
   @default_slow_query_threshold_ms 500
 
   def start_link(arg) do
@@ -57,25 +44,14 @@ defmodule CoreWeb.Telemetry do
     Supervisor.init(children, strategy: :one_for_one)
   end
 
-  # NOTE: The three `[:stacks, ...]` custom telemetry series
-  # (`:router_dispatch.stop`, `:upload.terminal`, `:fuse.state`) are now
-  # wired into Prometheus via `Core.PromEx.Plugins.Stacks` (see Issue
-  # #139). PromEx consumes plugin-returned metrics only, so defining them
-  # here too would either be dead weight or double-count. If a future
-  # change adds a second reporter (e.g. `TelemetryMetricsPrometheus.Core`
-  # attached directly), re-declare the three series here and in the
-  # plugin — don't point them at the same reporter twice.
   def metrics do
     [
-      # ── Phoenix ───────────────────────────────────────────────────────
       summary("phoenix.endpoint.start.system_time",
         unit: {:native, :millisecond}
       ),
       summary("phoenix.endpoint.stop.duration",
         unit: {:native, :millisecond}
       ),
-
-      # ── Ecto ──────────────────────────────────────────────────────────
       summary("core.repo.query.total_time",
         unit: {:native, :millisecond},
         description: "The sum of the other measurements"
@@ -92,8 +68,6 @@ defmodule CoreWeb.Telemetry do
         unit: {:native, :millisecond},
         description: "The time spent waiting for a database connection"
       ),
-
-      # ── Vision Client (Issue #129) ───────────────────────────────────
       counter("stacks.vision.request.start.system_time",
         tags: [:endpoint],
         description: "Count of vision request starts"
@@ -107,8 +81,6 @@ defmodule CoreWeb.Telemetry do
         tags: [:endpoint, :kind],
         description: "Count of vision request exceptions"
       ),
-
-      # ── Fuse (Issue #129 + Issue #136) ───────────────────────────────
       counter("stacks.fuse.melt.count",
         event_name: [:stacks, :fuse, :melt],
         tags: [:fuse_name],
@@ -119,14 +91,6 @@ defmodule CoreWeb.Telemetry do
         tags: [:fuse_name],
         description: "Fuse blown events (circuit opened)"
       ),
-      # `stacks.fuse.state` gauge is exported by `Core.PromEx.Plugins.Stacks`
-      # (see Issue #139); the series here would be redundant for PromEx.
-
-      # ── Upload pipeline (Issue #136) ─────────────────────────────────
-      # `stacks.upload.terminal` counter is exported by
-      # `Core.PromEx.Plugins.Stacks` (see Issue #139).
-
-      # ── Budget Tracker (Issue #129) ──────────────────────────────────
       sum("stacks.budget.cost_recorded.amount_cents",
         tags: [:provider],
         description: "AI API cost recorded in cents"
@@ -136,14 +100,10 @@ defmodule CoreWeb.Telemetry do
         tags: [:provider, :type],
         description: "Budget limit exceeded events"
       ),
-
-      # ── Costs Context (Issue #129) ───────────────────────────────────
       sum("stacks.costs.recorded.amount_cents",
         tags: [:category, :service],
         description: "Platform cost recorded in cents"
       ),
-
-      # ── Visibility & Privacy (Issue #197 / #122 §12) ─────────────────
       counter("stacks.visibility.profile_change.count",
         event_name: [:stacks, :visibility, :profile_change],
         tags: [:direction],
@@ -177,8 +137,6 @@ defmodule CoreWeb.Telemetry do
         tags: [:resource_type],
         description: "Visibility-ceiling rejections by resource type"
       ),
-
-      # ── Social: blocking (Issue #197 / #122 §12) ─────────────────────
       counter("stacks.social.block.count",
         event_name: [:stacks, :social, :block],
         description: "Successful user blocks"
@@ -193,16 +151,11 @@ defmodule CoreWeb.Telemetry do
         description:
           "Block errors by reason (cannot_block_self/not_found/already_blocked/invalid)"
       ),
-
-      # ── Rate limiting (canonical `:rejected` event; #197's `:hit` renamed
-      # in #206 so the LiveDashboard series matches the Prometheus counter) ──
       counter("stacks.rate_limit.rejected.count",
         event_name: [:stacks, :rate_limit, :rejected],
         tags: [:bucket],
         description: "Rate-limit rejections tagged by bucket (incl. :social, :auth)"
       ),
-
-      # ── ViewAs preview (Issue #197 / #122 §12) ───────────────────────
       counter("stacks.view_as.usage.count",
         event_name: [:stacks, :view_as, :usage],
         tags: [:perspective],
@@ -213,8 +166,6 @@ defmodule CoreWeb.Telemetry do
         tags: [:reason, :phase],
         description: "ViewAs errors by reason + phase (parse/authorize)"
       ),
-
-      # ── Search-engine privacy (Issue #197 / #122 §12) ────────────────
       counter("stacks.crawler.robots_fetch.count",
         event_name: [:stacks, :crawler, :robots_fetch],
         description: "robots.txt fetch count"
@@ -267,8 +218,6 @@ defmodule CoreWeb.Telemetry do
   """
   @spec attach_route_group_handler() :: :ok
   def attach_route_group_handler do
-    # Detach first so a crash+restart does not leave an old handler pointing at
-    # a dead PID. `:telemetry.detach/1` is a no-op if the handler is not attached.
     :telemetry.detach(@route_group_handler_id)
 
     :telemetry.attach(
@@ -337,8 +286,6 @@ defmodule CoreWeb.Telemetry do
       }
     )
 
-    # Slow-query log (throttled by threshold so we only log the
-    # interesting ones).
     threshold_native =
       System.convert_time_unit(
         Application.get_env(:core, :slow_query_threshold_ms, @default_slow_query_threshold_ms),
@@ -411,9 +358,6 @@ defmodule CoreWeb.Telemetry do
 
   defp ms(_), do: 0
 
-  # Cap SQL at 200 chars so a slow 20KB bulk INSERT doesn't drown the
-  # log line. Truncation marker keeps grep-ability for the full query
-  # shape without the parameter blob.
   defp truncate_sql(sql) when is_binary(sql) do
     if byte_size(sql) > 200 do
       binary_part(sql, 0, 200) <> "…"

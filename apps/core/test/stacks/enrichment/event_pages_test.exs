@@ -20,9 +20,6 @@ defmodule Stacks.Enrichment.EventPagesTest do
 
   @the_one_event "https://www.wordsworth.co.za/pages/treive-nicholas-book-signing-at-our-sea-point-store"
 
-  # The live harvest, verbatim. The near-misses are the point: `halloween` is a themed shopping
-  # page, `mothers-day-promotion` is a promotion, `celebrate-our-birthday…` is a birthday sale, and
-  # a classifier that invents an event from any of them is worse than no classifier.
   @wordsworth_pages [
                       "contact-us",
                       "payment-logos",
@@ -86,8 +83,6 @@ defmodule Stacks.Enrichment.EventPagesTest do
     end
 
     test "each declared phrase actually classifies a slug carrying it" do
-      # Enumerated from the module's own list: a phrase nothing can match is dead vocabulary, and
-      # dead vocabulary reads as coverage.
       for phrase <- EventPages.event_phrases() do
         url = "https://shop.test/pages/june-#{phrase}-with-the-author"
         assert EventPages.event_page?(url), "declared phrase #{phrase} never matches"
@@ -124,8 +119,6 @@ defmodule Stacks.Enrichment.EventPagesTest do
 
   describe "date_of/1 — never invents a date" do
     test "the real page shape: no date anywhere yields nil" do
-      # The measured reality (250,873 bytes, zero dates in any common format). This is why
-      # `event_date` became optional — the alternative was inventing one.
       assert EventPages.date_of("<html><title>An event</title><p>Join us!</p></html>") == nil
     end
 
@@ -156,7 +149,6 @@ defmodule Stacks.Enrichment.EventPagesTest do
 
       assert {:ok, {:events, 1}} = EventPages.discover_and_store(@wordsworth_pages, store)
 
-      # One fetch for 45 URLs: classification is free, only the candidate costs the shop anything.
       assert [{"za/test_store", "/pages/treive-nicholas-book-signing-at-our-sea-point-store"}] =
                MockScraperClient.fetches()
 
@@ -167,11 +159,6 @@ defmodule Stacks.Enrichment.EventPagesTest do
     end
 
     test "the unique index treats NULLs as equal — the structural pin" do
-      # ⚠️ A rollback probe of the 20260804200000 migration proved NOTHING here, and that is worth
-      # recording: `mix test`'s alias re-migrates before running, so the rolled-back index was back
-      # before the first assertion executed. The behavioural dedupe test below can therefore never
-      # see the old index locally. This structural pin is what fails on a fresh database if the
-      # migration is lost — it asserts the property itself, straight from pg_index.
       %{rows: [[nulls_not_distinct]]} =
         Repo.query!("""
         SELECT i.indnullsnotdistinct
@@ -185,9 +172,6 @@ defmodule Stacks.Enrichment.EventPagesTest do
     end
 
     test "a dateless event is upserted, not duplicated, on the second run" do
-      # ⚠️ The trap Option A walked into: Postgres treats NULLs as distinct in a unique index, so
-      # without NULLS NOT DISTINCT every scrape run would insert a fresh copy of the same page and
-      # ON CONFLICT would never fire. This is the test that fails if that migration is lost.
       store = insert(:bookstore, scraper_module: "za/test_store")
 
       MockScraperClient.put_page(
@@ -256,8 +240,6 @@ defmodule Stacks.Enrichment.EventPagesTest do
 
   describe "listed_events/1 vs upcoming_events/1 — the honesty split" do
     test "a dateless event is listed but never counted as upcoming" do
-      # "Upcoming" is a claim about time that a dateless event cannot make. Serving it under that
-      # label would be a structurally valid payload asserting something we do not know.
       store = insert(:bookstore)
 
       {:ok, _} =

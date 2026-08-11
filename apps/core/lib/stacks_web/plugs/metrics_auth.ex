@@ -76,7 +76,6 @@ defmodule StacksWeb.Plugs.MetricsAuth do
     end
   end
 
-  # Constant-time comparison to keep the check non-timing-leaky.
   defp constant_time_eq?(a, b) when is_binary(a) and is_binary(b) do
     byte_size(a) == byte_size(b) and :crypto.hash_equals(a, b)
   end

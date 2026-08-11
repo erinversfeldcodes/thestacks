@@ -56,10 +56,6 @@ defmodule Stacks.Workers.RSSLivenessJob do
       )
   end
 
-  # The seamed transport (#381c) — same shape as #377's fix in
-  # DiscoverAuthorSourcesJob. `RssFetcher.probe/1` bounds both the per-chunk
-  # AND whole-response phases (`request_opts(:probe)`), which the bare Finch
-  # call here did not.
   defp rss_fetcher do
     Application.get_env(:core, :rss_fetcher, Stacks.Enrichment.RssFetcher)
   end

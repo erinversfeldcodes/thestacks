@@ -4,7 +4,6 @@ defmodule Stacks.Books.TitleSearchCacheTest do
   alias Stacks.Books.TitleSearchCache
 
   setup do
-    # ETS is global — isolate per test by flushing before each.
     TitleSearchCache.invalidate_all()
     :ok
   end
@@ -41,17 +40,11 @@ defmodule Stacks.Books.TitleSearchCacheTest do
       assert :miss = TitleSearchCache.get("X", "Y", nil)
     end
 
-    # #352. A cache entry records an ANSWER; `:unavailable` is the absence of
-    # one. Storing it would keep answering "this book does not exist" for an
-    # hour on the strength of a provider outage that has since ended.
     test "an :unavailable outage is NOT cached" do
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :unavailable})
       assert :miss = TitleSearchCache.get("Dune", "Herbert", nil)
     end
 
-    # The policy is "do not cache an outage", not "do not cache a failure".
-    # A genuine absence is still an answer and must survive, or the fix would
-    # have been implemented by throwing the negative cache away.
     test "an :unavailable does not overwrite an existing genuine :not_found" do
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :not_found})
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :unavailable})
@@ -59,7 +52,6 @@ defmodule Stacks.Books.TitleSearchCacheTest do
       assert {:ok, {:error, :not_found}} = TitleSearchCache.get("Dune", "Herbert", nil)
     end
 
-    # ...nor a positive one. An outage must not evict a book we already know.
     test "an :unavailable does not overwrite an existing positive result" do
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:ok, "9780441172719", %{}})
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:error, :unavailable})
@@ -76,7 +68,6 @@ defmodule Stacks.Books.TitleSearchCacheTest do
           {:ok, "9780743273565", %{}}
         )
 
-      # Lowercase + extra whitespace both hit the same key.
       assert {:ok, {:ok, "9780743273565", _}} =
                TitleSearchCache.get("  the great gatsby  ", "f. scott fitzgerald", nil)
     end
@@ -115,26 +106,20 @@ defmodule Stacks.Books.TitleSearchCacheTest do
 
       assert :miss = TitleSearchCache.get("Crystal City", "Card", nil)
       assert :miss = TitleSearchCache.get("Crystal City", "Card", "text hint")
-      # Unrelated warm entry survives — invalidation is targeted, not a flush.
       assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
     end
 
     test "normalises hyphens/whitespace on both the argument and the stored ISBN" do
-      # Stored with hyphens, invalidated bare.
       :ok = TitleSearchCache.put("A", "a", nil, {:ok, "978-1-4299-6450-0", %{}})
       :ok = TitleSearchCache.invalidate_by_isbn("9781429964500")
       assert :miss = TitleSearchCache.get("A", "a", nil)
 
-      # Stored bare, invalidated with hyphens and spaces.
       :ok = TitleSearchCache.put("B", "b", nil, {:ok, "9781429964500", %{}})
       :ok = TitleSearchCache.invalidate_by_isbn(" 978-1-4299-6450-0 ")
       assert :miss = TitleSearchCache.get("B", "b", nil)
     end
 
     test "invalidating by ISBN-13 removes an entry stored in ISBN-10 form" do
-      # The live production gap: OL docs often carry only the ISBN-10, so
-      # the memo stores "0312864833", but rejection passes the edition's
-      # ISBN-13 "9780312864835". Both sides canonicalise to the 13 form.
       :ok = TitleSearchCache.put("Heartfire", "Card", nil, {:ok, "0312864833", %{}})
       :ok = TitleSearchCache.invalidate_by_isbn("9780312864835")
       assert :miss = TitleSearchCache.get("Heartfire", "Card", nil)

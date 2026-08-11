@@ -24,7 +24,6 @@ defmodule StacksWeb.AuthorEventsController do
 
     json(conn, %{events: events})
   rescue
-    # A non-UUID id names no author and has no events — an empty list, not a 500.
     Ecto.Query.CastError -> json(conn, %{events: []})
   end
 

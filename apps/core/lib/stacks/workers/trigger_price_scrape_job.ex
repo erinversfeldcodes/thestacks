@@ -46,19 +46,11 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
     end
   end
 
-  # An ISBN identifies an *edition*, not a work — a work has many ISBNs (Exclusive
-  # Books stocks six for The Name of the Rose). So the edition is what gets priced.
-  # Callers may pass `book_edition_id` when they already know it (the batch path
-  # does); otherwise it is resolved from the ISBN, which is the edition's natural
-  # key. A `book_id` in the args is ignored: it cannot say which edition was meant.
   def perform(%Oban.Job{args: %{"isbn" => isbn} = args}) do
     Logger.info("TriggerPriceScrapeJob: scraping isbn=#{isbn}")
 
     case args["book_edition_id"] || edition_id_for_isbn(isbn) do
       nil ->
-        # Not an error: the edition row may not exist yet, or the ISBN may have
-        # been removed. The nightly batch walks editions directly and will pick
-        # it up once it exists, so discarding beats retrying five times.
         Logger.info("TriggerPriceScrapeJob: no edition for isbn=#{isbn}, skipping")
         :ok
 
@@ -121,17 +113,10 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
     for %{isbn: isbn, book_edition_id: book_edition_id} <- isbn_entries,
         store <- stores do
-      # No `|| store.name` fallback: the display name is not a registry key and never
-      # matches one, so the fallback only ever produced a guaranteed 404 that melted the
-      # store's fuse. `scrapeable_stores/0` guarantees this is non-nil.
       store_name = store.scraper_module
 
       case client.scrape(isbn, store_name) do
         {:ok, response} ->
-          # Every response carries what the service observed this store to be
-          # capable of. Persisting it here means the observation's timestamp stays
-          # current from ordinary work, with no separate probe schedule — so a
-          # replatformed shop is re-derived on the next scrape.
           Prices.record_capability(store, response["capability"])
 
           interpret(response, %{
@@ -153,19 +138,11 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
     end
   end
 
-  # A 200 no longer implies a price. The scraper distinguishes what it *concluded*
-  # from whether it *worked*, because the two used to collapse into one HTTP 500 —
-  # and `ScraperClient` melts a fuse shared by every store on any non-200. A shop
-  # that permanently forbids our path, or simply does not stock a book, would
-  # otherwise disable price scraping everywhere, repeatedly.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_PRICED"} = response, ctx) do
     %{store: store, store_name: store_name, edition_id: edition_id} = ctx
 
     Monitoring.record_success(store_name, "scraper_config")
 
-    # This ISBN demonstrably resolves at this store, which is exactly what a canary
-    # needs to be. If it ever stops resolving, what we believe about the store is no
-    # longer supported by evidence.
     Prices.note_canary(store, ctx.isbn)
 
     {:ok,
@@ -179,18 +156,11 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
      }}
   end
 
-  # The shop does not carry this edition. A correct, permanent answer — the source
-  # is healthy, there is simply no price to record.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_NOT_STOCKED"}, ctx) do
     %{isbn: isbn, store: store, store_name: store_name} = ctx
 
     Monitoring.record_success(store_name, "scraper_config")
 
-    # An ordinary edition going out of stock is normal. The *canary* going missing is
-    # not: it is an ISBN we previously priced here, so its disappearance means the
-    # store changed underneath us in a way capability detection cannot see — the
-    # platform still answers and still looks the same, but the mapping has stopped
-    # working. `canary_failed/2` clears the capability so it is re-derived.
     case Prices.canary_failed(store, isbn) do
       :ok ->
         :ok
@@ -251,8 +221,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
 
     Monitoring.record_success(store_name, "scraper_config")
 
-    # Deduplicated by Oban, so a hundred lookups against an unindexed store enqueue
-    # one build rather than a hundred.
     %{store: store_name}
     |> BuildScraperIndexJob.new(unique: [period: 3600, fields: [:worker, :args]])
     |> Oban.insert()
@@ -265,8 +233,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
     {:determined, :index_required}
   end
 
-  # Our extractor is broken for this store. Recorded against per-source health
-  # rather than the shared breaker, since it says nothing about service health.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_EXTRACTOR_FAILED"} = response, ctx) do
     %{isbn: isbn, store_name: store_name} = ctx
 
@@ -280,9 +246,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJob do
     {:error, :extractor_failed}
   end
 
-  # An absent or unrecognised outcome is treated as a failure: a response that
-  # cannot say what it concluded is not evidence that nothing went wrong. This also
-  # catches a scraper deployed older than this contract.
   defp interpret(response, ctx) do
     %{isbn: isbn, store_name: store_name} = ctx
 

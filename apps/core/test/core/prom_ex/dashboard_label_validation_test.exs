@@ -33,32 +33,17 @@ defmodule Core.PromEx.DashboardLabelValidationTest do
 
   alias Core.PromEx.Plugins.Stacks, as: StacksPlugin
 
-  # ── Metric-name / label-matcher grammar ──────────────────────────────────
-  # A `stacks_*` instant-vector selector with its inline label block, e.g.
-  # `stacks_upload_terminal_count_total{app="$app",outcome="resolved"}`.
   @selector_regex ~r/(stacks_[a-zA-Z0-9_]+)\{([^}]*)\}/
 
-  # A single label matcher's KEY inside a selector's `{...}` block. Matchers
-  # are `key="v"`, `key=~"v"`, `key!="v"`, `key!~"v"`; the operator alternation
-  # is ordered so `=~`/`!=`/`!~` win over a bare `=`.
   @matcher_key_regex ~r/([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=~|!~|!=|=)\s*"/
 
-  # A `by (...)` / `without (...)` grouping clause (PromQL aggregation labels).
   @grouping_regex ~r/\b(?:by|without)\s*\(([^)]*)\)/
 
-  # Distribution selectors carry these exporter suffixes; strip to recover the
-  # registered `..._milliseconds` family name for the tag lookup.
   @distribution_suffixes ["_bucket", "_sum", "_count"]
 
-  # The `$app` template var and the histogram bucket-bound label are always
-  # legal keys regardless of a family's declared tags.
   @app_key "app"
   @le_key "le"
 
-  # ── Registered family → allowed label keys ───────────────────────────────
-  # Built at runtime from the plugin's declared Telemetry.Metrics structs, the
-  # same join TelemetryMetricsPrometheus uses. Value is a MapSet of allowed tag
-  # key strings; distribution families additionally allow `le`.
   defp allowed_by_family do
     StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
@@ -76,23 +61,17 @@ defmodule Core.PromEx.DashboardLabelValidationTest do
   defp distribution?(%Telemetry.Metrics.Distribution{}), do: true
   defp distribution?(_), do: false
 
-  # Normalise a raw `stacks_*` selector name to its registered family name, or
-  # nil if it is not a registered family at all (that case is the existing
-  # DashboardDriftTest's job — we do not duplicate its failure here).
   defp normalize_family(name, allowed) do
     if Map.has_key?(allowed, name),
       do: name,
       else: Enum.find_value(@distribution_suffixes, &stripped_family(name, &1, allowed))
   end
 
-  # If `name` ends with a distribution suffix and the stripped base is a
-  # registered family, return that base; otherwise nil.
   defp stripped_family(name, suffix, allowed) do
     base = String.replace_suffix(name, suffix, "")
     if base != name and Map.has_key?(allowed, base), do: base
   end
 
-  # ── Dashboard / panel extraction (mirrors the drift tests) ───────────────
   defp registered_dashboard_paths do
     Enum.map(Core.PromEx.dashboards(), fn
       {:core, relative} -> relative
@@ -103,34 +82,22 @@ defmodule Core.PromEx.DashboardLabelValidationTest do
   defp dashboard_path(relative),
     do: Application.app_dir(:core, Path.join("priv", relative))
 
-  # Recursively collect every panel, including panels nested inside Grafana
-  # "row" panels.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel -> [panel | all_panels(panel)] end)
   end
 
   defp all_panels(_), do: []
 
-  # Only panels that render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
     |> Enum.reject(&(&1["type"] == "row"))
   end
 
-  # ── The validation core ──────────────────────────────────────────────────
-  # For a single PromQL `expr`, return every label-key violation as a map. A
-  # violation is an inline-matcher key (or an unambiguous grouping key) that is
-  # neither `app`, nor `le`, nor a registered tag of the family it applies to.
-  # Selectors on families NOT registered at all are skipped (the drift test
-  # owns that). Public so the proof-it-catches-a-bug sub-test can drive it with
-  # inline strings — no dashboard edit required.
   def expr_violations(expr, allowed) when is_binary(expr) do
     inline_matcher_violations(expr, allowed) ++ grouping_violations(expr, allowed)
   end
 
-  # Every inline `key=…` in every `stacks_*{...}` selector, checked against the
-  # selector's own family.
   defp inline_matcher_violations(expr, allowed) do
     for [_, raw_name, block] <- Regex.scan(@selector_regex, expr),
         family = normalize_family(raw_name, allowed),
@@ -141,11 +108,6 @@ defmodule Core.PromEx.DashboardLabelValidationTest do
     end
   end
 
-  # `by (...)` / `without (...)` grouping keys. We can only attribute a
-  # grouping clause to a family when the whole expr references exactly ONE
-  # registered family; with two-or-more the association is ambiguous, so we
-  # skip (the high-value inline-matcher check above still runs). All six real
-  # dashboards use single-family exprs, so this path does validate them.
   defp grouping_violations(expr, allowed) do
     families =
       for [_, raw_name] <- Regex.scan(~r/(stacks_[a-zA-Z0-9_]+)/, expr),
@@ -177,36 +139,27 @@ defmodule Core.PromEx.DashboardLabelValidationTest do
   defp key_allowed?(@app_key, _family, _allowed), do: true
   defp key_allowed?(key, family, allowed), do: MapSet.member?(allowed_keys(family, allowed), key)
 
-  # A family's allowed tag keys (distribution families already carry `le`;
-  # `app` is handled separately in key_allowed?/3).
   defp allowed_keys(family, allowed), do: Map.get(allowed, family, MapSet.new())
 
-  # ── The tests ────────────────────────────────────────────────────────────
   describe "registered family label-key derivation" do
     test "families expose their declared tags, and distributions additionally allow le" do
       allowed = allowed_by_family()
 
-      # A counter's tags come straight from its :tags list; no le.
       assert MapSet.equal?(
                Map.fetch!(allowed, "stacks_upload_terminal_count_total"),
                MapSet.new(["outcome"])
              )
 
-      # A distribution's registered family (…_milliseconds) carries its tags
-      # PLUS the implicit le bucket-bound label.
       assert MapSet.equal?(
                Map.fetch!(allowed, "stacks_router_dispatch_stop_duration_milliseconds"),
                MapSet.new(["route_group", "le"])
              )
 
-      # A …_bucket selector normalises back to the registered …_milliseconds
-      # family for the tag lookup.
       assert normalize_family(
                "stacks_router_dispatch_stop_duration_milliseconds_bucket",
                allowed
              ) == "stacks_router_dispatch_stop_duration_milliseconds"
 
-      # A selector on an unregistered family is nil here (drift test's domain).
       assert normalize_family("stacks_not_a_real_family", allowed) == nil
     end
   end
@@ -255,7 +208,6 @@ defmodule Core.PromEx.DashboardLabelValidationTest do
     end
 
     test "a typo'd inline matcher KEY is rejected and named", %{allowed: allowed} do
-      # `outcom` (typo of `outcome`) — the metric never carries this label.
       bad =
         ~s|sum by (outcome) (rate(stacks_upload_terminal_count_total{app="$app",outcom="resolved"}[$__rate_interval]))|
 
@@ -270,7 +222,6 @@ defmodule Core.PromEx.DashboardLabelValidationTest do
     end
 
     test "a typo'd `by (...)` grouping KEY is rejected and named", %{allowed: allowed} do
-      # group `by (sourc)` — a typo; upload only carries `outcome`.
       bad =
         ~s|sum by (sourc) (rate(stacks_upload_terminal_count_total{app="$app"}[$__rate_interval]))|
 
@@ -287,13 +238,11 @@ defmodule Core.PromEx.DashboardLabelValidationTest do
     test "le is accepted on a histogram _bucket selector but not invented tags", %{
       allowed: allowed
     } do
-      # A real histogram_quantile expr: `le` (grouping) + `le` bound is legal.
       good =
         ~s|histogram_quantile(0.95, sum by (le, route_group) (rate(stacks_router_dispatch_stop_duration_milliseconds_bucket{app="$app"}[$__rate_interval])))|
 
       assert expr_violations(good, allowed) == []
 
-      # …but a bogus grouping key on the same histogram is still caught.
       bad =
         ~s|histogram_quantile(0.95, sum by (le, route_grp) (rate(stacks_router_dispatch_stop_duration_milliseconds_bucket{app="$app"}[$__rate_interval])))|
 

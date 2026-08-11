@@ -27,7 +27,6 @@ CHECKER="$REPO_ROOT/scripts/check-schema-diff.sh"
 FIXTURES="$REPO_ROOT/test/fixtures/schema"
 
 run_checker() {
-    # Explicitly unset so each run is clean.
     unset DB_BREAKING_LABEL
     OUT=$("$CHECKER" "$@" 2>&1)
     RC=$?
@@ -38,28 +37,22 @@ run_checker_with_label() {
     RC=$?
 }
 
-# ── benign (additive) diff ───────────────────────────────────────────────────
 test_case "benign_diff" "additive-only structure diff exits 0"
 run_checker "$FIXTURES/before_benign.dump" "$FIXTURES/after_benign.dump"
 assert_exit_zero "$RC" "benign diff passes without label"
 
-# ── drop column ──────────────────────────────────────────────────────────────
 test_case "drop_diff" "diff dropping a column exits non-zero and names it"
 run_checker "$FIXTURES/before_drop.dump" "$FIXTURES/after_drop.dump"
 assert_exit_nonzero "$RC" "drop diff exits non-zero without db-breaking label"
 assert_contains "$OUT" "cover_image_url" \
     "output names the removed column so reviewers know what broke"
 
-# ── rename column ────────────────────────────────────────────────────────────
 test_case "rename_diff" "diff renaming a column is flagged as destructive"
 run_checker "$FIXTURES/before_rename.dump" "$FIXTURES/after_rename.dump"
 assert_exit_nonzero "$RC" "rename diff exits non-zero without db-breaking label"
-# At structure.sql level the old name is missing and a new name appears — the
-# checker should call out the gone name OR say "rename".
 assert_contains "$OUT" "cover_image_url" \
     "output mentions the vanished column name"
 
-# ── bypass via env var (simulates db-breaking label) ─────────────────────────
 test_case "drop_diff_with_label" "DB_BREAKING_LABEL=true allows destructive diffs"
 run_checker_with_label "$FIXTURES/before_drop.dump" "$FIXTURES/after_drop.dump"
 assert_exit_zero "$RC" "drop diff with DB_BREAKING_LABEL=true exits 0"
@@ -68,14 +61,10 @@ test_case "rename_diff_with_label" "DB_BREAKING_LABEL=true also bypasses rename 
 run_checker_with_label "$FIXTURES/before_rename.dump" "$FIXTURES/after_rename.dump"
 assert_exit_zero "$RC" "rename diff with DB_BREAKING_LABEL=true exits 0"
 
-# ── benign diff with label set is still fine ─────────────────────────────────
 test_case "benign_diff_with_label" "label doesn't break benign case"
 run_checker_with_label "$FIXTURES/before_benign.dump" "$FIXTURES/after_benign.dump"
 assert_exit_zero "$RC" "benign diff with label still exits 0"
 
-# ── enum value drop ──────────────────────────────────────────────────────────
-# Removing a value from a CREATE TYPE AS ENUM is destructive: N-1 code may
-# still INSERT rows using that value and will 22P02 at the DB.
 test_case "enum_drop" "removing an enum value is flagged as destructive"
 run_checker "$FIXTURES/before_enum_drop.dump" "$FIXTURES/after_enum_drop.dump"
 assert_exit_nonzero "$RC" "enum-drop diff exits non-zero without db-breaking label"
@@ -86,10 +75,6 @@ test_case "enum_drop_with_label" "DB_BREAKING_LABEL=true allows enum value drops
 run_checker_with_label "$FIXTURES/before_enum_drop.dump" "$FIXTURES/after_enum_drop.dump"
 assert_exit_zero "$RC" "enum-drop diff with DB_BREAKING_LABEL=true exits 0"
 
-# ── sanity: real baseline schema self-diff ───────────────────────────────────
-# Feeds the current production-shape structure.sql into the checker against
-# itself. A sane parser must return 0 — any false positive here would block
-# every PR in CI. This is the finding-5 regression test.
 test_case "real_baseline_self_diff" "real-main structure dumped by mix ecto.dump yields no findings when diffed against itself"
 run_checker "$FIXTURES/real_main_baseline.dump" "$FIXTURES/real_main_baseline.dump"
 assert_exit_zero "$RC" "real baseline self-diff exits 0 (no false positives)"

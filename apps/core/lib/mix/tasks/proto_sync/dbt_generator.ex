@@ -33,7 +33,6 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
         field.name == "id" or field.name in ts_fields or excluded_field?(field, overrides)
       end)
 
-    # Use ecto_name if present (e.g., proto "website" → DB "website_url")
     proto_columns =
       Enum.map(filtered, fn field ->
         field_name = String.to_atom(field.name)

@@ -185,21 +185,13 @@ statusFilterToString filter =
             Nothing
 
         Pending ->
-            -- The server's value, not the UI's word for it. Sending "pending" matched no row, so
-            -- the Pending tab silently showed an empty list.
             Just "pending_review"
 
         Approved ->
             Just "approved"
 
         Rejected ->
-            -- `reject_source/1` transitions to **"dismissed"** (`discovery.ex:229`), not
-            -- "rejected" — the UI keeps the operator's word while sending the server's.
             Just "dismissed"
-
-
-
--- VIEW
 
 
 view : Model -> Html Msg
@@ -298,19 +290,7 @@ viewSourceRow actionInProgress source =
         , td [] [ text (String.fromFloat source.confidenceScore) ]
         , td [] [ viewStatusBadge source.status ]
         , td []
-            -- ⛔ Was `== "pending"`. The server's status is **`"pending_review"`**
-            -- (`Stacks.Discovery` writes it on create and gates both transitions on it), so this
-            -- comparison never matched and the Approve/Reject buttons NEVER rendered. The page
-            -- showed an "Actions" column that was always empty.
-            --
-            -- ⚠️ It survived because the page was unreachable at all (#303): the admin pipeline
-            -- 401'd every request, so nobody ever saw a row to notice the missing buttons. Two
-            -- independent defects stacked, and fixing only the auth one would have produced a
-            -- page that loads and still cannot be used.
             (if source.status == "pending_review" then
-                -- testIds because the filter tab above is also a button reading "Approved", so a
-                -- prose selector cannot tell the two apart — a test asserting the buttons are
-                -- ABSENT passes on the tab's label instead. That is #302's defect class exactly.
                 [ button
                     [ class "btn btn--primary btn--sm"
                     , onClick (ApproveClicked source.id)

@@ -82,10 +82,6 @@ catalogueInitEffects maybeToken =
                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                     , url = "/api/placements/mine"
                     , body = SimulatedEffect.Http.emptyBody
-
-                    -- The real decoders throughout, never a copy: a mirror and
-                    -- its fixtures stay consistent with each other while both
-                    -- drift away from the server (Issue #328).
                     , expect = SimulatedEffect.Http.expectJson Catalogue.UserPlacementsLoaded Api.placementsMineDecoder
                     , timeout = Nothing
                     , tracker = Nothing
@@ -184,10 +180,6 @@ fetchSimulated model maybeToken =
             SimulatedEffect.Cmd.none
 
 
-
--- JSON HELPERS
-
-
 sampleCatalogueJson : String
 sampleCatalogueJson =
     Encode.encode 0
@@ -273,10 +265,6 @@ bookJson id title authorName subjects =
         , ( "subjects", Encode.list Encode.string subjects )
         , ( "visibility_tier", Encode.string "public" )
         ]
-
-
-
--- TESTS
 
 
 loadAndDisplayBooks : Test

@@ -33,8 +33,6 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorker do
   def perform(%Oban.Job{args: %{"user_id" => user_id}}) do
     Logger.info("WritingAssistantDataPurgeWorker: purging AI data for user #{user_id}")
 
-    # Sessions first: the delete cascades to turn_feedback + retrieval_log via
-    # their session_id FK (ON DELETE CASCADE). No need to delete those directly.
     {sessions, _} = Repo.delete_all(from s in Session, where: s.user_id == ^user_id)
     {embeddings, _} = Repo.delete_all(from e in Embedding, where: e.user_id == ^user_id)
 

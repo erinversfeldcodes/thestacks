@@ -30,11 +30,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
   alias Stacks.Books.BookEdition
   alias Stacks.Enrichment.{PricePipeline, Prices, StoreMatcher}
 
-  # Editions attempted per store per run.
-  #
-  # Each match that succeeds costs one product fetch, against a shop limited to a few
-  # requests a minute. Sweeping the whole catalogue in one run would take hours and
-  # monopolise that budget; the TTL brings the rest around on later runs.
   @editions_per_run 25
 
   @impl true
@@ -53,7 +48,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
   end
 
   def perform(%Oban.Job{args: %{}}) do
-    # One job per store, so a failure at one shop does not lose the other's work.
     stores = Prices.stores_needing_title_match()
 
     Enum.each(stores, fn store ->
@@ -100,9 +94,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
     :ok
   end
 
-  # Editions worth trying, newest first. Deliberately does not filter to unpriced
-  # editions: a price at this store may be stale rather than absent, and the TTL is the
-  # right arbiter of that, not this job.
   defp candidate_editions do
     Core.Repo.all(
       from e in BookEdition,
@@ -129,14 +120,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
     end
   end
 
-  # This job's whole output for a non-priced outcome is a log line, so the log line
-  # has to be true. It used to be a single catch-all reading "the match was plausible
-  # but the product did not price… the likely cause is a wrong match" — a diagnosis
-  # that is correct only for NOT_STOCKED. It quietly mislabelled our own broken
-  # extractor, a shop's robots rule, and a shop pacing us as bad title matches, at
-  # `info`, which is precisely how the RATE_LIMITED miss stayed invisible for three
-  # campaigns. One clause per outcome, and `scripts/check-enum-coverage.py` keeps it
-  # that way.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_PRICED"} = response, ctx) do
     %{store: store, edition: edition} = ctx
 
@@ -155,8 +138,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
     ])
   end
 
-  # The one outcome that really does indict the match: we matched a title to a
-  # product the shop says it does not carry at this ISBN.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_NOT_STOCKED"}, ctx) do
     Logger.info("MatchStoreCatalogueJob: #{ctx.path} does not stock this edition — match spent")
   end
@@ -170,10 +151,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
     )
   end
 
-  # The shop is pacing us. Not a bad match and not our defect — the shop exercising a
-  # right we should be honouring. Enforcing the cooldown belongs in `RateLimiter`, so
-  # it holds for every caller rather than the ones that remember (Issue #308); here it
-  # must at least stop being logged as a match failure.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_RATE_LIMITED"} = response, ctx) do
     Logger.warning(
       "MatchStoreCatalogueJob: #{ctx.store_name} rate-limited us for #{ctx.path}: " <>
@@ -181,7 +158,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
     )
   end
 
-  # Our extractor is broken for this store. The match may well have been perfect.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_EXTRACTOR_FAILED"} = response, ctx) do
     Logger.warning(
       "MatchStoreCatalogueJob: extractor failed for #{ctx.store_name} at #{ctx.path}: " <>
@@ -189,10 +165,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
     )
   end
 
-  # Cannot arise on this path: we scrape an explicit product path found by title
-  # matching, so no ISBN index is consulted. Named rather than lumped in with the
-  # unknown case, because if it ever does appear the scraper's contract has changed
-  # under us and that is worth saying plainly.
   defp interpret(%{"outcome" => "SCRAPE_OUTCOME_INDEX_REQUIRED"}, ctx) do
     Logger.warning(
       "MatchStoreCatalogueJob: #{ctx.store_name} asked for an ISBN index while scraping " <>
@@ -200,8 +172,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJob do
     )
   end
 
-  # Absent or unrecognised: a response that cannot say what it concluded is not
-  # evidence that nothing went wrong. Also catches a scraper older than this contract.
   defp interpret(response, ctx) do
     Logger.warning(
       "MatchStoreCatalogueJob: unrecognised outcome #{inspect(response["outcome"])} from " <>

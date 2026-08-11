@@ -34,9 +34,6 @@ runs:
     - id: check-slo-gate
       name: Run SLO gate script
       shell: bash
-      # Inputs flow through env: rather than inline ${{...}} interpolation
-      # so a malicious value cannot escape the bash context. Defense in
-      # depth — same env-indirection pattern used by the rollback action.
       env:
         OUT_PATH: ${{ inputs.out-path }}
         PROBE_WINDOW_SECONDS: ${{ inputs.probe-window-seconds }}

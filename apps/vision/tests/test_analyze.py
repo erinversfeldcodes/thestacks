@@ -80,7 +80,6 @@ def test_analyze_returns_books_for_book_classification() -> None:
     assert data["confidence"] == 0.95
     assert len(data["books"]) == 1
     assert data["books"][0]["potential_isbns"] == ["9780743273565"]
-    # Two calls — one classify, one extract.
     assert mock_classify.await_count == 1
     assert mock_extract.await_count == 1
 
@@ -297,8 +296,6 @@ def test_analyze_with_excluded_books_appends_constraint() -> None:
 
     assert response.status_code == 200
     assert mock_extract.await_count == 1
-    # Positional arg 0 is the images list; the excluded_books kwarg carries
-    # the rejected identifications.
     call = mock_extract.await_args
     assert call is not None
     assert call.kwargs.get("excluded_books") == excluded

@@ -3,13 +3,11 @@ version: 2
 sources:
   - name: op
     schema: op
-    # Freshness is checked against updated_at; warn if data is >24 h old, error if >48 h.
     loaded_at_field: updated_at
     freshness:
       warn_after: { count: 24, period: hour }
       error_after: { count: 48, period: hour }
     tables:
-      # ── Core tables ──────────────────────────────────────────────────
       - name: books
         description: Works in the catalogue; each book may have multiple editions.
         columns:
@@ -291,7 +289,6 @@ sources:
 
       - name: bookstores
         description: Partner bookstores whose prices are scraped.
-        # No freshness check -- populated by scraper (Phase 2A), may be empty in dev
         freshness: null
         columns:
           - name: id
@@ -612,10 +609,6 @@ sources:
           - name: published_at
             description: Timestamp when the event was published to subscribers.
 
-      # my_writing_links: deprecated (superseded by blog_posts + users.website_url).
-      # See docs/technical-architecture.md — table was never created.
-
-      # ── Social tables (Issue #043) ───────────────────────────────────
       - name: user_blocks
         description: User-to-user block relationships.
         freshness: null
@@ -700,7 +693,6 @@ sources:
           - name: created_at
             description: Row creation timestamp (UTC).
 
-      # ── Blog tables (Issue #043) ─────────────────────────────────────
       - name: blog_posts
         description: User blog posts with per-post visibility controls.
         columns:
@@ -761,7 +753,6 @@ sources:
           - name: created_at
             description: Row creation timestamp (UTC).
 
-      # ── Partner tables (Issue #145) ──────────────────────────────────
       - name: partners
         description: Third-space businesses (bookshops, cafes, reading groups) registered as platform partners.
         columns:
@@ -815,7 +806,6 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
 
-      # ── Marketplace tables (Issue #043) ──────────────────────────────
       - name: offer_threads
         description: Conversation threads between buyer and seller for a placement listing.
         columns:
@@ -920,7 +910,6 @@ sources:
           - name: created_at
             description: Row creation timestamp (UTC).
 
-      # ── Monitoring tables (Issue #043) ───────────────────────────────
       - name: source_health_checks
         description: Health-check status for external data sources (bookstores, APIs).
         columns:
@@ -974,11 +963,6 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
 
-      # ── Writing-assistant / embeddings (Issue #183 / #184) ────────────
-      # The vector tables (op.embeddings, op.book_content_chunks) are skip_dbt
-      # (raw vectors / query text never enter the warehouse) so have no source
-      # here. The three append-only tables override loaded_at_field to created_at
-      # (they have no updated_at column).
       - name: blog_assistant_sessions
         description: Writing-assistant chat sessions (user-scoped).
         columns:

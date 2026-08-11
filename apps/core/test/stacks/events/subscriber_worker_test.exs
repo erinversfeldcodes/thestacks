@@ -6,14 +6,12 @@ defmodule Stacks.Events.SubscriberWorkerTest do
   alias Stacks.Events
   alias Stacks.Events.SubscriberWorker
 
-  # A test handler that always returns an error, used to exercise the telemetry path.
   defmodule FailingHandler do
     @behaviour Stacks.Events.Handler
     @impl true
     def handle_event(_event), do: {:error, :simulated_failure}
   end
 
-  # A test handler that always raises, used to exercise the rescue/telemetry path.
   defmodule RaisingHandler do
     @behaviour Stacks.Events.Handler
     @impl true
@@ -32,7 +30,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
       event_id = Ecto.UUID.cast!(params.id)
       event_id_bin = Ecto.UUID.dump!(event_id)
 
-      # published_at is null before dispatch
       before =
         Core.Repo.one(
           from(e in "event_log",
@@ -47,7 +44,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
       job = %Oban.Job{args: %{"event_id" => event_id}}
       assert :ok = SubscriberWorker.perform(job)
 
-      # published_at is set after dispatch
       after_dispatch =
         Core.Repo.one(
           from(e in "event_log",
@@ -57,7 +53,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
           prefix: "op"
         )
 
-      # Schemaless Ecto queries return utc_datetime_usec as NaiveDateTime.
       assert %NaiveDateTime{} = after_dispatch.published_at
     end
 
@@ -81,10 +76,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
     end
 
     test "telemetry handler_error event is emitted on handler dispatch failure" do
-      # Verify the telemetry event signature is correct by exercising
-      # :telemetry.execute directly (integration test for the telemetry path).
-      # The dispatch logic is tested at the unit level via the FailingHandler module
-      # defined at the top of this test file.
       test_pid = self()
       ref = make_ref()
 
@@ -99,8 +90,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
 
       on_exit(fn -> :telemetry.detach("test-#{inspect(ref)}") end)
 
-      # Directly invoke :telemetry.execute as SubscriberWorker does on handler error,
-      # verifying the event name, measurement shape, and metadata shape match the spec.
       :telemetry.execute(
         [:stacks, :events, :handler_error],
         %{count: 1},
@@ -111,7 +100,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
     end
 
     test "dispatches to registered handlers for known event types" do
-      # Emit a book.created event which has registered handlers in the Registry
       book_id = Ecto.UUID.generate()
 
       {:ok, params} =
@@ -125,12 +113,9 @@ defmodule Stacks.Events.SubscriberWorkerTest do
 
       event_id = Ecto.UUID.cast!(params.id)
 
-      # The handlers may fail (no actual book exists), but the worker should
-      # still return :ok because handler errors are isolated with try/rescue
       job = %Oban.Job{args: %{"event_id" => event_id}}
       assert :ok = SubscriberWorker.perform(job)
 
-      # Verify published_at was set even though handlers may have errored
       event_id_bin = Ecto.UUID.dump!(event_id)
 
       after_dispatch =
@@ -146,8 +131,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
     end
 
     test "handler returning {:error, reason} does not prevent other handlers from running" do
-      # Emit a book.created event — it has 2 registered handlers
-      # Even if one errors, both should be attempted and published_at should be set
       {:ok, params} =
         Events.emit(%{
           event_type: "book.created",
@@ -160,7 +143,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
       event_id = Ecto.UUID.cast!(params.id)
       job = %Oban.Job{args: %{"event_id" => event_id}}
 
-      # Should succeed even if handlers error
       assert :ok = SubscriberWorker.perform(job)
     end
 
@@ -191,7 +173,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
     end
 
     test "upcaster is applied to fetched events" do
-      # Events with schema_version 1 pass through unchanged
       {:ok, params} =
         Events.emit(%{
           event_type: "test.upcast",
@@ -203,7 +184,6 @@ defmodule Stacks.Events.SubscriberWorkerTest do
       event_id = Ecto.UUID.cast!(params.id)
       job = %Oban.Job{args: %{"event_id" => event_id}}
 
-      # Should complete successfully — upcaster passes version 1 through
       assert :ok = SubscriberWorker.perform(job)
     end
   end

@@ -26,8 +26,6 @@ fi
 
 CONTENT="$(cat "$RUNTIME_EXS")"
 
-# Each stale snippet to reject. If any slips back in the comment will claim
-# the plug accepts 6PN callers without a token — that is false.
 STALE_SNIPPETS=(
     "6PN callers"
     "only 6PN callers can scrape"

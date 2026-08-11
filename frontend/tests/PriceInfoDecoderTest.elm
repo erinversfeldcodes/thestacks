@@ -41,9 +41,6 @@ suite =
     describe "book price decoding"
         [ test "keeps editions of one work distinct" <|
             \_ ->
-                -- Exclusive Books carries six ISBNs of The Name of the Rose at
-                -- different prices. Collapsing them would show one arbitrary price
-                -- as though it were the price of the book.
                 case Decode.decodeString BookDetail.pricesDecoder twoEditionsAtOneStore of
                     Ok data ->
                         Expect.equal
@@ -54,8 +51,6 @@ suite =
                         Expect.fail (Decode.errorToString err)
         , test "converts cents to rand at the edge" <|
             \_ ->
-                -- The wire carries cents because that is what shops report; only the
-                -- view speaks rand.
                 case Decode.decodeString BookDetail.pricesDecoder twoEditionsAtOneStore of
                     Ok data ->
                         Expect.equal
@@ -89,8 +84,6 @@ suite =
                         Expect.fail (Decode.errorToString err)
         , test "survives a row missing its optional fields" <|
             \_ ->
-                -- store_name is a LEFT JOIN and url is nullable, so both can be
-                -- absent. A price is still worth showing without them.
                 let
                     json =
                         """{"prices": [{"isbn": "9780749397050", "price_cents": 40000}]}"""
@@ -111,8 +104,6 @@ suite =
                         Expect.fail (Decode.errorToString err)
         , test "the exposed aliases are constructible by a caller" <|
             \_ ->
-                -- Directly consumes PriceInfo's exposed types, which is what stops
-                -- elm-review narrowing the exposing list again.
                 let
                     listing : PriceInfo.StoreListing
                     listing =

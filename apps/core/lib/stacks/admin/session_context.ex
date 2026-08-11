@@ -93,10 +93,6 @@ defmodule Stacks.Admin.SessionContext do
     |> Repo.update()
   end
 
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
-
   defp hash_ip(raw_ip) do
     :crypto.hash(:sha256, raw_ip) |> Base.encode16(case: :lower)
   end

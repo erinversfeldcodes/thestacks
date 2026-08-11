@@ -209,8 +209,6 @@ suite =
                     |> Query.fromHtml
                     |> Query.find [ Selector.class "block-user__confirm" ]
                     |> Query.has [ Selector.disabled True ]
-
-        -- #389: the ⋯ menu and confirm modal must be Escape/click-away dismissable.
         , test "the ⋯ trigger carries a stable DOM id so focus can return to it on close" <|
             \_ ->
                 BlockModal.view initModel

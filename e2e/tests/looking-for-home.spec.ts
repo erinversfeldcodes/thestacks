@@ -15,24 +15,16 @@ test.describe("Looking for a Home page", () => {
     await page.goto("/looking-for-home");
     await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
 
-    // 8c rebuilt this shelf as a room in the shelf-room family (US-18.1.1): the
-    // flat `h1.page__title` was intentionally removed in favour of a brass-plate
-    // label rendered INSIDE the room scaffold (viewShelfLabel → .shelf-label).
     await expect(page.locator(".shelf-room")).toBeVisible();
     const label = page.locator(".shelf-room .shelf-label");
     await expect(label).toContainText("Looking for a Home");
-    // The removed flat page title must not have crept back.
     await expect(page.locator("h1.page__title")).toHaveCount(0);
   });
 
   test("empty state matches US-1.6.5 wording", async ({ page }) => {
-    // No suite user is seeded with looking_for_home placements, so this shelf
-    // is empty for every suite user — asserted unconditionally.
     await page.goto("/looking-for-home");
     await page.getByTestId('looking-for-home-page').waitFor({ timeout: 10000 });
 
-    // Looking-for-Home is the only page using Components.EmptyBookshelf.
-    // Note the en dash in the copy (LookingForHome.elm:102).
     await expect(page.locator(".empty-shelf__message")).toContainText(
       "Nothing here yet — these are books looking for a new home.",
       { timeout: 10000 }

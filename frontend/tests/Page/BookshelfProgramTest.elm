@@ -171,9 +171,6 @@ bookshelfLoadingState =
                     |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true") ]
                     |> ProgramTest.ensureViewHas [ Selector.attribute (Html.Attributes.attribute "role" "status") ]
                     |> ProgramTest.ensureViewHas [ Selector.text "Fetching your Library…" ]
-                    -- The placeholders are the picture, and there are several:
-                    -- one shimmering bar would read as a progress indicator, not
-                    -- as a shelf filling up.
                     |> ProgramTest.expectView
                         (Query.findAll [ Selector.class "book-skeleton" ]
                             >> Query.count (Expect.greaterThan 1)
@@ -181,8 +178,6 @@ bookshelfLoadingState =
         , test "bookshelf_loading_is_not_the_empty_state: nothing on the loading page claims the shelf is empty" <|
             \() ->
                 startLibrary
-                    -- Positive control for the two negatives: this IS the
-                    -- loading page, so their absence means something.
                     |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
                     |> ProgramTest.ensureViewHasNot [ Selector.attribute (Html.Attributes.attribute "data-testid" "bookshelf-empty") ]
                     |> ProgramTest.ensureViewHasNot [ Selector.class "shelf-row--empty" ]
@@ -190,8 +185,6 @@ bookshelfLoadingState =
         , test "bookshelf_empty_is_not_the_loading_state: once an empty shelf arrives the waiting marks are gone" <|
             \() ->
                 startLibrary
-                    -- Control: the marks asserted absent below were present a
-                    -- moment ago, on the very same program.
                     |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
                     |> ProgramTest.simulateHttpResponse "GET"
                         "/api/bookshelves/library"
@@ -287,10 +280,6 @@ bookshelfAgeGate =
                     [ Selector.class "age-gate" ]
 
 
-
--- ANTILIBRARY (punch #5)
-
-
 antiLibrarySuite : Test
 antiLibrarySuite =
     describe "antiLibraryConfig (punch #5)"
@@ -306,13 +295,10 @@ antiLibrarySuite =
                         (simulateBookshelfResponse [ testPlacement ])
                     |> ProgramTest.ensureViewHas [ Selector.class "shelf-antilibrary" ]
                     |> ProgramTest.ensureViewHas [ Selector.class "wallpaper--botanical" ]
-                    -- main.css uppercases the label, so the accessible name is
-                    -- the only trustworthy assertion target.
                     |> ProgramTest.ensureView
                         (Query.find [ Selector.class "shelf-label" ]
                             >> Query.has [ Selector.attribute (Html.Attributes.attribute "aria-label" "Antilibrary") ]
                         )
-                    -- Would fail if this page were rendering the Library config.
                     |> ProgramTest.ensureViewHasNot [ Selector.class "shelf-library" ]
                     |> ProgramTest.expectViewHasNot [ Selector.class "wallpaper--damask" ]
         , test "antilibrary_empty_state: an empty antilibrary shows its own invitation copy" <|
@@ -342,10 +328,6 @@ antiLibrarySuite =
                     |> ProgramTest.clickButton "Go Back"
                     |> ProgramTest.expectViewHasNot [ Selector.class "age-gate" ]
         ]
-
-
-
--- WISH LIST (punch #6)
 
 
 wishListSuite : Test
@@ -398,10 +380,6 @@ wishListSuite =
         ]
 
 
-
--- NO TOKEN (punch #11)
-
-
 noTokenSuite : Test
 noTokenSuite =
     describe "init with no token (punch #11)"
@@ -426,19 +404,11 @@ noTokenSuite =
                         (Query.findAll [ Selector.class "shelf-row" ]
                             >> Query.count (Expect.equal 4)
                         )
-                    -- No token means no books were ever fetched, so no spine
-                    -- may appear — and no error may be shown either.
                     |> ProgramTest.ensureViewHasNot [ Selector.class "book-button" ]
                     |> ProgramTest.expectViewHasNot [ Selector.class "error" ]
         , test "no_token_is_not_asked_not_loading: with no request issued the page does not claim one is in flight" <|
             \() ->
-                -- `shelves` was an unconditional `Loading` while the command
-                -- could be `Cmd.none` (#362). Harmless while `Loading` drew an
-                -- empty bookcase; with a real loading state it is a skeleton
-                -- that shimmers forever, because nothing will ever resolve it.
                 ProgramTest.start () (libraryProgram Nothing)
-                    -- Control: the same assertions are TRUE of the token case,
-                    -- so their falsity here is about the missing request.
                     |> ProgramTest.ensureViewHasNot [ Selector.class "bookshelf--loading" ]
                     |> ProgramTest.expectViewHasNot
                         [ Selector.attribute (Html.Attributes.attribute "aria-busy" "true") ]
@@ -451,18 +421,12 @@ noTokenSuite =
         ]
 
 
-
--- VIEW MODE + SORTING (punch #12)
-
-
 viewModeSuite : Test
 viewModeSuite =
     describe "view mode and list sorting (punch #12)"
         [ test "list_view_swaps_to_book_list: toggling to list view replaces the bookcase with BookList's sortable table" <|
             \() ->
                 loadedLibrary
-                    -- Pre-condition: spine view really is what's on screen, so
-                    -- the swap below is a change and not the initial state.
                     |> ProgramTest.ensureViewHas [ Selector.class "bookcase" ]
                     |> ProgramTest.simulateDomEvent (findViewModeButton "List view") Event.click
                     |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--list-view" ]
@@ -472,7 +436,6 @@ viewModeSuite =
                     |> ProgramTest.ensureViewHas [ Selector.text "Pages" ]
                     |> ProgramTest.ensureViewHas [ Selector.text "Date Added" ]
                     |> ProgramTest.ensureViewHas [ Selector.text "Formats" ]
-                    -- The bookcase is replaced, not merely hidden behind the table.
                     |> ProgramTest.expectViewHasNot [ Selector.class "bookcase" ]
         , test "spine_view_returns: toggling back to spine view restores the bookcase" <|
             \() ->
@@ -502,8 +465,6 @@ viewModeSuite =
         , test "sort_new_column_resets_to_ascending: switching column starts it ascending and clears the old column's indicator" <|
             \() ->
                 inListView
-                    -- Put Title into Desc first, so "resets to Asc" is a real
-                    -- reset rather than the direction it already had.
                     |> ProgramTest.simulateDomEvent (findColumnHeader "Title") Event.click
                     |> ProgramTest.ensureView
                         (findColumnHeader "Title" >> Query.has [ ariaSort "descending" ])
@@ -518,10 +479,6 @@ viewModeSuite =
                                 |> Expect.equal { column = BookList.Author, direction = BookList.Asc }
                         )
         ]
-
-
-
--- HELPERS
 
 
 {-| A library holding two distinguishable books.

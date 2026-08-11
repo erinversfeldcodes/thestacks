@@ -17,8 +17,6 @@ defmodule Stacks.Imports.GoodreadsCsvTest do
     end
 
     test "strips the =\"…\" Excel escape from ISBNs", %{rows: [orwell | _]} do
-      # The raw cell is `="9780141036144"` — the wrapper exists so spreadsheets
-      # keep leading zeros, and keeping it would fail every row at the gate.
       assert orwell.raw_isbn13 == "9780141036144"
       assert orwell.raw_isbn == "0141036141"
     end
@@ -71,7 +69,6 @@ defmodule Stacks.Imports.GoodreadsCsvTest do
     end
 
     test "columns are found by header name, not position" do
-      # A reordered export (Goodreads has done this) must still parse.
       csv =
         "ISBN13,Author,Title,Exclusive Shelf\n\"=\"\"9780141036144\"\"\",George Orwell,1984,read\n"
 
@@ -90,7 +87,6 @@ defmodule Stacks.Imports.GoodreadsCsvTest do
       assert GoodreadsCsv.destination_bookshelf(%{goodreads_shelf: "currently-reading"}) ==
                "reading_pile"
 
-      # Owned Copies is what tells the antilibrary from the wishlist.
       assert GoodreadsCsv.destination_bookshelf(%{
                goodreads_shelf: "to-read",
                raw_owned_copies: 1

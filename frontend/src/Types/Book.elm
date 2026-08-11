@@ -45,9 +45,6 @@ type alias Edition =
     , publisher : Maybe String
     , publicationYear : Maybe Int
     , isPrimary : Bool
-
-    -- Which catalogue confirmed this ISBN: "open_library", "google_books", or
-    -- "barcode_unverified" for none of them yet. See `isProvisional`.
     , verificationSource : String
     }
 
@@ -63,10 +60,6 @@ type alias Book =
     , subjects : List String
     , visibilityTier : VisibilityTier
     }
-
-
-
--- MAPPING FROM PROTO
 
 
 fromProtoVisibility : Proto.VisibilityTier -> VisibilityTier
@@ -287,10 +280,6 @@ displayTitle bk =
 
     else
         bk.title
-
-
-
--- DECODERS
 
 
 bookDecoder : Decoder Book

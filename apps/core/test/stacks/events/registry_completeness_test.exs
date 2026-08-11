@@ -21,11 +21,8 @@ defmodule Stacks.Events.RegistryCompletenessTest do
 
   @lib_root Path.expand("../../../lib", __DIR__)
 
-  # `event_type: "domain.thing"` — the shape every Stacks.Events.emit/1 call uses.
   @emit_pattern ~r/event_type:\s*"([a-z_]+\.[a-z_]+)"/
 
-  # registry.ex names every type by definition; upcaster.ex's moduledoc uses
-  # `"the.type"` as a worked example. Neither is an emitter.
   @non_emitting_files ~w(registry.ex upcaster.ex)
 
   defp emitted_event_types do
@@ -62,19 +59,6 @@ defmodule Stacks.Events.RegistryCompletenessTest do
              """
     end
 
-    # The INVERSE direction (#336): a catalogued type nothing emits. That is how
-    # `enrichment.reviews_scraped` sat for months — Wave 2 deleted its sole
-    # emitter while its handler, payload contract and two dbt models stayed
-    # wired, and no test asked the question in this direction. A type may be
-    # catalogued-but-unemitted only by naming itself in
-    # `Registry.pending_event_types/0` with the story/ruling that keeps it.
-    #
-    # Exemption class this test cannot see on its own: an emitter whose event
-    # type reaches `emit/1` as an argument is invisible to the literal scan
-    # (`Stacks.Discovery.transition_source/3` is the standing example — its
-    # types are deliberately uncatalogued today, see the Registry moduledoc).
-    # If such a type is ever catalogued, name it here with its emitting
-    # function rather than widening `pending`:
     @indirectly_emitted %{}
 
     test "every catalogued type is emitted, indirectly emitted, or explicitly pending" do
@@ -114,8 +98,6 @@ defmodule Stacks.Events.RegistryCompletenessTest do
                inspect(stale)
     end
 
-    # Guards the guard: if the scanner stops finding emit sites the test above
-    # passes vacuously, which is precisely how the original 22-of-54 gap survived.
     test "the emit-site scan finds a realistic number of event types" do
       found = emitted_event_types()
 

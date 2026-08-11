@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
-# Run deployed-only tests against a preview stack.
-# Requires: TEST_TARGET=deployed, DATABASE_URL, VISION_SERVICE_URL, R2_* env vars.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Load local .env for dev secrets when outside CI.
 if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
-# Colours
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
-
-# ── Preflight checks ──────────────────────────────────────────────────────────
 
 echo -e "${CYAN}${BOLD}=== Deployed-only test suite ===${RESET}"
 
@@ -40,8 +34,6 @@ fi
 echo "  DATABASE_URL is set"
 echo "  TEST_TARGET=${TEST_TARGET}"
 
-# ── dbt run + test (optional) ─────────────────────────────────────────────────
-
 DBT_OK=false
 
 if command -v dbt &>/dev/null; then
@@ -63,8 +55,6 @@ else
     echo -e "\n${CYAN}dbt not found on PATH — skipping dbt run/test${RESET}"
 fi
 
-# ── Elixir deployed-only tests ────────────────────────────────────────────────
-
 echo -e "\n${CYAN}${BOLD}--- mix test --only deployed_only ---${RESET}"
 
 cd "$REPO_ROOT/apps/core"
@@ -75,8 +65,6 @@ else
     echo -e "\n${RED}${BOLD}FAIL${RESET} Deployed-only Elixir tests"
     exit 1
 fi
-
-# ── Summary ────────────────────────────────────────────────────────────────────
 
 echo -e "\n${CYAN}${BOLD}=== Summary ===${RESET}"
 echo "  dbt materialised: ${DBT_OK}"

@@ -59,9 +59,6 @@ defmodule Stacks.Discovery.SearxngClient do
         [{"Accept", "application/json"}]
       )
 
-    # request_timeout bounds the WHOLE response (receive_timeout is per-chunk
-    # and defaults the total to :infinity — #381d); result JSON is small, so
-    # 20s total over the 15s idle bound is generous.
     case Finch.request(req, Stacks.Finch, receive_timeout: 15_000, request_timeout: 20_000) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         parse_results(body)
@@ -72,8 +69,6 @@ defmodule Stacks.Discovery.SearxngClient do
         {:error, {:unexpected_status, status}}
 
       {:ok, %Finch.Response{status: status, body: body}} ->
-        # 4xx other than server errors — don't melt; likely a
-        # misconfigured query, not a service-health signal.
         Logger.warning("SearxngClient: unexpected status #{status}: #{body}")
         {:error, {:unexpected_status, status}}
 

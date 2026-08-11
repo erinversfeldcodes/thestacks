@@ -34,8 +34,6 @@ defmodule Core.Repo.Migrations.AddUserIdFkToUploadedImages do
   use Ecto.Migration
 
   def up do
-    # Delete orphan rows whose user_id references no live op.users row. Leaked
-    # residue for an erasure-linkage column — deleting is correct (see moduledoc).
     execute("""
     DELETE FROM op.uploaded_images i
     WHERE i.user_id IS NOT NULL

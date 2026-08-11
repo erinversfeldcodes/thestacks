@@ -52,9 +52,6 @@ defmodule Stacks.FactoryHonestyTest do
         Books.book_edition_changeset(%BookEdition{}, %{
           "isbn" => edition.isbn,
           "book_id" => insert(:book).id,
-          # Provenance is required on every edition (#335 D1); the factory sets
-          # it, so pass the factory's value rather than a literal — the point of
-          # this probe is that what the factory builds is what production takes.
           "verification_source" => edition.verification_source
         })
 
@@ -107,10 +104,6 @@ defmodule Stacks.FactoryHonestyTest do
     end
   end
 
-  # Two columns describing one relationship must be built from one value, and
-  # must be INSERTED once. Ecto has no identity map, so naming the same unsaved
-  # struct on two association paths silently created two rows with two ids —
-  # the desync each factory's comment exists to prevent.
   describe "one relationship, one row" do
     test "a price snapshot's book is its edition's book, and only one work exists" do
       before = Repo.aggregate(Stacks.Books.Book, :count)

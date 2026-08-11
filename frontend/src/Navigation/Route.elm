@@ -80,9 +80,6 @@ parser =
         , Parser.map SettingsPassword (s "settings" </> s "password")
         , Parser.map SettingsNotifications (s "settings" </> s "notifications")
         , -- Consent folded into Privacy (#318 TR-4): the legacy path resolves
-          -- to the Privacy page so an in-app hit never 404s. A full-page load /
-          -- bookmark is 302-redirected server-side to /settings/privacy before
-          -- the SPA even boots (CoreWeb.Router + PageController.redirect_consent).
           Parser.map SettingsPrivacy (s "settings" </> s "consent")
         , Parser.map SettingsAuditLog (s "settings" </> s "audit-log")
         , Parser.map Insights (s "me" </> s "insights")

@@ -16,8 +16,6 @@ defmodule Stacks.Social do
   alias Stacks.Shelving.{Bookshelf, Placement}
   alias Stacks.Social.{Group, GroupInvitation, GroupMember, UserBlock, VisibilityGrant}
 
-  # ── Changeset functions (moved from schema modules) ──
-
   @group_required_fields [:owner_id, :name, :type]
   @group_optional_fields [:visibility]
   @group_valid_types ~w(close_friends broadcast subscription)
@@ -108,9 +106,6 @@ defmodule Stacks.Social do
         {:ok, block}
 
       {:error, changeset} ->
-        # Tag the counter by the ACTUAL failure. A uniqueness violation is the
-        # expected duplicate/already-blocked case; anything else (e.g. a missing
-        # required id) must not be mislabeled as :already_blocked.
         :telemetry.execute(
           [:stacks, :social, :block_error],
           %{count: 1},
@@ -121,9 +116,6 @@ defmodule Stacks.Social do
     end
   end
 
-  # Classifies a block-insert changeset error for the block_error counter.
-  # The (blocker_id, blocked_id) unique_constraint is the only DB constraint, so
-  # a unique violation is :already_blocked; any other changeset error is :invalid.
   @spec block_error_reason(Ecto.Changeset.t()) :: :already_blocked | :invalid
   defp block_error_reason(%Ecto.Changeset{errors: errors}) do
     unique? =
@@ -240,9 +232,6 @@ defmodule Stacks.Social do
     )
   end
 
-  # ── Group CRUD ──
-
-  # Dialyzer false positive: Ecto.Multi callback form confuses opaque MapSet tracking.
   @dialyzer {:no_opaque, create_group: 2}
   @doc """
   Creates a group and inserts the owner as the first member.
@@ -338,8 +327,6 @@ defmodule Stacks.Social do
     end
   end
 
-  # ── Invitation Flow ──
-
   @doc """
   Invites a user to a group by email or display_name.
   Emits `group.invitation_sent` event.
@@ -380,7 +367,6 @@ defmodule Stacks.Social do
     end
   end
 
-  # Dialyzer false positive: Ecto.Multi callback form confuses opaque MapSet tracking.
   @dialyzer {:no_opaque, accept_invitation: 2}
   @doc """
   Accepts a pending invitation. Atomically creates a GroupMember and updates invitation status.
@@ -452,8 +438,6 @@ defmodule Stacks.Social do
         {:error, :not_found}
     end
   end
-
-  # ── Member Management ──
 
   @doc "Removes caller from group. Owner cannot leave."
   def leave_group(group_id, caller_id) do
@@ -544,8 +528,6 @@ defmodule Stacks.Social do
         end
     end
   end
-
-  # ── Visibility Grants ──
 
   @doc """
   Grants visibility to a user for a group-visibility bookshelf.
@@ -650,8 +632,6 @@ defmodule Stacks.Social do
       )
     )
   end
-
-  # ── Group Content Feed ──
 
   @doc """
   Returns a reverse-chronological feed of activity from group members.
@@ -770,8 +750,6 @@ defmodule Stacks.Social do
     Repo.all(base)
   end
 
-  # ── Private Helpers ──
-
   @doc "Returns true if user_id is a member of group_id."
   def group_member?(group_id, user_id) do
     Repo.exists?(from(m in GroupMember, where: m.group_id == ^group_id and m.user_id == ^user_id))
@@ -784,7 +762,6 @@ defmodule Stacks.Social do
   end
 
   defp resolve_invitee(identifier) do
-    # Prioritise exact email match; fall back to display_name.
     user =
       Repo.one(from(u in User, where: u.email == ^identifier, limit: 1)) ||
         Repo.one(from(u in User, where: u.display_name == ^identifier, limit: 1))

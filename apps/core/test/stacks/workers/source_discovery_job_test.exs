@@ -83,7 +83,6 @@ defmodule Stacks.Workers.SourceDiscoveryJobTest do
                  "query" => "bookshops"
                })
 
-      # Only the new source should have ScoreSourceJob enqueued
       new_source = Discovery.get_source_by_url("https://new-source.com")
       assert new_source != nil
       assert new_source.status == "pending_review"

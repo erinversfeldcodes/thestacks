@@ -26,7 +26,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     test "enriches a placeholder book with OL metadata" do
       isbn = "9780743273565"
 
-      # Seed a placeholder book row the way Moderation does on the fast path.
       {:ok, book} =
         Books.create(%{
           "isbn" => isbn,
@@ -34,7 +33,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
           "visibility_tier" => "public"
         })
 
-      # Prime the mock so the resolver returns real metadata.
       MockHttpClient.put_response(
         "openlibrary.org/api/books",
         {:ok,
@@ -57,11 +55,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     end
 
     test "links the resolver author to the book via author_id" do
-      # Regression: previously `update_book` only cast title/description,
-      # so an OL response with an authors list left `op.books.author_id`
-      # null. The deployed preview showed
-      # `curl /api/books/isbn/9780156001311` returning `"author": null`
-      # for "The Name of the Rose" despite OL carrying Umberto Eco.
       isbn = "9780156001311"
 
       {:ok, book} =
@@ -92,14 +85,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     end
 
     test "enrichment stops the edition claiming nothing ever verified it (#344)" do
-      # `verification_source` is a CURRENT state — "no external source has
-      # confirmed this ISBN YET" — not a record of how the ISBN first arrived.
-      # Left unwritten here it was permanent: a book that entered on the barcode
-      # fast path and was identified by Open Library seconds later went on saying
-      # for ever that nobody had verified it. That makes the column useless for
-      # the one question it exists to answer, and since #344 renders a
-      # provisional book distinguishably off exactly this value, it would show a
-      # fully identified book as unidentified.
       isbn = "9780679783268"
 
       {:ok, book} =
@@ -139,13 +124,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     end
 
     test "enrichment stores the cross-reference id its provenance claim is read off (#346)" do
-      # The other half of #346. The fast path resolves no metadata, so
-      # `Moderation.build_book_attrs/4` has no identifier to hand the create —
-      # THIS job is the OL/GB round-trip for those rows. It wrote the
-      # `verification_source` claim above while dropping the two ids that claim
-      # is derived from, so a fast-path edition ended up saying "open_library"
-      # with `open_library_id` NULL: the claim and its evidence stored apart,
-      # and only the claim ever asserted.
       isbn = "9780141439518"
 
       {:ok, book} =
@@ -185,7 +163,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     end
 
     test "no-ops when book row for the ISBN doesn't exist" do
-      # No book seeded — worker should log + succeed, not crash.
       assert :ok = perform_job(EnrichBookJob, %{"isbn" => "9780000000000"})
     end
 
@@ -199,9 +176,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
           "visibility_tier" => "public"
         })
 
-      # Worker should short-circuit without calling the resolver. No
-      # mock response registered — if it DID hit the resolver, the
-      # result would be :not_found which isn't an error.
       assert :ok = perform_job(EnrichBookJob, %{"isbn" => isbn})
     end
   end
@@ -236,8 +210,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     end
 
     test "no-ops when book_id has no associated edition" do
-      # Book without edition — shouldn't happen in production but tests
-      # resilience against legacy args.
       assert :ok = perform_job(EnrichBookJob, %{"book_id" => Ecto.UUID.generate()})
     end
   end

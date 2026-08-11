@@ -75,22 +75,12 @@ suite =
         , describe "Consent — a saved choice can be changed again (#363)"
             [ test "toggling analytics after a save clears the 'Saved!' state" <|
                 \_ ->
-                    -- ⛔ THE REGRESSION. `ToggleAnalytics` did not touch
-                    -- `saving`, and nothing else on this page could return it to
-                    -- `NotAsked`. So after one successful save the button read
-                    -- "Saved!" for the rest of the page's life — and, in the
-                    -- shipped version, the "Saved!" branch had no `onClick`.
-                    -- A reader who granted analytics consent and then changed
-                    -- their mind could not revoke it without reloading, and the
-                    -- button claimed their unsent choice was already saved.
                     consentAfterSave
                         |> toggleAnalytics
                         |> .saving
                         |> Expect.equal NotAsked
             , test "positive control — the save really did reach Success first" <|
                 \_ ->
-                    -- Without this, the test above would also pass against a
-                    -- page whose save never succeeds.
                     consentAfterSave.saving |> Expect.equal (Success ())
             , test "the toggle still flips the value it is there to flip" <|
                 \_ ->

@@ -83,21 +83,13 @@ suite =
         ]
 
 
-
--- HARNESS
-
-
 {-| The shell as far as a login is concerned: the login card, plus the
 observable consequences of the effects a completed login fires.
 -}
 type alias ShellModel =
     { page : Login.Model
     , authState : Main.AuthState
-
-    -- What localStorage holds. `Nothing` is the bug: a 200 that was thrown away.
     , storedToken : Maybe String
-
-    -- Effects in the order they were realised.
     , effectLog : List Main.LoginEffect
     }
 
@@ -201,10 +193,6 @@ signIn =
             (simulateAuthResponse "jwt-token" "user-1" "reader@stacks.dev" "A Reader")
 
 
-
--- 1. PERSIST FIRST
-
-
 persistFirstNoAnimationSignal : Test
 persistFirstNoAnimationSignal =
     test "persist_first_no_animation_signal: the token is stored with no animation message ever delivered" <|
@@ -266,10 +254,6 @@ arrivalIsSignedInImmediately =
                             |> Maybe.map .token
                             |> Expect.equal (Just "jwt-token")
                     )
-
-
-
--- 2. completeLogin
 
 
 fakeResponse : Main.Auth -> { token : String, userId : String, email : String, displayName : String, handle : String, role : String, consentAnalytics : Bool, consentWritingAssistant : Bool }
@@ -334,10 +318,6 @@ completeLoginStartsArriving =
                 |> Expect.equal (Main.Arriving readerAuth)
 
 
-
--- 3. AuthState
-
-
 arrivingIsIndistinguishableFromAuthenticated : Test
 arrivingIsIndistinguishableFromAuthenticated =
     test "auth_state_arriving_is_signed_in: an unfinished animation cannot make a reader look signed out" <|
@@ -366,10 +346,6 @@ settleArrivalCannotSignOut =
     test "settle_cannot_sign_out: a stray settle on a signed-out app is a no-op" <|
         \() ->
             Main.settleArrival Main.Anonymous |> Expect.equal Main.Anonymous
-
-
-
--- 4. redirectAfterLogin
 
 
 bouncedRouteIsCaptured : Test
@@ -430,10 +406,6 @@ captureMatchesTheBounceForEveryRoute =
                         routes
             in
             disagreeing |> Expect.equalLists []
-
-
-
--- HELPERS
 
 
 indexOf : a -> List a -> Maybe Int

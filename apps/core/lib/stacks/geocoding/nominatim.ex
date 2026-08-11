@@ -37,7 +37,6 @@ defmodule Stacks.Geocoding.Nominatim do
 
   @fuse :nominatim_fuse
 
-  # Policy requirement: identify the application and give an operator a way to reach us.
   @user_agent "TheStacks/0.1 (+https://readinginthestacks.com; books@readinginthestacks.com)"
 
   @impl true
@@ -54,27 +53,19 @@ defmodule Stacks.Geocoding.Nominatim do
       "#{base_url()}/search?" <>
         URI.encode_query(%{"q" => query, "format" => "json", "limit" => "1"})
 
-    # request_timeout bounds the WHOLE response (receive_timeout is
-    # per-chunk — #381d); a limit=1 geocode result is tiny.
     Finch.build(:get, url, [{"user-agent", @user_agent}, {"accept", "application/json"}])
     |> Finch.request(Stacks.Finch, receive_timeout: 10_000, request_timeout: 15_000)
     |> handle(query)
   end
 
   @doc false
-  # Public so the response handling — which is where all the logic is — can be tested
-  # without a network or a stub HTTP server: string-to-float coordinates, an empty list
-  # meaning "no match", and a 429 melting the fuse rather than being retried. The request
-  # half is a single Finch call with no branching, so mocking it would test Finch.
   def handle({:ok, %Finch.Response{status: 200, body: body}}, query) do
     case Jason.decode(body) do
-      # Nominatim returns coordinates as *strings*, and an empty list for no match.
       {:ok, [%{"lat" => lat, "lon" => lon} | _]} ->
         with {latitude, _} <- Float.parse(lat),
              {longitude, _} <- Float.parse(lon) do
           {:ok, %{latitude: latitude, longitude: longitude}}
         else
-          # A 200 whose coordinates do not parse is a contract change, not a miss.
           _ ->
             Logger.warning("Nominatim: unparseable coordinates for #{inspect(query)}")
             {:error, :unexpected_response}
@@ -90,8 +81,6 @@ defmodule Stacks.Geocoding.Nominatim do
   end
 
   def handle({:ok, %Finch.Response{status: 429}}, query) do
-    # Melt deliberately. Being asked to slow down and not doing so is how the public
-    # instance blocks an IP, so the breaker turns "back off" into the default.
     Stacks.CircuitBreakers.melt(@fuse)
     Logger.warning("Nominatim: rate limited on #{inspect(query)} — backing off via the fuse")
     {:error, :rate_limited}

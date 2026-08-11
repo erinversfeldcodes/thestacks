@@ -44,10 +44,6 @@ defmodule Stacks.Books.MockHttpClient do
       {_, response} ->
         response
 
-      # Unmatched cover fetches fail closed rather than dialling out (#381a), so
-      # `download_cover/1` falls back to the source URL deterministically and no
-      # test ever touches the network. Register a `{:ok, <<bytes>>}` response to
-      # exercise the store-in-R2 path.
       nil ->
         {:error, :transport_error}
     end
@@ -77,12 +73,6 @@ defmodule Stacks.Books.MockHttpClient do
     Process.delete(__MODULE__)
   end
 
-  # Walk the `$callers` chain so responses registered in the test process
-  # are visible to Tasks spawned from it (e.g. ISBNResolver.race_resolve/1
-  # spawns two parallel Task.async'd lookups). Elixir automatically puts
-  # the caller hierarchy in `$callers` when a Task is started, so we can
-  # check each ancestor's dictionary. Local dict wins; fall through to
-  # ancestors only on miss.
   defp lookup_responses do
     case Process.get(__MODULE__, :undefined) do
       :undefined -> find_in_callers(Process.get(:"$callers", []))

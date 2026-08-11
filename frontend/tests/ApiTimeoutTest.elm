@@ -68,11 +68,6 @@ timeoutValues =
                     |> Expect.equal (Just 15000)
         , test "upload_timeout_is_longer_than_standard: a file body's clock measures bytes moving, not a server thinking" <|
             \() ->
-                -- Asserted as a RELATIONSHIP, not just as `Just 120000`. The
-                -- reason the upload bound is different is that it must not
-                -- cancel a slow-but-healthy upload — so the property to protect
-                -- is the ordering, which a later tuning of either number must
-                -- not invert.
                 case ( Api.uploadTimeout, Api.standardTimeout ) of
                     ( Just upload, Just standard ) ->
                         upload
@@ -90,8 +85,6 @@ timeoutIsVisibleToTheReader =
         [ test "timeout_leaves_the_loading_state: the shelf stops claiming a request is in flight" <|
             \() ->
                 ProgramTest.start () (libraryProgram (Just "test-token"))
-                    -- Control: it IS loading first, so the change below is a
-                    -- change and not the initial state.
                     |> ProgramTest.ensureViewHas [ Selector.class "bookshelf--loading" ]
                     |> ProgramTest.simulateHttpResponse "GET"
                         "/api/bookshelves/library"
@@ -105,20 +98,11 @@ timeoutIsVisibleToTheReader =
                         Test.Http.timeout
                     |> ProgramTest.ensureViewHas
                         [ Selector.text "Your library is taking too long to arrive. The library may be busy — please try again." ]
-                    -- The two sentences the page must NOT say here. Both are
-                    -- shown to be sayable by other tests in this file and in
-                    -- `Page.BookshelfProgramTest`, so neither absence is vacuous.
                     |> ProgramTest.ensureViewHasNot [ Selector.text "Could not load your library. Please try again." ]
                     |> ProgramTest.expectViewHasNot
                         [ Selector.text "Your library is waiting. Move a book here when you've finished reading it." ]
         , test "network_error_points_at_the_connection: a different failure gets different words" <|
             \() ->
-                -- Asserted as the EXACT text of the one error element rather than
-                -- as "…and not the timeout sentence". There is a single error
-                -- node, so exactness already excludes every other message — and
-                -- a negative prose assertion here would be checking a string
-                -- that `Page.Bookshelf` builds by concatenation and therefore
-                -- never contains literally (scripts/check-prose-assertions.sh).
                 ProgramTest.start () (libraryProgram (Just "test-token"))
                     |> ProgramTest.simulateHttpResponse "GET"
                         "/api/bookshelves/library"
@@ -126,18 +110,10 @@ timeoutIsVisibleToTheReader =
                     |> ProgramTest.expectView
                         (Query.find [ Selector.attribute (Attr.attribute "data-testid" "shelf-error") ]
                             >> Query.has
-                                -- #368: no "try again" — the app reloads the
-                                -- shelf itself on reconnect, and the copy
-                                -- promises exactly that instead of naming an
-                                -- affordance that does not exist.
                                 [ Selector.exactText "The library is unreachable. Your library will reload by itself as soon as the connection returns." ]
                         )
         , test "server_error_stays_generic: the positive control proving the two negatives above are real" <|
             \() ->
-                -- A reader cannot act on a 500, so it keeps the plain copy —
-                -- and its presence here is what shows the `ensureViewHasNot`
-                -- in `timeout_says_the_answer_never_came` is testing the
-                -- branch and not a string that never renders anywhere.
                 ProgramTest.start () (libraryProgram (Just "test-token"))
                     |> ProgramTest.simulateHttpResponse "GET"
                         "/api/bookshelves/library"

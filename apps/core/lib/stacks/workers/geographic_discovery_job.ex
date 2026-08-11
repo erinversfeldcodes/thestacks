@@ -54,7 +54,6 @@ defmodule Stacks.Workers.GeographicDiscoveryJob do
     ]
   end
 
-  # Map common country codes to names for richer search queries.
   defp country_name("ZA"), do: "South Africa"
   defp country_name("GB"), do: "United Kingdom"
   defp country_name("US"), do: "United States"

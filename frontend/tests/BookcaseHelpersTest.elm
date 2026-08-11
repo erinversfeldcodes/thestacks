@@ -210,7 +210,6 @@ productionWidthDrivenThroughThePage =
                         >> Query.findAll [ Selector.class "book-button" ]
                         >> Query.count (Expect.equal 1)
                     )
-                -- Two book rows, padded out to the four-row minimum.
                 |> ProgramTest.expectView
                     (Query.findAll [ Selector.class "shelf-row" ]
                         >> Query.count (Expect.equal 4)
@@ -241,10 +240,6 @@ noPageCountFallsBackToMinimumWidth =
                     |> Query.find [ Selector.class "book" ]
                     |> Query.has [ Selector.style "width" "35px" ]
         ]
-
-
-
--- FIXTURES
 
 
 {-| A placement whose book has neither editions nor a primary edition, so

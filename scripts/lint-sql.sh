@@ -13,8 +13,6 @@ source "$REPO_ROOT/scripts/lib/python-tools.sh"
 ensure_python_tools_path
 require_sqlfluff
 
-# Default to jinja templater (offline-friendly, no dbt profile/DB required).
-# CI sets SQLFLUFF_TEMPLATER=dbt for full macro resolution against a live database.
 TEMPLATER="${SQLFLUFF_TEMPLATER:-jinja}"
 
 (cd dbt && sqlfluff lint models/ --templater "$TEMPLATER")

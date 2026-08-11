@@ -37,7 +37,6 @@ async function publishPublicPost(
 ): Promise<string> {
   const auth = { Authorization: `Bearer ${token}` };
 
-  // The ceiling rule: profile must be public before a post can be.
   const vis = await request.put("/api/settings/profile_visibility", {
     headers: auth,
     data: { profile_visibility: "public" },
@@ -72,19 +71,13 @@ test.describe("Syndication (POSSE)", () => {
     const panel = page.getByTestId("syndication-panel");
     await expect(panel).toBeVisible();
 
-    // The canonical address is the permanent UUID form on this origin.
     await expect(page.getByTestId("syndication-canonical-url")).toContainText(`/blog/${postId}`);
     await expect(page.getByTestId("syndication-feed-url")).toContainText("/api/feeds/u/");
     await expect(page.getByTestId("syndication-export-markdown")).toBeVisible();
 
-    // The tickbox reflects the SERVER's syndicated flag (true by default).
-    // Pinned in the browser because this exact surface shipped unchecked while
-    // the post WAS in the feed — the flag was dropped by the wire serializer's
-    // take-list, invisible to every layer-level test (2026-08-10 live drive).
     const toggle = page.getByTestId("syndication-include-toggle");
     await expect(toggle).toBeChecked();
 
-    // Unticking round-trips: the server accepts it AND the feed loses the post.
     await toggle.click();
     await expect(toggle).not.toBeChecked();
 
@@ -114,7 +107,6 @@ test.describe("Syndication (POSSE)", () => {
     await landOn(page, session, `/blog/${postId}`);
     await page.getByTestId("syndication-export-markdown").click();
 
-    // The clipboard actually holds the canonical-tagged copy.
     await expect(page.getByTestId("syndication-panel")).toContainText(
       "Copied — paste it into Substack",
     );
@@ -122,7 +114,6 @@ test.describe("Syndication (POSSE)", () => {
     expect(clipboard).toContain("Originally published on [The Stacks]");
     expect(clipboard).toContain(`/blog/${postId}`);
 
-    // The record exists, so "Also published at" is offered — close the loop.
     const input = page.getByTestId("syndication-also-at-input");
     await expect(input).toBeVisible();
     await input.fill("https://erin.substack.com/p/on-marginalia");
@@ -163,7 +154,6 @@ test.describe("Syndication (POSSE)", () => {
 
     await publishPublicPost(request, session.token, "For the feed");
 
-    // A platform-visible post that must NEVER appear.
     const auth = { Authorization: `Bearer ${session.token}` };
     const platformPost = await request.post("/api/blog/posts", {
       headers: auth,
@@ -175,7 +165,6 @@ test.describe("Syndication (POSSE)", () => {
     const me = await request.get("/api/auth/me", { headers: auth });
     const handle = (await me.json()).user.handle as string;
 
-    // Anonymous fetch: the normal consumer (Substack's importer).
     const anon = await request.get(`/api/feeds/u/${handle}/blog`);
     expect(anon.status()).toBe(200);
     expect(anon.headers()["content-type"]).toContain("application/atom+xml");
@@ -183,7 +172,6 @@ test.describe("Syndication (POSSE)", () => {
     expect(anonBody).toContain("For the feed");
     expect(anonBody).not.toContain("Platform readers only");
 
-    // ⛔ The security property: the OWNER's own token must not widen the feed.
     const authed = await request.get(`/api/feeds/u/${handle}/blog`, { headers: auth });
     const authedBody = await authed.text();
     expect(authedBody).toContain("For the feed");

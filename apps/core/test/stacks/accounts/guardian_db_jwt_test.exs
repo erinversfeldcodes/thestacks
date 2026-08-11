@@ -32,8 +32,6 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
   alias Core.Repo
   alias Stacks.Accounts.Guardian
 
-  # Reads a single persisted guardian_tokens row schemalessly, projecting the
-  # bookkeeping columns plus the sensitive jwt so we can assert on each.
   defp read_token_row(jti) do
     Repo.one(
       from(t in "guardian_tokens",
@@ -61,12 +59,9 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
 
       assert row, "expected a persisted op.guardian_tokens row for jti #{jti}"
 
-      # RED today: the app writes jwt = token, so this is a non-nil signed token.
       assert row.jwt == nil,
              "expected persisted jwt to be nil, got #{inspect(row.jwt)} — a replayable bearer token is stored in op.guardian_tokens"
 
-      # Prove we nulled ONLY the jwt: the columns verify/revoke/sweep actually use
-      # must still be populated, or we'd have broken tracking instead of hardening it.
       assert row.jti == jti
       assert row.aud == claims["aud"]
       assert row.sub == to_string(user.id)
@@ -88,13 +83,8 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
               jti: jti,
               aud: "access",
               typ: "access",
-              # A REAL user: op.guardian_tokens now carries an owner FK to
-              # op.users (#335 D3), so a fabricated sub is a row production
-              # cannot produce and the database no longer accepts.
               sub: insert(:user).id,
               exp: future_exp,
-              # Even the initial insert value must not survive the trigger, but the
-              # UPDATE below is the specific behaviour under test here.
               jwt: "raw.token.value",
               inserted_at: now,
               updated_at: now
@@ -113,7 +103,6 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
 
       assert row, "expected the raw guardian_tokens row to still exist after UPDATE"
 
-      # RED today: no trigger, so the UPDATE value "another.raw.token" persists.
       assert row.jwt == nil,
              "expected jwt to be nil after UPDATE, got #{inspect(row.jwt)} — the trigger does not cover UPDATE"
     end
@@ -137,15 +126,9 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
 
       assert {:ok, _claims} = Guardian.revoke(token)
 
-      # Row is gone …
       refute read_token_row(jti), "row should be deleted after revoke"
 
-      # … and because the token is no longer tracked, verification fails.
       assert {:error, _reason} = Guardian.decode_and_verify(token)
     end
-
-    # Expired-token sweeping is already covered by
-    # apps/core/test/stacks/workers/guardian_token_sweep_job_test.exs — not
-    # duplicated here.
   end
 end

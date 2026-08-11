@@ -115,17 +115,6 @@ theWindowIsAFewSeconds =
                     ]
 
 
-
--- THE WIRE (Main)
---
--- ⚠️ The chain BookDetail → Main → Page.Bookshelf is where "built but not
--- wired" hides: both ends can be perfect and the offer still never arrive.
--- `Main.applyPendingUndo` is the joint, and it is pure and key-free (Main.Model
--- embeds an unconstructable Nav.Key — the seam SessionExpiryTest documents), so
--- it can be asserted directly. The producer end is pinned by
--- `BookDetailProgramTest`'s `remove_records_the_undoable_removal`.
-
-
 {-| A bookshelf page built during the `UrlChanged` a removal provokes comes out
 holding the offer.
 -}
@@ -171,17 +160,9 @@ mainDropsTheOfferOnANonBookshelfPage : Test
 mainDropsTheOfferOnANonBookshelfPage =
     test "main_drops_the_offer_off_a_non_bookshelf_page: the documented Reading-Pile gap is a no-op, not a crash" <|
         \() ->
-            -- Removing from the Reading Pile returns the reader to
-            -- `PageReadingPile`, a different module with its own model. The
-            -- removal still succeeded; only the offer is lost. Asserted so the
-            -- limitation is a decision on record rather than a surprise.
             Main.applyPendingUndo (Just removal) ( Main.PageHome Home.Landing, Cmd.none )
                 |> Tuple.first
                 |> Expect.equal (Main.PageHome Home.Landing)
-
-
-
--- THE OFFER
 
 
 toastOffersUndoNamingTheBook : Test
@@ -192,8 +173,6 @@ toastOffersUndoNamingTheBook =
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "undo-toast") ]
                 |> ProgramTest.expectViewHas
-                    -- Naming the book is what lets a reader who mis-clicked check
-                    -- that the offer is about the book they meant.
                     [ Selector.text "Removed “The Dispossessed”." ]
 
 
@@ -203,17 +182,10 @@ undoPostsToRestoreTheSameRow =
         \() ->
             afterRemoval
                 |> ProgramTest.clickButton "Undo"
-                -- The URL carries `placement-42` — the row that was soft-deleted.
-                -- A page that "undid" by re-placing the book would POST to
-                -- /api/bookshelves/library/placements instead, and this goes red.
                 |> ProgramTest.ensureHttpRequestWasMade "POST" restoreEndpoint
                 |> ProgramTest.expectHttpRequests "POST"
                     "/api/bookshelves/library/placements"
                     (\requests -> Expect.equal (List.length requests) 0)
-
-
-
--- THE READ-ONLY GUARD (#332)
 
 
 {-| ⚠️ **POSITIVE CONTROL for the two SECURITY tests below.**
@@ -264,9 +236,6 @@ readOnlyUndoIsInert =
                 ( seeded, _ ) =
                     Bookshelf.withPendingUndo (Just removal) ( initial, Cmd.none )
 
-                -- Pre-condition: the seeding really did put an offer in the
-                -- model, so the assertions below are about the guard and not
-                -- about an empty state.
                 ( loaded, _, _ ) =
                     Bookshelf.update
                         (Bookshelf.ShelvesLoaded
@@ -328,18 +297,9 @@ readOnlyShowsNoToast : Test
 readOnlyShowsNoToast =
     test "read_only_no_undo_control_SECURITY: the toast is absent, not merely disabled" <|
         \() ->
-            -- The second line of defence (see `viewUndoToast`): a control a
-            -- viewer cannot use should not be drawn. Anchored on the testId
-            -- rather than the word "Undo", so a copy edit cannot make this pass
-            -- by matching nothing — the mistake `no_mutation_control_SECURITY`
-            -- was repointed to avoid.
             readOnlyAfterRemoval
                 |> ProgramTest.expectViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "undo-toast") ]
-
-
-
--- THE TIMER
 
 
 toastDisappearsWhenExpired : Test
@@ -347,9 +307,6 @@ toastDisappearsWhenExpired =
     test "toast_expires: the offer is withdrawn when its timer fires" <|
         \() ->
             afterRemoval
-                -- ⚠️ Presence FIRST. Without this the assertion below is
-                -- satisfied by a toast that never rendered — a wait-for-absence
-                -- that fails open, which is a documented defect class here.
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "undo-toast") ]
                 |> ProgramTest.update Bookshelf.ToastExpired
@@ -371,10 +328,6 @@ undoAfterExpiryIssuesNothing =
                     (\requests -> Expect.equal (List.length requests) 0)
 
 
-
--- THE OUTCOME
-
-
 successHidesToastAndRefetches : Test
 successHidesToastAndRefetches =
     test "undo_success_refetches_the_shelf: the toast goes and the bookshelf is re-fetched" <|
@@ -386,12 +339,6 @@ successHidesToastAndRefetches =
                 |> ProgramTest.update (Bookshelf.UndoCompleted (Ok ()))
                 |> ProgramTest.ensureViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "undo-toast") ]
-                -- One OUTSTANDING GET — the refetch. The initial load was
-                -- resolved by `afterRemoval`, so the log was empty before the
-                -- undo; this request is therefore the restore's own, not the
-                -- initial load counted twice. The page does not paint the spine
-                -- back locally: the server decides which shelf row it lands on
-                -- (see `reloadShelves`).
                 |> ProgramTest.ensureHttpRequestWasMade "GET" libraryEndpoint
                 |> ProgramTest.expectHttpRequests "GET"
                     libraryEndpoint
@@ -402,10 +349,6 @@ conflictSaysTheBookIsAlreadyBack : Test
 conflictSaysTheBookIsAlreadyBack =
     test "undo_conflict_copy: a 409 says the book is already back, not that something went wrong" <|
         \() ->
-            -- The server refuses rather than reconciling two rows
-            -- (`Shelving.restore_placement/2`). From the reader's side that is
-            -- not a failure: they re-added the book themselves, so the shelf
-            -- already looks the way Undo would have made it look.
             afterRemoval
                 |> ProgramTest.clickButton "Undo"
                 |> ProgramTest.update (Bookshelf.UndoCompleted (Err (Http.BadStatus 409)))
@@ -419,9 +362,6 @@ failureToastSurvivesItsTimer : Test
 failureToastSurvivesItsTimer =
     test "undo_failure_is_not_swept_away: the expiry timer does not clear a failure the reader must read" <|
         \() ->
-            -- `Process.sleep` cannot be cancelled, so `ToastExpired` arrives
-            -- regardless. A failure that vanished on that message would leave
-            -- the reader believing the undo worked.
             afterRemoval
                 |> ProgramTest.clickButton "Undo"
                 |> ProgramTest.update (Bookshelf.UndoCompleted (Err Http.NetworkError))
@@ -457,8 +397,6 @@ plainVisitOffersNoUndo =
             in
             Expect.all
                 [ \_ -> Expect.equal Bookshelf.ToastHidden untouched.undoToast
-
-                -- And no timer is started for a toast that does not exist.
                 , \_ -> Expect.equal Cmd.none cmd
                 ]
                 ()

@@ -106,37 +106,8 @@ defmodule Stacks.Books.CandidateScorer do
 
   @subject_hit_cap 3
 
-  # Plausibility floor for `pick_best/3`. Max-wins alone has no notion
-  # of "all the candidates are garbage": a corrupted query can
-  # fuzzy-match pure noise (observed in production: VLM title "The
-  # Tramp's Crystal City" resolved to "The Crystal Ball a Mystery Story
-  # for Girls" at score 1.5) and the caller would still commit to it.
-  #
-  # Floor arithmetic: a bare title-token coincidence on a short title
-  # scores 3.0–3.5 (the overlap coefficient is generous to short
-  # candidate titles — the Crystal City fixtures pin Card/Tarantino/
-  # Etchemendy at 3.5), while garbage fuzzy matches land around 1.5.
-  # 2.5 splits the two populations. The floor is WAIVED when the
-  # candidate has author corroboration (see `author_match?/2`).
-  #
-  # Why not higher? `mix eval.resolver` shows the "Crystal City-CC"
-  # junk record scores exactly 3.0 (subset title overlap + raw_text,
-  # nothing else) — but so does every LEGITIMATE cut-off-title pick
-  # with no author/raw_text corroboration ("Gatsby" → "The Great
-  # Gatsby" is also exactly 3.0). Score alone cannot separate a junk
-  # candidate under a garbage VLM read from a good candidate under a
-  # partial read; raising the floor to 3.25 fixes the junk case but
-  # breaks partial-title resolution. Kept at 2.5.
   @default_floor 2.5
 
-  # Marker tokens for derivative/companion editions. Token-level match
-  # against the normalised candidate TITLE only (not subtitle/subjects —
-  # a legitimate work may carry "Study Aids"-ish subject metadata).
-  #
-  # Plain list, not a MapSet: baking a MapSet into a module attribute
-  # inlines the struct literal at compile time, which dialyzer rejects
-  # as an opaqueness violation (call_without_opaque on
-  # MapSet.disjoint?/2). Membership over a 6-element list is fine.
   @derivative_tokens ~w(study guide summary analysis workbook sparknotes)
 
   @stopwords ~w(the a an of to and in on for)
@@ -252,8 +223,6 @@ defmodule Stacks.Books.CandidateScorer do
     surname_match?(signals[:author], candidate_meta[:author])
   end
 
-  # --- components --------------------------------------------------------
-
   defp weights(opts) do
     Map.merge(@default_weights, Map.new(Keyword.get(opts, :weights, [])))
   end
@@ -278,11 +247,6 @@ defmodule Stacks.Books.CandidateScorer do
     end
   end
 
-  # Substring containment against the joined subjects text so a signal
-  # token like "internment" hits "Crystal City Internment Camp
-  # (Crystal City, Tex.)". Per-distinct-hit weight, capped at
-  # @subject_hit_cap so candidates with sprawling subject lists can't
-  # inflate their score.
   defp subject_score(signal_tokens, subjects_text, weight) do
     if subjects_text == "" do
       0.0
@@ -292,9 +256,6 @@ defmodule Stacks.Books.CandidateScorer do
     end
   end
 
-  # Substring containment (not token equality) so an OCR fragment like
-  # "fdrs" still hits a candidate subtitle containing "FDR's" (whose
-  # normalised form is "fdrs secret ...").
   defp raw_text_score(raw_text, candidate_text, weight) do
     raw_tokens = raw_text_tokens(raw_text)
 
@@ -306,9 +267,6 @@ defmodule Stacks.Books.CandidateScorer do
     end
   end
 
-  # Positive-evidence-only: bonus when the signal author's surname
-  # appears among the candidate's author tokens; no penalty otherwise
-  # (the VLM frequently invents authors).
   defp author_score(signal_author, candidate_author, weight) do
     if surname_match?(signal_author, candidate_author), do: weight, else: 0.0
   end
@@ -328,13 +286,6 @@ defmodule Stacks.Books.CandidateScorer do
     end
   end
 
-  # Negative evidence: the candidate TITLE carries a derivative-edition
-  # marker (study/guide/summary/analysis/workbook/sparknotes) that the
-  # signal title does NOT — a companion product masquerading as the
-  # work. Candidate title only: subtitles/subjects legitimately carry
-  # words like "analysis", and if the user photographed an actual study
-  # guide the marker appears in the signal title and the penalty is
-  # skipped.
   defp derivative_penalty(signal_title_tokens, candidate_title_tokens, weight) do
     candidate_derivative? =
       Enum.any?(@derivative_tokens, &MapSet.member?(candidate_title_tokens, &1))
@@ -344,10 +295,6 @@ defmodule Stacks.Books.CandidateScorer do
     if candidate_derivative? and not signal_derivative?, do: -weight, else: 0.0
   end
 
-  # --- normalisation ------------------------------------------------------
-
-  # Downcase, drop apostrophes (so "FDR's" → "fdrs", "America's" →
-  # "americas"), turn remaining punctuation into spaces, collapse runs.
   defp normalize(nil), do: ""
 
   defp normalize(text) when is_binary(text) do
@@ -367,9 +314,6 @@ defmodule Stacks.Books.CandidateScorer do
     |> MapSet.new()
   end
 
-  # raw_text matches against title+subtitle+subjects: OL search docs
-  # carry no subtitle, so OCR keywords often only corroborate via the
-  # subjects list.
   defp candidate_text(candidate_meta, subjects_text) do
     [normalize(candidate_meta[:title]), normalize(candidate_meta[:subtitle]), subjects_text]
     |> Enum.reject(&(&1 == ""))
@@ -396,16 +340,6 @@ defmodule Stacks.Books.CandidateScorer do
     |> Enum.uniq()
   end
 
-  # Join single-character fragments to the following token so
-  # OCR-fractured words still match: "f drs" → "fdrs". Applied only to
-  # raw_text (titles are not OCR-fractured the same way).
-  #
-  # ORDERING INVARIANT: this must run AFTER `normalize/1` has stripped
-  # apostrophes. Possessives like "TRAMP'S" normalise to the single
-  # token "tramps"; if the apostrophe instead became a space, the
-  # orphan "s" would be glued onto the NEXT word here ("s crystal" →
-  # "scrystal") and corrupt the tokens — the production "scrystal" bug
-  # in the resolver's parallel raw_text normalisation.
   defp collapse_fragments(text) do
     Regex.replace(~r/\b(\w)\s+(?=\w)/u, text, "\\1")
   end

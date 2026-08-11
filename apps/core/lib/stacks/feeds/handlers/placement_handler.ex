@@ -23,18 +23,12 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
   def handle_event(%{event_type: event_type, aggregate_id: aggregate_id, payload: payload})
       when event_type in @placement_events do
     if import_sourced?(event_type, payload) do
-      # A Goodreads import creates hundreds of placements in minutes; one
-      # RegenerateFeedJob per placement is O(n²) feed rebuilds. The import job
-      # enqueues ONE regeneration per touched bookshelf at finalize
-      # (Stacks.Imports.finalize/2), so this handler stands down for those
-      # events rather than duplicating the work n times.
       :ok
     else
       regenerate_for(event_type, aggregate_id, payload)
     end
   end
 
-  # Catch-all clause — ignore unrecognized events
   def handle_event(_event), do: :ok
 
   defp import_sourced?("placement.created", payload) do
@@ -46,7 +40,6 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
   defp regenerate_for(event_type, aggregate_id, payload) do
     bookshelf_name = extract_bookshelf_name(event_type, payload)
 
-    # For moved events, regenerate both source and destination feeds
     bookshelf_names =
       case event_type do
         "placement.moved" ->
@@ -90,12 +83,8 @@ defmodule Stacks.Feeds.Handlers.PlacementHandler do
     Map.get(payload, "to_bookshelf") || Map.get(payload, :to_bookshelf)
   end
 
-  # A removal carries no bookshelf name and needs none: whichever feed the book
-  # was in loses it, and `lookup_user_id/1` plus a full regeneration covers that.
   defp extract_bookshelf_name("placement.removed", _payload), do: nil
 
-  # An undo does need one. The book is going back into a specific bookshelf's
-  # feed, and the payload names it (see PayloadContract).
   defp extract_bookshelf_name("placement.restored", payload) do
     Map.get(payload, "bookshelf") || Map.get(payload, :bookshelf)
   end

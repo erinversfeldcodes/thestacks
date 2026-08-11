@@ -48,10 +48,6 @@ defmodule Stacks.Enrichment.PricePipeline do
     results =
       Enum.map(messages, fn message ->
         case Prices.upsert_snapshot(message.data) do
-          # Carry the snapshot through: it is the only place both the edition and
-          # its derived work id are known, and the event payload needs the work.
-          # Reading `message.data[:book_id]` here used to supply that, but the
-          # message no longer carries a work id by design.
           {:ok, snapshot} -> {:ok, message, snapshot}
           {:error, :unknown_edition} -> {:error, message, "unknown book_edition_id"}
           {:error, changeset} -> {:error, message, inspect(changeset.errors)}
@@ -72,11 +68,6 @@ defmodule Stacks.Enrichment.PricePipeline do
         event_type: "enrichment.prices_scraped",
         aggregate_type: "enrichment",
         aggregate_id: List.first(book_ids),
-        # Deliberately still `book_ids` only. Adding `book_edition_ids` would be
-        # more precise, but `PayloadContract` pins this event at version 1 with
-        # exactly these keys, so widening it needs a version bump plus an Upcaster
-        # clause. The consumers here are dbt refreshes keyed on the work, which
-        # `book_ids` serves — so the bump is a follow-up, not a prerequisite.
         payload: %{
           count: Enum.count(snapshots),
           book_ids: book_ids
@@ -106,9 +97,6 @@ defmodule Stacks.Enrichment.PricePipeline do
   end
 
   defp validate_price_data(data) when is_map(data) do
-    # `book_edition_id` is required and `book_id` is deliberately absent: the
-    # write site derives it from the edition, so accepting one here would let a
-    # producer supply a work that disagrees with the edition it priced.
     with {:ok, book_edition_id} <- fetch_field(data, "book_edition_id"),
          {:ok, store_id} <- fetch_field(data, "store_id"),
          {:ok, price_cents} <- fetch_field(data, "price_cents") do

@@ -214,8 +214,6 @@ defmodule Stacks.DataCorrection do
     end)
   end
 
-  # Nothing to do is the steady state, and it must not open a transaction or
-  # start a vault just to discover that.
   defp apply_plan(correction, scope, [], _opts),
     do: {:ok, outcome(correction, scope, :applied, [])}
 
@@ -231,10 +229,6 @@ defmodule Stacks.DataCorrection do
     end
   end
 
-  # The audit write shares the change's transaction on purpose: a correction
-  # that cannot be recorded is rolled back rather than applied silently. An
-  # unexplained mutation is worse than an unrepaired row — the row is at least
-  # still describable.
   defp apply_and_audit(correction, scope, change, opts) do
     with {:ok, detail} <- applied_detail(correction.apply_change(change)),
          {:ok, _entry} <- audit(correction, scope, change, detail, opts) do
@@ -244,9 +238,6 @@ defmodule Stacks.DataCorrection do
     end
   end
 
-  # A correction that learned nothing by applying says `:ok`; one that minted a
-  # row or counted something says `{:ok, detail}`. Normalising here keeps the
-  # audit write a single shape and leaves every existing correction untouched.
   defp applied_detail(:ok), do: {:ok, %{}}
   defp applied_detail({:ok, detail}) when is_map(detail), do: {:ok, detail}
   defp applied_detail({:error, reason}), do: {:error, reason}
@@ -269,11 +260,6 @@ defmodule Stacks.DataCorrection do
     )
   end
 
-  # `Stacks.Audit` encrypts its metadata through the Cloak vault, which lives in
-  # `Core.Application`'s supervision tree. A correction run from `mix` or from
-  # `bin/core eval` has a started repo but no application tree, and
-  # `Audit.log/3` rescues its own failures — so without this the audit trail
-  # would silently be empty in exactly the situation it exists for.
   defp ensure_vault! do
     case Process.whereis(Stacks.Vault) do
       nil ->

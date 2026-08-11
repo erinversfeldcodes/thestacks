@@ -42,7 +42,6 @@ hash s =
                 shifted =
                     Bitwise.shiftLeftBy 5 acc - acc + Char.toCode c
 
-                -- Simulate JS `| 0` (truncate to signed 32-bit)
                 masked =
                     Bitwise.or shifted 0
             in
@@ -270,8 +269,6 @@ book config =
                 Softened ->
                     ", well-loved"
 
-        -- A book the owner has written about (#287) announces ", with your
-        -- notes" so the bookmark ribbon is not a purely visual signal.
         notesSuffix =
             if config.hasWriting then
                 ", with your notes"
@@ -286,9 +283,6 @@ book config =
             else
                 ""
 
-        -- Suffix order is fixed: pages, wear, notes, hidden — so a screen reader
-        -- hears "…, N pages, well-loved, with your notes, hidden (only visible to
-        -- you)". The exact-label tests in SpineBookTest pin this order.
         ariaLabel =
             "Book: "
                 ++ config.title
@@ -301,13 +295,6 @@ book config =
                 ++ notesSuffix
                 ++ hiddenSuffix
 
-        -- The wrapper's classes: `book`, plus `book--hidden` for an owner-only
-        -- placement and `book--softened` for a well-loved one. All four
-        -- combinations are spelled out as whole `class "…"` literals rather than
-        -- assembled with `++`, because `scripts/check-orphan-classes.sh` matches
-        -- `class "…"` in Elm source and cannot see a composed one (#356) — these
-        -- two modifiers were previously invisible to it, which is precisely how
-        -- `book--hidden` came to have no CSS rule at all.
         wrapperClass =
             case ( config.hidden, config.wearLevel ) of
                 ( True, Softened ) ->
@@ -322,27 +309,6 @@ book config =
                 ( False, Pristine ) ->
                     class "book"
 
-        -- ⛔ An owner-private book must be legible to a SIGHTED reader too.
-        --
-        -- The whole affordance used to be `style "opacity" "0.35"` plus a
-        -- ", hidden (only visible to you)" suffix on the aria-label. So a screen
-        -- reader was told; everyone else got a book that was merely faint, with
-        -- nothing to say the faintness meant anything — indistinguishable from a
-        -- rendering artefact, or from the shelf's own depth shading. And 0.35
-        -- composites the spine's title text 65% of the way toward the shelf
-        -- behind it, which takes the label under the 4.5:1 contrast floor: the
-        -- one book you cannot read is the one whose privacy you might want to
-        -- check.
-        --
-        -- Now: a padlock that is actually visible, a dashed brass outline, and an
-        -- opacity that still reads as "set apart" without erasing the title. The
-        -- treatment moved OUT of an inline style, because an inline style beats
-        -- every rule in the stylesheet and so cannot be reviewed, overridden, or
-        -- seen by `scripts/check-css.sh`.
-        --
-        -- The padlock is `aria-hidden`: the aria-label already says it, and a
-        -- screen reader announcing "lock" after "hidden (only visible to you)"
-        -- is the same fact twice.
         lockEls =
             if config.hidden then
                 [ div [ class "book__lock", attribute "aria-hidden" "true" ] [ text "🔒" ] ]
@@ -350,10 +316,6 @@ book config =
             else
                 []
 
-        -- Additive bookmark ribbon for a book the owner has written about (#287).
-        -- A direct child of the `.book` container (not the overflow-hidden spine
-        -- face) so it can poke above the top edge like a real ribbon; decorative
-        -- only — the ", with your notes" aria suffix carries the meaning.
         ribbonEls =
             if config.hasWriting then
                 [ div [ class "book__ribbon", attribute "aria-hidden" "true" ] [] ]

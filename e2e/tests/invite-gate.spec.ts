@@ -57,18 +57,15 @@ test.describe("Invite gate — the wire (US-14.1.3)", () => {
   }) => {
     const { code } = await mintInvite(request);
 
-    // Redeemable now.
     const check = await request.get(`/api/auth/invite/${code}`);
     expect(check.status(), "fresh code checks valid").toBe(200);
     expect((await check.json()).valid).toBe(true);
 
-    // First redemption succeeds.
     const first = await request.post("/api/auth/register", {
       data: registration(uniqueEmail(), code),
     });
     expect(first.status(), "invited registration").toBe(201);
 
-    // Spent: the check reports exhausted, and a second registration refuses.
     const spent = await request.get(`/api/auth/invite/${code}`);
     expect(spent.status(), "spent code checks exhausted").toBe(409);
 

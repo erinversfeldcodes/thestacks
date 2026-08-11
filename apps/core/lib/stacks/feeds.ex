@@ -155,21 +155,6 @@ defmodule Stacks.Feeds do
   @spec feed_requires_auth?(String.t()) :: boolean()
   def feed_requires_auth?(visibility), do: not Visibility.at_least?(visibility, "public")
 
-  # ── Private helpers ────────────────────────────────────────────────────────
-
-  # Feed eligibility is "shared at least as widely as `platform`", not "is exactly `platform`".
-  #
-  # ⛔ It used to be the latter (`visibility != "platform"`), which refused a feed to a bookshelf
-  # on the **most** shared tier — `public` — while serving one for the *less* shared `platform`.
-  # Exposure and function ran in opposite directions. The `:not_public` atom is what hid it: it
-  # reads as correct at every call site, and both rejection tests only ever covered `owner` and
-  # `group`, so the literally-public case was never exercised.
-  #
-  # `Visibility.at_least?/2` treats an unknown value as most-private, so a typo fails closed.
-  # A `platform` feed needs a signed-in reader; `public` does not. Returns `:not_found` rather than
-  # a 403-ish error on purpose: the ladder says a `platform` resource is *invisible* to a logged-out
-  # visitor, and `GET /api/u/:handle` already 404s that case (#225). Telling an anonymous client
-  # "this exists but you may not have it" would leak the shelf's existence.
   defp authorize_viewer(%{visibility: visibility}, viewer) do
     if feed_requires_auth?(visibility) and is_nil(viewer) do
       {:error, :not_found}
@@ -190,9 +175,6 @@ defmodule Stacks.Feeds do
     end
   end
 
-  # Read-path miss-fill: render, attempt to fill the cache, and serve the fresh
-  # XML regardless of whether the write succeeds. The cache is an optimization,
-  # so a write failure is logged and swallowed rather than surfaced as an error.
   defp render_and_serve(bookshelf) do
     {xml, etag} = render_feed(bookshelf)
 
@@ -217,29 +199,6 @@ defmodule Stacks.Feeds do
     {xml, etag}
   end
 
-  # Books that *arrived* on this bookshelf from another one.
-  #
-  # US-6.1 asks for entries reading "Erin moved The Secret History to Library" **or**
-  # "Erin added Piranesi to the Reading Pile" — two verbs. Every entry used to say
-  # "added", so a move (the more interesting signal, and the one a follower actually
-  # wants) was reported as an acquisition.
-  #
-  # One query for the whole feed rather than one per entry: a shelf can hold hundreds
-  # of books and a feed is regenerated on every placement event.
-  #
-  # Returns a **map** used as a set, not a MapSet and not a list.
-  #
-  # Not a MapSet: under OTP 28 dialyzer reports `call_without_opaque` when a MapSet
-  # built from `Repo.all`'s `any()` result crosses a function boundary — the same issue
-  # behind `book_ids_with_user_writing` (b76fa3f3). MapSet is opaque, so dialyzer cannot
-  # see through it to the term it was built from.
-  #
-  # Not a list either, which was the first fix and the wrong one: a list turns the entry
-  # loop into O(entries × moved), and this runs on **every placement event**, so a shelf
-  # of several hundred mostly-moved books would do six figures of binary comparisons per
-  # regeneration. A plain map is O(log n) per lookup, is not opaque, and needs no
-  # dialyzer accommodation — the right structure rather than one chosen to satisfy a
-  # tool.
   @spec moved_book_ids(map(), list()) :: %{optional(binary()) => true}
   defp moved_book_ids(_bookshelf, []), do: %{}
 
@@ -257,9 +216,6 @@ defmodule Stacks.Feeds do
     |> Map.new(&{&1, true})
   end
 
-  # The cache writer is injectable (defaulting to `put_cache/3`) so tests can
-  # force a write failure deterministically — mirrors the `:*_client` seams
-  # used elsewhere in the core app.
   defp cache_writer do
     Application.get_env(:core, :feed_cache_writer, &put_cache/3)
   end
@@ -326,11 +282,6 @@ defmodule Stacks.Feeds do
     """
   end
 
-  # The cover, as an Atom enclosure.
-  #
-  # US-6.1 asks each entry to carry a cover thumbnail, and it is what makes a feed
-  # browsable in a reader rather than a list of sentences. Taken from the primary
-  # edition where there is one, since that is the edition the shelf displays.
   defp cover_link(nil), do: ""
 
   defp cover_link(book) do
@@ -371,12 +322,6 @@ defmodule Stacks.Feeds do
     "\n    <link rel=\"related\" href=\"https://openlibrary.org/isbn/#{isbn}\" />"
   end
 
-  # The public-facing name shown in a feed's <title> and <author>. A feed is a
-  # crawlable public artifact, so it must NEVER contain the owner's email (GDPR
-  # personal data, #283). Fallback ladder: chosen display_name → claimed handle
-  # (always present — op.users.handle is NOT NULL and app-assigned on every
-  # insert) → a neutral label as a defensive backstop for a blank handle. Blank
-  # strings are treated as absent so an empty value never renders as the name.
   defp feed_display_name(user) do
     cond do
       present?(user.display_name) -> user.display_name

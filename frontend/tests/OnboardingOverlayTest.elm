@@ -92,8 +92,6 @@ dataDrivenStepsOracle =
     describe "data-driven steps (AC#2)"
         [ test "progress dots derive from List.length steps — EXTENDING the list adds a dot" <|
             \_ ->
-                -- Five descriptors → five dots. The old enum hardcoded three
-                -- (`[ dot 0, dot 1, dot 2 ]`), so this assertion is red on it.
                 let
                     model =
                         { init | steps = Overlay.defaultSteps ++ [ Welcome ] }
@@ -114,9 +112,6 @@ dataDrivenStepsOracle =
                     |> Query.count (Expect.equal 3)
         , test "REORDERING the list changes which step renders at an index (Consent first)" <|
             \_ ->
-                -- Consent is placed at index 0. The view must render the consent
-                -- controls there. The old enum rendered "Welcome to The Stacks"
-                -- at index 0 unconditionally, so this is red on it.
                 let
                     model =
                         { init
@@ -144,8 +139,6 @@ dataDrivenStepsOracle =
                         q
                             |> Query.findAll [ Selector.class "onboarding-overlay__dot--active" ]
                             |> Query.count (Expect.equal 1)
-
-                    -- currentIndex 2 over a 3-item list renders the Welcome step.
                     , \q -> Query.has [ Selector.text "Welcome to The Stacks" ] q
                     ]
                     rendered
@@ -413,9 +406,6 @@ embeddedSurfaces =
                     |> Query.fromHtml
                     |> Query.has
                         [ byTestId "onboarding-upload-embed"
-
-                        -- The genuine upload drop zone from Page.Upload, proving
-                        -- the surface is embedded rather than re-described.
                         , byTestId "upload-drop-zone"
                         ]
         , test "the Consent step renders the real consent toggles" <|

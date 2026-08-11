@@ -42,8 +42,6 @@ defmodule Stacks.AuthSecurityTelemetryTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  # ── Refresh-token reuse detection ──────────────────────────────────────
-
   describe "refresh-token reuse telemetry" do
     setup do
       user = insert(:user)
@@ -66,7 +64,6 @@ defmodule Stacks.AuthSecurityTelemetryTest do
       assert {:error, :token_reuse_detected} =
                Accounts.check_token_family(fid, "jti-superseded", sub)
 
-      # The family is burned AND the counter fires — no PII in the metadata.
       assert Repo.get(AuthTokenFamily, fid).revoked_at
 
       assert_receive {:telemetry_event, [:stacks, :auth, :refresh, :reuse_detected], %{count: 1},
@@ -85,8 +82,6 @@ defmodule Stacks.AuthSecurityTelemetryTest do
          %{fid: fid} do
       attach_telemetry([[:stacks, :auth, :refresh, :reuse_detected]])
 
-      # A cross-user token is rejected as session_revoked and the innocent
-      # owner's family is NOT burned — so no reuse counter should fire.
       assert {:error, :session_revoked} =
                Accounts.check_token_family(fid, "jti-current", Ecto.UUID.generate())
 
@@ -95,8 +90,6 @@ defmodule Stacks.AuthSecurityTelemetryTest do
       refute_receive {:telemetry_event, [:stacks, :auth, :refresh, :reuse_detected], _, _}, 100
     end
   end
-
-  # ── MFA verify outcome ─────────────────────────────────────────────────
 
   describe "MFA verify telemetry" do
     setup do

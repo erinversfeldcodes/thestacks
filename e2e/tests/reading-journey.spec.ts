@@ -25,9 +25,6 @@ import { mintSession, injectSession, assertSeedOrSkip } from "./helpers";
  * can never pass vacuously against a still-loading shelf.
  */
 
-// ── Shelf descriptors: UI route path vs. API/mover bookshelf name ────────────
-// The mover <select> and placement API use the underscore name (reading_pile);
-// the SPA route uses the hyphen path (/reading-pile).
 type ShelfKey =
   | "library"
   | "antilibrary"
@@ -215,9 +212,6 @@ test.describe("Reading journey (#116)", () => {
     page,
     request,
   }) => {
-    // The Phase-1 bug: move_book updated bookshelf_id but not shelf_id, so a
-    // moved book stayed on the SOURCE browse and never appeared on the TARGET.
-    // This drives the fix end-to-end through the two browse listings.
     const session = await mintSession(request, { displayName: "Move Browse" });
     test.skip(session === null, SKIP_MSG);
     if (!session) return;
@@ -230,13 +224,10 @@ test.describe("Reading journey (#116)", () => {
 
     await injectSession(page, session);
 
-    // Move wishlist → antilibrary in the browser, via the overlay's mover.
     await gotoShelf(page, "wishlist");
     const overlay = await openOverlayFromShelf(page, book.id);
     await moveViaOverlay(overlay, "antilibrary");
 
-    // Browse assertions on the SPECIFIC book (not counts): present on the
-    // destination, absent from the (now empty) source.
     await expectPresentOnShelf(page, "antilibrary", book.id);
     await expectAbsentFromEmptyShelf(page, "wishlist", book.id);
   });
@@ -259,7 +250,6 @@ test.describe("Reading journey (#116)", () => {
 
     await injectSession(page, session);
 
-    // Move off the pile via the overlay (opened from the pile itself).
     await gotoShelf(page, "reading_pile");
     const overlay = await openOverlayFromPile(page);
     await moveViaOverlay(overlay, "antilibrary");
@@ -283,13 +273,11 @@ test.describe("Reading journey (#116)", () => {
     expect(await apiPlace(request, session.token, "wishlist", book.id)).toBe(201);
     await injectSession(page, session);
 
-    // Hop 1: wishlist → antilibrary.
     await gotoShelf(page, "wishlist");
     await moveViaOverlay(await openOverlayFromShelf(page, book.id), "antilibrary");
     await expectPresentOnShelf(page, "antilibrary", book.id);
     await expectAbsentFromEmptyShelf(page, "wishlist", book.id);
 
-    // Hop 2: antilibrary → reading pile.
     await gotoShelf(page, "antilibrary");
     await moveViaOverlay(
       await openOverlayFromShelf(page, book.id),
@@ -298,7 +286,6 @@ test.describe("Reading journey (#116)", () => {
     await expectPresentOnPile(page, book.title);
     await expectAbsentFromEmptyShelf(page, "antilibrary", book.id);
 
-    // Hop 3: reading pile → library.
     await gotoShelf(page, "reading_pile");
     await moveViaOverlay(await openOverlayFromPile(page), "library");
     await expectPresentOnShelf(page, "library", book.id);
@@ -320,7 +307,6 @@ test.describe("Reading journey (#116)", () => {
     expect(await apiPlace(request, session.token, "library", book.id)).toBe(201);
     await injectSession(page, session);
 
-    // library → reading pile.
     await gotoShelf(page, "library");
     await moveViaOverlay(
       await openOverlayFromShelf(page, book.id),
@@ -329,7 +315,6 @@ test.describe("Reading journey (#116)", () => {
     await expectPresentOnPile(page, book.title);
     await expectAbsentFromEmptyShelf(page, "library", book.id);
 
-    // reading pile → library (the re-read hop).
     await gotoShelf(page, "reading_pile");
     await moveViaOverlay(await openOverlayFromPile(page), "library");
     await expectPresentOnShelf(page, "library", book.id);
@@ -345,12 +330,7 @@ test.describe("Reading journey (#116)", () => {
     if (!session) return;
 
     const books = await catalogueBooks(request);
-    // Need a book with a KNOWN page count so the ceiling is enforceable and the
-    // "p. X / Y" line can render.
     const paged = books.find((b) => b.pageCount !== null && b.pageCount >= 10);
-    // Seed guarantee (#280): on a full-seed stack (E2E_EXPECT_FULL_SEEDS=1) the
-    // absence of any book with a known page count is a seed regression and must
-    // fail hard, not skip; elsewhere (prod-shaped/thin targets) skip loudly.
     assertSeedOrSkip(
       paged !== undefined,
       "needs a catalogue book with a primary-edition page count >= 10"
@@ -367,7 +347,6 @@ test.describe("Reading journey (#116)", () => {
     await gotoShelf(page, "reading_pile");
     await expect(pileSpine(page, paged.title)).toBeVisible({ timeout: 10000 });
 
-    // Open the status form via the badge (aria-expanded reflects the toggle).
     const badge = page.getByTestId("reading-status-badge");
     await expect(badge).toBeVisible({ timeout: 10000 });
     await expect(badge).toHaveAttribute("aria-expanded", "false");
@@ -377,22 +356,18 @@ test.describe("Reading journey (#116)", () => {
     const form = page.getByTestId("reading-status-form");
     await expect(form).toBeVisible();
 
-    // Set status Reading so the page input appears, then enter a page past the
-    // end of the book — the ceiling must reject it.
     await form.getByTestId("status-select").selectOption("reading");
     const pageInput = form.getByTestId("current-page-input");
     await expect(pageInput).toBeVisible();
     await pageInput.fill("999999");
     await form.getByTestId("save-progress-btn").click();
 
-    // Validation error surfaced as an alert; form stays open with the draft.
     const alert = page.getByTestId("progress-error");
     await expect(alert).toBeVisible({ timeout: 10000 });
     await expect(alert).toHaveAttribute("role", "alert");
     await expect(form).toBeVisible();
     await expect(pageInput).toHaveValue("999999");
 
-    // Correct to a valid page and save — the form closes and progress renders.
     await pageInput.fill(String(validPage));
     await form.getByTestId("save-progress-btn").click();
     await expect(form).toBeHidden({ timeout: 10000 });
@@ -401,7 +376,6 @@ test.describe("Reading journey (#116)", () => {
     await expect(progress).toBeVisible({ timeout: 10000 });
     await expect(progress).toHaveText(`p. ${validPage} / ${pageCount}`);
 
-    // Persistence across a reload.
     await gotoShelf(page, "reading_pile");
     await expect(page.getByTestId("reading-status-badge")).toHaveText("Reading", {
       timeout: 10000,
@@ -410,7 +384,6 @@ test.describe("Reading journey (#116)", () => {
       `p. ${validPage} / ${pageCount}`
     );
 
-    // Mark Finished → the "record this read?" bridge prompt appears.
     await page.getByTestId("reading-status-badge").click();
     const form2 = page.getByTestId("reading-status-form");
     await expect(form2).toBeVisible();
@@ -420,7 +393,6 @@ test.describe("Reading journey (#116)", () => {
     const finishedPrompt = page.getByTestId("finished-read-prompt");
     await expect(finishedPrompt).toBeVisible({ timeout: 10000 });
 
-    // Record the read → the book leaves the pile and lands on the Library.
     await finishedPrompt.getByTestId("record-read-btn").click();
     await expect(pileSpine(page, paged.title)).toHaveCount(0, { timeout: 10000 });
     await expectPresentOnShelf(page, "library", paged.id);

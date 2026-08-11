@@ -29,7 +29,6 @@ defmodule Stacks.AgeGatingFlagOffTest do
   end
 
   test "(a) AgeGate.enforce does NOT 403 an unverified user on an age-gated book", %{conn: conn} do
-    # No Guardian resource set → unauthenticated/unverified viewer.
     result = AgeGate.enforce(conn, @age_gated_book)
 
     refute result.halted

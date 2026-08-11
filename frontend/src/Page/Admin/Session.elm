@@ -59,9 +59,6 @@ type alias Model =
     , password : String
     , code : String
     , error : Maybe String
-
-    -- Good news, kept separate from `error` so a success and a failure cannot be rendered as each
-    -- other. Currently only set after enrolment.
     , notice : Maybe String
     , busy : Bool
     }
@@ -83,7 +80,6 @@ type Msg
 
 type OutMsg
     = NoOut
-      -- The admin token. Main holds it; this module never stores it.
     | Authenticated String
 
 
@@ -108,8 +104,6 @@ produce. Exposed so a test can assert the extraction without driving the whole f
 -}
 enrolmentSecret : AdminMfaEnrolment -> Maybe String
 enrolmentSecret enrolment =
-    -- `otpauth://totp/Label?secret=…&issuer=…`. Url.fromString rejects the otpauth scheme, so the
-    -- query is taken directly rather than via a URL parser that does not accept this scheme.
     enrolment.provisioningUri
         |> String.split "?"
         |> List.drop 1
@@ -150,15 +144,12 @@ update msg model ownerToken =
                 )
 
         LoggedIn (Ok session) ->
-            -- The password is dropped the moment it is no longer needed.
             ( { model | step = AwaitingCode session.sessionId, busy = False, password = "" }
             , Cmd.none
             , NoOut
             )
 
         LoggedIn (Err MfaNotEnrolled) ->
-            -- Not an error to report and stop at: it is a state with an action, and the action is
-            -- available right here.
             ( { model | busy = False, error = Nothing, step = Credentials }
             , Cmd.none
             , NoOut
@@ -232,12 +223,6 @@ update msg model ownerToken =
                     ( model, Cmd.none, NoOut )
 
         EnrolmentConfirmed (Ok ()) ->
-            -- ⚠️ Returns to the credentials step rather than a terminal "done" panel.
-            --
-            -- It used to render a panel whose copy read "Sign in above to open an admin session" —
-            -- while being the only thing on the page. There was no form above; it had replaced it.
-            -- The operator finished enrolling and had nowhere to go but a manual reload, and the
-            -- copy actively misdirected them. Found by driving the flow rather than reading it.
             ( { model
                 | step = Credentials
                 , busy = False
@@ -270,7 +255,6 @@ startEnrolmentIfPossible ownerToken ( model, cmd, out ) =
             ( { model | busy = True }, Api.adminMfaSetup token EnrolmentStarted, out )
 
         Nothing ->
-            -- No ordinary session either, which means the operator is not signed in at all.
             ( { model
                 | busy = False
                 , error = Just "Sign in to The Stacks first, then return here."
@@ -299,10 +283,6 @@ authErrorMessage err =
             "That code was not accepted. Codes expire every 30 seconds — try the current one."
 
         InvalidSession ->
-            -- ⚠️ The IP-change and node-restart case, and worth naming rather than calling it
-            -- "expired": the admin session is bound to both the client IP and the node's boot_id,
-            -- so a network switch or a deploy invalidates it. An operator told only "signed out"
-            -- goes looking for the wrong problem.
             "That admin session is no longer valid — a network change or a deploy ends it. Start again."
 
         AlreadyVerified ->
@@ -316,10 +296,6 @@ authErrorMessage err =
 
         AdminAuthTransport _ ->
             "Could not reach the server. Please try again."
-
-
-
--- VIEW
 
 
 view : Model -> Html Msg
@@ -398,9 +374,6 @@ viewCredentials model =
                     "Continue"
                 )
             ]
-
-        -- Enrolment is reachable without failing a sign-in first. Signing in only to be told
-        -- "you have no second factor" is a detour when the operator already knows.
         , button
             [ type_ "button"
             , class "admin-gate__secondary"

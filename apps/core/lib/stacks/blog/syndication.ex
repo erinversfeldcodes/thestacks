@@ -38,8 +38,6 @@ defmodule Stacks.Blog.Syndication do
   @valid_methods ~w(rss export)
   @valid_url_schemes ~w(http https)
 
-  # ── The feed ──────────────────────────────────────────────────────────
-
   @doc """
   The posts the syndication feed serves: public AND syndicated AND published,
   newest first, capped at #{@feed_limit}. Served by the partial index
@@ -100,9 +98,6 @@ defmodule Stacks.Blog.Syndication do
   defp feed_entry(post) do
     canonical = canonical_url(post)
 
-    # The "Originally published on" line goes INSIDE <content>, not only in
-    # <link>: Substack's importer carries content through but may not preserve
-    # a canonical hint. A visible sentence in the body survives any importer.
     content =
       escape_xml(
         "<p><em>Originally published on <a href=\"#{canonical}\">The Stacks</a>.</em></p>\n" <>
@@ -120,8 +115,6 @@ defmodule Stacks.Blog.Syndication do
       </entry>\
     """
   end
-
-  # ── The export ────────────────────────────────────────────────────────
 
   @doc """
   The paste-ready copy for Substack's editor: the post's body wrapped in the
@@ -162,8 +155,6 @@ defmodule Stacks.Blog.Syndication do
     %{format: format, canonical_url: canonical, body: String.trim(body)}
   end
 
-  # ── Syndication records ───────────────────────────────────────────────
-
   @doc """
   Records one act of syndication, storing the canonical URL AS IT IS NOW —
   stored rather than derived, so a future host change cannot silently rewrite
@@ -185,9 +176,6 @@ defmodule Stacks.Blog.Syndication do
       {:ok, syndication} ->
         Events.emit_safe(%{
           event_type: "post.syndicated",
-          # "post", matching every other blog event's aggregate_type — the
-          # story sketch said "blog_post", but a second name for the same
-          # aggregate would split its event stream.
           aggregate_type: "post",
           aggregate_id: post.id,
           payload: %{target: syndication.target, method: syndication.method}
@@ -256,8 +244,6 @@ defmodule Stacks.Blog.Syndication do
     end)
   end
 
-  # ── The canonical address ─────────────────────────────────────────────
-
   @doc """
   The post's permanent address: `<host>/blog/<uuid>`. The UUID form is ugly
   and it is PERMANENT, which is the POSSE requirement — slugs are deferred
@@ -270,10 +256,6 @@ defmodule Stacks.Blog.Syndication do
 
   defp host_url, do: CoreWeb.Endpoint.url()
 
-  # Markdown-authored bodies travel to Substack as paragraphs. Deliberately
-  # minimal (paragraph splitting + escaping): the writer pastes into Substack's
-  # own editor, which does the real rendering — a full Markdown pipeline here
-  # would be machinery in service of a preview nobody sees.
   defp body_as_html(body) do
     body
     |> String.split(~r/\n{2,}/)

@@ -9,9 +9,6 @@ defmodule Stacks.Books.HttpClient do
   def get(url) do
     req = Finch.build(:get, url)
 
-    # Explicit bounds (#381d): without options Finch defaults receive_timeout
-    # to 15s but request_timeout to :infinity — so a resolver host dribbling
-    # bytes held the caller forever. Resolver JSON is small; 15s each.
     case Finch.request(req, Stacks.Finch, receive_timeout: 15_000, request_timeout: 15_000) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         decode_body(body, url)
@@ -29,10 +26,6 @@ defmodule Stacks.Books.HttpClient do
   def get_binary(url) do
     req = Finch.build(:get, url)
 
-    # Bound BOTH the per-receive idle window AND the whole request (#381d): a
-    # cover host that accepts the connection then dribbles bytes forever would
-    # otherwise hang past `receive_timeout`. Covers are small, so 10s each is
-    # generous.
     case Finch.request(req, Stacks.Finch, receive_timeout: 10_000, request_timeout: 10_000) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         {:ok, body}
@@ -46,14 +39,6 @@ defmodule Stacks.Books.HttpClient do
     end
   end
 
-  # Finch >= 0.23 wraps every failure in one of its own exception structs
-  # (`t:Finch.error/0`): `%Finch.TransportError{reason, source}`,
-  # `%Finch.HTTPError{reason, module, source}`, or `%Finch.Error{reason}`.
-  # Bare Mint structs are never returned any more — the original
-  # `%Mint.TransportError{}` / `%Mint.HTTPError{}` is nested under `:source`
-  # (or nil). Timeouts surface as `%Finch.TransportError{reason: :timeout}`
-  # from HTTP/1 pools and as `%Finch.Error{reason: :timeout}` (or
-  # `:request_timeout`) from HTTP/2 pools.
   @doc false
   @spec map_error(term(), String.t()) ::
           {:error, Stacks.Books.HttpClientBehaviour.error_reason()}
@@ -74,12 +59,6 @@ defmodule Stacks.Books.HttpClient do
   end
 
   def map_error(error, url) do
-    # Defensive fall-through: covers `%Finch.HTTPError{}` (protocol
-    # errors), `%Finch.Error{}` with non-timeout reasons, and any future
-    # unknown error term. All map to the closed-set `:transport_error`.
-    # The original term is preserved in the log line so a Finch upgrade
-    # that changes error shapes again is diagnosable from production
-    # logs without a code change here.
     Logger.warning("ISBNResolver: request failed for #{url}: #{inspect(error)}")
     {:error, :transport_error}
   end

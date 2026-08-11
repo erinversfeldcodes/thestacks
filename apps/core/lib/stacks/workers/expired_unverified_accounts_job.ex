@@ -29,8 +29,6 @@ defmodule Stacks.Workers.ExpiredUnverifiedAccountsJob do
         case Deletion.delete_user_data(id,
                reason: "unverified account expired — email never confirmed within TTL",
                actor: "expired-unverified-reaper",
-               # US-14.1.3: same abandoned-signup case as the registration-time
-               # reap, different trigger — the invitee's key is restored.
                restore_invite: true
              ) do
           {:ok, _} ->

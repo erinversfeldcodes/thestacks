@@ -67,8 +67,6 @@ suite =
         [ describe "a source awaiting review offers the decisions"
             [ test "Approve renders for the server's real status value" <|
                 \_ ->
-                    -- ⛔ The bug. `"pending_review"` is what `Stacks.Discovery` writes on create and
-                    -- gates both transitions on; the page compared against `"pending"`.
                     render (loaded "pending_review")
                         |> Query.has [ testId "source-approve" ]
             , test "Reject renders too" <|
@@ -77,10 +75,6 @@ suite =
                         |> Query.has [ testId "source-reject" ]
             , test "an already-approved source offers neither" <|
                 \_ ->
-                    -- ⚠️ Anchored on the testId, not the word. `Selector.text "Approve"` also matches
-                    -- the **"Approved" filter tab**, so a prose version of this assertion passes
-                    -- whether the buttons are there or not — #302's defect class, caught here by the
-                    -- negative case failing when it should not have.
                     render (loaded "approved")
                         |> Query.hasNot [ testId "source-approve" ]
             , test "a dismissed source offers neither" <|
@@ -91,9 +85,6 @@ suite =
         , describe "the status filter sends what the server understands"
             [ test "Pending filters on pending_review, not pending" <|
                 \_ ->
-                    -- Sending `"pending"` matched no row, so the Pending tab showed an empty list
-                    -- and read as "nothing to review" — the worst possible way to be wrong on a
-                    -- queue whose entire job is telling you there is something to do.
                     SourceApproval.statusFilterToString SourceApproval.Pending
                         |> Expect.equal (Just "pending_review")
             , test "Rejected filters on dismissed — the server's word, not the UI's" <|

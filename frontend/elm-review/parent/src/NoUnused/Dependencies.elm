@@ -87,10 +87,6 @@ dependenciesVisitor dependencies projectContext =
     )
 
 
-
--- CONTEXT
-
-
 type alias ProjectContext =
     { moduleNameToDependency : Dict String String
     , dependencies : Dict String DependencyList
@@ -172,10 +168,6 @@ foldProjectContexts newContext previousContext =
     }
 
 
-
--- PROJECT VISITORS
-
-
 elmJsonVisitor : Maybe { elmJsonKey : Rule.ElmJsonKey, project : Project } -> ProjectContext -> ( List nothing, ProjectContext )
 elmJsonVisitor maybeProject projectContext =
     case maybeProject of
@@ -230,10 +222,6 @@ listDependencies deps =
         deps
 
 
-
--- IMPORT VISITOR
-
-
 importVisitor : Node Import -> ModuleContext -> ( List nothing, ModuleContext )
 importVisitor node context =
     ( []
@@ -251,10 +239,6 @@ moduleNameForImport (Node _ { moduleName }) =
     moduleName
         |> Node.value
         |> String.join "."
-
-
-
--- FINAL EVALUATION
 
 
 finalEvaluationForProject : ProjectContext -> List (Error { useErrorForModule : () })
@@ -294,10 +278,6 @@ finalEvaluationForProject projectContext =
 add : (a -> b) -> Set a -> List b -> List b
 add f set initial =
     Set.foldl (\item acc -> f item :: acc) initial set
-
-
-
--- ERROR FUNCTIONS
 
 
 unusedProjectDependencyError : Rule.ElmJsonKey -> Dict String DependencyList -> String -> Error scope
@@ -380,10 +360,6 @@ findPackageNameInElmJson packageName elmJson =
 defaultPackageNamePosition : Range
 defaultPackageNamePosition =
     { start = { row = 1, column = 1 }, end = { row = 10000, column = 1 } }
-
-
-
--- FIX
 
 
 type ProjectAndDependencyIdentifier

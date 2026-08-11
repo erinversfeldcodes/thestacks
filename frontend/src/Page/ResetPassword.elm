@@ -103,10 +103,6 @@ update msg model =
             )
 
         Submit ->
-            -- One request per press of the button. `Loading` and `Success` are
-            -- both already-decided states; re-submitting from either is what
-            -- burned the single-use token underneath a reset that had already
-            -- worked (see `clearStaleError`).
             case ( model.submitting, validate model ) of
                 ( Loading, _ ) ->
                     ( model, Cmd.none, NoOut )
@@ -127,10 +123,6 @@ update msg model =
 
         Completed result ->
             case ( model.submitting, result ) of
-                -- ⛔ A success is FINAL. Nothing that arrives afterwards may
-                -- overwrite it — not a late response, not a duplicate. The
-                -- reader has been told their password is reset; the one thing
-                -- this page must never do is take that back.
                 ( Success _, _ ) ->
                     ( model, Cmd.none, NoOut )
 
@@ -144,9 +136,6 @@ update msg model =
                     ( { model | submitting = Failure err }, Cmd.none, NoOut )
 
         AdvanceToSignIn ->
-            -- Only from a success. The timer is only ever started by one, but a
-            -- message that can be delivered late must not assume the state it
-            -- was scheduled in still holds.
             case model.submitting of
                 Success _ ->
                     ( model, Cmd.none, AdvanceToLogin )
@@ -189,10 +178,6 @@ clearStaleError submitting =
 
 view : Model -> Html Msg
 view model =
-    -- Reuse the login page's static scene (library background + dim + vignette)
-    -- and centre the card in its overlay, so the reset page reached from the
-    -- email link matches the login card. The animated door layers/ports are
-    -- login-only, so this renders the background statically — no animation.
     div [ class "page page--login" ]
         [ div [ class "layer-arrival" ] []
         , div [ class "layer-bookshelf" ] []

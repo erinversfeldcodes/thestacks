@@ -101,10 +101,6 @@ suite =
         ]
 
 
-
--- COPY (named once, so no test can assert copy the page does not have)
-
-
 successCopy : String
 successCopy =
     "If that address is waiting to be confirmed, a fresh link is on its way. It replaces any earlier one."
@@ -130,14 +126,6 @@ resendEndpoint =
 
 type alias LoginTest =
     ProgramTest.ProgramTest Login.Model Login.Msg (ProgramTest.SimulatedEffect Login.Msg)
-
-
-
--- THE CHECK-YOUR-INBOX CARD
---
--- Driven through the real registration journey rather than by constructing a
--- `RegistrationPending` model, because the thing most likely to break is the
--- handover: which address the card ends up holding.
 
 
 justRegistered : LoginTest
@@ -313,10 +301,6 @@ leavingTheCardSpendsTheResend =
                             ]
                             model
                     )
-
-
-
--- THE DEAD-LINK ROUTE
 
 
 {-| ⛔ The wire, not the parts.

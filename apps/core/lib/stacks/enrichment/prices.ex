@@ -24,8 +24,6 @@ defmodule Stacks.Enrichment.Prices do
   alias Stacks.Enrichment.{Bookstore, PriceSnapshot}
   alias Stacks.Workers.TriggerPriceScrapeJob
 
-  # ── Snapshots ─────────────────────────────────────────────────────────────
-
   @doc """
   Inserts a new price snapshot or updates the existing one for the same
   `(book_edition_id, store_id)` pair.
@@ -45,10 +43,6 @@ defmodule Stacks.Enrichment.Prices do
   def upsert_snapshot(attrs) do
     case attrs["book_edition_id"] || attrs[:book_edition_id] do
       nil ->
-        # Nothing supplied: report it through the changeset like any other missing
-        # required field, so callers have one error shape for validation problems.
-        # `:unknown_edition` is reserved for an id that was given but names nothing —
-        # a different situation deserving a different answer.
         {:error, Enrichment.price_snapshot_changeset(%PriceSnapshot{}, attrs)}
 
       edition_id ->
@@ -59,9 +53,6 @@ defmodule Stacks.Enrichment.Prices do
             |> Repo.insert(
               on_conflict: {:replace, [:price_cents, :currency, :in_stock, :url, :scraped_at]},
               conflict_target: [:book_edition_id, :store_id],
-              # Without this, an upsert that hit an existing row returns the struct
-              # we *sent* — including a freshly generated id that is not the stored
-              # one. Callers would see every upsert as an insert.
               returning: true
             )
 
@@ -78,8 +69,6 @@ defmodule Stacks.Enrichment.Prices do
     end
   end
 
-  # Mirror the key style the caller used so a string-keyed changeset doesn't end
-  # up with one atom key (Ecto's cast would silently drop the mixed one).
   defp put_book_id(attrs, book_id) when is_map_key(attrs, :book_edition_id),
     do: Map.put(attrs, :book_id, book_id)
 
@@ -151,22 +140,11 @@ defmodule Stacks.Enrichment.Prices do
   end
 
   defp refresh_enabled? do
-    # Off in :test so reads do not enqueue jobs that tests must then account for;
-    # a dedicated test sets it true to prove the enqueue actually happens.
     Application.get_env(:core, :lazy_price_refresh, true)
   end
 
-  # Editions refreshed per read. Deliberately small.
-  #
-  # One page view fans out to (editions × stores) outbound requests. Open Library
-  # reports 76 distinct ISBN-13s for The Name of the Rose, and there are eleven
-  # seeded stores — so an uncapped fan-out turns a single view of a
-  # much-republished classic into ~800 requests against mostly one-person
-  # bookshops. The primary edition plus a few others is what a reader can actually
-  # use on one page; the rest arrive over subsequent views.
   @max_editions_per_refresh 5
 
-  # Editions of this work that have no price, or a price older than the TTL.
   defp enqueue_refreshes(book_id, prices, ttl_days) do
     cutoff = DateTime.add(DateTime.utc_now(), -ttl_days, :day)
 
@@ -177,8 +155,6 @@ defmodule Stacks.Enrichment.Prices do
 
     from(be in BookEdition,
       where: be.book_id == ^book_id,
-      # Primary edition first: it is the one the page leads with, so it is the one
-      # worth spending the first requests on.
       order_by: [desc: be.is_primary, asc: be.isbn],
       select: %{id: be.id, isbn: be.isbn}
     )
@@ -187,11 +163,7 @@ defmodule Stacks.Enrichment.Prices do
     |> Enum.take(@max_editions_per_refresh)
     |> Enum.each(fn edition ->
       %{isbn: edition.isbn, book_edition_id: edition.id}
-      |> TriggerPriceScrapeJob.new(
-        # One pending refresh per edition at a time. Without this a popular book
-        # would enqueue a scrape on every page view.
-        unique: [period: 3600, fields: [:worker, :args]]
-      )
+      |> TriggerPriceScrapeJob.new(unique: [period: 3600, fields: [:worker, :args]])
       |> Oban.insert()
     end)
   end
@@ -257,8 +229,6 @@ defmodule Stacks.Enrichment.Prices do
         log_capability_change(store, attrs)
         update_store(store, attrs)
 
-      # Refresh the timestamp periodically even when nothing changed, so a stale
-      # `probed_at` genuinely means "not observed lately" rather than "unchanged".
       stale_observation?(store) ->
         update_store(store, attrs)
 
@@ -285,9 +255,6 @@ defmodule Stacks.Enrichment.Prices do
   @spec record_robots_block(map(), String.t(), String.t()) :: :ok
   def record_robots_block(store, path, rule) do
     if store.robots_blocked_path == path and store.robots_blocked_rule == rule do
-      # Same block as last time: refresh only the observation time, and stay quiet.
-      # Logging every recurrence would bury the first occurrence in noise, and a block
-      # recurs on every attempt by definition.
       update_store(store, %{robots_blocked_at: DateTime.utc_now()})
     else
       Logger.warning(
@@ -323,8 +290,6 @@ defmodule Stacks.Enrichment.Prices do
         "(was #{store.robots_blocked_path}, #{store.robots_blocked_rule}) — resuming"
     )
 
-    # All three move together: a half-cleared block would read as "still blocked,
-    # reason unknown".
     update_store(store, %{
       robots_blocked_path: nil,
       robots_blocked_rule: nil,
@@ -356,8 +321,6 @@ defmodule Stacks.Enrichment.Prices do
         :ok
 
       {:error, changeset} ->
-        # Deliberately swallowed: an observation is a side-benefit of the scrape, and
-        # losing it must not turn a successful price into a failure.
         Logger.warning(
           "Prices: could not record capability for #{store.name}: #{inspect(changeset.errors)}"
         )
@@ -445,8 +408,6 @@ defmodule Stacks.Enrichment.Prices do
     Repo.all(
       from b in Bookstore,
         where: b.isbn_location == "none" and not is_nil(b.scraper_module),
-        # A shop with no product API cannot be enumerated at all, so there are no
-        # titles to match against.
         where: not is_nil(b.price_source) and b.price_source != "none"
     )
   end
@@ -464,13 +425,9 @@ defmodule Stacks.Enrichment.Prices do
     Repo.all(
       from b in Bookstore,
         where: b.lookup_mode == "local_index" and not is_nil(b.scraper_module),
-        # A store with no ISBN anywhere cannot be indexed at all — fuzzy title
-        # matching is its only path, and that is not this sweep's job.
         where: b.isbn_location != "none"
     )
   end
-
-  # ── Stores ────────────────────────────────────────────────────────────────
 
   @doc """
   Returns all bookstores.

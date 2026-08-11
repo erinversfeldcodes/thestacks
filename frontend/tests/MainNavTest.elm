@@ -237,7 +237,6 @@ suite =
                         |> Query.has [ Selector.class "app-nav__backdrop" ]
             , test "opening one disclosure does not open another" <|
                 \() ->
-                    -- Marketplace open ⇒ its items show, Bookshelves items stay hidden.
                     navOpen MarketplaceMenu
                         |> Expect.all
                             [ Query.has [ Selector.text "Create Listing" ]
@@ -260,7 +259,6 @@ suite =
             ]
         , describe "Add Book — persistent primary action (#318 TR-1)"
             [ -- Reachable on touch and keyboard because it is ALWAYS rendered and
-              -- never behind a disclosure. Present with every menu closed:
               test "is present with all menus closed (no hover/open needed)" <|
                 \() ->
                     navClosed
@@ -270,8 +268,6 @@ suite =
                     navOpen MarketplaceMenu
                         |> Query.has addBook
             , -- ⛔ The old Add Book was an `app-nav__dropdown-link` INSIDE the
-              -- Catalogue hover menu; the new one is a `btn btn--primary`. This
-              -- would fail on the old nav.
               test "is styled as the primary action, not a dropdown link" <|
                 \() ->
                     navClosed
@@ -301,20 +297,10 @@ suite =
                         )
                         |> Query.find [ badge ]
                         |> Query.has [ Selector.text "2" ]
-
-            -- ⛔ Requirement 4 of the issue, and the reason `pendingConfirmationBadge`
-            -- returns a `Maybe Int` rather than an `Int`: "Zero pending renders no
-            -- badge, not a `0`." A badge showing nothing to do is a mark that
-            -- survives being looked at, and teaches the reader to stop looking.
             , test "renders NO badge when nothing is waiting" <|
                 \() ->
                     navWithInbox (Types.RemoteData.Success [])
                         |> Query.hasNot [ badge ]
-
-            -- ⛔ The failure/confirmation split, asserted on the number itself. A
-            -- failed upload has nothing to confirm and nothing to place, so a
-            -- badge counting it could never be cleared by doing what it asks —
-            -- the reader would be left with a permanent 1 and no way to act.
             , test "does not count failures — an inbox of only failures shows no badge" <|
                 \() ->
                     navWithInbox
@@ -324,11 +310,6 @@ suite =
                             ]
                         )
                         |> Query.hasNot [ badge ]
-
-            -- The anti-vacuity companion to the test above: "no badge" and "no
-            -- badge" compare equal for the wrong reason if the badge never
-            -- renders at all. A mixed inbox pins the number to the count of
-            -- confirmations ALONE — one, out of three items.
             , test "a mixed inbox counts only the confirmations" <|
                 \() ->
                     navWithInbox
@@ -348,11 +329,6 @@ suite =
                 \() ->
                     navWithInbox (Types.RemoteData.Failure Http.NetworkError)
                         |> Query.hasNot [ badge ]
-
-            -- #318 TR-1 moved the badge OUT of the (now-deleted) Catalogue hover
-            -- dropdown and onto the persistent Add Book action, where it is
-            -- reachable without opening anything. This supersedes the #351
-            -- "badge lives inside the Catalogue dropdown" placement.
             , test "the badge rides on the persistent Add Book action" <|
                 \() ->
                     navWithInbox (Types.RemoteData.Success [ awaitingItem "img-1" ])

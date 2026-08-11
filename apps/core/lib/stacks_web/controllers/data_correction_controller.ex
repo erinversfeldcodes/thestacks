@@ -136,9 +136,6 @@ defmodule StacksWeb.DataCorrectionController do
     |> respond(conn, apply?)
   end
 
-  # A dry-run wrote nothing, so it audits nothing — `:audit_row_count` is what
-  # the admin-audit plug reports, and claiming rows for a GET-shaped read would
-  # make the count meaningless for the writes it exists to track.
   defp respond({:ok, outcome}, conn, apply?) do
     conn
     |> assign(:audit_row_count, if(apply?, do: outcome.count, else: 0))
@@ -167,10 +164,6 @@ defmodule StacksWeb.DataCorrectionController do
         |> assign(:audit_row_count, outcome.count)
         |> json(%{correction: render_outcome(outcome)})
 
-      # Nothing was committed — not this row's change, not any earlier row's.
-      # Surfacing the reason verbatim is the point: a repair that collides with
-      # real data is a decision for the operator, and they cannot make it from
-      # a generic failure.
       {:error, reason} ->
         conn
         |> assign(:audit_row_count, 0)

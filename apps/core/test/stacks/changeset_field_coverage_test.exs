@@ -36,18 +36,8 @@ defmodule Stacks.ChangesetFieldCoverageTest do
 
   alias Stacks.Enrichment
 
-  # schema => {changeset function, fields legitimately not castable}
-  #
-  # A skip entry is a claim that the field is written by something other than this
-  # changeset — a probe, a job, a database default. Each one should be obvious from the
-  # field's own documentation; if it is not, it probably belongs in the cast list.
   @changesets %{
-    Stacks.Enrichment.ThirdSpace =>
-      {&Enrichment.third_space_changeset/2,
-       [
-         # Written only by `Discovery.create_third_space/1`'s geocoding step... which uses
-         # this changeset, so these ARE cast. Nothing to skip.
-       ]},
+    Stacks.Enrichment.ThirdSpace => {&Enrichment.third_space_changeset/2, []},
     Stacks.Enrichment.BookstoreEvent => {&Enrichment.bookstore_event_changeset/2, []},
     Stacks.Enrichment.ThirdSpaceEvent => {&Enrichment.third_space_event_changeset/2, []},
     Stacks.Enrichment.ReviewSnapshot => {&Enrichment.review_snapshot_changeset/2, []},
@@ -55,18 +45,12 @@ defmodule Stacks.ChangesetFieldCoverageTest do
     Stacks.Enrichment.DiscoveredSource =>
       {&Enrichment.discovered_source_changeset/2,
        [
-         # The creation changeset deliberately cannot set these: a source is not created
-         # already-excluded or already-requested. `discovered_source_status_changeset/2`
-         # owns them, and is covered by its own entry below.
          :exclusion_requested_at
        ]}
   }
 
-  # Fields no changeset should ever cast: the database owns them.
   @never_cast [:id, :created_at, :updated_at, :inserted_at]
 
-  # A value the field's Ecto type will accept, so `cast/3` does not reject it for the
-  # wrong reason — a type mismatch would look identical to a missing cast entry.
   defp sample(:string), do: "sample"
   defp sample(:integer), do: 1
   defp sample(:float), do: 1.0
@@ -78,7 +62,7 @@ defmodule Stacks.ChangesetFieldCoverageTest do
   defp sample(:map), do: %{}
   defp sample({:array, inner}), do: [sample(inner)]
   defp sample(:decimal), do: Decimal.new("1.0")
-  # Ecto.Enum and other parameterised types: fall back to the first permitted value.
+
   defp sample({:parameterized, _, %{on_load: on_load}}) when is_map(on_load),
     do: on_load |> Map.keys() |> List.first()
 
@@ -126,9 +110,6 @@ defmodule Stacks.ChangesetFieldCoverageTest do
 
   describe "the status changeset for discovered sources" do
     test "can write the exclusion fields the creation changeset deliberately cannot" do
-      # The other half of the split above: recording a removal request is a status
-      # transition, not a creation, and `exclusion_requested_at` distinguishes
-      # "asked for" from "applied".
       changeset =
         Enrichment.discovered_source_status_changeset(
           %Stacks.Enrichment.DiscoveredSource{},

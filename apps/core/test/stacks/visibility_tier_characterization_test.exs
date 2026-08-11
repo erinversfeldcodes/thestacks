@@ -34,14 +34,10 @@ defmodule Stacks.VisibilityTierCharacterizationTest do
 
   alias Stacks.Visibility
 
-  # {visibility_tier, viewer_kind, expected}. Only the two ENUM-storable tiers.
-  # viewer_kind: :unauthenticated | :verified (authed, age_verified) | :unverified
   @truth_table [
-    # public — visible to everyone
     {"public", :unauthenticated, :visible},
     {"public", :verified, :visible},
     {"public", :unverified, :visible},
-    # age_gated — the ONLY enforced tier: verified-authed only
     {"age_gated", :unauthenticated, :hidden},
     {"age_gated", :verified, :visible},
     {"age_gated", :unverified, :hidden}

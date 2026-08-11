@@ -5,9 +5,6 @@ on:
   push:
     branches: [main]
 
-# scorecard-action's publish verification rejects workflow-global write
-# permissions — writes must be scoped to the job (read-all globally).
-# https://github.com/ossf/scorecard-action#workflow-restrictions
 permissions: read-all
 
 jobs:

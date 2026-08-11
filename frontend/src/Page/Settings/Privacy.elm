@@ -36,12 +36,6 @@ type alias Model =
     , loadingMore : Bool
     , unblocking : Maybe String
     , unblockError : Bool
-
-    -- Analytics + writing-assistant consent, folded in from the former
-    -- standalone /settings/consent page (#318 TR-4). The consent controls now
-    -- render as a section of this page, but the state and the save path are the
-    -- SAME `Page.Settings.Consent` module — moving where they render does not
-    -- change what `Stacks.GDPR.Consent` records.
     , consent : Consent.Model
     }
 
@@ -285,8 +279,6 @@ update msg model maybeToken =
             ( { model | deleteRequested = True }, Cmd.none, NoOut )
 
         UserCancelsDelete ->
-            -- Back out of the danger zone entirely, discarding what was typed.
-            -- Ignored while a request is in flight (the input/button are locked).
             if isDeleting model.deleting then
                 ( model, Cmd.none, NoOut )
 
@@ -297,10 +289,6 @@ update msg model maybeToken =
                 )
 
         UserTypesDeleteConfirmation typed ->
-            -- Ignore edits while a deletion is in flight: clearing `deleting`
-            -- here would re-enable the submit button and let a second DELETE
-            -- fire. The single-flight invariant lives in the handler, not the
-            -- view alone.
             if isDeleting model.deleting then
                 ( model, Cmd.none, NoOut )
 
@@ -308,9 +296,6 @@ update msg model maybeToken =
                 ( { model | deleteConfirmation = typed, deleting = NotAsked }, Cmd.none, NoOut )
 
         UserClicksDeleteAccount ->
-            -- Fire only on an exact confirmation AND when no request is already
-            -- in flight — a real single-flight guard in the handler, not just a
-            -- disabled attribute in the view.
             if deleteConfirmed model.deleteConfirmation && not (isDeleting model.deleting) then
                 case maybeToken of
                     Just token ->
@@ -328,8 +313,6 @@ update msg model maybeToken =
         GotDeleteResponse result ->
             case result of
                 Ok _ ->
-                    -- Queued server-side. Confirm to the user, then hand off to
-                    -- Main to clear the session and show the farewell.
                     ( { model | deleting = Success () }, Cmd.none, AccountDeleted )
 
                 Err err ->
@@ -367,15 +350,12 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Keep the defaults on failure; the user can still save.
                         ( model, Cmd.none, NoOut )
 
         GotBlockedUsers result ->
             case result of
                 Ok response ->
                     let
-                        -- Page 1 replaces the list; later pages append to the
-                        -- readers already loaded (the "Load more" affordance).
                         merged =
                             case model.blockedUsers of
                                 Success existing ->
@@ -430,8 +410,6 @@ update msg model maybeToken =
         GotUnblockResponse userId result ->
             case result of
                 Ok _ ->
-                    -- Drop the row locally; the reader's content reappears
-                    -- server-side on the next visibility-resolved fetch.
                     let
                         remaining =
                             case model.blockedUsers of
@@ -448,17 +426,9 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Keep the row, clear the in-flight flag, and surface an
-                        -- error so the failure isn't silent.
                         ( { model | unblocking = Nothing, unblockError = True }, Cmd.none, NoOut )
 
         ConsentMsg subMsg ->
-            -- Pure delegation to the embedded consent module. The save path
-            -- (`Api.saveConsent` / `Api.saveWritingAssistantConsent`, and hence
-            -- what `Stacks.GDPR.Consent` records) is entirely unchanged by the
-            -- fold — only its host page moved (#318 TR-4). Consent's own
-            -- SessionExpired is surfaced through Privacy's OutMsg so Main's
-            -- single expiry handler still fires.
             let
                 ( newConsent, subCmd, consentOut ) =
                     Consent.update subMsg model.consent maybeToken

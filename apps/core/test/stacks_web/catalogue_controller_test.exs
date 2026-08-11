@@ -61,7 +61,6 @@ defmodule StacksWeb.CatalogueControllerTest do
       assert total == 2
       assert length(books) == 2
 
-      # Verify no ownership data is present
       for book <- books do
         refute Map.has_key?(book, "user_id")
         refute Map.has_key?(book, "owner")
@@ -175,10 +174,6 @@ defmodule StacksWeb.CatalogueControllerTest do
 
     test "excludes age_gated books for an authenticated-but-unverified user, total accurate",
          %{conn: conn} do
-      # #229: an authenticated user who is NOT age-verified must be treated like
-      # an anonymous viewer for age-gated listings — the books are omitted AND
-      # `total` reflects the exclusion (SQL-level filter, not a post-filter that
-      # would break pagination). Mirrors the anon total-correctness test above.
       user = insert(:user, age_verified: false)
       insert_book_with_edition(title: "Public A", visibility_tier: "public")
       insert_book_with_edition(title: "Public B", visibility_tier: "public")

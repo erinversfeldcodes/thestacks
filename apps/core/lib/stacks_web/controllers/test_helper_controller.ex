@@ -23,21 +23,8 @@ defmodule StacksWeb.TestHelperController do
 
   require Logger
 
-  # Reserved test TLD (RFC 6761) used for ALL E2E/test accounts:
-  #   - suite users:       e2e-<slug>@thestacks.test   (seeds.exs / helpers.ts suiteEmail)
-  #   - registration users: <prefix>-<ts>-<rand>@thestacks.test (helpers.ts uniqueEmail)
-  # A real, deliverable email address can NEVER be in the `.test` TLD, so scoping
-  # the lookup to this domain guarantees a real user's activation token can never
-  # be leaked — even when the flag is on for a public preview carrying real users.
   @e2e_email_domain "@thestacks.test"
 
-  # Reserved synthetic ISBN-13 block that marks a book as E2E-seeded (Issue #297).
-  # Every book created by POST /api/test/book-description WITHOUT an explicit ISBN
-  # carries this 8-digit prefix, so an auto-seeded catalogue row is identifiable at
-  # a glance and can never be confused with a verified, upstream-sourced ISBN. The
-  # `978` Bookland prefix keeps it EAN-13-shaped so it still passes the checksum
-  # gate; the `99999` "registration group" is unallocated by the ISBN agency, so no
-  # real published book can ever legitimately fall inside this block.
   @e2e_seed_isbn_prefix "97899999"
 
   @doc """
@@ -102,11 +89,6 @@ defmodule StacksWeb.TestHelperController do
           }
         end)
 
-      # `mailbox_readable` tells the E2E client whether reading this mailbox is
-      # meaningful: only the Local adapter routes sends here. When a real
-      # provider (Resend) is configured — e.g. a `preview-real-email` PR — mail
-      # never lands in this in-memory store, so the client should SKIP rather
-      # than fail on an (expectedly) empty mailbox.
       json(conn, %{mailbox_readable: mailbox_readable?(), emails: emails})
     else
       not_found(conn)
@@ -125,8 +107,6 @@ defmodule StacksWeb.TestHelperController do
     Enum.any?(mail.to, fn recipient -> String.downcase(address(recipient)) == target end)
   end
 
-  # Swoosh normalises recipients to `{name, address}` tuples, but tolerate a
-  # bare address string too.
   defp address({_name, addr}), do: addr
   defp address(addr) when is_binary(addr), do: addr
 
@@ -163,9 +143,6 @@ defmodule StacksWeb.TestHelperController do
 
   defp apply_verification(user, false), do: AgeVerification.revoke(user)
 
-  # Shared, non-secret password for minted E2E users — matches E2E_PASSWORD in
-  # e2e/tests/helpers.ts so a spec can still drive the real login form for a
-  # minted account when it needs to.
   @mint_password "e2e-password"
 
   @doc """
@@ -203,10 +180,6 @@ defmodule StacksWeb.TestHelperController do
                "password" => @mint_password,
                "display_name" => display_name
              },
-             # This helper exists to mint isolated `.test` users without the
-             # auth ceremony (it also skips email confirmation below); the
-             # closed-beta gate (US-14.1.3) is part of that ceremony. Explicit
-             # opt — never attrs-reachable from public registration.
              skip_invite_gate: true
            ),
          {:ok, user} <- Accounts.mark_confirmed(user) do
@@ -332,17 +305,6 @@ defmodule StacksWeb.TestHelperController do
 
   def seed_book_description(conn, _params), do: not_found(conn)
 
-  # Generates a fresh, checksum-valid ISBN-13 inside the reserved E2E-seed block
-  # (`@e2e_seed_isbn_prefix`, Issue #297). The four digits after the 8-digit marker
-  # prefix come from a node-monotonic counter (`System.unique_integer/1`, mod 10_000)
-  # so successive calls don't collide on the edition unique-constraint within a node;
-  # the 13th digit is the EAN-13 mod-10 check digit (weights 1,3,1,3… — the same rule
-  # Books enforces). The block is deliberately recognisable, NOT verifiable: it
-  # bypasses the ISBN Hard Gate's Open-Library/Google-Books verification, which is
-  # an accepted, documented risk (see `seed_book_description/2`) precisely because
-  # this helper is gated behind `STACKS_E2E_TEST_HELPERS` (never set in prod) and its
-  # rows live only in ephemeral per-PR preview Neon branches (deleted at cleanup) or
-  # local dev DBs.
   defp generate_valid_isbn13 do
     serial =
       System.unique_integer([:positive])
@@ -362,16 +324,10 @@ defmodule StacksWeb.TestHelperController do
     first12 <> Integer.to_string(check)
   end
 
-  # Unique default address in the reserved E2E domain — mirrors uniqueEmail()
-  # in e2e/tests/helpers.ts so minted users are recognisable in preview data.
   defp generated_mint_email do
     "e2e-mint-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}@thestacks.test"
   end
 
-  # Same mint path as AuthController.login (Issue #179, Phase 2a): the
-  # family_id is generated BEFORE minting so it is embedded as a claim, and the
-  # token family row must persist or the token is revoked (fail closed) —
-  # preserving the invariant that every live access token has a family.
   defp issue_session(conn, user) do
     fid = Ecto.UUID.generate()
     {:ok, token, claims} = Guardian.encode_and_sign(user, %{"family_id" => fid})
@@ -411,9 +367,6 @@ defmodule StacksWeb.TestHelperController do
     end
   end
 
-  # Scope the endpoint to E2E/test-domain emails only. Case-insensitive to match
-  # `Accounts.get_user_by_email/1`. Uses a strict domain-suffix match so
-  # lookalikes such as `x@thestacks.test.evil.com` do NOT qualify.
   defp e2e_test_email?(email) do
     email
     |> String.downcase()

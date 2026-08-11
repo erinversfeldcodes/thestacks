@@ -8,9 +8,6 @@ defmodule Stacks.EmailTest do
   alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Email
 
-  # A user whose confirmation token has been persisted the way
-  # Accounts.register/1 does it — a signed Phoenix.Token. Both
-  # send_registration_confirmation/1 and confirm_email/1 operate on this token.
   defp user_with_confirmation_token(attrs \\ []) do
     user = insert(:user, Keyword.merge([email_confirmed: false], attrs))
     token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
@@ -39,9 +36,6 @@ defmodule Stacks.EmailTest do
 
       assert {:ok, returned} = Email.send_registration_confirmation(user)
 
-      # The async handler must never overwrite the token Accounts.register/1
-      # persisted — otherwise a token already read for this user is invalidated
-      # (the register↔handler race this fixes).
       assert returned.email_confirmation_token == original
       assert Core.Repo.reload!(user).email_confirmation_token == original
     end
@@ -116,11 +110,6 @@ defmodule Stacks.EmailTest do
       assert {:error, :invalid} = Email.reset_password("bad-token", "newpassword123")
     end
 
-    # A reset is the recovery path for a compromised account, so any session
-    # minted under the OLD password must die with it. Without this the victim
-    # completes the flow, sees "Your password has been reset", and the
-    # attacker's token keeps working — verified live on a preview stack before
-    # this test existed.
     test "revokes every live session so a pre-reset token cannot outlive the password" do
       user = insert(:user)
       fid = Ecto.UUID.generate()
@@ -184,17 +173,6 @@ defmodule Stacks.EmailTest do
       assert final_user.password_reset_sent_at == nil
     end
 
-    # Single-use was proven LIVE on 2026-07-30 (replaying a spent reset link
-    # returned 400) but had no test — the closest, "clears reset token after
-    # successful password update" above, asserts the COLUMN is nil, which is the
-    # mechanism, not the guarantee. A refactor that kept the column clear but
-    # matched the user by id alone would leave that test green and hand every
-    # spent reset link a second life.
-    #
-    # The distinction matters because the token stays *cryptographically valid*
-    # for 24h: `Phoenix.Token.verify/4` will happily re-sign off on it. The only
-    # thing standing between a leaked-then-used link and an account takeover is
-    # the `password_reset_token: token` clause in the `Repo.get_by/2`.
     test "a spent reset token cannot be replayed (single-use)" do
       user = insert(:user)
       Email.send_password_reset(user.email)
@@ -203,13 +181,8 @@ defmodule Stacks.EmailTest do
       assert {:ok, _} = Email.reset_password(token, "newpassword123"),
              "precondition: the first use must succeed, or the replay proves nothing"
 
-      # Replay the SAME token. It is still inside its 24h signing window, so the
-      # rejection cannot come from expiry — it must come from single-use.
       assert {:error, :invalid} = Email.reset_password(token, "attackerpassword456")
 
-      # …and the attacker's password must not have taken effect. Without this
-      # the test would pass on an implementation that returned an error AFTER
-      # writing the new password.
       final_user = Core.Repo.reload!(user)
 
       assert Argon2.verify_pass("newpassword123", final_user.password_hash),

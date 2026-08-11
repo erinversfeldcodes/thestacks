@@ -23,10 +23,6 @@ defmodule StacksWeb.GDPRControllerTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/gdpr/export
-  # ---------------------------------------------------------------------------
-
   describe "POST /api/gdpr/export" do
     test "returns 202 and enqueues DataExportJob", %{conn: conn} do
       user = insert(:user)
@@ -45,10 +41,6 @@ defmodule StacksWeb.GDPRControllerTest do
       assert json_response(conn, 401)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # DELETE /api/gdpr/account
-  # ---------------------------------------------------------------------------
 
   describe "DELETE /api/gdpr/account" do
     test "returns 202 and enqueues AccountDeletionJob", %{conn: conn} do
@@ -74,11 +66,6 @@ defmodule StacksWeb.GDPRControllerTest do
 
       assert %{"status" => "accepted"} = json_response(conn, 202)
 
-      # The audit row is written synchronously by the controller. Oban is in
-      # :manual mode (see @moduledoc), so the AccountDeletionJob is enqueued but
-      # never executes — therefore any user.deletion_requested row in the table
-      # must have been written by the request handler itself, BEFORE / independent
-      # of the job. Query audit.audit_log directly rather than trusting the job.
       row =
         Core.Repo.one(
           from(a in "audit_log",
@@ -97,8 +84,6 @@ defmodule StacksWeb.GDPRControllerTest do
       assert row.resource_type == "user"
       assert row.resource_id == Ecto.UUID.dump!(user.id)
 
-      # The job is enqueued but has NOT run (manual mode), proving the audit row
-      # above is written independently of job execution.
       assert_enqueued(worker: AccountDeletionJob, args: %{"user_id" => user.id})
     end
 
@@ -107,10 +92,6 @@ defmodule StacksWeb.GDPRControllerTest do
       assert json_response(conn, 401)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/gdpr/consent
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/gdpr/consent" do
     test "returns 200 and grants consent when consent: true", %{conn: conn} do
@@ -213,7 +194,6 @@ defmodule StacksWeb.GDPRControllerTest do
         |> post("/api/gdpr/consent", %{consent: true, type: "marketing_🎯"})
 
       assert %{"error" => _} = json_response(conn, 422)
-      # Never enqueue / never mutate on an invalid type.
       refute_enqueued(worker: WritingAssistantDataPurgeWorker)
     end
 

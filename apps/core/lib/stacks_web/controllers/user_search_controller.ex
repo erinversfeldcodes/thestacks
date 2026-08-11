@@ -24,9 +24,6 @@ defmodule StacksWeb.UserSearchController do
 
     matches = Accounts.search_users(term, viewer_id)
 
-    # NO-PII: tag only the bounded `outcome` atom (hit|zero_result). NEVER the
-    # query string (unbounded cardinality) or any handle/user-id (PII) —
-    # telemetry is warehouse-adjacent. `results` is a plain numeric measurement.
     outcome = if matches == [], do: :zero_result, else: :hit
 
     :telemetry.execute(

@@ -28,11 +28,6 @@ defmodule Stacks.Email do
   @spec send_registration_confirmation(User.t()) :: {:ok, User.t()} | {:error, term()}
   def send_registration_confirmation(user) do
     with :ok <- check_rate_limit(user.id) do
-      # The confirmation token is generated + persisted synchronously by
-      # Accounts.register/1 (a signed Phoenix.Token). This handler runs
-      # asynchronously (Oban), so it must NOT regenerate/overwrite the token:
-      # overwriting would invalidate a token already read for this user and
-      # reintroduce the register↔handler race. We only DELIVER the persisted token.
       case user.email_confirmation_token do
         token when is_binary(token) ->
           EmailDeliveryJob.new(%{
@@ -67,9 +62,6 @@ defmodule Stacks.Email do
   """
   @spec confirm_email(String.t()) :: {:ok, User.t()} | {:error, :invalid}
   def confirm_email(token) do
-    # Salt and 24h lifetime live in Accounts — the same call the reaper asks
-    # before erasing the account behind a link, so a link this accepts is never
-    # one the reaper has already reaped out from under the reader.
     case Accounts.verify_confirmation_token(token) do
       {:ok, user_id} ->
         user = Repo.get_by(User, id: user_id, email_confirmation_token: token)
@@ -134,14 +126,9 @@ defmodule Stacks.Email do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
-
   defp do_send_password_reset(nil), do: :ok
 
   defp do_send_password_reset(user) do
-    # Rate limit checked before any DB writes; token write + job enqueue are atomic.
     with :ok <- check_rate_limit(user.id) do
       token = Phoenix.Token.sign(CoreWeb.Endpoint, "password_reset", user.id)
       now = DateTime.utc_now()
@@ -170,10 +157,6 @@ defmodule Stacks.Email do
 
   defp do_send_confirmation_resend(%User{email_confirmed: true}), do: :ok
 
-  # Past the absolute lifetime cap no further link is issued, so an anonymous
-  # caller cannot renew a stranger's abandoned signup indefinitely. The account
-  # is now within one TTL of the reaper and will be erased; the reader can
-  # register cleanly afterwards.
   defp do_send_confirmation_resend(%User{} = user) do
     if Accounts.confirmation_resendable?(user) do
       issue_confirmation_link(user)
@@ -183,9 +166,6 @@ defmodule Stacks.Email do
   end
 
   defp issue_confirmation_link(%User{} = user) do
-    # Same shape as do_send_password_reset/1: rate limit before any DB write,
-    # then token write + job enqueue atomically, so a failed enqueue never leaves
-    # the reader holding a token no email will ever carry.
     with :ok <- check_rate_limit(user.id) do
       token = Accounts.sign_confirmation_token(user.id)
 
@@ -234,12 +214,6 @@ defmodule Stacks.Email do
          })
          |> Repo.update() do
       {:ok, updated} ->
-        # A reset is the recovery path for a *compromised* account, so it must
-        # revoke every existing session — otherwise the attacker's token
-        # outlives the credential the victim just changed. Mirrors the
-        # authenticated change-password path (`UserSettingsController`), which
-        # has always done this (Issue #179, Phase 2b); the reset path did not,
-        # leaving the victim less safe than the success message implies.
         Accounts.revoke_all_user_sessions(updated.id)
         {:ok, updated}
 

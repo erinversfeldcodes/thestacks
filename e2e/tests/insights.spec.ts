@@ -45,7 +45,6 @@ test.describe("Personal inference view (/me/insights)", () => {
       timeout: 15_000,
     });
 
-    // The three grounded sections render from the user's own data.
     await expect(page.getByTestId("insights-interest")).toBeVisible();
     await expect(page.getByTestId("insights-behaviour")).toBeVisible();
     await expect(page.getByTestId("insights-deanon")).toBeVisible();
@@ -59,7 +58,6 @@ test.describe("Personal inference view (/me/insights)", () => {
     const reveal = page.getByTestId("insights-reveal-risk");
     await expect(reveal).toBeVisible();
 
-    // Revealing re-fetches with ?reveal_risk=true and shows the labelled block.
     await reveal.click();
     await expect(page.getByTestId("insights-risk-revealed")).toBeVisible({
       timeout: 10_000,

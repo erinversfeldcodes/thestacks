@@ -21,9 +21,6 @@ async function openNavDisclosure(page: Page, label: string): Promise<void> {
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
 }
 
-// The five bookshelves — top-level links on the OLD nav, now dropdown links
-// inside the Bookshelves disclosure (#318 TR-1). `href` doubles as the exact
-// pathname each dropdown link points at.
 const bookshelves = [
   { label: "Library", href: "/library" },
   { label: "Antilibrary", href: "/antilibrary" },
@@ -35,8 +32,6 @@ const bookshelves = [
 test.describe("Navbar navigation — authenticated", () => {
   test.use({ storageState: suiteAuthFile("navigation") });
 
-  // The five bookshelves are reached by OPENING the Bookshelves disclosure and
-  // clicking the dropdown link — they are no longer top-level `app-nav__link`s.
   for (const shelf of bookshelves) {
     test(`opening Bookshelves → "${shelf.label}" navigates to ${shelf.href}`, async ({
       page,
@@ -52,8 +47,6 @@ test.describe("Navbar navigation — authenticated", () => {
       await expect(shelfLink).toBeVisible({ timeout: 5000 });
       await shelfLink.click();
 
-      // Exact pathname match via a predicate (a dynamically-built RegExp trips
-      // semgrep's non-literal-regexp rule, blocking in `just ci`).
       await expect(page).toHaveURL((url) => url.pathname === shelf.href, {
         timeout: 10000,
       });
@@ -61,7 +54,6 @@ test.describe("Navbar navigation — authenticated", () => {
     });
   }
 
-  // Search is a top-level destination now (#318 TR-1), not buried in a menu.
   test('clicking "Search" navigates to /search', async ({ page }) => {
     await page.goto("/antilibrary");
     await page.waitForSelector(".app-nav__link", { timeout: 10000 });
@@ -76,8 +68,6 @@ test.describe("Navbar navigation — authenticated", () => {
     await expect(page.getByTestId("user-menu")).toBeVisible();
   });
 
-  // Add Book is a PERSISTENT primary action (#318 TR-1): always in the DOM,
-  // reachable on touch, never behind a disclosure.
   test('clicking "Add Book" navigates to /upload', async ({ page }) => {
     await page.goto("/antilibrary");
     await page.waitForSelector(".app-nav__link", { timeout: 10000 });
@@ -92,9 +82,6 @@ test.describe("Navbar navigation — authenticated", () => {
     await expect(page.getByTestId("user-menu")).toBeVisible();
   });
 
-  // The settings family now lives in the account/user menu (#318 TR-1) — a
-  // button-based dropdown that opens on click. "Profile" is the first entry and
-  // points at /settings/profile (the destination the old "Settings" item used).
   test('opening the account menu → "Profile" navigates to /settings/profile', async ({
     page,
   }) => {
@@ -131,7 +118,6 @@ test.describe("Navbar navigation — authenticated", () => {
       await expect(page.getByTestId("user-menu")).toBeVisible();
     }
 
-    // Sign In link should NOT be visible when authenticated
     await expect(page.locator('a.app-nav__link[href="/login"]')).not.toBeVisible();
   });
 });
@@ -142,35 +128,24 @@ test.describe("Navbar navigation — unauthenticated", () => {
   }) => {
     await page.goto("/login");
 
-    // Elm now boots without awaiting GET /api/config, but first paint is still
-    // async — `allTextContents()` does NOT auto-wait, so wait for the nav to
-    // render before reading it (otherwise we read [] on a cold page).
     const navLinks = page.locator(".app-nav__link");
     await expect(navLinks.first()).toBeVisible({ timeout: 10000 });
     const texts = await navLinks.allTextContents();
 
-    // The Wave 8 unauth nav (#318) is a flat row of top-level links.
     expect(texts).toContain("Catalogue");
     expect(texts).toContain("Search");
     expect(texts).toContain("Marketplace");
     expect(texts).toContain("About");
     expect(texts).toContain("Sign In");
 
-    // Authenticated-only surfaces are absent for a signed-out visitor.
     expect(texts).not.toContain("Bookshelves");
     expect(texts).not.toContain("Add Book");
 
-    // About is a top-level nav item (no brand dropdown any more) → /about.
     await expect(page.locator('a.app-nav__link[href="/about"]')).toBeVisible();
-    // And there is no disclosure trigger at all in the unauth nav.
     await expect(page.locator("button.app-nav__disclosure")).toHaveCount(0);
   });
 });
 
-// ── Home page (US-15.1.1) ────────────────────────────────────────────────────
-// The shipped home CTAs are the #235 About/Marketplace pair (the old
-// "View Antilibrary"/"Add a Book" buttons were removed). Assert the shipped
-// markup — `viewHome` in Main.elm renders it identically for auth/unauth.
 test.describe("Home page — unauthenticated", () => {
   test("renders the title, subtitle and About/Marketplace CTAs", async ({
     page,
@@ -194,9 +169,6 @@ test.describe("Home page — unauthenticated", () => {
   });
 });
 
-// ── Platform footer (US-15.3.1) ──────────────────────────────────────────────
-// `viewFooter` sits in the top-level `view`, so the footer renders on EVERY
-// page — home, an authenticated shelf, and the 404 page. Assert it on all three.
 test.describe("Platform footer", () => {
   const FOOTER_TEXT = "The Stacks — open source book management";
 
@@ -220,7 +192,6 @@ test.describe("Platform footer — authenticated", () => {
 
   test("footer renders on an authenticated bookshelf page", async ({ page }) => {
     await page.goto("/library");
-    // Wait for the authenticated shell to render before reading the footer.
     await expect(page.getByTestId("user-menu")).toBeVisible({ timeout: 10000 });
 
     const footer = page.locator("footer.app-footer");
@@ -231,18 +202,14 @@ test.describe("Platform footer — authenticated", () => {
   });
 });
 
-// ── 404 Not Found page (US-16.1.1) ───────────────────────────────────────────
 test.describe("404 Not Found page", () => {
   test("an unknown route renders the 404 page with nav, footer, title and Go Home", async ({
     page,
   }) => {
     await page.goto("/nonexistent-page");
 
-    // Browser tab title (`Main.pageTitle PageNotFound` — derived from the page
-    // that was built, not from the route that was asked for, since #360).
     await expect(page).toHaveTitle("Not Found — The Stacks");
 
-    // Page content.
     await expect(
       page.locator(".page--not-found h1")
     ).toHaveText("Page Not Found");
@@ -254,17 +221,11 @@ test.describe("404 Not Found page", () => {
     await expect(goHome).toBeVisible();
     await expect(goHome).toHaveText("Go Home");
 
-    // Nav bar and footer are still visible on the 404 page.
     await expect(page.locator("header.app-header")).toBeVisible();
     await expect(page.locator("footer.app-footer")).toBeVisible();
   });
 });
 
-// ── Swipe navigation (US-15.2.2) ─────────────────────────────────────────────
-// The app.js touch listener reads touchstart `touches[0].clientX` and touchend
-// `changedTouches[0].clientX`; a dx < -50 with |dx| > |dy| fires
-// `onSwipe.send("left")`. Dispatch real TouchEvents (dx = -240) to drive the
-// same path a mobile user's swipe takes. Requires a touch-enabled context.
 test.describe("Swipe navigation — authenticated", () => {
   test.use({ hasTouch: true, storageState: suiteAuthFile("navigation") });
 
@@ -301,13 +262,11 @@ test.describe("Swipe navigation — authenticated", () => {
     page,
   }) => {
     await page.goto("/library");
-    // Wait for the authenticated shelf to render before gesturing.
     await expect(page.getByTestId("user-menu")).toBeVisible({ timeout: 10000 });
     await expect(page).toHaveURL(/\/library/);
 
     await swipeLeft(page);
 
-    // swipeLeft advances Library → AntiLibrary via SwipeNavigation.
     await expect(page).toHaveURL(/\/antilibrary/, { timeout: 10000 });
   });
 
@@ -320,16 +279,11 @@ test.describe("Swipe navigation — authenticated", () => {
 
     await swipeLeft(page);
 
-    // Search is not a bookshelf route → SwipeNavigation returns Nothing, so the
-    // gesture is a no-op. Give the port + update a beat to run, then assert the
-    // URL is unchanged. (This is a genuine no-op assertion, not a vacuous guard:
-    // the positive-navigation case above proves the gesture path is live.)
     await page.waitForTimeout(1000);
     await expect(page).toHaveURL(/\/search/);
   });
 });
 
-// ── Marketplace dropdown (US-15.2.1) ─────────────────────────────────────────
 test.describe("Marketplace dropdown — authenticated", () => {
   test.use({ storageState: suiteAuthFile("navigation") });
 

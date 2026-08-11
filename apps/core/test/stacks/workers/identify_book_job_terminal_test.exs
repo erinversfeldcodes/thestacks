@@ -23,8 +23,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
   to update.
   """
 
-  # async: false — the branch table steers the globally-configured vision client
-  # and the zero-row sweep counts rows across the whole table.
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -49,21 +47,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
     :ok
   end
 
-  # ---------------------------------------------------------------------------
-  # The branch table
-  #
-  # Every way the pipeline can fail, in the vocabulary the worker actually sees.
-  # `:analyze` is what the vision client returns; `:expect` is the Oban verdict;
-  # `:retryable?` says whether a non-final attempt should leave the row alone for
-  # the next one.
-  #
-  # Adding a failure mode to the worker without adding a row here is the gap this
-  # file exists to close, so the table is deliberately exhaustive over
-  # `Stacks.AI.VisionError.t/0` plus the two determinations `Stacks.Moderation`
-  # makes itself, plus the non-vision exits (raise, throw, malformed args,
-  # storage failure).
-  # ---------------------------------------------------------------------------
-
   @vision_failures [
     {:circuit_open, {:error, :circuit_open}, :retryable},
     {:budget_exceeded, {:error, :budget_exceeded}, :retryable},
@@ -81,13 +64,9 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
      :deterministic},
     {:isbn_not_found, {:ok, %{"classification" => "CLASSIFICATION_RESULT_BOOK", "books" => []}},
      :deterministic},
-    # A 200 the sidecar sent that says nothing about what it concluded. This is
-    # the shape that used to raise CaseClauseError inside a rescue.
     {:unrecognised_response, {:ok, %{"nonsense" => true}}, :retryable}
   ]
 
-  # Not a module attribute: anonymous functions cannot be escaped into one.
-  # These are the exits that never went through a `case` at all.
   defp crashes do
     [
       {:raise, fn _payload -> raise "vision client blew up" end, :retryable},
@@ -108,7 +87,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
           MockClient.clear()
           MockClient.put_response("analyze", response)
 
-          # attempt == max_attempts: this is the job's last breath.
           run_attempt(image.id, attempt: 3, max_attempts: 3)
 
           {name, Repo.get!(UploadedImage, image.id).status}
@@ -127,8 +105,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
              Full sweep: #{inspect(results)}
              """
 
-      # Every branch is a failure, so every row must say so — "not pending" is
-      # not enough on its own, since `resolved` would also satisfy it.
       assert Enum.all?(results, fn {_name, status} -> status == "rejected" end),
              "expected every failure branch to end `rejected`, got #{inspect(results)}"
     end
@@ -136,9 +112,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
     test "the storage presign failure path also ends terminal" do
       image = insert(:uploaded_image)
 
-      # The branch at the top of `dispatch/1` that returns `{:error, reason}`
-      # without the pipeline ever running — the earliest exit in the worker, and
-      # the one furthest from the code that used to do the marking.
       StorageMock.put_presign_error(:signing_key_unavailable)
       on_exit(&StorageMock.clear/0)
 
@@ -153,8 +126,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
     end
 
     test "the storage presign failure is retried before it is terminal" do
-      # Pins the sibling half: the presign branch must not mark on attempt 1, or
-      # a momentary R2 blip would permanently reject a good upload.
       image = insert(:uploaded_image)
       StorageMock.put_presign_error(:signing_key_unavailable)
       on_exit(&StorageMock.clear/0)
@@ -180,8 +151,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
                  max_attempts: 3
                )
 
-      # A malformed job will present identical args on every retry, so this is
-      # terminal on the FIRST attempt, not the third.
       assert Repo.get!(UploadedImage, image.id).status == "rejected"
     end
 
@@ -262,12 +231,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
   end
 
   describe "an attempt that simply runs too long" do
-    # The branch that has no `case` anywhere: the job is not failing, it is not
-    # returning, it is just still going. Before the in-process bound this was
-    # `c:Oban.Worker.timeout/1`, which kills the executing process with an
-    # asynchronous exit signal — uncatchable, so the guarantee was skipped
-    # entirely and the row stayed `pending` for the reader to stare at.
-
     setup do
       Application.put_env(:core, :identify_attempt_timeout_ms, 50)
       on_exit(fn -> Application.delete_env(:core, :identify_attempt_timeout_ms) end)
@@ -298,8 +261,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
     end
 
     test "returns within the bound instead of waiting for the work" do
-      # If the bound were not enforced, this would take the client's 2s, and the
-      # assertion above would be passing for the wrong reason.
       image = insert(:uploaded_image)
       MockClient.put_response("analyze", slow_client_response())
 
@@ -311,10 +272,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
   end
 
   describe "retry split — attempt counts" do
-    # "It failed" is true of both a retried job and a cancelled one. Only the
-    # number of times the vision service was asked tells them apart, so that is
-    # what these assert.
-
     test "a deterministic failure calls the vision service exactly once" do
       image = insert(:uploaded_image)
 
@@ -345,8 +302,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
     end
 
     test "the two splits differ in attempt count, not merely in outcome" do
-      # Guards against a fix that cancels everything (1 call always) or retries
-      # everything (3 calls always) — both of which pass an outcome-only test.
       deterministic = insert(:uploaded_image)
       transient = insert(:uploaded_image)
 
@@ -394,9 +349,6 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
 
   describe "worst-case lifetime derivation" do
     test "the SSE deadline outlives the job it is waiting on" do
-      # The property that matters is an inequality, not a number: whatever the
-      # retry schedule is, the reader must not be told "timed out" while the job
-      # that will answer them is still allowed to run.
       lifetime = IdentifyBookJob.worst_case_lifetime_ms()
 
       attempts = 3
@@ -406,24 +358,16 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
 
       assert lifetime == attempts * IdentifyBookJob.attempt_timeout_ms() + backoffs * 1_000
 
-      # And an attempt must be allowed to outlast the calls it makes, or the
-      # bound would truncate work that was about to succeed.
       assert IdentifyBookJob.attempt_timeout_ms() > 2 * AIClient.receive_timeout_ms()
     end
 
     test "backoff is deterministic, so the sum above is exact" do
-      # Oban's default backoff adds up to 10% jitter; if this worker inherited it,
-      # `worst_case_lifetime_ms/0` would be an average dressed as a bound.
       values =
         for _ <- 1..20, do: IdentifyBookJob.backoff(%Oban.Job{attempt: 2})
 
       assert Enum.uniq(values) == [IdentifyBookJob.backoff(%Oban.Job{attempt: 2})]
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   defp run_attempt(image_id, opts, extra_args \\ %{}) do
     args =
@@ -438,18 +382,11 @@ defmodule Stacks.Workers.IdentifyBookJobTerminalTest do
 
     perform_job(IdentifyBookJob, args, opts)
   rescue
-    # A branch that raises is *supposed* to reach Oban as a raise — the wrapper
-    # marks the row and re-raises so the stacktrace survives. Swallowing it here
-    # is what lets the sweep assert on the row rather than on the exception.
     exception -> {:raised, exception}
   catch
     kind, reason -> {kind, reason}
   end
 
-  # Inserts a real job and drains the queue to exhaustion, counting how many
-  # times the vision service was actually called. `drain_queue` executes jobs in
-  # the calling process, so the MockClient steering (and the Ecto sandbox
-  # connection) reach the job through `$callers`.
   defp drain_counting_calls(image, response) do
     counter = :counters.new(1, [])
 

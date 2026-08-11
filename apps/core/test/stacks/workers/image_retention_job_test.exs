@@ -10,7 +10,6 @@ defmodule Stacks.Workers.ImageRetentionJobTest do
   alias Stacks.GDPR.ImageRetention
   alias Stacks.Workers.ImageRetentionJob
 
-  # The stuck threshold is 2 hours (from ImageRetention @stuck_threshold_hours)
   @stuck_hours 2
 
   defp image_count(status) do
@@ -99,12 +98,6 @@ defmodule Stacks.Workers.ImageRetentionJobTest do
 
   describe "missing_purge_check (orphan alarm)" do
     test "logs warning for images past expiry still in DB after cleanup" do
-      # Insert a resolved image with expires_at in the past.
-      # cleanup_stuck won't catch it (not pending).
-      # cleanup_expired WILL catch it (expires_at < now).
-      # So after the job runs, the image is deleted and missing_purge_check finds nothing.
-      #
-      # To test missing_purge_check directly, we call it without running cleanup first.
       insert(:uploaded_image,
         status: "resolved",
         expires_at: DateTime.add(DateTime.utc_now(), -1, :day),

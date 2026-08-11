@@ -95,15 +95,9 @@ saveFailure : String -> Http.Error -> String
 saveFailure subject err =
     case err of
         Http.BadStatus 422 ->
-            -- The reader did not type these values — settings forms send
-            -- toggles and picks — so a rejection means this page and the server
-            -- disagree about what is on offer, which a reload settles.
             "The library would not accept that change to " ++ subject ++ ". Reload the page and try again."
 
         Http.BadStatus 429 ->
-            -- No `retry-after` available: these endpoints are authenticated and
-            -- go through `Api.authedExpect`, which hands the caller an
-            -- `Http.Error` with the headers already discarded.
             rateLimited Nothing
 
         Http.BadStatus 503 ->
@@ -113,9 +107,6 @@ saveFailure subject err =
             "The library is unreachable, so " ++ subject ++ " were not saved. Check your connection, then try again."
 
         Http.Timeout ->
-            -- Deliberately does NOT claim the change was lost. A request that
-            -- timed out may well have been applied; the honest report is that
-            -- we stopped waiting for the answer, and where to look for it.
             "The library took too long to answer, so we cannot say whether " ++ subject ++ " were saved. Reload the page to see."
 
         _ ->

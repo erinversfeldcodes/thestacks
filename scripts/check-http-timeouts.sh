@@ -1,35 +1,4 @@
 #!/usr/bin/env bash
-# check-http-timeouts.sh — every HTTP request the SPA makes must be bounded in time (Issue #362).
-#
-# WHY THIS EXISTS
-#
-# `timeout = Nothing` does not mean "no timeout configured". It means "wait forever". Every one of
-# the 84 requests in the frontend carried it, and the consequence is not theoretical: a connection
-# that opens and then stalls — a sleeping machine, a proxy holding the socket, a captive portal —
-# never resolves, so the page's `RemoteData` never leaves `Loading`. The `Failure` branch each page
-# carefully writes is, for that entire class of failure, unreachable code. The reader waits on a
-# spinner with no end.
-#
-# ⚠️ **No Elm test can see this.** `elm-program-test` resolves simulated effects itself; the
-# `timeout` field of an `Http.request` record is never consulted, so a suite of 1,400 green tests
-# says exactly nothing about whether any request is bounded. `frontend/tests/ApiTimeoutTest.elm`
-# pins the VALUES (15s / 120s and their relative order); this gate is what pins the FIELD, at every
-# call site, including ones written next year.
-#
-# WHAT IT CHECKS
-#
-#   1. No `timeout = Nothing` anywhere under `frontend/src/`.
-#   2. No `Http.get`/`Http.post` — those shorthands have no `timeout` field at all, so they are
-#      `Nothing` by construction and cannot be fixed in place. Use `Http.request`.
-#   3. Every `Http.request` record actually names a `timeout`. (Elm requires the field, so this
-#      catches a record built somewhere the first two rules cannot see.)
-#
-# The roster is not a list of files: it is every `.elm` under `frontend/src/`, recomputed each run.
-# A page added tomorrow is checked the moment it makes a request. Nobody edits a list.
-#
-# Usage:
-#   scripts/check-http-timeouts.sh          # fail if any request is unbounded
-#   scripts/check-http-timeouts.sh --list   # every request site and the timeout it names
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
@@ -45,7 +14,6 @@ mode = sys.argv[1]
 
 SRC = "frontend/src/**/*.elm"
 
-# `Http.get`/`Http.post` take `{ url, expect }` only — there is no timeout to set.
 SHORTHAND = re.compile(r"\bHttp\.(get|post)\s*$|\bHttp\.(get|post)\s*\{", re.M)
 REQUEST = re.compile(r"\bHttp\.request\b")
 TIMEOUT = re.compile(r"^\s*,?\s*timeout\s*=\s*(.+?)\s*$", re.M)
@@ -79,7 +47,6 @@ def blank_comments(text):
             index += 1
     return "".join(out)
 
-
 sites, findings = [], []
 
 for path in sorted(glob.glob(SRC, recursive=True)):
@@ -99,11 +66,6 @@ for path in sorted(glob.glob(SRC, recursive=True)):
             )
 
         if REQUEST.search(line):
-            # The record follows the call. Walk it by brace DEPTH, not by the first line that
-            # looks like a closing brace: the request records here nest an encoder record inside
-            # `body`, whose `}` closes several lines before `timeout` appears. Stopping there
-            # reported seven perfectly-bounded endpoints as unbounded — the kind of false alarm
-            # that gets a gate switched off.
             named, depth, started = None, 0, False
             for follow in lines[number - 1 :]:
                 depth += follow.count("{") - follow.count("}")

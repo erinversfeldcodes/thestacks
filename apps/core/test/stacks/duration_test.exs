@@ -33,11 +33,6 @@ defmodule Stacks.DurationTest do
   describe "unknown units — the regression this module exists for" do
     @tag :regression
     test "a day is a day, not a second (Stacks.Accounts' private table stopped at :hour)" do
-      # Before Stacks.Duration, `Stacks.Accounts.grace_unit_in_seconds/1` handled
-      # :second/:minute/:hour and fell through to a catch-all of 1 for everything
-      # else. A `session_rotation_grace` of {1, :day} was therefore honoured as
-      # ONE SECOND — an 86,400x error in a security window, on the copy whose own
-      # comment claimed it mirrored the other two.
       assert Duration.to_seconds({1, :day}) == 86_400
       assert Duration.to_seconds({1, :week}) == 604_800
     end
@@ -99,14 +94,6 @@ defmodule Stacks.DurationTest do
   end
 
   describe "the unit table lives in exactly one module" do
-    # ⛔ The defect this module fixes was not "the conversion is wrong" — it was
-    # "there are three conversions and one of them drifted". Asserting the
-    # arithmetic cannot catch a FOURTH copy being written next month, so this
-    # asserts the property that actually matters: the unit table exists once.
-    #
-    # A hand-maintained list of "modules allowed to convert durations" is the
-    # thing that rots (the #173/#178 lesson), so this goes and looks at the source
-    # instead.
     test "no module outside Stacks.Duration defines its own unit table" do
       offenders =
         Path.wildcard(Path.join([__DIR__, "..", "..", "lib", "**", "*.ex"]))

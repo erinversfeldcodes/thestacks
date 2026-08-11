@@ -39,10 +39,6 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandler do
       enqueue_author_discovery()
       enqueue_edition_discovery(book_id)
 
-      # Only the ISBN is passed. A price belongs to an edition, and the ISBN *is*
-      # the edition's natural key, so the job resolves it — sending `book_id`
-      # would name a work that may have many ISBNs and could not say which one
-      # was priced.
       case %{isbn: isbn}
            |> TriggerPriceScrapeJob.new()
            |> Oban.insert() do
@@ -64,18 +60,8 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandler do
 
   def handle_event(_event), do: :ok
 
-  # Authors to attempt per new book. Small on purpose: the point is a trickle
-  # proportional to catalogue growth, not a burst. Deduplicated per author, so a busy
-  # day does not enqueue the same author repeatedly.
   @authors_per_book 2
 
-  # Editions are discovered per *work*, so this is keyed by book_id rather than ISBN —
-  # the opposite of the price job above, and for the same reason stated there: a price
-  # is a fact about one edition, whereas the edition list is a fact about the work.
-  #
-  # Deduplicated for a day: a work's edition list on Open Library does not change on the
-  # timescale of a book being added twice, and re-running would spend the creation cap
-  # rediscovering rows that already exist.
   defp enqueue_edition_discovery(book_id) do
     %{book_id: book_id}
     |> DiscoverEditionsJob.new(unique: [period: 86_400, fields: [:worker, :args]])
@@ -104,7 +90,6 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandler do
     end)
   rescue
     error ->
-      # Never fail a book creation over enrichment scheduling.
       Logger.warning("BookCreatedHandler: could not enqueue author discovery: #{inspect(error)}")
       :ok
   end

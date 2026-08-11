@@ -29,10 +29,6 @@ import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
 
 
-
--- MODEL
-
-
 type alias Model =
     { metrics : RemoteData Http.Error TransparencyMetrics
     }
@@ -43,10 +39,6 @@ init =
     ( { metrics = Loading }
     , Api.getTransparencyMetrics MetricsReceived
     )
-
-
-
--- UPDATE
 
 
 type Msg
@@ -60,10 +52,6 @@ update msg model =
             ( { model | metrics = Types.RemoteData.fromResult result }
             , Cmd.none
             )
-
-
-
--- VIEW
 
 
 view : Model -> Html Msg
@@ -99,10 +87,6 @@ viewMetrics metrics =
         ]
 
 
-
--- COSTS WIDGET (ADR-019 flagship)
-
-
 viewCostsWidget : List TransparencyEntry -> Html Msg
 viewCostsWidget durable =
     let
@@ -128,10 +112,6 @@ viewCostsWidget durable =
             text ""
 
 
-
--- LIVE SIGNALS
-
-
 viewLiveSection : LiveSignals -> Html Msg
 viewLiveSection live =
     section [ class "metrics__section metrics__section--live", testId "metrics-live-section" ]
@@ -148,10 +128,6 @@ viewLiveSection live =
         ]
 
 
-
--- DURABLE AGGREGATES
-
-
 viewDurableSection : List TransparencyEntry -> Html Msg
 viewDurableSection durable =
     section [ class "metrics__section metrics__section--durable", testId "metrics-durable-section" ]
@@ -160,10 +136,6 @@ viewDurableSection durable =
             [ text "Anonymised corpus and cost totals — always aggregates, never a single reader." ]
         , div [ class "metrics__grid" ] (List.map viewPanel durable)
         ]
-
-
-
--- ONE PANEL + ITS TEACHING TOOLTIP/EXPANDER
 
 
 viewPanel : TransparencyEntry -> Html Msg
@@ -192,10 +164,6 @@ viewTeaching entry =
         , p [ class "metrics__teaching-why" ]
             [ span [ class "metrics__teaching-label" ] [ text "Why: " ], text entry.why ]
         ]
-
-
-
--- WHAT WE OBSERVE / DATA RIGHTS
 
 
 viewObserveSection : Html Msg
@@ -234,10 +202,6 @@ metrics store behind it is never exposed (Grafana proxies queries server-side).
 grafanaUrl : String
 grafanaUrl =
     "https://thestacks-grafana.fly.dev"
-
-
-
--- VALUE FORMATTING
 
 
 formatValue : TransparencyEntry -> String

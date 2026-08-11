@@ -23,10 +23,6 @@ from typing import Any
 from dod_templates import DOD_TEMPLATES, DOMAIN_AGENTS
 from mcp.server.fastmcp import FastMCP
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 ISSUES_DIR = REPO_ROOT / "issues"
 PLANS_DIR = REPO_ROOT / "plans"
@@ -34,11 +30,6 @@ AGENTS_DIR = REPO_ROOT / "docs" / "agents"
 FEEDBACK_DIR = REPO_ROOT / "docs" / "agents" / "feedback"
 
 mcp = FastMCP("project-tools")
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _find_issue_file(number: int) -> Path | None:
@@ -82,7 +73,6 @@ def _parse_issue(path: Path) -> dict[str, Any]:
     text = path.read_text()
     lines = text.splitlines()
 
-    # Header: # Issue #NNN: Title
     number = 0
     title = ""
     if lines:
@@ -93,7 +83,6 @@ def _parse_issue(path: Path) -> dict[str, Any]:
 
     sections = _parse_sections(lines[1:])
 
-    # DoD items
     dod_items: list[dict[str, Any]] = []
     for line in sections.get("Definition of Done", []):
         m_done = re.match(r"^- \[x\] (.+)$", line, re.IGNORECASE)
@@ -106,14 +95,12 @@ def _parse_issue(path: Path) -> dict[str, Any]:
     done_count = sum(1 for d in dod_items if d["done"])
     status = "complete" if dod_items and done_count == len(dod_items) else "open"
 
-    # Progress notes
     progress_notes = [
         line[2:]  # strip leading "- "
         for line in sections.get("Progress Notes", [])
         if re.match(r"^- \d{4}-\d{2}-\d{2}:", line)
     ]
 
-    # Dependencies
     deps_raw = _section_text(sections, "Dependencies")
     dependencies = [
         line.lstrip("- ").strip() for line in deps_raw.splitlines() if line.startswith("-")
@@ -148,7 +135,6 @@ def _extract_summary(domain: str, output: str) -> str:
             if m:
                 return m.group(0).strip()
 
-    # Fall back to the last non-empty line.
     for line in reversed(output.splitlines()):
         stripped = line.strip()
         if stripped:
@@ -161,21 +147,17 @@ def _parse_feedback_file(path: Path) -> list[dict[str, Any]]:
     """Parse a feedback log file and return open entries as dicts."""
     text = path.read_text()
 
-    # Only parse content after the marker.
     marker = "<!-- Entries below this line -->"
     marker_idx = text.find(marker)
     if marker_idx == -1:
         return []
     body = text[marker_idx + len(marker) :]
 
-    # Derive agent name from filename stem.
     agent = path.stem
 
-    # Split on ## headings (each entry starts with ## YYYY-MM-DD ...).
     entry_re = re.compile(r"^## ", re.MULTILINE)
     parts = entry_re.split(body)
 
-    # Field extractors.
     heading_re = re.compile(r"^(\d{4}-\d{2}-\d{2})\s*—\s*Issue\s*#(\d+),?\s*Phase\s*(\S+)")
     field_re = re.compile(r"^\*\*(.+?):\*\*\s*(.+)$", re.MULTILINE)
 
@@ -193,7 +175,6 @@ def _parse_feedback_file(path: Path) -> list[dict[str, Any]]:
         if not part:
             continue
 
-        # Parse heading line.
         first_line = part.split("\n", 1)[0]
         hm = heading_re.match(first_line)
         if not hm:
@@ -206,24 +187,17 @@ def _parse_feedback_file(path: Path) -> list[dict[str, Any]]:
             "phase": hm.group(3),
         }
 
-        # Extract bold fields.
         for fm in field_re.finditer(part):
             key = field_map.get(fm.group(1))
             if key:
                 entry[key] = fm.group(2).strip()
 
-        # Only include open entries.
         if entry.get("status", "").lower() != "open":
             continue
 
         results.append(entry)
 
     return results
-
-
-# ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -316,7 +290,6 @@ def update_progress(number: int, note: str) -> dict[str, Any]:
     updated = text.rstrip("\n") + "\n" + new_line + "\n"
     path.write_text(updated)
 
-    # Also append to state file notes[] if one exists.
     state_path = _find_state_file(number)
     if state_path is not None:
         import json
@@ -343,7 +316,6 @@ def get_plan_status(issue_number: int) -> dict[str, Any]:
     Returns plan existence, status, current phase, and phase detail.
     """
 
-    # Prefer state file — it is the authoritative machine-readable source.
     state_path = _find_state_file(issue_number)
     if state_path is not None:
         state = json.loads(state_path.read_text())
@@ -354,7 +326,6 @@ def get_plan_status(issue_number: int) -> dict[str, Any]:
             **state,
         }
 
-    # Fall back to plan markdown.
     plan_path = _find_plan_file(issue_number)
     if plan_path is None:
         return {"exists": False, "issue_number": issue_number}
@@ -469,7 +440,6 @@ def run_test_suite(domain: str, worktree_path: str | None = None) -> dict[str, A
         }
 
     combined_output = result.stdout + result.stderr
-    # Truncate to last 5000 chars if very long.
     if len(combined_output) > 5000:
         combined_output = combined_output[-5000:]
 
@@ -509,7 +479,6 @@ def create_worktree(issue_number: int, phase: str) -> dict[str, Any]:
     if wt_path.exists():
         return {"error": f"Worktree already exists at {wt_path}"}
 
-    # Ensure parent directory exists.
     wt_path.parent.mkdir(parents=True, exist_ok=True)
 
     result = subprocess.run(
@@ -543,7 +512,6 @@ def remove_worktree(issue_number: int, phase: str) -> dict[str, Any]:
     if not wt_path.exists():
         return {"error": f"No worktree at {wt_path}"}
 
-    # Remove worktree.
     result = subprocess.run(
         ["git", "worktree", "remove", str(wt_path), "--force"],
         capture_output=True,
@@ -557,7 +525,6 @@ def remove_worktree(issue_number: int, phase: str) -> dict[str, Any]:
             or f"git worktree remove failed (exit {result.returncode})"
         }
 
-    # Clean up branch.
     result = subprocess.run(
         ["git", "branch", "-D", branch],
         capture_output=True,
@@ -667,7 +634,6 @@ def draft_issue(
                          and why (becomes the summary).
         domains: List of domain strings (e.g. ["elixir", "database"]).
     """
-    # 1. Collect DoD items (deduplicated, preserving order).
     seen: set[str] = set()
     combined_dod: list[str] = []
     for domain in domains:
@@ -676,7 +642,6 @@ def draft_issue(
                 seen.add(item)
                 combined_dod.append(item)
 
-    # 2. Derive agent assignment.
     agent_lines: list[str] = []
     agent_names: set[str] = set()
     for domain in domains:
@@ -686,7 +651,6 @@ def draft_issue(
             agent_lines.append(f"- **{agent}** for {domain}")
     agent_assignment_text = "\n".join(agent_lines) if agent_lines else ""
 
-    # 3. Detect dependencies from open issues.
     open_issues = list_issues(status="open")
     suggested_deps: list[dict[str, str]] = []
     dep_lines: list[str] = []
@@ -696,13 +660,11 @@ def draft_issue(
         issue_title = issue.get("title", "")
         issue_title_lower = issue_title.lower()
 
-        # Check domain keyword match in title.
         matching_reasons: list[str] = []
         for domain in domains:
             if domain.lower() in issue_title_lower:
                 matching_reasons.append(f"domain: {domain}")
 
-        # Check agent name match in agent_assignment (need full issue data).
         issue_path = _find_issue_file(issue["number"])
         if issue_path is not None:
             full_issue = _parse_issue(issue_path)
@@ -714,8 +676,7 @@ def draft_issue(
         if matching_reasons:
             reason = ", ".join(matching_reasons)
             dep_lines.append(
-                f"- Issue #{issue['number']:03d} ({issue_title})"
-                f" — potential overlap: [{reason}]"
+                f"- Issue #{issue['number']:03d} ({issue_title}) — potential overlap: [{reason}]"
             )
             suggested_deps.append(
                 {
@@ -727,7 +688,6 @@ def draft_issue(
 
     dependencies_text = "\n".join(dep_lines) if dep_lines else "None."
 
-    # 4. Build technical requirements stub with standards references.
     standards_map: dict[str, list[str]] = {
         "elixir": [
             "docs/agents/standards/code-quality.md",
@@ -758,7 +718,6 @@ def draft_issue(
         "[Additional technical requirements to be filled in by human]"
     )
 
-    # 5. Return draft matching create_issue input shape.
     return {
         "title": title,
         "summary": roadmap_context,
@@ -792,17 +751,11 @@ def get_feedback_summary(agent_name: str | None = None) -> list[dict[str, Any]]:
             return []
         return _parse_feedback_file(path)
 
-    # All agents.
     results: list[dict[str, Any]] = []
     if FEEDBACK_DIR.is_dir():
         for path in sorted(FEEDBACK_DIR.glob("*.md")):
             results.extend(_parse_feedback_file(path))
     return results
-
-
-# ---------------------------------------------------------------------------
-# E2E gate helpers
-# ---------------------------------------------------------------------------
 
 
 def _parse_deploy_output(output: str) -> dict[str, Any]:
@@ -824,14 +777,12 @@ def _parse_deploy_output(output: str) -> dict[str, Any]:
         # The script prints lines like: "    Core app:    stacks-core-pr-xxx"
         # and the URL is "https://<app>.fly.dev".
         if "Core app:" in line and not preview_url:
-            # Extract app name after "Core app:"
             parts = line.split("Core app:")
             if len(parts) == 2:
                 app_name = parts[1].strip()
                 if app_name:
                     preview_url = f"https://{app_name}.fly.dev"
 
-    # Also check for the explicit URL pattern in the output
     for line in output.splitlines():
         if "fly.dev" in line and "https://" in line:
             url_match = re.search(r"https://[\w.-]+\.fly\.dev", line)
@@ -878,7 +829,6 @@ def run_e2e_gate(issue_number: int) -> dict[str, Any]:
     if not deploy_script.exists():
         return {"error": f"Deploy script not found: {deploy_script}"}
 
-    # Determine the current branch name for the --branch argument.
     try:
         branch_result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -915,7 +865,6 @@ def run_e2e_gate(issue_number: int) -> dict[str, Any]:
         }
 
     combined_output = result.stdout + result.stderr
-    # Truncate to last 5000 chars if very long.
     if len(combined_output) > 5000:
         combined_output = combined_output[-5000:]
 
@@ -937,11 +886,6 @@ def run_e2e_gate(issue_number: int) -> dict[str, Any]:
         "fail_lines": parsed["fail_lines"],
         "output": combined_output,
     }
-
-
-# ---------------------------------------------------------------------------
-# Image generation (Replicate Flux)
-# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
@@ -983,7 +927,6 @@ def generate_image(
             },
         )
 
-        # output is a list of FileOutput objects or URLs
         image_url = None
         if isinstance(output, list) and len(output) > 0:
             item = output[0]
@@ -997,7 +940,6 @@ def generate_image(
         if not image_url:
             return f"Error: Unexpected output format from Replicate: {type(output)}"
 
-        # Download and save (using requests, not urllib, for security)
         out_path = REPO_ROOT / output_filename
         resp = http_requests.get(image_url, timeout=60)
         resp.raise_for_status()
@@ -1008,10 +950,6 @@ def generate_image(
     except Exception as e:
         return f"Error generating image: {e}"
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     mcp.run()

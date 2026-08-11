@@ -30,9 +30,6 @@ defmodule Core.Repo.Migrations.BackfillAndConstrainEditionVerificationSource do
   """
   use Ecto.Migration
 
-  # NOT NULL tightening is a destructive op (docs/agents/standards/migrations.md
-  # §Expand-Contract), written as the `modify … null: false` DSL so
-  # scripts/lint-migrations.sh detects and gates it.
   @breaking_ok "verification_source is INTRODUCED by this release (20260730193134). The UPDATE below fills every pre-existing row, and every application write path sets it explicitly: Books.create/1, Books.create_confirmed_book/4 and Books.merge_edition/2 all route through Books.book_edition_changeset/2, which now requires the field. No N-1 code writes op.book_editions at all — Books is the only writer — so no rolling-deploy window can insert a null."
 
   def up do
@@ -51,10 +48,6 @@ defmodule Core.Repo.Migrations.BackfillAndConstrainEditionVerificationSource do
       modify :verification_source, :text, null: false
     end
 
-    # Rung 4 for the value domain: an out-of-band writer (psql, a future
-    # importer, a seed) cannot invent a fourth provenance. Mirrors the
-    # `accepted_values` dbt test on stg_book_editions and the
-    # `validate_inclusion` in Books.book_edition_changeset/2.
     create constraint(:book_editions, :book_editions_verification_source_check,
              check:
                "verification_source IN ('open_library', 'google_books', 'barcode_unverified')",

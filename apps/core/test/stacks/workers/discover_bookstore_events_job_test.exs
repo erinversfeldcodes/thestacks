@@ -20,24 +20,15 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
   describe "perform/1 with batch" do
     test "processes stores with website_url set" do
       _store = insert(:bookstore, website_url: nil)
-      # batch mode should not crash even if no stores have URLs
       job = %Oban.Job{args: %{"batch" => true}}
       assert :ok = DiscoverBookstoreEventsJob.perform(job)
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Compliance — the egress (campaign C3) and the recorded block (C4)
-  # ---------------------------------------------------------------------------
-
   describe "compliance: the events page is fetched through the compliant egress" do
     setup do
       on_exit(&MockScraperClient.clear/0)
 
-      # The job no longer fetches a hardcoded `/events` — `EventsPath.resolve/1` asks the shop's own
-      # sitemap first, because the hardcoded path 404s on every real store. So these tests have to say
-      # where `/events` came from, which is a fair thing for them to have to say: previously they
-      # asserted behaviour on a path that does not exist anywhere in production.
       MockScraperClient.put_sitemap(
         "za/test_store",
         {:ok,
@@ -54,9 +45,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a store with no scraper config is never fetched" do
-      # The guarantee is structural, not a policy check: the egress is keyed by scraper
-      # config, which supplies the base URL and the rate limit. No config means no
-      # declared crawl policy, so the store cannot be fetched at all.
       store = insert(:bookstore, scraper_module: nil, website_url: "https://example.test")
 
       assert :ok = DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"batch" => true}})
@@ -86,8 +74,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a disallow does not fail the job, because retrying cannot succeed" do
-      # Reporting a disallow as an error would melt the store's fuse on every run, for
-      # a condition that recurs by definition — and the shared service fuse with it.
       store = insert(:bookstore, scraper_module: "za/test_store")
 
       MockScraperClient.put_page(
@@ -96,8 +82,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
         {:error, {:robots_blocked, "Disallow: /events"}}
       )
 
-      # `{:ok, _}` rather than a bare `:ok`: the classification is what the batch summary tallies,
-      # and the point of the assertion is that it is an :ok at all, not an :error.
       assert {:ok, :blocked} =
                DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
     end
@@ -123,8 +107,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a later successful fetch clears the block, so a lifted disallow resumes" do
-      # Without this the store stays marked blocked forever and "re-checked on the probe
-      # cadence" is a claim with nothing behind it.
       store =
         insert(:bookstore,
           scraper_module: "za/test_store",
@@ -139,9 +121,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
         {:ok, %{status: 200, body: "<h2>A Reading</h2><p>2026-09-01</p>"}}
       )
 
-      # `{:ok, {:events, n}}` rather than a bare `:ok`: `persist_events/2` now reports its COUNT,
-      # because returning `:ok` made `summarise_batch/2`'s events clause dead — every batch logged
-      # "0 event(s) written" regardless of what it wrote.
       assert {:ok, {:events, 1}} =
                DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
 
@@ -155,15 +134,9 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a 404 events page is data, not a failure" do
-      # Plenty of shops have no /events page. Treating that as a failure would melt the
-      # store's fuse for a condition that is simply true of the shop.
       store = insert(:bookstore, scraper_module: "za/test_store")
       MockScraperClient.put_page("za/test_store", "/events", {:ok, %{status: 404, body: ""}})
 
-      # `{:ok, :no_events_page}` rather than a bare `:ok`: the batch summary counts these so a run that
-      # writes zero events explains WHY per store. It took a direct fetch to establish that `/events`
-      # 404s on both scrapeable stores — that belonged in the log, not in an investigation. Oban treats
-      # `:ok` and `{:ok, term}` alike, so this is a reporting change, not a behavioural one.
       assert {:ok, :no_events_page} =
                DiscoverBookstoreEventsJob.perform(%Oban.Job{args: %{"store_id" => store.id}})
 
@@ -172,10 +145,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # The wiring trace — sitemap → resolve → fetch → parse → persist → a ROW
-  # ---------------------------------------------------------------------------
-
   describe "the pipeline actually writes rows" do
     setup do
       on_exit(&MockScraperClient.clear/0)
@@ -183,13 +152,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a resolved events page produces persisted events" do
-      # ⛔ **The assertion that did not exist, and whose absence is the whole story of #307.** This
-      # pipeline fetched a hardcoded `/events` that 404s on every scrapeable store, so it had never
-      # written a single row — and nothing failed, because every test either called `parse_events/2`
-      # on a fixture string or asserted on `Events` directly. Not one of them ran `perform/1` and then
-      # counted rows.
-      #
-      # A unit test per stage cannot catch a broken chain. Only a count at the far end can.
       store = insert(:bookstore, scraper_module: "za/test_store", events_path: nil)
 
       MockScraperClient.put_sitemap(
@@ -231,13 +193,10 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
 
       assert Enum.any?(rows, &(&1.title == "An Evening with Ada Lovelace"))
 
-      # And the resolved path is banked, so the next run costs the shop nothing.
       assert Repo.get!(Bookstore, store.id).events_path == "/pages/events"
     end
 
     test "the path is resolved from the sitemap, not guessed" do
-      # Asserts on the egress, because "it wrote rows" would also hold if a guessed `/events` happened
-      # to work on this fixture. The point of #307 is *which path was asked for*.
       store = insert(:bookstore, scraper_module: "za/test_store", events_path: nil)
 
       MockScraperClient.put_sitemap(
@@ -269,9 +228,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a 304 keeps existing events instead of wiping them" do
-      # ⛔ The failure this outcome exists to prevent. A 304 carries no body, so a client that treats it
-      # as a successful fetch of an empty page concludes the shop cancelled everything — and the first
-      # *unchanged* run would delete every event the store has. Unchanged is the opposite of empty.
       store =
         insert(:bookstore,
           scraper_module: "za/test_store",
@@ -301,9 +257,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "the stored validator is actually sent, so the shop can answer 304" do
-      # Asserts on the request, not on the outcome. "We store an ETag" is worth nothing unless it
-      # travels — and a validator that is stored and never sent fails completely silently: every fetch
-      # just stays full price for the shop.
       store =
         insert(:bookstore,
           scraper_module: "za/test_store",
@@ -329,8 +282,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a fresh fetch banks the validators it came back with" do
-      # Without this the round trip never closes: we would send nothing next time and the shop would
-      # render the page again, every run, forever.
       store =
         insert(:bookstore,
           scraper_module: "za/test_store",
@@ -358,7 +309,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a previously working path that starts 404ing is forgotten, so it re-resolves" do
-      # Without this the store keeps a dead path forever and the shop keeps serving 404s for it.
       store =
         insert(:bookstore,
           scraper_module: "za/test_store",
@@ -381,9 +331,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
   end
 
-  # Asserts directly on the egress rather than on a downstream side effect: "no events
-  # were persisted" would also hold if the fetch happened and returned nothing
-  # parseable, which is the wrong-selector failure mode wearing the right answer's face.
   defp refute_any_fetch_of(store) do
     fetched = Enum.map(MockScraperClient.fetches(), fn {s, _p} -> s end)
 
@@ -399,8 +346,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
       store = insert(:bookstore)
       author = insert(:author, name: "Jane Doe")
 
-      # The headings tier would read "Newsletter" with a footer-adjacent date;
-      # the JSON-LD declares the real event. Structured wins.
       html = """
       <html><head>
       <script type="application/ld+json">
@@ -417,7 +362,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
       assert event.title == "An evening with Jane Doe"
       assert event.location == "Main branch"
       assert event.store_id == store.id
-      # Author matching applies to structured events too.
       assert event.author_id == author.id
       assert DateTime.compare(event.event_date, ~U[2027-04-15 18:30:00Z]) == :eq
     end
@@ -490,14 +434,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
   end
 
-  # `build_events_url/1` and its two tests were removed when the job moved onto the
-  # scraper's compliant egress. It concatenated a caller-supplied host with "/events";
-  # the egress now resolves a *relative* path against the store's configured base URL,
-  # which is what stops a caller steering the rate-limited, robots-checked channel at
-  # another host. The trailing-slash handling those tests covered lives in Rust's
-  # `fetch_path` (`trim_end_matches('/')`) and is tested there, so no coverage was lost
-  # — the behaviour moved rather than disappeared.
-
   describe "parse_events/2 edge cases" do
     test "parses h3 tags as well as h2" do
       store = insert(:bookstore)
@@ -569,14 +505,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
 
   describe "parse_events does not invent a date it cannot justify" do
     test "several DIFFERENT dates on the page yield no date, rather than a guessed pairing" do
-      # ⛔ It used to be `Enum.at(dates, idx)` — the nth heading paired with the nth ISO date found
-      # anywhere in the document. Those lists have no relationship: headings include site chrome and
-      # dates appear in footers, scripts and JSON-LD.
-      #
-      # Measured on a real Shopify page (Wordsworth, 2026-07-29): the headings a regex like this
-      # matches are "Subscribe", "Follow us", "Disclaimer", "Reset your password". Pairing those with
-      # arbitrary dates would have produced confident, wrong records — worse than none, because a
-      # pipeline that invents data is harder to notice and harder to undo than one that produces none.
       store = insert(:bookstore)
 
       html = """
@@ -590,15 +518,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
 
       assert length(events) == 2
 
-      # ⚠️ **This assertion was inverted on 2026-07-29, and the reason matters.** It used to require
-      # `event_date == nil` for every event on any page carrying more than one distinct date. That was
-      # not the guarantee — it was a side effect of the only-one-distinct-date rule, and its cost was
-      # that a *normal* listing (several events, several dates) produced nothing at all. This pipeline
-      # stayed at zero rows partly because of it.
-      #
-      # The real guarantee is that a date is never borrowed from outside its own heading's block, and
-      # the two events below are correctly paired *because* each date sits in its own block. The
-      # no-borrowing half is asserted by the test immediately following.
       by_title = Map.new(events, &{&1.title, &1.event_date})
 
       assert by_title["Author Evening"] == ~U[2026-03-01 00:00:00Z]
@@ -606,10 +525,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a heading with no date in its own block gets nil, not a neighbour's date" do
-      # The no-borrowing half of the guarantee, and the part that keeps the original ⛔ from recurring:
-      # "Author Evening" has a date, "Mystery Event" does not, and the second must not inherit the
-      # first's. A dateless event is then rejected by `upsert_event`, which is the correct outcome —
-      # far better than a confident record with a date that belongs to something else.
       store = insert(:bookstore)
 
       html = """
@@ -631,8 +546,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "a footer date cannot attach itself to the last event" do
-      # The one place block scoping alone is not enough: the final block runs to the end of the
-      # document, so a copyright or "last updated" date in the footer would land on the last event.
       store = insert(:bookstore)
 
       html = """
@@ -647,11 +560,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "multi-byte headings are sliced correctly" do
-      # `heading_blocks/1` takes BYTE offsets from `Regex.scan(return: :index)` and cuts with
-      # `binary_part/3`, so it is fair to ask whether a heading containing é or ë can be sliced
-      # mid-codepoint. It cannot — every boundary is derived from a match of `<h2…>` / `</h2>`, which
-      # are ASCII — but "I reasoned about it" is weaker than "I ran it", and Afrikaans and isiZulu
-      # titles are routine for a South African bookshop rather than an exotic edge case.
       store = insert(:bookstore)
 
       html = """
@@ -671,8 +579,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "site chrome headings are not events" do
-      # Measured on a real Shopify storefront: every one of these renders as an `<h2>`, so without the
-      # filter a page reliably produces several "events" named after its own navigation.
       store = insert(:bookstore)
 
       html = """
@@ -690,8 +596,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "one distinct date repeated beside every entry IS used" do
-      # Unambiguous means one DISTINCT date, not one occurrence. A listing that repeats the same date
-      # next to each entry is common and perfectly clear; refusing it would throw away good data.
       store = insert(:bookstore)
 
       html = """
@@ -723,7 +627,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
       events = DiscoverBookstoreEventsJob.parse_events(html, store)
       assert length(events) == 2
 
-      # Persist them via upsert to verify the full path
       Enum.each(events, fn event_attrs ->
         assert {:ok, _} = Events.upsert_event(event_attrs)
       end)
@@ -733,7 +636,6 @@ defmodule Stacks.Workers.DiscoverBookstoreEventsJobTest do
     end
 
     test "upsert_event handles changeset errors gracefully" do
-      # Missing required store_id should return an error changeset
       result = Events.upsert_event(%{title: "Bad Event"})
       assert {:error, %Ecto.Changeset{}} = result
     end

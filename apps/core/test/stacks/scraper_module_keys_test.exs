@@ -20,8 +20,6 @@ defmodule Stacks.ScraperModuleKeysTest do
   @scrapers_dir Path.join(@repo_root, "apps/scraper/scrapers")
   @seeds Path.join(@repo_root, "apps/core/priv/repo/seeds.exs")
 
-  # Keys exactly as the Rust registry derives them: the path under scrapers/,
-  # extension stripped. See StoreRegistry.load_from_dir.
   defp registry_keys do
     @scrapers_dir
     |> Path.join("**/*.toml")
@@ -35,10 +33,6 @@ defmodule Stacks.ScraperModuleKeysTest do
   end
 
   defp seeded_modules do
-    # The seed builds rows from a literal list of
-    # {id, name, url, scraper_module, has_physical, unscrapable_reason} tuples, where
-    # scraper_module is either a quoted key or `nil`. Only the quoted ones are keys the
-    # registry will ever be asked for.
     ~r/\{\d+,\s*"[^"]+",\s*"[^"]+",\s*"([^"]+)",\s*(?:true|false),/
     |> Regex.scan(File.read!(@seeds))
     |> Enum.map(fn [_, module] -> module end)
@@ -54,8 +48,6 @@ defmodule Stacks.ScraperModuleKeysTest do
 
     basenames = Map.new(keys, &{Path.basename(&1), &1})
 
-    # The failure mode that actually happened: a value that matches a TOML's
-    # basename but not its full key.
     mismatched =
       for m <- seeded,
           m not in keys,
@@ -70,17 +62,6 @@ defmodule Stacks.ScraperModuleKeysTest do
   end
 
   test "no seeded store names a config that does not exist" do
-    # ⚠️ This case used to be *deliberately allowed*, on the reasoning that a store
-    # whose config had not been written yet was "expected and visible". It was neither.
-    # Nine of eleven seeded stores named a nonexistent config, and because the key is
-    # what the registry looks up, each one was a guaranteed `404 store not found` on
-    # every lookup — and the client melts that store's fuse on a non-200. So the
-    # "pending" state was indistinguishable from a broken shop, forever.
-    #
-    # The invariant now: `scraper_module` is non-nil **iff** a TOML exists for it.
-    # A store awaiting configuration carries nil, which `Prices.scrapeable_stores/0`
-    # excludes structurally, so it is never asked and never melts anything. That turns
-    # a silent runtime failure into a pre-merge one.
     keys = registry_keys()
     seeded = seeded_modules()
 
@@ -94,8 +75,6 @@ defmodule Stacks.ScraperModuleKeysTest do
   end
 
   test "every scraper TOML is claimed by a seeded store" do
-    # The other direction: a config nobody references is dead weight, and worse, it
-    # reads as coverage the pipeline does not have.
     keys = registry_keys()
     seeded = seeded_modules()
 

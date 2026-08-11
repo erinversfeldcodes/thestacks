@@ -35,10 +35,6 @@ suite =
         ]
 
 
-
--- 1. LOGIN PAGE LAYER STRUCTURE
-
-
 layerStructureTests : Test
 layerStructureTests =
     describe "Scene layer structure"
@@ -83,10 +79,6 @@ layerStructureTests =
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-overlay" ]
         ]
-
-
-
--- 2. PARCHMENT LOGIN CARD
 
 
 parchmentCardTests : Test
@@ -140,10 +132,6 @@ parchmentCardTests =
                     |> ProgramTest.expectViewHas
                         [ Selector.class "login-card__submit" ]
         ]
-
-
-
--- 3. FORM VALIDATION AND ERROR STATES
 
 
 formValidationTests : Test
@@ -232,10 +220,6 @@ formValidationTests =
         ]
 
 
-
--- 4. AUTH SUCCESS TRANSITION STATE
-
-
 transitionStateTests : Test
 transitionStateTests =
     describe "Auth success transition"
@@ -266,10 +250,6 @@ transitionStateTests =
                     |> ProgramTest.expectViewHasNot
                         [ Selector.class "login-entrance" ]
         ]
-
-
-
--- 5. ARIA ATTRIBUTES
 
 
 ariaTests : Test

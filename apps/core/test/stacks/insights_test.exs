@@ -13,7 +13,6 @@ defmodule Stacks.InsightsTest do
   alias Core.Repo
   alias Stacks.Insights
 
-  # Shelve a book (with given subjects/bisac) for a user, returning the book.
   defp shelve(user, opts \\ []) do
     bs = Keyword.get_lazy(opts, :bookshelf, fn -> insert(:bookshelf, user: user) end)
 
@@ -94,9 +93,6 @@ defmodule Stacks.InsightsTest do
 
       now = DateTime.utc_now()
 
-      # Two finished books spanning 10 and 3 days → median (10+3)/2 = 6.5, which
-      # must be emitted as an integer (7), not a float — the Elm decoder is
-      # Decode.int and a float would fail the whole payload decode.
       shelve(user,
         bookshelf: bs,
         reading_status: "completed",
@@ -148,7 +144,6 @@ defmodule Stacks.InsightsTest do
 
       books = for _ <- 1..5, do: shelve(user, bookshelf: bs)
 
-      # A second user shelves the exact same set of books.
       other = insert(:user)
       other_bs = insert(:bookshelf, user: other)
       for book <- books, do: insert(:placement, bookshelf: other_bs, book: book)

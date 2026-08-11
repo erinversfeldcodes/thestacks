@@ -15,10 +15,6 @@ defmodule Stacks.Blog do
   alias Stacks.Social
   alias Stacks.Visibility
 
-  # ---------------------------------------------------------------------------
-  # Post CRUD
-  # ---------------------------------------------------------------------------
-
   @doc """
   Creates a blog post for the given user.
 
@@ -32,9 +28,6 @@ defmodule Stacks.Blog do
     attrs =
       attrs
       |> Map.put(:user_id, user.id)
-      # US-6.2.1: the writer's account-level preference decides a NEW post's
-      # feed inclusion unless the post says otherwise. Only meaningful once
-      # the post is public — the flag is inert below that tier.
       |> Map.put_new(:syndicated, user.syndication_default)
 
     requested_visibility = Map.get(attrs, :visibility, "owner")
@@ -48,8 +41,6 @@ defmodule Stacks.Blog do
           event_type: "blog.post_created",
           aggregate_type: "post",
           aggregate_id: post.id,
-          # v2: title dropped — free text belongs on the row, not the event_log
-          # (events.ex UUID-only invariant). The post is identified by aggregate_id.
           schema_version: 2,
           payload: %{user_id: user.id, visibility: post.visibility}
         })
@@ -79,7 +70,6 @@ defmodule Stacks.Blog do
           event_type: "blog.post_updated",
           aggregate_type: "post",
           aggregate_id: updated_post.id,
-          # v2: title dropped (see blog.post_created).
           schema_version: 2,
           payload: %{
             user_id: user.id,
@@ -107,7 +97,6 @@ defmodule Stacks.Blog do
           event_type: "blog.post_published",
           aggregate_type: "post",
           aggregate_id: published_post.id,
-          # v2: title dropped (see blog.post_created).
           schema_version: 2,
           payload: %{user_id: user.id}
         })
@@ -149,10 +138,6 @@ defmodule Stacks.Blog do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Reads
-  # ---------------------------------------------------------------------------
-
   @doc """
   Fetches a single post by ID.
 
@@ -174,8 +159,6 @@ defmodule Stacks.Blog do
         nil
 
       post ->
-        # Preload the author so the serializer can emit author_display_name
-        # (the block-user confirmation label).
         post = Repo.preload(post, :user)
         if Visibility.can_view?(post, viewer), do: post, else: nil
     end
@@ -192,14 +175,12 @@ defmodule Stacks.Blog do
     query =
       case viewer do
         {:platform_user, ^user_id} ->
-          # Owner sees everything, including unpublished drafts
           from(p in Post,
             where: p.user_id == ^user_id,
             order_by: [desc: p.created_at]
           )
 
         _ ->
-          # Non-owners only see published posts
           from(p in Post,
             where: p.user_id == ^user_id and not is_nil(p.published_at),
             order_by: [desc: p.published_at]
@@ -208,7 +189,6 @@ defmodule Stacks.Blog do
 
     query
     |> Repo.all()
-    # Preload authors so the serializer can emit author_display_name.
     |> Repo.preload(:user)
     |> Enum.filter(&Visibility.can_view?(&1, viewer))
   end
@@ -259,10 +239,6 @@ defmodule Stacks.Blog do
 
     {:ok, length(posts_to_tighten)}
   end
-
-  # ---------------------------------------------------------------------------
-  # Book associations
-  # ---------------------------------------------------------------------------
 
   @doc """
   Manually associates a book with a post.
@@ -406,10 +382,6 @@ defmodule Stacks.Blog do
     |> Repo.all()
   end
 
-  # ---------------------------------------------------------------------------
-  # Comments
-  # ---------------------------------------------------------------------------
-
   @doc """
   Lists all comments for a post, with replies nested one level deep.
   Comments from users the viewer has blocked are silently excluded.
@@ -493,10 +465,6 @@ defmodule Stacks.Blog do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Changesets
-  # ---------------------------------------------------------------------------
-
   @post_required_fields [:user_id, :title, :body]
   @post_optional_fields [:visibility, :visibility_group_id, :published_at, :syndicated]
 
@@ -505,7 +473,6 @@ defmodule Stacks.Blog do
     post
     |> cast(attrs, @post_required_fields ++ @post_optional_fields)
     |> validate_required(@post_required_fields)
-    # Canonical Audience ladder (owner/group/platform) — one source of truth.
     |> validate_inclusion(:visibility, Visibility.audience_levels())
   end
 
@@ -520,10 +487,6 @@ defmodule Stacks.Blog do
     |> validate_required(@assoc_required_fields)
     |> validate_inclusion(:source, @assoc_valid_sources)
   end
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   defp check_ownership(%Post{user_id: owner_id}, %{id: user_id})
        when owner_id == user_id,

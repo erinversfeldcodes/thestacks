@@ -41,9 +41,6 @@ defmodule Stacks.DataCorrection.Column do
   @typedoc "A correction's write target: `{qualified table, column}`."
   @type target :: {String.t(), String.t()}
 
-  # Lowercase snake_case only, one optional schema qualifier. Anything else
-  # raises rather than being escaped — a correction that needs a quoted
-  # identifier is a correction that needs a human to look at it.
   @identifier ~r/\A[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?\z/
 
   @doc """
@@ -139,7 +136,6 @@ defmodule Stacks.DataCorrection.Column do
   @doc "False on a database that has not been migrated yet."
   @spec table_present?(String.t()) :: boolean()
   def table_present?(table) do
-    # ::text because Postgrex has no decoder for the bare `regclass` OID type.
     %{rows: [[regclass]]} = Repo.query!("SELECT to_regclass($1)::text", [table])
     regclass != nil
   end

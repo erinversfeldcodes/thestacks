@@ -36,8 +36,6 @@ type alias Model =
     , activeTab : Tab
     , feed : RemoteData Http.Error FeedResponse
     , loadingMoreFeed : Bool
-
-    -- One block affordance per other member seen in the feed, keyed by user id.
     , blockModals : Dict String BlockModal.Model
     }
 
@@ -61,8 +59,6 @@ type OutMsg
     = NoOut
     | NavigateTo Route
     | SessionExpired
-      -- Escape reached the page but no block surface was open to consume it, so
-      -- the shell should fall through to its default Escape handling.
     | EscapeUnhandled
 
 
@@ -256,8 +252,6 @@ update msg model =
                             ( modelWith newBlockModal, Cmd.map (BlockModalMsg uid) subCmd, NoOut )
 
                         BlockModal.UserBlocked ->
-                            -- The blocked member's activity resolves to :hidden
-                            -- server-side (bidirectional block), so refetch the feed.
                             ( { model
                                 | blockModals = Dict.insert uid newBlockModal model.blockModals
                                 , feed = Loading
@@ -279,9 +273,6 @@ update msg model =
                     ( model, Cmd.none, NoOut )
 
         EscapePressed ->
-            -- Give the open block affordance (at most one at a time) first dibs
-            -- on Escape; if none is open, tell the shell to fall through to its
-            -- default Escape handling.
             case firstOpenBlockModal model.blockModals of
                 Just ( uid, blockModal ) ->
                     let

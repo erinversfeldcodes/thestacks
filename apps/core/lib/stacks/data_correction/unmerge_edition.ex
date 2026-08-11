@@ -151,30 +151,18 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     with {:ok, work} <- mint_work(to),
          :ok <- Column.swap(@work, edition_id, uuid(work_id), uuid(work.id)),
          :ok <- Column.swap(@primary, edition_id, false, true) do
-      # #396: a placement whose book_edition_id IS this edition records that
-      # the reader's copy is the split-out book — it follows the edition, or
-      # the reparent would leave its book_id and book_edition_id naming
-      # different works. Set-based on the edition FK, so no other placement
-      # can match.
       {moved, _} =
         Repo.update_all(
           from(p in Placement, where: p.book_edition_id == ^edition_id),
           set: [book_id: work.id, updated_at: DateTime.utc_now()]
         )
 
-      # The book detail page is served from a 5-minute ETS cache keyed by work
-      # id, so without this both works keep describing the pre-split shape for
-      # up to five minutes — the same eviction-under-the-wrong-key defect #355
-      # found. Evicted in-band rather than by event, because the operator reads
-      # the result back immediately and Oban dispatch is asynchronous.
       BookDetailCache.invalidate(work_id)
       BookDetailCache.invalidate(work.id)
 
       {:ok, %{new_work_id: work.id, placements_moved: moved}}
     end
   end
-
-  # ── Planning ──────────────────────────────────────────────────────────────
 
   defp fetch_edition(edition_id) do
     case Repo.get(BookEdition, edition_id) do
@@ -183,17 +171,11 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     end
   end
 
-  # A merged edition is always `is_primary: false` (`Books.merge_edition/2`
-  # hardcodes it), so a primary edition was never merged and splitting it would
-  # take the work's representative row away from it.
   defp refuse_primary(%BookEdition{is_primary: true, id: id}),
     do: {:error, {:primary_edition, id}}
 
   defp refuse_primary(%BookEdition{}), do: :ok
 
-  # The work must keep an edition. A work with none is not reachable by ISBN and
-  # not describable on a detail page, and "split the only edition out" is a
-  # rename asking to be a repair.
   defp refuse_last_edition(edition) do
     siblings =
       Repo.aggregate(from(e in BookEdition, where: e.book_id == ^edition.book_id), :count)
@@ -231,8 +213,6 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     }
   end
 
-  # ── Applying ──────────────────────────────────────────────────────────────
-
   defp mint_work(%{work_title: title, visibility_tier: visibility_tier}) do
     %Book{}
     |> Books.book_changeset(%{"title" => title, "visibility_tier" => visibility_tier})
@@ -243,7 +223,5 @@ defmodule Stacks.DataCorrection.UnmergeEdition do
     end
   end
 
-  # `Column.swap/4` dumps the row id but hands `from`/`to` to Postgrex as it
-  # received them, and `book_id` is a `uuid` column — so the caller dumps.
   defp uuid(id), do: Ecto.UUID.dump!(id)
 end

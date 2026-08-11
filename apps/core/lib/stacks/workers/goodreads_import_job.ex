@@ -84,8 +84,6 @@ defmodule Stacks.Workers.GoodreadsImportJob do
         enqueue_next(import.id, List.last(batch).row_number)
 
       {:error, :resolver_unavailable} when final_attempt? ->
-        # The gate never converts an outage into "unverified"; the import
-        # fails instead, with every already-processed row's outcome kept.
         Logger.error(
           "GoodreadsImportJob: resolver still unavailable on final attempt, " <>
             "failing import=#{import.id} at offset=#{offset}"
@@ -115,7 +113,6 @@ defmodule Stacks.Workers.GoodreadsImportJob do
     end)
   end
 
-  # Already processed (this batch is a retry) — skip, never redo.
   defp process_row(_import, %LibraryImportRow{outcome: outcome}) when not is_nil(outcome), do: :ok
 
   defp process_row(import, row) do
@@ -137,15 +134,7 @@ defmodule Stacks.Workers.GoodreadsImportJob do
     end
   end
 
-  # The hard gate's front door: no verifiable ISBN, no entry. Goodreads rows for
-  # ebooks/audiobooks often ship without one — the reader's report says so
-  # plainly instead of inventing a book.
   defp usable_isbn(row) do
-    # canonical_isbn13/1 normalises but does NOT validate (an empty cell comes
-    # back as ""), and valid_isbn_checksum?/1 deliberately fails OPEN for
-    # strings not shaped like an ISBN — so the gate here demands both: 13
-    # digits AND a passing checksum. ISBN13 preferred, ISBN10 accepted
-    # (canonicalised to 13).
     candidate =
       Enum.find_value([row.raw_isbn13, row.raw_isbn], fn raw ->
         canonical = ISBN.canonical_isbn13(raw)
@@ -211,8 +200,6 @@ defmodule Stacks.Workers.GoodreadsImportJob do
           :ok
 
         {:error, :reading_pile_full} ->
-          # The pile's 50-book cap holds for imports too; the book is real, the
-          # pile is full — report it rather than silently rerouting.
           Imports.record_outcome(row, "unverified",
             reason: "reading pile is full — move some books and re-import",
             book_id: book.id
@@ -237,7 +224,6 @@ defmodule Stacks.Workers.GoodreadsImportJob do
     |> Enum.any?(&(&1.bookshelf.name == bookshelf_name))
   end
 
-  # The reader's Goodreads history, carried onto the placement it maps to.
   defp carried_attrs(row, bookshelf_name) do
     %{}
     |> put_if(:personal_rating, if(row.raw_rating in 1..5, do: row.raw_rating))
@@ -267,7 +253,6 @@ defmodule Stacks.Workers.GoodreadsImportJob do
     end
   end
 
-  # Goodreads exports dates as `YYYY/MM/DD`.
   defp parse_goodreads_date(value) do
     with <<_::binary>> <- value,
          [y, m, d] <- String.split(value, "/"),

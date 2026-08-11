@@ -49,14 +49,7 @@ type alias AvailabilityItem =
 type alias Model =
     { book : RemoteData Http.Error Book
     , placement : Maybe Placement
-
-    -- EVERY bookshelf this book sits on for the current reader (#333). A book
-    -- may legally be on more than one; `placement` is the first of these and
-    -- owns the single-placement affordances (rating, visibility, progress).
     , placements : List Placement
-
-    -- The placement currently being removed from the multi-shelf notice, so
-    -- only that row shows its pending state.
     , removingPlacementId : Maybe String
     , bookshelfMoverOpen : Bool
     , removeModalOpen : Bool
@@ -68,16 +61,7 @@ type alias Model =
     , removeState : RemoteData Http.Error ()
     , selectedEdition : Maybe Edition
     , previousRoute : Maybe Route
-
-    -- The author's bookstore events (#321 item 4). NotAsked = fetch not yet
-    -- issued (the card says "Events coming soon"); Success [] = we looked and
-    -- the author has none listed.
     , authorEvents : RemoteData Http.Error (List Api.AuthorEvent)
-
-    -- Set True only on a backend 403 (age_verification_required). The server
-    -- issues that 403 ONLY when age-gating is enforced (ADR-020: dark in prod →
-    -- no 403 → the gate never shows), so this flag alone is the correct signal;
-    -- no separate client-side age-gating flag is needed here.
     , showAgeGate : Bool
     , entryAnimationActive : Bool
     , isAuthenticated : Bool
@@ -87,19 +71,9 @@ type alias Model =
     , previousVisibility : Visibility
     , shelfCeiling : Visibility
     , visibilityState : RemoteData Http.Error ()
-
-    -- Reading progress (US-1.6.6). The card is mounted only when the placement
-    -- sits on a readable bookshelf (reading_pile, library).
     , progressCard : Maybe Card.Model
     , progressSaveState : RemoteData Api.ProgressError ()
     , finishedReadPrompt : Bool
-
-    -- The removal the reader could still take back (US-1.6.4 extension, #375).
-    -- Set only by `RemoveCompleted (Ok _)`, and read by `Main` at the moment it
-    -- acts on the accompanying `NavigateTo`: this page navigates away
-    -- immediately, so the toast belongs to the shelf the reader lands on, not
-    -- here. Structurally the same record as `Page.Bookshelf.Removal`, which is
-    -- what lets Main hand it straight over without a shared wrapper module.
     , undoableRemoval : Maybe { placementId : String, bookTitle : String }
     }
 
@@ -323,9 +297,6 @@ editionPricesFor rows isbn =
 toStoreListing : PriceRow -> PriceInfo.StoreListing
 toStoreListing row =
     { storeName = row.storeName
-
-    -- Cents become rand only at the edge. Storage and the wire use cents because
-    -- that is what shops report, and it avoids rounding drift.
     , priceZar = toFloat row.priceCents / 100
     , buyUrl = row.buyUrl
     , trend = ""
@@ -396,10 +367,6 @@ update msg model maybeToken =
                                 |> Maybe.map .formats
                                 |> Maybe.withDefault []
 
-                        -- No `Visibility.fromString` here any more: the
-                        -- placement decoder parses the wire enum at the
-                        -- boundary, so this reads a `Visibility` rather than
-                        -- re-parsing a string the app had already been handed.
                         placementVisibility =
                             response.placement
                                 |> Maybe.andThen .visibility
@@ -413,15 +380,7 @@ update msg model maybeToken =
                         progressCard =
                             case response.placement of
                                 Just placement ->
-                                    -- Reading progress is a readable-bookshelf
-                                    -- affordance (Reading Pile, Library) only.
-                                    -- Embed the loaded book so the card's
-                                    -- progress line can show "/ {page count}"
-                                    -- (the book-detail placement payload does
-                                    -- not embed the book itself).
                                     if bookshelf == "reading_pile" || bookshelf == "library" then
-                                        -- Hide the card's own title: the book
-                                        -- identity is already the page context.
                                         Just (Card.hideTitle (Card.init { placement | book = Just response.book }))
 
                                     else
@@ -476,8 +435,6 @@ update msg model maybeToken =
                     ( { model | authorEvents = Success events }, Cmd.none, NoOut )
 
                 Err err ->
-                    -- The card keeps its stub; events are enrichment, never a
-                    -- reason to degrade the page.
                     ( { model | authorEvents = Failure err }, Cmd.none, NoOut )
 
         DismissAgeGate ->
@@ -487,11 +444,6 @@ update msg model maybeToken =
             ( model, Cmd.none, RequestCloseOverlay )
 
         EscapePressed ->
-            -- Scoped Escape (US-1.4.1): dismiss the TOP-MOST surface first. Only
-            -- when no nested surface is open does Escape close the overlay (via
-            -- RequestCloseOverlay, which Main consumes to return focus to the
-            -- triggering spine). A consumed Escape returns NoOut so the overlay
-            -- stays open.
             if model.removeModalOpen then
                 ( { model | removeModalOpen = False }, focusElement removeTriggerId, NoOut )
 
@@ -602,9 +554,6 @@ update msg model maybeToken =
                     )
 
                 Err Api.PlaceReadingPileFull ->
-                    -- #281: the place path can hit the same reading-pile cap the
-                    -- move path does. Reuse the move path's ReadingPileFull so
-                    -- viewMoveState renders the specific full-pile copy.
                     ( { model | moveState = Failure Api.ReadingPileFull }, Cmd.none, NoOut )
 
                 Err (Api.PlaceHttpError err) ->
@@ -612,17 +561,12 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Wrap the transport error so the place path shares
-                        -- moveState (and its generic copy) with the move path.
                         ( { model | moveState = Failure (Api.MoveHttpError err) }, Cmd.none, NoOut )
 
         OpenRemoveModal ->
-            -- Move focus into the destructive dialog, defaulting to the safe
-            -- "Keep It" button.
             ( { model | removeModalOpen = True }, focusElement RemoveBookModal.cancelButtonId, NoOut )
 
         CloseRemoveModal ->
-            -- Return focus to the control that opened the dialog.
             ( { model | removeModalOpen = False }, focusElement removeTriggerId, NoOut )
 
         ConfirmRemove ->
@@ -639,11 +583,6 @@ update msg model maybeToken =
         RemoveCompleted result ->
             case result of
                 Ok _ ->
-                    -- Record what was removed BEFORE navigating away, so the shelf
-                    -- the reader lands on can offer to put it back (#375). The
-                    -- placement id is the one just soft-deleted; the undo clears
-                    -- `removed_at` on that same row rather than re-placing the
-                    -- book, which is why the id — not the book id — is carried.
                     ( { model
                         | removeState = Success ()
                         , undoableRemoval = undoableRemovalFor model
@@ -659,10 +598,6 @@ update msg model maybeToken =
                     else
                         ( { model | removeState = Failure err }, Cmd.none, NoOut )
 
-        -- Per-placement remove from the multi-shelf notice (#333). Unlike the
-        -- danger-zone remove this does NOT confirm and does NOT navigate away:
-        -- the reader is tidying up an extra copy, not leaving their collection,
-        -- and the book is still on at least one other bookshelf afterwards.
         RemovePlacement placementId ->
             case maybeToken of
                 Just token ->
@@ -681,10 +616,6 @@ update msg model maybeToken =
                         remaining =
                             List.filter (\p -> p.id /= placementId) model.placements
 
-                        -- The removed row may have been the one driving the
-                        -- rating / visibility / progress affordances. Promote
-                        -- the next remaining placement rather than leaving the
-                        -- page pointing at a placement that no longer exists.
                         primary =
                             case model.placement of
                                 Just current ->
@@ -746,21 +677,13 @@ update msg model maybeToken =
         PlacementVisibilitySelected raw ->
             case ( Visibility.fromString raw, model.placement, maybeToken ) of
                 ( Just vis, Just placement, Just token ) ->
-                    -- Ignore a new selection while a prior save is still in flight,
-                    -- so previousVisibility retains the last CONFIRMED value for
-                    -- rollback (a rapid double-change under latency would otherwise
-                    -- capture an unconfirmed optimistic value).
                     if model.visibilityState == Loading then
                         ( model, Cmd.none, NoOut )
-                        -- Guard client-side against the ceiling (mirrors the server
-                        -- 422): a disabled option should never reach the wire.
 
                     else if Visibility.exceedsCeiling model.shelfCeiling vis then
                         ( model, Cmd.none, NoOut )
 
                     else
-                        -- Optimistically show the new value, but remember the
-                        -- prior one so a failed save can roll the select back.
                         ( { model
                             | placementVisibility = vis
                             , previousVisibility = model.placementVisibility
@@ -795,8 +718,6 @@ update msg model maybeToken =
                         ( model, Cmd.none, SessionExpired )
 
                     else
-                        -- Revert the optimistic change: the server rejected it,
-                        -- so don't leave the rejected value shown in the select.
                         ( { model
                             | visibilityState = Failure err
                             , placementVisibility = model.previousVisibility
@@ -825,7 +746,6 @@ update msg model maybeToken =
                             )
 
                         ( Card.EditClosed, _ ) ->
-                            -- Form closed by Cancel: return focus to the badge.
                             ( { model | progressCard = Just newCard }, focusProgressBadge newCard, NoOut )
 
                         _ ->
@@ -839,16 +759,9 @@ update msg model maybeToken =
                 Ok progress ->
                     ( { model
                         | placement = Maybe.map (\p -> Api.foldProgress p progress) model.placement
-
-                        -- Fold from the CARD's placement (which carries the
-                        -- embedded book) so the "/ {page count}" total survives.
-                        -- Card.init closes the form on success.
                         , progressCard =
                             Maybe.map (\c -> Card.init (Api.foldProgress c.placement progress)) model.progressCard
                         , progressSaveState = Success ()
-
-                        -- The "record this read?" bridge is a Reading Pile
-                        -- affordance only — never offer a library→library move.
                         , finishedReadPrompt =
                             (progress.readingStatus == Just Completed && model.currentBookshelf == "reading_pile")
                                 || model.finishedReadPrompt
@@ -871,7 +784,6 @@ update msg model maybeToken =
                         )
 
                 Err other ->
-                    -- Keep the form open (draft preserved) so the reader can fix it.
                     ( { model
                         | progressCard = Maybe.map Card.stopSaving model.progressCard
                         , progressSaveState = Failure other
@@ -886,9 +798,6 @@ update msg model maybeToken =
         RecordReadRequested ->
             case ( model.placement, maybeToken ) of
                 ( Just placement, Just token ) ->
-                    -- Reuse the existing move mechanism (US-1.6.3): send the
-                    -- finished book to the Library. MoveCompleted folds the new
-                    -- bookshelf name from selectedBookshelf, so pin it here.
                     ( { model | finishedReadPrompt = False, selectedBookshelf = "library", moveState = Loading }
                     , Api.moveBook placement.id "library" token MoveCompleted
                     , NoOut
@@ -1738,8 +1647,6 @@ viewMoveState state =
                 [ text "Moved successfully." ]
 
         Failure Api.ReadingPileFull ->
-            -- #276: the write path rejected the move because the reading
-            -- pile is at its 50-book cap. Distinct from a transport failure.
             div
                 [ class "book-detail__status book-detail__status--error"
                 , testId "reading-pile-full-msg"
@@ -1848,9 +1755,6 @@ overlayView model =
             , attribute "aria-label" ariaLabel
             , attribute "aria-modal" "true"
             , tabindex -1
-
-            -- Focus trap (US-1.4.1): intercept Tab/Shift+Tab at the overlay
-            -- boundaries so keyboard focus never escapes to the shelf behind.
             , preventDefaultOn "keydown" trapKeydownDecoder
             , style "position" "relative"
             , style "z-index" "1001"

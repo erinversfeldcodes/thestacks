@@ -157,8 +157,6 @@ defmodule Stacks.Partners do
     @key_prefix <> hex
   end
 
-  # ── Inventory ──────────────────────────────────────────────────────────────
-
   @valid_conditions ~w(new like_new good fair poor)
 
   @doc """
@@ -263,8 +261,6 @@ defmodule Stacks.Partners do
       returning: true
     )
   end
-
-  # ── Events ─────────────────────────────────────────────────────────────────
 
   @doc """
   Create a third space event for a partner's linked third space.

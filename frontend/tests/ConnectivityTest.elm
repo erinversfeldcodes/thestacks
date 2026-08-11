@@ -88,8 +88,6 @@ suite =
                     |> Expect.equal ( Main.Online, Main.Offline )
         , test "port_boundary_to_banner: the value app.js sends, rendered — the contract in one assertion" <|
             \() ->
-                -- `app.js` sends `navigator.onLine`. This is that boolean going
-                -- all the way to markup, phrased the way the port is.
                 Expect.all
                     [ \_ ->
                         Main.viewConnectivity (Main.connectivityFromOnline False)

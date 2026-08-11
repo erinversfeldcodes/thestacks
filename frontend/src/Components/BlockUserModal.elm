@@ -68,8 +68,6 @@ type OutMsg
     = NoOut
     | UserBlocked
     | SessionExpired
-      -- Escape closed (or, mid-flight, kept) an open surface: the host consumed
-      -- the key and must NOT fall through to a page-level Escape handler.
     | Dismissed
 
 
@@ -102,17 +100,11 @@ update msg model maybeToken =
             ( { model | menuOpen = not model.menuOpen }, Cmd.none, NoOut )
 
         MenuClosed ->
-            -- Click-away on the backdrop: close the menu and return focus to the
-            -- ⋯ trigger (the disclosure focus-return convention).
             ( { model | menuOpen = False }, focusTrigger model, NoOut )
 
         EscapePressed ->
-            -- Escape dismisses the top-most open surface, mirroring the nav /
-            -- account-menu Escape close, and returns focus to the ⋯ trigger.
             if model.confirming then
                 if isBlocking model.status then
-                    -- A block is in flight: keep the modal (as BlockDismissed
-                    -- does), but the key is still consumed.
                     ( model, Cmd.none, Dismissed )
 
                 else
@@ -203,8 +195,6 @@ view model =
         , if model.menuOpen then
             div []
                 [ -- Transparent full-screen layer that turns an outside click
-                  -- into `MenuClosed` — the same click-away shape as the nav
-                  -- disclosures' `.app-nav__backdrop`.
                   div
                     [ class "app-nav__backdrop"
                     , style "position" "fixed"
@@ -219,10 +209,6 @@ view model =
                 , div
                     [ class "block-user__menu"
                     , -- `position` is required for `z-index` to apply: without it the
-                      -- inline z-index is inert and the fixed click-away backdrop
-                      -- (z-index 999, added with the #389 dismissal fix) paints OVER
-                      -- the menu and swallows the "Block <name>" click. `relative`
-                      -- activates the stacking without moving the menu.
                       style "position" "relative"
                     , style "z-index" "1000"
                     ]

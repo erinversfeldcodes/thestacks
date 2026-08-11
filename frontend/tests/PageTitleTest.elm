@@ -80,10 +80,6 @@ suite =
         ]
 
 
-
--- FIXTURES
-
-
 ownerUser : User
 ownerUser =
     { id = "u1"
@@ -130,10 +126,6 @@ pageFor : Main.AppConfig -> Route -> Maybe Main.Auth -> Maybe String -> Page
 pageFor config route maybeAuth adminToken =
     Main.initPage config route "https://thestacks.test" maybeAuth adminToken Nothing Login.Fresh
         |> Tuple.first
-
-
-
--- 1..6 — THE DRIFT SITES
 
 
 driftBounce : Test
@@ -252,10 +244,6 @@ driftAdminReauth =
                 ()
 
 
-
--- WHAT A ROUTE COULD NOT KNOW
-
-
 bookshelfPage : Bookshelf.Config -> Page
 bookshelfPage config =
     Bookshelf.init config (Just "tok") "u1"
@@ -293,9 +281,6 @@ profileShelfNamesWhoseShelf =
             in
             Expect.all
                 [ \t -> Expect.equal bookshelfProfileNamesWhose t
-
-                -- The route could only ever answer "Reader", for every shelf of
-                -- every reader.
                 , \t -> Expect.notEqual "Reader — The Stacks" t
                 ]
                 title
@@ -381,10 +366,6 @@ publicProfileNamesTheReader =
                 title
 
 
-
--- SHAPE
-
-
 {-| A representative page from every family. The suffix is written once, in
 `titled`; this is what stops a hand-written branch from dropping it.
 -}
@@ -416,10 +397,6 @@ homeIsJustTheProductName =
     test "home_title: the home page is the product, not a page within it" <|
         \() ->
             pageTitleOf (PageHome Home.Landing) |> Expect.equal "The Stacks"
-
-
-
--- HELPERS
 
 
 pageTitleOf : Page -> String

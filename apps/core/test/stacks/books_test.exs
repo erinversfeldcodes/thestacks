@@ -1,21 +1,4 @@
 defmodule Stacks.BooksTest do
-  # Coverage note (#345): the three `describe "identify/2"` tests went with
-  # `Books.identify/2`, which had no route, worker or context caller — these
-  # tests were its only reachability. What they incidentally protected is still
-  # covered:
-  #
-  #   * the steerable `extract_isbn` vision seam — `ai/client_test.exs`,
-  #     `ai/mock_client_test.exs`, and end-to-end through the real pipeline in
-  #     `upload_pipeline_test.exs` / `upload_telemetry_test.exs` /
-  #     `observability_telemetry_test.exs`;
-  #   * many-ISBNs-per-image and the per-candidate resolve — `Stacks.Moderation`
-  #     (`moderation*_test.exs`) is the production owner of that fan-out, and
-  #     `IdentifyBookJob` drives it;
-  #   * the `ISBNResolver.resolve/1` miss falling back to the vision result's own
-  #     title/author — `isbn_resolver_test.exs`.
-  #
-  # Nothing must replace them: the only behaviour genuinely lost is that of a
-  # function no caller could reach.
   use Core.DataCase, async: true
 
   import Ecto.Query
@@ -46,10 +29,6 @@ defmodule Stacks.BooksTest do
       assert %{isbn: [_]} = errors_on(changeset)
     end
 
-    # #335 D1. `ISBNResolver.resolve/1` races Open Library and Google Books and
-    # returns whichever answered, identified only by which cross-reference id
-    # the metadata carries — so that id IS the provenance signal, and these
-    # tests pin the mapping rather than the derivation's implementation.
     test "records open_library when the resolver returned an Open Library id" do
       attrs = %{
         "isbn" => "9780743273565",
@@ -83,8 +62,6 @@ defmodule Stacks.BooksTest do
     end
 
     test "an explicit provenance from the caller wins over the derivation" do
-      # Moderation's barcode fast path knows something the attrs cannot show:
-      # it deliberately skipped the OL/GB round-trip.
       attrs = %{
         "isbn" => "9780061120084",
         "title" => "ISBN 9780061120084",
@@ -126,8 +103,6 @@ defmodule Stacks.BooksTest do
       attrs = %{"isbn" => "0306406152", "title" => "Valid ISBN-10"}
       assert {:ok, book} = Books.create(attrs)
       assert [edition] = book.editions
-      # ISBN-10 "0306406152" normalises to ISBN-13 on storage so that
-      # find_existing/1 (which searches by ISBN-13) can round-trip correctly.
       assert edition.isbn == "9780306406157"
     end
   end
@@ -179,7 +154,6 @@ defmodule Stacks.BooksTest do
 
     test "finds a book by ISBN-10 when the edition is stored as ISBN-13" do
       book = insert(:book)
-      # Stored as ISBN-13; ISBN-10 equivalent is 0743273567
       insert(:book_edition, book: book, isbn: "9780743273565")
       assert found = Books.find_existing("0743273567")
       assert found.id == book.id
@@ -189,8 +163,6 @@ defmodule Stacks.BooksTest do
   describe "confirm/2 records the scanned edition on the placement (#378)" do
     test "placing an existing work by a non-primary ISBN records THAT edition, not the primary" do
       user = insert(:user)
-      # `insert(:book)` brings the work's primary edition; the scan is of a
-      # second, non-primary printing with its own ISBN.
       book = insert(:book)
       primary = Books.primary_edition(Books.get_book_detail(book.id))
       scanned = insert(:book_edition, book: book, is_primary: false, isbn: "9781600000027")
@@ -200,7 +172,6 @@ defmodule Stacks.BooksTest do
                Books.confirm(user.id, %{isbn: "9781600000027", shelf_name: "wishlist"})
 
       assert existing.id == book.id
-      # The regression: before #378 this recorded `primary.id` for every scan.
       assert placement.book_edition_id == scanned.id
       refute placement.book_edition_id == primary.id
     end
@@ -210,7 +181,6 @@ defmodule Stacks.BooksTest do
     test "returns book with author and editions preloaded" do
       author = insert(:author)
       book = insert(:book, author: author)
-      # The work already carries its primary edition; this is the second format.
       insert(:book_edition, book: book)
       assert found = Books.get_book_detail(book.id)
       assert found.id == book.id
@@ -232,10 +202,6 @@ defmodule Stacks.BooksTest do
       assert Books.primary_edition(book).id == primary.id
     end
 
-    # A work with editions but NO primary flag is drift, not something a write
-    # path produces — `create/1` always flags the first edition. It is still a
-    # branch `primary_edition/1` deliberately handles (books.ex:124-126), so it
-    # is built from `:editionless_book`, the factory's named escape hatch.
     test "falls back to first edition when no primary" do
       book = insert(:editionless_book)
       first = insert(:book_edition, book: book, is_primary: false)
@@ -264,7 +230,6 @@ defmodule Stacks.BooksTest do
           created_at: ~U[2024-06-01 00:00:00.000000Z]
         )
 
-      # The struct carries only the id, forcing the DB (query) clause.
       query_book = %Book{id: book.id}
 
       assert Books.primary_edition(query_book).id == older.id
@@ -290,7 +255,6 @@ defmodule Stacks.BooksTest do
           created_at: ~U[2024-06-01 00:00:00.000000Z]
         )
 
-      # Preload order must not sway the pick — both orderings resolve to `older`.
       assert Books.primary_edition(%Book{id: book.id, editions: [newer, older]}).id == older.id
       assert Books.primary_edition(%Book{id: book.id, editions: [older, newer]}).id == older.id
     end
@@ -351,12 +315,6 @@ defmodule Stacks.BooksTest do
       refute "Rust Atomics and Locks" in titles
     end
 
-    # #291 REGRESSION LOCK: the raw query must reach `plainto_tsquery` so titles
-    # with apostrophes/hyphens still match. A prior `String.replace(~r/[^\w\s]/)`
-    # sanitiser mangled "O'Brien" → "OBrien" and "spider-man" → "spiderman",
-    # changing the lexemes and dropping legitimate matches. Injection-safety comes
-    # from Ecto param binding + plainto_tsquery (see search_controller_test.exs
-    # "query edge cases"), not from stripping characters.
     test "matches a title containing an apostrophe" do
       book = insert(:book, title: "The Master of O'Brien Manor")
       insert(:book_edition, book: book)
@@ -383,9 +341,6 @@ defmodule Stacks.BooksTest do
       refute "Rust Atomics and Locks" in titles
     end
 
-    # Layer 3 DB-assertion punch (#115 audit #2): prove the two DB mechanisms the
-    # feature rests on — the generated tsvector column and the GIN index — rather
-    # than trusting them via `search_books/2`.
     test "populates the title_tsv tsvector column on book creation" do
       book = insert(:book, title: "Elixir in Action")
 
@@ -395,17 +350,12 @@ defmodule Stacks.BooksTest do
           [Ecto.UUID.dump!(book.id)]
         )
 
-      # Column is GENERATED ALWAYS AS to_tsvector('english', title) STORED, so it
-      # is non-null and carries stemmed lexemes with `in` dropped as a stopword.
       assert tsv =~ "elixir"
       assert tsv =~ "action"
       refute tsv =~ "'in'"
     end
 
     test "the full-text query uses the title_tsv GIN index" do
-      # On a tiny table the planner prefers a seqscan; disable it within this
-      # sandbox transaction so the plan reflects index availability, then assert
-      # the GIN index (idx_books_title_tsv) is chosen.
       Repo.query!("SET LOCAL enable_seqscan = off")
 
       %{rows: rows} =
@@ -419,9 +369,6 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  # #284 — deep search matches book DESCRIPTIONS (not just titles) under
-  # `scope: :deep`, ranking title matches ahead of description-only matches and
-  # leaving the default (title-only) scope untouched.
   describe "search_books/2 — deep scope (#284)" do
     test "deep scope finds a book matched only by its description" do
       book =
@@ -432,7 +379,6 @@ defmodule Stacks.BooksTest do
 
       insert(:book_edition, book: book)
 
-      # Title-only default must MISS it — the term is only in the description.
       assert Books.search_books("cartography") == []
 
       deep_titles =
@@ -480,9 +426,6 @@ defmodule Stacks.BooksTest do
       assert "Elixir in Action" in deep_titles
     end
 
-    # Layer 3 DB-assertion punch (mirrors the title_tsv patterns above): prove the
-    # two DB mechanisms deep search rests on — the generated description_tsv column
-    # and its GIN index — directly, not via search_books/2.
     test "populates the description_tsv tsvector column on book creation" do
       book = insert(:book, description: "Interstellar cartography and star charts.")
 
@@ -492,8 +435,6 @@ defmodule Stacks.BooksTest do
           [Ecto.UUID.dump!(book.id)]
         )
 
-      # GENERATED ALWAYS AS to_tsvector('english', coalesce(description,'')) STORED
-      # — non-null, stemmed lexemes, `and` dropped as a stopword.
       assert tsv =~ "cartographi"
       assert tsv =~ "star"
       refute tsv =~ "'and'"
@@ -543,13 +484,6 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  # #296 REGRESSION LOCK: the catalogue search path (`maybe_search/2`, shared by
-  # `list_catalogue/1` and `list_for_moderation/1`) uses the SAME `plainto_tsquery`
-  # mechanism as `search_books/2` — NOT `ilike` — so there are no `%`/`_` wildcard
-  # semantics to worry about; the raw query is passed via the bound param and
-  # plainto_tsquery treats it as plain text. A prior `String.replace(~r/[^\w\s]/)`
-  # sanitiser was lossy here too ("O'Brien" → "OBrien", "spider-man" → "spiderman"),
-  # degrading legitimate catalogue searches. Sibling of #291.
   describe "list_catalogue/1 — search" do
     test "matches a title containing an apostrophe" do
       insert(:book, title: "The Master of O'Brien Manor")
@@ -593,11 +527,7 @@ defmodule Stacks.BooksTest do
 
       assert {:ok, updated} = Books.confirm_cover_association(edition.id, cover_url)
 
-      # The download went THROUGH the mocked client — proof it is not a bare
-      # Finch call. Before #381a this fetch hit the network, and the assertion
-      # below was green only because the real host returned non-200.
       assert_receive {MockHttpClient, :request, ^cover_url}, 1_000
-      # Unmatched, the mock fails closed, so the source URL is kept (no R2 store).
       assert updated.cover_image_url == cover_url
     end
 
@@ -624,11 +554,6 @@ defmodule Stacks.BooksTest do
       assert event_count("book.cover_confirmed") == before_count
     end
 
-    # #355 sibling sweep. The event aggregates the EDITION, and the only
-    # subscriber (CacheInvalidationHandler) is keyed by WORK — so without
-    # `book_id` in the payload the handler had nothing to evict with, and the
-    # test above ("an event was emitted") could not tell. Assert the wire, not
-    # the count: the emitted row must name the work whose detail just changed.
     test "the emitted event names the WORK, which is what the cache is keyed by" do
       edition = insert(:book_edition)
 
@@ -648,24 +573,16 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Issue #046 — new functions under test
-  # ---------------------------------------------------------------------------
-
   describe "find_same_work/2" do
     test "returns empty list when DB is empty" do
       assert [] = Books.find_same_work("1984", "George Orwell")
     end
 
     test "returns the matching work when title+author Jaro-Winkler similarity is high" do
-      # Insert a work with title "1984" and author "George Orwell"
       author = insert(:author, name: "George Orwell")
       book = insert(:book, title: "1984", author: author)
       insert(:book_edition, book: book)
 
-      # "Nineteen Eighty-Four" by "George Orwell" should fuzzy-match "1984" by "George Orwell"
-      # Note: if Jaro-Winkler on "1984" vs "Nineteen Eighty-Four" is not > 0.8, implementation
-      # may only match by author. The test validates the return type — a list containing the work.
       results = Books.find_same_work("1984", "George Orwell")
       assert is_list(results)
       assert Enum.any?(results, fn w -> w.id == book.id end)
@@ -682,7 +599,6 @@ defmodule Stacks.BooksTest do
 
   describe "confirm/2" do
     setup do
-      # Use MockClient so ISBNResolver HTTP calls can be mocked
       original_http = Application.get_env(:core, :isbn_http_client)
       Application.put_env(:core, :isbn_http_client, MockHttpClient)
 
@@ -690,7 +606,6 @@ defmodule Stacks.BooksTest do
         Application.put_env(:core, :isbn_http_client, original_http)
       end)
 
-      # Stub ISBNResolver to return metadata for our test ISBN
       MockHttpClient.put_response(
         "openlibrary.org/api/books",
         {:ok,
@@ -714,11 +629,6 @@ defmodule Stacks.BooksTest do
 
       assert {:ok, :created, book} = Books.confirm(user.id, %{isbn: "9780141036144"})
 
-      # ⚠️ This asserted `book.title != nil` and `book.editions != []` — true of
-      # any book at all, so it could not tell the resolver's metadata from a
-      # placeholder, nor the requested edition from some other one (Issue #330).
-      # The `setup` above registers the exact Open Library payload, so the
-      # resolved values are known and can be named.
       assert book.title == "Nineteen Eighty-Four"
 
       assert [edition] = book.editions
@@ -732,10 +642,6 @@ defmodule Stacks.BooksTest do
       assert {:ok, :created, book} =
                Books.confirm(user.id, %{isbn: "9780141036144", shelf_name: "library"})
 
-      # ⚠️ This asserted only `book.title != nil` — in a test whose whole subject
-      # is *which bookshelf the placement lands on*, it never looked at the
-      # placement (Issue #330). It would have passed with the book placed on the
-      # default wishlist, i.e. with the `shelf_name` argument ignored entirely.
       assert book.title == "Nineteen Eighty-Four"
 
       placement =
@@ -792,10 +698,6 @@ defmodule Stacks.BooksTest do
       assert only.id == existing_placement.id
     end
 
-    # #333 — inform, never block. Owning the book on ANOTHER bookshelf used to
-    # short-circuit to :already_placed, so the requested placement was never
-    # made: a silent refusal reported as success. Multi-shelf is legal now, so
-    # the placement happens and the caller is handed every shelf to inform with.
     test "a book owned on another bookshelf is still placed on the requested one" do
       user = insert(:user)
       existing_book = insert(:book, title: "Wanted On Two Shelves")
@@ -814,14 +716,12 @@ defmodule Stacks.BooksTest do
     end
 
     test "returns {:error, {:merge_required, existing_work_id}} when same work detected via fuzzy match" do
-      # Insert a work that is a clear title+author match via Jaro-Winkler
       author = insert(:author, name: "George Orwell")
       existing_book = insert(:book, title: "Nineteen Eighty-Four", author: author)
       insert(:book_edition, book: existing_book, isbn: "9780451526342")
 
       user = insert(:user)
 
-      # A different ISBN for the same work should trigger merge detection
       MockHttpClient.put_response(
         "openlibrary.org/api/books",
         {:ok,
@@ -852,31 +752,6 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  # ── #341: one create transaction ──────────────────────────────────────────
-  #
-  # `Books.create/1` and the private `create_confirmed_book/4` were two
-  # independent implementations of "mint a work and its first edition", and they
-  # had drifted. Enumerated from both bodies BEFORE the collapse, the
-  # `op.book_editions` columns each of them set were:
-  #
-  #   create/1                 isbn book_id format_label cover_image_url
-  #                            page_count publisher publication_year
-  #                            open_library_id google_books_id is_primary
-  #                            verification_source
-  #   create_confirmed_book/4  all of the above EXCEPT google_books_id
-  #
-  # and on the work row:
-  #
-  #   create/1                 title author_id description language subjects
-  #                            bisac_codes visibility_tier  (whatever the caller
-  #                            passed — book_changeset/2's whole cast list)
-  #   create_confirmed_book/4  title author_id description subjects
-  #                            (the resolver carries no language, bisac_codes or
-  #                            visibility_tier, so those were never a drift)
-  #
-  # The union is asserted below by handing the SAME facts to both entry points
-  # and comparing the two rows column by column. Drop a field from the unified
-  # `edition_attrs/2` and the comparison goes red.
   describe "create/1 and the confirmed path are one transaction" do
     setup do
       original_http = Application.get_env(:core, :isbn_http_client)
@@ -885,9 +760,6 @@ defmodule Stacks.BooksTest do
       :ok
     end
 
-    # Deliberately excludes `:isbn` and `:book_id`, which identify the row rather
-    # than describe the book: the two paths must be given different ISBNs (the
-    # column is unique) and they mint different works.
     @edition_columns_both_create_paths_set [
       :format_label,
       :cover_image_url,
@@ -911,9 +783,6 @@ defmodule Stacks.BooksTest do
         {:ok, %{"items" => [google_volume(confirmed_isbn)]}}
       )
 
-      # Confirm FIRST: `confirm/2` refuses to mint a second work whose title and
-      # author fuzzy-match one already in the catalogue, and the direct create
-      # below is deliberately the same book.
       user = insert(:user)
       assert {:ok, :created, confirmed} = Books.confirm(user.id, %{isbn: confirmed_isbn})
 
@@ -938,7 +807,6 @@ defmodule Stacks.BooksTest do
                Map.take(direct_edition, @edition_columns_both_create_paths_set),
              "the two create entry points disagree about an edition column given identical facts"
 
-      # …and the agreement must not be two all-null rows agreeing about nothing.
       for column <- [
             :cover_image_url,
             :page_count,
@@ -951,7 +819,6 @@ defmodule Stacks.BooksTest do
                "#{column} is nil on the confirmed edition — the union assertion is vacuous"
       end
 
-      # The work row carries the same facts too.
       assert confirmed.title == direct.title
       assert confirmed.description == direct.description
       assert confirmed.subjects == direct.subjects
@@ -967,7 +834,6 @@ defmodule Stacks.BooksTest do
         {:ok, %{"ISBN:#{confirmed_isbn}" => open_library_book()}}
       )
 
-      # Confirm FIRST — see the Google Books twin above.
       user = insert(:user)
       assert {:ok, :created, confirmed} = Books.confirm(user.id, %{isbn: confirmed_isbn})
 
@@ -1003,10 +869,6 @@ defmodule Stacks.BooksTest do
       end
     end
 
-    # The specific field the drift had already eaten (#341 requirement 2). The
-    # cost is not only a missing cross-reference: `verification_source_from/1`
-    # reads the identifiers off the row's attrs, so an edition that loses its
-    # `google_books_id` also loses its claim to have been verified at all.
     @tag stories: ["US-1.1.5"]
     test "the confirmed path keeps the google_books_id the resolver returned" do
       isbn = "9780451524935"
@@ -1020,10 +882,6 @@ defmodule Stacks.BooksTest do
              "the resolver returned a Google Books id and the create transaction dropped it"
     end
 
-    # `ISBNResolver.resolve/1` RACES the two sources and returns whichever
-    # answered, so each provenance gets its own test with exactly one source
-    # able to answer. Registering both and confirming twice in one test makes
-    # the second confirm's provenance a coin flip.
     @tag stories: ["US-1.1.5"]
     test "verification_source is google_books when Google Books answered the confirm" do
       isbn = "9780451524935"
@@ -1100,7 +958,6 @@ defmodule Stacks.BooksTest do
 
   describe "merge_edition/2" do
     setup do
-      # Seed mock responses so ISBNResolver.resolve/1 succeeds for test ISBNs
       MockHttpClient.put_response("openlibrary.org/api/books", {
         :ok,
         %{
@@ -1152,7 +1009,6 @@ defmodule Stacks.BooksTest do
     test "returns {:error, :duplicate_isbn} on duplicate ISBN" do
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
 
-      # Try to merge the same ISBN again
       assert {:error, :duplicate_isbn} =
                Books.merge_edition(book.id, %{isbn: "9780743273565"})
     end
@@ -1173,12 +1029,6 @@ defmodule Stacks.BooksTest do
       assert event_count("books.edition_merged") == before_count + 1
     end
 
-    # #341 requirement 3. `merge_edition/2` resolves the ISBN — an Open Library /
-    # Google Books round-trip the platform pays for — and then wrote only the
-    # ISBN, the work id, the caller's format label and the provenance, throwing
-    # every resolved field away. The merged edition had no cover, no publisher,
-    # no page count and no cross-reference id, and nothing downstream could tell
-    # "this edition has no publisher" from "nobody ever asked".
     @tag stories: ["US-1.1.8"]
     test "keeps the metadata it just resolved instead of discarding it" do
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
@@ -1212,12 +1062,6 @@ defmodule Stacks.BooksTest do
       assert edition.verification_source == "open_library"
     end
 
-    # The stated conflict rule: the caller supplies `isbn` and `format_label`
-    # (the endpoint's documented contract) and the resolver fills the rest. A
-    # caller-supplied `publisher` is NOT honoured — `BookController.merge_format/2`
-    # hands `merge_edition/2` the raw request params, so widening the
-    # caller-wins set would turn `POST /api/books/:id/merge-format` into mass
-    # assignment over the edition's provenance columns.
     @tag stories: ["US-1.1.8"]
     test "the caller's format_label wins; the rest of the row comes from the resolver" do
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780743273565")])
@@ -1232,13 +1076,10 @@ defmodule Stacks.BooksTest do
 
       assert edition.format_label == "Slipcased"
 
-      # The resolver's answer for this ISBN, filled in: 328 pages, Open Library key.
       assert edition.page_count == 328
       assert edition.open_library_id == "/works/OL1168007W"
       assert edition.verification_source == "open_library"
 
-      # Open Library carried no publisher and no Google Books id for this ISBN,
-      # so both columns stay null — the caller's values did not land.
       assert is_nil(edition.publisher),
              "a caller-supplied publisher reached the row — merge_format/2's raw params are user input"
 
@@ -1298,9 +1139,6 @@ defmodule Stacks.BooksTest do
       )
 
       assert {:ok, meta} = ISBNResolver.resolve(isbn)
-      # The current implementation returns :open_library_id from the "key" field.
-      # Issue #046 extends this to also return :open_library_work_id.
-      # This test verifies at minimum one of the two keys is present.
       assert Map.has_key?(meta, :open_library_id) or Map.has_key?(meta, :open_library_work_id)
     end
   end
@@ -1349,10 +1187,6 @@ defmodule Stacks.BooksTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Gap 2 — Books.create_from_isbn/1 (US-1.1.5 new-book path)
-  # ---------------------------------------------------------------------------
-
   describe "create_from_isbn/1" do
     setup do
       original_http = Application.get_env(:core, :isbn_http_client)
@@ -1384,9 +1218,6 @@ defmodule Stacks.BooksTest do
     end
 
     test "returns {:error, :not_found} when both Open Library and Google Books return 404" do
-      # MockHttpClient returns {:ok, %{}} for unmatched URLs (empty body = not found)
-      # Both openlibrary.org and googleapis.com will get an empty response here.
-      # ISBNResolver treats an empty body as not found and falls through to {:error, :not_found}.
       MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
 
@@ -1418,19 +1249,12 @@ defmodule Stacks.BooksTest do
   end
 
   describe "canonical_isbn13/1" do
-    # The seam behind cache invalidation and rejection-retry exclusion
-    # matching: OL docs often carry only the ISBN-10 form while the DB
-    # stores ISBN-13, so both sides of any comparison canonicalise here.
-
     test "converts a valid ISBN-10 to its ISBN-13 form" do
-      # The live production case: title-search memoised the OL doc's
-      # ISBN-10 while rejection invalidated by the edition's ISBN-13.
       assert ISBN.canonical_isbn13("0312864833") == "9780312864835"
     end
 
     test "converts a valid ISBN-10 with an X check digit" do
       assert ISBN.canonical_isbn13("080442957X") == "9780804429573"
-      # Lowercase x is upcased before the shape check.
       assert ISBN.canonical_isbn13("080442957x") == "9780804429573"
     end
 

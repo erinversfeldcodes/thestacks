@@ -228,15 +228,6 @@ noAddShelfControl : Test
 noAddShelfControl =
     test "no_mutation_control_SECURITY: read-only view exposes no shelf organiser" <|
         \() ->
-            -- ⚠️ **This assertion was vacuous and had to be repointed.** It searched for a
-            -- button whose text was `"Add shelf"`; the button says **"Add a shelf"**. So it
-            -- passed by matching nothing anywhere on the page, not by the affordance being
-            -- absent — it would have kept passing had the organiser leaked into the
-            -- read-only view, which is the one thing it exists to prevent.
-            --
-            -- Now anchored on the testIds, which are stable against copy edits. The
-            -- organiser's controls all 403 for a non-owner, so rendering any of them would
-            -- be both a lie and a security smell.
             browse
                 |> ProgramTest.simulateHttpResponse "GET" profileEndpoint oneShelf
                 |> ProgramTest.expectViewHasNot
@@ -247,7 +238,6 @@ noShelfOrganiserPanel : Test
 noShelfOrganiserPanel =
     test "no_mutation_control_SECURITY: the organiser panel itself is absent, not merely disabled" <|
         \() ->
-            -- Disabled controls would still advertise an action the viewer cannot take.
             browse
                 |> ProgramTest.simulateHttpResponse "GET" profileEndpoint oneShelf
                 |> ProgramTest.expectViewHasNot
@@ -279,8 +269,6 @@ ownerMutationIsObservable =
                 |> ProgramTest.simulateHttpResponse "GET"
                     "/api/bookshelves/library"
                     (simulateBookshelfResponse [ testPlacement ])
-                -- Pre-condition: the affordance the read-only view must not
-                -- expose really is on screen here.
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "shelf-add") ]
                 |> ProgramTest.clickButton "Add a shelf"

@@ -75,10 +75,6 @@ suite =
         ]
 
 
-
--- FIXTURES
-
-
 {-| The exact shape `Main.encodeAuth` writes and `app.js` spreads into flags.
 -}
 validFlags : Encode.Value
@@ -151,10 +147,6 @@ isCorrupt stored =
             False
 
 
-
--- THE THREE OUTCOMES
-
-
 noBlobIsACleanSignedOutBoot : Test
 noBlobIsACleanSignedOutBoot =
     test "no_blob_is_clean: a reader who never signed in is not accused of a corrupt credential" <|
@@ -199,10 +191,6 @@ unreadableStorageIsCorrupt =
                     (Main.CorruptStoredAuth "SecurityError: localStorage is not available")
 
 
-
--- A CORRUPT CREDENTIAL IS NOT A SESSION
-
-
 {-| Paired with `validBlobSignsThemIn` above: without that positive control this
 would pass just as well if `storedSession` always answered `Nothing`.
 -}
@@ -213,10 +201,6 @@ readerIsSignedOut =
             [ nestedFlags, partialFlags, unreadableFlags ]
                 |> List.map (Main.decodeFlags >> Main.storedSession)
                 |> Expect.equalLists [ Nothing, Nothing, Nothing ]
-
-
-
--- THE READER IS TOLD
 
 
 {-| The whole chain a boot walks, minus only the `Nav.Key`: raw flags →

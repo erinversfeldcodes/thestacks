@@ -18,14 +18,6 @@ defmodule Stacks.Discovery.BraveClient do
   require Logger
 
   @base_url "https://api.search.brave.com/res/v1/web/search"
-  # Daily cap. Free tier quota is 2000/month ≈ 67/day, but we typically
-  # run several gate windows per day (each generates dozens of author-
-  # discovery jobs) plus real-user traffic; 67 is too tight and caused
-  # oban_failure_rate_default breaches once the canary probe expanded
-  # to cover non-barcode book extraction. 200/day is a defensive buffer
-  # against spikes while still well under the 2000/month cap (at sustained
-  # 200/day you'd hit the monthly ceiling in ~10 days — a useful signal
-  # that the batch-cron refactor is overdue).
   @daily_budget 200
   @fuse_name :brave_fuse
 
@@ -38,10 +30,6 @@ defmodule Stacks.Discovery.BraveClient do
     end
   end
 
-  # Ask the fuse first — short-circuit without spending budget or network
-  # when we know Brave is unhealthy. `CircuitBreakers.melt/1` trips the
-  # fuse when `do_search/2` actually fails upstream, so the loop is
-  # self-healing and self-breaking.
   defp check_fuse do
     case :fuse.ask(@fuse_name, :sync) do
       :ok -> :ok
@@ -70,8 +58,6 @@ defmodule Stacks.Discovery.BraveClient do
           ]
         )
 
-      # request_timeout bounds the WHOLE response (receive_timeout is
-      # per-chunk — #381d); result JSON is small, so 20s total is generous.
       case Finch.request(req, Stacks.Finch, receive_timeout: 15_000, request_timeout: 20_000) do
         {:ok, %Finch.Response{status: 200, body: body, headers: headers}} ->
           increment_daily_counter()
@@ -88,9 +74,6 @@ defmodule Stacks.Discovery.BraveClient do
           {:error, {:unexpected_status, status}}
 
         {:ok, %Finch.Response{status: status, body: body}} ->
-          # 4xx other than 429 (e.g. 401, 403, 400) — don't melt; likely
-          # a misconfigured request, not a service-health signal. Surface
-          # the error so callers see it but keep the fuse closed.
           Logger.warning("BraveClient: unexpected status #{status}: #{inspect(body)}")
           {:error, {:unexpected_status, status}}
 
@@ -147,8 +130,6 @@ defmodule Stacks.Discovery.BraveClient do
     end
   end
 
-  # Daily budget tracking via :counters (atomic, no global GC).
-  # The counter resets when the date changes.
   defp check_daily_budget do
     today = Date.utc_today()
     {date, count} = get_counter()
@@ -160,18 +141,6 @@ defmodule Stacks.Discovery.BraveClient do
     end
   end
 
-  # ⛔ This crashed on the FIRST live Brave call in any fresh node, which is why source discovery
-  # had never produced a row — and it was misread for weeks as "we need a real Brave API key".
-  # The key was present and deployed the whole time.
-  #
-  # The cause was a lying default. `get_counter/0` returns `{Date.utc_today(), 0}` when *nothing is
-  # stored*, which is indistinguishable from "stored, for today, at zero". So on a fresh node the
-  # old code compared `stored_date != today`, found them equal, concluded the counter existed, and
-  # took a branch calling `:persistent_term.get/1` **without a default** — which raises when the key
-  # was never put. A default that stands in for absent state must not be confusable with real state.
-  #
-  # Reading the term once, and matching on it, removes the question: absent and stale-date are the
-  # same case (start a counter for today), and only a genuine today-counter is incremented.
   @doc """
   Records one Brave call against today's budget.
 

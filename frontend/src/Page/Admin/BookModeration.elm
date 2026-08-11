@@ -198,10 +198,6 @@ searchToMaybe s =
         Just (String.trim s)
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--admin", testId "admin-book-moderation" ]

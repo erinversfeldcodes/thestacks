@@ -2,11 +2,6 @@ defmodule Core.Repo.Migrations.CreateDbRoles do
   use Ecto.Migration
 
   def up do
-    # Role passwords come from env vars so weak hardcoded passwords are never sent
-    # to hosted databases (e.g. Neon enforces a minimum password strength policy).
-    # If the env vars are not set, role creation is skipped — the application still
-    # works because it connects as the database owner role (neondb_owner on Neon,
-    # postgres locally). The fine-grained roles are set up out-of-band when needed.
     app_password = System.get_env("STACKS_APP_DB_PASSWORD")
     dbt_password = System.get_env("STACKS_DBT_DB_PASSWORD")
 
@@ -22,7 +17,6 @@ defmodule Core.Repo.Migrations.CreateDbRoles do
       """)
     end
 
-    # Only grant privileges if the roles were actually created above.
     execute("""
     DO $$ BEGIN
       -- stacks_app: CRUD on op, SELECT on wh, INSERT-only on audit
@@ -85,10 +79,6 @@ defmodule Core.Repo.Migrations.CreateDbRoles do
     execute("REVOKE USAGE ON SCHEMA op FROM stacks_readonly")
     execute("REVOKE USAGE ON SCHEMA wh FROM stacks_readonly")
 
-    # Roles are cluster-wide. DROP ROLE fails if the role still has privileges
-    # in other databases (e.g. stacks_dev when rolling back stacks_test).
-    # We attempt the drop and silently ignore dependency errors so the rollback
-    # can complete; the roles will be removed when the last DB is torn down.
     execute("""
     DO $$ BEGIN
       BEGIN DROP ROLE IF EXISTS stacks_readonly; EXCEPTION WHEN dependent_objects_still_exist THEN NULL; END;

@@ -59,10 +59,7 @@ type Msg
 type OutMsg
     = NoOut
     | SessionExpired
-      -- Escape reached the page but no block surface was open to consume it, so
-      -- the shell should fall through to its default Escape handling.
     | EscapeUnhandled
-      -- The syndication panel asked for a clipboard write; Main owns the port.
     | RequestCopy String
 
 
@@ -98,7 +95,6 @@ update msg model maybeToken =
                         | post = Success post
                         , blockModal = blockModalFor model.currentUserId post
                         , syndication =
-                            -- The panel exists only for the author.
                             if model.currentUserId == Just post.userId then
                                 Just (Syndication.init post.id model.origin post.syndicated)
 
@@ -264,8 +260,6 @@ update msg model maybeToken =
                             )
 
                         BlockModal.UserBlocked ->
-                            -- Content should vanish: re-fetch the post, which now
-                            -- resolves to :hidden server-side (bidirectional block).
                             ( { model | blockModal = Just newBlockModal }
                             , Cmd.batch
                                 [ Cmd.map BlockModalMsg subCmd
@@ -304,8 +298,6 @@ update msg model maybeToken =
                             ( baseModel, Cmd.map SyndicationMsg subCmd, RequestCopy payload )
 
                         Syndication.SyndicatedChanged syndicated ->
-                            -- Keep the page's copy of the post honest under
-                            -- the tickbox.
                             ( { baseModel
                                 | post =
                                     case baseModel.post of
@@ -326,9 +318,6 @@ update msg model maybeToken =
                     ( model, Cmd.none, NoOut )
 
         EscapePressed ->
-            -- Give the block affordance first dibs on Escape (close its menu /
-            -- confirm modal); if nothing was open, tell the shell to fall
-            -- through to its default Escape handling.
             case model.blockModal of
                 Just blockModal ->
                     let
@@ -397,8 +386,6 @@ view model =
 
             Failure err ->
                 if Api.isNotFound err then
-                    -- The post resolved to :hidden (a 404) — e.g. after the
-                    -- reader blocked its author. A gentle dead-end, not an error.
                     div [ class "blog-post__unavailable" ]
                         [ p [ class "blog-post__unavailable-text" ]
                             [ text "This post is no longer available." ]

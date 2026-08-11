@@ -156,7 +156,5 @@ errorResponseSurfacesMessage =
                     )
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "That page is past the end of the book." ]
-                -- The form stays open so the reader can correct it...
                 |> ProgramTest.ensureViewHas [ Selector.class "placement-card__edit-form" ]
-                -- ...with the draft page (seeded from the current page, 40) preserved.
                 |> ProgramTest.expectViewHas [ Selector.attribute (Html.Attributes.value "40") ]

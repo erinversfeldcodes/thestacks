@@ -7,7 +7,6 @@ source "$REPO_ROOT/scripts/lib/postgres.sh"
 
 ensure_postgres
 
-# Generate Ecto schemas from proto definitions (gen/ is gitignored).
 echo "==> Generating Ecto schemas from proto..."
 (cd "$REPO_ROOT/apps/core" && mix proto.sync)
 
@@ -21,11 +20,9 @@ if [[ -n "$_lingering_pids" ]]; then
     echo "==> Killing lingering BEAM processes: $_lingering_pids"
     echo "$_lingering_pids" | xargs kill -TERM 2>/dev/null || true
     sleep 2
-    # SIGKILL any that didn't respond to SIGTERM
     echo "$_lingering_pids" | xargs kill -KILL 2>/dev/null || true
 fi
 
-# Reset the test DB so migrations always run cleanly from a blank slate.
 MIX_ENV=test mix ecto.drop --quiet
 MIX_ENV=test mix ecto.create --quiet
 MIX_ENV=test mix ecto.migrate --quiet
@@ -52,5 +49,4 @@ if [[ "$pct" -lt "$MINIMUM_COVERAGE" ]]; then
     exit 1
 fi
 
-# Verify all migrations are reversible
 (cd "$REPO_ROOT/apps/core" && MIX_ENV=test mix ecto.rollback --all --quiet)

@@ -32,7 +32,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 def make_handler(mode: str, fail_ratio: float):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
-            # Silence default stderr log; we emit our own JSON line below.
             pass
 
         def _record(self, status: int) -> None:
@@ -57,7 +56,7 @@ def make_handler(mode: str, fail_ratio: float):
             self.wfile.write(body)
             self._record(status)
 
-        def do_GET(self):  # noqa: N802
+        def do_GET(self):
             if mode == "blackhole":
                 time.sleep(60)
                 return
@@ -68,8 +67,6 @@ def make_handler(mode: str, fail_ratio: float):
                 if mode == "fail-5xx" and random.random() < fail_ratio:
                     self._respond(500, b'{"error":"simulated"}')
                 elif mode == "fail-4xx-and-5xx" and random.random() < fail_ratio:
-                    # Half of forced failures are 5xx, half 4xx — exercises
-                    # the reviewer P1 #3 fix (4xx must also count as failure).
                     if random.random() < 0.5:
                         self._respond(500, b'{"error":"simulated"}')
                     else:
@@ -77,15 +74,12 @@ def make_handler(mode: str, fail_ratio: float):
                 else:
                     self._respond(200, b'{"items":[]}')
                 return
-            # Authenticated bookshelf read — exercises the Core.Repo multi-
-            # table join path in the real app. Here we just echo an empty
-            # shelf so availability stays 100% under the `healthy` mode.
             if self.path.startswith("/api/bookshelves/"):
                 self._respond(200, b'{"books":[]}')
                 return
             self._respond(404)
 
-        def do_POST(self):  # noqa: N802
+        def do_POST(self):
             if mode == "blackhole":
                 time.sleep(60)
                 return

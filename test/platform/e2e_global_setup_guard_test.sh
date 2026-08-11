@@ -35,20 +35,15 @@ GLOBAL_SETUP="$REPO_ROOT/e2e/global-setup.ts"
 CONFIG_SRC="$(cat "$CONFIG" 2>/dev/null || true)"
 SETUP_SRC="$(cat "$GLOBAL_SETUP" 2>/dev/null || true)"
 
-# ── Case 1: playwright.config.ts wires in globalSetup ────────────────────────
 test_case "config_references_globalSetup" "playwright.config.ts declares a globalSetup key"
 assert_contains "$CONFIG_SRC" "globalSetup" \
     "playwright.config.ts references globalSetup"
 assert_contains "$CONFIG_SRC" "global-setup" \
     "playwright.config.ts points globalSetup at ./global-setup"
 
-# ── Case 2: the globalSetup module exists ────────────────────────────────────
 test_case "global_setup_exists" "e2e/global-setup.ts exists"
 assert_path_exists "$GLOBAL_SETUP" "e2e/global-setup.ts file exists"
 
-# ── Case 3: no-op early-return guard on unset BASE_URL ───────────────────────
-# The module must short-circuit when process.env.BASE_URL is unset so local
-# `npm test` is untouched (no poll, no throw).
 test_case "global_setup_base_url_guard" "global-setup.ts early-returns when BASE_URL is unset"
 assert_contains "$SETUP_SRC" "process.env.BASE_URL" \
     "global-setup.ts branches on process.env.BASE_URL"
@@ -58,9 +53,6 @@ else
     _record_fail "global-setup.ts contains a conditional early-return guard"
 fi
 
-# ── Case 4: remote path polls health and fails clearly ───────────────────────
-# When BASE_URL is set, the module must poll the health endpoint and, on
-# failure, surface a clear, bounded error.
 test_case "global_setup_polls_health" "global-setup.ts polls /api/health and fails clearly"
 assert_contains "$SETUP_SRC" "/api/health" \
     "global-setup.ts polls the /api/health endpoint"

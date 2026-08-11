@@ -45,7 +45,6 @@ defmodule Stacks.PartnersTest do
       assert {:ok, {approved, raw_key}} = Partners.approve_partner(partner.id, admin.id)
       assert approved.status == "approved"
       assert String.starts_with?(raw_key, "stacks_pk_")
-      # "stacks_pk_" (10) + 64 hex
       assert String.length(raw_key) == 74
     end
 

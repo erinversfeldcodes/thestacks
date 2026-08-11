@@ -64,11 +64,6 @@ async function setProfileVisibility(
   }
 }
 
-// Raise the profile ceiling before any test flips a shelf to "platform", and
-// restore it after the whole file — afterAll always runs, including on failure,
-// so the shared suite user is left as seeded ("owner") for other suites.
-// bookshelf.spec.ts is the only other spec on this suite user and never asserts
-// on profile/shelf visibility, so the brief raise cannot interfere with it.
 test.beforeAll(async ({ browser }) => {
   await setProfileVisibility(browser, "platform");
 });
@@ -123,8 +118,6 @@ async function currentUserId(page: Page): Promise<string> {
 
 test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
   test.afterAll(async ({ browser }) => {
-    // Reset shelves this suite user touched back to the "owner" default so we
-    // do not leave a platform-visible shelf that could surprise other specs.
     const context = await browser.newContext({
       storageState: suiteAuthFile("bookshelf"),
     });
@@ -155,7 +148,6 @@ test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
     await page.goto("/wishlist");
     await page.waitForSelector(".shelf-wishlist", { timeout: 10000 });
 
-    // #263: the RSS affordance is now gated on the shelf's real visibility.
     const rssButton = page.locator(".rss-link__button");
     await expect(rssButton).toBeVisible({ timeout: 10000 });
 
@@ -169,7 +161,6 @@ test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
     await expect(popover.locator(".rss-link__help")).toContainText(
       "Subscribe in your RSS reader:",
     );
-    // The feed URL input carries the exact public feed path for this shelf.
     await expect(popover.locator(".rss-link__url")).toHaveValue(
       `/api/feeds/${userId}/wishlist`,
     );
@@ -184,9 +175,6 @@ test.describe("RSS affordance on a bookshelf (US-6.1 §1)", () => {
     await page.goto("/antilibrary");
     await page.waitForSelector(".shelf-antilibrary", { timeout: 10000 });
 
-    // The owner is on their own shelf (so the RSS control WOULD render if the
-    // shelf were platform-visible), but visibility is "owner" -> RSSLink.view
-    // returns `text ""`, so no button exists.
     await expect(page.locator(".rss-link__button")).toHaveCount(0);
   });
 });
@@ -214,36 +202,26 @@ test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name (US-6.1 §3)
     const feedUrl = `/api/feeds/${userId}/library`;
     const asReader = await authHeader(page);
 
-    // The feed route is optional-auth, not unauthenticated: a `platform` shelf is
-    // signed-in-only on the Audience ladder, so its feed is read AS A READER.
     const resp = await request.get(feedUrl, { headers: asReader });
     expect(resp.status()).toBe(200);
     expect(resp.headers()["content-type"]).toContain("application/atom+xml");
 
-    // Cache-Control: public, max-age=300 (Issue #119 §9 — previously unasserted).
     expect(resp.headers()["cache-control"]).toBe("public, max-age=300");
 
-    // ETag present.
     const etag = resp.headers()["etag"];
     expect(etag, "feed response carries an ETag").toBeTruthy();
 
-    // Valid Atom 1.0: XML prolog + feed element in the Atom namespace.
     const body = await resp.text();
     expect(body).toContain("<?xml");
     expect(body).toContain('<feed xmlns="http://www.w3.org/2005/Atom"');
     expect(body).toContain("<id>urn:stacks:feed:");
 
-    // 304 Not Modified when the client echoes the ETag back.
     const notModified = await request.get(feedUrl, {
       headers: { ...asReader, "If-None-Match": etag },
     });
     expect(notModified.status()).toBe(304);
   });
 
-  // The other half of the same rule, previously unasserted at this layer: the
-  // ladder says a `platform` resource is INVISIBLE to a logged-out visitor, and a
-  // 403 would leak that the shelf exists — so an anonymous read is 404, matching
-  // GET /api/u/:handle for a Members profile (#225).
   test("404 — not 403 — for an ANONYMOUS read of a platform shelf's feed", async ({
     page,
     request,
@@ -260,7 +238,6 @@ test.describe("Feed API — GET /api/feeds/:user_id/:bookshelf_name (US-6.1 §3)
   });
 
   test("404 for a non-existent user/bookshelf", async ({ request }) => {
-    // A well-formed but non-existent user id -> get_bookshelf returns nil -> 404.
     const resp = await request.get(
       "/api/feeds/00000000-0000-0000-0000-000000000000/library",
     );

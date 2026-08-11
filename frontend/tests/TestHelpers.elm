@@ -72,10 +72,6 @@ import Types.Shelf exposing (Shelf, bookshelfResponseDecoder, shelvesResponseDec
 import Types.Visibility
 
 
-
--- TEST DATA BUILDERS
-
-
 {-| A default edition for tests.
 -}
 testEdition : Edition
@@ -160,10 +156,6 @@ testPlacement =
     , visibility = Nothing
     , hasUserWriting = False
     }
-
-
-
--- JSON ENCODING HELPERS
 
 
 encodeEdition : Edition -> Encode.Value
@@ -293,10 +285,6 @@ encodePlacement placement =
             ++ encodeMaybe "started_at" Encode.string placement.startedAt
             ++ encodeMaybe "finished_at" Encode.string placement.finishedAt
         )
-
-
-
--- HTTP RESPONSE SIMULATORS
 
 
 {-| Create an HTTP response containing a single book JSON payload.
@@ -863,11 +851,6 @@ simulatePlacementVisibilityResponse placementId visibility =
         )
 
 
-
--- DECODERS (not exposed from Api, rebuilt here for simulated effects)
--- SIMULATED EFFECT TRANSLATORS
-
-
 {-| A simulated request derived from the REAL `Api.*` request definition
 (Issue #347).
 
@@ -910,12 +893,6 @@ uploadEffects msg model maybeToken =
         Upload.UploadAccepted (Ok _) ->
             SimulatedEffect.Cmd.none
 
-        -- Resuming an inbox item is a replay of the frame the reader would have
-        -- received, handed to the SAME `StatusReceived` the live stream calls
-        -- (Issue #351). The harness delegates rather than restating the effect,
-        -- because a second copy here is the one place a divergence between the
-        -- two paths could hide: the tests would keep passing against a resume
-        -- that fetched something the live path did not.
         Upload.ResumeInboxItem item ->
             uploadEffects
                 (Upload.StatusReceived (Ok (Upload.replayFrame item)))
@@ -974,8 +951,6 @@ uploadEffects msg model maybeToken =
                     SimulatedEffect.Cmd.none
 
                 TimedOut ->
-                    -- Terminal, and it fetches nothing: there is no book id to
-                    -- ask about, which is precisely what makes it a timeout.
                     SimulatedEffect.Cmd.none
 
         Upload.SubmitManualIsbn ->
@@ -1011,9 +986,6 @@ uploadEffects msg model maybeToken =
                     SimulatedEffect.Cmd.none
 
         Upload.ConfirmMergeFormat bookId ->
-            -- Derived from the real request (#347), which also corrected a live
-            -- drift: this branch used to send an EMPTY body where production
-            -- sends the proto-encoded {isbn, format_label} from the model.
             case maybeToken of
                 Just token ->
                     authedRequestFromSpec
@@ -1076,8 +1048,6 @@ uploadEffects msg model maybeToken =
                     SimulatedEffect.Cmd.none
 
         Upload.ConfirmPlacement ->
-            -- Mirrors Upload.update: place the book, and (when the user ticked
-            -- "adults only") ALSO fire the raise-only user age-gate PUT.
             case ( model.step, maybeToken ) of
                 ( Upload.ChoosingShelf book, Just token ) ->
                     let
@@ -1169,12 +1139,6 @@ libraryEffects msg model =
                 Nothing ->
                     SimulatedEffect.Cmd.none
 
-        -- Undo-remove (#375). Reads `Bookshelf.mutationToken` for the same reason
-        -- the organiser branches do — production's guard, CALLED — and gates on
-        -- `ToastOffered` because that is the only state `UndoRemove` acts on: a
-        -- translator that fired on any toast state would report a request the
-        -- page does not make, and `undo_after_expiry_issues_nothing` would pass
-        -- against a page that had regressed.
         ( Bookshelf.UndoRemove, Just token, _ ) ->
             case model.undoToast of
                 Bookshelf.ToastOffered removal ->
@@ -1184,15 +1148,9 @@ libraryEffects msg model =
                     SimulatedEffect.Cmd.none
 
         ( Bookshelf.UndoCompleted (Ok ()), _, Just token ) ->
-            -- Mirrors `UndoCompleted (Ok ())`'s `reloadShelves`: the page never
-            -- trusts its local shelves after a restore.
             bookshelfInitEffects model.config (Just token)
 
         ( Bookshelf.ShelfMutated _, _, Just token ) ->
-            -- Both the Ok and Err branches refetch: the page never trusts its
-            -- local order after a mutation. Keyed off the *plain* token, matching
-            -- `reloadShelves` — a refetch is a GET, and read-only browse reloads
-            -- through the same path it loaded through.
             bookshelfInitEffects model.config (Just token)
 
         _ ->
@@ -1276,8 +1234,6 @@ reorderEffect model token reorder =
                 }
 
         _ ->
-            -- Shelves not loaded: production's `handleOrganiser` falls through
-            -- to its no-token/no-shelves clause and issues nothing.
             SimulatedEffect.Cmd.none
 
 
@@ -1354,9 +1310,6 @@ profileShelfInitEffects maybeToken handle bookshelfName =
         , url = "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
         , body = SimulatedEffect.Http.emptyBody
         , expect =
-            -- Mirror Api.getProfileShelf: the read-only profile payload carries
-            -- no visibility, so map it into the shared ShelvesLoaded response
-            -- shape with the "owner" default (RSS is never rendered here).
             SimulatedEffect.Http.expectJson
                 (Bookshelf.ShelvesLoaded
                     (Bookshelf.requestKey (Bookshelf.profileConfig handle bookshelfName))
@@ -1384,8 +1337,6 @@ searchEffects msg model maybeToken =
             if count == model.debounceCount && not (String.isEmpty model.query) then
                 let
                     booksEffect =
-                        -- The scope follows the current toggle state (#284): deep
-                        -- appends `&scope=deep`, default emits no param.
                         searchBooksEffect model.query model.deepSearch maybeToken
 
                     readersEffect =
@@ -1407,10 +1358,6 @@ searchEffects msg model maybeToken =
                 SimulatedEffect.Cmd.none
 
         Search.DeepSearchToggled deep ->
-            -- Mirror `Page.Search.update`: flipping the toggle with a non-empty
-            -- query re-fires ONLY the book search, under the new scope. `model` is
-            -- the pre-update model, whose `query` the toggle does not change; the
-            -- new scope comes from the Msg's `deep` value, not `model.deepSearch`.
             if String.isEmpty model.query then
                 SimulatedEffect.Cmd.none
 
@@ -1478,8 +1425,6 @@ bookDetailEffects msg model maybeToken =
                             SimulatedEffect.Http.jsonBody
                                 (Encode.object [ ( "bookshelf", Encode.string model.selectedBookshelf ) ])
                         , expect =
-                            -- Mirrors Api.expectMove: the 422 reading_pile_full
-                            -- body must reach MoveCompleted as its own error.
                             SimulatedEffect.Http.expectStringResponse
                                 BookDetail.MoveCompleted
                                 Api.moveResponseToResult
@@ -1506,9 +1451,6 @@ bookDetailEffects msg model maybeToken =
                 _ ->
                     SimulatedEffect.Cmd.none
 
-        -- Per-placement remove from the multi-shelf notice (#333). Mirrors
-        -- `Api.removeBook placementId`, keyed on the id carried by the Msg
-        -- rather than `model.placement` — that is the whole point of it.
         BookDetail.RemovePlacement placementId ->
             case maybeToken of
                 Just token ->
@@ -1546,8 +1488,6 @@ bookDetailEffects msg model maybeToken =
                     SimulatedEffect.Cmd.none
 
         BookDetail.ProgressCardMsg _ ->
-            -- `model` is the post-update model. A Loading progressSaveState means
-            -- the card emitted ProgressUpdateRequested and a PUT should be issued.
             case ( model.placement, maybeToken, model.progressSaveState ) of
                 ( Just placement, Just token, Types.RemoteData.Loading ) ->
                     SimulatedEffect.Http.request
@@ -1588,9 +1528,6 @@ bookDetailEffects msg model maybeToken =
                     SimulatedEffect.Cmd.none
 
         BookDetail.PlacementVisibilitySelected _ ->
-            -- `model` here is the post-update model (bookDetailProgram passes
-            -- newModel). A Loading visibilityState means the client-side ceiling
-            -- guard passed and a PUT should be issued.
             case ( model.placement, maybeToken, model.visibilityState ) of
                 ( Just placement, Just token, Types.RemoteData.Loading ) ->
                     SimulatedEffect.Http.request
@@ -1655,10 +1592,6 @@ bookDetailInitEffects bookId maybeToken =
 
         Nothing ->
             SimulatedEffect.Cmd.none
-
-
-
--- PROGRAM TEST HARNESSES
 
 
 {-| Create a ProgramTest harness for the Upload page. `ageGatingEnabled`
@@ -1956,18 +1889,6 @@ loginEffects : Login.Msg -> Login.Model -> SimulatedEffect Login.Msg
 loginEffects msg model =
     case msg of
         Login.ForgotSubmitted ->
-            -- Mirrors `Api.forgotPassword`. The backend always answers 200 (no
-            -- user enumeration), so a test drives the acknowledgement by
-            -- responding 200 and reading what the card then says.
-            --
-            -- ⛔ The guard is applied here for the same reason `ResendRequested`
-            -- below applies its own: a simulation that fires the request
-            -- unconditionally cannot notice a double-send the real app
-            -- suppresses, and the double-send is exactly what #374 added this
-            -- branch to prove impossible. `Login.isForgotDisabled` is the real
-            -- predicate — re-deriving it here would let the harness and the page
-            -- disagree, which is the only way this test could pass while the app
-            -- was broken.
             if Login.isForgotDisabled model then
                 SimulatedEffect.Cmd.none
 
@@ -2031,14 +1952,6 @@ loginEffects msg model =
                     SimulatedEffect.Cmd.none
 
         Login.ResendRequested ->
-            -- Mirrors `Api.resendConfirmation` (#373), INCLUDING both things the
-            -- real branch decides. `Login.resendTarget` and
-            -- `Login.isResendDisabled` are called rather than re-derived: a
-            -- simulation that read `model.email` would leave the "check your
-            -- inbox" button untested against the address it must send to, and
-            -- one that skipped the guard would fire a request the real app
-            -- suppresses — which is precisely the double-send this is here to
-            -- prove cannot happen.
             if Login.isResendDisabled model then
                 SimulatedEffect.Cmd.none
 

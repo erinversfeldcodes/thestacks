@@ -58,10 +58,6 @@ defmodule Stacks.Books.ISBNResolverCache do
   @negative_ttl_ms 60 * 60 * 1000
   @cleanup_interval 5 * 60 * 1000
 
-  # Known atom keys in resolver metadata. Used to safely convert string
-  # keys back to atoms on DB reads — `String.to_existing_atom/1` would
-  # also work but is noisy if a field was renamed. An allowlist here
-  # keeps the round-trip explicit.
   @metadata_atom_keys ~w(
     title author description subjects publication_year cover_image_url
     publisher page_count source isbn_10 isbn_13 language
@@ -71,10 +67,6 @@ defmodule Stacks.Books.ISBNResolverCache do
     "open_library" => :open_library,
     "google_books" => :google_books
   }
-
-  # ---------------------------------------------------------------------------
-  # Public API
-  # ---------------------------------------------------------------------------
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -143,10 +135,6 @@ defmodule Stacks.Books.ISBNResolverCache do
     ets_put(isbn, result, @negative_ttl_ms)
     db_put(isbn, result, @negative_ttl_ms)
 
-    # Diagnostic signal: a negative cache hit lives for 1 h and will
-    # short-circuit subsequent ISBN resolutions for the same ISBN. If
-    # EnrichBookJob is stuck returning :not_found despite a healthy
-    # upstream, this event marks the moment the poison was planted.
     :telemetry.execute(
       [:stacks, :isbn_resolver_cache, :negative_stored],
       %{count: 1, ttl_ms: @negative_ttl_ms},
@@ -156,11 +144,6 @@ defmodule Stacks.Books.ISBNResolverCache do
     :ok
   end
 
-  # Transient resolver errors — see closed set in
-  # `Stacks.Books.ISBNResolver.error_reason/0`. We deliberately enumerate
-  # rather than catch-all so a future resolver reason fails the pattern
-  # match loudly (dialyzer enforces the same exhaustiveness in
-  # `EnrichBookJob.outcome_tag/1`).
   def put(isbn, {:error, reason})
       when is_binary(isbn) and
              reason in [
@@ -245,10 +228,6 @@ defmodule Stacks.Books.ISBNResolverCache do
     :ok
   end
 
-  # ---------------------------------------------------------------------------
-  # GenServer callbacks
-  # ---------------------------------------------------------------------------
-
   @impl true
   def init(_) do
     table = :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
@@ -267,10 +246,6 @@ defmodule Stacks.Books.ISBNResolverCache do
     schedule_cleanup()
     {:noreply, state}
   end
-
-  # ---------------------------------------------------------------------------
-  # L1 — ETS helpers
-  # ---------------------------------------------------------------------------
 
   defp ets_get(isbn) do
     now = System.monotonic_time(:millisecond)
@@ -305,10 +280,6 @@ defmodule Stacks.Books.ISBNResolverCache do
     ArgumentError -> :ok
   end
 
-  # ---------------------------------------------------------------------------
-  # L2 — Postgres helpers
-  # ---------------------------------------------------------------------------
-
   defp db_get(isbn) do
     if persistent_enabled?() do
       now = DateTime.utc_now()
@@ -338,19 +309,6 @@ defmodule Stacks.Books.ISBNResolverCache do
       :miss
   end
 
-  # Asynchronous L2 upsert. The whole point of the persistent cache is to
-  # remove DB latency from the upload hot path — if `put/2` waited on
-  # `Repo.insert_all/3` inline, the caller would pay ~1-3 ms per resolution.
-  # Submitting to Stacks.Books.CacheWriteSupervisor makes the write truly
-  # fire-and-forget. ETS is populated synchronously by the caller so
-  # subsequent in-process reads still see the entry immediately; the
-  # Postgres row lands within a tick for other nodes/machines.
-  #
-  # Errors inside the task are logged and emitted as a :put telemetry
-  # event (see `emit_put/2`) so L2 write failures remain visible in Fly
-  # logs. They are deliberately not surfaced back to the caller —
-  # resolution already succeeded, the cache miss on the next lookup is
-  # self-correcting.
   defp db_put(isbn, result, ttl_ms) do
     if persistent_enabled?() do
       now = DateTime.utc_now()
@@ -418,10 +376,6 @@ defmodule Stacks.Books.ISBNResolverCache do
       :ok
   end
 
-  # ---------------------------------------------------------------------------
-  # Serialization — atom-keyed Elixir map ↔ string-keyed JSONB map.
-  # ---------------------------------------------------------------------------
-
   defp serialize({:ok, metadata}) when is_map(metadata) do
     {"found", serialize_metadata(metadata)}
   end
@@ -469,10 +423,6 @@ defmodule Stacks.Books.ISBNResolverCache do
 
   defp deserialize_value(_key, value), do: value
 
-  # ---------------------------------------------------------------------------
-  # Misc
-  # ---------------------------------------------------------------------------
-
   defp persistent_enabled? do
     Application.get_env(:core, :persistent_cache_enabled, true)
   end
@@ -485,11 +435,6 @@ defmodule Stacks.Books.ISBNResolverCache do
     )
   end
 
-  # Emitted from inside the Task.Supervisor fn after the async DB upsert.
-  # `outcome` is `:stored` on success, `:error` on a rescued exception.
-  # Stacks.Telemetry.Reporter subscribes and writes a `cache_put ...` log
-  # line — this is the ONLY way async write failures surface, so the log
-  # line must be emitted on every terminal outcome.
   defp emit_put(outcome, isbn) do
     :telemetry.execute(
       [:stacks, :books, :isbn_resolver_cache, :put],

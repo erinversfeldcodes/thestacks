@@ -180,10 +180,6 @@ defmodule Stacks.Monitoring do
   def compute_status(consecutive_failures) when consecutive_failures <= 6, do: "degraded"
   def compute_status(_consecutive_failures), do: "broken"
 
-  # ---------------------------------------------------------------------------
-  # Private
-  # ---------------------------------------------------------------------------
-
   defp to_wire(%SourceHealthCheck{} = check) do
     %{
       name: check.source_name,

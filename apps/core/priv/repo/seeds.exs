@@ -1,11 +1,3 @@
-# Seed fixtures for development and dbt testing.
-# Run with: mix run apps/core/priv/repo/seeds.exs
-# Or via:   just test-dbt  (which resets the DB first)
-#
-# Dev logins:
-#   owner@thestacks.app / dev-password-123  (owner role)
-#   user@thestacks.app  / dev-password-456  (user role — for IDOR/E2E tests)
-
 alias Core.Repo
 import Ecto.Query, only: [from: 2]
 
@@ -55,8 +47,6 @@ defmodule Seeds do
   def e2e_empty_suites, do: ["empty-shelves"]
 end
 
-# ── Timestamps ──────────────────────────────────────────────────────────────
-
 jan_01 = ~U[2026-01-01 00:00:00.000000Z]
 jan_05 = ~U[2026-01-05 00:00:00.000000Z]
 jan_10 = ~U[2026-01-10 00:00:00.000000Z]
@@ -66,16 +56,10 @@ feb_01 = ~U[2026-02-01 00:00:00.000000Z]
 feb_14 = ~U[2026-02-14 00:00:00.000000Z]
 mar_01 = ~U[2026-03-01 00:00:00.000000Z]
 
-# ── Users ───────────────────────────────────────────────────────────────────
-
 e2e_users =
   Enum.map(Seeds.e2e_suites(), fn {idx, slug, display} ->
     %{
       id: Seeds.uuid(idx),
-      # `shouldShowOnboarding` (Main.elm:2845) renders the first-run overlay for any
-      # authenticated user with zero placements, which would cover the empty shelves
-      # the empty-suite fixture exists to expose. Mark those users onboarded.
-      # `onboarding_completed` is a generated column over these two keys.
       onboarding_steps:
         if(slug in Seeds.e2e_empty_suites(),
           do: %{"profile" => true, "privacy" => true},
@@ -83,9 +67,6 @@ e2e_users =
         ),
       email: "e2e-#{slug}@thestacks.test",
       display_name: display,
-      # handle is NOT NULL (#211); hyphens aren't valid in the handle format,
-      # and the `e2e_` prefix keeps otherwise-reserved slugs (search, settings)
-      # out of the reserved list.
       handle: "e2e_" <> String.replace(slug, "-", "_"),
       password_hash: Argon2.hash_pwd_salt("e2e-password"),
       role: "user",
@@ -130,19 +111,6 @@ Repo.insert_all(
       handle: "test_user",
       password_hash: Argon2.hash_pwd_salt("dev-password-456"),
       role: "user",
-      # ⚠️ The one seeded reader with a **publicly viewable profile**, and it exists for the
-      # same reason `public_bookshelf_names` does below.
-      #
-      # That fix was half-applied. Making three bookshelves `platform` was meant to make the
-      # RSS affordance (US-6.1) drivable, but every seeded user kept `profile_visibility:
-      # "owner"` — so `/u/:handle` 404s for *every* viewer, including an authenticated one,
-      # and the page the subscribe link lives on could never be reached. The feed link had
-      # still never been seen in any seeded environment; only the reason had moved one level
-      # up. Confirmed on a preview 2026-07-28: `/u/platform_owner…` → "Reader not found".
-      #
-      # Deliberately just this one: user 1 (the owner) stays `owner`, so the private-profile
-      # path and the 404-for-a-hidden-profile case both stay represented — the same balance
-      # `public_bookshelf_names` strikes by leaving `wishlist` private.
       profile_visibility: "platform",
       age_verified: false,
       email_confirmed: true,
@@ -154,22 +122,9 @@ Repo.insert_all(
     }
   ] ++ e2e_users,
   prefix: "op",
-  # ⚠️ `profile_visibility` MUST be in this list, and leaving it out silently voided a fix.
-  #
-  # Every preview branches from staging by Neon copy-on-write, so these deterministic-UUID rows
-  # already exist and the conflict path always fires. With only
-  # `[:email_confirmed, :password_hash, :updated_at]` replaced, any change to a *fixture* field
-  # — visibility above all — was discarded on every environment that mattered, while the seed
-  # reported success and the diff looked landed. Verified on a preview 2026-07-28: after a
-  # successful reseed, `test_user` was still `profile_visibility: "owner"`.
-  #
-  # So this list is the set of fields the seed is AUTHORITATIVE for on re-run. A dev fixture that
-  # cannot correct its own rows is not a fixture, it is a one-time insert.
   on_conflict: {:replace, [:email_confirmed, :password_hash, :profile_visibility, :updated_at]},
   conflict_target: :id
 )
-
-# ── Authors ─────────────────────────────────────────────────────────────────
 
 authors_data = [
   {101, "Ursula K. Le Guin"},
@@ -206,11 +161,7 @@ author_rows =
 
 Repo.insert_all("authors", author_rows, prefix: "op", on_conflict: :nothing)
 
-# ── Books ───────────────────────────────────────────────────────────────────
-# {book_index, isbn, title, author_index, page_count, year, subjects, visibility_tier}
-
 books_data = [
-  # ── Le Guin (101) ──
   {1001, "9780061120084", "The Left Hand of Darkness", 101, 304, 1969,
    ["Science Fiction", "Fiction"], "public"},
   {1002, "9780061470769", "The Dispossessed", 101, 387, 1974, ["Science Fiction", "Fiction"],
@@ -226,14 +177,11 @@ books_data = [
   {1008, "9780060766399", "The Farthest Shore", 101, 197, 1972, ["Fantasy", "Fiction"], "public"},
   {1009, "9780553382563", "Tehanu", 101, 226, 1990, ["Fantasy", "Fiction"], "public"},
   {1010, "9780156027786", "The Other Wind", 101, 246, 2001, ["Fantasy", "Fiction"], "public"},
-
-  # ── Plato (102) ──
   {1011, "9780140449280", "The Republic", 102, 416, -380, ["Philosophy", "Classic"], "public"},
   {1012, "9780140455113", "Phaedrus", 102, 103, -370, ["Philosophy", "Classic"], "public"},
   {1013, "9780872201798", "Symposium", 102, 128, -385, ["Philosophy", "Classic"], "public"},
   {1014, "9780199537761", "The Republic (Oxford)", 102, 416, -380, ["Philosophy", "Classic"],
    "public"},
-  # Use different editions / translations for Plato
   {1015, "9780199535767", "Meno and Other Dialogues", 102, 224, -390, ["Philosophy", "Classic"],
    "public"},
   {1016, "9780140440409", "The Last Days of Socrates", 102, 256, -399, ["Philosophy", "Classic"],
@@ -243,8 +191,6 @@ books_data = [
   {1019, "9780199537525", "Theaetetus", 102, 240, -369, ["Philosophy", "Classic"], "public"},
   {1020, "9780140449273", "Timaeus and Critias", 102, 160, -360, ["Philosophy", "Classic"],
    "public"},
-
-  # ── Donna Tartt (103) ──
   {1021, "9780679410324", "The Secret History", 103, 559, 1992,
    ["Literary Fiction", "Dark Academia"], "public"},
   {1022, "9780316258784", "The Goldfinch", 103, 771, 2013, ["Literary Fiction", "Fiction"],
@@ -265,8 +211,6 @@ books_data = [
    "public"},
   {1030, "9780141006314", "The Little Friend (Penguin)", 103, 555, 2002,
    ["Literary Fiction", "Mystery"], "public"},
-
-  # ── Umberto Eco (104) ──
   {1031, "9780156030410", "The Name of the Rose", 104, 536, 1980,
    ["Historical Fiction", "Mystery"], "public"},
   {1032, "9780151006908", "Baudolino", 104, 528, 2000, ["Historical Fiction", "Fiction"],
@@ -286,8 +230,6 @@ books_data = [
    ["Non-Fiction", "Philosophy"], "public"},
   {1040, "9780253213396", "A Theory of Semiotics", 104, 354, 1976, ["Non-Fiction", "Philosophy"],
    "public"},
-
-  # ── Ishiguro (105) ──
   {1041, "9780571258093", "The Remains of the Day", 105, 245, 1989,
    ["Literary Fiction", "Classic"], "public"},
   {1042, "9780571225385", "Never Let Me Go", 105, 288, 2005,
@@ -307,8 +249,6 @@ books_data = [
   {1049, "9780571311569", "Nocturnes", 105, 221, 2009, ["Literary Fiction", "Fiction"], "public"},
   {1050, "9780571364879", "Klara and the Sun (PB)", 105, 303, 2021,
    ["Science Fiction", "Literary Fiction"], "public"},
-
-  # ── Borges (106) ──
   {1051, "9780802130303", "Labyrinths", 106, 240, 1962, ["Fiction", "Magic Realism"], "public"},
   {1052, "9780142437889", "Collected Fictions", 106, 565, 1998, ["Fiction", "Magic Realism"],
    "public"},
@@ -326,8 +266,6 @@ books_data = [
    "public"},
   {1060, "9780811217477", "Selected Non-Fictions", 106, 576, 1999, ["Non-Fiction", "Philosophy"],
    "public"},
-
-  # ── Dostoevsky (107) ──
   {1061, "9780140449136", "Crime and Punishment", 107, 671, 1866, ["Literary Fiction", "Classic"],
    "public"},
   {1062, "9780140449228", "The Idiot", 107, 656, 1869, ["Literary Fiction", "Classic"], "public"},
@@ -346,8 +284,6 @@ books_data = [
    ["Literary Fiction", "Classic"], "public"},
   {1070, "9780199536368", "The Adolescent", 107, 587, 1875, ["Literary Fiction", "Classic"],
    "public"},
-
-  # ── Virginia Woolf (108) ──
   {1071, "9780156030472", "Mrs Dalloway", 108, 194, 1925, ["Literary Fiction", "Classic"],
    "public"},
   {1072, "9780156907392", "To the Lighthouse", 108, 209, 1927, ["Literary Fiction", "Classic"],
@@ -364,8 +300,6 @@ books_data = [
    "public"},
   {1079, "9780156949705", "The Years", 108, 435, 1937, ["Literary Fiction", "Classic"], "public"},
   {1080, "9780156031493", "Flush", 108, 188, 1933, ["Fiction", "Classic"], "public"},
-
-  # ── Garcia Marquez (109) ──
   {1081, "9780060883287", "One Hundred Years of Solitude", 109, 417, 1967,
    ["Magic Realism", "Fiction"], "public"},
   {1082, "9780060531041", "Love in the Time of Cholera", 109, 368, 1985,
@@ -385,8 +319,6 @@ books_data = [
    ["Fiction", "Romance"], "age_gated"},
   {1090, "9780060153465", "Collected Stories", 109, 311, 1984, ["Magic Realism", "Fiction"],
    "public"},
-
-  # ── Toni Morrison (110) ──
   {1091, "9781400033416", "Beloved", 110, 324, 1987, ["Literary Fiction", "Classic"], "public"},
   {1092, "9781400078653", "Song of Solomon", 110, 337, 1977, ["Literary Fiction", "Classic"],
    "public"},
@@ -400,8 +332,6 @@ books_data = [
   {1099, "9780307740922", "God Help the Child", 110, 178, 2015, ["Literary Fiction", "Fiction"],
    "public"},
   {1100, "9781400032747", "Tar Baby", 110, 306, 1981, ["Literary Fiction", "Classic"], "public"},
-
-  # ── Murakami (111) ──
   {1101, "9780375718946", "Kafka on the Shore", 111, 467, 2002, ["Fiction", "Magic Realism"],
    "public"},
   {1102, "9780679775430", "The Wind-Up Bird Chronicle", 111, 607, 1994,
@@ -418,8 +348,6 @@ books_data = [
    "public"},
   {1110, "9780307762672", "Colorless Tsukuru Tazaki", 111, 298, 2013,
    ["Fiction", "Literary Fiction"], "public"},
-
-  # ── Octavia E. Butler (112) ──
   {1111, "9780807083697", "Kindred", 112, 264, 1979, ["Science Fiction", "Fiction"], "public"},
   {1112, "9781538751480", "Parable of the Sower", 112, 345, 1993, ["Science Fiction", "Dystopia"],
    "public"},
@@ -437,8 +365,6 @@ books_data = [
   {1119, "9780446603799", "Imago", 112, 264, 1989, ["Science Fiction", "Afrofuturism"], "public"},
   {1120, "9781583226988", "Fledgling", 112, 310, 2005, ["Science Fiction", "Horror"],
    "age_gated"},
-
-  # ── Kundera (113) ──
   {1121, "9780060932145", "The Unbearable Lightness of Being", 113, 314, 1984,
    ["Literary Fiction", "Philosophy"], "public"},
   {1122, "9780060932190", "The Book of Laughter and Forgetting", 113, 298, 1979,
@@ -455,8 +381,6 @@ books_data = [
   {1128, "9780060997007", "Slowness", 113, 156, 1995, ["Literary Fiction", "Fiction"], "public"},
   {1129, "9780060841805", "Identity", 113, 153, 1998, ["Literary Fiction", "Fiction"], "public"},
   {1130, "9780061992100", "Ignorance", 113, 176, 2000, ["Literary Fiction", "Fiction"], "public"},
-
-  # ── Calvino (114) ──
   {1131, "9780156453806", "If on a winter's night a traveler", 114, 260, 1979,
    ["Literary Fiction", "Fiction"], "public"},
   {1132, "9780156457101", "Invisible Cities", 114, 165, 1972, ["Literary Fiction", "Fiction"],
@@ -476,8 +400,6 @@ books_data = [
    ["Non-Fiction", "Literary Fiction"], "public"},
   {1140, "9780156029872", "The Path to the Spiders' Nests", 114, 189, 1947,
    ["Literary Fiction", "Historical Fiction"], "public"},
-
-  # ── Margaret Atwood (115) ──
   {1141, "9780385490818", "The Handmaid's Tale", 115, 311, 1985, ["Dystopia", "Fiction"],
    "public"},
   {1142, "9780385543781", "The Testaments", 115, 419, 2019, ["Dystopia", "Fiction"], "public"},
@@ -494,8 +416,6 @@ books_data = [
   {1149, "9780771008801", "The Blind Assassin", 115, 521, 2000, ["Literary Fiction", "Fiction"],
    "public"},
   {1150, "9780385541350", "Hag-Seed", 115, 293, 2016, ["Fiction", "Literary Fiction"], "public"},
-
-  # ── Ray Bradbury (116) ──
   {1151, "9781451673319", "Fahrenheit 451", 116, 194, 1953, ["Science Fiction", "Dystopia"],
    "public"},
   {1152, "9780380977260", "The Martian Chronicles", 116, 222, 1950,
@@ -515,8 +435,6 @@ books_data = [
    ["Science Fiction", "Fiction"], "public"},
   {1160, "9780380730391", "R is for Rocket", 116, 233, 1962, ["Science Fiction", "Fiction"],
    "public"},
-
-  # ── Chimamanda Ngozi Adichie (117) ──
   {1161, "9780307455925", "Americanah", 117, 477, 2013, ["Literary Fiction", "Fiction"],
    "public"},
   {1162, "9781400095209", "Half of a Yellow Sun", 117, 541, 2006,
@@ -536,8 +454,6 @@ books_data = [
    ["Literary Fiction", "Fiction"], "public"},
   {1170, "9780307455932", "Americanah (PB)", 117, 477, 2013, ["Literary Fiction", "Fiction"],
    "public"},
-
-  # ── Carlos Ruiz Zafon (118) ──
   {1171, "9780143034902", "The Shadow of the Wind", 118, 487, 2001, ["Gothic", "Mystery"],
    "public"},
   {1172, "9780062199546", "The Prisoner of Heaven", 118, 281, 2011, ["Gothic", "Mystery"],
@@ -554,8 +470,6 @@ books_data = [
    "public"},
   {1180, "9780062668684", "The Labyrinth of the Spirits (HB)", 118, 821, 2016,
    ["Gothic", "Mystery"], "public"},
-
-  # ── Madeline Miller (119) ──
   {1181, "9780316556347", "Circe", 119, 393, 2018, ["Fantasy", "Mythology"], "public"},
   {1182, "9780062060624", "The Song of Achilles", 119, 369, 2011, ["Fantasy", "Mythology"],
    "public"},
@@ -571,8 +485,6 @@ books_data = [
    "public"},
   {1189, "9780316334754", "Circe (Trade PB)", 119, 393, 2018, ["Fantasy", "Mythology"], "public"},
   {1190, "9780316556330", "Circe (LP)", 119, 393, 2018, ["Fantasy", "Mythology"], "public"},
-
-  # ── Patrick Rothfuss (120) ──
   {1191, "9780756404741", "The Name of the Wind", 120, 662, 2007, ["Fantasy", "Fiction"],
    "public"},
   {1192, "9780756407919", "The Wise Man's Fear", 120, 994, 2011, ["Fantasy", "Fiction"],
@@ -595,19 +507,12 @@ books_data = [
    ["Fantasy", "Fiction"], "public"}
 ]
 
-# ── Group editions into works ─────────────────────────────────────────────
-# Group by canonical title + author to consolidate editions of the same work.
-# The first edition in each group is the primary; the rest are secondary.
-# Works get the UUID of the first (primary) edition's index.
-
 work_groups =
   books_data
   |> Enum.group_by(fn {_idx, _isbn, title, author_idx, _pages, _year, _subj, _vis} ->
     {Seeds.canonical_title(title), author_idx}
   end)
 
-# Build a mapping from each edition's index to its parent work index.
-# The work index = the first edition's index in the group.
 {work_rows, edition_rows, edition_to_work_map} =
   Enum.reduce(work_groups, {[], [], %{}}, fn {_key, editions},
                                              {works_acc, editions_acc, map_acc} ->
@@ -636,14 +541,6 @@ work_groups =
             _ -> if is_primary, do: nil, else: "Edition #{i + 1}"
           end
 
-        # `vet_edition_row!/1` puts this row through the SAME changeset every
-        # production write path uses, and raises here rather than letting
-        # `insert_all/3` carry an impossible edition into the database. Three
-        # seeded ISBNs with wrong check digits reached staging exactly this way
-        # (#339) — `insert_all/3` was chosen for deterministic ids and fixed
-        # timestamps, and silently bought a bypass of every validation with it.
-        # It also normalises: an ISBN-10 literal comes back as its ISBN-13 form,
-        # so the seed cannot mint the unnormalised rows #339 also had to repair.
         edition =
           Stacks.Books.vet_edition_row!(%{
             id: Seeds.uuid(3000 + idx),
@@ -653,9 +550,6 @@ work_groups =
             page_count: pages,
             publication_year: year,
             is_primary: is_primary,
-            # Every seeded ISBN is a real, externally-catalogued book, and
-            # `op.book_editions.verification_source` is NOT NULL (#335 D1) — so
-            # the seed must state its provenance like any other writer.
             verification_source: "open_library",
             created_at: jan_01,
             updated_at: jan_01
@@ -675,21 +569,8 @@ work_groups =
 Repo.insert_all("books", work_rows, prefix: "op", on_conflict: :nothing)
 Repo.insert_all("book_editions", edition_rows, prefix: "op", on_conflict: :nothing)
 
-# ── Bookshelves ─────────────────────────────────────────────────────────────
-
 bookshelf_names = ["antilibrary", "library", "wishlist", "reading_pile", "looking_for_home"]
 
-# Bookshelves the demo users share publicly.
-#
-# `Components.RSSLink` renders nothing unless a bookshelf is `visibility: "platform"`,
-# and every seeded bookshelf was `"owner"` — so the RSS affordance (US-6.1) had never
-# appeared in any seeded environment and the story had never been drivable. A shelf
-# somebody shares is also the realistic default for a demo fixture: a platform with no
-# public shelves cannot demonstrate discovery, following, or feeds.
-#
-# Deliberately not all of them: `wishlist` and `looking_for_home` stay owner-only so the
-# *private* path stays represented too, and so the RSSLink negative case (icon absent)
-# is still exercisable.
 public_bookshelf_names = ["library", "antilibrary", "reading_pile"]
 
 bookshelf_visibility = fn name ->
@@ -710,22 +591,11 @@ bookshelf_rows =
     end)
   end)
 
-# ⚠️ `:nothing` made the `public_bookshelf_names` decision above a no-op wherever it mattered.
-#
-# A preview branches staging, so these rows already exist and `:nothing` left their old
-# `visibility` in place — every preview kept `owner` on all five bookshelves. The comment above
-# says this fix made the RSS affordance drivable; it never did, on any preview, because this line
-# discarded it. Confirmed 2026-07-28: 0 shared bookshelves after a successful reseed.
-#
-# Replacing `visibility` makes the seed authoritative for the one field it is deciding.
 Repo.insert_all("bookshelves", bookshelf_rows,
   prefix: "op",
   on_conflict: {:replace, [:visibility, :updated_at]},
   conflict_target: :id
 )
-
-# ── E2E user bookshelves ──────────────────────────────────────────────────
-# Each E2E user gets 5 bookshelves. UUID range: 400+ (5 per user, starting at user index * 10).
 
 e2e_bookshelf_rows =
   Enum.flat_map(Seeds.e2e_suites(), fn {user_idx, _slug, _display} ->
@@ -736,8 +606,6 @@ e2e_bookshelf_rows =
         id: Seeds.uuid(shelf_base + i),
         user_id: Seeds.uuid(user_idx),
         name: name,
-        # E2E users keep private shelves: several specs assert owner-only behaviour, and
-        # flipping them to platform would change what those specs are testing.
         visibility: "owner",
         created_at: jan_01,
         updated_at: jan_01
@@ -746,10 +614,6 @@ e2e_bookshelf_rows =
   end)
 
 Repo.insert_all("bookshelves", e2e_bookshelf_rows, prefix: "op", on_conflict: :nothing)
-
-# ── Shelves (one default shelf per bookshelf) ────────────────────────────
-# Shelf UUID index = bookshelf UUID index + 3000. This mapping is stable and
-# referenced by placement rows below.
 
 shelf_rows =
   Enum.flat_map([{1, 301}, {2, 306}], fn {_user_n, start_idx} ->
@@ -783,10 +647,6 @@ e2e_shelf_rows =
 
 Repo.insert_all("shelves", shelf_rows ++ e2e_shelf_rows, prefix: "op", on_conflict: :nothing)
 
-# Build lookup: bookshelf_id (binary) → actual shelf_id (binary).
-# In deployed environments, shelves may already exist from migration back-fill with
-# random UUIDs. on_conflict: :nothing skips our deterministic IDs in that case, so
-# we must query the actual IDs from the DB rather than computing Seeds.uuid(n+3000).
 all_bookshelf_ids = Enum.map(bookshelf_rows ++ e2e_bookshelf_rows, & &1.id)
 
 shelf_id_by_bookshelf =
@@ -799,13 +659,6 @@ shelf_id_by_bookshelf =
   )
   |> Map.new()
 
-# ── E2E user placements ──────────────────────────────────────────────────
-# Each E2E user gets 5 books on library, 3 on antilibrary, 2 on reading_pile —
-# except the `e2e_empty_suites/0` slugs, which stay at zero so the per-shelf
-# empty states (US-1.6.5) are assertable.
-# Uses works from the seed data. Placement UUID range: 5000+.
-
-# Collect all work IDs from the edition_to_work_map (unique work indices)
 all_work_indices = edition_to_work_map |> Map.values() |> Enum.uniq() |> Enum.sort()
 
 e2e_placement_rows =
@@ -814,9 +667,6 @@ e2e_placement_rows =
   |> Enum.flat_map(fn {user_idx, _slug, _display} ->
     shelf_base = 400 + (user_idx - 10) * 10
     place_base = 5000 + (user_idx - 10) * 20
-    # Each user gets a different slice of works so they don't collide.
-    # Use circular indexing so high-idx users still get 10 works even when
-    # offset exceeds the total number of unique works.
     offset = (user_idx - 10) * 10
     n = length(all_work_indices)
     user_works = Enum.map(0..9, fn i -> Enum.at(all_work_indices, rem(offset + i, n)) end)
@@ -838,11 +688,6 @@ e2e_placement_rows =
         %{
           id: Seeds.uuid(place_base + i),
           book_id: Seeds.uuid(work_idx),
-          # The work's primary edition (#335 D2): the works loop above gives every
-          # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
-          # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
-          # sets this on every real placement, so a seed that left it null would
-          # fixture a shape production stopped producing.
           book_edition_id: Seeds.uuid(3000 + work_idx),
           bookshelf_id: library_shelf,
           shelf_id: library_shelf_id,
@@ -860,11 +705,6 @@ e2e_placement_rows =
         %{
           id: Seeds.uuid(place_base + 10 + i),
           book_id: Seeds.uuid(work_idx),
-          # The work's primary edition (#335 D2): the works loop above gives every
-          # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
-          # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
-          # sets this on every real placement, so a seed that left it null would
-          # fixture a shape production stopped producing.
           book_edition_id: Seeds.uuid(3000 + work_idx),
           bookshelf_id: antilibrary_shelf,
           shelf_id: antilibrary_shelf_id,
@@ -882,11 +722,6 @@ e2e_placement_rows =
         %{
           id: Seeds.uuid(place_base + 15 + i),
           book_id: Seeds.uuid(work_idx),
-          # The work's primary edition (#335 D2): the works loop above gives every
-          # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
-          # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
-          # sets this on every real placement, so a seed that left it null would
-          # fixture a shape production stopped producing.
           book_edition_id: Seeds.uuid(3000 + work_idx),
           bookshelf_id: reading_pile_shelf,
           shelf_id: reading_pile_shelf_id,
@@ -907,9 +742,6 @@ Repo.insert_all("bookshelf_placements", e2e_placement_rows,
   on_conflict: :nothing
 )
 
-# ── Placements ──────────────────────────────────────────────────────────────
-
-# User 1 placement groups: {shelf_uuid_idx, book_range, placed_at, label}
 placement_groups = [
   {302, 0..19, jan_10, "library"},
   {301, 20..59, jan_15, "antilibrary"},
@@ -918,7 +750,6 @@ placement_groups = [
   {305, 75..76, jan_20, "looking_for_home"}
 ]
 
-# Track placement UUID counter
 {user1_placements, next_place_idx} =
   Enum.flat_map_reduce(placement_groups, 2001, fn {shelf_idx, range, placed_at, label},
                                                   place_idx ->
@@ -930,17 +761,11 @@ placement_groups = [
                                                  idx ->
         position = idx - place_idx + 1
 
-        # Map edition index to its parent work index
         work_idx = Map.get(edition_to_work_map, book_idx, book_idx)
 
         base = %{
           id: Seeds.uuid(idx),
           book_id: Seeds.uuid(work_idx),
-          # The work's primary edition (#335 D2): the works loop above gives every
-          # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
-          # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
-          # sets this on every real placement, so a seed that left it null would
-          # fixture a shape production stopped producing.
           book_edition_id: Seeds.uuid(3000 + work_idx),
           bookshelf_id: Seeds.uuid(shelf_idx),
           shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(shelf_idx)),
@@ -1001,7 +826,6 @@ placement_groups = [
     {placements, new_idx}
   end)
 
-# User 2 placements: 3 on library (shelf 307), 1 on antilibrary (shelf 306)
 user2_antilibrary_book_idx = elem(Enum.at(books_data, 3), 0)
 
 user2_antilibrary_work_idx =
@@ -1014,11 +838,6 @@ user2_placements =
     %{
       id: Seeds.uuid(next_place_idx + i),
       book_id: Seeds.uuid(work_idx),
-      # The work's primary edition (#335 D2): the works loop above gives every
-      # work's first edition `is_primary: true` and the id `Seeds.uuid(3000 +
-      # primary_idx)`, and `primary_idx` IS the work index. `Shelving.place_book/3`
-      # sets this on every real placement, so a seed that left it null would
-      # fixture a shape production stopped producing.
       book_edition_id: Seeds.uuid(3000 + work_idx),
       bookshelf_id: Seeds.uuid(307),
       shelf_id: Map.fetch!(shelf_id_by_bookshelf, Seeds.uuid(307)),
@@ -1050,24 +869,6 @@ all_placements = user1_placements ++ user2_placements
 
 Repo.insert_all("bookshelf_placements", all_placements, prefix: "op", on_conflict: :nothing)
 
-# ── Replay placement events for seeded rows ─────────────────────────────────
-#
-# Every placement above is written with `insert_all`, which bypasses
-# `Shelving.place_book/3` and therefore emits nothing. That is the systemic
-# reason `op.feed_cache` held **zero rows in every environment**: the only thing
-# that writes it is `RegenerateFeedJob`, which only ever runs off a
-# `placement.created` event. The feature was built, deployed, and tested — and
-# had never once produced a row, because no seeded placement ever announced
-# itself. The same silence applies to any future event-driven consumer of
-# placements, so this is fixed once here rather than per feature.
-#
-# Driven off the rows that actually landed rather than the in-memory lists, so
-# it covers every `insert_all` site above (E2E users included) and cannot drift
-# from them. `emit_safe/1` because a fixture must not abort a seed run.
-#
-# Requires an Oban queue to actually deliver: under `seed_live/0` on a preview
-# the jobs run, whereas a bare `mix run seeds.exs` writes the events and leaves
-# the jobs queued. The events are the contract; delivery is the environment's.
 seeded_placements =
   Repo.all(
     from p in Stacks.Shelving.Placement,
@@ -1095,8 +896,6 @@ Enum.each(seeded_placements, fn p ->
 end)
 
 IO.puts("  emitted placement.created for #{length(seeded_placements)} seeded placements")
-
-# ── Placement History ───────────────────────────────────────────────────────
 
 Repo.insert_all(
   "bookshelf_placement_history",
@@ -1127,8 +926,6 @@ Repo.insert_all(
   on_conflict: :nothing
 )
 
-# ── Uploaded Image ──────────────────────────────────────────────────────────
-
 Repo.insert_all(
   "uploaded_images",
   [
@@ -1147,8 +944,6 @@ Repo.insert_all(
   on_conflict: :nothing
 )
 
-# ── Audit Log ───────────────────────────────────────────────────────────────
-
 Repo.insert_all(
   "audit_log",
   [
@@ -1166,19 +961,8 @@ Repo.insert_all(
   on_conflict: :nothing
 )
 
-# ── Platform Costs ──────────────────────────────────────────────────────────
-# Seed the 5 static current-month platform cost line items (Issue #110) so
-# preview/local deploys always have current-period data for the /costs page E2E.
-# Idempotent — seed_current_period_costs/0 upserts on [:service, :period_start,
-# :period_end], matching the daily RefreshCostsJob cron's conflict semantics.
 Stacks.Costs.seed_current_period_costs()
 
-# ── Source Health Checks ────────────────────────────────────────────────────
-# Representative per-source health rows so the admin scraper-health page
-# (Route.AdminScraperConfig, GET /api/admin/source-health) is non-empty in
-# dev/E2E (Issue #262). Synthetic source names, no user FK / PII. Covers a
-# healthy, a degraded, and a broken source. (The metrics dashboard that also
-# read these was removed in #267; the scraper-health page still consumes them.)
 Repo.insert_all(
   "source_health_checks",
   [
@@ -1299,8 +1083,6 @@ bookstore_targets = [
   {9001, "Loot", "https://www.loot.co.za", nil, false, "no product JSON API"},
   {9002, "Wordsworth Books", "https://www.wordsworth.co.za", "za/wordsworth", true, nil},
   {9003, "The Book Lounge", "https://booklounge.co.za", nil, true, nil},
-  # Bare domain, not www: www.exclusivebooks.co.za answers 301 while the bare
-  # host answers 200, so every request through www would cost two round trips.
   {9004, "Exclusive Books", "https://exclusivebooks.co.za", "za/exclusive_books", true, nil},
   {9005, "Clarke's Bookshop", "https://clarkesbooks.co.za", nil, true, nil},
   {9006, "Kalk Bay Books", "https://kalkbaybooks.co.za", nil, true,
@@ -1308,11 +1090,6 @@ bookstore_targets = [
   {9007, "Love Books", "http://www.lovebooks.co.za", nil, true,
    "WooCommerce, but no ISBN in sku (0/30 sampled)"},
   {9008, "Bridge Books", "https://bridgebooks.co.za", nil, true, nil},
-  # 9009 was Skoobs Theatre of Books. Removed 2026-07-28: skoobs.co.za and
-  # www.skoobs.co.za both return NXDOMAIN, so the domain no longer exists and the
-  # shop appears to have closed. Kept as a comment rather than silently dropped so
-  # the gap in the id sequence is explained, and so it is not re-added from the
-  # owner's original list without re-checking DNS.
   {9010, "Ike's Books", "http://ikesbooks.com", nil, true,
    "Shopify, but no ISBN in any field across 50 sampled products"},
   {9011, "Fortunate Finds", "https://fortunatefinds.co.za", nil, true,
@@ -1327,17 +1104,8 @@ Repo.insert_all(
       id: Seeds.uuid(n),
       name: name,
       website_url: url,
-      # "none" is a *conclusion*, so it is only set where a reason backs it. Leaving
-      # price_source nil elsewhere lets the capability probe write what it observes,
-      # which is the only thing allowed to author these fields.
       price_source: if(unscrapable, do: "none"),
       unscrapable_reason: unscrapable,
-      # Left nil deliberately. It used to say "{isbn}", recording an
-      # ISBN-substitution contract that does not exist: Shopify's storefront
-      # search matches an ISBN in no field, so six of these stores can never be
-      # searched that way. How a store is queried is now derived from its observed
-      # platform, not declared here, and a template that cannot work is worse than
-      # no template — it reads as a working configuration.
       search_template: nil,
       has_physical: physical,
       country_code: "ZA",
@@ -1350,23 +1118,6 @@ Repo.insert_all(
   on_conflict: :nothing
 )
 
-# ── Discovered sources ──────────────────────────────────────────────────────
-#
-# ⚠️ `op.discovered_sources` had **never held a row in any environment** (campaign G3).
-# The nightly `DiscoverAuthorSourcesJob` was the only thing that wrote it, and it
-# *creates* rather than refreshes — so a cron that may not fire meant the admin approval
-# UI at `/admin/sources` had never had anything to approve, and the feature could not be
-# demonstrated, reviewed or tested end to end.
-#
-# Seeded as `pending_review` on purpose, not `approved`. Approval is a **human** act and
-# the only producer of `op.third_spaces` (US-3.1.1 §4) — seeding approved rows would both
-# bypass that gate and skip the geocoding that approval performs. Left pending, these give
-# the owner something real to approve, and approving one exercises the whole chain:
-#
-#   approve_source → geocode → third_space (+ nearest_bookshop_km) → the map's 500 m filter
-#
-# Real Cape Town and Johannesburg places, because a geocoder has to be able to find them
-# for the chain to mean anything.
 discovered_source_rows = [
   {9101, "Truth Coffee Roasting", "community", "https://truth.coffee"},
   {9102, "Haas Collective", "community", "https://haascollective.com"},
@@ -1384,8 +1135,6 @@ Repo.insert_all(
       type: type,
       url: url,
       status: "pending_review",
-      # Mid-range: these came from a geographic sweep, not a hand-curated list, and a
-      # fabricated 0.95 would misrepresent how much the scorer actually knows.
       confidence: 0.6,
       discovered_via: "seed:geographic_sweep",
       discovered_at: jan_10,

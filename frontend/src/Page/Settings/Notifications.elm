@@ -69,8 +69,6 @@ init maybeToken =
             )
 
         Nothing ->
-            -- No token means no request is in flight: Loading here would
-            -- render "Loading your preferences…" forever (#324 0h).
             ( { prefs = NotAsked, saving = NotAsked }, Cmd.none )
 
 
@@ -101,7 +99,6 @@ update msg model maybeToken =
                     ( { model | saving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    -- 401 is gone from this branch: `Api.authed` claims it first.
                     ( { model | saving = Failure err }, Cmd.none, NoOut )
 
         SessionExpiryDetected ->

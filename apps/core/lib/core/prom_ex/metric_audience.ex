@@ -36,10 +36,6 @@ defmodule Core.PromEx.MetricAudience do
   `DashboardLabelValidationTest`.
   """
 
-  # All families below are aggregate + non-PII + non-de-anonymisable (#249 audit)
-  # → `:public`. To withhold a future metric, classify it `:own` (per-user, #242)
-  # or `:break_glass` (#138) instead — and never leave a registered metric absent
-  # (the test fails), because absent == invisible on every dashboard.
   @audience %{
     "stacks_age_gate_enforce_count_total" => :public,
     "stacks_age_verification_count_total" => :public,
@@ -90,14 +86,7 @@ defmodule Core.PromEx.MetricAudience do
     "stacks_visibility_recap_count_total" => :public,
     "stacks_visibility_recap_placements_capped_total" => :public,
     "stacks_visibility_recap_posts_capped_total" => :public,
-    # Issue #349 — vision call latency. Aggregate wall-time keyed only on the
-    # fixed endpoint set and the HTTP status; nothing about the uploaded image
-    # or its uploader is in the label set, so it is not de-anonymisable.
     "stacks_vision_request_stop_duration_milliseconds" => :public,
-    # Issue #350 — vision calls that produced no response. Keyed on the same
-    # fixed endpoint set plus `Stacks.AI.Client.reason_class/1`, a closed set of
-    # five atoms naming the socket failure; the open `reason` term the event
-    # also carries is not a tag and never reaches the sink.
     "stacks_vision_request_exception_count_total" => :public
   }
 

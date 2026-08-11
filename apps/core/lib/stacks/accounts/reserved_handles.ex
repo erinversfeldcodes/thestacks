@@ -12,15 +12,12 @@ defmodule Stacks.Accounts.ReservedHandles do
   All checks are case-insensitive against the lowercased handle.
   """
 
-  # Top-level SPA path segments + the `/u/` prefix itself. (Dashed segments can
-  # never be a valid handle — format is [a-z0-9_] — but are listed for the record.)
   @route_segments ~w(
     u login library antilibrary wishlist reading-pile looking-for-home books
     upload search settings costs catalogue marketplace blog admin groups
     confirm-email
   )
 
-  # Operational / impersonation-sensitive.
   @operational ~w(
     api static assets health me new root about help support terms privacy
     home owner staff moderator system stacks thestacks null undefined

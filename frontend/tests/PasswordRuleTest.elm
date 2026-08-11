@@ -94,8 +94,6 @@ suite =
                         |> Expect.equal "New password must be at least 8 characters."
             , test "the number in the copy is the number that is enforced" <|
                 \_ ->
-                    -- If `minLength` moved and the sentence did not, this fails.
-                    -- That is the whole point: the copy is built from the number.
                     ( PasswordRule.isLongEnough (String.repeat (PasswordRule.minLength - 1) "a")
                     , PasswordRule.isLongEnough (String.repeat PasswordRule.minLength "a")
                     )
@@ -141,10 +139,6 @@ suite =
         , describe "the wordings that used to disagree are gone"
             [ test "the register card no longer spells the number as a word" <|
                 \_ ->
-                    -- Positive control FIRST, on the same value: without it,
-                    -- "the old copy is absent" would pass against an empty
-                    -- message. `check-prose-assertions.sh` cannot see a bare
-                    -- negative, so it is paired here by hand.
                     let
                         message =
                             Login.errorMessage Login.RegisterMode
@@ -158,13 +152,6 @@ suite =
                         |> Expect.equal ( True, False )
             , test "the register card's two statements of the rule are now the same string" <|
                 \_ ->
-                    -- They were "Password must be at least 8 characters" (the
-                    -- inline hint, no full stop) and "That password is too
-                    -- slight; please choose at least eight characters." (the
-                    -- 422) — on the SAME form, about the same rule, with the
-                    -- number written two different ways. Comparing them to each
-                    -- other rather than to a literal is what makes this survive
-                    -- a future rewording: the guarantee is agreement, not wording.
                     let
                         inlineHint =
                             case Login.validatePassword "short" of
@@ -185,10 +172,6 @@ suite =
         , describe "the register card still speaks its own language for everything else"
             [ test "a duplicate email keeps the in-world copy" <|
                 \_ ->
-                    -- The collapse is scoped: only the length rule loses its
-                    -- second voice, because only the length rule is ALSO stated
-                    -- inline on the same card. The other branches say something
-                    -- the reader is told nowhere else.
                     Login.errorMessage Login.RegisterMode
                         (Login.SubmitValidationError
                             [ ( "email", [ "has already been taken" ] ) ]

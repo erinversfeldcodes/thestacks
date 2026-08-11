@@ -33,8 +33,6 @@ mod tests {
             capability: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
-        // Parse as Value so field-presence checks aren't fooled by substrings in
-        // other field names (e.g. "cover_image_url" containing "url").
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(
             val.get("price_cents").is_none(),

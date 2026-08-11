@@ -7,7 +7,6 @@ defmodule StacksWeb.EmailVerificationControllerTest do
     test "redirects to /confirm-email/success and confirms email with a valid token", %{
       conn: conn
     } do
-      # Mirror post-registration state: register/1 persists a signed Phoenix.Token.
       user = insert(:user, email_confirmed: false)
       token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
 

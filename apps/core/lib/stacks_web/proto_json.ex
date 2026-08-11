@@ -27,7 +27,6 @@ defmodule StacksWeb.ProtoJSON do
   alias Stacks.Feeds
   alias StacksWeb.ProtoJSON.Gen
 
-  # Shared user field lists — used by user/1 and listing_seller/1 for consistency.
   @user_core_fields [
     :id,
     :email,
@@ -39,10 +38,6 @@ defmodule StacksWeb.ProtoJSON do
   ]
   @user_auth_fields @user_core_fields ++ [:handle, :country_code, :city, :onboarding_completed]
   @user_embed_fields @user_core_fields ++ [:created_at, :updated_at]
-
-  # ---------------------------------------------------------------------------
-  # Book (work)
-  # ---------------------------------------------------------------------------
 
   @doc """
   Serializes a book (work) struct into the proto `Book` message shape.
@@ -147,9 +142,6 @@ defmodule StacksWeb.ProtoJSON do
       owner_handle: Map.get(label, :owner_handle, ""),
       price: Map.get(label, :price, ""),
       bookshelf_name: Map.get(label, :bookshelf_name, ""),
-      # Every bookshelf the hit sits on (#333). A book may legally sit on
-      # several at once, and the singular `bookshelf_name` can only name one —
-      # it is kept for wire compatibility and always equals the first entry.
       bookshelf_names: Map.get(label, :bookshelf_names, []),
       snippet: Map.get(label, :snippet, "")
     }
@@ -180,10 +172,6 @@ defmodule StacksWeb.ProtoJSON do
       primary_edition: edition_or_nil(primary)
     })
   end
-
-  # ---------------------------------------------------------------------------
-  # Author
-  # ---------------------------------------------------------------------------
 
   @doc """
   Serializes an author struct — the full shape with `{id, name, bio, website}`.
@@ -222,10 +210,6 @@ defmodule StacksWeb.ProtoJSON do
   def author_bookshelf(author_struct),
     do: Gen.author(author_struct) |> Map.take([:id, :name]) |> Map.put(:bio, nil)
 
-  # ---------------------------------------------------------------------------
-  # Edition
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a book edition struct.
 
@@ -260,20 +244,6 @@ defmodule StacksWeb.ProtoJSON do
     ])
   end
 
-  # ---------------------------------------------------------------------------
-  # SocialController — no ProtoJSON functions needed
-  # ---------------------------------------------------------------------------
-  #
-  # SocialController responses are trivial inline maps:
-  #   block/2   -> %{blocked: true}
-  #   unblock/2 -> %{blocked: false}
-  #   blocked_users/2 -> %{blocked_users: list, total: int, page: int}
-  # These stay as inline maps in the controller — no serializer benefit.
-
-  # ---------------------------------------------------------------------------
-  # Placement variants
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a placement with embedded book — the rich shape for bookshelf views.
 
@@ -293,8 +263,6 @@ defmodule StacksWeb.ProtoJSON do
       :current_page,
       :started_at,
       :finished_at,
-      # The placement's own visibility — the shelf spine renders owner-only
-      # placements faint/hidden for the owner (#194 `Components.Spine` `hidden`).
       :visibility
     ])
     |> Map.put(:book, bookshelf_book(placement.book))
@@ -340,12 +308,6 @@ defmodule StacksWeb.ProtoJSON do
 
   @spec loaded_bookshelf(term()) :: map() | nil
   defp loaded_bookshelf(%Ecto.Association.NotLoaded{}) do
-    # A placement always belongs to a bookshelf (NOT NULL FK), so an unloaded
-    # association here is a missing-preload BUG at the call site — not a normal
-    # state. Silently returning nil would emit `bookshelf_visibility: nil`, and
-    # the #194 client would then default the ceiling to Public and grey NOTHING,
-    # letting an over-permissive placement slip past the visual ceiling. Fail
-    # loud so the missing preload is caught, rather than degrading quietly.
     Logger.warning(
       "ProtoJSON.book_placement/1: placement.bookshelf not preloaded — bookshelf_visibility " <>
         "will be nil and the client cannot grey ceiling-exceeding options. Preload :bookshelf."
@@ -356,10 +318,6 @@ defmodule StacksWeb.ProtoJSON do
 
   defp loaded_bookshelf(nil), do: nil
   defp loaded_bookshelf(bookshelf), do: bookshelf
-
-  # ---------------------------------------------------------------------------
-  # User
-  # ---------------------------------------------------------------------------
 
   @doc """
   Serializes a user struct for auth responses.
@@ -380,10 +338,6 @@ defmodule StacksWeb.ProtoJSON do
     Map.put(base, :next_onboarding_step, next_step)
   end
 
-  # ---------------------------------------------------------------------------
-  # Onboarding
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes the onboarding status map from `Accounts.onboarding_status/1`.
 
@@ -393,10 +347,6 @@ defmodule StacksWeb.ProtoJSON do
   def onboarding_status(%{steps: steps, completed: completed, next_step: next_step}) do
     %{steps: steps, completed: completed, next_step: next_step}
   end
-
-  # ---------------------------------------------------------------------------
-  # Blog
-  # ---------------------------------------------------------------------------
 
   @doc """
   Serializes a blog post struct.
@@ -420,10 +370,6 @@ defmodule StacksWeb.ProtoJSON do
       :published_at,
       :created_at,
       :updated_at,
-      # US-6.2.1. ⚠️ This take-list is a WIRE ALLOWLIST: a proto field absent
-      # here is silently dropped, and the Elm decoder then defaults the bool —
-      # which is how the syndication tickbox rendered unchecked for a post that
-      # WAS in the feed (found only by the live drive, 2026-08-10).
       :syndicated
     ])
     |> Map.put(:author_display_name, author_display_name(post))
@@ -456,10 +402,6 @@ defmodule StacksWeb.ProtoJSON do
     if is_owner, do: base, else: Map.delete(base, :reasoning)
   end
 
-  # ---------------------------------------------------------------------------
-  # Comment
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a blog post comment.
 
@@ -477,10 +419,6 @@ defmodule StacksWeb.ProtoJSON do
       replies: Map.get(comment, :replies, []) |> Enum.map(&comment/1)
     }
   end
-
-  # ---------------------------------------------------------------------------
-  # Group
-  # ---------------------------------------------------------------------------
 
   @doc """
   Serializes a group struct.
@@ -514,10 +452,6 @@ defmodule StacksWeb.ProtoJSON do
     }
   end
 
-  # ---------------------------------------------------------------------------
-  # Visibility Grant
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a visibility grant struct.
   """
@@ -532,10 +466,6 @@ defmodule StacksWeb.ProtoJSON do
       created_at: grant.created_at
     }
   end
-
-  # ---------------------------------------------------------------------------
-  # Upload / Poll
-  # ---------------------------------------------------------------------------
 
   @doc """
   Builds the poll response map for upload status polling.
@@ -582,10 +512,6 @@ defmodule StacksWeb.ProtoJSON do
     }
   end
 
-  # ---------------------------------------------------------------------------
-  # Listing (marketplace)
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a marketplace listing struct.
 
@@ -624,10 +550,6 @@ defmodule StacksWeb.ProtoJSON do
       seller: listing_seller(l.seller)
     })
   end
-
-  # ---------------------------------------------------------------------------
-  # Placement formats
-  # ---------------------------------------------------------------------------
 
   @doc """
   Serializes a shelf with its placements, filtering by visibility.
@@ -669,24 +591,10 @@ defmodule StacksWeb.ProtoJSON do
   def public_profile(user, shelves) do
     %{
       handle: user.handle,
-      # display_name is nullable + optional at registration; coalesce so the JSON
-      # never carries `null` (the redacted-profile decoders expect a string).
       display_name: user.display_name || "",
       website_url: user.website_url,
       city: user.city,
       country_code: user.country_code,
-      # `has_feed`, not `visibility`. The client's actual question is "may I offer a
-      # subscribe link here?", and answering that directly keeps the visibility ladder
-      # out of a public payload — a stranger has no business learning that a shelf is
-      # group-visible rather than simply absent.
-      #
-      # ⚠️ Delegates to `Feeds.feed_eligible?/1` rather than repeating the predicate. This
-      # line used to hardcode `visibility == "platform"` under a comment promising it
-      # "mirrors Feeds.resolve_platform_bookshelf/2 exactly" — and then the feed side was
-      # fixed to accept `public` too, which would have left this offering no link for a
-      # bookshelf whose feed works. A link that 403s is a broken promise; a working feed
-      # nobody is told about is a feature that may as well not exist. One function, both
-      # answers.
       bookshelves:
         Enum.map(shelves, &%{name: &1.name, has_feed: Feeds.feed_eligible?(&1.visibility)})
     }
@@ -723,10 +631,6 @@ defmodule StacksWeb.ProtoJSON do
     %{id: placement.id, formats: placement.formats}
   end
 
-  # ---------------------------------------------------------------------------
-  # Reading progress
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a placement's reading progress update response.
 
@@ -744,10 +648,6 @@ defmodule StacksWeb.ProtoJSON do
     }
   end
 
-  # ---------------------------------------------------------------------------
-  # Visibility update
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a visibility update response for a bookshelf or placement.
 
@@ -760,10 +660,6 @@ defmodule StacksWeb.ProtoJSON do
     %{id: entity.id, visibility: entity.visibility}
   end
 
-  # ---------------------------------------------------------------------------
-  # Association action
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a blog association confirm/dismiss response.
 
@@ -774,10 +670,6 @@ defmodule StacksWeb.ProtoJSON do
   def association_action(assoc) do
     %{id: assoc.id, book_id: assoc.book_id, visible: assoc.visible}
   end
-
-  # ---------------------------------------------------------------------------
-  # Feed items
-  # ---------------------------------------------------------------------------
 
   @doc """
   Serializes a feed item (placement or blog post) for the group content feed.
@@ -808,10 +700,6 @@ defmodule StacksWeb.ProtoJSON do
     }
   end
 
-  # ---------------------------------------------------------------------------
-  # Partner
-  # ---------------------------------------------------------------------------
-
   @doc """
   Serializes a partner struct for API responses.
   Omits hmac_secret — security-sensitive, never serialized.
@@ -830,10 +718,6 @@ defmodule StacksWeb.ProtoJSON do
       created_at: p.created_at && DateTime.to_iso8601(p.created_at)
     }
   end
-
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
 
   @spec editions_list(map()) :: [map()]
   defp editions_list(%{editions: %Ecto.Association.NotLoaded{}}), do: []
@@ -862,9 +746,6 @@ defmodule StacksWeb.ProtoJSON do
     end
   end
 
-  # Matches `Book @derive {Jason.Encoder, only: [...]}` — the shape Jason
-  # produces when ListingController passes the raw struct through `json/2`.
-  # No author, no editions — just the flat book fields plus timestamps.
   @spec listing_book(map() | struct() | nil) :: map() | nil
   defp listing_book(%Ecto.Association.NotLoaded{}), do: nil
   defp listing_book(nil), do: nil
@@ -884,15 +765,12 @@ defmodule StacksWeb.ProtoJSON do
     ])
   end
 
-  # Extracts the book title from a preloaded association, handling not-loaded and nil.
   @spec association_book_title(map()) :: String.t()
   defp association_book_title(%{book: %Ecto.Association.NotLoaded{}}), do: ""
   defp association_book_title(%{book: nil}), do: ""
   defp association_book_title(%{book: %{title: title}}), do: title || ""
   defp association_book_title(_), do: ""
 
-  # Matches `User @derive {Jason.Encoder, only: [...]}` — the shape Jason
-  # produces when ListingController passes the raw struct through `json/2`.
   @spec listing_seller(map() | struct() | nil) :: map() | nil
   defp listing_seller(%Ecto.Association.NotLoaded{}), do: nil
   defp listing_seller(nil), do: nil

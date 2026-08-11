@@ -19,12 +19,6 @@ defmodule Stacks.AI.TogetherClient do
   When blown, callers should persist snapshots without a summary.
   """
 
-  # ⚠️ Together retired `meta-llama/Llama-3-8b-chat-hf` from the serverless
-  # tier (observed live 2026-08-10: HTTP 400 `model_not_available`). The whole
-  # small-Llama serverless tier is gone — 3.1-8B-Turbo and 3.2-3B were probed
-  # live the same day and refuse identically; 3.3-70B-Instruct-Turbo is the
-  # smallest surviving serverless Llama chat model and answered. One attribute
-  # so the two request builders below cannot drift onto different models (#397).
   @model "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
   @behaviour Stacks.AI.TogetherClientBehaviour

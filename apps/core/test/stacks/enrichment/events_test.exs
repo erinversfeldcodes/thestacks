@@ -41,7 +41,6 @@ defmodule Stacks.Enrichment.EventsTest do
       updated_attrs = %{attrs | description: "Updated description"}
       assert {:ok, second} = Events.upsert_event(updated_attrs)
 
-      # Same record, updated description
       assert first.id == second.id
       assert second.description == "Updated description"
     end

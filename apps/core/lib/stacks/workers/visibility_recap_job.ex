@@ -111,11 +111,6 @@ defmodule Stacks.Workers.VisibilityRecapJob do
       {:error, exception}
   end
 
-  # Returns the visibility values that are less restrictive (more permissive)
-  # than the given ceiling and therefore need to be capped down.
-  #
-  # Visibility rank: "group" (0) < "platform" (1) < "owner" (2).
-  # The visibility_level enum only has: owner, group, platform.
   defp visibilities_below("owner"), do: ["platform", "group"]
   defp visibilities_below(_), do: []
 end

@@ -26,10 +26,6 @@ defmodule StacksWeb.AuthController do
           ip: get_ip(conn)
         )
 
-        # Registration outcome counter (Issue #206 / auth §12). `result` is a
-        # bounded label (:ok | :error) — never derived from user input — so the
-        # `stacks_auth_registration_count_total{result=…}` series stays
-        # low-cardinality and alertable for a registration-failure spike.
         :telemetry.execute([:stacks, :auth, :registration], %{count: 1}, %{result: :ok})
 
         if Stacks.FeatureFlags.invite_only_registration?() do
@@ -40,10 +36,6 @@ defmodule StacksWeb.AuthController do
         |> put_status(201)
         |> json(%{message: "confirmation_email_sent"})
 
-      # Invite-gate refusals (US-14.1.3). Counted on the invite event, NOT as
-      # registration errors, so the registration-failure alert does not fire on
-      # a working gate. `result` is a bounded label derived from the outcome,
-      # never from user input.
       {:error, invite_error} when is_atom(invite_error) ->
         :telemetry.execute([:stacks, :auth, :invite], %{count: 1}, %{
           result: invite_telemetry_label(invite_error)
@@ -72,11 +64,6 @@ defmodule StacksWeb.AuthController do
           ip: get_ip(conn)
         )
 
-        # Open a refresh-token family (Issue #179, Phase 2a). Generate the
-        # family_id BEFORE minting so the same value is embedded as a claim and
-        # carried forward across every future rotation. `sst` is auto-stamped by
-        # build_claims; we read it back to anchor session_started_at to the
-        # session's true origin.
         fid = Ecto.UUID.generate()
         {:ok, token, claims} = Guardian.encode_and_sign(user, %{"family_id" => fid})
 
@@ -89,19 +76,11 @@ defmodule StacksWeb.AuthController do
 
         case Accounts.rotate_token_family(family_attrs) do
           {:ok, _family} ->
-            # JWT issuance counter (Issue #206 / auth §12). Counted only once the
-            # token is actually handed to the client (family persisted); the
-            # fail-closed branch below revokes an un-issued token and must NOT
-            # count. `context` is a bounded label (:login | :refresh).
             :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :login})
 
             json(conn, %{token: token, user: ProtoJSON.user(user)})
 
           {:error, reason} ->
-            # Fail closed: the token was minted (and a guardian_tokens row
-            # written) but its family did not persist. Handing it out would
-            # break the "every live token has a family" invariant that Phase 2b
-            # relies on, so revoke the just-minted token and refuse the login.
             Logger.error("rotate_token_family failed on login: #{inspect(reason)}")
             revoke_refresh_token(token)
 
@@ -155,14 +134,6 @@ defmodule StacksWeb.AuthController do
     |> json(%{error: "email and password are required"})
   end
 
-  # Login-failure-by-type counter (Issue #206 / auth §12). `type` is a bounded,
-  # whitelisted atom drawn from the fixed set of login-error branches
-  # (never raw user input), so `stacks_auth_login_failure_count_total{type=…}`
-  # stays low-cardinality and gives operators a per-reason breakdown
-  # (401 invalid_credentials, 403 email_unconfirmed, 422 missing_params,
-  # 423 account_locked, 503 service_busy). 429 rate-limit rejections are
-  # counted upstream in StacksWeb.Plugs.RateLimiter (the request never reaches
-  # this action once the :auth bucket trips).
   defp emit_login_failure(type)
        when type in [
               :invalid_credentials,
@@ -191,11 +162,6 @@ defmodule StacksWeb.AuthController do
         Logger.warning("Guardian.revoke failed on logout: #{inspect(error)}")
     end
 
-    # Revoke the whole family (Issue #179, Phase 2b): mark the family revoked so
-    # any OTHER token sharing this session's family_id — e.g. an attacker's
-    # stolen, already-rotated chain — dies at the verify_claims gate on its next
-    # use, not just the single token we hold here. Scoped to this family (not a
-    # by-sub burn) so logging out of one session does not kill the user's others.
     case claims do
       %{"family_id" => family_id} when is_binary(family_id) ->
         Accounts.revoke_token_family(family_id)
@@ -311,13 +277,6 @@ defmodule StacksWeb.AuthController do
     old_token = Guardian.Plug.current_token(conn)
     now = System.system_time(:second)
 
-    # Absolute session-lifetime cap (Issue #179, Phase 1). Read the "sst"
-    # (session-start) anchor stamped at login and carried forward across every
-    # prior rotation. Missing/legacy `sst` policy: tokens minted before this
-    # change (or the direct-action code path in tests) carry no anchor. Rather
-    # than treat "unknown start" as infinitely old and lock those users out, we
-    # stamp the anchor forward to `now` so a legacy session becomes bounded from
-    # this moment — bounded, not immediately expired.
     claims = Guardian.Plug.current_claims(conn) || %{}
 
     session_start =
@@ -326,10 +285,6 @@ defmodule StacksWeb.AuthController do
         _ -> now
       end
 
-    # Carry the refresh-token family forward across rotation (Issue #179,
-    # Phase 2a). A legacy token minted before families existed carries no
-    # family_id; rather than lock it out we adopt it into a new family from now
-    # (lazy-create in rotate_token_family), mirroring the missing-sst policy.
     family_id =
       case claims do
         %{"family_id" => fid} when is_binary(fid) -> fid
@@ -337,17 +292,8 @@ defmodule StacksWeb.AuthController do
       end
 
     if now - session_start > session_cap_seconds() do
-      # Past the cap: the session may not be renewed beyond the window measured
-      # from its ORIGINAL issue, no matter how many times it has rotated. Revoke
-      # the presented token and refuse to mint — the #173 frontend interceptor
-      # sends the user to /login on this 401.
       revoke_refresh_token(old_token)
 
-      # Absolute session-lifetime-cap expiry (Issue #237). The session exceeded
-      # its 7-day window measured from ORIGINAL issue and may not be renewed —
-      # the user is force-logged-out. Count it so re-login spikes are visible.
-      # `reason` is a bounded whitelisted atom (:lifetime_cap), NOT PII — no
-      # token/user-id/IP in the metadata (telemetry is warehouse-adjacent, GDPR).
       :telemetry.execute([:stacks, :auth, :session, :expired], %{count: 1}, %{
         reason: :lifetime_cap
       })
@@ -356,23 +302,13 @@ defmodule StacksWeb.AuthController do
       |> put_status(401)
       |> json(%{error: "session_expired"})
     else
-      # Within the cap: rotate. Revoke the old token first so it stops working
-      # immediately, then mint a fresh one CARRYING THE ANCHOR FORWARD so the
-      # cap does not reset on renewal (survives rotation).
       revoke_refresh_token(old_token)
 
-      # The jti being superseded — the OLD current token — becomes the family's
-      # `previous_jti` so the reuse gate can honour it for a short grace window
-      # (Issue #180). A legacy token with no jti claim yields nil (no grace).
       old_jti = claims["jti"]
 
       {:ok, token, new_claims} =
         Guardian.encode_and_sign(user, %{"sst" => session_start, "family_id" => family_id})
 
-      # Advance the family's live token to the newly minted jti (lazy-creates the
-      # row for a legacy/untracked session — see rotate_token_family). Record the
-      # predecessor jti + rotation time atomically so the grace window applies to
-      # the just-rotated old token only (Issue #180).
       Accounts.rotate_token_family(%{
         family_id: family_id,
         user_id: user.id,
@@ -382,9 +318,6 @@ defmodule StacksWeb.AuthController do
         session_started_at: DateTime.from_unix!(session_start)
       })
 
-      # JWT issuance counter (Issue #206 / auth §12) — a rotation mints a fresh
-      # access token, so it is a real issuance. Tagged `context: :refresh` to
-      # distinguish silent-renewal issuance from interactive login issuance.
       :telemetry.execute([:stacks, :auth, :jwt_issued], %{count: 1}, %{context: :refresh})
 
       json(conn, %{token: token, user: ProtoJSON.user(user)})
@@ -405,10 +338,6 @@ defmodule StacksWeb.AuthController do
     end
   end
 
-  # Absolute session cap expressed as `{n, unit}` in config, converted to
-  # seconds (NOT milliseconds) here at the check site. The conversion itself
-  # lives in `Stacks.Duration` — this used to carry its own copy of the unit
-  # table, and one of the three copies had silently lost `:day` and `:week`.
   defp session_cap_seconds do
     :core
     |> Application.get_env(:session_absolute_cap, {7, :day})
@@ -421,13 +350,6 @@ defmodule StacksWeb.AuthController do
     json(conn, %{user: ProtoJSON.user(user)})
   end
 
-  # Provenance IP for audit-log events. Key on the *trusted* client IP: Fly
-  # sets and overwrites the `fly-client-ip` header at the edge with the real
-  # client address, so it cannot be spoofed. `x-forwarded-for` is deliberately
-  # NOT consulted — behind Fly its leftmost hop is client-supplied and trivially
-  # forged, which would let an attacker poison the recorded provenance IP (Issue
-  # #176, mirroring the RateLimiter fix). When the header is absent or empty
-  # (local dev / ExUnit conns) we fall back to `conn.remote_ip`.
   defp get_ip(conn) do
     case get_req_header(conn, "fly-client-ip") do
       [ip | _] when ip != "" -> ip
@@ -435,7 +357,6 @@ defmodule StacksWeb.AuthController do
     end
   end
 
-  # US-14.1.3's status table: expired 410, exhausted 409, everything else 403.
   defp invite_error_status(:invite_expired), do: 410
   defp invite_error_status(:invite_exhausted), do: 409
   defp invite_error_status(_), do: 403

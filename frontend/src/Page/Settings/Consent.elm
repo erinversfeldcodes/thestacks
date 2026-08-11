@@ -64,24 +64,6 @@ update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         ToggleAnalytics ->
-            -- ⛔ `saving = NotAsked` is the load-bearing half of this line.
-            --
-            -- Analytics consent is a STAGED preference: the toggle changes the
-            -- model and the "Save Preferences" button sends it. Once a save
-            -- succeeded, `saving` stayed `Success ()` forever — nothing on this
-            -- page could return it to `NotAsked` — and the save button's
-            -- `Success` branch had no `onClick`. So flipping this toggle a
-            -- second time left the reader with a button that said "Saved!",
-            -- looked pressable, and was inert: **their consent choice could not
-            -- be changed again without reloading the page**, and the label
-            -- actively claimed the unsent value was saved.
-            --
-            -- `Components.SaveButton` now keeps `Success` clickable, so the
-            -- reader is no longer stuck. This line fixes the other half — the
-            -- lie. An edit means the on-screen values are no longer the saved
-            -- ones, so the button must stop saying they are. `Settings.Profile`
-            -- and `Settings.Privacy` have always done this on every edit
-            -- message; this page was the one that did not.
             ( { model | analyticsConsent = not model.analyticsConsent, saving = NotAsked }
             , Cmd.none
             , NoOut
@@ -94,9 +76,6 @@ update msg model maybeToken =
             in
             case maybeToken of
                 Just token ->
-                    -- Persist writing-assistant consent immediately: turning it
-                    -- OFF triggers a server-side purge, so the toggle is not a
-                    -- staged preference — it takes effect on click.
                     ( { model | writingAssistantConsent = newValue, saving = Loading }
                     , Api.saveWritingAssistantConsent newValue token SaveWritingAssistantCompleted
                     , NoOut
@@ -229,8 +208,6 @@ viewSection model =
         , div [ class "settings-actions" ]
             [ SaveButton.primary model.saving SaveConsent "Save Preferences" ]
         , -- Distinguished by cause since #374 — see
-          -- `Page.Settings.Notifications.viewSaveFeedback` for why one sentence
-          -- for every failure was worse than no sentence for some of them.
           case model.saving of
             Failure err ->
                 p [ class "error" ]

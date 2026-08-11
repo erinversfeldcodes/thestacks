@@ -118,10 +118,6 @@ update msg model =
                         ( { model | riskLoading = False, riskError = True }, Cmd.none, NoOut )
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--insights", testId "insights-page" ]
@@ -154,10 +150,6 @@ viewContent model =
                 , viewDeanon payload.deanonymisation
                 , viewRisk model payload
                 ]
-
-
-
--- INTEREST PROFILE
 
 
 viewInterest : InterestProfile -> Html Msg
@@ -204,10 +196,6 @@ viewBisac bisac =
         ]
 
 
-
--- BEHAVIOUR
-
-
 viewBehaviour : Behaviour -> Html Msg
 viewBehaviour behaviour =
     div [ class "insights__section", testId "insights-behaviour" ]
@@ -242,10 +230,6 @@ maybeStat label maybeValue =
 
         Nothing ->
             []
-
-
-
--- DE-ANONYMISATION (the centrepiece)
 
 
 viewDeanon : Deanonymisation -> Html Msg
@@ -300,10 +284,6 @@ viewDeanonBody deanon =
                 , p [ class "insights__section-desc" ]
                     [ text "The uniqueness of your shelf could not be computed this time. Nothing has been recorded either way." ]
                 ]
-
-
-
--- RISK INFERENCES (consent-gated)
 
 
 viewRisk : Model -> PersonalInferences -> Html Msg
@@ -370,10 +350,6 @@ viewRiskItem inference =
         , p [ class "insights__risk-basis" ]
             [ text "Based on: ", text inference.basis ]
         ]
-
-
-
--- FORMATTING HELPERS
 
 
 formatPercent : Float -> String

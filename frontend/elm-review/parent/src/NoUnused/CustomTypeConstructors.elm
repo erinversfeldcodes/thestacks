@@ -143,10 +143,6 @@ rule phantomTypes =
         |> Rule.fromProjectRuleSchema
 
 
-
--- MODULE VISITOR
-
-
 moduleVisitor : Rule.ModuleRuleSchema {} ModuleContext -> Rule.ModuleRuleSchema { hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor schema =
     schema
@@ -156,10 +152,6 @@ moduleVisitor schema =
         |> Rule.withExpressionEnterVisitor (\node context -> ( [], expressionVisitor node context ))
         |> Rule.withCaseBranchEnterVisitor (\caseBlock casePattern context -> ( [], caseBranchEnterVisitor caseBlock casePattern context ))
         |> Rule.withCaseBranchExitVisitor (\_ _ context -> ( [], caseBranchExitVisitor context ))
-
-
-
--- CONTEXT
 
 
 type alias ModuleNameAsString =
@@ -386,10 +378,6 @@ updateToInsert key value dict =
         dict
 
 
-
--- ELM.JSON VISITOR
-
-
 elmJsonVisitor : Maybe { elmJsonKey : Rule.ElmJsonKey, project : Elm.Project.Project } -> ProjectContext -> ( List nothing, ProjectContext )
 elmJsonVisitor maybeElmJson projectContext =
     case maybeElmJson |> Maybe.map .project of
@@ -419,10 +407,6 @@ elmJsonVisitor maybeElmJson projectContext =
             ( [], projectContext )
 
 
-
--- MODULE DEFINITION VISITOR
-
-
 moduleDefinitionVisitor : Node Module -> ModuleContext -> ModuleContext
 moduleDefinitionVisitor moduleNode context =
     case Module.exposingList (Node.value moduleNode) of
@@ -446,10 +430,6 @@ moduleDefinitionVisitor moduleNode context =
                         list
             in
             { context | exposedCustomTypesWithConstructors = exposedCustomTypesWithConstructors }
-
-
-
--- DECLARATION LIST VISITOR
 
 
 declarationListVisitor : List (Node Declaration) -> ModuleContext -> ModuleContext
@@ -504,10 +484,6 @@ register node context =
 
         _ ->
             context
-
-
-
--- DECLARATION VISITOR
 
 
 declarationVisitor : Node Declaration -> ModuleContext -> ModuleContext
@@ -655,10 +631,6 @@ isNeverOrItself lookupTable typeName (Node _ typeAnnotation) =
 
         _ ->
             False
-
-
-
--- EXPRESSION VISITOR
 
 
 expressionVisitor : Node Expression -> ModuleContext -> ModuleContext
@@ -1134,10 +1106,6 @@ registerUsedFunctionOrValue range moduleName name moduleContext =
         { moduleContext | usedFunctionsOrValues = updateToInsert moduleName name moduleContext.usedFunctionsOrValues }
 
 
-
--- FINAL PROJECT EVALUATION
-
-
 finalProjectEvaluation : ProjectContext -> List (Error { useErrorForModule : () })
 finalProjectEvaluation projectContext =
     Dict.foldl
@@ -1185,10 +1153,6 @@ errorsForConstructors projectContext usedConstructors moduleName moduleKey const
         )
         acc
         constructors
-
-
-
--- ERROR
 
 
 errorInformation : { a | wasUsedInLocationThatNeedsItself : Bool, wasUsedInComparisons : Bool, looksLikePhantomType : Bool } -> String -> { message : String, details : List String }
@@ -1274,10 +1238,6 @@ errorForCurrentModule params constructorInformation =
             Nothing ->
                 []
         )
-
-
-
--- TYPE ANNOTATION UTILITY FUNCTIONS
 
 
 markPhantomTypesFromTypeAnnotationAsUsed : Maybe (Node TypeAnnotation) -> ModuleContext -> ModuleContext

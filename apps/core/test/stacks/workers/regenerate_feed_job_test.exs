@@ -1,7 +1,6 @@
 defmodule Stacks.Workers.RegenerateFeedJobTest do
   @moduledoc "Tests for Stacks.Workers.RegenerateFeedJob."
 
-  # async: false — mutates the global :feed_cache_writer env seam (see FeedsTest).
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -16,10 +15,6 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
     Repo.all(from fc in FeedCacheEntry, where: fc.bookshelf_id == ^bookshelf_id)
   end
 
-  # ---------------------------------------------------------------------------
-  # perform/1 — valid user + platform-visible bookshelf
-  # ---------------------------------------------------------------------------
-
   describe "perform/1 — platform-visible bookshelf" do
     test "regenerates feed and returns :ok" do
       user = insert(:user, profile_visibility: "platform")
@@ -32,10 +27,6 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
                })
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # perform/1 — writes the feed_cache row (Issue #264)
-  # ---------------------------------------------------------------------------
 
   describe "perform/1 — feed_cache write" do
     test "upserts a feed_cache row holding the generated Atom XML + etag" do
@@ -55,7 +46,6 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
       assert [row] = cache_rows(bookshelf.id)
       assert row.atom_xml =~ "<feed xmlns="
       assert row.atom_xml =~ "The Secret History"
-      # etag is the pure MD5 of the stored XML
       assert row.etag == Stacks.Feeds.compute_etag(row.atom_xml)
     end
 
@@ -101,10 +91,6 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # perform/1 — cache write failure (Issue #266)
-  # ---------------------------------------------------------------------------
-
   describe "perform/1 — cache write failure" do
     test "returns {:error, _} so Oban retries when the cache write fails" do
       user = insert(:user, profile_visibility: "platform")
@@ -129,10 +115,6 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # perform/1 — non-existent user
-  # ---------------------------------------------------------------------------
-
   describe "perform/1 — non-existent user" do
     test "returns {:cancel, _} when user/bookshelf not found" do
       assert {:cancel, "bookshelf not found"} =
@@ -142,10 +124,6 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
                })
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # perform/1 — owner-visibility bookshelf (non-public)
-  # ---------------------------------------------------------------------------
 
   describe "perform/1 — owner-visibility bookshelf" do
     test "returns :ok and skips feed generation for non-public shelf" do
@@ -159,10 +137,6 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
                })
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # perform/1 — missing or malformed args
-  # ---------------------------------------------------------------------------
 
   describe "perform/1 — missing args" do
     test "returns {:cancel, _} for empty args" do
@@ -180,17 +154,8 @@ defmodule Stacks.Workers.RegenerateFeedJobTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Batch enqueue — N placements on one bookshelf converge on one row
-  # ---------------------------------------------------------------------------
-
   describe "batch enqueue" do
     test "repeated regenerations of the same bookshelf leave exactly one row" do
-      # The job is deliberately not `unique:` (see its @moduledoc note), so a bulk
-      # placement enqueues one job per book. That is safe only because the job
-      # recomputes and upserts: the end state must be one row no matter how many
-      # times it runs. This is the property that makes the missing dedup a
-      # performance question rather than a correctness one.
       user = insert(:user, profile_visibility: "platform")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       book = insert(:book, title: "Repeatedly Regenerated")

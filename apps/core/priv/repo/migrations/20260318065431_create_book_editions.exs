@@ -12,7 +12,6 @@ defmodule Core.Repo.Migrations.CreateBookEditions do
   use Ecto.Migration
 
   def change do
-    # ── Create book_editions ───────────────────────────────────────────────
     create table(:book_editions, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
       add :book_id, references(:books, type: :binary_id, on_delete: :delete_all), null: false
@@ -32,18 +31,14 @@ defmodule Core.Repo.Migrations.CreateBookEditions do
     create unique_index(:book_editions, [:isbn], prefix: "op")
     create index(:book_editions, [:book_id], prefix: "op")
 
-    # At most one primary edition per work
     create unique_index(:book_editions, [:book_id],
              prefix: "op",
              where: "is_primary = true",
              name: "book_editions_one_primary_per_book"
            )
 
-    # Drop old unique index on isbn BEFORE removing the column
-    # (on rollback, the index is re-created AFTER the column is re-added)
     drop_if_exists index(:books, [:isbn], prefix: "op")
 
-    # ── Drop edition-specific columns from books ──────────────────────────
     alter table(:books, prefix: "op") do
       remove :isbn, :text
       remove :cover_image_url, :text
@@ -54,14 +49,10 @@ defmodule Core.Repo.Migrations.CreateBookEditions do
       remove :google_books_id, :text
     end
 
-    # ── Add book_edition_id to uploaded_images ────────────────────────────
     alter table(:uploaded_images, prefix: "op") do
       add :book_edition_id, references(:book_editions, type: :binary_id, on_delete: :nilify_all)
     end
 
-    # Grant SELECT on the new table to the dbt role (if it exists).
-    # The role-creation migration grants on ALL TABLES at that point in time,
-    # but tables created by later migrations need explicit grants.
     execute(
       """
       DO $$ BEGIN

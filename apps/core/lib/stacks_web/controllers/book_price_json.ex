@@ -5,10 +5,6 @@ defmodule StacksWeb.BookPriceJSON do
 
   defp render_price(price) do
     %{
-      # The edition is exposed, not just the work: a shop stocks whichever edition
-      # it stocks, and Exclusive Books carries six ISBNs of The Name of the Rose at
-      # different prices. Collapsing them would show one arbitrary price as though
-      # it were the price of the book.
       book_edition_id: price.book_edition_id,
       isbn: price.isbn,
       format_label: price.format_label,

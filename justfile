@@ -1,4 +1,3 @@
-# The Stacks — Task Runner
 set dotenv-load
 
 # Start all available services for local development.
@@ -14,8 +13,6 @@ dev:
     just db-migrate
 
     echo "==> Generating Ecto schemas from proto..."
-    # Subshell so the cd cannot leak into the steps below — `cd ..` from apps/core
-    # lands in apps/, not the repo root, which is how the first version of this broke.
     (cd apps/core && mix proto.sync)/..
 
     echo "==> Generating Elm proto decoders..."
@@ -24,7 +21,6 @@ dev:
     echo "==> Building assets (Elm + CSS via esbuild)..."
     (cd apps/core/assets && npm run deploy)
 
-    # Kill any stale processes from a previous dev session on our ports.
     echo "==> Cleaning up stale dev processes..."
     lsof -ti :4000 | xargs kill -9 2>/dev/null || true
     lsof -ti :8000 | xargs kill -9 2>/dev/null || true
@@ -316,10 +312,8 @@ deploy-preview:
 run *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Non-interactive shells often lack nix on PATH even when it is installed.
     export PATH="/nix/var/nix/profiles/default/bin:${HOME}/.nix-profile/bin:${PATH}"
     if [[ -n "${STACKS_DEV_SHELL:-}" ]]; then
-        # Already inside the pinned dev shell — run directly, don't re-wrap.
         exec {{ARGS}}
     fi
     if ! command -v nix >/dev/null 2>&1; then
@@ -362,8 +356,6 @@ combine-dependabot:
     BASE="${DEPENDABOT_BASE:-main}"
     COMBINE_BRANCH="combined-deps"
 
-    # Only tracked changes block us — untracked files (e.g. local plans/*.md)
-    # ride along safely across the branch switch + cherry-picks.
     if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
         echo "ERROR: uncommitted tracked changes — commit or stash before combining (untracked files are fine)." >&2
         exit 1
@@ -411,8 +403,6 @@ combine-dependabot:
         body+=$'\n'"## Skipped (same-file conflicts — NOT in this PR; merge individually or re-run \`just combine-dependabot\` after this merges)"$'\n'"$(printf '%s\n' "${skipped[@]}" | sed 's/^/- /')"$'\n'
     fi
     body+=$'\n'"After merging this PR: \`just close-dependabot-prs <this-pr-number>\`"
-    # Machine-readable marker so close-dependabot-prs closes ONLY the bundled PRs
-    # (never the skipped ones, which still carry un-merged updates).
     body+=$'\n\n'"<!-- combined-includes: ${nums} -->"
 
     existing="$(gh pr list --head "$COMBINE_BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)"
@@ -436,9 +426,6 @@ close-dependabot-prs COMBINED:
         echo "ERROR: PR #{{COMBINED}} is not merged yet — refusing to close Dependabot PRs." >&2
         exit 1
     fi
-    # Close ONLY the PRs actually bundled into the combined PR — read the
-    # machine-readable marker its body carries. Skipped/conflicting PRs are left
-    # open because they still carry updates that never reached main.
     body="$(gh pr view {{COMBINED}} --json body --jq .body)"
     nums="$(printf '%s\n' "$body" | grep -oE 'combined-includes:[0-9 ]+' | head -1 | sed 's/combined-includes://')"
     if [[ -z "${nums// /}" ]]; then
@@ -459,7 +446,6 @@ close-dependabot-prs COMBINED:
 lock-vision:
     #!/usr/bin/env bash
     set -euo pipefail
-    # pip-tools pinned so output is byte-identical to the CI drift-guard.
     docker run --rm -v "$PWD":/repo -w /repo python:3.14-slim bash -c '
       set -e
       pip install --quiet --root-user-action=ignore pip-tools==7.5.3

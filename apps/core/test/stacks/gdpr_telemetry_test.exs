@@ -19,7 +19,6 @@ defmodule Stacks.GDPRTelemetryTest do
     * `[:stacks, :gdpr, :audit, :write]`     — audit-log write throughput
   """
 
-  # async: false — telemetry handlers are process-global state.
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -47,8 +46,6 @@ defmodule Stacks.GDPRTelemetryTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  # ── Export / Deletion job outcomes ─────────────────────────────────────────
-
   describe "DataExportJob outcome telemetry" do
     test "emits [:stacks, :gdpr, :export] with result :ok + a non-negative duration on success" do
       attach_telemetry([[:stacks, :gdpr, :export]])
@@ -56,8 +53,6 @@ defmodule Stacks.GDPRTelemetryTest do
 
       assert :ok = perform_job(DataExportJob, %{"user_id" => user.id})
 
-      # Issue #238: the emit now carries the job wall-time in the `:duration`
-      # measurement (ms) so the latency distribution can watch the 30-day SLA.
       assert_receive {:telemetry_event, [:stacks, :gdpr, :export], measurements, %{result: :ok}}
 
       assert %{count: 1, duration: duration} = measurements
@@ -84,9 +79,6 @@ defmodule Stacks.GDPRTelemetryTest do
 
       assert :ok = perform_job(AccountDeletionJob, %{"user_id" => user.id})
 
-      # `failed_step: :none` on success keeps the tag set identical to the
-      # failure branch so the PromEx counter records both series (see plugin).
-      # Issue #238: the emit also carries the job wall-time in `:duration` (ms).
       assert_receive {:telemetry_event, [:stacks, :gdpr, :deletion], measurements,
                       %{result: :ok, failed_step: :none}}
 
@@ -106,8 +98,6 @@ defmodule Stacks.GDPRTelemetryTest do
       assert is_integer(duration) and duration >= 0
     end
   end
-
-  # ── Consent grant / revoke ─────────────────────────────────────────────────
 
   describe "consent telemetry" do
     test "emits [:stacks, :gdpr, :consent, :grant] on grant" do
@@ -149,8 +139,6 @@ defmodule Stacks.GDPRTelemetryTest do
                       %{feature: "writing_assistant"}}
     end
   end
-
-  # ── Image retention: expired / stuck / orphan + by-reason ──────────────────
 
   describe "image retention telemetry" do
     test "cleanup_expired_images/0 emits [:stacks, :gdpr, :image, :expired] with reason \"expired\"" do
@@ -199,8 +187,6 @@ defmodule Stacks.GDPRTelemetryTest do
     end
   end
 
-  # ── Audit-log write throughput ─────────────────────────────────────────────
-
   describe "audit write telemetry" do
     test "Audit.log/3 emits [:stacks, :gdpr, :audit, :write] on a successful insert" do
       attach_telemetry([[:stacks, :gdpr, :audit, :write]])
@@ -213,20 +199,16 @@ defmodule Stacks.GDPRTelemetryTest do
     end
   end
 
-  # ── Audit-log read throughput (Issue #238) ─────────────────────────────────
-
   describe "audit read telemetry" do
     test "Audit.list_for_user/2 emits [:stacks, :gdpr, :audit, :read] with no PII metadata" do
       attach_telemetry([[:stacks, :gdpr, :audit, :read]])
       user = insert(:user)
 
-      # A prior write so the listing has a row (the read emit fires regardless).
       assert {:ok, _} = Audit.log(user.id, "test.read_action", resource_type: "test")
 
       assert {[_ | _], total, 1, _per_page} = Audit.list_for_user(user.id)
       assert total >= 1
 
-      # Untagged, empty-metadata emit: no user-id/handle/IP reaches the sink.
       assert_receive {:telemetry_event, [:stacks, :gdpr, :audit, :read], %{count: 1}, metadata}
       assert metadata == %{}
     end

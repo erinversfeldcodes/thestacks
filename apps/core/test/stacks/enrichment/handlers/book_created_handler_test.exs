@@ -22,10 +22,6 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
 
       assert :ok = BookCreatedHandler.handle_event(event)
 
-      # No `book_id`: a price belongs to an edition, and the ISBN is the edition's
-      # natural key. Passing the work would name something with potentially many
-      # ISBNs, which cannot say which edition was priced — so the job resolves the
-      # edition from the ISBN instead.
       assert_enqueued(worker: TriggerPriceScrapeJob, args: %{isbn: "9780743273565"})
     end
 
@@ -85,16 +81,10 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
                  payload: %{"isbn" => "9780743273565"}
                })
 
-      # The inverse of TriggerPriceScrapeJob's key, deliberately: a price is a fact about
-      # one edition, whereas the edition *list* is a fact about the work. Keying this by
-      # ISBN would ask "which editions does this edition have".
       assert_enqueued(worker: DiscoverEditionsJob, args: %{book_id: book_id})
     end
 
     test "does not re-enqueue the same work within the day" do
-      # A work's Open Library edition list does not change on the timescale of a book
-      # being added twice, and a re-run would spend its creation cap rediscovering rows
-      # that already exist.
       book_id = Ecto.UUID.generate()
 
       event = %{
@@ -128,9 +118,6 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
 
   describe "author-source discovery" do
     test "enqueues discovery for authors still missing sources" do
-      # `discovered_sources` has never held a row: the nightly batch was the only thing
-      # that ran it, and it *creates* rather than refreshes, so a cron entry that may
-      # not fire means the feature has never existed.
       author = insert(:author, website_url: nil, rss_feed_url: nil)
 
       assert :ok =
@@ -148,9 +135,6 @@ defmodule Stacks.Enrichment.Handlers.BookCreatedHandlerTest do
     end
 
     test "trickles rather than bursting" do
-      # A per-book enqueue of *every* author is what the nightly batch replaced, having
-      # exhausted Brave's free tier within hours. Work should arrive in proportion to
-      # catalogue growth, not all at once.
       Enum.each(1..10, fn _ -> insert(:author, website_url: nil, rss_feed_url: nil) end)
 
       assert :ok =

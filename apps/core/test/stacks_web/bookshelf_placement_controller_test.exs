@@ -21,20 +21,12 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  # Book ids reachable on a bookshelf's browse — i.e. through its physical
-  # shelves (op.shelves, #151), exactly as BookshelfController.show feeds the UI.
-  # A placement whose shelf_id was not re-homed on a move is invisible here even
-  # if bookshelf_id updated, so this is the true browse-level assertion.
   defp browse_book_ids(user_id, bookshelf_name) do
     user_id
     |> Shelving.get_bookshelf_shelves(bookshelf_name)
     |> Enum.flat_map(& &1.placements)
     |> Enum.map(& &1.book_id)
   end
-
-  # ---------------------------------------------------------------------------
-  # GET /api/placements/mine
-  # ---------------------------------------------------------------------------
 
   describe "GET /api/placements/mine — mine" do
     test "returns empty list when user has no placements", %{conn: conn} do
@@ -69,7 +61,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       assert book1.id in book_ids
       assert book2.id in book_ids
 
-      # Each summary carries the book title for the marketplace listing dropdown.
       assert Enum.all?(placements, &(is_binary(&1["title"]) and &1["title"] != ""))
 
       titles = Enum.map(placements, & &1["title"])
@@ -96,10 +87,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       assert json_response(conn, 401)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/bookshelves/:bookshelf_name/placements
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/bookshelves/:bookshelf_name/placements — create" do
     test "returns 201 with placement on valid bookshelf and book_id", %{conn: conn} do
@@ -157,10 +144,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       assert %{"error" => "reading_pile_full"} = json_response(conn, 422)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # PUT /api/placements/:id/move
-  # ---------------------------------------------------------------------------
 
   describe "PUT /api/placements/:id/move — move" do
     setup do
@@ -258,8 +241,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       for target <- ~w(library antilibrary wishlist reading_pile looking_for_home) do
         user = insert(:user)
         book = insert(:book)
-        # Seed via place_book so the placement has a real shelf; a fresh user's
-        # reading_pile is empty, so the 50-cap never trips on a single move.
         {:ok, placement} = Shelving.place_book(user.id, book.id, "wishlist")
 
         moved =
@@ -289,10 +270,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Abandon transition (US-1.6.2) — reuses PUT /move with {bookshelf: antilibrary}
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/placements/:id/move — abandon transition (US-1.6.2)" do
     test "moving a reading_pile placement to antilibrary lands it on the antilibrary browse", %{
       conn: conn
@@ -313,16 +290,7 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Re-read via two sequential moves (US-1.6.3, punch #3)
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/placements/:id/move — re-read round-trip (US-1.6.3)" do
-    # Decision (punch #3): the re-read journey is modelled as two sequential move
-    # calls (library → reading_pile → library), NOT a dedicated endpoint.
-    # Shelving.reread_book/2 stays context-only (its own describe in ShelvingTest
-    # covers the direct API). Each move writes one PlacementHistory row, so a
-    # round-trip yields exactly two.
     test "a library→reading_pile→library round-trip writes two history rows and ends in library",
          %{
            conn: conn
@@ -346,10 +314,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       refute book.id in browse_book_ids(user.id, "reading_pile")
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # DELETE /api/placements/:id
-  # ---------------------------------------------------------------------------
 
   describe "DELETE /api/placements/:id — delete" do
     setup do
@@ -411,17 +375,10 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       first = delete(authed, "/api/placements/#{placement.id}")
       assert response(first, 204)
 
-      # The soft-deleted row still exists, so a repeat DELETE re-finds it, passes
-      # ownership, re-stamps removed_at, and returns 204 again — idempotent, not
-      # a 404 or an error.
       second = delete(authed, "/api/placements/#{placement.id}")
       assert response(second, 204)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/placements/:id/restore — undo a removal (US-1.6.4 extension, #375)
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/placements/:id/restore — restore" do
     setup do
@@ -445,8 +402,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
 
       restored = post(authed, "/api/placements/#{placement.id}/restore")
 
-      # The id in the response is the assertion that matters: a re-place would
-      # answer 200 with a new UUID and this would go red.
       assert %{"placement" => %{"id" => id}} = json_response(restored, 200)
       assert id == placement.id
 
@@ -495,12 +450,9 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       readded = post(authed, "/api/bookshelves/library/placements", %{"book_id" => book.id})
       assert %{"placement" => %{"id" => readded_id}} = json_response(readded, 201)
 
-      # 409, not 422: the request was well-formed and the caller did nothing
-      # wrong — the shelf is simply already in the state undo would produce.
       conflict = post(authed, "/api/placements/#{placement.id}/restore")
       assert %{"error" => "already_shelved"} = json_response(conflict, 409)
 
-      # And the refusal changed nothing: one active placement, the re-added one.
       assert browse_book_ids(user.id, "library") == [book.id]
       assert Repo.get!(Stacks.Shelving.Placement, placement.id).removed_at != nil
       assert Repo.get!(Stacks.Shelving.Placement, readded_id).removed_at == nil
@@ -520,10 +472,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
       assert id == placement.id
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # PUT /api/placements/:id/formats
-  # ---------------------------------------------------------------------------
 
   describe "PUT /api/placements/:id/formats — update_formats" do
     setup %{conn: conn} do
@@ -650,10 +598,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # PUT /api/placements/:id/progress  (Issue #148)
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/placements/:id/progress — update_progress" do
     setup %{conn: conn} do
       user = insert(:user)
@@ -751,8 +695,6 @@ defmodule StacksWeb.BookshelfPlacementControllerTest do
     end
   end
 
-  # Fills the user's reading_pile bookshelf with `count` active placements,
-  # inserted directly so the 50-cap (#276) boundary can be staged.
   defp fill_reading_pile(user, count) when count >= 1 do
     bookshelf = insert(:bookshelf, user: user, name: "reading_pile")
     shelf = insert(:shelf, bookshelf: bookshelf)

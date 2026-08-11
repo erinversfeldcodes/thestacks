@@ -34,8 +34,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
 
   describe "best_candidate/1 — the judgement, tested without a network" do
     test "prefers an events page over a calendar" do
-      # Token ORDER is the scoring. A shop with both usually has events as the listing and calendar as
-      # something else (opening hours, a term diary), so the order is not cosmetic.
       assert EventsPath.best_candidate([
                "https://shop.test/pages/calendar",
                "https://shop.test/pages/events"
@@ -50,8 +48,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "recognises every declared token" do
-      # Enumerated from the module's own list rather than restated here: a duplicated list drifts, and
-      # a drifting list of tokens fails silently — the page simply stops being found.
       for token <- EventsPath.candidate_tokens() do
         url = "https://shop.test/pages/#{token}"
 
@@ -106,11 +102,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "a known path short-circuits without touching the network" do
-      # The cost this module exists to remove. Re-verifying on every run would put us back to one
-      # request per store per run, which is what made the hardcoded path expensive in the first place.
-      # `events_path_checked_at` must be set too: a path with no record of ever having been checked is
-      # one we cannot vouch for, so `resolve/1` correctly re-verifies it. Only a *fresh* verdict
-      # short-circuits, which is the whole point of the window.
       s =
         insert(:bookstore,
           scraper_module: "za/test_store",
@@ -129,9 +120,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
 
   describe "resolve/1 — the recheck window, i.e. what events_path_checked_at is FOR" do
     test "a recent negative is not re-asked, so the shop pays nothing" do
-      # ⛔ The finding this closes. `events_path_checked_at` was written on every outcome and read by
-      # nothing, so a bookshop with no events page paid for a fresh sitemap walk on **every run,
-      # forever** — the exact opposite of the courtesy the whole path was built for.
       s =
         insert(:bookstore,
           scraper_module: "za/test_store",
@@ -149,8 +137,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "a negative older than the window IS re-asked, so a new events page is found" do
-      # The other half. A verdict trusted forever is a shop written off permanently, which is what the
-      # timestamp exists to prevent.
       stale = DateTime.add(DateTime.utc_now(), -(EventsPath.recheck_after_days() + 1), :day)
 
       s =
@@ -173,7 +159,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "a never-checked store is always asked" do
-      # `nil` must read as stale, never as a fresh negative: it means we have not looked.
       s = insert(:bookstore, scraper_module: "za/test_store", events_path_checked_at: nil)
       MockScraperClient.put_sitemap("za/test_store", harvest([]))
 
@@ -182,8 +167,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "a stale resolved path is re-verified, catching one that died without a 404" do
-      # `forget/1` only fires on a 404, so a path that starts answering 500 — or redirecting to the
-      # homepage — would otherwise be believed indefinitely.
       stale = DateTime.add(DateTime.utc_now(), -(EventsPath.recheck_after_days() + 1), :day)
 
       s =
@@ -255,8 +238,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "does not fetch anything to confirm an absence" do
-      # There is nothing to verify. A confirming fetch here would cost the shop a request to learn
-      # something its own sitemap already told us.
       s = store()
       MockScraperClient.put_sitemap("za/test_store", harvest(["https://shop.test/pages/about"]))
 
@@ -267,9 +248,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
 
   describe "resolve/1 — NOT a fact about the shop: we were unable to look" do
     test "no declared sitemap is recorded as could-not-look, not as absence" do
-      # ⛔ The load-bearing distinction. `{:error, :no_sitemap_declared}` means the shop never showed us
-      # its page list. Banking that as "no events page" writes the shop off on the strength of never
-      # having asked.
       s = store()
       MockScraperClient.put_sitemap("za/test_store", {:error, :no_sitemap_declared})
 
@@ -283,11 +261,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "a declared-but-unreadable sitemap is could-not-look, not absence" do
-      # ⛔ **Found by the first live run, not by review.** exclusivebooks.co.za declares `Sitemap:`
-      # three times and that sitemap answers HTTP 500 with 0 bytes. The harvest returns HARVESTED with
-      # an empty `urls` and the failure in `skipped`, so the store was being recorded as "no candidate
-      # matched among 0 listed page(s)" — a shop written off on the strength of a document we could not
-      # open. No fixture had this shape, which is why every unit test passed.
       s = store()
 
       MockScraperClient.put_sitemap(
@@ -309,7 +282,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "a truncated walk with no candidate is could-not-look, not absence" do
-      # The events page may well have been in the part of the sitemap the budget stopped us reading.
       s = store()
 
       MockScraperClient.put_sitemap(
@@ -338,8 +310,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
     end
 
     test "a candidate the shop lists but does not serve is unresolved, not an absence" do
-      # The shop's sitemap is wrong. That says nothing about whether it holds events, so this must
-      # stay re-checkable rather than becoming a verdict.
       s = store()
       MockScraperClient.put_sitemap("za/test_store", harvest(["https://shop.test/pages/events"]))
 
@@ -360,8 +330,6 @@ defmodule Stacks.Enrichment.EventsPathTest do
 
   describe "resolve/1 — every outcome is stamped" do
     test "checked_at is written on success and on every failure alike" do
-      # Stated as its own test because it is the invariant that makes all of the above legible: a
-      # reason written without a timestamp leaves exactly the ambiguity the reason exists to remove.
       cases = [
         {harvest(["https://shop.test/pages/events"]), {:ok, %{status: 200, body: ""}}},
         {harvest(["https://shop.test/pages/about"]), nil},

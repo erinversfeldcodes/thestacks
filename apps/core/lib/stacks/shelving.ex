@@ -23,21 +23,11 @@ defmodule Stacks.Shelving do
   alias Stacks.Events
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory, Shelf}
 
-  # ── Bookshelf changeset constants ──────────────────────────────────
   @valid_bookshelf_names ~w(antilibrary library wishlist reading_pile looking_for_home)
-  # Single-sourced from the canonical Audience ladder (#209). Evaluated at compile
-  # time to the same literal list, so it stays usable in the ceiling GUARD clauses
-  # below (`when visibility in @valid_visibilities`). A drift test asserts this list
-  # equals the `Audience` proto enum's settable values (proto/…/visibility.proto).
   @valid_visibilities Stacks.Visibility.audience_levels()
 
-  # ── Placement changeset constants ──────────────────────────────────
   @valid_reading_statuses ~w(to_read reading completed abandoned)
 
-  # ── Reading-pile capacity (#276) ───────────────────────────────────
-  # The single source of truth for the 50-book Reading Pile cap. The Elm
-  # view must never re-derive or truncate to this number — enforcement
-  # lives here, at the write path.
   @reading_pile_limit 50
 
   @placement_optional_fields [
@@ -60,8 +50,6 @@ defmodule Stacks.Shelving do
     :book_edition_id,
     :source
   ]
-
-  # ── Changeset functions (moved from schema modules) ────────────────
 
   @doc "Changeset for creating or updating a bookshelf."
   def bookshelf_changeset(bookshelf, attrs) do
@@ -107,21 +95,6 @@ defmodule Stacks.Shelving do
     |> put_moved_at()
   end
 
-  # Stamps `placed_at` when a placement does not have one yet — which is to say,
-  # on insert.
-  #
-  # ⛔ **This used to fire on every UPDATE too**, because it only asked whether
-  # the changeset carried a `:placed_at` change and never whether the row already
-  # had a value. `placement_changeset/2` is the changeset for removals, format
-  # edits, visibility edits and progress edits alike, so "on my shelf since March
-  # 2025" silently became today the first time the reader touched any of them.
-  # Found by #375, whose undo promises to bring a placement back AS IT WAS: the
-  # removal it reverses had already moved the date, so the promise could not be
-  # kept without fixing this. Probed before and after — `remove_book/2` on a
-  # placement dated 2025-03-01 rewrote it to the wall clock.
-  #
-  # An explicit `placed_at` in `attrs` still wins (the first clause), which is
-  # what the factory and `reread_book/2` rely on.
   defp put_placed_at(%Ecto.Changeset{changes: changes, data: data} = changeset) do
     cond do
       Map.has_key?(changes, :placed_at) -> changeset
@@ -261,12 +234,6 @@ defmodule Stacks.Shelving do
     limit = Keyword.get(opts, :limit, 20)
     scope = Keyword.get(opts, :scope, :title)
 
-    # A book may sit on several bookshelves at once (owner ruling, 2026-07-30),
-    # so the join returns one row per placement. Collapsing with `uniq_by` — as
-    # this did before #333 — kept the first bookshelf and silently DROPPED the
-    # rest, so a book on both the Wish List and the Reading Pile was annotated
-    # "On your Wish List shelf" and the reader was never told about the other.
-    # Group instead: one entry per book, carrying every shelf it sits on.
     rows =
       Book
       |> join(:inner, [b], p in Placement, on: p.book_id == b.id and is_nil(p.removed_at))
@@ -278,10 +245,6 @@ defmodule Stacks.Shelving do
       |> select([b, p, bs], {b, bs.name})
       |> Repo.all()
 
-    # Group by book id rather than `chunk_by`: two distinct books can share a
-    # title, and the SQL tie-breaker is the bookshelf name, so equal-titled
-    # books' rows may interleave. Rank order is taken from first appearance so
-    # the relevance ordering computed in SQL survives the grouping.
     by_book = Enum.group_by(rows, fn {book, _name} -> book.id end)
 
     ordered_ids =
@@ -312,11 +275,6 @@ defmodule Stacks.Shelving do
     where(query_ast, [b], fragment("title_tsv @@ plainto_tsquery('english', ?)", ^query))
   end
 
-  # Under deep scope, rank title matches ahead of description-only matches
-  # (mirrors `Stacks.Books.search_books/2`): the boolean `title_tsv @@ ...` sorts
-  # `true` before `false` under DESC, then title (and bookshelf name) break ties.
-  # Title scope keeps its plain alphabetical order. Ordering happens in SQL, so
-  # the later `Enum.uniq_by`/`Enum.take` preserve it.
   defp collection_scope_order(query_ast, :deep, query) do
     order_by(
       query_ast,
@@ -494,16 +452,6 @@ defmodule Stacks.Shelving do
             {:error, :unauthorized}
 
           placement.bookshelf.name == to_bookshelf_name ->
-            # Same-bookshelf "move" is a no-op success. A user has at most one
-            # bookshelf per name, so an equal name means the same bookshelf. The
-            # Elm mover already excludes the current bookshelf, so this path is
-            # only reachable defensively (direct API/context call). Return the
-            # placement UNCHANGED — no PlacementHistory row, no `placement.moved`
-            # event, no audit entry, and (critically) WITHOUT the shelf_id reset
-            # the Multi below would perform, which would yank a book off a
-            # non-default shelf onto position 0 on a self-move. Shaped as
-            # `{:ok, %{placement: _}}` to match the Multi result the controller
-            # unwraps.
             {:ok, %{placement: placement}}
 
           true ->
@@ -516,15 +464,6 @@ defmodule Stacks.Shelving do
     from_bookshelf = placement.bookshelf
     from_bookshelf_name = from_bookshelf.name
     to_bookshelf = get_or_create_bookshelf(user_id, to_bookshelf_name)
-    # Browse lists placements through their physical shelf (op.shelves, #151),
-    # so a move must re-home the placement onto a shelf of the DESTINATION
-    # bookshelf — otherwise it stays visible on the source and never on the
-    # target. Mirrors the creation-time assignment in place_book/3 and
-    # reread_book/2: get-or-create the destination's default (position 0)
-    # shelf. Resolved outside the Multi exactly as place_book/3 does; on a
-    # capacity rejection the destination is a full reading_pile that already
-    # owns its default shelf, so this is a no-op read and no write precedes
-    # the rejection.
     to_shelf = get_or_create_default_shelf(to_bookshelf.id)
 
     Multi.new()
@@ -611,9 +550,6 @@ defmodule Stacks.Shelving do
         book_id: placement.book_id,
         bookshelf_id: library_bookshelf.id,
         shelf_id: default_shelf.id,
-        # A reread is the same copy going back on the shelf — carry the
-        # edition forward rather than re-resolving the work's primary, which
-        # would silently rewrite which edition the reader owns.
         book_edition_id: placement.book_edition_id || primary_edition_id(placement.book_id)
       })
     )
@@ -762,7 +698,6 @@ defmodule Stacks.Shelving do
   end
 
   defp do_restore_placement(%Placement{removed_at: nil} = placement, _user_id) do
-    # Already active: undo has nothing to undo. Idempotent, like a repeat DELETE.
     {:ok, placement}
   end
 
@@ -775,9 +710,6 @@ defmodule Stacks.Shelving do
         {:ok, :clear}
       end
     end)
-    # Only `removed_at` changes. `placement_changeset/2` already carries the
-    # partial index's `unique_constraint`, so the concurrent-re-add race lands as
-    # a changeset error rather than a raised Postgres exception.
     |> Multi.update(:placement, placement_changeset(placement, %{removed_at: nil}))
     |> Multi.run(:emit_event, fn _repo, %{placement: p} ->
       Events.emit_safe(%{
@@ -805,9 +737,6 @@ defmodule Stacks.Shelving do
     end
   end
 
-  # A concurrent re-add that landed between the check and the update trips the
-  # partial unique index; report it as the same refusal the check reports, so the
-  # caller has one case to handle rather than two spellings of one situation.
   defp restore_conflict_or_changeset(changeset) do
     conflict? =
       Enum.any?(changeset.errors, fn {field, _} -> field in [:book_id, :bookshelf_id] end)
@@ -940,8 +869,6 @@ defmodule Stacks.Shelving do
       |> validate_bookshelf_profile_ceiling(user_id, visibility)
       |> Repo.update()
     else
-      # SEC-5: reject an invalid visibility value BEFORE lazily creating the
-      # shelf, so a 422 does not leave a stray empty bookshelf behind.
       {:error,
        %Bookshelf{user_id: user_id, name: bookshelf_name}
        |> cast(%{visibility: visibility}, [:visibility])
@@ -949,23 +876,12 @@ defmodule Stacks.Shelving do
     end
   end
 
-  # A bookshelf may not be made more visible than the owner's profile ceiling
-  # (US-10.2.1). Per Stacks.Visibility, only a "owner" profile acts as a hard
-  # ceiling — it hides all content — so when the profile is "owner" the bookshelf
-  # visibility must also be "owner". A "platform" profile imposes no additional
-  # restriction beyond the bookshelf's own value. The error is added to the
-  # changeset so callers get an Ecto.Changeset (HTTP 422 with visibility errors),
-  # consistent with the other visibility validations. Only applied to otherwise-
-  # valid visibility values so invalid-inclusion errors are surfaced normally.
   defp validate_bookshelf_profile_ceiling(changeset, user_id, visibility)
        when visibility in @valid_visibilities do
     profile_visibility =
       Repo.one(from(u in User, where: u.id == ^user_id, select: u.profile_visibility))
 
     if profile_visibility == "owner" and visibility != "owner" do
-      # Count the bookshelf ceiling rejection (§12 telemetry, Issue #197). This
-      # rejection path was added in #195; the counter is wired here so it fires
-      # on the same definitive rule violation the changeset error marks.
       Stacks.Visibility.emit_ceiling_rejection(:bookshelf)
 
       add_error(
@@ -1037,8 +953,6 @@ defmodule Stacks.Shelving do
   def update_reading_progress(placement_id, user_id, attrs) do
     placement =
       case Repo.get(Placement, placement_id) do
-        # Preload the book's editions too: the page-count ceiling (below) lives
-        # on the primary edition, not the placement, so we resolve it here.
         nil -> nil
         p -> Repo.preload(p, [:bookshelf, book: :editions])
       end
@@ -1051,9 +965,6 @@ defmodule Stacks.Shelving do
   end
 
   defp do_update_reading_progress(placement, attrs) do
-    # Normalise to atom keys so that maybe_set_* helpers produce a
-    # consistent key type regardless of whether attrs came from a
-    # controller (string keys) or a context test (atom keys).
     key_map = %{
       "reading_status" => :reading_status,
       "current_page" => :current_page,
@@ -1095,13 +1006,6 @@ defmodule Stacks.Shelving do
     end
   end
 
-  # Reading progress may not exceed the book's primary-edition page count when
-  # that count is KNOWN. Page count lives on the edition, not the placement, so
-  # the ceiling is enforced at the context layer (here) rather than in
-  # `reading_progress_changeset/2`, which has no access to the book. When the
-  # page count is unknown (no edition, or an edition with a null/zero
-  # page_count) NO ceiling is applied — a reader is never blocked on missing
-  # catalogue metadata (permissive by design).
   defp placement_page_count(%Placement{book: %Book{} = book}) do
     case Books.primary_edition(book) do
       %{page_count: pc} when is_integer(pc) and pc > 0 -> pc
@@ -1157,8 +1061,6 @@ defmodule Stacks.Shelving do
 
   defp maybe_set_finished_at(attrs, true), do: Map.put(attrs, :finished_at, DateTime.utc_now())
   defp maybe_set_finished_at(attrs, false), do: attrs
-
-  # ── Shelf functions ──────────────────────────────────────────────────
 
   @doc "Returns all shelves for a bookshelf in ascending position order."
   @spec list_shelves(binary()) :: [Shelf.t()]
@@ -1267,9 +1169,6 @@ defmodule Stacks.Shelving do
     from(p in Placement,
       where: is_nil(p.removed_at),
       order_by: [p.position, p.placed_at],
-      # Preload bookshelf + its owner so Visibility.resolve_visibility/2 reuses them
-      # (profile ceiling + bookshelf ceiling) instead of firing a query per placement
-      # — the public /u/:handle/bookshelves/:name browse resolves every row.
       preload: [book: [:author, :editions], bookshelf: :user]
     )
   end
@@ -1325,14 +1224,11 @@ defmodule Stacks.Shelving do
 
       result =
         Repo.transaction(fn ->
-          # Phase 1: shift all positions up by n to vacate the 0..n-1 range,
-          # preventing unique-constraint conflicts during sequential updates.
           Repo.update_all(
             from(s in Shelf, where: s.bookshelf_id == ^bookshelf_id),
             inc: [position: n]
           )
 
-          # Phase 2: set each shelf to its final position.
           apply_shelf_positions(shelf_ids_in_order)
         end)
 
@@ -1368,11 +1264,6 @@ defmodule Stacks.Shelving do
     end
   end
 
-  # Looks up the book's visibility_tier so downstream event consumers (e.g. the
-  # GDPR/age-gate filter on the public timeline) can decide whether to surface
-  # this placement without a follow-up book lookup. Returns nil if the book
-  # cannot be loaded — the placement insert that follows will fail the FK check
-  # in that case, so a nil here is harmless.
   defp lookup_book_visibility_tier(book_id) do
     case Repo.get(Book, book_id) do
       %Book{visibility_tier: tier} -> tier
@@ -1380,13 +1271,6 @@ defmodule Stacks.Shelving do
     end
   end
 
-  # The edition a new placement points at (#335 D2). A placement is made from a
-  # work — the user picked a book, not an ISBN — so the honest default is the
-  # edition the work displays as its own, the same one `Books.primary_edition/1`
-  # resolves. Falls back to the oldest edition when nothing is flagged primary
-  # (legacy rows: `book_editions_one_primary_per_book` forbids two primaries but
-  # not zero), and to nil for a work with no edition at all, which the nullable
-  # column permits. Mirrors the backfill in `20260730200100`.
   defp primary_edition_id(nil), do: nil
 
   defp primary_edition_id(book_id) do
@@ -1435,11 +1319,6 @@ defmodule Stacks.Shelving do
 
   defp check_reading_pile_capacity(_repo, %Bookshelf{}), do: {:ok, :not_limited}
 
-  # Only cross-bookshelf moves reach here: `move_book/3` short-circuits a
-  # same-bookshelf "move" to a no-op success before `do_move_book/3` (and thus
-  # this check) ever runs. So the cap is evaluated purely against the
-  # destination — a same-bookshelf reorganisation of a full (or grandfathered
-  # over-limit) pile never trips it because it never gets this far.
   defp check_move_capacity(repo, _from_bookshelf, to_bookshelf),
     do: check_reading_pile_capacity(repo, to_bookshelf)
 

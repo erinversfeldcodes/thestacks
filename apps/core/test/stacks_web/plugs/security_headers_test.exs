@@ -43,11 +43,6 @@ defmodule StacksWeb.Plugs.SecurityHeadersTest do
 
       [_, img_src] = Regex.run(~r/img-src([^;]*)/, csp)
 
-      # covers.openlibrary.org 302s to archive.org, which 302s again to
-      # iaNNNNNN.us.archive.org. CSP is enforced on the redirect target, so
-      # listing only the first host blocks every cover — the failure is
-      # invisible server-side (curl fetches the image fine) and total in the
-      # browser. All three hosts are required for one cover to render.
       for host <- [
             "https://covers.openlibrary.org",
             "https://archive.org",

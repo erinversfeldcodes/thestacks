@@ -21,15 +21,6 @@ pub enum ScraperError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
-    // `rule` carries the `Disallow:` line that caused the refusal. Without it a caller
-    // recording the block has no way to distinguish a narrow disallow (`/search`) from
-    // a total one (`/`) — i.e. whether the store is permanently unscrapable or merely
-    // needs a different path. See `RobotsPolicy::blocked_by`.
-    //
-    // `sitemaps` carries the `Sitemap:` URLs the same document declared. A disallow is the case
-    // where they matter MOST: we are not permitted to guess at paths, so the store's own index is
-    // the only respectful way left to find a page it *is* willing to serve. Dropping them here
-    // would make the endpoint's blocked branch quietly lossier than the policy that produced it.
     #[error("robots.txt disallows scraping {url} ({rule})")]
     RobotsDisallowed {
         url: String,
@@ -43,17 +34,6 @@ pub enum ScraperError {
     #[error("rate limit exceeded for {domain}")]
     RateLimitExceeded { domain: String },
 
-    // Distinct from `RateLimitExceeded` on purpose, and the distinction is not cosmetic.
-    //
-    // `RateLimitExceeded` means *we* reached the ceiling we configured — an operator should widen
-    // it or ask for less work. `UpstreamBackoff` means the *shop* answered 429 and told us to wait;
-    // the only correct response is to wait, and the only wrong one is to keep asking. Collapsing
-    // them would leave an operator tuning `requests_per_minute` in response to a signal that has
-    // nothing to do with it.
-    //
-    // Like `RobotsDisallowed`, this is a determination and not a failure: it recurs on every
-    // attempt while the cooldown holds, so counting it against the fuse shared by all stores would
-    // take price scraping down everywhere, repeatedly. See `ScrapeOutcome` in scraper.proto.
     #[error("{domain} asked us to back off; {seconds_remaining}s remaining")]
     UpstreamBackoff {
         domain: String,

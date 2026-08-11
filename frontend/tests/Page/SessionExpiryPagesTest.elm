@@ -447,9 +447,6 @@ suite =
                     outMsg |> Expect.equal Password.NoOut
             , test "password_expiry_does_not_repaint_the_form_as_failed" <|
                 \() ->
-                    -- `Main` is about to re-check for a sibling tab's newer token.
-                    -- Rendering "Could not change password" now would be wrong if
-                    -- that re-check adopts one — and is the copy this issue removed.
                     let
                         ( newModel, _, _ ) =
                             Password.update
@@ -462,10 +459,6 @@ suite =
                         |> Query.hasNot [ Selector.text "Could not change password. Please try again." ]
             , test "password_a_real_failure_still_says_try_again (positive control)" <|
                 \() ->
-                    -- The control for the assertion above: with the 401 routed
-                    -- away, what is left really is retryable, and the copy must
-                    -- still appear for it. Without this, the `hasNot` above would
-                    -- pass just as well against a page that renders nothing ever.
                     let
                         ( newModel, _, _ ) =
                             Password.update
@@ -490,9 +483,6 @@ suite =
                     outMsg |> Expect.equal Profile.SessionExpired
             , test "profile_validation_failure_stays_local: a 422 → NoOut" <|
                 \() ->
-                    -- The 422 field errors are why `ProfileError` exists; routing
-                    -- them to the interceptor would log a user out for typing a
-                    -- taken handle.
                     let
                         ( _, _, outMsg ) =
                             Profile.update
@@ -515,8 +505,6 @@ suite =
                     outMsg |> Expect.equal Profile.NoOut
             , test "profile_expiry_keeps_the_typed_current_password_on_screen" <|
                 \() ->
-                    -- The password was typed to authorise an email change. It is
-                    -- not cleared on expiry: the re-check may still adopt a token.
                     let
                         ( typed, _, _ ) =
                             Profile.update

@@ -61,23 +61,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SEARCH_ROOTS = [REPO_ROOT / "apps/core/lib"]
-# Generated code is derived from the same proto and cannot drift from it.
 EXCLUDED_PATH_PARTS = ("/gen/",)
 
-# `# proto-enum-coverage: <Enum> ignore <VALUE>[, <VALUE>...] — <reason>`
-#
-# A directive may wrap across consecutive comment lines (proto value names are long
-# and credo caps line length), so the lines are joined before matching. Only
-# `[A-Z0-9_, ]` is accepted between `ignore` and the em-dash: prose there makes the
-# whole directive fail to parse, which leaves the gap undeclared and fails the
-# build. Ambiguity fails closed.
 DIRECTIVE_START_RE = re.compile(r"^\s*#.*proto-enum-coverage:")
 COMMENT_LINE_RE = re.compile(r"^\s*#")
 DIRECTIVE_RE = re.compile(
     r"proto-enum-coverage:\s*(?P<enum>\w+)\s+ignore\s+(?P<values>[A-Z0-9_,\s]+?)"
     r"\s*(?:—|--)\s*(?P<reason>\S.*)$"
 )
-# A wire value used as an Elixir string literal.
 LITERAL_RE = re.compile(r'"([A-Z][A-Z0-9_]*)"')
 
 
@@ -132,8 +123,6 @@ def _directive_blocks(text: str) -> list[str]:
             continue
         parts = [lines[i].lstrip().lstrip("#").strip()]
         j = i + 1
-        # Absorb the continuation, but never a second directive — two adjacent
-        # declarations must stay two declarations.
         while (
             j < len(lines)
             and COMMENT_LINE_RE.match(lines[j])
@@ -182,8 +171,6 @@ def analyse(enums: dict[str, dict]) -> tuple[list[dict], list[str]]:
             if enum_name:
                 matched.setdefault(enum_name, set()).add(literal)
 
-        # A directive for an enum this file does not consume is dead weight that
-        # would outlive the code it excused.
         for enum_name, ignores in declared.items():
             if enum_name not in enums:
                 errors.append(f"{rel}: ignore declared for unknown enum '{enum_name}'")
@@ -205,7 +192,6 @@ def analyse(enums: dict[str, dict]) -> tuple[list[dict], list[str]]:
             if meta["zero"]:
                 required.discard(meta["zero"])
 
-            # An ignore for a value the file already handles is a lie about the code.
             redundant = sorted(set(ignores) & seen)
             for value in redundant:
                 errors.append(
@@ -260,8 +246,6 @@ def main() -> None:
                 print(f"      MISSING: {value}")
         return
 
-    # One line per declaration, not per value: the reason is shared, and repeating a
-    # paragraph five times is how an ignore-list stops being read.
     for finding in findings:
         if finding["ignored"]:
             values = ", ".join(finding["ignored"])

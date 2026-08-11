@@ -62,21 +62,10 @@ defmodule Stacks.Enrichment.StoreMatcher do
 
   alias Stacks.Books.CandidateScorer
 
-  # Above CandidateScorer's default of 2.5, and set from measurement rather than taste:
-  # a derivative ("A Study Guide to X") scores 1.0 and an unrelated title 0.0, while
-  # any genuine title relationship scores 3.0 or more.
   @floor 3.0
 
-  # How far ahead of the runner-up the winner must be. Measured: an exact match scores
-  # 3.5 and a derivative 1.0, so a real winner clears this comfortably while two
-  # equally-plausible listings do not.
   @min_margin 1.0
 
-  # Minimum token-set symmetry (Jaccard) between our title and the shop's.
-  #
-  # This is the part the score cannot do. 0.6 accepts exact and near-exact titles while
-  # rejecting "The Island" vs "The Island of the Day Before" (0.33) and "Sapiens" vs
-  # "Sapiens: A Brief History of Humankind" (0.17).
   @min_symmetry 0.6
 
   @doc """
@@ -100,8 +89,6 @@ defmodule Stacks.Enrichment.StoreMatcher do
       author: edition[:author] || edition["author"]
     }
 
-    # The product path stands in for the ISBN slot: CandidateScorer treats it as an
-    # opaque identifier, so no adaptation is needed beyond naming.
     candidates = Enum.map(listings, fn {path, title} -> {path, %{title: title}} end)
 
     symmetry = Keyword.get(opts, :min_symmetry, @min_symmetry)
@@ -120,7 +107,6 @@ defmodule Stacks.Enrichment.StoreMatcher do
           :no_match
         end
 
-      # Below the floor: the best candidate is not plausibly the same book.
       {:floored, _best, _runner_up} ->
         :no_match
 
@@ -133,8 +119,6 @@ defmodule Stacks.Enrichment.StoreMatcher do
 
   defp clear_winner?(score, {runner_score, _, _}, margin), do: score - runner_score >= margin
 
-  # Jaccard, deliberately, not the overlap coefficient the scorer uses: overlap treats
-  # a subset as a perfect match, which is exactly the case that must be rejected here.
   defp symmetric_enough?(ours, theirs, threshold)
        when is_binary(ours) and is_binary(theirs) do
     a = word_set(ours)

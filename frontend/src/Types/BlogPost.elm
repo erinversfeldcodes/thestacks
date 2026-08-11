@@ -105,10 +105,6 @@ type AssociationStatus
     | Dismissed
 
 
-
--- HELPERS
-
-
 visibilityToString : Visibility -> String
 visibilityToString v =
     case v of
@@ -123,10 +119,6 @@ visibilityToString v =
 
         Public ->
             "public"
-
-
-
--- MAPPING FROM PROTO
 
 
 fromProtoVisibility : Proto.BlogVisibility -> Visibility
@@ -208,10 +200,6 @@ fromProtoBlogPostSummary ps =
     , published = False
     , insertedAt = ps.createdAt
     }
-
-
-
--- DECODERS
 
 
 {-| Decode a full BlogPost from JSON.

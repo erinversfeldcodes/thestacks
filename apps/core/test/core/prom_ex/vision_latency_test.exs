@@ -29,7 +29,6 @@ defmodule Core.PromEx.VisionLatencyTest do
   emits the same event) by using `status` values no other test emits.
   """
 
-  # async: false — PromEx aggregator state is global.
   use ExUnit.Case, async: false
 
   alias Core.PromEx.MetricAudience
@@ -39,8 +38,6 @@ defmodule Core.PromEx.VisionLatencyTest do
   @family "stacks_vision_request_stop_duration_milliseconds"
   @event [:stacks, :vision, :request, :stop]
 
-  # `status` values used ONLY here, so a series matched below cannot have been
-  # produced by another suite emitting the same event name.
   @slow_status 599
   @error_status 502
 
@@ -75,15 +72,12 @@ defmodule Core.PromEx.VisionLatencyTest do
   end
 
   defp scrape do
-    # Give PromEx's telemetry handler a moment to process the ETS writes.
     Process.sleep(50)
     output = PromEx.get_metrics(Core.PromEx)
     refute output == :prom_ex_down, "Core.PromEx must be running for this test"
     output
   end
 
-  # Every exported line of `<family><suffix>` whose label block matches all of
-  # `pairs`, as {label_block, value} tuples.
   defp series(output, suffix, pairs) do
     for line <- String.split(output, "\n"),
         [_, block, value] <-
@@ -100,8 +94,6 @@ defmodule Core.PromEx.VisionLatencyTest do
     |> MapSet.new()
   end
 
-  # The only label keys this family may ever export: the two whitelisted tags
-  # plus the histogram's own bucket bound.
   defp whitelist, do: MapSet.new(["endpoint", "status", "le"])
 
   describe "the metric is registered at all (the defect this issue is)" do
@@ -115,11 +107,6 @@ defmodule Core.PromEx.VisionLatencyTest do
       assert metric.event_name == @event
       assert metric.tags == [:endpoint, :status]
 
-      # `unit: {:native, :millisecond}` makes Telemetry.Metrics replace the
-      # `:duration` measurement key with a converting function, so assert the
-      # conversion itself: the client measures with System.monotonic_time/0
-      # (native units), and without the conversion every exported value would
-      # be nanoseconds and every quantile off by six orders of magnitude.
       assert metric.unit == :millisecond
       assert is_function(metric.measurement, 1)
 
@@ -187,10 +174,6 @@ defmodule Core.PromEx.VisionLatencyTest do
     end
 
     test "a slow call lands in a FINITE bucket, not only +Inf (anti-saturation)" do
-      # 60s: far beyond the ~3-8s estimate, far short of the client's deadline.
-      # With a 20_000ms ceiling (the @route_duration_buckets shape this issue
-      # warns against) this sample would exist ONLY in +Inf and the quantile
-      # would be a fabricated fallback.
       emit(60_000, "analyze", @slow_status)
 
       output = scrape()
@@ -207,10 +190,6 @@ defmodule Core.PromEx.VisionLatencyTest do
                "+Inf the ceiling is too low and the tail this metric exists to measure is " <>
                "invisible; got:\n#{output}"
 
-      # Read the ceiling rather than restating it. Issue #350 moved the client's
-      # deadline (210s → 330s) and this literal was the one place that did not
-      # move with it, which is the same "two copies of a number that must agree"
-      # trap that produced the inversion #350 fixed.
       assert [{_, top} | _] = series(output, "_bucket", pairs ++ [le: Enum.max(buckets())])
 
       assert String.to_integer(top) >= 1,
@@ -240,11 +219,6 @@ defmodule Core.PromEx.VisionLatencyTest do
     end
 
     test "metadata outside the whitelist is DROPPED, not exported, if an emit site adds it" do
-      # The guarantee is the `:tags` whitelist, not the discipline of every
-      # future emit site. Emit the event carrying exactly the kind of payload
-      # that must never reach a metrics sink and prove none of it becomes a
-      # label. This is what makes the whitelist a guarantee rather than a
-      # convention.
       :telemetry.execute(
         @event,
         %{duration: System.convert_time_unit(900, :millisecond, :native)},

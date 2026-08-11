@@ -53,9 +53,5 @@ defmodule Core.Repo.Migrations.ExpandUsersDiscoveredSourcesThirdSpaces do
       remove :excluded_at
       remove :exclusion_email
     end
-
-    # NOTE: ALTER TYPE ... ADD VALUE cannot be reversed in PostgreSQL — enum values
-    # cannot be removed once added. The 'excluded' value in op.source_status is
-    # intentionally left in place on rollback to avoid a destructive DDL operation.
   end
 end

@@ -204,12 +204,6 @@ suite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Location
--- ---------------------------------------------------------------------------
-
-
 locationSuite : Test
 locationSuite =
     describe "Location decoders"
@@ -338,12 +332,6 @@ locationSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- EventBus
--- ---------------------------------------------------------------------------
 
 
 eventBusSuite : Test
@@ -495,12 +483,6 @@ eventBusSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Book (enums + messages + embedded fields)
--- ---------------------------------------------------------------------------
-
-
 bookSuite : Test
 bookSuite =
     describe "Book decoders"
@@ -647,10 +629,6 @@ bookSuite =
                         , openLibraryId = ""
                         , googleBooksId = ""
                         , bookId = ""
-
-                        -- Deliberately NOT "" (#335): "" is this field's proto
-                        -- default, so a round-trip using it would pass even if
-                        -- the decoder dropped the field entirely.
                         , verificationSource = "open_library"
                         , createdAt = ""
                         , updatedAt = ""
@@ -673,12 +651,6 @@ bookSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- User (>8 fields, andThen pattern)
--- ---------------------------------------------------------------------------
 
 
 userSuite : Test
@@ -792,12 +764,6 @@ userSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Placement (cross-module reference to Book)
--- ---------------------------------------------------------------------------
-
-
 placementSuite : Test
 placementSuite =
     describe "PlacementDetail decoders"
@@ -907,12 +873,6 @@ placementSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- SourceHealthCheck (optional + enums + >8 fields)
--- ---------------------------------------------------------------------------
 
 
 sourceHealthCheckSuite : Test
@@ -1090,12 +1050,6 @@ sourceHealthCheckSuite =
                     ]
                     ()
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- Response-level tests (BookDetailResponse, AuthResponse, BookshelfResponse)
--- ---------------------------------------------------------------------------
 
 
 responseSuite : Test
@@ -1406,12 +1360,6 @@ responseSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Blog (BlogPost, BlogPostSummary, BookAssociation, BlogVisibility)
--- ---------------------------------------------------------------------------
-
-
 blogSuite : Test
 blogSuite =
     describe "Blog decoders"
@@ -1584,12 +1532,6 @@ blogSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Listing
--- ---------------------------------------------------------------------------
-
-
 listingSuite : Test
 listingSuite =
     describe "Listing decoders"
@@ -1699,12 +1641,6 @@ listingSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- Blog response-level decoders
--- ---------------------------------------------------------------------------
 
 
 blogResponseSuite : Test
@@ -1953,12 +1889,6 @@ blogResponseSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Listing response-level decoders
--- ---------------------------------------------------------------------------
-
-
 listingResponseSuite : Test
 listingResponseSuite =
     describe "Listing response-level decoders"
@@ -2069,12 +1999,6 @@ listingResponseSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- Source response-level decoders
--- ---------------------------------------------------------------------------
 
 
 sourceResponseSuite : Test
@@ -2289,12 +2213,6 @@ sourceResponseSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Upload (UploadAccepted, PollResponse, PollStatus)
--- ---------------------------------------------------------------------------
-
-
 uploadSuite : Test
 uploadSuite =
     describe "Upload decoders"
@@ -2433,12 +2351,6 @@ uploadSuite =
                     ]
                     ()
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- Admin (MetricsDashboard, CostItem)
--- ---------------------------------------------------------------------------
 
 
 adminSuite : Test

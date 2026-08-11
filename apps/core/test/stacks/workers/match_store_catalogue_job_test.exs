@@ -8,7 +8,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJobTest do
 
   describe "store selection" do
     test "selects a store with a product API but no ISBN on any product" do
-      # Ike's Books: enumerable, but 0 of 50 sampled products carried an ISBN.
       ikes =
         insert(:bookstore,
           scraper_module: "za/ikes_books",
@@ -21,7 +20,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJobTest do
     end
 
     test "skips a store whose products do carry ISBNs" do
-      # Identifiable by ISBN, so title matching would be strictly worse.
       insert(:bookstore,
         scraper_module: "za/wordsworth",
         price_source: "shopify_products_json",
@@ -33,7 +31,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJobTest do
     end
 
     test "skips a store with no product API, which cannot be enumerated" do
-      # loot.co.za and fortunatefinds.co.za: nothing to sweep, so no titles to match.
       insert(:bookstore,
         scraper_module: "za/loot",
         price_source: "none",
@@ -73,8 +70,6 @@ defmodule Stacks.Workers.MatchStoreCatalogueJobTest do
     end
 
     test "returns an error so Oban retries when the sweep fails", %{store: store} do
-      # A catalogue sweep can lose to a rate limit or a transient fault. Retrying is
-      # right; swallowing would leave the shop silently unpriced.
       Application.put_env(:core, :mock_catalogue_titles, {:error, :timeout})
 
       assert {:error, :timeout} =

@@ -89,11 +89,7 @@ type alias Model =
     { steps : List Step
     , currentIndex : Int
     , visible : Bool
-
-    -- The embedded US-1.1.1 upload flow, driven verbatim by `Page.Upload`.
     , upload : Upload.Model
-
-    -- The embedded consent controls, driven verbatim by `Page.Settings.Consent`.
     , consent : Consent.Model
     }
 
@@ -235,33 +231,21 @@ update token msg model =
                 ( { model | visible = False }, Cmd.none, NoOut )
 
             else
-                -- The overlay is now committed to a visible step: pull focus into
-                -- the dialog so `aria-modal` is honoured from the first render
-                -- (focus-on-open). A no-op if the shell has not rendered it.
                 ( { model | currentIndex = indexForNextStep model status.nextStep }
                 , focusContainerCmd
                 , NoOut
                 )
 
         StatusLoaded (Err _) ->
-            -- On error, start from the first step rather than blocking the reader,
-            -- and still pull focus into the dialog (focus-on-open).
             ( { model | currentIndex = 0 }, focusContainerCmd, NoOut )
 
         StepCompleted ->
-            -- The index is client-driven; the server-step write is fire-and-forget
-            -- (localStorage is the re-trigger guard). Absorb the result either way.
             ( model, Cmd.none, NoOut )
 
         NextStep ->
             advance token model
 
         ConfirmConsent ->
-            -- The Consent step's "Continue": persist analytics through the
-            -- UNCHANGED consent write path (`Consent.update SaveConsent` →
-            -- `Api.saveConsent`), then advance. Writing-assistant consent has
-            -- already persisted on toggle inside `Consent.update`. Skipping,
-            -- by contrast, advances and grants nothing.
             let
                 ( newConsent, consentCmd, _ ) =
                     Consent.update Consent.SaveConsent model.consent token
@@ -278,8 +262,6 @@ update token msg model =
             finishNow token model
 
         EscapePressed ->
-            -- Escape dismisses the modal via the SAME finish path as Skip
-            -- (US-14.1.2 §2 sad path): persist and never re-trigger.
             finishNow token model
 
         UploadMsg subMsg ->
@@ -300,9 +282,6 @@ update token msg model =
                     isUploadComplete newUpload.step && not (isUploadComplete model.upload.step)
             in
             if justPlaced then
-                -- A real placement happened: fold back to the sequence and
-                -- advance. The upload's own OutMsg (typically RefreshInbox) still
-                -- propagates; the index bump is internal.
                 let
                     ( advanced, advanceCmd, _ ) =
                         advance token base
@@ -328,11 +307,9 @@ update token msg model =
             ( { model | consent = newConsent }, Cmd.map ConsentMsg subCmd, out )
 
         FocusWrapToFirst ->
-            -- Forward Tab fell off the trailing sentinel: wrap to the leading one.
             ( model, focusElementCmd leadingGuardId, NoOut )
 
         FocusWrapToLast ->
-            -- Shift+Tab fell off the leading sentinel: wrap to the trailing one.
             ( model, focusElementCmd trailingGuardId, NoOut )
 
         FocusResult ->
@@ -459,10 +436,6 @@ mapUploadOut upOut =
             SessionExpired
 
 
-
--- VIEW
-
-
 view : Model -> Maybe String -> Html Msg
 view model maybeToken =
     if not model.visible then
@@ -477,24 +450,14 @@ view model maybeToken =
             , attribute "aria-label" (ariaLabelFor (currentStep model))
             , id containerId
             , tabindex -1
-
-            -- Focus trap (US-14.1.2 §aria-modal): intercept Tab/Shift+Tab at the
-            -- two sentinels so keyboard focus can never escape the dialog in
-            -- either direction. Mirrors the proven BookDetail overlay trap.
             , preventDefaultOn "keydown" trapKeydownDecoder
             ]
             [ div [ class "onboarding-overlay__backdrop" ] []
-
-            -- Leading (backward) sentinel: Shift+Tab off it wraps to the trailing
-            -- sentinel, so focus never falls off the front of the dialog.
             , focusGuard leadingGuardId
             , div [ class "onboarding-overlay__card" ]
                 [ viewStep model maybeToken
                 , viewProgressDots model
                 ]
-
-            -- Trailing (forward) sentinel: Tab off it wraps back to the leading
-            -- sentinel, so focus never falls off the back of the dialog.
             , focusGuard trailingGuardId
             ]
 
@@ -606,11 +569,6 @@ viewUpload model maybeToken =
         [ h2 [ class "onboarding-overlay__title" ] [ text "Add your first book" ]
         , p [ class "onboarding-overlay__tagline" ]
             [ text "Photograph a cover or barcode, or type an ISBN — we'll identify it and put it on a shelf." ]
-
-        -- The REAL US-1.1.1 surface, driven verbatim. `NotAsked` for the inbox
-        -- suppresses the "Waiting for you" list (standing content that belongs
-        -- on the upload page, not in onboarding); the flow itself advances the
-        -- moment a placement lands (`Upload.step` = `Complete`).
         , div [ class "onboarding-overlay__embed", testId "onboarding-upload-embed" ]
             [ Html.map UploadMsg (Upload.view model.upload maybeToken NotAsked) ]
         , div [ class "onboarding-overlay__actions" ]
@@ -624,10 +582,6 @@ viewConsent model =
         [ h2 [ class "onboarding-overlay__title" ] [ text "Your privacy choices" ]
         , p [ class "onboarding-overlay__tagline" ]
             [ text "Both default to off. You can change either any time in Settings › Privacy." ]
-
-        -- The consent controls, reused from Settings verbatim (8d extracted
-        -- `viewSection`). Delegated to `Consent.update`; the write path is
-        -- unchanged.
         , div [ class "onboarding-overlay__embed", testId "onboarding-consent-embed" ]
             [ Html.map ConsentMsg (Consent.viewSection model.consent) ]
         , div [ class "onboarding-overlay__actions" ]

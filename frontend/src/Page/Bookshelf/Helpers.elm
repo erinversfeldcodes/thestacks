@@ -352,8 +352,6 @@ viewClickableSpine config placement =
         texture =
             pickTexture bookData.title
 
-        -- Roving tabindex (#388): one tab stop per bookcase. No roving state
-        -- (tabStopId = Nothing) keeps every spine tabbable.
         spineTabIndex =
             case config.tabStopId of
                 Nothing ->
@@ -371,10 +369,6 @@ viewClickableSpine config placement =
         , attribute "role" "listitem"
         , id ("spine-" ++ bookData.id)
         , tabindex spineTabIndex
-
-        -- Arrows/Home/End move focus; the decoder FAILS for every other key,
-        -- so Tab keeps tabbing and Enter/Space keep clicking. preventDefault
-        -- stops the arrows scrolling the page under the move.
         , preventDefaultOn "keydown"
             (GridNav.keyDecoder
                 |> Decode.map (\key -> ( config.onNavKey bookData.id key, True ))

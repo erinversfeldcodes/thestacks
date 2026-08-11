@@ -20,8 +20,6 @@ defmodule Stacks.Enrichment do
   alias Stacks.Enrichment.ThirdSpaceEvent
   alias Stacks.Partners.{InventoryItem, Partner}
 
-  # ── DiscoveredSource ───────────────────────────────────────────────────────
-
   @doc "Changeset for creating a new discovered source."
   @spec discovered_source_changeset(DiscoveredSource.t(), map()) :: Ecto.Changeset.t()
   def discovered_source_changeset(%DiscoveredSource{} = source, attrs) do
@@ -50,8 +48,6 @@ defmodule Stacks.Enrichment do
   @spec discovered_source_status_changeset(DiscoveredSource.t(), map()) :: Ecto.Changeset.t()
   def discovered_source_status_changeset(%DiscoveredSource{} = source, attrs) do
     source
-    # `exclusion_requested_at` is castable so a removal request can be recorded without
-    # applying it — the pending state for an unverified request.
     |> cast(attrs, [
       :status,
       :approved_at,
@@ -70,8 +66,6 @@ defmodule Stacks.Enrichment do
     |> validate_required([:confidence])
     |> validate_number(:confidence, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 1.0)
   end
-
-  # ── ReviewSnapshot ─────────────────────────────────────────────────────────
 
   @review_snapshot_required_fields [:book_id, :source, :source_url, :scraped_at]
   @review_snapshot_optional_fields [
@@ -92,11 +86,6 @@ defmodule Stacks.Enrichment do
     |> foreign_key_constraint(:book_id)
   end
 
-  # ── PriceSnapshot ──────────────────────────────────────────────────────────
-
-  # `book_edition_id` is the grain: a price belongs to an edition, not a work.
-  # `book_id` is required too, but it is derived from the edition by
-  # `Prices.upsert_snapshot/1` rather than supplied — see the note there.
   @price_snapshot_required_fields [
     :book_edition_id,
     :book_id,
@@ -119,16 +108,6 @@ defmodule Stacks.Enrichment do
     |> unique_constraint([:book_edition_id, :store_id])
   end
 
-  # ── BookstoreEvent ─────────────────────────────────────────────────────────
-
-  # ⚠️ `event_date` is deliberately OPTIONAL (#382, owner ruling 2026-08-04). The one real event
-  # either scrapeable shop publishes is a standalone page with no date anywhere on it (measured:
-  # wordsworth's book-signing page, 250,873 bytes, zero dates in any common format), and the
-  # extraction rule this pipeline lives by is "never invent a date". An event without a date is
-  # still real information — the shop's own page carries the details — but it must NOT be counted
-  # as "upcoming": `Events.upcoming_events/1` stays date-only, and `Events.listed_events/1` is the
-  # query that includes dateless rows. Idempotency for dateless upserts is held by the
-  # NULLS NOT DISTINCT unique index (see the 20260804200000 migration).
   @bookstore_event_required_fields [:store_id, :title, :scraped_at]
   @bookstore_event_optional_fields [:event_date, :description, :location, :url, :author_id]
 
@@ -142,8 +121,6 @@ defmodule Stacks.Enrichment do
     |> foreign_key_constraint(:author_id)
   end
 
-  # ── ThirdSpace ─────────────────────────────────────────────────────────────
-
   @third_space_required_fields [:name, :type]
   @third_space_optional_fields [
     :city,
@@ -156,23 +133,9 @@ defmodule Stacks.Enrichment do
     :last_active_at,
     :opted_out,
     :opted_out_at,
-    # ⚠️ Position is optional, not required. A space that could not be geocoded must
-    # still be creatable: the owner approved it, and discarding the row would lose a
-    # human decision because a third-party geocoder had no match. `list_third_spaces/1`
-    # excludes unpositioned spaces from geo queries, so an incomplete row cannot render
-    # as though its location were known.
-    #
-    # These live here rather than in the generated schema because changesets in this
-    # project are hand-written on purpose (see the moduledoc) — which means `proto.sync`
-    # adding a column does NOT make it writable, and a field missing from this list is
-    # dropped in silence. That is exactly what happened when these three were added.
-    #
-    # ⚠️ Now guarded: `Stacks.ChangesetFieldCoverageTest` calls this changeset with every
-    # schema field and fails if any is dropped, so the trap is pre-merge rather than silent.
     :latitude,
     :longitude,
     :nearest_bookshop_km,
-    # Owner-writable curation, and the second tier of the 500 m rule — see the proto.
     :curated,
     :curated_note
   ]
@@ -184,8 +147,6 @@ defmodule Stacks.Enrichment do
     |> cast(attrs, @third_space_required_fields ++ @third_space_optional_fields)
     |> validate_required(@third_space_required_fields)
   end
-
-  # ── ThirdSpaceEvent ────────────────────────────────────────────────────────
 
   @third_space_event_required_fields [:space_id, :title, :event_date, :scraped_at]
   @third_space_event_optional_fields [
@@ -204,8 +165,6 @@ defmodule Stacks.Enrichment do
     |> validate_required(@third_space_event_required_fields)
     |> foreign_key_constraint(:space_id)
   end
-
-  # ── Queries ──────────────────────────────────────────────────────────────────
 
   @doc """
   Lists third spaces with upcoming events preloaded.
@@ -258,30 +217,6 @@ defmodule Stacks.Enrichment do
   defp filter_types(query, []), do: query
   defp filter_types(query, types) when is_list(types), do: where(query, [s], s.type in ^types)
 
-  # ── The 500 m rule, in two tiers ────────────────────────────────────────────
-  #
-  # ⚠️ **500 m is a rule of thumb, not a cutoff** (owner, 2026-07-28): *"further away
-  # should only be included if the ratings are high."* So proximity and quality trade
-  # off, and a single `<=` was the wrong shape:
-  #
-  #   tier 1 — within `near_bookshop_km`: qualifies on distance alone.
-  #   tier 2 — beyond it but within `curated_within_km`: qualifies only if `curated`.
-  #
-  # Observed live and the reason this changed: Truth Coffee Roasting sits **678 m** from
-  # Clarke's Bookshop — walkable, and exactly the pairing US-3.1.1 §1 describes — and a
-  # hard 500 m cutoff excluded it. The filter was working correctly; the *rule* was too
-  # blunt.
-  #
-  # There is still an outer bound, because "curated" cannot mean "any distance": a
-  # wonderful café 40 km from the nearest bookshop is not an answer to "where can I read
-  # near here". `@curated_within_km` is that bound.
-  #
-  # Filtering on a scalar computed at geocode time, not a per-request recomputation —
-  # that would be the query that eventually forces PostGIS for the wrong reason.
-  #
-  # `is_nil` is excluded from both tiers deliberately: a space whose proximity has not
-  # been computed is not *known* to be near a bookshop, and treating missing data as a
-  # pass would put it on the map on the strength of nothing.
   @curated_within_km 2.0
 
   defp filter_near_bookshop(query, nil), do: query
@@ -307,8 +242,6 @@ defmodule Stacks.Enrichment do
   @spec curated_within_km() :: float()
   def curated_within_km, do: @curated_within_km
 
-  # Derives the SQL bounding box from whichever geo option was supplied. A radius query
-  # gets a box that encloses its circle; the Haversine pass then trims the corners.
   defp bounds_for(opts) do
     lat = Keyword.get(opts, :lat)
     lng = Keyword.get(opts, :lng)
@@ -331,12 +264,8 @@ defmodule Stacks.Enrichment do
     Enum.all?([:north, :south, :east, :west], &is_number(Keyword.get(opts, &1)))
   end
 
-  # One degree of latitude is ~111 km everywhere; a degree of longitude shrinks with
-  # cos(lat), so the box must widen as it approaches the poles or it clips the circle.
   defp box_around(lat, lng, radius_km) do
     dlat = radius_km / 111.0
-    # Guard the cosine: at the poles the longitude span is the whole globe, and
-    # dividing by ~0 would produce an infinite delta.
     cos_lat = max(:math.cos(deg_to_rad(lat)), 0.01)
     dlng = radius_km / (111.0 * cos_lat)
 
@@ -353,19 +282,12 @@ defmodule Stacks.Enrichment do
     |> order_by([s], asc: s.name)
   end
 
-  # ⚠️ Antimeridian. A viewport spanning ±180° arrives with `east < west`, and a plain
-  # `between` then matches nothing — silently, which is the worst way to be wrong. The
-  # box becomes two: west→180 and -180→east. US-3.1.1 §1 explicitly puts "drag across
-  # the globe to Shanghai" in scope, so this is a real case, not a curiosity.
   defp apply_longitude_bounds(query, west, east) when west <= east,
     do: where(query, [s], s.longitude >= ^west and s.longitude <= ^east)
 
   defp apply_longitude_bounds(query, west, east),
     do: where(query, [s], s.longitude >= ^west or s.longitude <= ^east)
 
-  # Exact radius test over the box-bounded set. Skipped entirely for a viewport query —
-  # a viewport IS the filter there, and trimming it to a circle would hide pins the
-  # reader can plainly see space for.
   defp refine_by_radius(spaces, opts) do
     lat = Keyword.get(opts, :lat)
     lng = Keyword.get(opts, :lng)
@@ -381,7 +303,6 @@ defmodule Stacks.Enrichment do
     end
   end
 
-  # One query for all upcoming events, grouped in memory — not a preload per space.
   defp preload_upcoming_events([]), do: []
 
   defp preload_upcoming_events(spaces) do

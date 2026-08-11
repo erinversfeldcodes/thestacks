@@ -22,10 +22,6 @@ defmodule StacksWeb.UserSettingsControllerArgonBusyTest do
     put_req_header(conn, "authorization", "Bearer #{token}")
   end
 
-  # Hold every ArgonPool worker and shrink the checkout timeout to 0 so any
-  # `ArgonPool.run/1` from the request pipeline times out at once and yields
-  # `{:error, :argon2_busy}`. Returns a zero-arg release fn (holders freed,
-  # timeout restored). Mirrors the saturation pattern in argon_pool_test.exs.
   defp saturate_argon_pool do
     original_timeout = Application.get_env(:core, :argon2_checkout_timeout_ms)
     Application.put_env(:core, :argon2_checkout_timeout_ms, 0)
@@ -94,8 +90,6 @@ defmodule StacksWeb.UserSettingsControllerArgonBusyTest do
 
   describe "PUT /api/settings/profile (email change) when the Argon2 pool is saturated" do
     test "returns 503 service_busy with retry-after: 5", %{conn: conn} do
-      # Only the email-change path verifies a password (via ArgonPool), so the
-      # payload must carry a genuinely different email plus current_password.
       user = insert(:user, email: "old@example.com")
       release = saturate_argon_pool()
 

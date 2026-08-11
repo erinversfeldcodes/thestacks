@@ -37,8 +37,6 @@ defmodule Stacks.Enrichment.MockScraperClient do
 
   @impl true
   def fetch_page(store_name, path, validators) do
-    # Recorded so a test can assert a fetch WAS conditional. Without this, "we send validators" is a
-    # claim about code rather than about behaviour.
     Process.put(
       {__MODULE__, :validators},
       Process.get({__MODULE__, :validators}, []) ++ [{store_name, path, validators}]
@@ -51,19 +49,12 @@ defmodule Stacks.Enrichment.MockScraperClient do
   def sent_validators, do: Process.get({__MODULE__, :validators}, [])
 
   defp do_fetch_page(store_name, path) do
-    # Recorded so a test can assert a store was *never* fetched. Asserting absence via
-    # a downstream side effect (no events persisted) would also pass if the fetch
-    # happened and merely returned nothing parseable — which is the wrong-selector
-    # failure mode in disguise.
     Process.put({__MODULE__, :fetches}, fetches() ++ [{store_name, path}])
 
     pages = Process.get({__MODULE__, :pages}, [])
 
     case Enum.find(pages, fn {s, p, _} -> s == store_name and p == path end) do
       {_, _, response} -> response
-      # `sitemaps: []` rather than omitting the key: the real client always includes it (robots.txt
-      # is read on every fetch), so a mock that leaves it out lets a caller pass here while
-      # crashing on the real shape.
       nil -> {:ok, %{status: 200, body: "", sitemaps: []}}
     end
   end
@@ -77,8 +68,6 @@ defmodule Stacks.Enrichment.MockScraperClient do
       {_, response} ->
         response
 
-      # Every key present with its real default, for the same reason `fetch_page/2` always includes
-      # `sitemaps: []`: a mock that omits a key lets a caller pass here and crash on the real shape.
       nil ->
         {:ok, %{urls: [], skipped: [], truncated: false, documents_fetched: 0, bytes_read: 0}}
     end
@@ -106,11 +95,6 @@ defmodule Stacks.Enrichment.MockScraperClient do
 
   @impl true
   def build_index(_store_name) do
-    # Stubbed rather than simulated, and deliberately without touching the Agent: the
-    # index is a property of the Rust service's own process, so there is nothing
-    # meaningful for a mock to model, and requiring the Agent would make every test
-    # that merely triggers a rebuild start one. Tests that care assert on the
-    # *decision* to rebuild — the enqueued job — not on a fabricated entry count.
     Application.get_env(:core, :mock_index_build_result, {:ok, 0})
   end
 

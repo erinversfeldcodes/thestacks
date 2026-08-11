@@ -59,20 +59,6 @@ defmodule Stacks.Release do
   """
   @spec deploy() :: :ok
   def deploy do
-    # Two sweeps, one on each side of the migrations, because corrections have
-    # two relationships to schema change and one pass cannot serve both:
-    #
-    #   * BEFORE — a repair that must land ahead of the constraint that would
-    #     reject the row (#339's original case: the CHECK validates existing
-    #     rows, so the bad rows must be fixed first).
-    #   * AFTER — a repair over a column the migrations have just ADDED. On a
-    #     fresh fork of an older database the pre-migration pass sees no such
-    #     column (Column.column_present?/1 reads it as nothing-to-correct,
-    #     2026-08-10) and only this pass can reach the backfilled rows.
-    #
-    # Safe to run twice: every correction plans against current state and is
-    # idempotent by the mechanism's own contract (the second run of a repair
-    # plans nothing).
     correct_data(apply: true)
 
     migrate()
@@ -152,10 +138,6 @@ defmodule Stacks.Release do
     end
   end
 
-  # Read schema_migrations directly rather than via
-  # Ecto.Migrator.migrated_versions/1: the guard needs an exact, unambiguous
-  # list of every recorded version, and the direct query matches what a plain
-  # `SELECT` sees.
   defp emit_applied_versions(started_repo) do
     %{rows: rows} = SQL.query!(started_repo, "SELECT version FROM schema_migrations", [])
     Enum.each(rows, fn [version] -> IO.puts("APPLIED_VERSION #{version}") end)
@@ -236,9 +218,6 @@ defmodule Stacks.Release do
 
     if user_id == "", do: erase_fail!("user_id is required")
 
-    # Refuse anything that is not a UUID — no email/handle resolution lives in
-    # the destructive path, so it can never delete the wrong user on an
-    # ambiguous key. Use gdpr_lookup_user/1 to turn an email into a user_id.
     case Ecto.UUID.cast(user_id) do
       :error ->
         erase_fail!(
@@ -364,8 +343,6 @@ defmodule Stacks.Release do
 
     load_app()
 
-    # We only need the primary repo (Core.Repo) for Accounts.register/1.
-    # Use with_repo to start it so context calls work under release eval.
     [primary_repo | _] = repos()
 
     {:ok, _, _} =
@@ -426,8 +403,6 @@ defmodule Stacks.Release do
       "display_name" => "Platform Prober"
     }
 
-    # Use the registration changeset directly (not Accounts.register) to
-    # bypass maybe_assign_owner_role, which forces role="owner" on empty DBs.
     changeset =
       Stacks.Accounts.registration_changeset(%Stacks.Accounts.User{}, attrs)
 
@@ -476,12 +451,6 @@ defmodule Stacks.Release do
 
     case Stacks.Accounts.register(attrs) do
       {:ok, user} ->
-        # Mark the owner email as confirmed so the login endpoint accepts
-        # them immediately. The owner is created programmatically from a
-        # trusted secret flow (PROD_OWNER_EMAIL/PASSWORD) — no email
-        # verification posture applies. Without this, the login probe
-        # (and the operator themselves) get `email_unconfirmed` on first
-        # authentication attempt.
         confirm_owner!(user)
         IO.puts("seed_prod: created owner: #{email}")
         :ok

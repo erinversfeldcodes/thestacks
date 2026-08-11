@@ -170,8 +170,6 @@ defmodule Stacks.DiscoveryTest do
 
   describe "opt_out/2" do
     test "removes the listing when the requester's domain matches it" do
-      # Self-service path: a shop at optout.com writing from @optout.com is the common
-      # case and needs no human.
       _source = insert(:discovered_source, url: "https://optout.com", status: "pending_review")
 
       assert {:ok, :excluded, updated} =
@@ -184,9 +182,6 @@ defmodule Stacks.DiscoveryTest do
     end
 
     test "does NOT remove the listing when the domain does not match" do
-      # The hole this closes: the form has no account behind it, so submission alone
-      # cannot be evidence of ownership. Previously *anyone* knowing a URL could delist
-      # any business.
       insert(:discovered_source, url: "https://booklounge.co.za", status: "approved")
 
       assert {:ok, :pending_review, updated} =
@@ -208,8 +203,6 @@ defmodule Stacks.DiscoveryTest do
     end
 
     test "handles multi-part public suffixes" do
-      # Naively taking the last two labels would compare "co.za" to "co.za" and match
-      # every South African domain against every other.
       insert(:discovered_source, url: "https://clarkesbooks.co.za", status: "approved")
 
       assert {:ok, :pending_review, _} =

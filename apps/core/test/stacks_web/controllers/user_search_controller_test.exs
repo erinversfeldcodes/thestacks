@@ -33,7 +33,6 @@ defmodule StacksWeb.UserSearchControllerTest do
       assert [user] = body["users"]
       assert user["handle"] == "adal"
       assert user["display_name"] == "Ada Lovelace"
-      # REDACTED — no account/PII fields leak.
       refute Map.has_key?(user, "email")
       refute Map.has_key?(user, "consent_analytics")
       refute Map.has_key?(user, "role")
@@ -80,8 +79,6 @@ defmodule StacksWeb.UserSearchControllerTest do
 
       body = conn |> get("/api/search/users", q: "Ada") |> json_response(200)
 
-      # A logged-out searcher discovers only public profiles — platform (Members)
-      # is signed-in-only, owner is private.
       assert [user] = body["users"]
       assert user["handle"] == "seen"
     end

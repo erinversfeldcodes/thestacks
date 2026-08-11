@@ -62,7 +62,6 @@ defmodule Mix.Tasks.Eval.Resolver do
 
   @impl Mix.Task
   def run(argv) do
-    # Pure module usage only — no repo, no HTTP clients, no app boot.
     Mix.Task.run("compile")
     _ = Application.load(:core)
 
@@ -79,8 +78,6 @@ defmodule Mix.Tasks.Eval.Resolver do
     results = Enum.map(corpus, &evaluate(&1, opts))
     print_summary(results)
   end
-
-  # --- configuration -------------------------------------------------------
 
   defp scorer_opts(cli) do
     weights =
@@ -115,8 +112,6 @@ defmodule Mix.Tasks.Eval.Resolver do
     Application.app_dir(:core, "priv/eval/corpus.exs")
   end
 
-  # --- evaluation ----------------------------------------------------------
-
   defp evaluate(entry, opts) do
     pairs = Enum.map(entry.candidates, &{&1.isbn, &1.meta})
     picked = pick(pairs, entry.signals, opts)
@@ -127,9 +122,6 @@ defmodule Mix.Tasks.Eval.Resolver do
     outcome
   end
 
-  # The production code path: identical call the resolver makes in
-  # `pick_best_candidate/3` (opts default to the same production
-  # defaults there).
   defp pick(pairs, signals, opts) do
     case CandidateScorer.pick_best(pairs, signals, opts) do
       :empty -> :not_found
@@ -154,8 +146,6 @@ defmodule Mix.Tasks.Eval.Resolver do
       {false, true} -> :xfail
     end
   end
-
-  # --- output --------------------------------------------------------------
 
   defp print_header(opts, cli) do
     weights = Map.merge(CandidateScorer.default_weights(), Map.new(opts[:weights]))

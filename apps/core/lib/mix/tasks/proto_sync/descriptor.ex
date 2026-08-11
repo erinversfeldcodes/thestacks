@@ -72,8 +72,6 @@ defmodule Mix.Tasks.ProtoSync.Descriptor do
       ["healthy", "degraded", "broken"]
   """
   def extract_enum_values(descriptor, type_name) do
-    # type_name is like ".stacks.monitoring.v1.HealthStatus"
-    # We need to find the enum definition in the descriptor files
     clean_name = String.trim_leading(type_name || "", ".")
 
     Enum.find_value(descriptor["file"] || [], [], fn file ->
@@ -84,7 +82,6 @@ defmodule Mix.Tasks.ProtoSync.Descriptor do
   defp find_enum_in_file(file, full_enum_name) do
     package = file["package"] || ""
 
-    # Check top-level enums, then nested enums inside messages
     Enum.find_value(file["enumType"] || [], nil, fn enum_type ->
       qualified = if package == "", do: enum_type["name"], else: "#{package}.#{enum_type["name"]}"
 
@@ -129,8 +126,6 @@ defmodule Mix.Tasks.ProtoSync.Descriptor do
   end
 
   defp infer_enum_prefix(enum_name) do
-    # Convert PascalCase enum name to UPPER_SNAKE_CASE prefix
-    # e.g. "HealthStatus" -> "HEALTH_STATUS_"
     enum_name
     |> String.graphemes()
     |> Enum.reduce([], fn char, acc ->

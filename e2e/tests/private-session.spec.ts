@@ -7,17 +7,14 @@ test.describe("Private/incognito session isolation", () => {
   test("fresh browser context has no stored auth and shows login state", async ({
     browser,
   }) => {
-    // Create a brand new browser context (equivalent to private/incognito window)
     const context = await browser.newContext();
     const page = await context.newPage();
 
     await page.goto("/");
 
-    // Should NOT be logged in — nav should show "Sign In", not a user name
     await expect(page.locator('a[href="/login"]')).toBeVisible();
     await expect(page.getByTestId('user-menu')).not.toBeVisible();
 
-    // localStorage should not contain auth
     const storedAuth = await page.evaluate(() =>
       localStorage.getItem("stacks-auth")
     );
@@ -27,7 +24,6 @@ test.describe("Private/incognito session isolation", () => {
   });
 
   test("auth does not leak between browser contexts", async ({ browser }) => {
-    // Context 1: log in and verify auth is stored
     const ctx1 = await browser.newContext();
     const page1 = await ctx1.newPage();
 
@@ -42,7 +38,6 @@ test.describe("Private/incognito session isolation", () => {
     );
     expect(authInCtx1).toBeTruthy();
 
-    // Context 2: separate context should have NO auth
     const ctx2 = await browser.newContext();
     const page2 = await ctx2.newPage();
 
@@ -53,7 +48,6 @@ test.describe("Private/incognito session isolation", () => {
     );
     expect(authInCtx2).toBeNull();
 
-    // Should show unauthenticated nav
     await expect(page2.locator('a[href="/login"]')).toBeVisible();
     await expect(page2.getByTestId('user-menu')).not.toBeVisible();
 
@@ -67,10 +61,8 @@ test.describe("Private/incognito session isolation", () => {
     const context = await browser.newContext();
     const page = await context.newPage();
 
-    // Try to access library directly without auth
     await page.goto("/library");
 
-    // Should render the login form since auth is required
     await expect(page.locator('input[id="email"]')).toBeVisible();
 
     await context.close();

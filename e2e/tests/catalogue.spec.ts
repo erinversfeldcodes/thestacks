@@ -25,7 +25,6 @@ test.describe("Catalogue — unauthenticated", () => {
     const initialCount = await page.locator(".catalogue__card").count();
 
     await page.locator('.search-bar__input').fill("Circe");
-    // Wait for debounce + API call
     await page.waitForTimeout(1000);
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
@@ -49,9 +48,7 @@ test.describe("Catalogue — unauthenticated", () => {
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
     await page.locator('.search-bar__clear').click();
-    // Wait for the catalogue grid to re-render with the full list
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 15000 });
-    // Allow time for all cards to render on slow deployed environments
     await page.waitForTimeout(2000);
 
     const count = await page.locator(".catalogue__card").count();
@@ -62,8 +59,6 @@ test.describe("Catalogue — unauthenticated", () => {
     await page.goto("/catalogue");
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
-    // The seed catalogue always carries subjects (Philosophy has 9 books), so
-    // the subject-select always renders — assert it, don't guard on it.
     const subjectSelect = page.locator(".catalogue__subject-select");
     await expect(subjectSelect).toBeVisible({ timeout: 10000 });
     await subjectSelect.selectOption("Philosophy");
@@ -89,7 +84,6 @@ test.describe("Catalogue — unauthenticated", () => {
       .first()
       .textContent();
 
-    // Titles should differ since sort changed from A-Z to recent
     expect(firstTitleAfter).not.toEqual(firstTitleBefore);
   });
 
@@ -97,10 +91,6 @@ test.describe("Catalogue — unauthenticated", () => {
     await page.goto("/catalogue");
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
-    // The seed catalogue holds 169 books (default per_page=24 → 8 pages), so
-    // pagination and a "Next" button always render on page 1. Assert both and
-    // drive the page change (was a nested pair of vacuous `if (count > 0)`
-    // guards that passed even if pagination had vanished entirely).
     const pagination = page.locator(".catalogue__pagination");
     await expect(pagination).toBeVisible({ timeout: 10000 });
 
@@ -120,7 +110,6 @@ test.describe("Catalogue — unauthenticated", () => {
 
     await page.locator(".catalogue__card-link").first().click();
 
-    // Book detail now opens as an overlay (URL does NOT change)
     const overlay = page.getByTestId('book-overlay');
     await expect(overlay).toBeVisible({ timeout: 10000 });
   });
@@ -169,7 +158,6 @@ test.describe("Catalogue — authenticated", () => {
     await ensureBookOnLibrary(page);
     await page.goto("/catalogue");
     await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
-    // Wait for at least one placement badge to appear (placements load async after catalogue)
     await page.waitForSelector(".catalogue__card-badge", { timeout: 15000 });
 
     const badges = await page.locator(".catalogue__card-badge").count();
@@ -179,7 +167,6 @@ test.describe("Catalogue — authenticated", () => {
       .locator(".catalogue__card-badge")
       .first()
       .textContent();
-    // Should use the new phrasing
     expect(
       badgeText?.startsWith("In your") || badgeText?.startsWith("On your") || badgeText?.startsWith("You're")
     ).toBeTruthy();
@@ -195,7 +182,6 @@ test.describe("Catalogue — authenticated", () => {
     await page.click('button:has-text("In my collection")');
     await page.waitForTimeout(500);
 
-    // Every visible card should have a badge
     const cards = await page.locator(".catalogue__card").count();
     const badges = await page.locator(".catalogue__card-badge").count();
     expect(badges).toEqual(cards);
@@ -211,9 +197,7 @@ test.describe("Catalogue — authenticated", () => {
     await page.click('button:has-text("Not in my collection")');
     await page.waitForTimeout(500);
 
-    // No badges should be visible
     await expect(page.locator(".catalogue__card-badge")).toHaveCount(0);
-    // But there should be cards with "Add to Shelf" buttons
     const addButtons = await page.locator(".catalogue__card-add").count();
     expect(addButtons).toBeGreaterThan(0);
   });

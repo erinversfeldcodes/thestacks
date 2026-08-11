@@ -40,8 +40,6 @@ defmodule StacksWeb.AgeGateTelemetryTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  # ── AgeGate.enforce/2 ──────────────────────────────────────────────────
-
   describe "age-gate enforcement telemetry" do
     test "emits :passed when an age-verified user accesses an age-gated book (happy)", %{
       conn: conn
@@ -86,8 +84,6 @@ defmodule StacksWeb.AgeGateTelemetryTest do
       refute_receive {:telemetry_event, [:stacks, :age_gate, :enforce], _, _}, 100
     end
   end
-
-  # ── AgeVerification.record_verification/3 (ADR-020) ─────────────────────
 
   describe "age-verification telemetry" do
     test "emits :success when a provider verification is recorded (happy)" do

@@ -29,10 +29,6 @@ defmodule Core.Repo.Migrations.RekeyPriceSnapshotsToEdition do
   """
 
   def up do
-    # Guard rather than assume. This is written for an empty table; if rows ever
-    # exist, a backfill has to be designed (an edition cannot be inferred from a
-    # work when the work has several) and silently proceeding would either fail
-    # opaquely on the FK or invent an arbitrary edition.
     execute("""
     DO $$
     DECLARE n bigint;
@@ -50,10 +46,6 @@ defmodule Core.Repo.Migrations.RekeyPriceSnapshotsToEdition do
              references(:book_editions, type: :binary_id, prefix: "op", on_delete: :delete_all),
              from: :binary_id
     end
-
-    # Index swap moved to 20260730090000_rekey_price_snapshots_indexes.exs:
-    # squawk requires CONCURRENTLY, which needs @disable_ddl_transaction —
-    # incompatible with this migration's guard + FK modify (#311 finalization).
   end
 
   def down do

@@ -16,8 +16,6 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
     original_http = Application.get_env(:core, :isbn_http_client)
     Application.put_env(:core, :isbn_http_client, MockHttpClient)
 
-    # :fuse state is global; the outage tests here melt both breakers, and a
-    # blown fuse leaking in (or out) turns a mocked resolve into :circuit_open.
     :fuse.reset(:open_library_fuse)
     :fuse.reset(:google_books_fuse)
 
@@ -43,9 +41,6 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
   end
 
   defp stub_fixture_isbns do
-    # The three ISBNs the fixture can verify. Everything else falls through to
-    # MockHttpClient's default `{:ok, %{}}` — both upstreams ANSWERING "never
-    # heard of it", which is exactly the state `unverified` is reserved for.
     books =
       Map.new([
         ol_book("9780141036144", "1984", "George Orwell"),
@@ -62,8 +57,6 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
   end
 
   defp run_to_completion(import) do
-    # Batch 1 covers all 5 fixture rows and enqueues offset=5; the empty batch
-    # finalises. Driven by hand because Oban is in :manual testing mode.
     assert :ok = perform_job(GoodreadsImportJob, %{"import_id" => import.id, "offset" => 0})
     assert :ok = perform_job(GoodreadsImportJob, %{"import_id" => import.id, "offset" => 5})
   end
@@ -97,15 +90,12 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
       {:ok, rows} = Imports.list_rows(user.id, import.id)
       by_number = Map.new(rows, &{&1.row_number, &1})
 
-      # Row 4 (ROTK): the upstreams answered and did not know the ISBN.
       assert by_number[4].outcome == "unverified"
       assert by_number[4].reason =~ "not found"
 
-      # Row 5 (zine): no ISBN at all.
       assert by_number[5].outcome == "unverified"
       assert by_number[5].reason =~ "no valid ISBN"
 
-      # Neither invented a book.
       assert Shelving.get_bookshelf_books(user.id, "wishlist") == []
     end
 
@@ -123,7 +113,6 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
       assert placement.formats == ["paperback"]
       assert placement.reading_status == "completed"
       assert DateTime.compare(placement.finished_at, ~U[2023-06-14 00:00:00Z]) == :eq
-      # "On my shelf since" is the Goodreads Date Added, not today.
       assert DateTime.compare(placement.placed_at, ~U[2023-01-02 00:00:00Z]) == :eq
     end
 
@@ -170,7 +159,6 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
       assert row.book_id == orwell.id
       assert row.reason =~ "library"
 
-      # Still exactly one copy on the bookshelf.
       placements = Shelving.get_bookshelf_books(user.id, "library")
       assert length(Enum.filter(placements, &(&1.book.id == orwell.id))) == 1
     end
@@ -178,7 +166,6 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
 
   describe "resolver outage (fuse-open)" do
     setup do
-      # Both upstreams DOWN — nothing was learned about any ISBN.
       MockHttpClient.put_response("openlibrary.org", {:error, :unexpected_status})
       MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
       :ok
@@ -193,7 +180,6 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
 
       assert message =~ "resolver unavailable"
 
-      # The gate's rule: an outage is not evidence. No row got "unverified".
       {:ok, rows} = Imports.list_rows(user.id, import.id, outcome: "unverified")
       assert rows == []
 
@@ -223,13 +209,11 @@ defmodule Stacks.Workers.GoodreadsImportJobTest do
       import = create_import(user)
       {:ok, [first | _]} = Imports.list_rows(user.id, import.id)
 
-      # Simulate the first attempt having processed row 1 before the outage.
       Imports.record_outcome(first, "shelved")
 
       assert {:error, _} =
                perform_job(GoodreadsImportJob, %{"import_id" => import.id, "offset" => 0})
 
-      # Row 1's outcome is untouched — no double-shelving on retry.
       {:ok, rows} = Imports.list_rows(user.id, import.id)
       assert Enum.find(rows, &(&1.row_number == 1)).outcome == "shelved"
     end

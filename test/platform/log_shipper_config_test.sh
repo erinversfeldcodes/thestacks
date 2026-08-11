@@ -35,7 +35,6 @@ _case() {
     echo "# $2"
 }
 
-# ── Case 1: vector.toml parses and has required sections ────────────────────
 _case "vector_toml_structure" "vector.toml has fly source, scrub_pii transform, axiom sink"
 if python3 -c "
 import sys
@@ -56,18 +55,6 @@ else
     _fail "vector_toml_structure — missing required blocks"
 fi
 
-# ── Case 2: source is wired to Fly's NATS broadcast with explicit auth ──────
-# Two requirements, both load-bearing:
-#   1. URL points at Fly's internal NATS host (`[fdaa::3]:4223`). No
-#      credentials in the URL — Vector's nats source doesn't parse
-#      user:pass@ from URLs and the server rejects the connection with
-#      "authorization violation" if we try. Verified empirically
-#      2026-04-20 when the shipper crash-looped on that error.
-#   2. `auth.strategy = "user_password"` with user = ${ORG} and
-#      password = ${LOG_SHIPPER_ACCESS_TOKEN}. The
-#      `LOG_SHIPPER_ACCESS_TOKEN` name disambiguates from Fly's generic
-#      `ACCESS_TOKEN` convention — the shipper has its own org-scoped
-#      token independent of any other Fly credential in the system.
 _case "vector_toml_nats_source" \
     "fly source connects to Fly NATS with user_password auth"
 if python3 -c "
@@ -78,7 +65,6 @@ src = data['sources']['fly']
 assert src['type'] == 'nats', f'expected nats, got {src[\"type\"]}'
 url = src.get('url', '')
 assert '[fdaa::3]:4223' in url, f'URL missing Fly NATS host: {url}'
-# Credentials must NOT live in the URL — Vector doesn't parse them there.
 assert '@' not in url, f'URL must not embed user:pass@ (Vector ignores it): {url}'
 auth = src.get('auth', {})
 assert auth.get('strategy') == 'user_password', \
@@ -94,7 +80,6 @@ else
     _fail "vector_toml_nats_source — NATS source misconfigured; Vector will reject auth"
 fi
 
-# ── Case 3: scrub_pii transform mentions all three PII classes ───────────────
 _case "vector_toml_pii_scrub" "scrub transform redacts email, UUID, and IP patterns"
 if grep -q "REDACTED_EMAIL" "${VECTOR_TOML}" \
     && grep -q "UUID" "${VECTOR_TOML}" \
@@ -104,7 +89,6 @@ else
     _fail "vector_toml_pii_scrub — at least one PII class is missing from the scrub transform"
 fi
 
-# ── Case 4: fly.log-shipper.toml has build.dockerfile pointing at our image ─
 _case "fly_toml_build_dockerfile" "fly.log-shipper.toml builds from our custom Dockerfile"
 if python3 -c "
 import tomllib
@@ -120,22 +104,6 @@ else
     _fail "fly_toml_build_dockerfile — build.dockerfile or app name wrong"
 fi
 
-# ── Case 4b: Dockerfile COPY paths resolve in Fly's build context ───────────
-# deploy-stack.sh cd's into the Dockerfile's own directory before
-# invoking `fly deploy`, so Fly's remote builder uses CWD (the
-# Dockerfile's directory) as the build context. COPY paths in the
-# Dockerfile must therefore be relative to THAT directory.
-#
-# Running fly deploy from the repo root instead produces a 2-byte
-# build-context payload (verified empirically 2026-04-19) — the root
-# .dockerignore filters nearly everything — and the COPY fails with
-# `"settings.rendered.yml": not found`. Either way, deploy-stack.sh's
-# `deploy_with_retry` swallows the error into a WARN and the app sits
-# in a created-but-never-deployed state.
-#
-# This test prevents both regressions: a subdir-prefixed path (which
-# would break once we're cd'd into the subdir) and a missing source
-# file in the correct directory.
 _check_dockerfile_copy_paths() {
     local dockerfile="$1"
     local label="$2"
@@ -149,16 +117,11 @@ _check_dockerfile_copy_paths() {
     fi
     local all_ok=1
     while IFS= read -r src; do
-        # Subdir-prefixed paths (e.g. `searxng/foo.yml`) are a regression
-        # — they'd break now that deploy-stack cd's INTO the subdir.
-        # A bare basename is correct.
         if [[ "$src" == */* ]]; then
             _fail "${label} — COPY source '${src}' has a subdir prefix; must be a bare basename relative to the Dockerfile's directory"
             all_ok=0
             continue
         fi
-        # Deploy-time-generated files (e.g. *.rendered.*) don't exist
-        # at test time; assert the *unrendered* template lives alongside.
         if [[ "$src" == *.rendered.* ]]; then
             local unrendered="${src/.rendered/}"
             if [[ ! -e "${dir}/${unrendered}" ]]; then
@@ -186,12 +149,6 @@ _check_dockerfile_copy_paths \
     "${REPO_ROOT}/deploy/searxng/Dockerfile" \
     "searxng Dockerfile"
 
-# ── Case 4c: Vector's HTTP API is enabled on :8686 for the /health probe ────
-# fly.log-shipper.toml's [[checks]] block hits `localhost:8686/health`.
-# Vector's HTTP API is off by default in `timberio/vector` — we must
-# declare `[api] enabled = true, address = "0.0.0.0:8686"` in
-# vector.toml or the health check will never pass and Fly will suspend
-# the app after enough failed checks. Regression-catch that.
 _case "vector_toml_api_enabled" \
     "[api] block enables /health on :8686 for Fly's health check"
 if python3 -c "
@@ -208,7 +165,6 @@ else
     _fail "vector_toml_api_enabled — /health would not respond; Fly would suspend the app"
 fi
 
-# ── Case 5: axiom sink reads token + dataset from env ────────────────────────
 _case "vector_toml_axiom_sink" "axiom sink uses env-interpolated token + dataset"
 if python3 -c "
 import tomllib
@@ -225,7 +181,6 @@ else
     _fail "vector_toml_axiom_sink — axiom sink misconfigured"
 fi
 
-# ──────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "# ——————————————————————————"
 echo "# passed: ${PASSED}  failed: ${FAILED}"

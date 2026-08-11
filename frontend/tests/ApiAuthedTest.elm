@@ -102,21 +102,14 @@ suite =
                         |> Expect.equal Expired
             , test "expired_401_on_a_json_endpoint" <|
                 \() ->
-                    -- The JSON path resolves through a decoder rather than
-                    -- discarding the body; the 401 must be claimed either way.
                     Api.interpretAuthed Api.resolveProfile authedOutcome (badStatus 401 "{}")
                         |> Expect.equal Expired
             , test "expired_401_is_claimed_even_when_the_body_would_decode" <|
                 \() ->
-                    -- A 401 carrying a well-formed validation payload must not be
-                    -- mistaken for a 422: the status decides, not the body.
                     profile (badStatus 401 "{\"errors\":{\"email\":[\"is invalid\"]}}")
                         |> Expect.equal Expired
             ]
         , describe "everything else still reaches the endpoint's own resolver"
-            -- The positive controls for the assertions above: if the 401 branch
-            -- over-captured, or `interpretAuthed` returned `Expired` for
-            -- everything, these would fail rather than silently agree.
             [ test "a_422_keeps_its_field_errors" <|
                 \() ->
                     profile (badStatus 422 "{\"errors\":{\"handle\":[\"has already been taken\"]}}")
@@ -131,7 +124,6 @@ suite =
                             )
             , test "a_403_stays_local" <|
                 \() ->
-                    -- 403 is the age-gate, not an expiry (see `Api.isUnauthorized`).
                     whatever (badStatus 403 "")
                         |> resultOf
                         |> Expect.equal (Just (Err (Http.BadStatus 403)))

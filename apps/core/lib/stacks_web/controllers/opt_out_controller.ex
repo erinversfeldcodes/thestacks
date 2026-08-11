@@ -26,8 +26,6 @@ defmodule StacksWeb.OptOutController do
           message: "Your listing has been removed and will not be re-added."
         })
 
-      # Deliberately different copy: the listing is still live. Telling someone their
-      # listing is gone when it is not would be worse than telling them it is pending.
       {:ok, :pending_review, _source} ->
         json(conn, %{
           status: "pending_review",

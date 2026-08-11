@@ -66,12 +66,6 @@ defmodule Stacks.GDPR.Consent do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Feature → column mapping. Only known features reach here (whitelisted at the
-  # HTTP boundary); an unknown feature falls back to the analytics columns rather
-  # than raising, but is never reachable via the controller.
-  # ---------------------------------------------------------------------------
-
   defp grant_attrs("writing_assistant", now),
     do: %{consent_writing_assistant: true, consent_writing_assistant_at: now}
 
@@ -84,9 +78,6 @@ defmodule Stacks.GDPR.Consent do
   defp consented?(%User{consent_writing_assistant: v}, "writing_assistant"), do: v == true
   defp consented?(%User{consent_analytics: v}, _analytics), do: v == true
 
-  # On a successful writing_assistant revoke, enqueue the data purge. A failed
-  # consent update does not enqueue (nothing changed). Analytics revoke never
-  # purges.
   defp maybe_purge_on_revoke({:ok, user} = result, "writing_assistant") do
     %{"user_id" => user.id}
     |> WritingAssistantDataPurgeWorker.new()
@@ -97,10 +88,6 @@ defmodule Stacks.GDPR.Consent do
 
   defp maybe_purge_on_revoke(result, _feature), do: result
 
-  # GDPR telemetry: fire one event per successful consent transition so the
-  # grant/revoke rates are observable. Only successful updates count — a failed
-  # changeset is not a consent decision. Registered in
-  # `Core.PromEx.Plugins.Stacks` as `stacks_gdpr_consent_{grant,revoke}_count_total`.
   defp emit_consent({:ok, _user} = result, action, feature) do
     :telemetry.execute([:stacks, :gdpr, :consent, action], %{count: 1}, %{feature: feature})
     result

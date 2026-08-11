@@ -28,8 +28,6 @@ defmodule StacksWeb.BlogFeedController do
         |> json(%{error: "Reader not found"})
 
       user ->
-        # An empty feed is a valid answer (200, empty Atom document) — a 404
-        # would make Substack drop the subscription.
         {xml, etag} = Syndication.feed_xml(user)
         client_etag = get_req_header(conn, "if-none-match") |> List.first()
 

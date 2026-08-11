@@ -15,8 +15,6 @@ defmodule Stacks.Marketplace.ListingExpiryReadTimeTest do
   alias Stacks.Marketplace
 
   defp listing_with_expiry(expires_at, attrs \\ []) do
-    # Inserted with status "active" on purpose: this is exactly the state the cron
-    # would have corrected and has not.
     insert(
       :listing,
       Keyword.merge(
@@ -38,14 +36,12 @@ defmodule Stacks.Marketplace.ListingExpiryReadTimeTest do
     end
 
     test "a listing with no expiry is still available" do
-      # Nullable column: absent expiry means it does not expire, not that it expired.
       forever = listing_with_expiry(nil)
 
       assert forever.id in (Marketplace.list_active_listings() |> Enum.map(& &1.id))
     end
 
     test "expiry is exclusive at the boundary" do
-      # `expires_at` in the past by a second is expired; the future is not.
       just_past = listing_with_expiry(DateTime.add(DateTime.utc_now(), -1, :second))
       just_future = listing_with_expiry(DateTime.add(DateTime.utc_now(), 60, :second))
 
@@ -58,8 +54,6 @@ defmodule Stacks.Marketplace.ListingExpiryReadTimeTest do
 
   describe "reading one listing" do
     test "reports expired status even though the row still says active" do
-      # Callers act on `listing.status` — accepting an offer, say — so the read is what
-      # has to tell the truth.
       past = listing_with_expiry(DateTime.add(DateTime.utc_now(), -1, :day))
 
       assert Core.Repo.get!(Stacks.Marketplace.Listing, past.id).status == "active",
@@ -74,7 +68,6 @@ defmodule Stacks.Marketplace.ListingExpiryReadTimeTest do
     end
 
     test "does not resurrect a sold listing as expired" do
-      # Only "active" is derived. A sold listing stays sold whatever its expiry says.
       sold =
         listing_with_expiry(DateTime.add(DateTime.utc_now(), -1, :day), status: "sold")
 
@@ -99,7 +92,6 @@ defmodule Stacks.Marketplace.ListingExpiryReadTimeTest do
 
   describe "a seller's own listings" do
     test "keep expired entries, but each says it is expired" do
-      # Sellers need to see them to relist.
       past = listing_with_expiry(DateTime.add(DateTime.utc_now(), -1, :day))
 
       mine = Marketplace.list_user_listings(past.seller_id)

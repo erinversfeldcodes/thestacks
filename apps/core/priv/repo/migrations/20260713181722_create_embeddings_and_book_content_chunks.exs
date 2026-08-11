@@ -24,21 +24,15 @@ defmodule Core.Repo.Migrations.CreateEmbeddingsAndBookContentChunks do
   use Ecto.Migration
 
   def up do
-    # pgvector must exist before any `vector` column is created. Idempotent so
-    # re-running against an env that already has it is a no-op.
     execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-    # ---- op.embeddings — PERSONAL (user-scoped) ----------------------------
     create table(:embeddings, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
 
-      # user_id FK → op.users ON DELETE CASCADE: erasure reach. A hard-delete of
-      # the user row cascades to their embeddings (see Stacks.GDPR.Deletion).
       add :user_id, references(:users, type: :binary_id, prefix: "op", on_delete: :delete_all),
         null: false
 
       add :source_type, :text, null: false
-      # Polymorphic source reference (interpreted per source_type) — no FK.
       add :source_id, :binary_id
       add :title, :text
       add :shelf, :text
@@ -47,29 +41,18 @@ defmodule Core.Repo.Migrations.CreateEmbeddingsAndBookContentChunks do
       timestamps(type: :utc_datetime_usec)
     end
 
-    # 1024-dim vector (Together AI bge-m3). Added via raw SQL — the pgvector
-    # `vector` type is not a built-in the migration DSL knows. Torn down by the
-    # `drop table` in down/0.
     execute("ALTER TABLE op.embeddings ADD COLUMN embedding vector(1024)")
 
     create index(:embeddings, [:user_id], prefix: "op")
 
-    # HNSW ANN index with cosine distance. Built on an empty table (instant),
-    # inside the migration transaction — CONCURRENTLY is both needless here and
-    # illegal in a transaction block, so the concurrency rule is ignored for
-    # this statement only (it still guards index builds on populated tables).
     execute("""
     -- squawk-ignore require-concurrent-index-creation
     CREATE INDEX embeddings_embedding_hnsw_idx ON op.embeddings USING hnsw (embedding vector_cosine_ops)
     """)
 
-    # ---- op.book_content_chunks — SHARED, NON-personal (PRESERVED) ---------
-    # NO user_id column: nothing to erase, so GDPR erasure preserves this table.
     create table(:book_content_chunks, prefix: "op", primary_key: false) do
       add :id, :binary_id, primary_key: true
 
-      # book_id FK → op.books ON DELETE CASCADE: chunk lifecycle follows the
-      # book, never a user.
       add :book_id, references(:books, type: :binary_id, prefix: "op", on_delete: :delete_all),
         null: false
 
@@ -84,7 +67,6 @@ defmodule Core.Repo.Migrations.CreateEmbeddingsAndBookContentChunks do
 
     create index(:book_content_chunks, [:book_id], prefix: "op")
 
-    # Empty table, in-transaction — same rationale as the embeddings HNSW index.
     execute("""
     -- squawk-ignore require-concurrent-index-creation
     CREATE INDEX book_content_chunks_embedding_hnsw_idx ON op.book_content_chunks USING hnsw (embedding vector_cosine_ops)
@@ -92,9 +74,6 @@ defmodule Core.Repo.Migrations.CreateEmbeddingsAndBookContentChunks do
   end
 
   def down do
-    # Dropping each table cascades away its columns (incl. the vector column)
-    # and indexes. The `vector` extension is intentionally left installed on
-    # rollback (it is cheap, may back other objects, and re-install is a no-op).
     drop table(:book_content_chunks, prefix: "op")
     drop table(:embeddings, prefix: "op")
   end

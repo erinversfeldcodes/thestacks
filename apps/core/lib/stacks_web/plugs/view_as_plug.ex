@@ -69,10 +69,6 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Phase 1: Parse perspective
-  # ---------------------------------------------------------------------------
-
   defp parse_perspective(conn, "unauthenticated") do
     emit_usage(:unauthenticated)
     assign(conn, :requested_perspective, :unauthenticated)
@@ -84,7 +80,6 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   end
 
   defp parse_perspective(conn, "user:" <> id) when byte_size(id) > 0 do
-    # Tag only the perspective KIND — never the raw uuid — to bound cardinality.
     emit_usage(:specific_user)
     assign(conn, :requested_perspective, {:specific_user, id})
   end
@@ -125,8 +120,6 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
     |> halt()
   end
 
-  # ── Telemetry (Issue #197) — whitelisted atoms only, never raw input ──
-
   defp emit_usage(perspective) do
     :telemetry.execute([:stacks, :view_as, :usage], %{count: 1}, %{perspective: perspective})
   end
@@ -134,10 +127,6 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   defp emit_error(reason, phase) do
     :telemetry.execute([:stacks, :view_as, :error], %{count: 1}, %{reason: reason, phase: phase})
   end
-
-  # ---------------------------------------------------------------------------
-  # Phase 2: Authorize
-  # ---------------------------------------------------------------------------
 
   defp check_ownership(conn, perspective, resource_owner_id) do
     user = Guardian.Plug.current_resource(conn)
@@ -165,31 +154,23 @@ defmodule StacksWeb.Plugs.ViewAsPlug do
   defp owns_resource?(%{id: user_id}, resource_owner_id), do: user_id == resource_owner_id
   defp owns_resource?(_, _), do: false
 
-  # Platform owners may use any perspective.
   defp apply_perspective(conn, :unauthenticated, _user) do
     assign(conn, :view_as_context, :unauthenticated)
   end
 
   defp apply_perspective(conn, :platform, _user) do
-    # Generic platform viewer with NO identity (SEC-1) — never the owner, so a
-    # preview "as a platform user" cannot see owner-only content.
     assign(conn, :view_as_context, :platform_preview)
   end
 
   defp apply_perspective(conn, {:specific_user, id}, _user) do
-    # Simulate exactly what that user sees — owner/group/block all resolve for id
-    # (SEC-4: previously dead-ended to hidden-everything via the catch-all).
     assign(conn, :view_as_context, {:platform_user, id})
   end
 
-  # Resource owners may only use unauthenticated and platform.
   defp apply_limited_perspective(conn, :unauthenticated, _user) do
     assign(conn, :view_as_context, :unauthenticated)
   end
 
   defp apply_limited_perspective(conn, :platform, _user) do
-    # See SEC-1 above — a resource owner previewing "as platform" must not see
-    # their own owner-only content, so use the identity-less preview viewer.
     assign(conn, :view_as_context, :platform_preview)
   end
 

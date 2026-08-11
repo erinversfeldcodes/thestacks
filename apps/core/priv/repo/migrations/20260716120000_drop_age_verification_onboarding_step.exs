@@ -16,8 +16,6 @@ defmodule Core.Repo.Migrations.DropAgeVerificationOnboardingStep do
 
   use Ecto.Migration
 
-  # Recreated after the column swap. Mirrors the column list from the original
-  # onboarding migration (20260322000002) so the staging view is unchanged.
   @recreate_stg_users_view """
   DO $body$
   BEGIN

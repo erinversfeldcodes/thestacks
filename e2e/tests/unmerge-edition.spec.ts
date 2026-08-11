@@ -85,7 +85,6 @@ async function pickMergeTarget(
   expect(Array.isArray(books) && books.length > 0, "catalogue carries books").toBe(true);
 
   for (const book of books) {
-    // Readable by this (age-unverified) reader — skips anything age-gated.
     const detail = await request.get(`/api/books/${book.id}`, { headers: readerAuth });
     if (detail.status() === 200) return { id: book.id, title: book.title };
   }
@@ -111,7 +110,6 @@ test.describe("un-merge correction round trip (#384)", () => {
       "split-ISBN pool exhausted on this long-lived database — recreate the preview or extend SPLIT_ISBN_POOL",
     );
 
-    // ---- 1. reader merges a second real ISBN onto an existing work --------
     const target = await pickMergeTarget(request, readerAuth);
 
     const merge = await request.post(`/api/books/${target.id}/merge-format`, {
@@ -126,8 +124,6 @@ test.describe("un-merge correction round trip (#384)", () => {
     const editionId = merged.edition.id as string;
     expect(editionId, "merge-format returns the new edition").toBeTruthy();
 
-    // The merged ISBN now resolves to the target work — the wrong-merge state
-    // the correction exists to repair.
     const beforeSplit = await request.get(`/api/books/isbn/${splitIsbn}`, {
       headers: readerAuth,
     });
@@ -136,7 +132,6 @@ test.describe("un-merge correction round trip (#384)", () => {
       target.id,
     );
 
-    // ---- 2. owner dry-runs, then applies, the un-merge --------------------
     const adminAuth = { Authorization: `Bearer ${await ownerAdminToken(request)}` };
     const argument = { edition_id: editionId, title: `Split of ${target.title} (#384)` };
 
@@ -149,7 +144,6 @@ test.describe("un-merge correction round trip (#384)", () => {
     expect(dryOutcome.mode, "an absent apply flag means dry-run").toBe("dry_run");
     expect(dryOutcome.count, "dry-run names exactly the one edition").toBe(1);
 
-    // Dry-run wrote nothing: the ISBN still resolves to the merged-onto work.
     const afterDry = await request.get(`/api/books/isbn/${splitIsbn}`, { headers: readerAuth });
     expect((await afterDry.json()).book.id, "dry-run must not move the edition").toBe(target.id);
 
@@ -160,7 +154,6 @@ test.describe("un-merge correction round trip (#384)", () => {
     expect(apply.status(), "apply").toBe(200);
     expect((await apply.json()).correction.count).toBe(1);
 
-    // ---- 3. the repair: the ISBN resolves to a DIFFERENT work -------------
     const afterSplit = await request.get(`/api/books/isbn/${splitIsbn}`, {
       headers: readerAuth,
     });
@@ -168,7 +161,6 @@ test.describe("un-merge correction round trip (#384)", () => {
     const splitWorkId = (await afterSplit.json()).book.id as string;
     expect(splitWorkId, "the split edition lives on its own work now").not.toBe(target.id);
 
-    // ---- and exactly once: a second apply refuses -------------------------
     const again = await request.post("/api/admin/data_corrections/unmerge_edition/target", {
       headers: adminAuth,
       data: { reason: "#384 E2E round trip — second apply must refuse", apply: true, argument },

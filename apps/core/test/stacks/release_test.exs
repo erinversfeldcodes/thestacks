@@ -87,7 +87,6 @@ defmodule Stacks.ReleaseTest do
       assert user.email == email
       assert user.role == "owner"
 
-      # Password must verify via Argon2 (same check used by Accounts.authenticate/2)
       assert Argon2.verify_pass(password, user.password_hash)
     end
 
@@ -100,7 +99,6 @@ defmodule Stacks.ReleaseTest do
 
       assert :ok = Release.seed_prod()
 
-      # Looking up by the downcased form must find the user.
       user = Accounts.get_user_by_email(String.downcase(email))
       assert %User{} = user
       assert user.email == String.downcase(email)
@@ -120,7 +118,6 @@ defmodule Stacks.ReleaseTest do
       assert %User{} = user_before
       hash_before = user_before.password_hash
 
-      # Call again — must not error, must not change password hash.
       assert :ok = Release.seed_prod()
 
       user_after = Accounts.get_user_by_email(email)
@@ -128,7 +125,6 @@ defmodule Stacks.ReleaseTest do
       assert user_after.id == user_before.id
       assert user_after.password_hash == hash_before
 
-      # And only one row exists for that email.
       assert Repo.aggregate(from_user_by_email_query(email), :count, :id) == 1
     end
   end
@@ -144,7 +140,6 @@ defmodule Stacks.ReleaseTest do
         Release.seed_prod()
       end
 
-      # Must NOT have inserted a user.
       assert Accounts.get_user_by_email(email) == nil
     end
   end
@@ -275,7 +270,6 @@ defmodule Stacks.ReleaseTest do
       assert %User{} = user_before
       hash_before = user_before.password_hash
 
-      # Second call must be a no-op.
       assert :ok = Release.seed_prober()
 
       user_after = Accounts.get_user_by_email(email)
@@ -284,14 +278,9 @@ defmodule Stacks.ReleaseTest do
       assert user_after.password_hash == hash_before
       assert user_after.role == "user"
 
-      # Only one row exists for that email.
       assert Repo.aggregate(from_user_by_email_query(email), :count, :id) == 1
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # gdpr_erase_user/1 — operator right-to-erasure (GitHub Actions entry point)
-  # ---------------------------------------------------------------------------
 
   describe "gdpr_erase_user/1 dry run (user_id only)" do
     test "previews by user_id without deleting" do
@@ -392,12 +381,6 @@ defmodule Stacks.ReleaseTest do
   end
 
   describe "gdpr_lookup_user/1 (email/handle → user_id, read-only)" do
-    # This used to seed two rows sharing an address in different cases and
-    # assert the operator lookup surfaced BOTH. `users_lower_email_index`
-    # (#335 D4) makes that pair unreachable — the database now rejects the
-    # second row, which `Stacks.SchemaConstraintsTest` proves directly. The
-    # property the break-glass runbook actually depends on survives: whatever
-    # casing the operator pastes resolves to the account they mean.
     test "finds a user however the operator cased the email" do
       user = insert(:user, email: "dup@stacks.test", handle: "dup_one")
 
@@ -431,10 +414,6 @@ defmodule Stacks.ReleaseTest do
       assert out =~ "GDPR_LOOKUP_COUNT 0"
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   defp encode(params), do: params |> Jason.encode!() |> Base.encode64()
 

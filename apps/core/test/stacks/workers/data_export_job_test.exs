@@ -22,9 +22,6 @@ defmodule Stacks.Workers.DataExportJobTest do
     end
 
     test "returns {:error, _} for a nonexistent user_id" do
-      # Export.export_user_data raises Ecto.NoResultsError via get!/1
-      # which the export function rescues and converts to {:error, reason}.
-      # The worker then propagates that as {:error, reason}.
       assert {:error, _reason} =
                perform_job(DataExportJob, %{"user_id" => Ecto.UUID.generate()})
     end

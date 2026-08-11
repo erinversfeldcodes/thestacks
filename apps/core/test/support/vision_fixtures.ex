@@ -34,10 +34,6 @@ defmodule Stacks.AI.VisionFixtures do
   @not_book "CLASSIFICATION_RESULT_NOT_BOOK"
   @ambiguous "CLASSIFICATION_RESULT_AMBIGUOUS"
 
-  # ---------------------------------------------------------------------------
-  # Steering
-  # ---------------------------------------------------------------------------
-
   @doc """
   Register `response` as the answer to `endpoint` for the current process.
 
@@ -66,10 +62,6 @@ defmodule Stacks.AI.VisionFixtures do
       MockClient.clear()
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Response builders
-  # ---------------------------------------------------------------------------
 
   @doc """
   Build an `/analyze` success response.

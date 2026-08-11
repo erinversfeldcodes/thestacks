@@ -31,8 +31,6 @@ defmodule Core.Repo.Migrations.ExtendSpaceTypeForThirdSpacesMap do
   @disable_ddl_transaction true
   @disable_migration_lock true
 
-  # Ordered as the story lists them, which is roughly "most to least obviously a
-  # reading spot" — the order a reader would scan a filter list in.
   @new_types ~w(
     restaurant
     bar
@@ -49,20 +47,11 @@ defmodule Core.Repo.Migrations.ExtendSpaceTypeForThirdSpacesMap do
 
   def up do
     for type <- @new_types do
-      # IF NOT EXISTS makes this idempotent, which matters because a failed run cannot
-      # be rolled back (see `down/0`).
       execute("ALTER TYPE op.space_type ADD VALUE IF NOT EXISTS '#{type}'")
     end
   end
 
   def down do
-    # Postgres cannot remove a value from an enum. Reversing this would mean recreating
-    # the type, rewriting every dependent column, and deciding what to do with rows
-    # already using a removed value — which is a data migration, not a rollback.
-    #
-    # Deliberately a no-op rather than raising: `up/0` is idempotent and purely
-    # additive, so leaving the values in place is harmless, whereas raising here would
-    # block an unrelated rollback of a later migration.
     :ok
   end
 end

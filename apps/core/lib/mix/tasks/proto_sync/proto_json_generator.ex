@@ -39,7 +39,6 @@ defmodule Mix.Tasks.ProtoSync.ProtoJsonGenerator do
 
     has_id = Enum.any?(fields, &(&1.name == "id"))
 
-    # Build field lines: extract from struct, map to json_name
     field_lines =
       fields
       |> Enum.reject(fn f ->

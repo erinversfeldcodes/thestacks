@@ -125,10 +125,6 @@ update msg model maybeToken =
                         ( { model | actionState = Failure Http.NetworkError }, Cmd.none, NoOut )
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--marketplace-mine" ]
@@ -246,10 +242,6 @@ viewListingActions listing =
 
         Removed ->
             []
-
-
-
--- HELPERS
 
 
 statusCssClass : ListingStatus -> String

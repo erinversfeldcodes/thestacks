@@ -28,10 +28,6 @@ defmodule StacksWeb.ShelfControllerTest do
     %{user: user, bookshelf: bookshelf, shelf_a: shelf_a, shelf_b: shelf_b}
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/bookshelves/:name/shelves
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/bookshelves/:name/shelves — index" do
     setup :setup_bookshelf_with_shelves
 
@@ -80,14 +76,6 @@ defmodule StacksWeb.ShelfControllerTest do
       bookshelf: bookshelf,
       shelf_a: shelf_a
     } do
-      # ⚠️ This endpoint used to return `placements: []` for every shelf regardless of what
-      # was on it. Structurally valid, factually false — and the SPA repainted the owner's
-      # bookcase from it after every shelf mutation, so their books vanished, a full shelf
-      # read as "empty", and Remove lit up on a shelf the server refuses to delete.
-      #
-      # Asserting the key is *absent* rather than correct is the point: this endpoint does
-      # not own placement data, and an empty list is the failure mode. A missing key breaks
-      # a decoder loudly; an empty one is indistinguishable from an empty shelf.
       book = insert(:book)
       insert(:placement, bookshelf: bookshelf, book: book, shelf: shelf_a)
 
@@ -106,10 +94,6 @@ defmodule StacksWeb.ShelfControllerTest do
                "lie, and the SPA will paint an empty bookcase over a full one"
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # POST /api/bookshelves/:name/shelves
-  # ---------------------------------------------------------------------------
 
   describe "POST /api/bookshelves/:name/shelves — create" do
     setup :setup_bookshelf_with_shelves
@@ -137,21 +121,10 @@ defmodule StacksWeb.ShelfControllerTest do
         |> auth_conn(other_user)
         |> post("/api/bookshelves/library/shelves")
 
-      # The bookshelf "library" belongs to the original user; other_user either
-      # gets 403 or their own empty bookshelf is created. The expected behavior
-      # is 403 since the route scopes to the authenticated user's bookshelf.
-      # If scoped by user, other_user would get their own — but since they have
-      # no "library" bookshelf, this should return 404 or create one.
-      # The exact response depends on implementation, but it should NOT create
-      # a shelf on the original user's bookshelf.
       status = conn.status
       assert status in [403, 404]
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # DELETE /api/shelves/:id
-  # ---------------------------------------------------------------------------
 
   describe "DELETE /api/shelves/:id — delete" do
     setup :setup_bookshelf_with_shelves
@@ -197,10 +170,6 @@ defmodule StacksWeb.ShelfControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # PUT /api/bookshelves/:name/shelves/reorder
-  # ---------------------------------------------------------------------------
-
   describe "PUT /api/bookshelves/:name/shelves/reorder — reorder" do
     setup :setup_bookshelf_with_shelves
 
@@ -244,10 +213,6 @@ defmodule StacksWeb.ShelfControllerTest do
       assert json_response(conn, 401)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # PUT /api/placements/:id/shelf  (new action on BookshelfPlacementController)
-  # ---------------------------------------------------------------------------
 
   describe "PUT /api/placements/:id/shelf — move placement to shelf" do
     setup :setup_bookshelf_with_shelves

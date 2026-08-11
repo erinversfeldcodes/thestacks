@@ -33,10 +33,6 @@ defmodule Stacks.Marketplace do
 
   @default_limit 50
 
-  # ---------------------------------------------------------------------------
-  # Create
-  # ---------------------------------------------------------------------------
-
   @doc """
   Creates a new listing in `draft` status.
 
@@ -78,31 +74,12 @@ defmodule Stacks.Marketplace do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Expiry as a read-time truth
-  # ---------------------------------------------------------------------------
-
-  # A listing past `expires_at` is expired whether or not anything has written that
-  # down yet.
-  #
-  # `ListingExpiryJob` used to be the only thing that made it so, which made a cron
-  # entry load-bearing for *correctness* rather than freshness: with the platform
-  # scaling to zero the job may not fire, and an expired listing then showed as
-  # available and could still be bought. Deriving it on read removes that dependency —
-  # the job stays as tidy-up so stored state eventually matches, but nothing depends on
-  # it having run.
-
   defp unexpired(query) do
     now = DateTime.utc_now()
 
     where(query, [l], l.status == "active" and (is_nil(l.expires_at) or l.expires_at > ^now))
   end
 
-  # Normalises a loaded listing's status in memory. No write: reads must not, and the
-  # answer is derivable, so persisting it would be a second source of truth.
-  #
-  # Applied to single reads because callers act on `listing.status` — accepting an offer
-  # on an expired listing should be refused, and it is the read that has to say so.
   defp with_effective_status(nil), do: nil
 
   defp with_effective_status(%Listing{status: "active", expires_at: %DateTime{} = at} = listing) do
@@ -114,10 +91,6 @@ defmodule Stacks.Marketplace do
   end
 
   defp with_effective_status(%Listing{} = listing), do: listing
-
-  # ---------------------------------------------------------------------------
-  # Read
-  # ---------------------------------------------------------------------------
 
   @doc "Fetches a single listing with book and seller preloaded."
   @spec get_listing(binary()) :: Listing.t() | nil
@@ -200,14 +173,8 @@ defmodule Stacks.Marketplace do
     |> limit(^limit)
     |> preload([:book, :seller])
     |> Repo.all()
-    # A seller's own list keeps expired entries — they need to see them to relist —
-    # but each must *say* it is expired.
     |> Enum.map(&with_effective_status/1)
   end
-
-  # ---------------------------------------------------------------------------
-  # State transitions
-  # ---------------------------------------------------------------------------
 
   @doc """
   Activates a draft listing: draft → active.
@@ -366,10 +333,6 @@ defmodule Stacks.Marketplace do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Changesets
-  # ---------------------------------------------------------------------------
-
   @listing_required_fields [:book_id, :seller_id, :pricing_mode, :price_cents, :condition]
   @listing_optional_fields [
     :status,
@@ -451,10 +414,6 @@ defmodule Stacks.Marketplace do
     |> validate_inclusion(:payment_status, @transaction_valid_payment_statuses)
     |> validate_inclusion(:shipping_status, @transaction_valid_shipping_statuses)
   end
-
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
 
   defp verify_ownership(%Listing{seller_id: seller_id}, user_id) do
     if seller_id == user_id, do: :ok, else: {:error, :unauthorized}

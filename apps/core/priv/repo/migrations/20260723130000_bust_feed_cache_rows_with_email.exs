@@ -16,8 +16,6 @@ defmodule Core.Repo.Migrations.BustFeedCacheRowsWithEmail do
   """
   use Ecto.Migration
 
-  # No-op on rollback: we cannot (and would not want to) recreate rows that
-  # leaked an email. Regeneration repopulates the cache with correct XML.
   @disable_ddl_transaction false
 
   def up do

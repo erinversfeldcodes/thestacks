@@ -23,10 +23,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
   @password "lockout-test-password"
 
   setup do
-    # Pin the lockout config for deterministic, fast tests. Override the
-    # production defaults (10 attempts / 10 min) with a tight 3-attempt /
-    # 60-second window so we don't have to fight time or do many Argon2
-    # verifies per test (each verify is slow).
     threshold = Application.get_env(:core, :login_lockout_threshold)
     window = Application.get_env(:core, :login_lockout_window_seconds)
     duration = Application.get_env(:core, :login_lockout_duration_seconds)
@@ -78,7 +74,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
 
     test "under-threshold failures do NOT lock the account" do
       user = insert_user("under@example.com")
-      # threshold = 3, so 2 failures must not lock.
       assert {:error, :invalid_credentials} = Accounts.authenticate(user.email, "wrong")
       assert {:error, :invalid_credentials} = Accounts.authenticate(user.email, "wrong")
 
@@ -90,7 +85,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
     test "successful login resets the counter and clears the lock" do
       user = insert_user("reset@example.com")
 
-      # Build up two failures, then a success.
       _ = Accounts.authenticate(user.email, "wrong")
       _ = Accounts.authenticate(user.email, "wrong")
       assert {:ok, _} = Accounts.authenticate(user.email, @password)
@@ -104,9 +98,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
     test "expired failure window rolls the counter back to 1" do
       user = insert_user("window@example.com")
 
-      # Place failed_login_first_at in the distant past — outside the
-      # configured window — and the counter at threshold-1. A new failure
-      # should treat this as a fresh window: counter becomes 1, not threshold.
       stale = DateTime.add(DateTime.utc_now(), -3_600, :second)
 
       {1, nil} =
@@ -157,7 +148,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
       # the Argon2 module and assert no verify_pass call is made.
       user = insert_user("nopool@example.com")
 
-      # Drive to lock via the real flow.
       Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
 
       :erlang.trace(:all, true, [:call])
@@ -166,7 +156,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
       try do
         Accounts.authenticate(user.email, @password)
 
-        # After the call: drain any verify_pass trace messages.
         receive do
           {:trace, _, :call, {Argon2, :verify_pass, _}} ->
             flunk("locked account path must not call Argon2.verify_pass/2")
@@ -190,7 +179,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
           set: [locked_until: past, failed_login_count: 3]
         )
 
-      # Right password should now succeed and clear the stale lock.
       assert {:ok, _} = Accounts.authenticate(user.email, @password)
       reloaded = Repo.get!(User, user.id)
       assert is_nil(reloaded.locked_until)
@@ -202,14 +190,10 @@ defmodule Stacks.Accounts.LoginLockoutTest do
     test "second lockout within 24h has a longer duration than the first" do
       user = insert_user("backoff@example.com")
 
-      # First lockout.
       Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
       first = Repo.get!(User, user.id)
       first_lock_seconds = DateTime.diff(first.locked_until, DateTime.utc_now())
 
-      # Simulate the first lock having just expired so we can trigger a
-      # second one immediately. Keep the failed_login_first_at recent so
-      # the backoff window matters (within 24h).
       just_expired = DateTime.add(DateTime.utc_now(), -1, :second)
 
       {1, nil} =
@@ -222,7 +206,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
           ]
         )
 
-      # Trigger another N failures to lock again.
       Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
       second = Repo.get!(User, user.id)
       second_lock_seconds = DateTime.diff(second.locked_until, DateTime.utc_now())
@@ -243,7 +226,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
       Enum.each(1..6, fn _ ->
         Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
 
-        # Force the lock to "just expired" so the next round can re-lock.
         just_expired = DateTime.add(DateTime.utc_now(), -1, :second)
 
         Repo.update_all(
@@ -256,7 +238,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
         )
       end)
 
-      # Now do one more lock cycle so we observe the cap.
       Enum.each(1..3, fn _ -> Accounts.authenticate(user.email, "wrong") end)
       reloaded = Repo.get!(User, user.id)
       seconds = DateTime.diff(reloaded.locked_until, DateTime.utc_now())
@@ -266,21 +247,12 @@ defmodule Stacks.Accounts.LoginLockoutTest do
 
   describe "constant-time email enumeration defence" do
     test "unknown email exercises constant-time path (timing parity with real verify)" do
-      # We assert constant-time defence behaviourally: a known-email-wrong-password
-      # authenticate and an unknown-email authenticate must both spend Argon2 work
-      # (i.e. take a similar order-of-magnitude time). Without the dummy hash, the
-      # unknown-email branch would return instantly (~µs) instead of taking the
-      # Argon2 hash time (~10-100ms). We assert the unknown-email path takes at
-      # least 50% of the known-email path time — generous enough to avoid CI
-      # flakiness but tight enough that a regression returning immediately on
-      # unknown-email would clearly fail.
       insert(:user,
         email: "timing-known@example.com",
         password_hash: Argon2.hash_pwd_salt("right-pass"),
         email_confirmed: true
       )
 
-      # Warm-up: one verify so the BEAM JIT and any cache are hot.
       _ = Accounts.authenticate("timing-known@example.com", "wrong-pass")
 
       {known_us, _} =
@@ -293,10 +265,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
           Accounts.authenticate("timing-unknown@example.com", "wrong-pass")
         end)
 
-      # Unknown-email path must take comparable time to a real verify.
-      # We allow a 10x window in either direction (very generous for CI noise)
-      # but assert the unknown path is NOT effectively instantaneous (< 1ms),
-      # which would indicate the no_user_verify dummy hash was removed.
       assert unknown_us > 1_000,
              "unknown-email path returned in #{unknown_us}µs — the dummy " <>
                "Argon2.no_user_verify call appears to be missing (enumeration risk)"
@@ -309,8 +277,6 @@ defmodule Stacks.Accounts.LoginLockoutTest do
     end
 
     test "unknown email does not crash on the lock check" do
-      # Regression guard: the lockout state check must not run before the
-      # nil-user branch — otherwise we'd 500 on unknown emails.
       assert {:error, :invalid_credentials} =
                Accounts.authenticate("ghost@example.com", "whatever")
     end

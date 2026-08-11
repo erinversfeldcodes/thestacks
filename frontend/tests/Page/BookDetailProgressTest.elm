@@ -147,16 +147,10 @@ cardRendersForReadableShelf =
             startDetailWith libraryPlacement
                 |> ProgramTest.ensureViewHas [ Selector.class "book-detail__progress" ]
                 |> ProgramTest.ensureViewHas [ Selector.text "Reading Progress" ]
-                -- `book_placement/1` (proto_json.ex:311-322) emits no
-                -- `reading_status`, so the badge falls to its ToRead default...
                 |> ProgramTest.ensureViewHas
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "reading-status-badge")
                     , Selector.text "To Read"
                     ]
-                -- ...and with no `current_page` either there is no progress
-                -- line to render. Asserting its ABSENCE is what pins the
-                -- contract: the moment #314 adds progress to this endpoint,
-                -- this test fails and asks to be updated deliberately.
                 |> ProgramTest.expectViewHasNot
                     [ Selector.attribute (Html.Attributes.attribute "data-testid" "reading-progress") ]
 
@@ -166,13 +160,8 @@ saveFoldsResult =
     test "save_folds: saving drives the API and folds the returned progress in place" <|
         \() ->
             startDetailWith libraryPlacement
-                -- Nothing renders a page count before the save: the card loaded
-                -- with no progress, so a later "p. 142" can only have come from
-                -- the response body.
                 |> ProgramTest.ensureViewHasNot [ Selector.text "p. 142 / 371" ]
                 |> openAndSave
-                -- Exactly `ProtoJSON.reading_progress/1`
-                -- (proto_json.ex:688-696): the five keys it emits, no more.
                 |> ProgramTest.simulateHttpResponse "PUT"
                     progressEndpoint
                     (goodProgress
@@ -195,11 +184,6 @@ errorResponseKeepsFormOpen =
                 |> ProgramTest.ensureViewHas
                     [ Selector.text "That page is past the end of the book." ]
                 |> ProgramTest.ensureViewHas [ Selector.class "placement-card__edit-form" ]
-                -- The draft the reader typed survives the rejection. It has to
-                -- be typed rather than seeded from the placement: the
-                -- book-detail contract carries no `current_page` to seed it
-                -- with, so a fixture that pre-filled the field was testing a
-                -- state production never reaches.
                 |> ProgramTest.expectViewHas [ Selector.attribute (Html.Attributes.value "142") ]
 
 

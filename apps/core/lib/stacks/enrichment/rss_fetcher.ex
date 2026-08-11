@@ -16,19 +16,6 @@ defmodule Stacks.Enrichment.RssFetcher do
 
   require Logger
 
-  # ⚠️ `receive_timeout` does NOT bound the request. Finch documents it as
-  # "the maximum time to wait for EACH CHUNK to be received" — so a peer that
-  # dribbles bytes resets it indefinitely. Measured on this codebase
-  # (2026-08-03, Finch 0.23): a server emitting a 17-byte response one byte
-  # every 2s ran for 35_017ms under `receive_timeout: 5_000` alone, and
-  # returned in 8_028ms once `request_timeout: 8_000` was added. Only
-  # `:request_timeout` bounds the whole response, and it defaults to
-  # `:infinity`. Always set it alongside `receive_timeout`.
-  #
-  # The connect phase, by contrast, IS already bounded: Finch injects
-  # `transport_opts[:timeout] = 5_000` when a pool does not set one
-  # (`finch.ex` `valid_opts_to_map/1`). `Core.Application.finch_spec/0` now
-  # pins that value explicitly rather than inheriting it.
   @probe_receive_timeout 5_000
   @probe_request_timeout 5_000
   @fetch_receive_timeout 15_000

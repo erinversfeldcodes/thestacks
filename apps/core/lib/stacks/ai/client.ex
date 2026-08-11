@@ -60,28 +60,8 @@ defmodule Stacks.AI.Client do
   @fuse_name :vision_fuse
   @default_modal_cost_per_call_cents 1
 
-  # ── The one deadline both sides are sized from ────────────────────────────
-  #
-  # Modal owns it. `apps/vision/modal_app.py` sets `timeout=300` on the
-  # `@app.cls` serving every endpoint reached from here, and justifies it there
-  # from the A10G's own cost structure: cold start ~60s, plus queue wait up to
-  # ~120s when concurrent jobs serialise on a single GPU, plus inference ~60s.
-  #
-  # This constant is a MIRROR of that number, not a second opinion about it.
-  # `Stacks.AI.VisionTimeoutTest` reads the decorator out of `modal_app.py` and
-  # fails when the two stop agreeing, so the mirror is checked rather than
-  # asserted in a comment — which is how the previous inversion survived.
   @modal_function_timeout_ms 300_000
 
-  # Time for a response to make it back AFTER Modal's own deadline has fired.
-  #
-  # Modal's 300s bounds the handler's execution, not the HTTP round trip: once
-  # the function times out, the platform still has to serialise an error and
-  # return it through its proxy, on top of TLS setup and transit. 30s is 10% of
-  # the server budget and more than three times the whole-call p50 measured in
-  # #349 (8.4s), so a slow error response cannot re-invert the relationship.
-  # Deliberately coarse — a slack of a few seconds would leave us one unlucky
-  # round trip from the bug this constant exists to prevent.
   @transport_slack_ms 30_000
 
   @receive_timeout_ms @modal_function_timeout_ms + @transport_slack_ms
@@ -180,10 +160,6 @@ defmodule Stacks.AI.Client do
           :blown -> {:error, :circuit_open}
         end
 
-      # Both limits collapse to one reason on purpose. Which cap was hit is a
-      # spend question, already logged and counted by BudgetTracker; to a caller
-      # it is the same fact — no request will be made, and that will still be
-      # true a few seconds from now.
       {:error, _daily_or_monthly} ->
         {:error, :budget_exceeded}
     end
@@ -237,10 +213,6 @@ defmodule Stacks.AI.Client do
 
   defp endpoint_path("is_book"), do: "classify"
   defp endpoint_path("extract_isbn"), do: "extract"
-  # Single-request classify + extract — the vision service composes both
-  # steps and short-circuits on non-books internally. Prefer this over
-  # calling "is_book" and "extract_isbn" separately; see
-  # Stacks.Moderation.run_pipeline/1.
   defp endpoint_path("analyze"), do: "analyze"
   defp endpoint_path("associate"), do: "associate"
 
@@ -274,19 +246,12 @@ defmodule Stacks.AI.Client do
       %{endpoint: endpoint}
     )
 
-    # Both bounds carry the same value: the vision service holds the
-    # connection open while Modal runs inference, then returns a small JSON
-    # body — so "longest wait for a chunk" and "longest whole response" are
-    # the same budget. request_timeout closes the dribbling-peer hole
-    # (receive_timeout alone is per-chunk and unbounded in total — #381d).
     result =
       Finch.request(req, Stacks.Finch,
         receive_timeout: @receive_timeout_ms,
         request_timeout: @receive_timeout_ms
       )
 
-    # Record the per-call cost regardless of outcome. Rejection ≠ free —
-    # Modal bills for GPU time whether or not we use the result.
     record_vision_call_cost()
 
     case result do
@@ -336,28 +301,6 @@ defmodule Stacks.AI.Client do
   @type reason_class :: :timeout | :closed | :unreachable | :protocol | :other
 
   @doc false
-  # A bounded NAME for a transport failure, because the failure itself cannot be
-  # one. `reason` is an open term — a Finch struct wrapping a Mint struct, or
-  # whatever else the socket layer surfaces — and must never reach a metrics
-  # sink; the counter's `:tags` whitelist is what stops it, and this is what
-  # gives the whitelist something worth selecting.
-  #
-  # The distinction that earns its keep is `:timeout` against everything else.
-  # This client only reaches its own deadline once Modal has already blown past
-  # its own (see `receive_timeout_ms/0`), so a non-zero `:timeout` rate is the
-  # single observation that says the deadline is set wrong — and without it
-  # nobody can tell whether raising it to #{@receive_timeout_ms}ms was right,
-  # because a give-up emits no duration and is otherwise invisible.
-  #
-  # Both struct families are matched because Finch wraps Mint's errors
-  # (`Finch.Error.wrap/1`) on the paths we use but not necessarily on every path
-  # a future version might take; matching only the wrapper is how this would
-  # quietly degrade to `:other` after a dependency bump.
-  #
-  # Note there is deliberately no `:pool_timeout` class. Finch's pool checkout
-  # timeout RAISES rather than returning `{:error, reason}`, so it never reaches
-  # this function — a clause for it would be unreachable code claiming to draw a
-  # distinction it cannot draw.
   @spec reason_class(term()) :: reason_class()
   def reason_class(%Finch.TransportError{reason: reason}), do: transport_class(reason)
   def reason_class(%Mint.TransportError{reason: reason}), do: transport_class(reason)
@@ -374,9 +317,6 @@ defmodule Stacks.AI.Client do
 
   defp transport_class(_other), do: :other
 
-  # A 200 we cannot parse is not a success. It is also not a determination about
-  # the image — the service never told us anything — so it is reported as the
-  # transport failure it functionally is, and stays retryable.
   defp decode_success_body(resp_body) do
     case Jason.decode(resp_body) do
       {:ok, decoded} ->
@@ -389,12 +329,6 @@ defmodule Stacks.AI.Client do
     end
   end
 
-  # The breaker exists to stop us hammering a service that is unwell. A
-  # deterministic rejection says nothing about the service's health — it says
-  # our image was unreadable, and the service told us so promptly and
-  # correctly. Melting on it would let a run of corrupt uploads disable vision
-  # for everybody, which is exactly the trap `SCRAPE_OUTCOME_ROBOTS_BLOCKED` was
-  # split out of the scraper's shared fuse to avoid.
   defp maybe_melt(error) do
     case VisionError.determination(error) do
       :transient -> Stacks.CircuitBreakers.melt(@fuse_name)

@@ -1,61 +1,4 @@
 #!/usr/bin/env bash
-# check-session-expiry-coverage.sh — every page that makes a mandatorily-authenticated
-# `Api.*` call must route a 401 to the global session-expiry interceptor (Issue #361).
-#
-# WHY THIS EXISTS
-#
-# A 401 on a request that definitely carried a credential means one thing: the session is
-# gone. Answering it with "Please try again" is a lie — retrying cannot work, and the
-# reader retypes a password into a form whose session no longer exists. `Page/Settings/`
-# `Password`, `Profile` and `Notifications` each did exactly that, driven live 2026-07-30.
-#
-# ⚠️ **There was already a test for this, and it was green the whole time.**
-# `frontend/tests/Page/SessionExpiryPagesTest.elm` (#178) asserts the contract on EIGHT
-# pages, named by hand in its import list. The three above were not among them. That is
-# the failure mode this gate exists to remove: a hand-written roster of covered pages
-# cannot report what is missing from it, because what is missing from it is the report.
-# The project has paid for this twice already (#173/#178, then #303/#309).
-#
-# THE RULE, AND HOW THE ROSTER IS DERIVED
-#
-# Nothing here is a list of pages. The roster is a set difference, recomputed on every run:
-#
-#   1. Read `frontend/src/Api.elm`. An endpoint is MANDATORILY AUTHENTICATED when its
-#      `Authorization` header is unconditional — `headers = authedHeaders ...` (the #361
-#      wrapper) or the legacy `headers = [ Http.header "Authorization" ... ]`.
-#
-#      Optional-auth endpoints are excluded, and the distinction is the whole point:
-#      `headers = authHeaders maybeToken` (or an inline `case maybeToken of`) means the
-#      request is valid anonymously, so its 401 is NOT an expiry signal and must not be
-#      routed as one. `getProfile`, `getListings`, `getBlogPosts` and `searchUsers` are
-#      in that group.
-#
-#   2. Read every module under `frontend/src/Page/`. A page is IN SCOPE when it names any
-#      endpoint from (1).
-#
-#   3. Every in-scope page must (a) declare a `SessionExpired` constructor, (b) expose its
-#      type with `(..)` so `Main` can match on it, and (c) actually return it somewhere.
-#      (c) matters: declaring the constructor and never using it compiles, satisfies a
-#      grep, and routes nothing.
-#
-#   4. Every `onExpired = <Ctor>` handed to `Api.authed` must name a message the page
-#      routes to `SessionExpired`. This is the link no Elm test can reach — the `Cmd` that
-#      carries the handler is opaque, so `ApiAuthedTest` can prove "a 401 produces
-#      `onExpired`" and `SessionExpiryPagesTest` can prove "the expiry message produces
-#      `SessionExpired`", and neither can prove they are the same message.
-#
-# A page added tomorrow is checked the moment it makes an authed call. Nobody edits a list.
-#
-# EXEMPTIONS
-#
-# `EXEMPT` below is an exemption map, NOT a coverage roster — the direction matters. It can
-# only ever remove NAMED files that already exist; it can never cause a new page to go
-# unchecked, which is the rot that killed the hand-written list. Each entry carries its
-# reason and the gate prints them on every run, so an exemption cannot go quiet.
-#
-# Usage:
-#   scripts/check-session-expiry-coverage.sh          # fail if any authed page drops a 401
-#   scripts/check-session-expiry-coverage.sh --list   # every page in scope and its verdict
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
@@ -72,8 +15,6 @@ mode = sys.argv[1]
 API = "frontend/src/Api.elm"
 PAGE_GLOB = "frontend/src/Page/**/*.elm"
 
-# See EXEMPTIONS in the header. Only ever shrinks the checked set, and only for a file
-# that must already exist — a stale entry is itself a failure.
 EXEMPT = {
     "frontend/src/Page/Admin/Session.elm": (
         "The admin sign-in gate itself. Its 401s ARE the sign-in failing, and it renders "
@@ -83,11 +24,9 @@ EXEMPT = {
     ),
 }
 
-
 def read(path):
     with open(path, encoding="utf-8") as handle:
         return handle.read()
-
 
 def top_level_definitions(text):
     """Split an Elm module into (name, body) for each top-level lowercase binding."""
@@ -105,9 +44,6 @@ def top_level_definitions(text):
         definitions.setdefault(name, []).extend(buffer)
     return {key: "\n".join(value) for key, value in definitions.items()}
 
-
-# ---- 1. which Api endpoints carry a credential unconditionally ---------------------
-
 MANDATORY = re.compile(
     r"headers\s*=\s*(authedHeaders\b|\[\s*Http\.header\s+\"Authorization\")"
 )
@@ -117,7 +53,6 @@ api_text = read(API)
 authed_endpoints = set()
 for name, body in top_level_definitions(api_text).items():
     if name in ("authedHeaders", "authHeaders"):
-        # The header builders themselves, not endpoints.
         continue
     if MANDATORY.search(body) and not OPTIONAL.search(body):
         authed_endpoints.add(name)
@@ -128,10 +63,6 @@ if not authed_endpoints:
     print("the source having become safe. Fix this script before trusting a green run.")
     sys.exit(1)
 
-
-# ---- 2/3/4. every page that calls one must route its 401 ---------------------------
-
-
 def declaring_type(text):
     """The union type declaring `SessionExpired`, as (name, whole declaration)."""
     for match in re.finditer(r"^type ([A-Z][A-Za-z0-9_]*)\b(.*?)(?=^\S|\Z)", text, re.M | re.S):
@@ -139,11 +70,9 @@ def declaring_type(text):
             return match.group(1), match.group(0)
     return None, None
 
-
 def module_header(text):
     """The `module ... exposing (...)` block, i.e. everything before the doc comment."""
     return text.split("\n\n", 1)[0]
-
 
 def routes_to_session_expired(text, constructor):
     """Does a `<constructor> ->` case branch produce `SessionExpired`?"""
@@ -151,14 +80,12 @@ def routes_to_session_expired(text, constructor):
         rest = text[match.end():]
         branch = []
         for line in rest.split("\n"):
-            # A line at or left of the branch's own indent ends it.
             if line.strip() and len(line) - len(line.lstrip()) <= len(match.group(1)):
                 break
             branch.append(line)
         if "SessionExpired" in "\n".join(branch):
             return True
     return False
-
 
 findings, in_scope = [], []
 
@@ -174,8 +101,6 @@ for path in sorted(glob.glob(PAGE_GLOB, recursive=True)):
 
     header = module_header(text)
     type_name, declaration = declaring_type(text)
-    # Neither the `exposing (...)` list nor the type declaration counts as USING the
-    # constructor — both are satisfied by a page that declares it and routes nothing.
     body = text[len(header):]
     if declaration:
         body = body.replace(declaration, "")

@@ -28,7 +28,6 @@ defmodule StacksWeb.CostControllerTest do
       refute String.contains?(body, "email")
       refute String.contains?(body, "password")
 
-      # metrics should not contain user count
       refute Map.has_key?(response["data"]["metrics"], "users")
     end
   end

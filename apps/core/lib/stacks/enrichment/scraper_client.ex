@@ -66,7 +66,6 @@ defmodule Stacks.Enrichment.ScraperClient do
     end
   end
 
-  # Bulk sweep, so only the service fuse gates it — same reasoning as the index build.
   defp do_catalogue_titles(store_name) do
     with :ok <- ask(@fuse_name) do
       path = "/catalogue/titles"
@@ -107,8 +106,6 @@ defmodule Stacks.Enrichment.ScraperClient do
   defp do_scrape(isbn, store_name, product_path) do
     store_fuse = CircuitBreakers.store_fuse(store_name)
 
-    # Both domains must be healthy. Asking the service fuse first means a downed
-    # sidecar short-circuits without allocating or consulting store state.
     with :ok <- ask(@fuse_name),
          :ok <- ask(store_fuse) do
       make_scraper_request(isbn, store_name, store_fuse, product_path)
@@ -118,19 +115,11 @@ defmodule Stacks.Enrichment.ScraperClient do
   defp ask(fuse_name) do
     case :fuse.ask(fuse_name, :sync) do
       :ok -> :ok
-      # `:not_found` can only happen if a fuse was never installed — treat it as
-      # closed rather than blocking scrapes on a bookkeeping gap.
       {:error, :not_found} -> :ok
       :blown -> {:error, :circuit_open}
     end
   end
 
-  # An HTTP 200 carrying EXTRACTOR_FAILED means the service worked and this store's
-  # extraction did not — a per-store fault that should back off from this store
-  # alone. Every other outcome is a conclusion the service reached successfully, so
-  # none of them melt anything; deciding what they *mean* is TriggerPriceScrapeJob's
-  # job, not this transport's.
-  #
   # proto-enum-coverage: ScrapeOutcome ignore
   #   SCRAPE_OUTCOME_PRICED, SCRAPE_OUTCOME_NOT_STOCKED, SCRAPE_OUTCOME_ROBOTS_BLOCKED,
   #   SCRAPE_OUTCOME_INDEX_REQUIRED, SCRAPE_OUTCOME_RATE_LIMITED
@@ -167,19 +156,6 @@ defmodule Stacks.Enrichment.ScraperClient do
     end
   end
 
-  # A single page fetch through the scraper's compliant egress — robots.txt, then the
-  # rate limiter, then the request. Callers must never build their own HTTP request to
-  # a store: `DiscoverBookstoreEventsJob` did (a bare Finch GET, no robots check, no
-  # rate limit, no fuse), which is the hole this closes.
-  #
-  # Gated by BOTH fuses, unlike the bulk sweeps: this is a per-store read on a normal
-  # cadence, so a store that is failing should stop being asked — exactly the case the
-  # store fuse exists for.
-  #
-  # `{:error, {:robots_blocked, rule}}` is a *determination*, not a failure: the caller
-  # records it and stops. Deliberately not melting either fuse, because a disallow
-  # recurs on every attempt by definition and melting on it would take every other
-  # store down with it.
   defp do_fetch_page(store_name, path, validators) do
     store_fuse = CircuitBreakers.store_fuse(store_name)
 
@@ -197,7 +173,6 @@ defmodule Stacks.Enrichment.ScraperClient do
         Jason.encode!(%{
           store: store_name,
           path: path,
-          # Sent verbatim — an ETag is opaque, and reformatting one makes it stop matching silently.
           if_none_match: Keyword.get(validators, :etag) || "",
           if_modified_since: Keyword.get(validators, :last_modified) || ""
         })
@@ -215,8 +190,6 @@ defmodule Stacks.Enrichment.ScraperClient do
     end
   end
 
-  # Gated by both fuses like `fetch_page/2`: a per-store read on a normal cadence, so a store that is
-  # failing should stop being asked.
   defp do_sitemap_urls(store_name) do
     store_fuse = CircuitBreakers.store_fuse(store_name)
 
@@ -233,8 +206,6 @@ defmodule Stacks.Enrichment.ScraperClient do
         ],
         Jason.encode!(%{store: store_name})
       )
-      # Longer than `fetch_page`'s 30s: the walk fetches several documents and pauses between them
-      # on purpose. The courtesy delay is the reason this needs room, not slowness.
       |> Finch.request(Stacks.Finch, receive_timeout: 120_000, request_timeout: 120_000)
       |> handle_sitemap_response(store_name, store_fuse)
     end
@@ -279,8 +250,6 @@ defmodule Stacks.Enrichment.ScraperClient do
   def classify_sitemap_body(body, store) do
     case Jason.decode(body) do
       {:ok, %{"outcome" => "SITEMAP_OUTCOME_HARVESTED"} = ok} ->
-        # Every list is read with a default: the sidecar omits empty repeated fields
-        # (`skip_serializing_if`), so an absent key means "none", not a malformed response.
         harvest = %{
           urls: Map.get(ok, "urls", []),
           skipped: Map.get(ok, "skipped", []),
@@ -297,9 +266,6 @@ defmodule Stacks.Enrichment.ScraperClient do
 
         {:ok, harvest}
 
-      # ⚠️ Its own error and NOT `{:ok, %{urls: []}}`. "The shop declares no sitemap" is a different
-      # fact from "the sitemap listed nothing", and a caller that cannot tell them apart will record
-      # a shop as having no events page without ever having looked.
       {:ok, %{"outcome" => "SITEMAP_OUTCOME_NO_SITEMAP_DECLARED"}} ->
         Logger.info("ScraperClient: #{store} declares no sitemap in robots.txt")
         {:error, :no_sitemap_declared}
@@ -317,9 +283,6 @@ defmodule Stacks.Enrichment.ScraperClient do
     end
   end
 
-  # No `store_fuse` here: on a 200 the store answered, so nothing about it is failing.
-  # An unrecognised outcome below is a client/sidecar contract mismatch, which melts the
-  # *service* fuse — melting the store's would blame the shop for our own bug.
   defp handle_fetch_response({:ok, %Finch.Response{status: 200, body: body}}, store, _store_fuse) do
     case classify_fetch_body(body, store) do
       {:unexpected, other} ->
@@ -375,14 +338,6 @@ defmodule Stacks.Enrichment.ScraperClient do
         Logger.info("ScraperClient: robots.txt blocks #{store} (#{rule})")
         {:error, {:robots_blocked, rule}}
 
-      # The shop is pacing us. A determination, so **neither fuse melts** — same reasoning as
-      # `:robots_blocked` above, and the reasoning matters more here because it recurs: while the
-      # cooldown holds, every attempt gets this answer, so counting it against the shared fuse would
-      # take price scraping down for every other shop, over and over.
-      #
-      # ⚠️ Note what the clause below this one does to an unrecognised outcome: it melts the
-      # *service* fuse. So adding `FETCH_OUTCOME_RATE_LIMITED` to the sidecar without adding this
-      # clause would have made a 429 strictly worse than before it was reported at all.
       {:ok, %{"outcome" => "FETCH_OUTCOME_RATE_LIMITED"} = ok} ->
         retry_after = Map.get(ok, "retry_after_seconds", 60)
 
@@ -392,10 +347,6 @@ defmodule Stacks.Enrichment.ScraperClient do
 
         {:error, {:rate_limited, retry_after}}
 
-      # ⚠️ Its own result, NOT `{:ok, %{body: ""}}`. A 304 says "what you have is current"; an empty
-      # body says "the page is now blank", which for an events listing means every event was removed.
-      # The caller must keep what it already had, and a caller that cannot tell these apart will
-      # cheerfully delete the lot.
       {:ok, %{"outcome" => "FETCH_OUTCOME_NOT_MODIFIED"} = ok} ->
         {:ok,
          %{
@@ -406,27 +357,15 @@ defmodule Stacks.Enrichment.ScraperClient do
          }}
 
       {:ok, %{"outcome" => "FETCH_OUTCOME_FETCHED", "status" => status, "body" => page} = ok} ->
-        # `sitemaps` rides along on every fetch because robots.txt was already read for compliance —
-        # the shop has therefore already told us where its content index is, and asking separately
-        # would cost it a request it should never have to serve.
-        #
-        # This is what lets a caller resolve a real path instead of guessing. A guess is expensive
-        # for the shop: a Shopify 404 is a *styled* page, measured at 249,540 bytes on 2026-07-29,
-        # while a sitemap index is ~10 KB and states exactly which pages exist.
         {:ok,
          %{
            status: status,
            body: page,
            sitemaps: Map.get(ok, "sitemaps", []),
-           # Stored by the caller and sent back next time, which is the only thing that makes the
-           # conditional request worth having — without the round trip closing, every fetch stays full
-           # price for the shop.
            etag: Map.get(ok, "etag", ""),
            last_modified: Map.get(ok, "last_modified", "")
          }}
 
-      # An unrecognised outcome is a contract mismatch between this client and the
-      # sidecar, which is a service problem rather than a store problem.
       other ->
         {:unexpected, other}
     end
@@ -440,12 +379,8 @@ defmodule Stacks.Enrichment.ScraperClient do
     end
   end
 
-  # Only the service fuse gates this, not the store's. A store fuse opens because
-  # *price lookups* are failing there, and rebuilding the index is often the fix — so
-  # letting the store's own breaker block the repair would be self-defeating.
   defp do_build_index(store_name) do
     with :ok <- ask(@fuse_name) do
-      # Minutes, not seconds: the sweep waits on the shop's rate limit by design.
       index_request(store_name)
       |> Finch.request(Stacks.Finch, receive_timeout: 600_000, request_timeout: 600_000)
       |> handle_index_response(store_name)
@@ -471,7 +406,6 @@ defmodule Stacks.Enrichment.ScraperClient do
   end
 
   defp handle_index_response({:ok, %Finch.Response{status: status, body: body}}, store_name) do
-    # Service fuse only: an index build says nothing about one store's prices.
     CircuitBreakers.melt(@fuse_name)
     Logger.warning("ScraperClient: index build HTTP #{status} for #{store_name}: #{body}")
     {:error, {:http, status}}
@@ -506,8 +440,6 @@ defmodule Stacks.Enrichment.ScraperClient do
 
   defp make_scraper_request(isbn, store_name, store_fuse, product_path) do
     req = build_scraper_request(isbn, store_name, product_path)
-    # Telemetry :start is emitted here (after fuse gate) so every :start has a
-    # matching :stop/:exception — necessary for handlers that track open spans.
     start_time = System.monotonic_time()
 
     :telemetry.execute(
@@ -539,11 +471,6 @@ defmodule Stacks.Enrichment.ScraperClient do
           %{isbn: isbn, store: store_name, status: status}
         )
 
-        # A 401 means our HMAC is wrong, which is true of every store — that is a
-        # service problem. Everything else non-200 is store-specific after the
-        # outcome split: an upstream HTTP error, a rate limit, a missing or invalid
-        # config for this store. Melting the shared fuse for those is what let one
-        # shop stop all twelve.
         CircuitBreakers.melt(if status == 401, do: @fuse_name, else: store_fuse)
 
         Logger.warning("ScraperClient: HTTP #{status} for isbn=#{isbn} store=#{store_name}")
@@ -558,7 +485,6 @@ defmodule Stacks.Enrichment.ScraperClient do
           %{isbn: isbn, store: store_name, kind: :error, reason: reason}
         )
 
-        # We never reached the sidecar, so this says nothing about any one store.
         CircuitBreakers.melt(@fuse_name)
 
         Logger.warning(

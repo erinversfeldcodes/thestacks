@@ -21,13 +21,10 @@ pub struct Price {
 pub fn parse_price(raw: &str, expected_currency: &str) -> Result<i64, ScraperError> {
     let s = raw.trim();
 
-    // Strip known currency prefixes and validate they match expected_currency.
     let s = strip_currency_prefix(s, expected_currency)?;
 
-    // Remove thousands separators (commas) and strip whitespace.
     let s = s.replace(',', "").trim().to_string();
 
-    // Parse as f64 and convert to cents.
     let amount: f64 = s
         .parse()
         .map_err(|_| ScraperError::PriceParse(format!("cannot parse '{raw}' as a price number")))?;
@@ -38,15 +35,12 @@ pub fn parse_price(raw: &str, expected_currency: &str) -> Result<i64, ScraperErr
         )));
     }
 
-    // Round to nearest cent.
     Ok((amount * 100.0).round() as i64)
 }
 
 /// Strip the currency prefix from `s`, returning the bare numeric portion.
 /// Returns an error if a different currency symbol is detected.
 fn strip_currency_prefix<'a>(s: &'a str, expected_currency: &str) -> Result<&'a str, ScraperError> {
-    // Map of known currency symbols/codes to their ISO codes.
-    // Order matters: longer matches first.
     const KNOWN_CURRENCIES: &[(&str, &str)] = &[
         ("ZAR", "ZAR"),
         ("GBP", "GBP"),
@@ -70,7 +64,6 @@ fn strip_currency_prefix<'a>(s: &'a str, expected_currency: &str) -> Result<&'a 
         }
     }
 
-    // No currency prefix found — treat as bare number.
     Ok(s)
 }
 
@@ -127,8 +120,6 @@ pub fn extract_in_stock(html: &str, selector: &str) -> Result<Option<bool>, Scra
 mod tests {
     use super::*;
 
-    // --- parse_price ---
-
     #[test]
     fn test_parse_r_space_decimal() {
         assert_eq!(parse_price("R 285.00", "ZAR").unwrap(), 28500);
@@ -177,8 +168,6 @@ mod tests {
         assert!(parse_price("price not available", "ZAR").is_err());
     }
 
-    // --- extract_price from HTML ---
-
     #[test]
     fn test_extract_price_from_html() {
         let html = r#"<div class="product-price">R 285.00</div>"#;
@@ -195,8 +184,6 @@ mod tests {
         let err = result.unwrap_err();
         assert!(matches!(err, ScraperError::PriceNotFound { .. }));
     }
-
-    // --- extract_in_stock ---
 
     #[test]
     fn test_extract_in_stock_positive() {

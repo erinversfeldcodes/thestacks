@@ -48,15 +48,11 @@ suite =
                     |> Query.count (Expect.equal 1)
         , test "offers no feed link when the bookshelf has no feed" <|
             \_ ->
-                -- Only platform-visible bookshelves have a feed; the endpoint 403s
-                -- otherwise. Offering the link anyway would be a broken promise.
                 render [ shelf "library" False ]
                     |> Query.findAll [ Selector.class "profile__shelf-feed" ]
                     |> Query.count (Expect.equal 0)
         , test "uses the handle-addressed URL, not a UUID" <|
             \_ ->
-                -- The whole reason this link could not exist before. If this ever
-                -- regresses to a UUID form, the page has no way to fill it in.
                 render [ shelf "antilibrary" True ]
                     |> Query.find [ Selector.class "profile__shelf-feed" ]
                     |> Query.has
@@ -71,8 +67,6 @@ suite =
                         [ Selector.attribute (Attr.type_ "application/atom+xml") ]
         , test "still links to the bookshelf itself alongside the feed" <|
             \_ ->
-                -- The feed is an addition, not a replacement: a reader clicking the
-                -- shelf name must still reach the shelf.
                 render [ shelf "library" True ]
                     |> Query.has
                         [ Selector.attribute (Attr.href "/u/erin/library") ]

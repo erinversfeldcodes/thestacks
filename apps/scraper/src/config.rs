@@ -63,12 +63,6 @@ pub struct RateLimitConfig {
     pub requests_per_minute: u32,
     #[serde(default = "default_retry_after")]
     pub retry_after_seconds: u64,
-    // NOTE: there is deliberately no `respect_robots_txt` field. It existed as a
-    // per-store boolean defaulting to true, which meant any TOML could opt itself
-    // out of robots.txt compliance. Compliance is a hard rule (owner, 2026-07-27),
-    // so the flag is gone rather than merely defaulted — the engine always checks.
-    // Removing the field is backward-compatible: serde ignores the unknown key in
-    // any TOML that still carries it.
 }
 
 fn default_retry_after() -> u64 {
@@ -121,7 +115,6 @@ impl ScraperConfig {
                 "rate_limit.requests_per_minute must be > 0".to_string(),
             ));
         }
-        // Validate that the price selector is a parseable CSS selector.
         scraper::Selector::parse(&self.selectors.price).map_err(|e| {
             ScraperError::InvalidConfig(format!(
                 "selectors.price is not a valid CSS selector: {e:?}"
@@ -222,7 +215,6 @@ query_param = "q"
 [selectors]
 price = ".price"
 "#;
-        // Missing [rate_limit] — should fail to deserialize
         let result = ScraperConfig::from_toml_str(toml);
         assert!(result.is_err());
     }

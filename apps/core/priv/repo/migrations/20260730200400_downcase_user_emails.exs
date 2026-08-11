@@ -38,7 +38,5 @@ defmodule Core.Repo.Migrations.DowncaseUserEmails do
     execute("UPDATE op.users SET email = lower(email) WHERE email <> lower(email)")
   end
 
-  # Irreversible by design: the original casing is not recorded anywhere, and
-  # re-uppercasing an address would only restore the unreachable-login bug.
   def down, do: :ok
 end

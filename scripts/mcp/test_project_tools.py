@@ -69,10 +69,7 @@ class TestExtractSummary(unittest.TestCase):
 
     def test_python_passed(self):
         output = (
-            "===== test session starts =====\n"
-            "collected 12 items\n"
-            "...........\n"
-            "12 passed in 1.23s\n"
+            "===== test session starts =====\ncollected 12 items\n...........\n12 passed in 1.23s\n"
         )
         self.assertEqual(_extract_summary("python", output), "12 passed")
 
@@ -155,10 +152,6 @@ class TestRunTestSuiteReturnKeys(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertIn("timed out", result["summary"])
 
-
-# ---------------------------------------------------------------------------
-# Feedback parsing tests
-# ---------------------------------------------------------------------------
 
 _HEADER = """\
 # Feedback Log: test-agent
@@ -251,11 +244,6 @@ class TestGetFeedbackSummary(unittest.TestCase):
         self.assertEqual(result, [])
 
 
-# ---------------------------------------------------------------------------
-# Worktree tool tests
-# ---------------------------------------------------------------------------
-
-
 class TestWorktreeInfo(unittest.TestCase):
     """Test _worktree_info helper returns correct path and branch."""
 
@@ -345,11 +333,6 @@ class TestRemoveWorktree(unittest.TestCase):
         self.assertIn("not a worktree", result["error"])
 
 
-# ---------------------------------------------------------------------------
-# DoD templates tests
-# ---------------------------------------------------------------------------
-
-
 class TestDoDTemplates(unittest.TestCase):
     """Test DOD_TEMPLATES covers all required domains."""
 
@@ -382,11 +365,6 @@ class TestDomainAgents(unittest.TestCase):
         self.assertEqual(DOMAIN_AGENTS, expected)
 
 
-# ---------------------------------------------------------------------------
-# draft_issue tests
-# ---------------------------------------------------------------------------
-
-
 class TestDraftIssueSingleDomain(unittest.TestCase):
     """Test draft_issue with a single domain."""
 
@@ -414,15 +392,11 @@ class TestDraftIssueMultipleDomains(unittest.TestCase):
             roadmap_context="Spans elixir and elm.",
             domains=["elixir", "elm"],
         )
-        # Should have all elixir items + all elm items (no overlap).
         expected = DOD_TEMPLATES["elixir"] + DOD_TEMPLATES["elm"]
         self.assertEqual(result["dod_items"], expected)
 
     @patch("project_tools.list_issues", return_value=[])
     def test_deduplication(self, _mock_list: MagicMock):
-        # Both elixir and database share "mix test" related items but with
-        # different text, so all should appear. Passing same domain twice
-        # should deduplicate.
         result = draft_issue(
             title="Test dedup",
             roadmap_context="Dedup test.",
@@ -474,7 +448,6 @@ class TestDraftIssueDependencyDetection(unittest.TestCase):
             roadmap_context="New elixir work.",
             domains=["elixir"],
         )
-        # Issue #5 has "Elixir" in the title, should be suggested.
         self.assertEqual(len(result["suggested_dependencies"]), 1)
         self.assertEqual(result["suggested_dependencies"][0]["issue"], 5)
         self.assertIn("domain: elixir", result["suggested_dependencies"][0]["reason"])
@@ -495,10 +468,6 @@ class TestDraftIssueAgentFormatting(unittest.TestCase):
         self.assertIn("**elixir-agent**", lines[0])
         self.assertIn("**elm-agent**", lines[1])
 
-
-# ---------------------------------------------------------------------------
-# E2E gate tests
-# ---------------------------------------------------------------------------
 
 _DEPLOY_OUTPUT_SUCCESS = """\
 ==> Deploy preview for branch: feat/test
@@ -596,8 +565,6 @@ class TestRunE2EGateSuccess(unittest.TestCase):
     @patch("project_tools.subprocess.run")
     @patch("project_tools.REPO_ROOT", Path("/tmp/fake-repo"))
     def test_success(self, mock_run: MagicMock):
-        # First call: git rev-parse for branch name
-        # Second call: deploy script
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="feat/test\n", stderr=""),
             MagicMock(
@@ -606,7 +573,6 @@ class TestRunE2EGateSuccess(unittest.TestCase):
                 stderr="",
             ),
         ]
-        # Patch the script path to exist
         with patch.object(Path, "exists", return_value=True):
             result = run_e2e_gate(36)
         self.assertTrue(result["passed"])

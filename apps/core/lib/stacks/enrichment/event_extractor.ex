@@ -48,14 +48,11 @@ defmodule Stacks.Enrichment.EventExtractor do
     end
   end
 
-  # A block may be one object, a list, or a @graph envelope.
   defp unwrap(%{"@graph" => graph}) when is_list(graph), do: graph
   defp unwrap(list) when is_list(list), do: list
   defp unwrap(%{} = object), do: [object]
   defp unwrap(_), do: []
 
-  # @type may be a string or a list; subtypes ("LiteraryEvent", "SocialEvent")
-  # end in "Event" and count.
   defp event?(%{"@type" => type}) when is_binary(type), do: String.ends_with?(type, "Event")
 
   defp event?(%{"@type" => types}) when is_list(types),
@@ -82,8 +79,6 @@ defmodule Stacks.Enrichment.EventExtractor do
 
   defp string_or_nil(_), do: nil
 
-  # schema.org startDate is ISO 8601 — full datetime, or a bare date. A date
-  # we cannot read is nil, never a guess (the pipeline's standing rule).
   defp parse_start(value) when is_binary(value) do
     case DateTime.from_iso8601(value) do
       {:ok, dt, _offset} -> dt

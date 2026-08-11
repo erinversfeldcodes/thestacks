@@ -99,9 +99,6 @@ defmodule Stacks.Books.ISBN do
 
   def canonical_isbn13(_isbn), do: nil
 
-  # Shape + checksum gate for canonical_isbn13/1. Unlike isbn10_valid?/1
-  # (which only sees all-digit strings — valid_isbn_checksum?/1's regex
-  # filters `X` out before it), this accepts the `X` (= 10) check digit.
   defp valid_isbn10?(isbn) do
     isbn =~ ~r/^\d{9}[\dX]$/ and isbn10_check_digit_ok?(isbn)
   end

@@ -28,7 +28,6 @@ defmodule Stacks.UploadTelemetryTest do
   - US-1.1.8: Multi-format merge
   """
 
-  # async: false — telemetry handlers are global state
   use CoreWeb.ConnCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -94,13 +93,7 @@ defmodule Stacks.UploadTelemetryTest do
     handler_id
   end
 
-  # ============================================================================
-  # 1. Telemetry event emission on handler error
-  # ============================================================================
-
   describe "Suite 11 — handler_error telemetry from SubscriberWorker" do
-    # Use a test-only event type wired to deterministic failing handlers via
-    # Application.put_env so we don't rely on production handlers returning errors.
     setup do
       on_exit(fn -> Application.delete_env(:core, :test_handler_overrides) end)
       :ok
@@ -219,10 +212,6 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  # ============================================================================
-  # 2. Oban job telemetry
-  # ============================================================================
-
   describe "Suite 11 — Oban job lifecycle telemetry" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test "[:oban, :job, :start] fires for IdentifyBookJob", %{user: user} do
@@ -233,8 +222,6 @@ defmodule Stacks.UploadTelemetryTest do
 
       image = insert(:uploaded_image, status: "pending")
 
-      # Use Oban.insert + drain instead of perform_job so Oban emits lifecycle
-      # telemetry. perform_job bypasses the Oban engine and won't emit these.
       {:ok, _job} =
         Oban.insert(
           IdentifyBookJob.new(%{
@@ -283,7 +270,6 @@ defmodule Stacks.UploadTelemetryTest do
         &(&1.job.worker == "Stacks.Events.SubscriberWorker")
       )
 
-      # Create a book, which emits a book.created event and enqueues SubscriberWorker
       {:ok, _book} =
         Stacks.Books.create(%{
           "title" => "Oban Telemetry Test",
@@ -307,8 +293,6 @@ defmodule Stacks.UploadTelemetryTest do
 
       image = insert(:uploaded_image, status: "pending")
 
-      # The MockClient will return a not_a_book result, causing the job to cancel.
-      # IdentifyBookJob delegates to Moderation.run_pipeline which uses the mock.
       {:ok, _job} =
         Oban.insert(
           IdentifyBookJob.new(%{
@@ -320,7 +304,6 @@ defmodule Stacks.UploadTelemetryTest do
 
       Oban.drain_queue(queue: :vision)
 
-      # The job will either stop or get an exception; either way telemetry fires
       assert_receive {:telemetry, [:oban, :job, :stop], measurements, metadata}, 5_000
       assert metadata.job.worker == "Stacks.Workers.IdentifyBookJob"
       assert is_integer(measurements.duration)
@@ -338,8 +321,6 @@ defmodule Stacks.UploadTelemetryTest do
 
       steer_vision(no_isbn())
 
-      # `no_isbn()` classifies the image as a book but returns no ISBNs,
-      # causing IdentifyBookJob to return {:cancel, "isbn_not_found"}.
       {:ok, _job} =
         Oban.insert(
           IdentifyBookJob.new(%{
@@ -363,8 +344,6 @@ defmodule Stacks.UploadTelemetryTest do
         &(&1.job.worker == "Stacks.Events.SubscriberWorker")
       )
 
-      # Insert an image.submitted event (different from book.created) to test
-      # SubscriberWorker telemetry with varied event types.
       event_id = Ecto.UUID.generate()
 
       Core.Repo.insert_all(
@@ -395,16 +374,11 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  # ============================================================================
-  # 3. BudgetTracker cost recording (state-based, no telemetry events)
-  # ============================================================================
-
   describe "Suite 11 — BudgetTracker state tracking for metrics" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test "record_cost updates daily_total_cents" do
       state_before = BudgetTracker.current_state()
       BudgetTracker.record_cost(:modal, 42)
-      # Cast is async, wait for it to process
       Process.sleep(50)
       state_after = BudgetTracker.current_state()
 
@@ -485,10 +459,6 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  # ============================================================================
-  # 4. Phoenix request telemetry for upload endpoints
-  # ============================================================================
-
   describe "Suite 11 — Phoenix endpoint telemetry for upload requests" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test "[:phoenix, :endpoint, :stop] fires for POST /api/upload/init", %{
@@ -541,10 +511,6 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.UploadController
     end
   end
-
-  # ============================================================================
-  # 5. HTTP request telemetry for ALL upload-related endpoints (Section A)
-  # ============================================================================
 
   describe "Suite 11 — router_dispatch telemetry for POST /api/upload/init" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
@@ -614,7 +580,6 @@ defmodule Stacks.UploadTelemetryTest do
 
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      # Mark image as resolved with a book_id
       {:ok, book_id_bin} = Ecto.UUID.dump(book.id)
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
 
@@ -816,7 +781,6 @@ defmodule Stacks.UploadTelemetryTest do
     } do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
-      # ISBNResolver.resolve fails in test (no real HTTP), returning :isbn_not_found.
       conn =
         conn
         |> auth_conn(token)
@@ -833,10 +797,6 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  # ============================================================================
-  # 6. Oban job telemetry for rejection outcomes (Section B)
-  # ============================================================================
-
   describe "Suite 11 — Oban job telemetry for IdentifyBookJob cancellation (US-1.1.2, US-1.1.3)" do
     @tag stories: ["US-1.1.2"], suite: :telemetry
     test "job stop telemetry fires when IdentifyBookJob processes an image (isbn_not_found path)",
@@ -848,8 +808,6 @@ defmodule Stacks.UploadTelemetryTest do
 
       image = insert(:uploaded_image, status: "pending")
 
-      # Insert and drain — the mock vision client will produce a result
-      # that flows through the pipeline; telemetry fires regardless of outcome.
       {:ok, _job} =
         Oban.insert(
           IdentifyBookJob.new(%{
@@ -874,8 +832,6 @@ defmodule Stacks.UploadTelemetryTest do
         &(&1.job.worker == "Stacks.Workers.IdentifyBookJob")
       )
 
-      # Using a non-existent image_id with storage_key to trigger a presigned URL error.
-      # The job should error (not cancel), which triggers exception telemetry.
       {:ok, _job} =
         Oban.insert(
           IdentifyBookJob.new(%{
@@ -887,24 +843,16 @@ defmodule Stacks.UploadTelemetryTest do
 
       Oban.drain_queue(queue: :vision)
 
-      # The job may stop with error or raise an exception — either triggers telemetry.
-      # We check for either stop or exception event.
       receive do
         {:telemetry, [:oban, :job, :exception], measurements, metadata} ->
           assert metadata.job.worker == "Stacks.Workers.IdentifyBookJob"
           assert is_integer(measurements.duration)
       after
         5_000 ->
-          # If no exception telemetry, the job completed normally or was cancelled.
-          # This is acceptable — the error was handled gracefully by the job.
           :ok
       end
     end
   end
-
-  # ============================================================================
-  # 7. Ecto query telemetry (Section E — database metrics)
-  # ============================================================================
 
   describe "Suite 11 — Ecto query telemetry during upload flow" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
@@ -915,16 +863,11 @@ defmodule Stacks.UploadTelemetryTest do
 
       get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
 
-      # Ecto emits telemetry for every query; at minimum the status lookup query
       assert_receive {:telemetry, [:core, :repo, :query], measurements, _metadata}, 2_000
       assert is_integer(measurements.total_time)
       assert measurements.total_time >= 0
     end
   end
-
-  # ============================================================================
-  # 8. RefreshCostsJob telemetry (Section D — cost tracking)
-  # ============================================================================
 
   describe "Suite 11 — RefreshCostsJob Oban lifecycle telemetry" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
@@ -959,8 +902,6 @@ defmodule Stacks.UploadTelemetryTest do
       assert_receive {:telemetry, [:oban, :job, :stop], _measurements, metadata}, 5_000
       assert metadata.job.worker == "Stacks.Workers.RefreshCostsJob"
 
-      # The job also emits a costs.refreshed event, which enqueues a
-      # SubscriberWorker. We can verify the event was recorded.
       import Ecto.Query
 
       events =
@@ -975,10 +916,6 @@ defmodule Stacks.UploadTelemetryTest do
       assert events != []
     end
   end
-
-  # ============================================================================
-  # 9. Costs context state tracking (Section D — no telemetry events emitted)
-  # ============================================================================
 
   describe "Suite 11 — Costs context usage metrics for cost tracking" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
@@ -1018,38 +955,27 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 
-  # ============================================================================
-  # 10. Circuit breaker / Fuse telemetry (Section C)
-  # ============================================================================
-
   describe "Suite 11 — Circuit breaker / Fuse observability" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test ":fuse.ask returns :ok or :blown for the vision_service fuse" do
-      # The :fuse library does not emit :telemetry events. We verify that the
-      # fuse can be queried programmatically (which is how monitoring would work).
       case :fuse.ask(:vision_service, :sync) do
         :ok ->
           assert true
 
         :blown ->
-          # Fuse is blown from a previous test — still a valid state
           assert true
 
         {:error, :not_found} ->
-          # Fuse not installed yet — valid in test env
           assert true
       end
     end
 
     @tag stories: ["US-1.1.1"], suite: :telemetry
     test "AI.Client returns {:error, :circuit_open} when fuse is blown" do
-      # Force the real client (not mock) so the fuse check in do_call_vision runs.
       original = Application.get_env(:core, :vision_client)
       Application.put_env(:core, :vision_client, Stacks.AI.Client)
       on_exit(fn -> Application.put_env(:core, :vision_client, original) end)
 
-      # Reinstall :vision_fuse with a low threshold, then blow it.
-      # :vision_fuse is the name used by AI.Client (@fuse_name).
       :fuse.reset(:vision_fuse)
       :fuse.install(:vision_fuse, {{:standard, 1, 1_000}, {:reset, 60_000}})
       :fuse.melt(:vision_fuse)
@@ -1059,14 +985,9 @@ defmodule Stacks.UploadTelemetryTest do
 
       assert result == {:error, :circuit_open}
 
-      # Reset so other tests aren't affected
       :fuse.reset(:vision_fuse)
     end
   end
-
-  # ============================================================================
-  # 12. End-to-end telemetry: full upload flow emits multiple telemetry events
-  # ============================================================================
 
   describe "Suite 11 — end-to-end telemetry across upload flow (US-1.1.1)" do
     @tag stories: ["US-1.1.1"], suite: :telemetry
@@ -1106,7 +1027,6 @@ defmodule Stacks.UploadTelemetryTest do
       |> auth_conn(token)
       |> post("/api/upload/init", %{"content_type" => "image/jpeg"})
 
-      # Both endpoint-level and router-level telemetry should fire
       assert_receive {:endpoint_stop, measurements}, 2_000
       assert is_integer(measurements.duration)
 
@@ -1115,10 +1035,6 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.UploadController
     end
   end
-
-  # ============================================================================
-  # 13. Age-gated book detail telemetry (US-1.1.4)
-  # ============================================================================
 
   describe "Suite 11 — telemetry for age-gated book access (US-1.1.4)" do
     @tag stories: ["US-1.1.4"], suite: :telemetry
@@ -1130,7 +1046,6 @@ defmodule Stacks.UploadTelemetryTest do
 
       conn = get(conn, "/api/books/#{age_gated_book.id}")
 
-      # The response will be either 403 (age gate) or 200 depending on user state
       assert conn.status in [200, 403]
 
       assert_receive {:telemetry, [:phoenix, :router_dispatch, :stop], measurements, metadata},
@@ -1140,10 +1055,6 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.BookController
     end
   end
-
-  # ============================================================================
-  # 14. Duplicate detection telemetry (US-1.1.6)
-  # ============================================================================
 
   describe "Suite 11 — telemetry for duplicate detection (US-1.1.6)" do
     @tag stories: ["US-1.1.6"], suite: :telemetry
@@ -1155,10 +1066,8 @@ defmodule Stacks.UploadTelemetryTest do
     } do
       attach_telemetry([:phoenix, :router_dispatch, :stop])
 
-      # Place the book on user's bookshelf so it counts as duplicate
       Stacks.Shelving.place_book(user.id, book.id, "library")
 
-      # Create uploaded image marked as resolved with this book
       image = insert(:uploaded_image, status: "pending", user_id: user.id)
       {:ok, book_id_bin} = Ecto.UUID.dump(book.id)
       {:ok, image_id_bin} = Ecto.UUID.dump(image.id)
@@ -1185,10 +1094,6 @@ defmodule Stacks.UploadTelemetryTest do
       assert metadata.plug == StacksWeb.UploadController
     end
   end
-
-  # ============================================================================
-  # 15. Multi-book extraction telemetry (US-1.1.7)
-  # ============================================================================
 
   describe "Suite 11 — telemetry for multi-book status poll (US-1.1.7)" do
     @tag stories: ["US-1.1.7"], suite: :telemetry
@@ -1239,45 +1144,3 @@ defmodule Stacks.UploadTelemetryTest do
     end
   end
 end
-
-# ==============================================================================
-# TELEMETRY GAPS — Paths that cannot be tested or are untestable
-# ==============================================================================
-#
-# The following telemetry paths were identified as gaps during Suite 11 analysis.
-# Issue #129 (observability instrumentation) closed most of them.
-#
-# 1. Prometheus/PromEx export:
-#    CLOSED by #129. Core.PromEx is now configured and /internal/metrics serves
-#    Prometheus text format. Custom [:stacks, :*] events are collected via PromEx
-#    plugins alongside built-in Phoenix/Ecto metrics.
-#    Verified in: test/core_web/metrics_endpoint_test.exs
-#
-# 2. Fuse state telemetry:
-#    CLOSED by #129. Stacks.AI.Client now wraps :fuse.melt/1 with telemetry,
-#    emitting [:stacks, :fuse, :melt] and [:stacks, :fuse, :blown] events.
-#    Verified in: test/stacks/observability_telemetry_test.exs
-#
-# 3. Costs context telemetry:
-#    CLOSED by #129. Stacks.Costs now emits [:stacks, :costs, :recorded] via
-#    :telemetry.execute on successful cost upsert.
-#    Verified in: test/stacks/observability_telemetry_test.exs
-#
-# 4. BudgetTracker telemetry:
-#    CLOSED by #129. BudgetTracker now emits [:stacks, :budget, :cost_recorded]
-#    and [:stacks, :budget, :limit_exceeded] via :telemetry.execute.
-#    Verified in: test/stacks/observability_telemetry_test.exs
-#
-# 5. Vision client request-level telemetry:
-#    CLOSED by #129. Stacks.AI.Client.make_vision_request/2 now emits
-#    [:stacks, :vision, :request, :start/:stop/:exception] telemetry events,
-#    enabling latency histograms for vision API calls.
-#    Verified in: test/stacks/observability_telemetry_test.exs
-#
-# 6. Deployed-only telemetry paths:
-#    OPEN. These paths require real infrastructure and cannot be verified in
-#    the local test suite:
-#    - Real Finch HTTP calls to the vision sidecar (mocked in test)
-#    - R2/S3 storage upload latency (mocked via Storage.Mock in test)
-#    - Neon database query latency over network (local PG in test)
-#    These would need @tag :deployed_only tests running against real infra.

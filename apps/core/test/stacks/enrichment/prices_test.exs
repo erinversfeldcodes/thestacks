@@ -24,14 +24,10 @@ defmodule Stacks.Enrichment.PricesTest do
       assert snapshot.price_cents == 29_900
       assert snapshot.book_edition_id == edition.id
       assert snapshot.store_id == store.id
-      # Derived, not supplied — the caller never sent a book_id.
       assert snapshot.book_id == edition.book_id
     end
 
     test "ignores a caller-supplied book_id rather than letting it contradict the edition" do
-      # The two columns describe one relationship, so a caller must not be able to
-      # make them disagree. Passing a wrong work id must not produce a row that
-      # says edition E belongs to work W when it does not.
       edition = insert(:book_edition)
       other_book = insert(:book)
       store = insert(:bookstore)
@@ -50,9 +46,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "two editions of one work hold separate prices at the same store" do
-      # The point of the re-key. Exclusive Books stocks six ISBNs of The Name of
-      # the Rose at different prices; the old (book_id, store_id) uniqueness made
-      # the second one overwrite the first.
       book = insert(:book)
       paperback = insert(:book_edition, book: book, isbn: "9780749397050")
       spanish = insert(:book_edition, book: book, isbn: "9788497592581", is_primary: false)
@@ -106,9 +99,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "returns :unknown_edition when the edition id names nothing" do
-      # Distinct from the changeset case above: an id was given, it just does not
-      # resolve. Collapsing the two would hide a broken producer behind a
-      # validation error.
       store = insert(:bookstore)
 
       assert {:error, :unknown_edition} =
@@ -138,8 +128,6 @@ defmodule Stacks.Enrichment.PricesTest do
 
   describe "latest_prices/1" do
     test "returns snapshots across every edition of the work" do
-      # Callers hold a work — that is what a book-detail page shows — while prices
-      # hang off editions, so the read must span them.
       book = insert(:book)
       paperback = insert(:book_edition, book: book, isbn: "9780749397050")
       spanish = insert(:book_edition, book: book, isbn: "9788497592581", is_primary: false)
@@ -191,10 +179,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "staleness is per edition: pricing one leaves its siblings stale" do
-      # This is the defect the re-key fixes, and it was silent. Joining snapshots
-      # to editions on `book_id` meant a fresh price for ONE edition made EVERY
-      # edition of that work look freshly scraped — so on a work with six editions,
-      # five could never be priced at all.
       book = insert(:book)
       priced = insert(:book_edition, book: book, isbn: "9780749397050")
       sibling = insert(:book_edition, book: book, isbn: "9788497592581", is_primary: false)
@@ -253,11 +237,6 @@ defmodule Stacks.Enrichment.PricesTest do
 
   describe "scrapeable_stores/0" do
     test "excludes stores with no scraper registry key" do
-      # `scraper_module` is the scraper's registry key, not a label. A store without one
-      # cannot be addressed at all — the service answers 404 — and because the client
-      # melts a fuse on a non-200, including it could open the breaker for stores that
-      # ARE configured. So the exclusion is about protecting the working stores, not
-      # just about tidiness.
       addressable = insert(:bookstore, name: "Configured", scraper_module: "za/configured")
       orphan = insert(:bookstore, name: "No Config", scraper_module: nil)
 
@@ -268,8 +247,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "every returned store has a non-nil registry key" do
-      # The guarantee callers rely on: `TriggerPriceScrapeJob` no longer has a
-      # `|| store.name` fallback, so a nil key here would pass `nil` to the client.
       insert(:bookstore, scraper_module: nil)
       insert(:bookstore, scraper_module: "za/some_store")
 
@@ -299,13 +276,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "notices a replatform rather than trusting the stored platform" do
-      # The reason capability is derived and not configured. A shop that moves from
-      # WooCommerce to Shopify must be re-observed, or every lookup silently returns
-      # nothing and looks exactly like "we don't stock it".
-      # A *fresh* probed_at is essential to this test. Without it the stale-refresh
-      # branch writes the new capability regardless of whether the change was
-      # noticed, and the test passes while change detection is broken — confirmed by
-      # mutation probe.
       store =
         insert(:bookstore,
           price_source: "woo_store_api",
@@ -327,8 +297,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "a response without a capability is not an error" do
-      # An older scraper, or one that could not determine anything, still returns a
-      # usable price. Losing the observation must not lose the scrape.
       store = insert(:bookstore, price_source: "woo_store_api")
 
       assert :ok = Prices.record_capability(store, nil)
@@ -359,8 +327,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "an unchanged but stale observation refreshes its timestamp" do
-      # So that a stale probed_at means "not observed lately" rather than
-      # "unchanged since forever".
       old = DateTime.add(DateTime.utc_now(), -10, :day)
 
       store =
@@ -393,10 +359,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "the canary going missing clears the capability so it is re-derived" do
-      # The failure detection alone cannot see: the platform stays Shopify, the probe
-      # still answers, but the shop re-slugs its catalogue or moves the ISBN out of
-      # `handle` for new products. Detection reports the same capability while every
-      # lookup quietly returns "not stocked".
       store =
         insert(:bookstore,
           canary_isbn: "9780749397050",
@@ -416,8 +378,6 @@ defmodule Stacks.Enrichment.PricesTest do
     end
 
     test "an ordinary edition going out of stock changes nothing" do
-      # Most (edition, store) pairs legitimately have no price. Treating each of those
-      # as evidence the store broke would clear the capability constantly.
       store =
         insert(:bookstore,
           canary_isbn: "9780749397050",

@@ -118,15 +118,9 @@ update msg model maybeToken =
                     ( { init | saving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    -- A 401 can no longer reach here: `Api.authed` routes it to
-                    -- `SessionExpiryDetected` before the resolver runs. What is
-                    -- left really is retryable, so "Please try again" is true.
                     ( { model | saving = Failure err }, Cmd.none, NoOut )
 
         SessionExpiryDetected ->
-            -- Leave the model untouched: `Main` is about to re-check for a newer
-            -- token from a sibling tab, and repainting the form as failed would
-            -- be wrong if that re-check adopts one.
             ( model, Cmd.none, SessionExpired )
 
 

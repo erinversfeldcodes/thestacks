@@ -22,10 +22,8 @@ defmodule Stacks.Acceptance.UploadBookTest do
       {:ok, user} =
         Accounts.register(%{"email" => "reader@example.com", "password" => "password123"})
 
-      # Pre-create the book that would be identified
       {:ok, book} = Books.create(%{"isbn" => "9780743273565", "title" => "The Great Gatsby"})
 
-      # Step 1: upload image — enqueues job (manual mode, not executed)
       image_id = Ecto.UUID.generate()
       image_b64 = Base.encode64("fake image bytes")
       assert {:ok, _job} = Uploads.upload_and_identify(user.id, image_id, image_b64)
@@ -35,10 +33,8 @@ defmodule Stacks.Acceptance.UploadBookTest do
         args: %{"user_id" => user.id, "image_id" => image_id}
       )
 
-      # Step 2: Place the pre-existing book on a bookshelf
       {:ok, placement} = Shelving.place_book(user.id, book.id, "library")
 
-      # Step 3: Verify book is on bookshelf
       placements = Shelving.get_bookshelf_books(user.id, "library")
       ids = Enum.map(placements, & &1.id)
       assert placement.id in ids
@@ -51,7 +47,6 @@ defmodule Stacks.Acceptance.UploadBookTest do
       image_id = Ecto.UUID.generate()
       image_b64 = Base.encode64("fake image bytes")
 
-      # upload_and_identify only enqueues — does not validate image existence
       assert {:ok, _job} = Uploads.upload_and_identify(user.id, image_id, image_b64)
 
       assert_enqueued(

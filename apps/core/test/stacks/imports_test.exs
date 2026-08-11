@@ -131,7 +131,6 @@ defmodule Stacks.ImportsTest do
       assert import.unverified_count == 1
       assert import.unreadable_count == 1
 
-      # Rows 1 (read) and 2 (currently-reading) were marked shelved above.
       assert Enum.sort(bookshelves) == ["library", "reading_pile"]
 
       event =

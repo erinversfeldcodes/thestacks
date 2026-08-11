@@ -12,10 +12,6 @@ defmodule Stacks.Books.BookDetailCache do
   @ttl_ms 300_000
   @cleanup_interval 60_000
 
-  # ---------------------------------------------------------------------------
-  # Public API
-  # ---------------------------------------------------------------------------
-
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
@@ -63,10 +59,6 @@ defmodule Stacks.Books.BookDetailCache do
     :ets.delete_all_objects(@table)
     :ok
   end
-
-  # ---------------------------------------------------------------------------
-  # GenServer callbacks
-  # ---------------------------------------------------------------------------
 
   @impl true
   def init(_) do

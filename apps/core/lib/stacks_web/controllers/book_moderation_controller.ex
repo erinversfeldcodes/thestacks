@@ -58,8 +58,6 @@ defmodule StacksWeb.BookModerationController do
     end
   end
 
-  # Accepts both the explicit `visibility_tier` string and the `age_gated`
-  # boolean flag. Anything not clearly age-gating resolves to "public".
   defp resolve_tier(%{"visibility_tier" => tier}) when tier in ["public", "age_gated"], do: tier
 
   defp resolve_tier(%{"age_gated" => value}),

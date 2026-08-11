@@ -16,15 +16,8 @@ defmodule Core.Repo.Migrations.DatelessBookstoreEventsStayUnique do
   """
   use Ecto.Migration
 
-  # `CREATE/DROP INDEX CONCURRENTLY` cannot run inside a transaction, so opt out of Ecto's
-  # migration-wide transaction. Swapping the index concurrently keeps `op.bookstore_events` writable
-  # for the rebuild instead of blocking the scrape jobs that write it.
   @disable_ddl_transaction true
 
-  # Ecto holds its advisory migration lock on a separate idle connection for the whole CONCURRENTLY
-  # build; Neon drops idle sockets mid-build (300s hang + `ssl send: closed`). Deploys are already
-  # serialised by the release pipeline, so releasing the lock is safe. Same rationale as the
-  # generated concurrent-index migrations.
   @disable_migration_lock true
 
   def up do

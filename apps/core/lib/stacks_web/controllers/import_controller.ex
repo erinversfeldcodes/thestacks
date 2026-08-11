@@ -15,8 +15,6 @@ defmodule StacksWeb.ImportController do
   alias Stacks.Accounts.Guardian
   alias Stacks.Imports
 
-  # Well past any real Goodreads export (thousands of books ≈ single-digit MB)
-  # while keeping a runaway upload from being read into memory whole.
   @max_bytes 10 * 1024 * 1024
 
   @doc "POST /api/imports/goodreads"

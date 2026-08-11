@@ -6,11 +6,6 @@ defmodule Stacks.CircuitBreakers.ProbeHttpClient do
 
   @behaviour Stacks.CircuitBreakers.ProbeHttpClientBehaviour
 
-  # `receive_timeout` bounds each chunk; only `request_timeout` bounds the
-  # whole response, and it defaults to `:infinity` — measured in
-  # `Stacks.Enrichment.RssFetcher` (a peer dribbling bytes ran 35s under a
-  # "5s" receive_timeout). A probe's answer is tiny, so the same 5s bounds
-  # both.
   @receive_timeout 5_000
   @request_timeout 5_000
 

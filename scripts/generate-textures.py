@@ -20,10 +20,6 @@ REPO_ROOT = Path(__file__).parent.parent
 TEXTURE_DIR = REPO_ROOT / "frontend" / "public" / "textures"
 MANIFEST_PATH = REPO_ROOT / "frontend" / "public" / "textures" / "manifest.json"
 
-# -------------------------------------------------------------------
-# Asset manifest — each entry is a generation job
-# -------------------------------------------------------------------
-
 
 def _asset(category, filename, prompt, width, height):
     return {
@@ -36,7 +32,6 @@ def _asset(category, filename, prompt, width, height):
 
 
 ASSETS = [
-    # --- PBR Normal Maps ---
     _asset(
         "normal-maps",
         "normal-leather-burgundy.png",
@@ -97,7 +92,6 @@ ASSETS = [
         512,
         512,
     ),
-    # --- Fallback Book Covers ---
     _asset(
         "book-covers",
         "cover-fallback-01.png",
@@ -180,7 +174,6 @@ ASSETS = [
         256,
         512,
     ),
-    # --- Atmospheric Overlays ---
     _asset(
         "atmosphere",
         "overlay-light-leak.png",
@@ -211,7 +204,6 @@ ASSETS = [
         1024,
         768,
     ),
-    # --- Environment Art ---
     _asset(
         "environment",
         "ceiling-library.png",
@@ -244,7 +236,6 @@ ASSETS = [
         512,
         512,
     ),
-    # --- Enhanced Shelf/Wood Textures ---
     _asset(
         "wood",
         "wood-walnut-shelf-hq.png",
@@ -267,11 +258,6 @@ ASSETS = [
         1024,
     ),
 ]
-
-
-# -------------------------------------------------------------------
-# Generation with retry
-# -------------------------------------------------------------------
 
 MAX_RETRIES = 5
 BASE_DELAY = 12  # rate limit is 6/min so ~10s between requests
@@ -356,11 +342,6 @@ def generate_asset(asset: dict, client, force: bool = False) -> dict:
     }
 
 
-# -------------------------------------------------------------------
-# Main
-# -------------------------------------------------------------------
-
-
 def main():
     parser = argparse.ArgumentParser(description="Generate cinematic textures")
     parser.add_argument(
@@ -391,7 +372,7 @@ def main():
         assets = [a for a in ASSETS if a["category"] == args.filter]
         if not assets:
             cats = sorted(set(a["category"] for a in ASSETS))
-            print(f"No assets in category '{args.filter}'. " f"Available: {', '.join(cats)}")
+            print(f"No assets in category '{args.filter}'. Available: {', '.join(cats)}")
             sys.exit(1)
 
     total = len(assets)
@@ -408,7 +389,6 @@ def main():
         result = generate_asset(asset, client, force=args.force)
         results.append(result)
 
-    # Write manifest
     manifest = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "model": "black-forest-labs/flux-dev",
@@ -416,11 +396,10 @@ def main():
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
 
-    # Summary
     generated = sum(1 for r in results if r["status"] == "generated")
     skipped = sum(1 for r in results if r["status"] == "skipped")
     failed = sum(1 for r in results if r["status"] == "failed")
-    print(f"\nDone: {generated} generated, " f"{skipped} skipped, {failed} failed")
+    print(f"\nDone: {generated} generated, {skipped} skipped, {failed} failed")
     print(f"Manifest: {MANIFEST_PATH}")
 
 

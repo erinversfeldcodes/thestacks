@@ -35,15 +35,12 @@ defmodule Stacks.Workers.DiscoverEditionsJob do
 
   import Ecto.Query
 
-  # See the moduledoc: bounded by what the price layer will actually consume.
   @max_created_per_run 10
 
   @impl true
   def perform(%Oban.Job{args: %{"book_id" => book_id}}) do
     case primary_isbn(book_id) do
       nil ->
-        # No primary edition means no ISBN to resolve a work from. Not an error: the
-        # work may have been created by a path that has not attached its edition yet.
         Logger.debug("DiscoverEditionsJob: no primary edition for book=#{book_id}")
         :ok
 
@@ -69,13 +66,10 @@ defmodule Stacks.Workers.DiscoverEditionsJob do
 
       :ok
     else
-      # The fuse is the signal to retry later, so let Oban do exactly that.
       {:error, :circuit_open} ->
         {:error, :circuit_open}
 
       {:error, reason} ->
-        # A work we cannot identify is not a failure of this job — plenty of ISBNs
-        # resolve without an Open Library work key at all (Google Books fallback).
         Logger.debug("DiscoverEditionsJob: no editions for book=#{book_id}: #{inspect(reason)}")
 
         :ok
@@ -95,8 +89,6 @@ defmodule Stacks.Workers.DiscoverEditionsJob do
     end
   end
 
-  # Skipping ISBNs we already hold keeps the cap meaningful: without it a re-run would
-  # spend its whole budget re-attempting rows that exist and rediscovering nothing.
   defp create_editions(book_id, isbns, known) do
     isbns
     |> Enum.reject(&MapSet.member?(known, &1))
@@ -107,8 +99,6 @@ defmodule Stacks.Workers.DiscoverEditionsJob do
           created + 1
 
         {:error, reason} ->
-          # Expected and frequent: an ISBN Open Library lists but neither upstream can
-          # verify fails the ISBN hard gate, which is the gate working as intended.
           Logger.debug("DiscoverEditionsJob: skipped #{isbn}: #{inspect(reason)}")
           created
       end

@@ -37,8 +37,6 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     end
   end
 
-  # All known email templates. Any job with an unrecognised template is discarded
-  # immediately (no retries) to prevent blocking the queue.
   @known_templates %{
     "registration_confirmation" => :registration_confirmation,
     "password_reset" => :password_reset,
@@ -51,7 +49,6 @@ defmodule Stacks.Workers.EmailDeliveryJob do
     "wishlist_available" => :wishlist_available
   }
 
-  # Templates that bypass user notification preferences
   @bypass_prefs [
     :registration_confirmation,
     :password_reset,
@@ -93,8 +90,6 @@ defmodule Stacks.Workers.EmailDeliveryJob do
   defp should_send?(user, :marketplace_sale), do: user.notify_marketplace
   defp should_send?(user, :new_offer), do: user.notify_marketplace
   defp should_send?(user, :group_invitation), do: user.notify_group_invitations
-  # Unknown templates default to false — new opt-in notifications must be
-  # explicitly listed above to avoid sending unintended emails.
   defp should_send?(_user, _template), do: false
 
   defp build_email(user, :registration_confirmation, %{"token" => token}) do

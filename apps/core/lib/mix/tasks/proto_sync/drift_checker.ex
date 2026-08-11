@@ -48,8 +48,6 @@ defmodule Mix.Tasks.ProtoSync.DriftChecker do
     end
   end
 
-  # A gitignored artefact is not under version control and this generator is its
-  # only writer, so rewriting it cannot lose anything a human authored.
   defp resolve(expected_content, file_path, repo_root, diff) do
     if classify(file_path, repo_root) == "ignored" do
       File.mkdir_p!(Path.dirname(file_path))
@@ -60,9 +58,6 @@ defmodule Mix.Tasks.ProtoSync.DriftChecker do
     end
   end
 
-  # Shells out to scripts/generated-file-class.sh so the tracked-vs-gitignored
-  # policy has one implementation across Elixir, Python and shell. Reached only
-  # once drift is already known, so the clean path never pays for it.
   defp classify(_file_path, nil), do: "untracked"
 
   defp classify(file_path, repo_root) do

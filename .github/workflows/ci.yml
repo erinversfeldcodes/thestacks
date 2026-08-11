@@ -11,31 +11,6 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Cost gate. The pre-push hook runs `just ci` — which includes the local
-  # deploy-preview + E2E suite as part of scripts/ci.sh's deploy phase —
-  # and writes the results to <!-- ci-summary-* --> in the PR description.
-  # The PR also carries a <!-- deployed-e2e-summary-* --> block written
-  # by CI's post-pipeline step as an audit artefact of the runner-side
-  # deploy; we deliberately do NOT gate on it here, because (a) it
-  # always lags one CI cycle behind the current push and would
-  # ratchet stale red state into a permanent block, and (b) its
-  # content overlaps with ci-summary's "deploy: *" rows anyway.
-  # We don't want to burn CI minutes re-running checks that already failed
-  # locally — or running CI at all on a PR that was pushed with
-  # --no-verify, which leaves ci-summary blank. So before any other job
-  # runs, scan the description: if ci-summary is missing, contains a
-  # "skipped" sentinel, or has any ❌, set proceed=false and let the rest
-  # of the workflow short-circuit.
-  #
-  # Trust model: this is a cost-saving optimization, not a security gate.
-  # PR descriptions are editable by anyone with write access — branch
-  # protection rules are the actual gate that enforces "CI must pass
-  # before merge". Someone faking a green report can skip the cost-saver
-  # but cannot bypass branch protection.
-  #
-  # Only runs on pull_request events. Pushes to main bypass the gate
-  # entirely (the workflow's `on: push: branches: [main]` trigger fires
-  # only after merge, when CI must always run).
   gate-pre-push-report:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -49,18 +24,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          # Pass the repo explicitly so `gh pr view` doesn't fall back
-          # to detecting it via local git. This job has no checkout
-          # (saves ~5s per CI run — we only need the PR body, not the
-          # repo contents) so without -R, gh shells out to git and dies
-          # on "fatal: not a git repository".
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           body="$(gh pr view "$PR_NUMBER" --json body --jq '.body')"
 
-          # Extract content strictly between (and excluding) the sentinel
-          # comments. Empty string if either sentinel is missing.
           extract_block() {
               local start="$1" end="$2"
               awk -v s="$start" -v e="$end" '
@@ -70,11 +38,6 @@ jobs:
               ' <<< "$body"
           }
 
-          # Pass condition: ci-summary exists, contains at least one ✅,
-          # and contains zero ❌. This catches three failure modes —
-          # block missing entirely (--no-verify), block is a "skipped"
-          # sentinel (no checks ran, e.g. FLY_API_TOKEN unset locally),
-          # or block has a real failure.
           block_is_green() {
               local label="$1" block="$2"
               if [[ -z "$block" ]]; then
@@ -106,13 +69,8 @@ jobs:
           fi
           echo "proceed=${proceed}" >> "$GITHUB_OUTPUT"
 
-  # Reads .versions and exposes the values as job outputs so every other job
-  # has a single authoritative reference. Service container images (which are
-  # resolved before steps run) can also reference needs.versions.outputs.*
   versions:
     needs: gate-pre-push-report
-    # Run when the gate ran and approved (PR with green report) OR when
-    # the gate was skipped entirely (push to main, no PR context).
     if: |
       always() &&
       (needs.gate-pre-push-report.result == 'skipped' ||
@@ -227,11 +185,6 @@ jobs:
               - 'proto/**'
               - 'dbt/**'
 
-  # Split from test-elixir: lint runs CPU-only (no postgres service, no frontend
-  # build needed), so it parallelises cleanly with test-elixir and gets its own
-  # timeout budget. dialyzer's PLT generation can take ~4 min on a cold cache
-  # whenever mix.lock changes — running it inside test-elixir was eating the
-  # 15-min budget before the test suite could finish.
   lint-elixir:
     needs: [changes, versions]
     if: needs.changes.outputs.elixir == 'true'
@@ -261,9 +214,6 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}
-      # Elixir-side proto artifacts only — lint doesn't need the Elm decoders.
-      # Without these the generated Ecto schemas + ProtoJSON modules don't
-      # exist, and dialyzer/credo would error on the undefined references.
       - name: Generate Elixir proto artifacts
         run: |
           scripts/gen-ecto-proto.sh
@@ -291,9 +241,6 @@ jobs:
           --health-retries 5
     env:
       MIX_ENV: test
-      # Trigger the CreateDbRoles migration to actually create stacks_app /
-      # stacks_dbt / stacks_readonly — mirrors production behaviour so the
-      # role grants, revokes, and rollback are exercised in CI.
       STACKS_APP_DB_PASSWORD: ci-stacks-app-password
       STACKS_DBT_DB_PASSWORD: ci-stacks-dbt-password
     steps:
@@ -360,13 +307,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          # Explicit toolchain is required when the action is pinned to a
-          # commit SHA — dtolnay/rust-toolchain normally infers the toolchain
-          # from the ref name (@stable), which a SHA pin no longer carries.
           toolchain: stable
-          # llvm-tools is required by cargo-llvm-cov for the 80% coverage
-          # gate in scripts/test-rust.sh. Locally it's installed by
-          # setup.sh via `rustup component add llvm-tools-preview`.
           components: rustfmt, clippy, llvm-tools
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -377,15 +318,7 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('apps/scraper/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-
       - run: cargo install cargo-audit --locked
-      # cargo-llvm-cov drives the 80% coverage threshold check at the
-      # end of test-rust.sh. Locally installed by setup.sh; install
-      # here so CI runs the same gate. --locked pins to Cargo.lock.
       - run: cargo install cargo-llvm-cov --locked
-      # The Rust proto code (apps/scraper/src/proto/generated/) is
-      # gitignored and built from proto/ at deploy time. `cargo fmt
-      # --check` follows `pub mod generated;` from src/proto/mod.rs and
-      # errors if the file isn't there ("failed to resolve mod
-      # `generated`"), so the generator has to run before lint.
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}
@@ -405,18 +338,9 @@ jobs:
         with:
           python-version: ${{ needs.versions.outputs.python }}
           cache: pip
-      # libzbar is the C library behind pyzbar (used by the vision
-      # sidecar's local OCR pre-pass). pyzbar dlopens libzbar.so.0 via
-      # ctypes — without the system package, every barcode test in
-      # test_local_ocr.py silently returns None (local_isbn_scan's
-      # safety contract on ImportError). Locally provided by nix's
-      # `zbar` package; on Ubuntu CI runners it's `libzbar0`.
       - run: sudo apt-get update && sudo apt-get install -y libzbar0
       - working-directory: apps/vision
         run: pip install --require-hashes -r requirements-dev.lock
-      # apps/vision/app/proto/gen/ is gitignored; lint and tests both
-      # `from app.proto.gen.vision import ...`, which fails to resolve
-      # without first running the generator. Same shape as test-rust.
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}
@@ -438,11 +362,6 @@ jobs:
       - run: scripts/lint-proto.sh
 
   lint-actions:
-    # Issue #137 Phase 5: actionlint backfill across .github/workflows/*.yml +
-    # .github/actions/**/action.yml. Pinned to v1.7.4 (latest stable as of
-    # 2026-04). Bumping the pin is a one-line edit but should be paired with
-    # a fresh local re-run of `actionlint` in case the new version surfaces
-    # findings the previous one missed.
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
@@ -450,10 +369,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install actionlint
-        # Use the upstream-published install script. Pins to a specific
-        # version + the install dir so the binary lands at a predictable
-        # path on $GITHUB_PATH. The script verifies the SHA256 checksum
-        # against the release manifest.
         run: |
           mkdir -p "$HOME/.local/bin"
           bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/5db9d9cde2f3deb5035dea3e45f0a9fff2f29448/scripts/download-actionlint.bash) 1.7.4 "$HOME/.local/bin"
@@ -516,8 +431,6 @@ jobs:
           scripts/gen-ecto-proto.sh
           python3 scripts/gen_python_proto.py --language elixir
       - name: Install dbt-postgres, sqlfluff, and dbt-checkpoint
-        # dbt-checkpoint pinned by commit SHA (= tag v2.0.8) rather than the
-        # mutable tag, so the git dependency is immutable (Scorecard pinning).
         run: pip install dbt-postgres==1.10.2 sqlfluff==4.2.2 sqlfluff-templater-dbt==4.2.2 'git+https://github.com/dbt-checkpoint/dbt-checkpoint.git@ff0bdf428ef49ed6ba70185bc797c76d4ad5b56b'
       - name: Seed and test dbt staging layer
         env:
@@ -577,10 +490,6 @@ jobs:
       image: semgrep/semgrep
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # --error still fails the job on findings; --sarif writes results even
-      # then, and the upload (if: always()) registers a recognized SAST
-      # analysis per commit for OSSF Scorecard's SAST check. semgrep is green
-      # today, so the SARIF is empty and no alerts are created.
       - run: semgrep scan --config auto --error --sarif --output semgrep.sarif
       - name: Upload semgrep SARIF to code scanning
         if: always()
@@ -589,17 +498,8 @@ jobs:
           sarif_file: semgrep.sarif
           category: semgrep
 
-  # Fail if the hash-pinned vision lockfiles drift from their source
-  # requirements — e.g. a Dependabot bump to requirements.txt that wasn't
-  # followed by `just lock-vision`. Without this the Docker build would keep
-  # installing the stale locked versions, silently ignoring the update (and any
-  # security fix in it). Regenerates in python:3.14-slim with the same pinned
-  # pip-tools as the recipe, so output is byte-identical when in sync.
   vision-lock-drift:
     needs: changes
-    # Dependabot PRs are handled by dependabot-lock-autoregen.yml (which commits
-    # the regenerated lock back), so skip the hard-fail guard for them. Human
-    # PRs and pushes to main still fail closed on stale locks.
     if: ${{ needs.changes.outputs.vision_deps == 'true' && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -650,10 +550,6 @@ jobs:
           scan-ref: .
           severity: CRITICAL,HIGH
 
-  # E2E tests run in the deploy-preview job against the deployed stack
-  # (line ~552: "Run E2E against deployed stack"). No standalone E2E job —
-  # the tests need the full stack (Phoenix + vision on Modal + Neon DB).
-
   security-squawk:
     needs: changes
     if: needs.changes.outputs.migrations == 'true'
@@ -664,14 +560,8 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install squawk
-        # Pinned: matches the security-squawk job's 2.47.0 (verified against
-        # the Phase 2 fixtures). Bump both together.
         run: npm install -g squawk-cli@2.47.0
       - name: Lint changed migrations
-        # Exit 2 means squawk inspected nothing. This job only runs when the
-        # `changes` filter saw a migration touched, so "nothing to inspect" is
-        # a contradiction worth surfacing — annotate it instead of letting the
-        # step go green and read as approval (#337).
         run: |
           set +e
           scripts/security-squawk.sh origin/main
@@ -726,9 +616,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install grype and scan
         run: |
-          # Two-step install instead of curl | sh: download the installer from
-          # a pinned tag to a file, then execute it with an explicit grype
-          # version. No mutable remote script is piped straight into a shell.
           curl -sSfL -o /tmp/grype-install.sh \
             https://raw.githubusercontent.com/anchore/grype/v0.115.0/install.sh
           sh /tmp/grype-install.sh -b /usr/local/bin v0.115.0
@@ -767,25 +654,12 @@ jobs:
           dockle --exit-code 1 --exit-level WARN stacks-dockle-scraper
 
   migration-safety:
-    # Expand–contract enforcement. Runs only on pull_request events that
-    # touch Ecto migrations. Three gates in sequence:
-    #   1. squawk on the extracted SQL (ban-drop-column, renaming-column,
-    #      renaming-table, adding-required-field).
-    #   2. scripts/lint-migrations.sh — requires `@breaking_ok "<reason>"`
-    #      on destructive Ecto DSL ops (remove, rename, modify null: false).
-    #   3. scripts/check-schema-diff.sh — compares structure.sql BEFORE
-    #      (origin/main) and AFTER (this branch + migrations applied). A
-    #      destructive column/table/enum diff requires the `db-breaking` PR label.
     needs: [changes, versions]
     if: needs.changes.outputs.migrations == 'true' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
       postgres:
-        # config/dev.exs hardcodes `database: "stacks_dev"` and runtime.exs
-        # only reads DATABASE_URL in :prod, so the Postgres container name
-        # MUST match `stacks_dev` for `mix ecto.migrate` (MIX_ENV=dev) to
-        # connect. Do not change this without also changing dev.exs.
         image: pgvector/pgvector:pg${{ needs.versions.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
@@ -800,13 +674,8 @@ jobs:
           --health-retries 5
     env:
       MIX_ENV: dev
-      # runtime.exs raises unconditionally in non-test envs without these.
-      # Sourced from the same secrets deploy-preview uses — identical values
-      # mean the gate exercises the real config path without special casing.
       CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
       VISION_HMAC_SECRET: ${{ secrets.VISION_HMAC_SECRET }}
-      # Derived from the PR labels. `true` iff `db-breaking` is applied, which
-      # allows scripts/check-schema-diff.sh to pass on destructive diffs.
       DB_BREAKING_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'db-breaking') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -821,16 +690,10 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           github_token: ${{ github.token }}
-      # Pinned: 2.47.0 is the version verified locally against all Phase 2
-      # fixtures. Bump only after re-running test/platform/run_all.sh.
       - name: Install squawk
         run: npm install -g squawk-cli@2.47.0
 
-      # ── 1. Squawk — destructive SQL patterns ──────────────────────────────
       - name: squawk — destructive migration rules
-        # Exit 2 = nothing inspected. See the migration-lint job above: this
-        # job is gated on `migrations == true`, so a skip here means the gate
-        # and the path filter disagree. Annotate rather than pass silently.
         run: |
           set +e
           scripts/security-squawk.sh origin/main
@@ -842,7 +705,6 @@ jobs:
           fi
           exit "$rc"
 
-      # ── 2. @breaking_ok annotation on Ecto DSL destructive ops ────────────
       - name: lint-migrations — require @breaking_ok on destructive Ecto ops
         run: |
           changed="$(git diff --name-only --diff-filter=AM origin/main...HEAD \
@@ -860,16 +722,11 @@ jobs:
           # shellcheck disable=SC2086
           scripts/lint-migrations.sh ${changed}
 
-      # ── 3. Schema diff — BEFORE (origin/main) vs AFTER (HEAD + migrate) ───
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           otp-version: ${{ needs.versions.outputs.otp }}
           elixir-version: ${{ needs.versions.outputs.elixir }}
 
-      # `mix deps.get` must run BEFORE proto gen: gen-ecto-proto.sh shells
-      # into `mix run` to bootstrap proto.sync, which requires deps on disk.
-      # Proto artifacts are gitignored (apps/core/lib/stacks/gen/); without
-      # them `mix compile` fails during ecto.migrate below.
       - name: Install mix deps (HEAD)
         run: mix deps.get
       - name: Generate proto artifacts (HEAD)
@@ -878,23 +735,10 @@ jobs:
           python3 scripts/gen_python_proto.py --language elixir
 
       - name: Dump BEFORE and AFTER structure
-        # Swap the migrations/ dir between origin/main's state and HEAD's,
-        # running `mix ecto.migrate` + `mix ecto.dump` against each. Uses
-        # HEAD's compiled app and deps for both — migrations must be
-        # self-contained SQL-level DSL, per docs/agents/standards/migrations.md.
-        # If a migration imports an app module, this gate may silently
-        # produce the wrong diff (main's migration runs against HEAD's app
-        # shape). `lint-migrations.sh` / reviewer audit catches this class
-        # at the source; this gate does not detect it mechanically.
-        #
-        # `rm -rf` before each `git checkout <ref> -- dir` guarantees the
-        # working tree matches the ref exactly — handles additions, deletions,
-        # and squashing uniformly.
         run: |
           mkdir -p /tmp/schema
           MIG_DIR=apps/core/priv/repo/migrations
 
-          # BEFORE: migrations dir as it is on origin/main
           rm -rf "${MIG_DIR}"
           git checkout origin/main -- "${MIG_DIR}"
           mix ecto.drop || true
@@ -902,7 +746,6 @@ jobs:
           mix ecto.migrate
           mix ecto.dump --dump-path /tmp/schema/before.sql
 
-          # AFTER: migrations dir as it is on HEAD
           rm -rf "${MIG_DIR}"
           git checkout HEAD -- "${MIG_DIR}"
           mix ecto.drop || true
@@ -913,13 +756,6 @@ jobs:
       - name: check-schema-diff — destructive changes require db-breaking label
         run: scripts/check-schema-diff.sh /tmp/schema/before.sql /tmp/schema/after.sql
 
-  # Deterministic dashboard RENDER gate (ADR-021 / Epic #249). Evaluates every
-  # Grafana panel's real PromQL against a live VictoriaMetrics seeded with
-  # synthesized well-formed data — fails on any blank panel or malformed query.
-  # No app, no preview, no network beyond the local docker VM: deterministic and
-  # self-contained. The drift + label tests are structural (they never evaluate a
-  # query); this proves the panels actually render. Complements the preview
-  # emission smoke (real-data fidelity) in deploy-preview.
   dashboard-render-gate:
     runs-on: ubuntu-latest
     steps:
@@ -957,56 +793,22 @@ jobs:
       GUARDIAN_SECRET_KEY: ${{ secrets.GUARDIAN_SECRET_KEY }}
       BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
       SEARXNG_SECRET_KEY: ${{ secrets.SEARXNG_SECRET_KEY }}
-      # Real Resend email delivery on the preview is OFF by default (Bug 5,
-      # Issue #124). Without the `preview-real-email` PR label this resolves to
-      # an empty string, so deploy-stack.sh's `${RESEND_API_KEY:+...}` guard is a
-      # no-op: the preview keeps Swoosh.Adapters.Local (deterministic, no
-      # external send) and ordinary CI runs never touch Resend. Apply the
-      # `preview-real-email` label to opt a PR IN — the RESEND_API_KEY secret is
-      # then exported, deploy-stack.sh stages RESEND_API_KEY + EMAIL_PROVIDER=resend
-      # as Fly secrets, and Swoosh sends via Resend so real delivery is validated
-      # before merge. The key is never hardcoded; it comes from the secret store.
-      # Labeling alone does not re-trigger CI (the `pull_request` trigger only
-      # fires on opened/synchronize/reopened) — label, then push or re-run the
-      # workflow. See docs/deployment/FLY_SETUP.md § "Real email on a preview".
       RESEND_API_KEY: ${{ contains(github.event.pull_request.labels.*.name, 'preview-real-email') && secrets.RESEND_API_KEY || '' }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-      # Trigger CreateDbRoles migration against Neon preview branch — exercises
-      # role creation, grants, and revokes the same way prod will.
       STACKS_APP_DB_PASSWORD: ${{ secrets.STACKS_APP_DB_PASSWORD }}
       STACKS_DBT_DB_PASSWORD: ${{ secrets.STACKS_DBT_DB_PASSWORD }}
-      # (Retired ADR-021: the Fly managed-Prometheus + fly-metrics.net Grafana
-      # creds are gone. The preview VM emission smoke reaches the self-hosted
-      # VictoriaMetrics via `fly proxy` using FLY_API_TOKEN; the deterministic
-      # render-gate job needs no creds at all.)
       GITHUB_HEAD_REF: ${{ github.head_ref }}
     steps:
       - name: Derive PREVIEW_SUFFIX (run-unique preview names, Issue #170 C)
-        # "ci" + the LAST 6 digits of the run id. Run ids are ~11 digits and
-        # monotonically increasing across all of GitHub, so the last 6 only
-        # repeat for runs ~10^6 apart — never concurrently. Truncated (rather
-        # than the full id) because Fly's 30-char app-name cap leaves only 12
-        # chars for the "<branch>-<suffix>" component after the longest
-        # prefix (stacks-scraper-pr- / stacks-searxng-pr-, 18 chars); an
-        # 8-char suffix keeps 3 chars of branch for legibility. Local `just
-        # ci` runs never set PREVIEW_SUFFIX and keep the bare branch-derived
-        # names — this suffix is what stops a local cleanup deleting CI's
-        # Neon branch mid-run (and vice versa). Consumed by
-        # scripts/lib/preview-names.sh via deploy-stack.sh /
-        # cleanup-preview.sh and the Pin-Fly-hostname step below.
         run: |
           echo "PREVIEW_SUFFIX=ci${GITHUB_RUN_ID: -6}" >> "$GITHUB_ENV"
           echo "PREVIEW_SUFFIX=ci${GITHUB_RUN_ID: -6}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
-          # fetch-depth: 0 gives deploy-stack.sh enough git history to diff
-          # apps/core/priv/repo/seeds.exs against origin/main when deciding
-          # whether to run the per-preview seed step. Default depth=1 would
-          # leave origin/main unreachable.
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1023,8 +825,6 @@ jobs:
         with:
           version: 0.4.67
       - name: Alias fly -> flyctl
-        # fly.io's install.sh provided both `fly` and `flyctl`; setup-flyctl
-        # ships only `flyctl`, but deploy scripts invoke `fly`.
         run: |
           mkdir -p "$HOME/.local/bin"
           ln -sf "$(command -v flyctl)" "$HOME/.local/bin/fly"
@@ -1057,22 +857,12 @@ jobs:
       - name: Deploy preview stack + warm vision pipeline
         run: scripts/deploy-preview.sh 2>&1 | tee /tmp/deploy-preview-output.txt; exit "${PIPESTATUS[0]}"
       - name: Pin Fly hostname to IPv4 in /etc/hosts
-        # GitHub runners lack IPv6 connectivity to Fly's AAAA addresses
-        # (ENETUNREACH on 2a09:...). Playwright's apiRequestContext ignores
-        # NODE_OPTIONS=--dns-result-order=ipv4first, so pin the A record
-        # directly so every resolver (curl, Playwright, Node) returns IPv4.
         run: |
-          # Same shared derivation as deploy-stack.sh / cleanup-preview.sh —
-          # picks up PREVIEW_SUFFIX from GITHUB_ENV so the names match the
-          # ones the deploy step just created.
           source scripts/lib/preview-names.sh
           derive_preview_names "${GITHUB_HEAD_REF:-preview}"
           CORE_URL="https://${PREVIEW_CORE_APP}.fly.dev"
           HOST="${PREVIEW_CORE_APP}.fly.dev"
           NEON_BRANCH="${PREVIEW_NEON_BRANCH}"
-          # GRAFANA_URL is consumed by the main E2E step so dashboards.spec runs
-          # (renders live panels) INSIDE the suite instead of skipping on
-          # !GRAFANA_URL (Issue #269 workstream 2). Deterministic preview host.
           {
             echo "CORE_URL=${CORE_URL}"
             echo "NEON_BRANCH=${NEON_BRANCH}"
@@ -1087,12 +877,8 @@ jobs:
           echo "Pinned ${HOST} -> ${IPV4}"
           getent hosts "${HOST}"
       - name: Warm Fly machines and Neon database
-        # The only piped curl below feeds the login JSON response to python3
-        # for token extraction — nothing fetched is executed as code.
         # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
         run: |
-          # DNS is now pinned to IPv4 via /etc/hosts, no -4 needed.
-          # `_` is the bash convention for an intentionally unused loop variable.
           for _ in {1..20}; do
             curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 &
           done
@@ -1140,26 +926,9 @@ jobs:
             echo "::warning::login POST path never returned non-502 in warm-up — test-e2e.sh will re-warm and Playwright retries setup"
           fi
           sleep 2
-      # Pre-flight check: verify Open Library can resolve the ISBNs the upload
-      # suite depends on. If OL is down or rate-limiting when this deploy
-      # starts, the upload suite will fail with an unhelpful "title never
-      # enriched" timeout 6+ minutes later. Failing fast here saves CI time
-      # and gives the operator an actionable error.
       - name: Preflight — external resolver health
         run: bash scripts/preflight-resolver-health.sh
       - name: Wait for Grafana readiness (observability specs run in-suite)
-        # dashboards.spec now runs INSIDE the main E2E (GRAFANA_URL wired) instead
-        # of a separate post-drive step, so give the preview Grafana time to come
-        # up before the suite hits it (Issue #269 workstream 2), reducing render
-        # flakiness while the datasource settles. The core metrics pusher (15s
-        # interval) has already run several cycles by now; the observability
-        # specs' own retry budgets cover the remaining push→flush→query lag, so no
-        # VM-sample poll is needed here.
-        #
-        # Deliberately NON-fatal: blocking the whole suite on Grafana would turn a
-        # 6-spec observability gap into ~190 abandoned specs ("did not run") — the
-        # exact anti-goal of this issue. If Grafana is genuinely down, dashboards.spec
-        # fails IN the suite (surfaced, not silently skipped); the rest still run.
         run: |
           ok=0
           for _ in $(seq 1 20); do
@@ -1176,29 +945,7 @@ jobs:
             echo "Grafana reachable at ${GRAFANA_URL}"
           fi
       - name: Run E2E against deployed stack
-        # E2E_EXPECT_LIVE_METRICS=1: the preview has the self-hosted VictoriaMetrics
-        # wired and the core pusher delivering samples, so the transparency page's
-        # LIVE section must render real panels (ADR-021 / #255) — transparency.spec
-        # enforces it with a retry budget for push/flush/cache lag.
-        # E2E_EXPECT_FULL_SEEDS=1: the preview carries the full dev-fixture seed, so
-        # an insufficient-seed skip (assertSeedOrSkip) is a seed regression, not a
-        # reason to skip — turn it into a hard failure (#280 enforcement switch,
-        # wiring left to #269).
-        # E2E_EXPECT_RATE_LIMITING=1: the preview runs with rate_limiting_enabled,
-        # so rate-limit.spec must ASSERT the 429 rather than skip when it doesn't
-        # appear (#330 — the old `test.skip(!sawRateLimit, …)` skipped precisely
-        # when the :auth bucket was broken, and this is its only E2E proof).
-        # BASE_URL alone already implies this; set explicitly so the intent
-        # survives a future BASE_URL refactor.
-        # GRAFANA_URL: makes dashboards.spec render live panels in-suite instead of
-        # skipping on !GRAFANA_URL (#269 workstream 2).
         run: |
-          # Keep-alive: hold the single 512MB preview machine awake for the whole
-          # E2E window. auto_stop_machines=true naps the VM after ~a minute idle;
-          # a quiet gap between projects (e.g. the serial upload project's ramp)
-          # could otherwise let it sleep mid-run and abandon in-flight specs
-          # ("did not run", Issue #269 stability finding #3). Backgrounded, killed
-          # on exit — E2E-scoped, no effect on prod or the shared fly.core.toml.
           ( while true; do
               curl -sf --max-time 5 "${CORE_URL}/api/health" >/dev/null 2>&1 || true
               sleep 20
@@ -1209,19 +956,6 @@ jobs:
             E2E_EXPECT_RATE_LIMITING=1 \
             GRAFANA_URL="${GRAFANA_URL}" BASE_URL="${CORE_URL}" scripts/test-e2e.sh
       - name: Dashboard emission gate (preview VictoriaMetrics)
-        # Emission-fidelity layer (ADR-021 / #253/#256). After the E2E drive, the core
-        # app has pushed its PromEx metrics to the ephemeral preview VM
-        # (Core.PromEx.MetricsPusher). Prove the real data LANDED *per dashboard*: reach
-        # the 6PN-only VM via fly proxy and run scripts/dashboard-emission-gate.sh, which
-        # asserts every dashboard receives live data and every curated always-driven
-        # family is present (a stronger successor to the old "≥1 series total" smoke).
-        #
-        # Proxy to the VM's FLYCAST address, not `.internal`: the preview VM is a
-        # 6PN-only [[services]] app whose direct-instance `.internal:8428` is
-        # connection-refused; `.flycast` routes through fly-proxy and works.
-        #
-        # Gate policy: HARD-fail on a real missing-family (a push/emission gap). A proxy/
-        # connection failure is infra, not a metrics defect, so it warns and passes.
         if: ${{ !cancelled() }}
         run: |
           source scripts/lib/preview-names.sh
@@ -1246,12 +980,6 @@ jobs:
           set -e
           kill "$PROXY" 2>/dev/null || true
           exit $rc
-      # NOTE (Issue #269): the former "Grafana dashboards render (preview browser
-      # check)" step was removed. dashboards.spec.ts now runs INSIDE the main E2E
-      # (the "Run E2E against deployed stack" step exports GRAFANA_URL), so it is
-      # counted in the E2E summary as passed rather than skipped there and
-      # re-run redundantly here. The VM-side emission gate above still hard-checks
-      # per-dashboard metric families independently.
       - name: Smoke — circuit breakers
         if: always()
         run: |
@@ -1275,16 +1003,6 @@ jobs:
           fi
       - name: Security live — IDOR cross-user check
         if: always()
-        # Hard-fails on missing preconditions. Skipping a security check
-        # because the seed data didn't cooperate masks regressions: if a
-        # future code change accidentally allowed cross-user DELETE, this
-        # step would still report green. So:
-        #   * either auth login failing → seed/auth path broken (real issue)
-        #   * owner has zero placements anywhere → seed contract broken
-        # Both fail loudly so someone is forced to fix the test surface.
-        #
-        # curl output is piped to python3 purely to parse login/API JSON
-        # responses — nothing fetched from the network is executed as code.
         # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
         run: |
           U1="$(curl -sf "${CORE_URL}/api/auth/login" \

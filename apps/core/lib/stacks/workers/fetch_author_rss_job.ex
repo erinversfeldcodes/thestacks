@@ -101,10 +101,6 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
   @doc false
   @spec try_rfc2822(String.t()) :: DateTime.t() | nil
   def try_rfc2822(date_string) do
-    # RSS feeds use RFC 2822 dates which have 4-digit years. Timex's {RFC1123}
-    # matches this format (e.g. "Tue, 05 Mar 2013 23:25:19 +0200"), while
-    # {RFC822} expects 2-digit years. Try both {RFC1123} variants, then fall
-    # back to {RFC822} for legacy feeds.
     with {:error, _} <- try_timex_format(date_string, "{RFC1123}"),
          {:error, _} <- try_timex_format(date_string, "{RFC1123z}"),
          {:error, _} <- try_timex_format(date_string, "{RFC822}"),

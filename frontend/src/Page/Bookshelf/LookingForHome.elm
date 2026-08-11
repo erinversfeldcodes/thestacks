@@ -43,8 +43,6 @@ init maybeToken =
         cmd =
             case maybeToken of
                 Just token ->
-                    -- This page only needs the shelves; drop the response's
-                    -- visibility (added for the RSS gate on Page.Bookshelf).
                     Api.getBookshelf "looking_for_home" token (BooksLoaded << Result.map .shelves)
 
                 Nothing ->

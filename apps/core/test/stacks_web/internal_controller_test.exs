@@ -3,11 +3,6 @@ defmodule StacksWeb.InternalControllerTest do
 
   import Stacks.Factory
 
-  # Generates a valid X-Vision-Signature token for the test HMAC secret.
-  # Contract under test: "<unix_ts>.<HMAC-SHA256(secret, ts.METHOD.path)>" (hex, lowercase).
-  # This must stay in sync with InternalController.verify_hmac/2 — if the signing scheme
-  # changes in the controller, this helper must change too (and CI will catch the mismatch
-  # via the 401 responses in the auth tests below).
   defp test_signature do
     ts = System.os_time(:second) |> Integer.to_string()
     secret = Application.fetch_env!(:core, :vision_hmac_secret)
@@ -16,7 +11,6 @@ defmodule StacksWeb.InternalControllerTest do
     "#{ts}.#{sig}"
   end
 
-  # Generates a valid X-Internal-Token for the smoke endpoint (scraper HMAC scheme).
   defp test_internal_token do
     ts = System.os_time(:second) |> Integer.to_string()
     secret = Application.fetch_env!(:core, :scraper_hmac_secret)
@@ -27,7 +21,6 @@ defmodule StacksWeb.InternalControllerTest do
 
   describe "POST /api/internal/smoke/circuit_breakers" do
     test "returns 404 when smoke_tests_enabled is false (production default)", %{conn: conn} do
-      # smoke_tests_enabled defaults to false in test env — endpoint should be invisible.
       conn =
         conn
         |> put_req_header("content-type", "application/json")
@@ -64,10 +57,6 @@ defmodule StacksWeb.InternalControllerTest do
 
       assert json_response(conn, 401)
     end
-
-    # Full blow-and-recover integration is covered by scripts/smoke-circuit-breakers.sh
-    # (deploy-time check). Running it here would mutate global Application env for 30s
-    # while async tests in other modules are in flight.
   end
 
   describe "POST /api/internal/vision/associate" do
@@ -177,8 +166,6 @@ defmodule StacksWeb.InternalControllerTest do
     end
 
     test "valid HMAC + missing status (empty string) returns 200 without DB write", %{conn: conn} do
-      # Proto3 zero value: status field absent from payload → defaults to "" in
-      # handle_association/2. validate_callback/1 catches status: "" explicitly.
       conn =
         conn
         |> put_req_header("x-vision-signature", test_signature())
@@ -194,8 +181,6 @@ defmodule StacksWeb.InternalControllerTest do
     end
 
     test "valid HMAC + unknown status emits telemetry and returns 200", %{conn: conn} do
-      # Verifies the catch-all is observable — alerts fire when vision rolls back
-      # to a pre-enum wire format. See docs/runbooks/vision-service-rollback.md.
       test_pid = self()
 
       :telemetry.attach(

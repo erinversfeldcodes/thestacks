@@ -23,8 +23,6 @@ defmodule StacksWeb.Plugs.RouteGroup do
 
   @behaviour Plug
 
-  # Longest-prefix-first. Static prefixes are compared with String.starts_with?/2.
-  # Order matters: `/api/bookshelves/` must win over a hypothetical `/api/b` entry.
   @rules [
     {"/api/auth/", :auth},
     {"/api/catalogue", :catalogue},
@@ -57,7 +55,6 @@ defmodule StacksWeb.Plugs.RouteGroup do
     end)
   end
 
-  # Exact match for paths without a trailing slash, prefix match for those with.
   defp prefix_matches?(path, prefix) do
     if String.ends_with?(prefix, "/") do
       String.starts_with?(path, prefix)

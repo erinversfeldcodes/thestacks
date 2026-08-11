@@ -3,9 +3,6 @@ defmodule Stacks.FeedsTest do
   Tests for Stacks.Feeds context — Atom feed generation for public bookshelves.
   """
 
-  # async: false — these tests swap the GLOBAL :feed_cache_writer application-env
-  # seam (Application.put_env); running async lets the override leak into (and be
-  # reset under) concurrent tests that exercise the cache write path.
   use Core.DataCase, async: false
 
   import Ecto.Query
@@ -15,9 +12,6 @@ defmodule Stacks.FeedsTest do
   alias Stacks.Feeds
   alias Stacks.Feeds.FeedCacheEntry
 
-  # A cache writer that always fails, mirroring the `{:error, changeset}` shape
-  # `put_cache/3` returns on a real FK/constraint violation. Injected via the
-  # `:feed_cache_writer` application env seam.
   defp failing_writer do
     changeset =
       %FeedCacheEntry{}
@@ -79,18 +73,6 @@ defmodule Stacks.FeedsTest do
     end
 
     test "serves a feed for a public-visibility bookshelf" do
-      # ⛔ It did not. `resolve_platform_bookshelf/2` tested `visibility != "platform"`, an
-      # equality check where the ladder needs a comparison — so a bookshelf on the **most**
-      # shared tier (`public`) was refused its feed with `:not_public` while the *less* shared
-      # `platform` was served one. Exposure and function ran in opposite directions.
-      #
-      # The atom name is what hid it: `{:error, :not_public}` returned for the literally public
-      # case reads as correct in every call site and in both existing rejection tests above,
-      # which only ever covered `owner` and `group`. `public` was never tested.
-      #
-      # `Stacks.Visibility.audience_levels/0` is `owner < group < platform < public`, and
-      # `@valid_visibilities` is that whole list — so `public` is a reachable state for any
-      # bookshelf, not a hypothetical.
       user = insert(:user, display_name: "Ada")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
       author = insert(:author, name: "Donna Tartt")
@@ -112,14 +94,6 @@ defmodule Stacks.FeedsTest do
     end
 
     test "a PLATFORM bookshelf's feed is not served to an anonymous reader" do
-      # ⚠️ Owner ruling 2026-07-29: `platform` means "any authenticated platform user — NOT visible
-      # to logged-out" on the Audience ladder, so serving it anonymously contradicted the ladder the
-      # rest of the system enforces. The feed route sat in a wholly unauthenticated pipeline and
-      # handed a reader's shelf — titles, authors — to any anonymous client.
-      #
-      # `:not_found` rather than a forbidden-style error is deliberate and matches
-      # `GET /api/u/:handle` for a platform profile (#225): the ladder says the resource is
-      # *invisible*, and "exists but not for you" would leak that the shelf exists.
       user = insert(:user)
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
       _placement = insert(:placement, bookshelf: bookshelf, book: insert(:book))
@@ -128,9 +102,6 @@ defmodule Stacks.FeedsTest do
     end
 
     test "a PUBLIC bookshelf's feed IS served to an anonymous reader" do
-      # The other half of the same ruling, and the reason this is not simply "feeds need auth":
-      # `public` means "anyone with the link, signed in or not". A feed reader has no session, so
-      # requiring auth for `public` would make the feature pointless.
       user = insert(:user, display_name: "Ada")
       bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "public")
       book = insert(:book, title: "The Secret History")
@@ -172,13 +143,7 @@ defmodule Stacks.FeedsTest do
       assert String.contains?(xml, "&lt;")
     end
 
-    # A public Atom document is crawled and cached by RSS readers, so the owner's
-    # email must never appear anywhere in it (title/author/entries). These three
-    # tests pin the fallback ladder: display_name → handle → neutral label.
     test "never leaks the owner email in feed XML when display_name and handle are blank (#283)" do
-      # op.users.handle is NOT NULL (backfilled + app-assigned on every insert),
-      # so the only reachable "no name" shape is a blank handle — the defensive
-      # backstop the neutral label exists for.
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -247,8 +212,6 @@ defmodule Stacks.FeedsTest do
       assert String.contains?(xml, "The Secret History")
       assert is_binary(etag)
 
-      # The write failed, so no row was persisted — proving the render was
-      # served despite the cache miss-fill failing.
       assert [] = Repo.all(from fc in FeedCacheEntry, where: fc.bookshelf_id == ^bookshelf.id)
     end
   end
@@ -270,8 +233,6 @@ defmodule Stacks.FeedsTest do
     end
 
     test "persists email-free cache XML for a nil-display-name user (#283 self-heal)" do
-      # The migration busts pre-fix rows; regeneration must then refill the cache
-      # with email-free XML so a subsequent hit never re-serves the email.
       user =
         insert(:user,
           email: "owner-secret@example.com",
@@ -316,8 +277,6 @@ defmodule Stacks.FeedsTest do
 
   describe "put_cache/3" do
     test "returns {:error, %Ecto.Changeset{}} on an FK violation rather than raising" do
-      # A bookshelf_id with no matching op.bookshelves row violates the FK.
-      # The changeset must translate that into an error tuple, not a raise.
       assert {:error, %Ecto.Changeset{} = changeset} =
                Feeds.put_cache(Ecto.UUID.generate(), "<feed/>", "etag")
 
@@ -373,8 +332,6 @@ defmodule Stacks.FeedsTest do
     end
 
     test "carries the cover as an enclosure", %{user: user, library: library} do
-      # US-6.1 asks each entry to carry a cover thumbnail. It is what makes a feed
-      # browsable in a reader rather than a list of sentences.
       book =
         insert(:book,
           editions: [
@@ -393,8 +350,6 @@ defmodule Stacks.FeedsTest do
     end
 
     test "omits the enclosure rather than emitting an empty one", %{user: user, library: library} do
-      # Most seeded editions have no cover: 200 of 201 measured. An empty href would be
-      # invalid Atom and would render as a broken image in a reader.
       book = insert(:book, editions: [build(:primary_book_edition, cover_image_url: nil)])
       place(library, book)
 
@@ -407,10 +362,6 @@ defmodule Stacks.FeedsTest do
       user: user,
       library: library
     } do
-      # US-6.1 names two verbs: "Erin moved The Secret History to Library" **or**
-      # "Erin added Piranesi to the Reading Pile". Every entry used to say "added", so a
-      # move — the more interesting signal, and the one a follower wants — read as an
-      # acquisition.
       antilibrary = insert(:bookshelf, user: user, name: "antilibrary", visibility: "owner")
       book = insert(:book, title: "The Secret History")
       place(library, book)
@@ -440,8 +391,6 @@ defmodule Stacks.FeedsTest do
 
     test "a move onto a *different* shelf does not make this one say moved",
          %{user: user, library: library} do
-      # The history row must be scoped to this bookshelf. Without that scoping any book
-      # that had ever moved anywhere would read as "moved" on every shelf it sits on.
       other = insert(:bookshelf, user: user, name: "reading_pile", visibility: "owner")
       third = insert(:bookshelf, user: user, name: "wishlist", visibility: "owner")
       book = insert(:book)

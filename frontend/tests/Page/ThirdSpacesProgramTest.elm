@@ -29,10 +29,6 @@ suite =
         ]
 
 
-
--- PROGRAM TEST HARNESS
-
-
 thirdSpacesProgram : Maybe String -> ProgramDefinition () ThirdSpaces.Model ThirdSpaces.Msg (SimulatedEffect ThirdSpaces.Msg)
 thirdSpacesProgram maybeToken =
     ProgramTest.createElement
@@ -64,10 +60,6 @@ thirdSpacesInitEffects maybeToken =
                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                 , url = "/api/third-spaces"
                 , body = SimulatedEffect.Http.emptyBody
-
-                -- The real decoder, not a copy of it. A hand-mirrored trio used
-                -- to live here; a mirror agrees with its fixtures while both
-                -- drift away from the server (Issue #328).
                 , expect = SimulatedEffect.Http.expectJson ThirdSpaces.SpacesLoaded ThirdSpaces.thirdSpacesResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
@@ -80,10 +72,6 @@ thirdSpacesInitEffects maybeToken =
 startThirdSpaces : ProgramTest.ProgramTest ThirdSpaces.Model ThirdSpaces.Msg (SimulatedEffect ThirdSpaces.Msg)
 startThirdSpaces =
     ProgramTest.start () (thirdSpacesProgram (Just "test-token"))
-
-
-
--- JSON HELPERS
 
 
 sampleSpacesJson : String
@@ -130,10 +118,6 @@ eventJson id title =
         , ( "event_date", Encode.string "2026-04-15T18:00:00Z" )
         , ( "ends_at", Encode.string "2026-04-15T21:00:00Z" )
         ]
-
-
-
--- TESTS
 
 
 showsLoadingState : Test

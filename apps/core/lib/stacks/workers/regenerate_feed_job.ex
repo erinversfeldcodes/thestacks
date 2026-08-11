@@ -63,13 +63,10 @@ defmodule Stacks.Workers.RegenerateFeedJob do
           "RegenerateFeedJob: feed_cache write failed for user=#{user_id} bookshelf=#{bookshelf_name}: #{inspect(changeset.errors)}"
         )
 
-        # Filling the cache is the whole point of this job — surface the failure
-        # so Oban retries (max_attempts: 3) rather than dropping the update.
         {:error, "feed cache write failed"}
     end
   end
 
-  # Catch-all for unexpected args shape
   def perform(%Oban.Job{args: args}) do
     Logger.warning("RegenerateFeedJob: unexpected args shape: #{inspect(args)}")
     {:cancel, "invalid args"}

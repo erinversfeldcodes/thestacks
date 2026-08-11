@@ -40,7 +40,6 @@ test.describe("Privacy — block & unblock (live browser journey)", () => {
     page,
     request,
   }) => {
-    // ── AUTHOR (B) — API only ────────────────────────────────────────────
     const authorName = `E2E Author ${Math.floor(Math.random() * 1_000_000)}`;
     const author = await mintOrSkip(request, {
       email: uniqueEmail("e2e-block-author"),
@@ -48,9 +47,6 @@ test.describe("Privacy — block & unblock (live browser journey)", () => {
     });
     const authorAuth = author.token;
 
-    // A fresh user defaults to profile_visibility "owner" (most restrictive),
-    // so a "platform" post would be rejected by the visibility ceiling. Loosen
-    // the profile first so the post is visible to another signed-in reader.
     const loosen = await request.put("/api/settings/profile_visibility", {
       headers: { Authorization: `Bearer ${authorAuth}` },
       data: { profile_visibility: "platform" },
@@ -60,8 +56,6 @@ test.describe("Privacy — block & unblock (live browser journey)", () => {
     const postTitle = `Marginalia ${Math.floor(Math.random() * 1_000_000)}`;
     const postId = await createPublishedPost(request, authorAuth, postTitle);
 
-    // ── BLOCKER (A) — browser ────────────────────────────────────────────
-    // (helper presence already asserted by the first mint above.)
     const blocker = await mintOrSkip(request, {
       email: uniqueEmail("e2e-block-blocker"),
     });
@@ -69,47 +63,35 @@ test.describe("Privacy — block & unblock (live browser journey)", () => {
     await injectSession(page, blocker);
     await ensureBookOnLibrary(page);
 
-    // A can see B's post before blocking.
     await page.goto(`/blog/${postId}`);
     await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
     await expect(page.locator(".blog-post__title")).toHaveText(postTitle, {
       timeout: 10000,
     });
 
-    // ── Block from the ⋯ overflow menu ───────────────────────────────────
-    // The ⋯ trigger carries aria-label "Reader actions" (#202 polish); target
-    // it by role so the test tracks the accessible affordance.
     await page.getByRole("button", { name: "Reader actions" }).click();
 
-    // Menu action names the author: "Block <name>". Exact match so it can't
-    // collide with the modal's bare "Block" confirm button.
     await page
       .getByRole("button", { name: `Block ${authorName}`, exact: true })
       .click();
 
-    // Confirmation modal appears and NAMES the author (#203).
     const modal = page.getByTestId("block-user-modal");
     await expect(modal).toBeVisible();
     await expect(modal).toContainText(`Block ${authorName}?`);
 
-    // Confirm the block (modal's danger button, text "Block").
     await modal.getByRole("button", { name: "Block", exact: true }).click();
 
-    // On success the host re-fetches the post, which now resolves to :hidden
-    // (bidirectional block → 404) → the "no longer available" dead-end.
     await expect(page.getByText("This post is no longer available.")).toBeVisible({
       timeout: 10000,
     });
     await expect(page.locator(".blog-post__title")).toHaveCount(0);
 
-    // ── Unblock from Settings → Privacy → Blocked Users ──────────────────
     await page.goto("/settings/privacy");
     await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
 
     const blockedSection = page.getByTestId("blocked-users-section");
     await expect(blockedSection).toBeVisible({ timeout: 10000 });
 
-    // The blocked-users list names B.
     const blockedRow = blockedSection.locator(".blocked-user", {
       hasText: authorName,
     });
@@ -117,10 +99,8 @@ test.describe("Privacy — block & unblock (live browser journey)", () => {
 
     await blockedRow.getByRole("button", { name: "Unblock" }).click();
 
-    // The row is removed from the list on a successful unblock.
     await expect(blockedRow).toHaveCount(0, { timeout: 10000 });
 
-    // ── B's content reappears for A ──────────────────────────────────────
     await page.goto(`/blog/${postId}`);
     await expect(page.locator(".blog-post__title")).toHaveText(postTitle, {
       timeout: 10000,

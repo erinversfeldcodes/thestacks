@@ -2,16 +2,10 @@
 name = "Exclusive Books"
 type = "bookshop"
 country = "ZA"
-# Bare domain: www 301s to it, so every request through www costs two
-# round trips. Measured 2026-07-28.
 url = "https://exclusivebooks.co.za"
 has_physical_location = true
 currency = "ZAR"
 
-# ⚠️ DEAD for this store, and kept only because [selectors].price is still a
-# required field for the stores that have no product API at all. Exclusive Books
-# is Shopify, so it is looked up via /products/<isbn>.js instead — its storefront
-# search matches an ISBN in no field, and robots.txt disallows /search anyway.
 [search]
 method = "GET"
 path = "/search"

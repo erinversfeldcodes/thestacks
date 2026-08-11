@@ -8,9 +8,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
   alias Stacks.Workers.TriggerPriceScrapeJob
 
   setup do
-    # Start PricePipeline for tests (not started in test env via application.ex).
-    # Must use the default module name since the worker calls
-    # Broadway.push_messages(PricePipeline, ...).
     start_supervised!(Stacks.Enrichment.PricePipeline)
     :ok
   end
@@ -47,23 +44,15 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
 
   describe "perform/1 edition resolution" do
     test "skips without scraping when the ISBN matches no edition" do
-      # An ISBN names an edition, so with no edition row there is nothing to price.
-      # This must not reach the scraper at all — issuing an outbound request for a
-      # book we do not hold would spend a store's rate-limit budget for nothing.
       store = insert(:bookstore)
       MockScraperClient.put_response("9789999999999", store.scraper_module, {:error, :timeout})
 
       job = TriggerPriceScrapeJob.new(%{isbn: "9789999999999"})
 
-      # `:ok` is itself the discriminating assertion here: the store's mocked
-      # response for this ISBN is a :timeout, so had the job called out at all,
-      # every request would have failed and `evaluate_outcome/1` would have
-      # returned {:error, "all scrape requests failed"} instead.
       assert :ok = perform_job(TriggerPriceScrapeJob, job.changes.args)
     end
 
     test "prefers an explicitly supplied book_edition_id over resolving the ISBN" do
-      # The batch path already knows the edition; it should not pay for a lookup.
       edition = insert(:book_edition, isbn: "9780743273565")
       store = insert(:bookstore)
 
@@ -119,10 +108,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
     end
 
     test "a robots.txt block is not a failure", %{store: store} do
-      # The reason the outcome field exists. A disallowed path recurs on *every*
-      # attempt, and `ScraperClient` melts a fuse shared by all stores on any
-      # non-200 — so treating this as a failure would open the breaker for 15
-      # minutes and disable price scraping for every other shop, repeatedly.
       respond(store, "SCRAPE_OUTCOME_ROBOTS_BLOCKED", %{
         "detail" => "robots.txt disallows https://example.com/search?q=9780743273565"
       })
@@ -139,17 +124,12 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
         "detail" => "shop answered 429 for https://example.com/search?q=9780743273565"
       })
 
-      # With a single store, any {:error, _} interpretation would surface as
-      # {:error, "all scrape requests failed"} — :ok proves the outcome was
-      # interpreted as a determination.
       assert :ok = run_scrape()
     end
 
     test "a rate-limit records source-health success and does not retry", %{store: store} do
       respond(store, "SCRAPE_OUTCOME_RATE_LIMITED")
 
-      # Anything but a non-error return would put the job into Oban's retry
-      # loop — rate limiting recurs, so retrying it hammers the shop harder.
       refute match?({:error, _}, run_scrape())
 
       health =
@@ -163,9 +143,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
     end
 
     test "not stocked is a real answer, not a failure", %{store: store} do
-      # Shops stock whichever editions they stock. With per-edition pricing most
-      # (edition, store) pairs legitimately have no price, so if this counted as a
-      # failure the breaker would never close.
       respond(store, "SCRAPE_OUTCOME_NOT_STOCKED")
 
       assert :ok = run_scrape()
@@ -205,8 +182,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
 
     test "a response that cannot say what it concluded is treated as a failure",
          %{store: store} do
-      # Fail safe, not open: a missing outcome means an older scraper or a bug, and
-      # neither is evidence that nothing went wrong.
       MockScraperClient.put_response(
         "9780743273565",
         store.scraper_module,
@@ -232,9 +207,6 @@ defmodule Stacks.Workers.TriggerPriceScrapeJobTest do
 
   describe "circuit breaker propagation" do
     test "returns error when ScraperClient reports circuit open" do
-      # The `:scraper_fuse` is now owned by ScraperClient. The job no longer has
-      # its own fuse guard — it treats {:error, :circuit_open} from the client
-      # the same as any other scrape failure.
       _edition = insert(:book_edition, isbn: "9780743273565")
       store = insert(:bookstore)
 

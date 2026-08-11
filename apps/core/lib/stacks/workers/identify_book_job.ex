@@ -44,11 +44,7 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
   @max_attempts 3
 
-  # Slack above the calls an attempt is actually waiting on, for the DB writes,
-  # event emission and PubSub broadcast that bracket them.
   @attempt_slack_ms 30_000
-
-  # ── Retry schedule ────────────────────────────────────────────────────────
 
   @doc """
   Seconds to wait before the next attempt.
@@ -109,17 +105,10 @@ defmodule Stacks.Workers.IdentifyBookJob do
     @max_attempts * attempt_timeout_ms() + backoff_ms
   end
 
-  # ── Entry point ───────────────────────────────────────────────────────────
-
-  # One head, so that args matching NO dispatch clause is a value this module
-  # decides about rather than a FunctionClauseError raised before the guarantee
-  # is in scope.
   @impl Oban.Worker
   def perform(%Oban.Job{args: args} = job) do
     with_terminal_guarantee(job, Map.get(args, "image_id"), fn -> dispatch(job) end)
   end
-
-  # ── New path: storage_key ─────────────────────────────────────────────────
 
   defp dispatch(%Oban.Job{
          args:
@@ -149,8 +138,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # ── Legacy path: image_b64 (backwards compat for in-flight jobs) ──────────
-
   defp dispatch(%Oban.Job{
          args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64} = args
        }) do
@@ -170,9 +157,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     run_pipeline(context, image_id)
   end
 
-  # Args that name neither an image source nor (possibly) an image at all. A
-  # retry would present the identical args, so this cancels immediately; the
-  # wrapper still marks the row, when there is a row to mark.
   defp dispatch(%Oban.Job{args: args}) do
     Logger.error(
       "IdentifyBookJob: job args match no dispatch clause " <>
@@ -182,10 +166,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     {:cancel, "malformed job args"}
   end
 
-  # Carries the cumulative rejected-books list from the args map into the
-  # moderation context. Missing or non-list values are normalised to an
-  # empty list so downstream callers can `Map.get(context, :excluded_books, [])`
-  # without worrying about shape.
   defp put_excluded_books(context, args) do
     case Map.get(args, "excluded_books") do
       list when is_list(list) -> Map.put(context, :excluded_books, list)
@@ -193,12 +173,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # Carries the cumulative rejected-ISBNs list from the args map into the
-  # moderation context. The resolver layer consumes this to skip OL/GB
-  # search hits whose ISBN matches a previously-rejected book, preventing
-  # a slightly-different VLM title variant from collapsing back to the
-  # same wrong ISBN on every retry. Distinct from `excluded_books` (which
-  # is VLM-bound for the extract prompt) — this list is Elixir-side only.
   defp put_excluded_isbns(context, args) do
     case Map.get(args, "excluded_isbns") do
       list when is_list(list) -> Map.put(context, :excluded_isbns, list)
@@ -206,27 +180,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # ── The terminal guarantee ────────────────────────────────────────────────
-
-  # Runs the job body and, if this attempt is the job's last, ensures the image
-  # row is left in a terminal state before the result escapes.
-  #
-  # Only the wrapper writes rejections. The body says WHAT happened
-  # (`{:reject, token, message}` for a determination, `{:error, reason}` for a
-  # fault) and the wrapper decides whether that ends the job — because only the
-  # wrapper knows the attempt number, and "is this the last attempt" is exactly
-  # the fact the branch sites kept not having.
-  #
-  # Raises are caught, marked, and re-raised rather than converted to
-  # `{:error, exception}`: Oban records the kind, reason and stacktrace of a
-  # raised error, and flattening it into a return value threw that away. The row
-  # is terminal either way; this way the operator can also see why.
-  #
-  # What this cannot cover: the BEAM losing the node, or an operator killing the
-  # machine mid-attempt. Nothing in-process can. Those leave the job `executing`
-  # rather than the row silently abandoned, and Oban's stager returns an orphaned
-  # executing job to `available`, so the next run re-enters this wrapper. The row
-  # is terminal a retry later, not never — which is the difference that matters.
   defp with_terminal_guarantee(job, image_id, body) do
     case run_bounded(body) do
       {:returned, result} ->
@@ -251,20 +204,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # Runs the body under `attempt_timeout_ms/0`, in a task, so that "this attempt
-  # took too long" is a value rather than a dead process.
-  #
-  # The task catches everything itself and reports it as data. That is not
-  # belt-and-braces: `Task.async/1` links, so a task that genuinely crashed
-  # would send an exit signal to this process and kill it before `Task.yield/2`
-  # could return — turning a catchable raise into an uncatchable one, which is
-  # the failure mode we are here to remove. Nothing may escape the task except
-  # by being returned.
-  #
-  # Logger metadata is copied across because it is process-local: Oban sets the
-  # job's id and queue on the executing process, and without this every log line
-  # the pipeline writes would lose the job it belongs to — a silent cost of
-  # moving the work one process sideways.
   defp run_bounded(body) do
     metadata = Logger.metadata()
 
@@ -285,9 +224,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # Translates the body's vocabulary into Oban's, marking the row on the way
-  # through. Written without a catch-all: a new body outcome must be classified
-  # here, and the compiler says so.
   defp finalise(_job, _image_id, :ok), do: :ok
 
   defp finalise(_job, image_id, {:reject, token, message}) do
@@ -295,10 +231,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     {:cancel, message}
   end
 
-  # A cancel decided outside the pipeline (malformed args). There is no
-  # determination token to carry, so the row records the generic one — and
-  # `image_id` may itself be missing, which is one of the ways args get
-  # malformed.
   defp finalise(_job, nil, {:cancel, message}), do: {:cancel, message}
 
   defp finalise(_job, image_id, {:cancel, message}) do
@@ -322,10 +254,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
   defp final_attempt?(%Oban.Job{attempt: attempt, max_attempts: max_attempts}),
     do: attempt >= max_attempts
 
-  # A failure that came from the vision service names its own reader-facing
-  # token; anything else (a storage presign failure, a raised exception, a
-  # reason a test double invented) is a fault we cannot describe more precisely
-  # than "we could not process this".
   defp rejection_token(reason) do
     if VisionError.vision_error?(reason) do
       VisionError.reason_token(reason)
@@ -333,8 +261,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
       "processing_failed"
     end
   end
-
-  # ── Pipeline ──────────────────────────────────────────────────────────────
 
   defp run_pipeline(context, image_id) do
     Stacks.Telemetry.phase(:identify_book, %{upload_id: image_id}, fn ->
@@ -367,14 +293,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # The retry decision, made from the failure's KIND rather than its shape.
-  #
-  # A deterministic vision error is a conclusion about these bytes: the service
-  # has already looked and told us it cannot read them. Sending them again buys
-  # nothing and costs the reader the full backoff schedule, so it cancels on the
-  # first attempt. Everything else may succeed next time and is returned as an
-  # error for Oban to retry — with the wrapper above guaranteeing that "next
-  # time" eventually runs out into a terminal row rather than into silence.
   defp classify_failure(reason) do
     if VisionError.vision_error?(reason) and
          VisionError.determination(reason) == :deterministic do
@@ -384,13 +302,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # Emits one `image.rejected` event per failed candidate from a
-  # multi-book partial-resolve. The aggregate_id stays the same `image_id`
-  # so the events tie back to the upload — observability tools can group
-  # by aggregate to reconstruct the per-image outcome (1+ resolved + N
-  # rejected). The image's row stays `resolved` because at least one
-  # candidate succeeded; that's the all-or-nothing rejection contract at
-  # the upload level.
   defp emit_partial_rejections(_image_id, []), do: :ok
 
   defp emit_partial_rejections(image_id, rejected) when is_list(rejected) do
@@ -411,10 +322,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
   defp primary_isbn(_book), do: "unknown"
 
   defp mark_resolved(image_id, book_ids) when is_list(book_ids) do
-    # Scope the update to rows still in `pending` so Oban retries that re-enter
-    # this path after a successful run do not re-touch the row and double-emit
-    # the [:stacks, :upload, :terminal] telemetry event. Only a real
-    # pending -> resolved transition fires the counter.
     query = from(i in UploadedImage, where: i.id == ^image_id and i.status == "pending")
 
     {count, _} =
@@ -457,8 +364,5 @@ defmodule Stacks.Workers.IdentifyBookJob do
       Logger.error("IdentifyBookJob: failed to resolve image #{image_id}: #{inspect(error)}")
   end
 
-  # Rejection machinery lives in `Stacks.Uploads.reject_image/2` (terminal row
-  # state + telemetry + SSE PubSub + image.rejected event) so the commit-time
-  # undersized-object gate and this pipeline share one observable path.
   defp mark_rejected(image_id, reason), do: Stacks.Uploads.reject_image(image_id, reason)
 end

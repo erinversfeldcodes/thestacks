@@ -39,7 +39,6 @@ defmodule Stacks.AI.VisionTimeoutTest do
   `async: false` — the export assertions read global PromEx state.
   """
 
-  # async: false — PromEx aggregator state is global.
   use ExUnit.Case, async: false
 
   alias Core.PromEx.MetricAudience
@@ -50,9 +49,6 @@ defmodule Stacks.AI.VisionTimeoutTest do
   @family "stacks_vision_request_exception_count_total"
   @event [:stacks, :vision, :request, :exception]
 
-  # An endpoint value no production call site can produce (`endpoint_path/1`
-  # accepts exactly four names and raises otherwise), so a series matched below
-  # cannot have come from another suite emitting the same event.
   @isolating_endpoint "vision_timeout_test"
 
   describe "the client outlasts the service (the inversion this issue is)" do
@@ -80,9 +76,6 @@ defmodule Stacks.AI.VisionTimeoutTest do
                "function times out the platform still has to serialise an error and return it " <>
                "through its proxy. Equal deadlines make the losing side a race."
 
-      # Modal's 300s is mostly queue wait, and a slack of a second or two would
-      # leave the pair one slow error response away from re-inverting — the
-      # exact failure this suite exists to prevent, reintroduced quietly.
       assert slack >= 10_000,
              "#{slack}ms of slack over Modal's deadline is too thin to survive a slow error " <>
                "response; the derivation in Stacks.AI.Client uses 30s."
@@ -122,18 +115,11 @@ defmodule Stacks.AI.VisionTimeoutTest do
 
   describe "a give-up is countable (or the deadline above is unfalsifiable)" do
     test "reason_class/1 maps a real receive timeout to :timeout" do
-      # `Finch.TransportError` is what actually arrives: `Finch.HTTP1.Conn`
-      # builds a `%Mint.TransportError{reason: :timeout}` when `receive_timeout`
-      # elapses and then puts it through `Finch.Error.wrap/1`. Classifying only
-      # the inner Mint struct would have sent every real give-up to `:other` —
-      # the counter would exist, export, and never once say "timeout".
       assert VisionClient.reason_class(%Finch.TransportError{
                reason: :timeout,
                source: %Mint.TransportError{reason: :timeout}
              }) == :timeout
 
-      # The unwrapped form classifies identically, so a dependency bump that
-      # stops wrapping cannot silently blind the counter.
       assert VisionClient.reason_class(%Mint.TransportError{reason: :timeout}) == :timeout
     end
 
@@ -151,8 +137,6 @@ defmodule Stacks.AI.VisionTimeoutTest do
         %Finch.Error{reason: :connection_process_went_down},
         :malformed_response,
         {:unexpected, "tuple"},
-        # The shape that matters most: an unbounded term carrying user content.
-        # It must classify, not pass through.
         %{image_url: "https://example.test/u/9780241543382.jpg"}
       ]
 
@@ -220,9 +204,6 @@ defmodule Stacks.AI.VisionTimeoutTest do
     end
 
     test "the open `reason` term is DROPPED, never exported as a label" do
-      # The event deliberately carries the raw failure for logs and for future
-      # consumers. The `:tags` whitelist is the only thing keeping it out of the
-      # metrics sink, so prove it with a term that would be a genuine leak.
       :telemetry.execute(
         @event,
         %{duration: 1},
@@ -261,15 +242,12 @@ defmodule Stacks.AI.VisionTimeoutTest do
   end
 
   defp scrape do
-    # Give PromEx's telemetry handler a moment to process the ETS writes.
     Process.sleep(50)
     output = PromEx.get_metrics(Core.PromEx)
     refute output == :prom_ex_down, "Core.PromEx must be running for this test"
     output
   end
 
-  # Every exported line of the counter family whose label block matches all of
-  # `pairs`, as {label_block, value} tuples.
   defp series(output, pairs) do
     for line <- String.split(output, "\n"),
         [_, block, value] <- Regex.scan(~r/^#{Regex.escape(@family)}\{([^}]*)\}\s+(\S+)$/, line),

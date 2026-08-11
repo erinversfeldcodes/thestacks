@@ -59,8 +59,6 @@ defmodule Stacks.Storage.Mock do
     :ok
   end
 
-  # ── Test helpers ──────────────────────────────────────────────────────────
-
   @doc "Retrieve stored data for a key. Returns `nil` if not present."
   @spec get(String.t()) :: binary() | nil
   def get(key) do
@@ -93,9 +91,6 @@ defmodule Stacks.Storage.Mock do
     :ok
   end
 
-  # Walks `$callers` for the same reason `Stacks.AI.MockClient` does: the worker
-  # runs its body in a Task, so the registration made in the test process has to
-  # be visible from a descendant.
   defp presign_error do
     case Process.get({__MODULE__, :presign_error}, :undefined) do
       :undefined -> find_presign_error_in_callers(Process.get(:"$callers", []))

@@ -128,9 +128,6 @@ update msg model maybeToken =
 
         SaveProfile ->
             if emailChanged model && String.isEmpty (String.trim model.currentPassword) then
-                -- Changing the email requires the current password; block the
-                -- save and surface an inline message rather than sending a
-                -- request the server would reject.
                 ( { model | currentPasswordError = Just "Please enter your current password to change your email." }
                 , Cmd.none
                 , NoOut
@@ -164,10 +161,6 @@ update msg model maybeToken =
             case result of
                 Ok normalisedHandle ->
                     let
-                        -- The 200 body echoes the server-normalised (lowercased)
-                        -- handle. An omitted-handle save (unchanged field) still
-                        -- echoes the real stored handle, so a session that
-                        -- rendered an empty field now settles on the true value.
                         settledHandle =
                             if normalisedHandle == "" then
                                 model.handle
@@ -175,9 +168,6 @@ update msg model maybeToken =
                             else
                                 normalisedHandle
                     in
-                    -- Reflect the settled handle in the field and rebaseline both
-                    -- the handle and email so a following untouched save omits
-                    -- them. Also clear the (now consumed) password field.
                     ( { model
                         | savingProfile = Success ()
                         , initialEmail = model.email
@@ -191,9 +181,6 @@ update msg model maybeToken =
                     )
 
                 Err err ->
-                    -- 401 no longer arrives as `ProfileRequestFailed`: `Api.authed`
-                    -- claims it before `resolveProfile` runs. A 422's field errors
-                    -- still land here, which is the point of keeping them distinct.
                     ( { model | savingProfile = Failure err }, Cmd.none, NoOut )
 
         SaveLocation ->
@@ -222,10 +209,6 @@ update msg model maybeToken =
                     ( { model | savingLocation = Failure err }, Cmd.none, NoOut )
 
         SessionExpiryDetected ->
-            -- Both saves route here. The model is left alone: the reader's typed
-            -- values (including a current password entered for an email change)
-            -- stay on screen while `Main` re-checks for a sibling tab's newer
-            -- token, and are only lost if that re-check confirms the expiry.
             ( model, Cmd.none, SessionExpired )
 
 

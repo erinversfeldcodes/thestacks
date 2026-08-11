@@ -8,9 +8,6 @@ defmodule StacksWeb.BookPriceControllerTest do
 
   describe "GET /api/books/:id/prices" do
     test "returns a price per (edition, store), keyed by edition", %{conn: conn} do
-      # Exclusive Books carries six ISBNs of The Name of the Rose at different
-      # prices. Exposing only the work would show one arbitrary price as though it
-      # were the price of the book.
       book = insert(:book)
       paperback = insert(:book_edition, book: book, isbn: "9780749397050")
       spanish = insert(:book_edition, book: book, isbn: "9788497592581", is_primary: false)
@@ -60,8 +57,6 @@ defmodule StacksWeb.BookPriceControllerTest do
 
   describe "lazy refresh on read" do
     setup do
-      # Enabled explicitly: it is off in :test so ordinary reads do not enqueue
-      # jobs every other test would have to account for.
       Application.put_env(:core, :lazy_price_refresh, true)
       on_exit(fn -> Application.put_env(:core, :lazy_price_refresh, false) end)
       :ok
@@ -80,7 +75,6 @@ defmodule StacksWeb.BookPriceControllerTest do
     end
 
     test "does not enqueue for an edition priced inside the TTL", %{conn: conn} do
-      # This is what makes reads cheap: a fresh price costs no outbound request.
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780749397050")])
       edition = hd(book.editions)
 
@@ -113,14 +107,8 @@ defmodule StacksWeb.BookPriceControllerTest do
     end
 
     test "caps the fan-out for a much-republished work", %{conn: conn} do
-      # Open Library reports 76 distinct ISBN-13s for The Name of the Rose. With
-      # eleven seeded stores, an uncapped fan-out turns one page view into ~800
-      # outbound requests against mostly one-person bookshops.
       book = insert(:book)
 
-      # The work's own primary edition is edition 1; these are the reprints.
-      # No `isbn:` — only distinctness matters here, and the factory's generated
-      # ISBNs satisfy `book_editions_isbn_ean13_checksum` (#335 D4).
       Enum.each(2..12, fn _i ->
         insert(:book_edition, book: book, is_primary: false)
       end)
@@ -132,7 +120,6 @@ defmodule StacksWeb.BookPriceControllerTest do
     end
 
     test "spends the first requests on the primary edition", %{conn: conn} do
-      # It is the edition the page leads with, so it is the one worth pricing first.
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9781600000119")])
       primary = hd(book.editions)
 
@@ -147,8 +134,6 @@ defmodule StacksWeb.BookPriceControllerTest do
     end
 
     test "repeated views do not pile up duplicate scrapes", %{conn: conn} do
-      # A popular book is viewed constantly. Without Oban's uniqueness this would
-      # enqueue one scrape per page view.
       book = insert(:book, editions: [build(:primary_book_edition, isbn: "9780749397050")])
 
       Enum.each(1..5, fn _ ->

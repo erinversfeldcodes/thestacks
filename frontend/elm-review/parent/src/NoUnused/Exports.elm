@@ -454,10 +454,6 @@ moduleVisitor config schema =
         |> Rule.withExpressionEnterVisitor (\node context -> ( [], expressionVisitor node context ))
 
 
-
--- CONTEXT
-
-
 type alias ProjectContext =
     { projectType : ProjectType
     , modules :
@@ -512,8 +508,6 @@ type alias ElementIdentifier =
 
 
 type alias Realm =
-    -- valueRealm for values
-    -- | typeRealm for types
     Int
 
 
@@ -808,10 +802,6 @@ registerAsUsed key moduleContext =
     { moduleContext | used = Set.insert key moduleContext.used }
 
 
-
--- ELM JSON VISITOR
-
-
 elmJsonVisitor : Maybe { a | project : Elm.Project.Project } -> ProjectContext -> ProjectContext
 elmJsonVisitor maybeProject projectContext =
     case maybeProject |> Maybe.map .project of
@@ -862,10 +852,6 @@ elmJsonVisitor maybeProject projectContext =
 
         Nothing ->
             { projectContext | projectType = IsApplication ElmApplication }
-
-
-
--- PROJECT EVALUATION
 
 
 finalEvaluationForProject : Maybe String -> ProjectContext -> List (Error { useErrorForModule : () })
@@ -1186,10 +1172,6 @@ untilEndOfVariable name range =
 
     else
         { range | end = { row = range.start.row, column = range.start.column + String.length name } }
-
-
-
--- IMPORT VISITOR
 
 
 importVisitor : Node Import -> ModuleContext -> ModuleContext
@@ -1804,10 +1786,6 @@ collectTypesFromTypeAnnotation moduleContext nodes acc =
 
                 _ ->
                     collectTypesFromTypeAnnotation moduleContext restOfNodes acc
-
-
-
--- EXPRESSION VISITOR
 
 
 expressionVisitor : Node Expression -> ModuleContext -> ModuleContext

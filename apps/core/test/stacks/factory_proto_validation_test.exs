@@ -24,8 +24,6 @@ defmodule Stacks.FactoryProtoValidationTest do
 
   alias Stacks.Factory
 
-  # Map of factory name → {schema module, optional nil fields}
-  # Skip fields must actually exist in the schema — phantom entries are caught.
   @factories %{
     user:
       {Stacks.Accounts.User,
@@ -60,9 +58,6 @@ defmodule Stacks.FactoryProtoValidationTest do
     source_health_check:
       {Stacks.Monitoring.SourceHealthCheck,
        ~w(last_success_at last_failure_at last_failure_reason)a},
-    # The exclusion fields are set only when a removal is requested or applied, and
-    # `exclusion_requested_at` distinguishes "asked for" from "done" — a factory that
-    # populated it would make every fixture look like a pending takedown.
     discovered_source:
       {Stacks.Enrichment.DiscoveredSource,
        ~w(confidence approved_at excluded_at exclusion_email exclusion_requested_at config_generated)a},
@@ -93,9 +88,6 @@ defmodule Stacks.FactoryProtoValidationTest do
           events_page_etag events_page_last_modified)a},
     price_snapshot: {Stacks.Enrichment.PriceSnapshot, ~w()a},
     bookstore_event: {Stacks.Enrichment.BookstoreEvent, ~w()a},
-    # `nearest_bookshop_km` is computed at geocode time, never fixture data: a factory
-    # that pre-populated it would make every seeded space look like it had already been
-    # paired with a bookshop, and the 500 m filter would pass for the wrong reason.
     third_space:
       {Stacks.Enrichment.ThirdSpace,
        ~w(instagram_url description discovered_via last_active_at opted_out_at
@@ -111,15 +103,7 @@ defmodule Stacks.FactoryProtoValidationTest do
     user_book_content_access: {Stacks.WritingAssistant.UserBookContentAccess, ~w()a},
     embedding: {Stacks.WritingAssistant.Embedding, ~w()a},
     book_content_chunk: {Stacks.WritingAssistant.BookContentChunk, ~w()a},
-    # started_at/finished_at are stamped by the job lifecycle (mark_running /
-    # finalize) — a factory setting them would make every fixture import look
-    # already-run.
     library_import: {Stacks.Imports.LibraryImport, ~w(started_at finished_at)a},
-    # The raw_* skips mirror a real Goodreads row: most cells are optional in
-    # the export (a row without a review, notes, or dates is the common case).
-    # outcome/reason are written only by GoodreadsImportJob as it processes —
-    # pre-populating them would make every fixture row look already-imported
-    # and get skipped by the job's idempotent-retry guard.
     library_import_row:
       {Stacks.Imports.LibraryImportRow,
        ~w(raw_isbn raw_review raw_notes raw_binding raw_date_read raw_date_added
@@ -130,30 +114,14 @@ defmodule Stacks.FactoryProtoValidationTest do
     post_syndication: {Stacks.Blog.PostSyndication, ~w(syndicated_url)a}
   }
 
-  # Schemas that are proto-generated but intentionally have no factory.
-  # EventLog: insert-only via Stacks.Events.emit/1, not ExMachina.
-  # Entry: insert-only via Stacks.Audit.log/1, not ExMachina.
-  # IsbnResolverCacheEntry / TitleSearchCacheEntry: write-through caches
-  # populated by Stacks.Books.BookCache during the identification pipeline.
-  # Tests that exercise the cache use the cache module directly; no fixture
-  # builder is needed.
-  # FeedCacheEntry (#264): write-through Atom-feed cache populated by
-  # Stacks.Feeds.regenerate/2 (RegenerateFeedJob) / filled on FeedController
-  # miss; feed tests exercise it via the Feeds module directly, no fixture.
   @excluded_schemas [
     Stacks.Events.EventLog,
     Stacks.Audit.Entry,
     Stacks.Books.IsbnResolverCacheEntry,
     Stacks.Books.TitleSearchCacheEntry,
     Stacks.Feeds.FeedCacheEntry,
-    # US-14.1.3: rows are only ever written through Stacks.Accounts.Invites
-    # (the code/hash pair must be generated together); invites_test builds
-    # them via Invites.issue/2, so a bare-struct factory would invite exactly
-    # the hashless shape production cannot produce.
     Stacks.Accounts.InviteCode
   ]
-
-  # ── Per-factory field coverage tests ──────────────────────────────────────
 
   for {factory_name, {schema_module, skip_fields}} <- @factories do
     @factory_name factory_name
@@ -164,13 +132,11 @@ defmodule Stacks.FactoryProtoValidationTest do
       struct = Factory.build(@factory_name)
       all_fields = @schema_module.__schema__(:fields)
 
-      # Validate skip list: every entry must be an actual schema field.
       invalid_skips = @skip_fields -- all_fields
 
       assert invalid_skips == [],
              "Skip list for :#{@factory_name} contains non-existent fields: #{inspect(invalid_skips)}"
 
-      # FK fields from belongs_to associations — set by ExMachina via build(:assoc).
       assoc_fk_fields =
         @schema_module.__schema__(:associations)
         |> Enum.map(&@schema_module.__schema__(:association, &1))
@@ -195,14 +161,10 @@ defmodule Stacks.FactoryProtoValidationTest do
     end
   end
 
-  # ── Schema discovery: every proto-generated schema has a factory ──────────
-
   test "all proto-generated schemas have a factory or are explicitly excluded" do
-    # All schema modules referenced by factories + excluded list
     covered =
       MapSet.new(Enum.map(@factories, fn {_, {mod, _}} -> mod end) ++ @excluded_schemas)
 
-    # Load the manifest to get all proto-generated schema modules
     manifest_path = Path.expand("../../../../proto/persisted.exs", __DIR__)
     {manifest, _} = Code.eval_file(manifest_path)
 

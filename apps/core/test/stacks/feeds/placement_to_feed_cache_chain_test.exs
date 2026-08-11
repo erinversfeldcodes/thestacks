@@ -19,7 +19,6 @@ defmodule Stacks.Feeds.PlacementToFeedCacheChainTest do
   dispatch that was the missing link.
   """
 
-  # async: false — drains real Oban queues.
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -30,8 +29,6 @@ defmodule Stacks.Feeds.PlacementToFeedCacheChainTest do
   alias Stacks.Events
   alias Stacks.Feeds.FeedCacheEntry
 
-  # Drains :events first (dispatch), then :default (the work the dispatch queued).
-  # Order matters: draining :default first would find nothing to do.
   defp drain_chain do
     events = Oban.drain_queue(queue: :events, with_recursion: true)
     default = Oban.drain_queue(queue: :default, with_recursion: true)
@@ -42,9 +39,6 @@ defmodule Stacks.Feeds.PlacementToFeedCacheChainTest do
     user = insert(:user, display_name: "Erin", profile_visibility: "platform")
     bookshelf = insert(:bookshelf, user: user, name: "library", visibility: "platform")
     book = insert(:book, title: "The Name of the Rose")
-    # `insert/2` writes the row directly, exactly as `seeds.exs` does with
-    # `insert_all` — so no event is emitted as a side effect and the test has to
-    # emit it explicitly, which is the behaviour under test.
     placement = insert(:placement, bookshelf: bookshelf, book: book, visibility: "platform")
 
     %{user: user, bookshelf: bookshelf, book: book, placement: placement}
@@ -83,9 +77,6 @@ defmodule Stacks.Feeds.PlacementToFeedCacheChainTest do
     end
 
     test "a placement written without an event produces nothing" do
-      # The precise state seeds.exs was in before this was fixed, and the reason
-      # `feed_cache` was empty everywhere: the rows existed, nothing announced
-      # them, so no amount of draining produced a feed.
       %{bookshelf: bookshelf} = setup_shelf()
 
       drain_chain()
@@ -96,9 +87,6 @@ defmodule Stacks.Feeds.PlacementToFeedCacheChainTest do
     end
 
     test "many placements on one bookshelf still yield exactly one cache row" do
-      # Seeds place up to 40 books on a single bookshelf. Each emits its own
-      # event; the cache is keyed by bookshelf, and RegenerateFeedJob dedups the
-      # pending duplicates, so the end state is one row regardless.
       %{bookshelf: bookshelf, user: user} = setup_shelf()
 
       for i <- 1..10 do
@@ -112,8 +100,6 @@ defmodule Stacks.Feeds.PlacementToFeedCacheChainTest do
       rows = Repo.all(from fc in FeedCacheEntry, where: fc.bookshelf_id == ^bookshelf.id)
       assert length(rows) == 1, "expected one cache row per bookshelf, got #{length(rows)}"
 
-      # And the surviving regeneration reflects the full shelf, not just whichever
-      # placement won the dedup — the property that makes collapsing safe.
       [row] = rows
       assert row.atom_xml =~ "Extra Book 10"
       refute is_nil(user.id)

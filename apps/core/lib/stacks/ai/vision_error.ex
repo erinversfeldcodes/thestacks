@@ -163,12 +163,6 @@ defmodule Stacks.AI.VisionError do
   @spec from_transport(term()) :: t()
   def from_transport(reason), do: emit(:transport, {:transport, reason})
 
-  # One clause per VisionErrorCode wire value. `scripts/check-enum-coverage.py`
-  # discovers this file as a consumer (it matches on the literals) and fails the
-  # build if the enum grows a value this function does not name — which is the
-  # point: a new deterministic failure mode must be given a reader-facing token
-  # here before it can ship, rather than defaulting into "something went wrong".
-  #
   # proto-enum-coverage: VisionErrorCode ignore VISION_ERROR_CODE_UNSPECIFIED —
   #   proto3 unset sentinel; a body carrying it named no determination, so it is
   #   handled as an unrecognised code (retryable + counted), not as a decision.
@@ -197,10 +191,6 @@ defmodule Stacks.AI.VisionError do
     emit(:unrecognised, {:upstream_status, status})
   end
 
-  # Funnel counter for vision failures. `code` is a whitelisted atom — never a
-  # message, URL, or anything else the service echoed back (GDPR: telemetry is a
-  # warehouse-adjacent sink). `determination` lets a dashboard show the split
-  # this module exists to create.
   defp emit(code, error) do
     :telemetry.execute(
       [:stacks, :vision, :error],
@@ -211,9 +201,6 @@ defmodule Stacks.AI.VisionError do
     error
   end
 
-  # The body is the JSON encoding of a `VisionError` message. A body that is not
-  # JSON, or is JSON without a string `code`, is not a determination — say so by
-  # returning :error rather than inventing one.
   defp decode_error_code(body) do
     case Jason.decode(body) do
       {:ok, %{"code" => code}} when is_binary(code) -> {:ok, code}

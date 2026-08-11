@@ -26,7 +26,6 @@ defmodule Stacks.Accounts.InvitesTest do
 
   defp gate_on, do: Application.put_env(:core, :invite_only_registration, true)
 
-  # One owner per platform (unique constraint) — find-or-insert.
   defp owner do
     Repo.get_by(Stacks.Accounts.User, role: "owner") || insert(:user, role: "owner")
   end
@@ -91,7 +90,6 @@ defmodule Stacks.Accounts.InvitesTest do
       assert reloaded.redeemed_by_id == user.id
       assert reloaded.redeemed_at
 
-      # …and the same code cannot admit a second account.
       assert {:error, :invite_exhausted} = register("b@example.test", code)
     end
 
@@ -111,17 +109,12 @@ defmodule Stacks.Accounts.InvitesTest do
     test "the E2E mint helper's bypass is an OPT, and attrs cannot reach it" do
       gate_on()
 
-      # The helper path (flag-gated, .test-only) skips the gate explicitly —
-      # this is the 2026-08-10 live failure: every mint-session 500'd because
-      # the gate refused it and the helper's `with` had no clause for that.
       assert {:ok, _} =
                Accounts.register(
                  %{"email" => "minted@thestacks.test", "password" => "long-enough-password"},
                  skip_invite_gate: true
                )
 
-      # The public path passes raw params as ATTRS — a params-shaped bypass
-      # must NOT open the gate (mass-assignment).
       assert {:error, :invite_required} =
                Accounts.register(%{
                  "email" => "sneaky@example.test",
@@ -154,18 +147,14 @@ defmodule Stacks.Accounts.InvitesTest do
       %{code: code, invite: invite} = issue!()
       {:ok, user} = register("reaped@example.test", code)
 
-      # Reap path (restore_invite: true): the invitee never got in — key back.
       assert {:ok, _} = Deletion.delete_user_data(user.id, restore_invite: true)
       reloaded = Repo.get!(InviteCode, invite.id)
       assert reloaded.use_count == 0
       assert reloaded.redeemed_at == nil
-      # Personal fields are scrubbed either way.
       assert reloaded.redeemed_by_id == nil
 
-      # The code is redeemable again.
       assert {:ok, _} = register("second-chance@example.test", code)
 
-      # User-requested path (opt omitted): the spent credential stays spent.
       %{code: code2, invite: invite2} = issue!(%{"note" => "Mara — book club"})
       {:ok, user2} = register("leaver@example.test", code2)
       assert {:ok, _} = Deletion.delete_user_data(user2.id)

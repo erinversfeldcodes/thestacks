@@ -41,8 +41,6 @@ from typing import Any
 
 import modal
 
-# Per-PR deploys override this via the MODAL_APP_NAME env var.
-# Local / production deploys use the default.
 MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "thestacks-vision")
 MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
 
@@ -175,39 +173,8 @@ def _build_extract_prompt(excluded_books: list[str] | None) -> str:
 @app.cls(
     gpu="A10G",
     image=image,
-    # A10G economics: 7B bf16 fits comfortably (~15 GB weights of the
-    # 24 GB VRAM); single-inference-per-container under HF Transformers
-    # (no continuous batching here — that was vLLM). Cold start ~60 s
-    # to load the 7B weights from the local image cache.
-    #
-    # Cap autoscaled containers at 10. Without @modal.concurrent we run
-    # one inference per container at a time, so this also caps in-flight
-    # GPU work at 10. Re-evaluate `max_containers` if monthly bill runs
-    # hotter than expected or if upload queue depth saturates the cap.
     max_containers=10,
-    # 300s allows for cold-start (~60s) + queue wait (up to 120s when
-    # concurrent jobs are serialised on a single A10G) + inference (~60s
-    # for long inputs).
-    #
-    # ⚠️ THIS NUMBER IS THE OWNER OF THE CALLER'S DEADLINE TOO (Issue #350).
-    # `Stacks.AI.Client` derives its Finch `receive_timeout` as this value plus
-    # 30s of transport slack, so that the client never hangs up on a call this
-    # service is still working on. It used to (210s against this 300s), and the
-    # cost was not a lost result but a multiplied one: core abandoned the call,
-    # classified the timeout as transient, and retried — queueing another
-    # cold start behind the same contended GPU while this container carried on
-    # paying for the first.
-    #
-    # Changing this value therefore moves an Elixir constant. `mix test` reads
-    # this decorator (`Stacks.AI.VisionTimeoutTest`) and fails when the two stop
-    # agreeing, so the mirror is checked rather than remembered — update
-    # `@modal_function_timeout_ms` in `apps/core/lib/stacks/ai/client.ex` in the
-    # same change.
     timeout=300,
-    # Keep the container alive for 20 minutes after the last request.
-    # Warmup runs at deploy time; E2E upload tests run ~15 minutes later (after
-    # all chromium tests complete). 20 min window ensures the GPU is still warm
-    # when upload tests start, avoiding a cold-start that would exceed the test timeout.
     scaledown_window=1200,
 )
 class VisionModel:
@@ -314,20 +281,10 @@ def _parse_json(text: str) -> dict[str, Any]:
     return {}
 
 
-# ── FastAPI vision service (ASGI) ─────────────────────────────────────────────
-# Hosts the FastAPI app on Modal's serverless infrastructure.
-# Elixir core calls this endpoint via HMAC-authenticated HTTPS. In local dev
-# the service runs at localhost:8000 via uvicorn.
-#
-# The Modal secret "thestacks-vision" must contain VISION_HMAC_SECRET.
-# Create or update with:
-#   modal secret create thestacks-vision VISION_HMAC_SECRET=<secret> [--force]
-
 _VISION_DIR = Path(__file__).parent
 
 _fastapi_image = (
     modal.Image.debian_slim(python_version="3.12")
-    # libzbar0 is required by pyzbar for barcode decoding (local OCR pre-pass).
     .apt_install("libzbar0")
     .pip_install(
         "fastapi==0.139.0",
@@ -338,9 +295,6 @@ _fastapi_image = (
         "pydantic-settings==2.7.1",
         "structlog==24.4.0",
         "modal>=0.73.0",
-        # Pillow + pyzbar enable the local OCR barcode pre-pass in app/services/local_ocr.py.
-        # Without these, barcode images fall through to the GPU model, which cannot
-        # reliably decode machine-readable barcodes and causes E2E test timeouts.
         "Pillow>=10.0.0",
         "pyzbar>=0.1.9",
     )
@@ -352,13 +306,8 @@ _fastapi_image = (
     image=_fastapi_image,
     secrets=[
         modal.Secret.from_name("thestacks-vision"),
-        # Bake the app name into the ASGI container so VisionClient can look up
-        # the correct GPU class. For ephemeral preview deploys the app name differs
-        # from the default "thestacks-vision", so we cannot hardcode it in the app.
         modal.Secret.from_dict({"MODAL_APP_NAME": MODAL_APP_NAME}),
     ],
-    # Keep the ASGI container alive long enough for all E2E tests to complete.
-    # ASGI apps handle concurrency natively — no @modal.concurrent needed.
     scaledown_window=1200,
 )
 @modal.asgi_app()

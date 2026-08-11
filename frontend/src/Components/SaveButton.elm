@@ -93,16 +93,11 @@ view : Config e msg -> Html msg
 view config =
     case config.state of
         Loading ->
-            -- Genuinely disabled, not merely dressed as it. `Settings.Consent`
-            -- wrote the `btn--disabled` class without the attribute, so its
-            -- in-flight button was still focusable and still announced as
-            -- enabled; it only failed to do anything because it had no handler.
             button
                 [ busyClass config.variant, disabled True ]
                 [ text config.busyLabel ]
 
         Success _ ->
-            -- Still clickable. See the module doc: this branch used to be inert.
             button
                 [ idleClass config.variant, onClick config.onSave ]
                 [ text config.savedLabel ]

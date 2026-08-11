@@ -8,7 +8,6 @@ whether Pydantic validators are generated.
 import sys
 from pathlib import Path
 
-# Add scripts/ to path so we can import the generator directly.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
@@ -98,7 +97,6 @@ def test_real_oneof_name_starting_with_underscore() -> None:
     msg = _make_msg(
         oneof_names=["_real_oneof"],
         fields=[
-            # No proto3Optional — this is a real oneof despite the _ prefix.
             _make_field("option_a", oneof_index=0),
             _make_field("option_b", oneof_index=0),
         ],

@@ -69,10 +69,6 @@ defmodule Stacks.Books.TitleSearchCache do
     "google_books" => :google_books
   }
 
-  # ---------------------------------------------------------------------------
-  # Public API
-  # ---------------------------------------------------------------------------
-
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
@@ -159,10 +155,6 @@ defmodule Stacks.Books.TitleSearchCache do
     :ok
   end
 
-  # Named rather than left to the catch-all on purpose. `:unavailable` is a
-  # value `search_by_title/4` returns in normal operation, so a reader of this
-  # module should be able to see the decision not to cache it, not infer it
-  # from the absence of a clause.
   def put(_title, _author, _raw_text, {:error, :unavailable}), do: :ok
 
   def put(_title, _author, _raw_text, _other), do: :ok
@@ -244,10 +236,6 @@ defmodule Stacks.Books.TitleSearchCache do
     ISBNResolverCache.await_pending_writes(timeout)
   end
 
-  # ---------------------------------------------------------------------------
-  # GenServer callbacks
-  # ---------------------------------------------------------------------------
-
   @impl true
   def init(_) do
     table = :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
@@ -266,10 +254,6 @@ defmodule Stacks.Books.TitleSearchCache do
     schedule_cleanup()
     {:noreply, state}
   end
-
-  # ---------------------------------------------------------------------------
-  # L1 — ETS helpers
-  # ---------------------------------------------------------------------------
 
   defp ets_get(key) do
     now = System.monotonic_time(:millisecond)
@@ -297,12 +281,6 @@ defmodule Stacks.Books.TitleSearchCache do
     ArgumentError -> :ok
   end
 
-  # Scan-and-delete L1 entries whose positive result matches the
-  # (already canonicalised) ISBN. The stored ISBN is canonicalised too —
-  # ISBN-10 memos must match ISBN-13 invalidations. Full table scan is
-  # acceptable: the table is bounded by distinct title-search inputs
-  # within the TTL window, and invalidation only runs on user-initiated
-  # rejections.
   defp ets_delete_by_isbn(canonical_isbn) do
     @table
     |> :ets.tab2list()
@@ -321,10 +299,6 @@ defmodule Stacks.Books.TitleSearchCache do
   rescue
     ArgumentError -> 0
   end
-
-  # ---------------------------------------------------------------------------
-  # L2 — Postgres helpers
-  # ---------------------------------------------------------------------------
 
   defp db_get(key) do
     if persistent_enabled?() do
@@ -355,12 +329,6 @@ defmodule Stacks.Books.TitleSearchCache do
       :miss
   end
 
-  # Asynchronous L2 upsert — same rationale as
-  # `Stacks.Books.ISBNResolverCache.db_put/3`. The upload hot path runs
-  # title-search on every non-ISBN candidate (up to 5 per image); paying
-  # DB latency on each was the symptom that motivated the L2 cache in the
-  # first place. ETS write stays synchronous so the caller's subsequent
-  # reads hit the warm local entry; the Postgres upsert is fire-and-forget.
   defp db_put(key, title, author, raw_text, result, ttl_ms) do
     if persistent_enabled?() do
       now = DateTime.utc_now()
@@ -420,12 +388,6 @@ defmodule Stacks.Books.TitleSearchCache do
       :ok
   end
 
-  # Delete L2 rows whose stored ISBN canonicalises to the (already
-  # canonicalised) target: fetch (id, isbn) for `outcome = 'found'` rows
-  # (the only ones carrying an ISBN; negative rows store ""), run
-  # `Stacks.Books.ISBN.canonical_isbn13/1` in Elixir rather than replicating the
-  # ISBN-10 → 13 conversion in SQL, then delete by id list. Best-effort,
-  # non-transactional — see `invalidate_by_isbn/1` doc for the rationale.
   defp db_delete_by_isbn(canonical_isbn) do
     if persistent_enabled?() do
       matching_ids =
@@ -459,21 +421,6 @@ defmodule Stacks.Books.TitleSearchCache do
       0
   end
 
-  # ---------------------------------------------------------------------------
-  # Key / normalisation
-  # ---------------------------------------------------------------------------
-
-  # Build the cache key.
-  #
-  # Algorithm: `normalise(title) <> "\x1f" <> normalise(author) <> "\x1f" <>
-  # normalise(raw_text)`, where `normalise/1` trims surrounding whitespace
-  # and lowercases. The `\x1f` (ASCII Unit Separator) is used as a field
-  # delimiter that cannot appear inside a normalised input.
-  #
-  # Mirrored in `proto/stacks/infra/v1/book_cache.proto` on
-  # `TitleSearchCacheEntry.cache_key`. This algorithm must NOT change
-  # without a coordinated migration — every existing persisted row would
-  # miss on lookup because the new key wouldn't match the stored digest.
   defp key_for(title, author, raw_text) do
     [title, author, raw_text]
     |> Enum.map_join("\x1f", &normalise/1)
@@ -487,10 +434,6 @@ defmodule Stacks.Books.TitleSearchCache do
     |> String.trim()
     |> String.downcase()
   end
-
-  # ---------------------------------------------------------------------------
-  # Serialization
-  # ---------------------------------------------------------------------------
 
   defp serialize({:ok, isbn, metadata}) when is_binary(isbn) and is_map(metadata) do
     {"found", isbn, serialize_metadata(metadata)}
@@ -539,10 +482,6 @@ defmodule Stacks.Books.TitleSearchCache do
 
   defp deserialize_value(_key, value), do: value
 
-  # ---------------------------------------------------------------------------
-  # Misc
-  # ---------------------------------------------------------------------------
-
   defp persistent_enabled? do
     Application.get_env(:core, :persistent_cache_enabled, true)
   end
@@ -555,11 +494,6 @@ defmodule Stacks.Books.TitleSearchCache do
     )
   end
 
-  # Emitted from inside the Task.Supervisor fn after the async DB upsert.
-  # `outcome` is `:stored` on success, `:error` on a rescued exception.
-  # Stacks.Telemetry.Reporter subscribes and writes a `cache_put ...` log
-  # line — this is the ONLY way async write failures surface, so the log
-  # line must be emitted on every terminal outcome.
   defp emit_put(outcome, cache_key) do
     :telemetry.execute(
       [:stacks, :books, :title_search_cache, :put],

@@ -43,7 +43,6 @@ defmodule Core.Repo.Migrations.AddOwnerFksToAuthSessionTables do
   @uuid_re "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 
   def up do
-    # ── op.auth_token_families.user_id ────────────────────────────────────
     execute("""
     DELETE FROM op.auth_token_families f
     WHERE NOT EXISTS (SELECT 1 FROM op.users u WHERE u.id = f.user_id)
@@ -55,7 +54,6 @@ defmodule Core.Repo.Migrations.AddOwnerFksToAuthSessionTables do
       FOREIGN KEY (user_id) REFERENCES op.users (id) ON DELETE CASCADE NOT VALID
     """)
 
-    # ── op.guardian_tokens.sub -> generated user_id ───────────────────────
     execute("""
     DELETE FROM op.guardian_tokens
     WHERE sub IS NOT NULL AND sub <> '' AND sub !~ '#{@uuid_re}'
@@ -79,9 +77,6 @@ defmodule Core.Repo.Migrations.AddOwnerFksToAuthSessionTables do
     """)
   end
 
-  # The generated column and both constraints are introduced by this migration,
-  # so `down` removes exactly what `up` added — `just db-rollback-check` replays
-  # the whole history in both directions.
   @breaking_ok "op.guardian_tokens.user_id is introduced by THIS migration's up/0; the down/0 drop removes only what it added, and nothing reads the column (it exists solely to carry the FK)."
 
   def down do

@@ -1,33 +1,7 @@
-// The Stacks — JS entry point
-// Compiled by esbuild with esbuild-plugin-elm
 import { Elm } from "../elm/src/Main.elm";
 
-// Import CSS so esbuild bundles it
 import "../css/main.css";
 
-// ---------------------------------------------------------------------------
-// Transparent client-side image compression before /api/upload
-//
-// Why: phone-camera uploads are typically 2–5 MB at 4000×3000. For book-
-// cover recognition (barcode scan or VLM classification) 1024px max side
-// at JPEG quality 0.85 is indistinguishable to the pipeline and ~20×
-// smaller. Cuts upload transit time from seconds to ~100 ms on typical
-// home upload bandwidth. Canvas re-encoding also strips EXIF (GPS, camera
-// metadata) as a side effect — no dedicated library needed, and uploads
-// no longer leak location.
-//
-// How: monkey-patch XMLHttpRequest. Elm's Http module uses XHR under the
-// hood; by intercepting at the transport layer we avoid touching any
-// Elm code. On any compression error we forward the original bytes so
-// the upload always succeeds. The patch is installed BEFORE Elm.init so
-// the very first upload is covered.
-//
-// Patched request path (send):
-//   1. If this is a POST to /api/upload with a FormData body carrying
-//      an image File → run compressImage → rebuild FormData with the
-//      compressed File → call origSend.
-//   2. Any non-matching request → forward unchanged.
-// ---------------------------------------------------------------------------
 (function () {
   var MAX_SIDE = 1024;
   var JPEG_QUALITY = 0.85;
@@ -47,8 +21,6 @@ import "../css/main.css";
             MAX_SIDE / Math.max(img.width, img.height)
           );
           if (scale >= 1) {
-            // Already within target size — skip re-encode to preserve
-            // original bytes (user might have carefully compressed).
             URL.revokeObjectURL(url);
             resolve(file);
             return;
@@ -89,9 +61,6 @@ import "../css/main.css";
   var origOpen = XMLHttpRequest.prototype.open;
   var origSend = XMLHttpRequest.prototype.send;
 
-  // Match either the legacy `POST /api/upload` flow (multipart body) or
-  // the new presigned flow's `PUT https://*.r2.cloudflarestorage.com/...`
-  // step, where the body is a raw File.
   function classifyUpload(method, url) {
     if (typeof method !== "string" || typeof url !== "string") return null;
     var m = method.toUpperCase();
@@ -109,7 +78,6 @@ import "../css/main.css";
   XMLHttpRequest.prototype.send = function (body) {
     var kind = this._stacksUploadKind;
 
-    // Legacy path: multipart body with an "image" field.
     if (
       kind === "legacy_post" &&
       body &&
@@ -136,11 +104,6 @@ import "../css/main.css";
       }
     }
 
-    // Presigned path: raw File body PUT directly to R2. Compress the
-    // File first, then hand it off so R2 receives the smaller payload.
-    // On any error, fall back to the original File to keep the upload
-    // working — compression is a perf optimization, not a correctness
-    // requirement.
     if (kind === "presigned_put" && body instanceof File) {
       var xhr2 = this;
       var originalArgs2 = arguments;
@@ -161,19 +124,6 @@ import "../css/main.css";
   };
 })();
 
-// Read stored auth from localStorage (passed as flags to Elm).
-//
-// ⛔ A failure here is REPORTED, not swallowed (Issue #360). This `catch` used to
-// be empty, so `localStorage` throwing (private browsing, storage disabled by
-// policy) and a blob that will not `JSON.parse` both left `storedAuth = null` —
-// which reaches Elm as flags with no auth fields, i.e. indistinguishable from a
-// reader who simply is not signed in. The app then signed them out in silence
-// and discarded the only artefact that explained why.
-//
-// These two are the failures Elm CANNOT see for itself: it never receives the
-// raw string. A blob that parses but has the wrong SHAPE is caught on the Elm
-// side by `Main.decodeFlags`. Between them the three outcomes of a boot —
-// nothing stored, something unreadable, a valid session — are all distinguished.
 var storedAuth = null;
 var storedAuthUnreadable = null;
 try {
@@ -185,14 +135,6 @@ try {
   storedAuthUnreadable = String((e && e.message) || e);
 }
 
-// Mount the Elm application IMMEDIATELY — no network round-trip may block first
-// paint. Flags carry the stored auth (top-level, as written to localStorage)
-// PLUS `ageGatingEnabled: false`, the fail-safe production default (all
-// age-gating UI hidden). The REAL flag value is fetched in the background right
-// after init (see below) and delivered to Elm over the `ageGatingConfig`
-// inbound port a beat later, so in test (flag on) the age UI reveals shortly
-// after boot without ever delaying render. All the port wiring below lives
-// inside `boot` because it needs the `app` handle returned by `Elm.Main.init`.
 function boot() {
   var flags = {};
   if (storedAuth && typeof storedAuth === "object") {
@@ -201,8 +143,6 @@ function boot() {
     });
   }
   if (storedAuthUnreadable !== null) {
-    // Read by `Main.decodeFlags` → `CorruptStoredAuth`, which surfaces a notice
-    // on the login card instead of leaving the reader to guess (#360).
     flags.storedAuthUnreadable = storedAuthUnreadable;
   }
   flags.ageGatingEnabled = false;
@@ -215,42 +155,24 @@ function boot() {
     flags: flags,
   });
 
-// ---------------------------------------------------------------------------
-// Port: Persist auth to localStorage on login
-// ---------------------------------------------------------------------------
 if (app.ports && app.ports.saveAuth) {
   app.ports.saveAuth.subscribe(function (authData) {
     try {
       localStorage.setItem("stacks-auth", JSON.stringify(authData));
     } catch (e) {
-      // localStorage may be full or unavailable
     }
   });
 }
 
-// ---------------------------------------------------------------------------
-// Port: Clear auth from localStorage on logout
-// ---------------------------------------------------------------------------
 if (app.ports && app.ports.clearAuth) {
   app.ports.clearAuth.subscribe(function () {
     try {
       localStorage.removeItem("stacks-auth");
     } catch (e) {
-      // Ignore
     }
   });
 }
 
-// ---------------------------------------------------------------------------
-// Onboarding completion (#395)
-// A SEPARATE localStorage key on purpose — NOT the `stacks-auth` blob. The blob
-// is rewritten from the server's value on every login and token renewal, so
-// storing completion there would be clobbered on the next renewal. This flag is
-// written when the reader finishes onboarding and read back on boot so the
-// overlay does not re-trigger on reload (Elm's `saveOnboardingCompleted` /
-// `onOnboardingStatus` ports were declared but never wired — the orphan #366
-// found). Written value is the string "true"; anything else reads as not-done.
-// ---------------------------------------------------------------------------
 var ONBOARDING_DONE_KEY = "stacks-onboarding-completed";
 
 if (app.ports && app.ports.saveOnboardingCompleted) {
@@ -258,14 +180,10 @@ if (app.ports && app.ports.saveOnboardingCompleted) {
     try {
       localStorage.setItem(ONBOARDING_DONE_KEY, "true");
     } catch (e) {
-      // localStorage may be full or unavailable — onboarding will re-show, but
-      // that is a soft failure, not a broken app.
     }
   });
 }
 
-// Read the stored flag on boot and hand it to Elm, so a reader who finished
-// onboarding in a prior session is not shown it again.
 if (app.ports && app.ports.onOnboardingStatus) {
   var onboardingDone = false;
   try {
@@ -276,14 +194,6 @@ if (app.ports && app.ports.onOnboardingStatus) {
   app.ports.onOnboardingStatus.send(onboardingDone);
 }
 
-// ---------------------------------------------------------------------------
-// Cross-tab token propagation (Issue #180 Phase 2)
-// The `storage` event fires in OTHER tabs of the same origin when this tab
-// writes `stacks-auth` (the writing tab never receives its own event, so there
-// is no feedback loop). `e.newValue` is the new JSON string (a sibling rotated
-// its token → adopt) or `null` (a sibling `clearAuth` → log out). The raw
-// string / null is handed to Elm, which decodes it via `adoptExternalAuth`.
-// ---------------------------------------------------------------------------
 if (app.ports && app.ports.authChanged) {
   window.addEventListener("storage", function (e) {
     if (e.key === "stacks-auth") {
@@ -292,20 +202,12 @@ if (app.ports && app.ports.authChanged) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Port: Re-check-before-logout net (Issue #180 Phase 2)
-// On request, read the CURRENT stored auth and hand the raw string (or null when
-// absent) back to Elm on `gotStoredAuth`. Elm reuses `adoptExternalAuth` to
-// decide whether a token another tab refreshed should be adopted instead of
-// logging out.
-// ---------------------------------------------------------------------------
 if (app.ports && app.ports.requestStoredAuth) {
   app.ports.requestStoredAuth.subscribe(function () {
     var current = null;
     try {
       current = localStorage.getItem("stacks-auth");
     } catch (e) {
-      // localStorage unavailable — treat as no stored auth
       current = null;
     }
     if (app.ports && app.ports.gotStoredAuth) {
@@ -314,11 +216,6 @@ if (app.ports && app.ports.requestStoredAuth) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Port: Persist an in-progress marketplace listing draft (Issue #182)
-// Mirrors the auth persistence above but under a separate key so a session
-// revocation mid-compose doesn't discard the user's work.
-// ---------------------------------------------------------------------------
 var LISTING_DRAFT_KEY = "stacks-listing-draft";
 
 if (app.ports && app.ports.saveListingDraft) {
@@ -326,7 +223,6 @@ if (app.ports && app.ports.saveListingDraft) {
     try {
       localStorage.setItem(LISTING_DRAFT_KEY, JSON.stringify(data));
     } catch (e) {
-      // localStorage may be full or unavailable
     }
   });
 }
@@ -336,13 +232,10 @@ if (app.ports && app.ports.clearListingDraft) {
     try {
       localStorage.removeItem(LISTING_DRAFT_KEY);
     } catch (e) {
-      // Ignore
     }
   });
 }
 
-// Read the stored draft on request and hand it back to Elm. Sends the parsed
-// value, or null when absent/corrupt (Elm treats a decode failure as "no draft").
 if (app.ports && app.ports.requestListingDraft) {
   app.ports.requestListingDraft.subscribe(function () {
     var draft = null;
@@ -352,7 +245,6 @@ if (app.ports && app.ports.requestListingDraft) {
         draft = JSON.parse(rawDraft);
       }
     } catch (e) {
-      // Corrupted localStorage data — treat as no draft
       draft = null;
     }
     if (app.ports && app.ports.gotListingDraft) {
@@ -361,9 +253,6 @@ if (app.ports && app.ports.requestListingDraft) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Port: Swipe gesture detection for bookshelf navigation (mobile)
-// ---------------------------------------------------------------------------
 (function (app) {
   var startX = 0;
   var startY = 0;
@@ -390,30 +279,6 @@ if (app.ports && app.ports.requestListingDraft) {
   );
 })(app);
 
-// ---------------------------------------------------------------------------
-// Port: WAAPI login dolly-shot transition (Issue #028)
-//
-// ⛔ This handler is DECORATION and nothing downstream of it may matter.
-//
-// It used to be load-bearing: `onLoginTransitionComplete` was the app's cue to
-// write the auth token to localStorage, and that cue was `Promise.all(...)` over
-// the WAAPI `finished` promises, inside a `requestAnimationFrame`. Neither fires
-// while the window is occluded or backgrounded — rAF is not throttled there, it
-// is not called at all — so the callback below never ran, the promise never
-// settled, and a login that had already returned 200 was silently discarded.
-// Driven live 2026-07-30: three logins, three 200s, nothing in localStorage, ten
-// frozen 300 ms transitions, zero WAAPI animations, no follow-up request (#359).
-//
-// Elm now persists the credential on the update that decodes the 200, so the
-// completion signal only retires a cosmetic state. Two rules keep it that way:
-//
-//   1. The signal fires EXACTLY ONCE, from whichever of the animations or the
-//      backstop timer gets there first — including the rejection path, because
-//      navigating away cancels these animations and `finished` then rejects.
-//   2. The backstop is armed OUTSIDE the frame callback. A timer in a background
-//      tab is throttled, not cancelled, and fires on wake; rAF is neither. Arming
-//      it inside would put it behind the very frame that never comes.
-// ---------------------------------------------------------------------------
 if (app.ports && app.ports.playLoginTransition) {
   app.ports.playLoginTransition.subscribe(function (config) {
     var dur = (config && config.duration) || 4000;
@@ -427,11 +292,6 @@ if (app.ports && app.ports.playLoginTransition) {
       }
     }
 
-    // Respect prefers-reduced-motion (#364). The dolly-shot is pure decoration
-    // and the credential is already durable, so a reader who asked for no motion
-    // gets none: settle immediately so Elm retires `Arriving` and the shell drops
-    // the door layers (which CSS also hides under the same query) without playing
-    // a single animation. Gating nothing means this path is safe too.
     if (
       window.matchMedia &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -440,8 +300,6 @@ if (app.ports && app.ports.playLoginTransition) {
       return;
     }
 
-    // Rule 2. Elm arms its own backstop as well; this one keeps the JS side from
-    // holding a promise nobody will ever settle.
     setTimeout(signalComplete, dur + 1000);
 
     requestAnimationFrame(function () {
@@ -596,8 +454,6 @@ if (app.ports && app.ports.playLoginTransition) {
         );
       }
 
-      // Nothing to animate — the login scene has already been unmounted by the
-      // navigation the 200 triggered. Settle now rather than wait out the timer.
       if (animations.length === 0) {
         signalComplete();
         return;
@@ -612,11 +468,6 @@ if (app.ports && app.ports.playLoginTransition) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Port: Upload SSE stream (Issue #159/#160)
-// Opens an EventSource to stream upload status from the backend.
-// JWT is passed as ?token= query param (browser EventSource cannot set headers).
-// ---------------------------------------------------------------------------
 if (app.ports && app.ports.openUploadStream) {
   app.ports.openUploadStream.subscribe(function (params) {
     if (window._uploadStream) {
@@ -638,15 +489,6 @@ if (app.ports && app.ports.openUploadStream) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Background server-config fetch (ADR-020). Runs AFTER Elm has already booted,
-// so it never blocks first paint. The config is unauthenticated
-// (`GET /api/config`) and currently carries a single flag, `ageGatingEnabled`.
-// The resolved boolean is delivered to Elm over the `ageGatingConfig` inbound
-// port. On ANY failure (network error, non-2xx, malformed JSON, or a missing
-// field) we send nothing — Elm keeps its fail-safe boot default (`false`,
-// age-gating UI hidden).
-// ---------------------------------------------------------------------------
 if (app.ports && app.ports.ageGatingConfig) {
   fetch("/api/config", { headers: { Accept: "application/json" } })
     .then(function (response) {
@@ -656,14 +498,11 @@ if (app.ports && app.ports.ageGatingConfig) {
       if (config) {
         app.ports.ageGatingConfig.send(Boolean(config.ageGatingEnabled));
         if (app.ports.inviteOnlyConfig && typeof config.inviteOnly === "boolean") {
-          // Sent only for a well-formed boolean — anything else keeps the
-          // fail-closed boot default (US-14.1.3).
           app.ports.inviteOnlyConfig.send(config.inviteOnly);
         }
       }
     })
     .catch(function () {
-      // Stay false — do nothing.
     });
 }
 
@@ -690,14 +529,6 @@ if (app.ports && app.ports.connectivityChanged) {
   sendConnectivity();
 }
 
-// ---------------------------------------------------------------------------
-// Port: clipboard write for the syndication panel (US-6.2.1)
-//
-// MUST answer on copyResult in BOTH directions — a swallowed rejection
-// produces a copy button that appears to work and does not, and the False
-// answer is what makes Elm's textarea fallback reachable. No Clipboard API
-// at all (http, ancient browser) is the same False, not a crash.
-// ---------------------------------------------------------------------------
 if (app.ports && app.ports.copyToClipboard) {
   app.ports.copyToClipboard.subscribe(function (text) {
     var answer = function (ok) {
@@ -721,5 +552,4 @@ if (app.ports && app.ports.copyToClipboard) {
 }
 }
 
-// Boot immediately — the server config arrives asynchronously (see boot()).
 boot();

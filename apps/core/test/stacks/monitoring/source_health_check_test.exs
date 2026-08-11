@@ -228,12 +228,9 @@ defmodule Stacks.Monitoring.SourceHealthCheckTest do
 
       [first, second] = Monitoring.list_source_health()
 
-      # Ordered by source_name ascending.
       assert first.name == "alpha-source"
       assert second.name == "zeta-source"
 
-      # Exact wire contract the frontend `getSourceHealth` decoder consumes:
-      # {name, source_type, status, consecutive_failures, last_success_at, last_failure_at}.
       assert Map.keys(first) |> Enum.sort() == [
                :consecutive_failures,
                :last_failure_at,
@@ -243,10 +240,8 @@ defmodule Stacks.Monitoring.SourceHealthCheckTest do
                :status
              ]
 
-      # Plain-string source_type/status (not proto enums).
       assert first.source_type == "scraper_config"
       assert first.status == "healthy"
-      # ISO8601-or-nil timestamps.
       assert is_binary(first.last_success_at)
       assert first.last_failure_at == nil
     end

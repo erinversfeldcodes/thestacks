@@ -101,13 +101,9 @@ defmodule Stacks.Enrichment.EventsPath do
   @spec resolve(Bookstore.t()) :: {:ok, String.t()} | {:error, term()}
   def resolve(%Bookstore{events_path: path} = store) when is_binary(path) and path != "" do
     if stale?(store) do
-      # Re-verify rather than trust indefinitely. `forget/1` only fires on a 404, so a path that
-      # starts answering 500 or redirecting to the homepage would otherwise be believed forever.
       Logger.info("EventsPath: re-verifying #{store.name || store.id}'s #{path} (stale)")
       verify(store, store.name || store.id, path)
     else
-      # Fresh and known: no network at all. Re-testing a working path on every run is the per-store
-      # per-run cost this module exists to remove.
       {:ok, path}
     end
   end
@@ -115,10 +111,6 @@ defmodule Stacks.Enrichment.EventsPath do
   def resolve(%Bookstore{} = store) do
     store_name = store.name || store.id
 
-    # ⚠️ A *negative* verdict is trusted for the same window as a positive one, and this is the half
-    # that matters for the shop. Without it, a bookshop with no events page pays for a fresh sitemap
-    # walk on every single run, forever — which is the opposite of the courtesy this whole path was
-    # built for. `events_path_checked_at` is what makes "we already asked" answerable.
     if stale?(store) do
       walk(store, store_name)
     else
@@ -131,8 +123,6 @@ defmodule Stacks.Enrichment.EventsPath do
     end
   end
 
-  # Never checked, or checked longer ago than the window. `nil` is stale by definition: it means we
-  # have not looked, which must never read as a fresh negative.
   defp stale?(%Bookstore{events_path_checked_at: nil}), do: true
 
   defp stale?(%Bookstore{events_path_checked_at: at}) do
@@ -141,15 +131,6 @@ defmodule Stacks.Enrichment.EventsPath do
 
   defp walk(store, store_name) do
     case client().sitemap_urls(store.scraper_module) do
-      # ⛔ `documents_fetched == 0` means we never successfully READ a sitemap — the shop declared one
-      # and it did not serve. Found by the first live run (2026-08-04): exclusivebooks.co.za declares
-      # `Sitemap:` three times and that sitemap answers **HTTP 500 with 0 bytes**. The harvest comes
-      # back `HARVESTED` with an empty `urls` and the failure in `skipped`, so without this clause the
-      # store was recorded as "no candidate matched among 0 listed page(s)" — i.e. as a shop with no
-      # events page, on the strength of a document we could not open.
-      #
-      # That is the exact conflation this module exists to prevent, and it survived every unit test
-      # because no fixture had a declared-but-unreadable sitemap. Only the live run had one.
       {:ok, %{documents_fetched: 0} = harvest} ->
         detail = harvest |> Map.get(:skipped, []) |> Enum.take(1) |> Enum.join("; ")
         unresolved(store, "could not read the shop's sitemap — could not look (#{detail})")
@@ -158,8 +139,6 @@ defmodule Stacks.Enrichment.EventsPath do
       {:ok, %{urls: urls, truncated: truncated}} ->
         resolve_from(store, store_name, urls, truncated)
 
-      # ⚠️ NOT "this shop has no events page". We were unable to look at all, and recording that as a
-      # resolved negative is the false negative this module is shaped to avoid.
       {:error, :no_sitemap_declared} ->
         unresolved(store, "no sitemap declared in robots.txt — could not look")
         {:error, :no_sitemap_declared}
@@ -181,20 +160,10 @@ defmodule Stacks.Enrichment.EventsPath do
   defp resolve_from(store, store_name, urls, truncated) do
     case best_candidate(urls) do
       nil when truncated ->
-        # No candidate AND an incomplete walk. The two together are not evidence of absence: the
-        # events page may well have been in the part we never read.
         unresolved(store, "no candidate in a truncated walk — budget ran out, retry later")
         {:error, {:no_candidate, urls}}
 
       nil ->
-        # A real, resolved negative: we read the shop's page list and it contains no events page.
-        # Recorded with a checked_at so it is re-checkable, not permanent.
-        #
-        # ⚠️ The harvested URLs travel WITH the negative. #382's live run proved these shops publish
-        # events as individual pages, so "no listing page" is where per-page classification starts —
-        # and the classifier reusing this walk's harvest is what keeps its cost at zero extra
-        # requests to the shop. Returning a bare atom here would force a second walk for the same
-        # answer.
         Logger.info(
           "EventsPath: #{store_name} lists #{length(urls)} page(s), none an events page"
         )
@@ -237,12 +206,7 @@ defmodule Stacks.Enrichment.EventsPath do
 
   defp depth(url), do: url |> String.split("/") |> length()
 
-  # One fetch, and only one. The candidate came from the shop's own list of pages, so it should
-  # exist; verifying is about confirming it is reachable and not a redirect stub, not about searching.
   defp verify(store, store_name, candidate) do
-    # Accepts either an absolute URL from a sitemap or an already-relative path from a re-verify —
-    # `path_of/1` is idempotent on a path, so one function serves both callers rather than the caller
-    # having to know which shape it holds.
     path = if String.starts_with?(candidate, "/"), do: candidate, else: path_of(candidate)
 
     case client().fetch_page(store.scraper_module, path) do
@@ -252,8 +216,6 @@ defmodule Stacks.Enrichment.EventsPath do
         {:ok, path}
 
       {:ok, %{status: status}} ->
-        # The shop listed a page in its own sitemap that does not serve. Its problem, not a fact about
-        # whether it holds events — so unresolved and re-checkable rather than a resolved negative.
         unresolved(store, "sitemap listed #{path} but it answered HTTP #{status}")
         {:error, :unverified}
 
@@ -261,9 +223,6 @@ defmodule Stacks.Enrichment.EventsPath do
         unresolved(store, "shop asked us to back off for #{retry_after}s during verification")
         {:error, {:rate_limited, retry_after}}
 
-      # Unlike the walk-level block, the disallowed path is known here — it is the candidate we just
-      # asked for — so this one is recorded as a real block on a real path. `Prices` stays the only
-      # writer of that trio; this is a caller of it, not a second writer.
       {:error, {:robots_blocked, rule}} ->
         Prices.record_robots_block(store, path, rule)
         unresolved(store, "robots.txt blocks #{path} (#{rule})")
@@ -308,8 +267,6 @@ defmodule Stacks.Enrichment.EventsPath do
   """
   @spec forget(Bookstore.t()) :: :ok
   def forget(%Bookstore{} = store) do
-    # The validators go with the path. Keeping them would send `If-None-Match` for a URL we are about
-    # to stop using, against a page that may not exist.
     stamp(store, events_page_etag: "", events_page_last_modified: "")
     unresolved(store, "previously resolved path stopped serving; will re-resolve")
   end
@@ -339,12 +296,6 @@ defmodule Stacks.Enrichment.EventsPath do
     stamp(store, events_path: nil, events_unresolved_reason: reason)
   end
 
-  # `events_path_checked_at` is stamped on EVERY outcome, success or not. It is what separates "we
-  # looked and found nothing" from "we have not looked", so writing a reason without it would leave
-  # exactly the ambiguity the reason exists to remove.
-  # Named `stamp`, not `update` — `import Ecto.Query` brings in `update/2`, and a private function of
-  # the same arity shadows it, so the `Repo.update_all` below fails to compile with a confusing
-  # "malformed update" from inside the macro.
   defp stamp(store, fields) do
     fields = Keyword.put(fields, :events_path_checked_at, DateTime.utc_now())
 

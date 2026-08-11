@@ -85,14 +85,10 @@ defmodule Stacks.DataCorrectionTest do
 
   @constraint "book_editions_isbn_ean13_checksum"
 
-  # The two rows the Wave 4 live drive found in production
-  # (`square-art-39019825`), verbatim.
   @prod_isbn10s [
     {"0071615695", "9780071615693", "Schaum's Outline of Complex Variables, 2ed"},
     {"0062028510", "9780062028518", "The Fury"}
   ]
-
-  # ── Helpers ───────────────────────────────────────────────────────────────
 
   defp constraint_definition do
     %{rows: [[definition]]} =
@@ -107,17 +103,11 @@ defmodule Stacks.DataCorrectionTest do
     Repo.query!("ALTER TABLE op.book_editions DROP CONSTRAINT #{@constraint}")
   end
 
-  # Re-adding validates against every existing row, which is precisely what
-  # `20260730200350`'s VALIDATE does.
   defp add_constraint!(definition) do
     Repo.query!("ALTER TABLE op.book_editions ADD CONSTRAINT #{@constraint} #{definition}")
   end
 
-  # Writes a row the current constraint forbids, the way a pre-2026-05-15
-  # write path did: no changeset, no normalisation.
   defp plant_legacy_edition!(isbn, id \\ nil) do
-    # `insert(:book)` builds its primary edition too (#329), and a work may hold
-    # only one primary — so the legacy row needs a work of its own.
     book = insert(:editionless_book)
     id = id || Ecto.UUID.generate()
 
@@ -149,8 +139,6 @@ defmodule Stacks.DataCorrectionTest do
     end)
   end
 
-  # ── The conversion itself ─────────────────────────────────────────────────
-
   describe "ISBN-10 to ISBN-13 conversion, against the real production values" do
     test "both production ISBN-10s convert to the expected ISBN-13" do
       for {isbn10, isbn13, _title} <- @prod_isbn10s do
@@ -180,12 +168,9 @@ defmodule Stacks.DataCorrectionTest do
     end
 
     test "a ten-digit string with a bad check digit is not claimed as convertible" do
-      # 0071615690 — same nine digits, wrong check digit.
       refute ISBN.valid_isbn_checksum?("0071615690")
     end
   end
-
-  # ── The acceptance test: the deploy failure, and its fix ──────────────────
 
   describe "the deploy that #339 aborted" do
     setup do
@@ -201,8 +186,6 @@ defmodule Stacks.DataCorrectionTest do
     end
 
     test "before the correction, validating the constraint fails on those rows", ctx do
-      # Nested in its own transaction so the check_violation rolls back to a
-      # savepoint and leaves the test's sandbox transaction usable.
       assert {:error, %Postgrex.Error{postgres: %{code: :check_violation}}} =
                Repo.transaction(fn ->
                  case Repo.query(
@@ -225,8 +208,6 @@ defmodule Stacks.DataCorrectionTest do
       end
     end
   end
-
-  # ── The mechanism's guarantees ────────────────────────────────────────────
 
   describe "dry-run is the default" do
     setup do
@@ -297,7 +278,6 @@ defmodule Stacks.DataCorrectionTest do
     end
 
     test "refuses a change that would collide with an existing edition", ctx do
-      # A second edition already owns the ISBN-13 the repair would produce.
       book = insert(:book)
       Repo.insert!(build(:book_edition, book: book, isbn: "9780071615693"))
 
@@ -306,7 +286,6 @@ defmodule Stacks.DataCorrectionTest do
 
       assert id == ctx.ids["0071615695"]
 
-      # Nothing was committed — including the other row's correction.
       assert isbn_of(ctx.ids["0071615695"]) == "0071615695"
       assert isbn_of(ctx.ids["0062028510"]) == "0062028510"
       assert audit_rows() == []
@@ -348,17 +327,6 @@ defmodule Stacks.DataCorrectionTest do
     end
   end
 
-  # ── The audit shares the change's transaction ─────────────────────────────
-
-  # Every other test here covers the direction where the CHANGE fails. This is
-  # the other one, and it is the one that matters: a change that cannot be
-  # RECORDED must not happen. An unexplained mutation is worse than an
-  # unrepaired row — the unrepaired row can at least still be described.
-  #
-  # One planted row, so the assertion can be exact: the failure must come back
-  # as `{:error, {that row's id, the audit's own error}}`. That shape is the
-  # property. A best-effort audit — one that logs the failure and carries on —
-  # cannot produce it.
   describe "a correction that cannot be recorded" do
     setup do
       definition = constraint_definition()
@@ -381,8 +349,6 @@ defmodule Stacks.DataCorrectionTest do
       assert audit_rows() == []
     end
   end
-
-  # ── The unrepairable rows ─────────────────────────────────────────────────
 
   describe "stale seed editions" do
     setup do
@@ -435,10 +401,6 @@ defmodule Stacks.DataCorrectionTest do
   end
 
   describe "a database that has not been migrated yet" do
-    # Corrections run BEFORE migrations, so bringing up a fresh environment
-    # calls them against a database with no tables. Renaming (not dropping) the
-    # table is the cheapest way to reach that state; the sandbox transaction
-    # puts it back.
     setup do
       Repo.query!("ALTER TABLE op.book_editions RENAME TO book_editions_absent")
       :ok
@@ -476,8 +438,6 @@ defmodule Stacks.DataCorrectionTest do
     end
   end
 
-  # ── The registry as the security boundary (#340) ──────────────────────────
-
   describe "Registry.fetch/1" do
     test "resolves a registered correction by its name" do
       assert {:ok, NormaliseEditionIsbn10} = Registry.fetch("normalise_edition_isbn10")
@@ -511,8 +471,6 @@ defmodule Stacks.DataCorrectionTest do
     end
   end
 
-  # ── The generalised writer (#340) ─────────────────────────────────────────
-
   describe "Column" do
     @isbn_target {"op.book_editions", "isbn"}
 
@@ -531,8 +489,6 @@ defmodule Stacks.DataCorrectionTest do
       add_constraint!(definition)
     end
 
-    # A backfill's `from` is NULL, and `column = NULL` is never true — so an
-    # `=` guard would silently refuse every row it was written to repair.
     test "a NULL old value is a value, not a missing one" do
       book = insert(:book)
       edition = Repo.insert!(build(:book_edition, book: book, publisher: nil))
@@ -545,9 +501,6 @@ defmodule Stacks.DataCorrectionTest do
       assert Repo.reload!(edition).publisher == "Vintage"
     end
 
-    # The 2026-08-10 release failure: corrections run BEFORE migrations, so on
-    # a fresh fork of an older database a correction whose COLUMN is newer than
-    # the branch must plan nothing — not abort the release with Postgrex 42703.
     test "a column the migrations have not added yet reads as nothing-to-correct" do
       assert Column.holding({"op.book_editions", "not_yet_migrated_column"}, "x") == []
     end
@@ -569,10 +522,6 @@ defmodule Stacks.DataCorrectionTest do
              )
     end
 
-    # The message matters as much as the exception: without the guard the table
-    # forms are quietly swallowed by `to_regclass` (returning `[]`, which reads
-    # like "nothing to correct") while the column form reaches SQL. Both are
-    # wrong, and only one of them looks wrong.
     test "refuses an identifier that is not a plain snake_case name" do
       for bad <- [
             {"op.book_editions; DROP TABLE op.users", "isbn"},
@@ -596,8 +545,6 @@ defmodule Stacks.DataCorrectionTest do
       assert Column.by_ids({"op.no_such_table", "isbn"}, [Ecto.UUID.generate()]) == %{}
     end
   end
-
-  # ── The next correction, which is not about ISBNs (#340 → #370) ───────────
 
   describe "a correction over a column that is not isbn" do
     setup do
@@ -658,9 +605,6 @@ defmodule Stacks.DataCorrectionTest do
     test "the write satisfies the column's CHECK constraint", ctx do
       DataCorrection.run(RelabelVerificationSource, apply: true, invoked_by: "test")
 
-      # Proof the constraint is live and would have rejected a made-up value —
-      # so the previous assertion is about the constraint accepting, not about
-      # there being no constraint to satisfy.
       assert {:error, %Postgrex.Error{postgres: %{code: :check_violation}}} =
                Repo.transaction(fn ->
                  case Repo.query(

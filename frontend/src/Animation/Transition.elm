@@ -35,7 +35,6 @@ transitionClass from to =
                 SlideTransition.slideInLeft
 
             else
-                -- Same bookshelf: there is no direction to travel in.
                 RoomTransition.fadeThroughDarkIn
 
         _ ->

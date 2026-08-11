@@ -18,7 +18,6 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
         map_proto_type(field.type, field.type_name)
       end
 
-    # Don't double-wrap: if the override already specifies {:array, _}, don't wrap again.
     if field.label == "LABEL_REPEATED" and not match?({:array, _}, base_type) do
       {:array, base_type}
     else
@@ -86,7 +85,6 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
     end
   end
 
-  # Scalar types
   defp map_proto_type("TYPE_STRING", _), do: :string
   defp map_proto_type("TYPE_INT32", _), do: :integer
   defp map_proto_type("TYPE_UINT32", _), do: :integer
@@ -103,7 +101,6 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   defp map_proto_type("TYPE_BOOL", _), do: :boolean
   defp map_proto_type("TYPE_BYTES", _), do: :binary
 
-  # Well-known types
   defp map_proto_type("TYPE_MESSAGE", "." <> type_name) do
     case type_name do
       "google.protobuf.Timestamp" ->
@@ -112,14 +109,11 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
       "google.protobuf.Struct" ->
         :map
 
-      # Non-WKT embedded messages: default to :map (JSONB).
-      # Use api_only: true or belongs_to in field_overrides for most cases.
       _other ->
         :map
     end
   end
 
-  # Enums are stored as strings in Postgres (text column)
   defp map_proto_type("TYPE_ENUM", _), do: :string
 
   defp map_proto_type(type, type_name) do
@@ -128,7 +122,6 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
     )
   end
 
-  # Migration-specific type mappings (differ from schema types)
   defp map_migration_type("TYPE_STRING", _), do: :text
   defp map_migration_type("TYPE_INT32", _), do: :integer
   defp map_migration_type("TYPE_UINT32", _), do: :integer

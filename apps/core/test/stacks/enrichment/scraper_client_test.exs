@@ -42,9 +42,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
 
     test "a rate-limited outcome without a cooldown still waits rather than defaulting to zero" do
-      # The sidecar always sets it, but a field read with `Map.get/2` and no default would return
-      # nil here and a caller doing arithmetic on it would crash — turning the shop's polite request
-      # into an exception on our side.
       assert {:error, {:rate_limited, 60}} =
                classify(%{"outcome" => "FETCH_OUTCOME_RATE_LIMITED", "status" => 0, "body" => ""})
     end
@@ -60,9 +57,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
 
     test "neither determination is classified as unexpected, which is what melts the fuse" do
-      # Stated as its own assertion because this — not the tuple shapes above — is the guarantee.
-      # An outcome the sidecar sends and this client does not recognise melts `:scraper_fuse`, so
-      # adding an outcome to the proto without adding a clause here makes it worse than silence.
       for outcome <- ["FETCH_OUTCOME_RATE_LIMITED", "FETCH_OUTCOME_ROBOTS_BLOCKED"] do
         refute match?(
                  {:unexpected, _},
@@ -81,12 +75,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
 
   describe "classify_fetch_body/2 — a 304 is unchanged, not empty" do
     test "a not-modified outcome never presents as a fetched empty page" do
-      # ⛔ **Found by a mutation probe that my own job-level test failed to catch.** That test stubbed
-      # the mock client with `not_modified: true` directly, so it never exercised this classification
-      # at all — rewriting a 304 into `%{status: 200, body: ""}` here left it green.
-      #
-      # This is the layer where the conflation is possible, so it is the layer that has to assert.
-      # `body: ""` would tell the events job the page went blank, i.e. every event was cancelled.
       assert {:ok, result} =
                classify(%{
                  "outcome" => "FETCH_OUTCOME_NOT_MODIFIED",
@@ -104,8 +92,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
 
     test "the validators come back so the next request can be conditional too" do
-      # An origin may rotate an ETag alongside a 304. Keeping the stale one silently makes every later
-      # request unconditional again — nothing fails, the saving just stops.
       assert {:ok, %{etag: "W/\"v2\"", last_modified: "Wed, 21 Oct 2026 07:28:00 GMT"}} =
                classify(%{
                  "outcome" => "FETCH_OUTCOME_NOT_MODIFIED",
@@ -131,9 +117,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
 
     test "an absent sitemaps key is an empty list, not a crash" do
-      # The sidecar omits the key entirely when robots.txt declared nothing — `skip_serializing_if`
-      # on the Rust struct — because an absent key means "nothing was declared" while `[]` would
-      # read as a positive claim that the shop has no index.
       assert {:ok, %{sitemaps: []}} =
                classify(%{
                  "outcome" => "FETCH_OUTCOME_FETCHED",
@@ -154,7 +137,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
 
     test "an upstream 404 is passed through as data, not an error" do
-      # Plenty of shops have no /events page. The fetch succeeded; the page does not exist.
       assert {:ok, %{status: 404}} =
                classify(%{
                  "outcome" => "FETCH_OUTCOME_FETCHED",
@@ -196,9 +178,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
 
     test "no declared sitemap is its own error, not an empty harvest" do
-      # ⚠️ The distinction this whole endpoint is shaped around. Returning `{:ok, %{urls: []}}` here
-      # would have a caller record the shop as having no events page on the strength of never
-      # having looked at one.
       assert {:error, :no_sitemap_declared} =
                classify_sitemap(%{"outcome" => "SITEMAP_OUTCOME_NO_SITEMAP_DECLARED"})
     end
@@ -212,8 +191,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
 
     test "absent repeated fields default rather than crashing" do
-      # The sidecar omits empty repeated fields (`skip_serializing_if`), so absence is the normal
-      # shape for a shop with nothing skipped — not a malformed response.
       assert {:ok, %{urls: [], skipped: [], truncated: false, bytes_read: 0}} =
                classify_sitemap(%{"outcome" => "SITEMAP_OUTCOME_HARVESTED"})
     end
@@ -261,8 +238,6 @@ defmodule Stacks.Enrichment.ScraperClientTest do
     end
 
     test "an unset outcome is not read as success" do
-      # proto3's zero value. Treating "unset" as FETCHED is the trap the FetchOutcome enum
-      # documents itself as existing to avoid.
       assert {:unexpected, _} =
                classify(%{
                  "outcome" => "FETCH_OUTCOME_UNSPECIFIED",

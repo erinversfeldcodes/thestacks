@@ -46,7 +46,6 @@ defmodule StacksWeb.MeInferenceControllerTest do
       bob_bs = insert(:bookshelf, user: bob)
       shelve(bob, bookshelf: bob_bs, subjects: ["gardening"])
 
-      # Bob calls the endpoint and even tries to smuggle Alice's id as a param.
       body =
         conn
         |> auth_conn(bob)

@@ -75,10 +75,6 @@ update msg model =
                     ( { model | listing = Failure err }, Cmd.none )
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--marketplace-detail" ]
@@ -239,10 +235,6 @@ viewContact listing =
 
         _ ->
             text ""
-
-
-
--- HELPERS
 
 
 statusCssClass : Types.Listing.ListingStatus -> String

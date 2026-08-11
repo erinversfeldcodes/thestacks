@@ -143,14 +143,12 @@ update msg model maybeToken =
                     in
                     case model.mode of
                         Edit postId ->
-                            -- Save first, then publish on SaveCompleted
                             ( { model | publishing = Loading, saving = Loading }
                             , Api.updateBlogPost postId postData token SaveCompleted
                             , NoOut
                             )
 
                         New ->
-                            -- Create first, then publish on SaveCompleted
                             ( { model | publishing = Loading, saving = Loading }
                             , Api.createBlogPost postData token SaveCompleted
                             , NoOut
@@ -295,10 +293,6 @@ viewForm model =
                 [ option [ value "owner", selected (model.visibility == Owner) ] [ text "Only me" ]
                 , option [ value "group", selected (model.visibility == Group) ] [ text "Group" ]
                 , option [ value "platform", selected (model.visibility == Platform) ] [ text "Platform" ]
-
-                -- US-6.2.1: the tier the syndication feed reads from. The
-                -- server enforces the profile-visibility ceiling (422) — a
-                -- writer with a non-public profile is told, not silently capped.
                 , option [ value "public", selected (model.visibility == Public) ] [ text "Public — anyone, and your syndication feed" ]
                 ]
             ]

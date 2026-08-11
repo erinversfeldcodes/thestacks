@@ -7,7 +7,6 @@ defmodule Stacks.BooksAgeGateTest do
   The user path is raise-only (public → age_gated); only the owner may un-gate.
   """
 
-  # async: false — attaches global telemetry handlers.
   use Core.DataCase, async: false
 
   import Stacks.Factory

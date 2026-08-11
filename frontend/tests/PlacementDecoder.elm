@@ -263,8 +263,6 @@ suite =
                         |> Expect.equal (Ok Nothing)
             , test "a visibility the client does not recognise is Nothing, not a silent mis-classification" <|
                 \_ ->
-                    -- The decoder must not invent a level. `Nothing` means
-                    -- "no opinion", and every reader falls back explicitly.
                     decodedVisibility """{"id":"p-1","visibility":"onwer"}"""
                         |> Expect.equal (Ok Nothing)
             ]

@@ -16,10 +16,6 @@ defmodule StacksWeb.VisibilityGrantControllerTest do
     insert(:bookshelf, user: user, visibility: "group")
   end
 
-  # ---------------------------------------------------------------------------
-  # POST /api/bookshelves/:bookshelf_id/grants
-  # ---------------------------------------------------------------------------
-
   describe "POST /api/bookshelves/:bookshelf_id/grants" do
     test "creates grant (201)", %{conn: conn} do
       owner = insert(:user)
@@ -101,10 +97,6 @@ defmodule StacksWeb.VisibilityGrantControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # GET /api/bookshelves/:bookshelf_id/grants
-  # ---------------------------------------------------------------------------
-
   describe "GET /api/bookshelves/:bookshelf_id/grants" do
     test "lists grants for owner (200)", %{conn: conn} do
       owner = insert(:user)
@@ -174,10 +166,6 @@ defmodule StacksWeb.VisibilityGrantControllerTest do
       assert conn.status == 401
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # DELETE /api/bookshelves/:bookshelf_id/grants/:user_id
-  # ---------------------------------------------------------------------------
 
   describe "DELETE /api/bookshelves/:bookshelf_id/grants/:user_id" do
     test "revokes grant (204)", %{conn: conn} do

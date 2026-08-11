@@ -40,8 +40,6 @@ defmodule Core.Repo.Migrations.CreateMarketplaceAndMonitoringTables do
     EXCEPTION WHEN duplicate_object THEN NULL; END $$;
     """)
 
-    # NOTE: op.source_type already exists for op.discovered_sources (bookshop/review_site/...).
-    # This enum is distinct — it classifies the source of health check data, not of discovered sources.
     execute("""
     DO $$ BEGIN
       CREATE TYPE op.monitored_source_type AS ENUM ('scraper_config', 'review_source', 'rss_feed', 'event_source', 'llm_output');
@@ -131,9 +129,6 @@ defmodule Core.Repo.Migrations.CreateMarketplaceAndMonitoringTables do
       # from an offer thread (e.g. direct buy). No FK enforced; referential integrity handled
       # at application layer. Revisit in #052 if marketplace context requires hard FK.
       add :offer_id, :binary_id
-      # buyer_id and seller_id are nullable with nilify_all for GDPR erasure: when a user
-      # account is deleted, transaction records are retained for financial audit but user
-      # references are set to NULL. This is intentional.
       add :buyer_id, references(:users, type: :binary_id, prefix: "op", on_delete: :nilify_all)
       add :seller_id, references(:users, type: :binary_id, prefix: "op", on_delete: :nilify_all)
       add :amount_cents, :integer, null: false
@@ -165,7 +160,6 @@ defmodule Core.Repo.Migrations.CreateMarketplaceAndMonitoringTables do
       timestamps(type: :utc_datetime_usec)
     end
 
-    # source_name is the lookup key for health check upserts — must be unique
     create unique_index(:source_health_checks, [:source_name], prefix: "op")
 
     for table_name <-

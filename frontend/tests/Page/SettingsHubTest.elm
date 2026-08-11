@@ -140,7 +140,6 @@ suite =
                         |> Query.has [ Selector.text "Notifications" ]
             , test "the current-page marker follows the current route" <|
                 \_ ->
-                    -- A different route moves aria-current off Notifications.
                     viewFor SettingsPrivacy
                         |> Query.find [ ariaCurrentPage ]
                         |> Query.hasNot [ Selector.text "Notifications" ]

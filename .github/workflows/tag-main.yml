@@ -1,48 +1,21 @@
 name: Tag main
 
-# Every SUCCESSFUL production deploy gets a deterministic lightweight tag
-# (`main-<short-sha>`) so the next deploy's `record-prev-state` step has a
-# stable source of truth for the prev Modal commit. Trigger is `workflow_run`
-# on Deploy production / success — failed deploys deliberately do NOT get a
-# tag, so `main-*` tags become "verified-deployed" markers. That makes the
-# rollback target always the last KNOWN-GOOD prod, not just the last attempt.
-#
-# Sequencing: deploy-production runs first; on success this workflow stamps
-# the tag. The next deploy's record-prev-state takes the most-recent
-# `main-*` tag, which is now guaranteed to be the previous successful deploy
-# (no race with the current deploy's own tag).
-
 on:
   workflow_run:
     workflows: ["Deploy production"]
     types: [completed]
 
-# Least-privilege default (Scorecard Token-Permissions): read-only at the
-# workflow level; the tag-main job elevates to contents: write only where it
-# actually pushes the tag.
 permissions:
   contents: read
 
 jobs:
   tag-main:
-    # Only stamp a tag when the upstream Deploy production run succeeded.
-    # workflow_run fires on every completion (success/failure/cancelled);
-    # we filter to success so failed deploys never get a "verified" tag.
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write # create + push the main-<sha> tag
     steps:
-      # Check out the default branch (NOT the workflow_run head_sha). We only
-      # need git history to create a lightweight tag pointing at the deployed
-      # SHA — we never execute any code from that SHA's working tree. This
-      # dodges the `workflow-run-target-code-checkout` semgrep rule
-      # (https://sg.run/A0p6) which flags the dangerous pattern of running
-      # workflow_run handlers against checked-out incoming-PR code with
-      # access to repo secrets. Since deploy-production only fires on
-      # `push: branches: [main]`, the head_sha is always a maintainer-merged
-      # main commit, but checking out main keeps the threat model trivial.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -50,9 +23,6 @@ jobs:
         env:
           DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          # Verify the SHA exists in the cloned history before tagging. With
-          # fetch-depth: 0 it should always be reachable from main, but be
-          # defensive in case of force-pushes or unusual states.
           if ! git rev-parse --verify "${DEPLOYED_SHA}^{commit}" >/dev/null 2>&1; then
               echo "::error::Deployed SHA ${DEPLOYED_SHA} not found in repo history"
               exit 1

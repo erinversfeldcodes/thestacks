@@ -30,12 +30,8 @@ defmodule Core.Repo.Migrations.CreateGuardianTokens do
       add :updated_at, :naive_datetime, null: false
     end
 
-    # sub is the user id; sweeping/revoke-all queries filter on it.
     create index(:guardian_tokens, [:sub], prefix: "op")
 
-    # The token reaper (GuardianTokenSweepJob) deletes WHERE exp < now(); index
-    # exp so that range delete uses an index scan instead of a seq scan as the
-    # table grows.
     create index(:guardian_tokens, [:exp], prefix: "op")
 
     execute("""
@@ -45,10 +41,6 @@ defmodule Core.Repo.Migrations.CreateGuardianTokens do
       END IF;
     END $$;
     """)
-
-    # stacks_dbt is intentionally NOT granted access: raw JWTs and their claims
-    # have no analytics use and tracking them in the warehouse would widen the
-    # blast radius of a warehouse-credential compromise.
   end
 
   def down do

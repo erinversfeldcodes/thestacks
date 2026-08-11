@@ -1,50 +1,15 @@
 #!/usr/bin/env bash
-# scripts/test-e2e.sh — start all services and run Playwright E2E tests.
-#
-# In CI (or any fresh environment) this script:
-#   1. Starts Phoenix on :4000 with a live DB
-#   2. Serves the pre-built Elm frontend on :4001
-#   3. Starts the vision service locally on :8000 (if present; in production this is Modal)
-#   4. Waits for each service to be ready
-#   5. Runs `npm test` (playwright) inside e2e/
-#   6. Stops all services on exit (trap)
-#
-# If services are already running on the expected ports the script
-# skips starting them and runs the tests against the live stack.
-# This makes it safe to call both from `just ci` and interactively.
-#
-# Env overrides:
-#   BASE_URL           Playwright base URL (default: http://localhost:4001)
-#   E2E_SERVICES       Set to "none" to skip starting services (use live stack)
-#   DATABASE_URL       Override DB connection for Phoenix
-#
-# Prerequisites: Node (playwright installed in e2e/), Elixir/Mix, Python venv,
-#               PostgreSQL running.
-#
-# NOT `npx serve` — this line used to say so and was wrong. Phoenix serves the built assets
-# (`mix phx.server` + the esbuild bundle); nothing here has ever invoked `serve`. The stale mention
-# was the only trace of an unused `serve` devDependency that was carrying **four high-severity
-# advisories** and failing `npm audit` in `lint-elm`. Removed 2026-08-04; the audit is now clean.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Pre-flight: fail fast on reintroduced vacuous assertion guards (Issue #275).
-# The CI `e2e` path filter covers `e2e/**`, so this catches guard reintroduction
-# on e2e-only PRs that don't trigger the frontend lint-elm job.
 bash "$REPO_ROOT/scripts/check-e2e-vacuous-guards.sh"
 
-# Load local .env for dev secrets (CLOAK_KEY, SECRET_KEY_BASE, etc.) if running outside CI.
 if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
-# ── Modal app name resolution ─────────────────────────────────────────────────
-# The local vision service calls a Modal deployment for GPU inference.
-# MODAL_APP_NAME must point at a live Modal deployment — typically the ephemeral
-# preview app that matches the current branch. If not set, derive it from the
-# current git branch using the same sanitization logic as deploy-stack.sh.
 if [[ -z "${MODAL_APP_NAME:-}" ]]; then
     _BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")"
     _SANITISED="$(echo "$_BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\{2,\}/-/g' | cut -c1-28)"
@@ -54,8 +19,6 @@ fi
 
 # shellcheck source=scripts/lib/postgres.sh
 source "$REPO_ROOT/scripts/lib/postgres.sh"
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 # wait_for_health <url> <name> [timeout_seconds]
 # Polls the given HTTP health endpoint until it returns HTTP 200.
@@ -79,13 +42,10 @@ wait_for_health() {
             esac
             exit 1
         fi
-        # No sleep — curl itself has a 2s timeout, so we're polling at most every 2s
-        # without any artificial delay between attempts.
     done
     echo "  $name healthy at $url"
 }
 
-# port_open is kept for the "already running" pre-checks only.
 port_open() {
     nc -z localhost "$1" 2>/dev/null
 }
@@ -104,7 +64,6 @@ port_open() {
 # mode, E2E_SERVICES=none with no BASE_URL) — so this is a strict no-op. This
 # matches the globalSetup guard, which is likewise BASE_URL-only.
 warm_remote_preview() {
-    # No remote target to warm (local run) → strict no-op.
     if [[ -z "${BASE_URL:-}" ]]; then
         return 0
     fi
@@ -138,51 +97,34 @@ warm_remote_preview() {
     echo "           proceeding; globalSetup re-checks health and Playwright retries the setup project." >&2
 }
 
-# ── Install E2E deps if needed ─────────────────────────────────────────────────
 if [[ ! -d "$REPO_ROOT/e2e/node_modules" ]]; then
     echo "==> Installing E2E dependencies..."
     (cd "$REPO_ROOT/e2e" && npm ci)
 fi
 
-# Install Playwright browsers if needed
 if [[ ! -d "$HOME/.cache/ms-playwright" && ! -d "$HOME/Library/Caches/ms-playwright" ]]; then
     echo "==> Installing Playwright browsers..."
     (cd "$REPO_ROOT/e2e" && npx playwright install --with-deps chromium)
 fi
 
-# ── Start services unless already running ────────────────────────────────────
 SERVICES_STARTED=()
 STARTED_PIDS=()
 
 if [[ "${E2E_SERVICES:-}" != "none" ]]; then
     ensure_postgres
 
-    # Phoenix on :4000 (serves both API and the pre-built Elm frontend via Plug.Static)
     if port_open 4000; then
         echo "  Phoenix already running on :4000 — skipping start"
     else
         echo "==> Starting Phoenix on :4000..."
         (
             cd "$REPO_ROOT"
-            # Age-gating ships dark (ADR-020) — default OFF outside :test. The
-            # age-gate E2E specs exercise ENFORCEMENT, which reads
-            # Stacks.FeatureFlags.age_gating_enabled? (env AGE_GATING_ENABLED).
-            # Turn it on for this local/CI Phoenix so the age-gate suite is live.
-            #
-            # STACKS_E2E_TEST_HELPERS=1 exposes the /api/test/* helper endpoints
-            # (confirmation-token, sent-emails, age-verification) the full-flow
-            # specs need — without it every helper-gated spec silently test.skips
-            # (confirm-email full flow, password-reset). The preview stack sets
-            # this via deploy-stack.sh; the local Phoenix must set it too.
             AGE_GATING_ENABLED=true STACKS_E2E_TEST_HELPERS=1 MIX_ENV=dev mix phx.server
         ) &>/tmp/stacks-phoenix.log &
         STARTED_PIDS+=($!)
         SERVICES_STARTED+=(phoenix)
     fi
 
-    # Vision service on :8000 (optional — local dev only; in CI/production this is Modal)
-    # Always kill any existing process on :8000 before starting — a stale process may be
-    # running with a different VISION_HMAC_SECRET and would cause every upload to 401.
     if [[ -f "$REPO_ROOT/apps/vision/app/main.py" ]]; then
         if port_open 8000; then
             echo "  Killing stale process on :8000 before starting fresh vision service..."
@@ -199,7 +141,6 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
     fi
 fi
 
-# ── Cleanup trap ──────────────────────────────────────────────────────────────
 cleanup() {
     if [[ ${#STARTED_PIDS[@]} -gt 0 ]]; then
         echo ""
@@ -207,14 +148,12 @@ cleanup() {
         for pid in "${STARTED_PIDS[@]}"; do
             kill "$pid" 2>/dev/null || true
         done
-        # Ensure ports are freed
         lsof -ti :4000 | xargs kill -9 2>/dev/null || true
         lsof -ti :8000 | xargs kill -9 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
 
-# ── Wait for services ─────────────────────────────────────────────────────────
 if [[ "${E2E_SERVICES:-}" != "none" ]]; then
     # Check the actual HTTP health endpoints, not just TCP port availability.
     # Phoenix opens its socket early but isn't ready to handle requests until
@@ -226,11 +165,6 @@ if [[ "${E2E_SERVICES:-}" != "none" ]]; then
     fi
 fi
 
-# ── Clear stale auth storage state ───────────────────────────────────────────
-# Auth storage state files (.auth/*.json) are keyed to the origin (base URL).
-# If a previous run targeted a different URL (e.g. fly.dev preview), the stale
-# files will have the wrong origin and all authenticated tests will fail.
-# Always delete them so auth.setup.ts generates fresh files for the current URL.
 echo ""
 echo "==> Clearing stale auth storage state..."
 rm -rf "$REPO_ROOT/e2e/.auth/"
@@ -241,7 +175,6 @@ mkdir -p "$REPO_ROOT/e2e/.auth"
 # returns 200 so auth.setup.ts's first login doesn't hit a 502.
 warm_remote_preview
 
-# ── Run Playwright ────────────────────────────────────────────────────────────
 echo ""
 echo "==> Running Playwright E2E tests..."
 (

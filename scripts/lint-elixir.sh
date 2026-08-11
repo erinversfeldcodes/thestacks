@@ -3,8 +3,6 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
-# Every outbound HTTP transport must be seam-selected with a :test default (#381e) —
-# the class behind #377/#379: "flaky" tests that were actually dialling the internet.
 bash "$REPO_ROOT/scripts/check-outbound-test-default.sh"
 
 mix format --check-formatted

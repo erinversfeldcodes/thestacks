@@ -36,8 +36,6 @@ defmodule Stacks.AccountsSignupReapTest do
 
   describe "re-registering an address someone abandoned" do
     test "erases the abandoned account so the address is usable" do
-      # The UX half: an abandoned signup currently blocks a real one with
-      # "email has already been taken", for an account nobody owns.
       long_ago = DateTime.add(DateTime.utc_now(), -30, :day)
       old = unconfirmed("reclaim@example.test", long_ago)
 
@@ -49,9 +47,6 @@ defmodule Stacks.AccountsSignupReapTest do
     end
 
     test "reclaims it regardless of how recent the abandonment was" do
-      # Deliberately ignores the TTL for *this* address: if someone is registering it
-      # now, the earlier unconfirmed attempt is abandoned whatever its age, and holding
-      # the address hostage for 24 hours serves nobody.
       minutes_ago = DateTime.add(DateTime.utc_now(), -5, :minute)
       recent = unconfirmed("mistyped@example.test", minutes_ago)
 
@@ -67,8 +62,6 @@ defmodule Stacks.AccountsSignupReapTest do
     end
 
     test "leaves a confirmed account alone, so the address stays taken" do
-      # Only *unconfirmed* accounts are abandoned. A real account must not be erasable
-      # by someone else registering its address.
       confirmed =
         Core.Repo.insert!(%User{
           email: "real@example.test",
@@ -89,8 +82,6 @@ defmodule Stacks.AccountsSignupReapTest do
 
   describe "reaping unrelated debt" do
     test "erases other expired unverified accounts opportunistically" do
-      # This is what bounds retention: work arrives in proportion to registrations,
-      # which is the event most correlated with abandonment.
       long_ago = DateTime.add(DateTime.utc_now(), -30, :day)
       stale = unconfirmed("someone-else@example.test", long_ago)
 
@@ -100,7 +91,6 @@ defmodule Stacks.AccountsSignupReapTest do
     end
 
     test "leaves an unverified account still inside its TTL" do
-      # It has hours left to confirm; erasing it would break a legitimate signup.
       just_now = DateTime.add(DateTime.utc_now(), -1, :minute)
       pending = unconfirmed("still-deciding@example.test", just_now)
 
@@ -110,8 +100,6 @@ defmodule Stacks.AccountsSignupReapTest do
     end
 
     test "a registration still succeeds when reaping cannot" do
-      # A registration must never fail because someone else's abandoned signup could
-      # not be erased.
       assert {:ok, _} = Accounts.register(valid_attrs("unaffected@example.test"))
     end
   end

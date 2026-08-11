@@ -67,13 +67,7 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "with geo params returns only spaces within radius" do
-      # ⚠️ Rewritten 2026-07-28. This test used to pass `city: "Cape Town"` and
-      # `city: "Johannesburg"` and rely on a hardcoded six-entry city→coords map. It
-      # passed only because both cities happened to be among the six, so it asserted
-      # the broken mechanism rather than the behaviour: a space in any other city was
-      # silently dropped, and two spaces in one city were treated as equidistant.
       insert(:third_space, name: "Nearby Cafe", latitude: -33.9249, longitude: 18.4241)
-      # Johannesburg, ~1270 km away.
       insert(:third_space, name: "Far Away Shop", latitude: -26.2041, longitude: 28.0473)
 
       result = Enrichment.list_third_spaces(lat: -33.9249, lng: 18.4241, radius_km: 50)
@@ -84,8 +78,6 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "distinguishes two spaces in the same city" do
-      # The defect the city-map version could not express at all: both of these are
-      # "Cape Town", but one is 200 m away and the other ~25 km.
       insert(:third_space, name: "Around The Corner", latitude: -33.9249, longitude: 18.4262)
       insert(:third_space, name: "Across The Peninsula", latitude: -34.1350, longitude: 18.4270)
 
@@ -98,20 +90,6 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "applies the limit AFTER the radius refinement, not before" do
-      # The second defect: `limit` used to run before filtering, so the query took N
-      # rows in unspecified order and *then* filtered — the nearest space could be
-      # invisible while a far one showed.
-      #
-      # ⚠️ Getting this test to actually fail took a mutation probe. The obvious version
-      # (30 spaces in another city) is **vacuous**, because the bounding box is applied
-      # in SQL and excludes them before the limit is ever reached — moving the limit back
-      # to its buggy position left that version green.
-      #
-      # The limit can only bite on rows the box *admits*, so the decoys must sit inside
-      # the box and outside the circle: the box corners. For a 5 km radius at this
-      # latitude the box is ±0.045 lat / ±0.054 lng, and a point at 98% of both deltas is
-      # 6.94 km away — inside the box, outside the circle. Named to sort first so a
-      # pre-filter limit consumes the budget on them.
       corner_lat = -33.9249 + 0.045 * 0.98
       corner_lng = 18.4241 + 0.0543 * 0.98
 
@@ -134,7 +112,6 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "excludes a space that has opted out" do
-      # US-2.5.3: a business that asked to be delisted must stop rendering.
       insert(:third_space, name: "Still Listed")
       insert(:third_space, name: "Asked To Be Removed", opted_out: true)
 
@@ -169,9 +146,6 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "a viewport crossing the antimeridian still returns results" do
-      # ⚠️ The silent-failure case. Panning past ±180° arrives with east < west, and a
-      # plain `between` matches nothing at all — no error, just an empty map. US-3.1.1
-      # §1 explicitly puts "drag across the globe to Shanghai" in scope.
       insert(:third_space, name: "Just West of the Line", latitude: -17.0, longitude: 179.0)
       insert(:third_space, name: "Just East of the Line", latitude: -17.0, longitude: -179.0)
       insert(:third_space, name: "Nowhere Near", latitude: -17.0, longitude: 0.0)
@@ -199,9 +173,6 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "a curated space just beyond the radius is included — 500 m is a rule of thumb" do
-      # ⚠️ Owner ruling, 2026-07-28: "500m is a rule of thumb: further away should only be
-      # included if the ratings are high." The live case that prompted it — Truth Coffee at
-      # 678 m from Clarke's Bookshop, walkable, and excluded by a hard cutoff.
       insert(:third_space, name: "Truth Coffee", nearest_bookshop_km: 0.678, curated: true)
 
       names = Enrichment.list_third_spaces(near_bookshop_km: 0.5) |> Enum.map(& &1.name)
@@ -211,8 +182,6 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "an uncurated space just beyond the radius stays out" do
-      # The other half of the trade-off. Without this the tier-2 rule would just be a
-      # wider radius for everyone, and "the ratings are high" would mean nothing.
       insert(:third_space, name: "Ordinary Cafe", nearest_bookshop_km: 0.678, curated: false)
 
       names = Enrichment.list_third_spaces(near_bookshop_km: 0.5) |> Enum.map(& &1.name)
@@ -221,8 +190,6 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "curated does not mean any distance" do
-      # A wonderful cafe 40 km from the nearest bookshop is not an answer to "where can I
-      # read near here". The outer bound is what stops tier 2 becoming unbounded.
       assert Enrichment.curated_within_km() < 10.0,
              "the curated outer bound is too wide to mean 'near a bookshop'"
 
@@ -235,8 +202,6 @@ defmodule Stacks.EnrichmentThirdSpacesTest do
     end
 
     test "a space with no computed proximity is not assumed to be near a bookshop" do
-      # Missing data must not put a space on the map. `nil` means "not computed", which
-      # is not the same as "close".
       insert(:third_space, name: "Never Paired", nearest_bookshop_km: nil)
 
       names = Enrichment.list_third_spaces(near_bookshop_km: 0.5) |> Enum.map(& &1.name)

@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# CI running, report formatting, and PR description updating.
-# Source this file; do not execute directly.
 
-# _strip_ansi <string>
 _strip_ansi() {
     sed 's/\x1b\[[0-9;]*[mK]//g'
 }
 
-# _parse_ci_output <output>
-# Emits a markdown table of check results.
 _parse_ci_output() {
     local output
     output="$(echo "$1" | _strip_ansi)"
@@ -16,12 +11,6 @@ _parse_ci_output() {
     local table
     table="| Check | Status |"$'\n'"| --- | --- |"
 
-    # NB: split with case/parameter-expansion rather than `[[ =~ ]]` +
-    # BASH_REMATCH. This function is `source`d and may run under the caller's
-    # interactive shell — under zsh, `=~` populates $match, NOT BASH_REMATCH, so
-    # the capture came back empty and the check-name column rendered blank
-    # (see PR #211). case globs + `${line#PASS}` work identically in bash 3.2,
-    # bash 5, and zsh.
     local name
     while IFS= read -r line; do
         case "$line" in
@@ -41,8 +30,6 @@ _parse_ci_output() {
     echo "$table"
 }
 
-# _replace_sentinel <current_body> <new_section>
-# Replaces everything between (and including) the sentinel comments with new_section.
 _replace_sentinel() {
     local body="$1"
     local new_section="$2"
@@ -69,8 +56,6 @@ _replace_sentinel() {
     rm -f "$body_file" "$new_file" "$out_file"
 }
 
-# _replace_deployed_e2e_sentinel <current_body> <new_section>
-# Replaces everything between (and including) the deployed-e2e sentinel comments.
 _replace_deployed_e2e_sentinel() {
     local body="$1"
     local new_section="$2"
@@ -97,14 +82,10 @@ _replace_deployed_e2e_sentinel() {
     rm -f "$body_file" "$new_file" "$out_file"
 }
 
-# _get_deployed_e2e_section <repo_root>
-# Runs deploy-preview.sh (if FLY_API_TOKEN is set) and returns the formatted
-# deployed-e2e-summary sentinel block on stdout.
 _get_deployed_e2e_section() {
     local repo_root="$1"
 
     if [[ -z "${FLY_API_TOKEN:-}" ]]; then
-        # Return an empty/skipped sentinel block
         cat <<'EOF'
 <!-- deployed-e2e-summary-start -->
 _Deployed E2E skipped — FLY_API_TOKEN not set._
@@ -135,25 +116,9 @@ _Last deployed: ${timestamp}_
 EOF
 }
 
-# run_ci_and_get_section <repo_root>
-# Runs `just ci`, prints output to the terminal, and returns the formatted
-# ci-summary sentinel block (including the sentinel comments) on stdout.
-# Shared by create_issue_and_pr (first push) and update_pr_ci_summary (subsequent pushes).
 run_ci_and_get_section() {
     local repo_root="$1"
 
-    # Git hooks run in a fresh bash subshell that doesn't trigger direnv
-    # (direnv hooks fire on interactive shell init), so the project's nix
-    # devShell — which exposes the .venv-tools/ wrappers and LLVM env vars
-    # via shellHook — isn't loaded. Wrap the `just ci` invocation in
-    # `nix develop --command` so the hook sees the same environment as an
-    # interactive shell.
-    #
-    # Marker check uses STACKS_DEV_SHELL (set by our shellHook) rather than
-    # the generic IN_NIX_SHELL — IN_NIX_SHELL is also set when entering
-    # *any* nix shell (including a stale one with broken state), so it
-    # produces false negatives that skip the wrap when we genuinely need it.
-    # Skip the wrap if `nix` isn't installed (e.g. CI runners with --no-verify).
     local runner=()
     if [[ -z "${STACKS_DEV_SHELL:-}" ]] && command -v nix &>/dev/null; then
         runner=(nix develop --command)
@@ -161,9 +126,6 @@ run_ci_and_get_section() {
 
     local tmpfile
     tmpfile="$(mktemp)"
-    # ${runner[@]+...} guards the empty-array case: macOS bash 3.2 treats
-    # expanding an empty array under `set -u` as an unbound variable and
-    # aborts, silently skipping the entire CI run before a push.
     ${runner[@]+"${runner[@]}"} just --justfile "$repo_root/justfile" ci 2>&1 | tee /dev/tty > "$tmpfile" || true
     local ci_output
     ci_output="$(cat "$tmpfile")"
@@ -184,9 +146,6 @@ _Last run: ${timestamp} · push \`--no-verify\` to skip_
 EOF
 }
 
-# update_pr_ci_summary <branch> <pr_num>
-# Used on subsequent pushes — updates the CI summary section of an open PR.
-# pr_num is passed in from the pre-push hook to avoid a redundant gh pr list call.
 update_pr_ci_summary() {
     local branch="$1"
     local pr_num="$2"
@@ -204,13 +163,11 @@ update_pr_ci_summary() {
     local new_body
     new_body="$(_replace_sentinel "$current_body" "$ci_section")"
 
-    # If all local CI checks passed and FLY_API_TOKEN is available, run deploy preview
     if echo "$ci_section" | grep -v "FAIL" | grep -q "PASS" && [[ -n "${FLY_API_TOKEN:-}" ]]; then
         echo "[hook] Running deploy preview for PR #${pr_num}..." >&2
         local deployed_e2e_section
         deployed_e2e_section="$(_get_deployed_e2e_section "$repo_root")"
 
-        # Ensure the sentinel block exists in the body; append it if not
         if ! echo "$new_body" | grep -q "<!-- deployed-e2e-summary-start -->"; then
             new_body="${new_body}
 
@@ -224,15 +181,6 @@ ${deployed_e2e_section}"
     gh pr edit "$pr_num" --body "$new_body"
     echo "[hook] Done." >&2
 
-    # Belt-and-suspenders push. This pre-push hook does a lot of slow work (full
-    # `just ci` + preview deploy) BEFORE git performs the actual object transfer,
-    # so a GitHub connection that flakes at that final moment would drop the push
-    # and force the whole hook to re-run. Push the branch explicitly here — right
-    # after a successful `gh` call, so we know GitHub is reachable — with
-    # --no-verify so it bypasses THIS hook (no recursion). git's own subsequent
-    # push is then a no-op fast-forward; if it fails transiently, the commits are
-    # already on the remote. Non-fatal: a real non-fast-forward surfaces on git's
-    # own push too, so we never mask it.
     echo "[hook] Pushing ${branch} to origin to guarantee the latest commits land..." >&2
     if git push origin "$branch" --no-verify; then
         echo "[hook] Push complete." >&2

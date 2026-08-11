@@ -36,10 +36,6 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 cd "$REPO_ROOT" || exit 1
 MODE="${1:-check}"
 
-# The floor, with nothing exempt from it. Never raise it.
-#
-# 2026-07-29 (#306): all 309 orphans needing a rule got one. 2026-08-04 (#310): the last two "hooks"
-# were styled and the exemption deleted — see the header for why it could never be made sound.
 ORPHAN_BUDGET=0
 
 python3 - "$MODE" "$ORPHAN_BUDGET" <<'PY'
@@ -48,27 +44,11 @@ from collections import defaultdict
 
 mode, budget = sys.argv[1], int(sys.argv[2])
 
-# Class literals used in Elm views: `class "a b"`, `classList` entries, and `Attr.class "x"`.
-#
-# ⚠️ #356: `class "a b"` is only the SIMPLE form. Whenever a class depends on state Elm writes a
-# COMPUTED form — `class (if cond then "a--selected" else "a")`, `class ("base " ++ fn x)`,
-# `classList [ ("a", cond) ]` — and the naive `class\s+"…"` regex is blind to every literal in it,
-# because `class` is followed by `(` or `[`, not `"`. That blind spot (42 sites) let
-# `.upload-shelf-picker__shelf(--selected)` ship completely unstyled while the gate read `0 unstyled`:
-# a class named ONLY inside a computed form is invisible to BOTH halves — it can neither be flagged an
-# orphan nor caught as an unstyled surface. So we also harvest every string literal that appears inside
-# a balanced `class (…)` / `classList […]` argument region, including inside `if/then/else` and `case`
-# branches. Over-collecting class-shaped tokens is safe (a spurious `used` entry can only ADD an orphan
-# to investigate, never hide one) — but we drop tokens ending in `-`/`_`, which are concatenation
-# PREFIXES (`"marketplace__status-badge--" ++ fn`), not real class names.
-
-
 def _add_token(token, used):
     if token.endswith("-") or token.endswith("_"):
         return
     if re.fullmatch(r"[a-z][a-z0-9_-]*", token):
         used.add(token)
-
 
 def _harvest_computed(text, used):
     """Collect string literals inside `class (…)` / `classList […]` argument regions."""
@@ -101,7 +81,6 @@ def _harvest_computed(text, used):
             for token in literal.split():
                 _add_token(token, used)
 
-
 used = set()
 for path in glob.glob("frontend/src/**/*.elm", recursive=True):
     text = open(path, encoding="utf-8").read()
@@ -110,11 +89,6 @@ for path in glob.glob("frontend/src/**/*.elm", recursive=True):
             _add_token(token, used)
     _harvest_computed(text, used)
 
-# Selectors defined anywhere in the single stylesheet source.
-#
-# ⚠️ #391: strip comments FIRST. A class named only in a `/* … */` comment is not a rule, but counting
-# it as "defined" silently absolves the orphan of the same name — the exact mask this gate exists to
-# prevent. Same line as `check-css-values.sh`, so both gates agree on what main.css actually defines.
 defined = set()
 raw = open("frontend/css/main.css", encoding="utf-8").read()
 css = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)   # strip comments so their examples never count
@@ -122,7 +96,6 @@ for name in re.findall(r"\.([a-zA-Z][a-zA-Z0-9_-]*)", css):
     defined.add(name)
 
 orphans = sorted(used - defined)
-
 
 if mode == "--list":
     groups = defaultdict(list)

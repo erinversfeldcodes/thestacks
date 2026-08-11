@@ -45,8 +45,6 @@ suite =
                         |> Query.has [ Selector.text "Your listing has been removed." ]
             , test "a pending request does NOT say the listing is gone" <|
                 \_ ->
-                    -- ⚠️ The failure that would matter. If this copy ever claims removal,
-                    -- a business owner stops checking and the listing stays up.
                     render { filled | submitting = Success PendingReview }
                         |> Query.hasNot [ Selector.text "Your listing has been removed." ]
             , test "a pending request says plainly that the listing is still visible" <|
@@ -56,8 +54,6 @@ suite =
                             [ Selector.attribute (Attr.attribute "data-testid" "removal-pending") ]
             , test "the form is replaced by the outcome, not shown alongside it" <|
                 \_ ->
-                    -- Leaving the form up invites a second submission of a request that
-                    -- already succeeded.
                     render { filled | submitting = Success Removed }
                         |> Query.hasNot
                             [ Selector.attribute (Attr.attribute "data-testid" "removal-submit") ]
@@ -83,8 +79,6 @@ suite =
                         |> Query.has [ Selector.disabled True ]
             , test "submitting an invalid form fires no request" <|
                 \_ ->
-                    -- Guards against the button being bypassed by a keyboard submit: the
-                    -- update must refuse too, not rely on `disabled`.
                     ListingRemoval.update ListingRemoval.Submit { filled | url = "" }
                         |> Tuple.second
                         |> Expect.equal Cmd.none
@@ -102,14 +96,10 @@ suite =
         , describe "the form explains why an address is asked for"
             [ test "says a matching domain is acted on immediately" <|
                 \_ ->
-                    -- Without this the field reads as data collection rather than the
-                    -- thing that decides how quickly the request is honoured.
                     render filled
                         |> Query.has [ Selector.text "act immediately" ]
             , test "says any other address still works" <|
                 \_ ->
-                    -- A business owner on a Gmail address must not conclude they cannot
-                    -- ask.
                     render filled
                         |> Query.has [ Selector.text "still works" ]
             ]

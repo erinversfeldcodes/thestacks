@@ -1,20 +1,4 @@
 #!/usr/bin/env bash
-# test/platform/preview_names_test.sh
-#
-# Covers scripts/lib/preview-names.sh — the shared preview-resource name
-# derivation sourced by deploy-stack.sh, deploy-preview.sh,
-# cleanup-preview.sh, ci.sh and ci.yml's Pin-Fly-hostname step (Issue #170 C).
-#
-# Contract under test:
-#   - PREVIEW_SUFFIX unset → byte-identical to the historical inline
-#     derivation (lowercase, / and _ → -, cut -c1-30, strip one trailing
-#     hyphen). Existing preview apps must keep their names.
-#   - PREVIEW_SUFFIX set → every name differs from the bare derivation,
-#     ends with the sanitised suffix, and every FLY app name stays within
-#     the 30-char app-name cap (the branch part is truncated, never the
-#     suffix — the suffix is the uniqueness guarantee).
-#   - The suffix is sanitised with the same rules as the branch.
-#   - A suffix too long to leave >=1 branch char fails loudly (return 1).
 
 set -uo pipefail
 
@@ -44,7 +28,6 @@ assert_le() {
     fi
 }
 
-# The historical inline derivation, verbatim, for byte-identity comparison.
 legacy_sanitise() {
     local s
     s="$(echo "$1" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | cut -c1-30)"
@@ -52,7 +35,6 @@ legacy_sanitise() {
     printf '%s' "$s"
 }
 
-# ── Case 1: no suffix → byte-identical to the legacy derivation ─────────────
 test_case "bare_names_byte_identical" "PREVIEW_SUFFIX unset keeps historical names"
 unset PREVIEW_SUFFIX
 for branch in \
@@ -70,7 +52,6 @@ for branch in \
     assert_eq "$PREVIEW_NEON_BRANCH" "preview/${legacy}" "neon branch unchanged ('${branch}')"
 done
 
-# ── Case 2: suffix present → unique names, suffix visible ────────────────────
 test_case "suffixed_names_differ" "PREVIEW_SUFFIX makes CI names disjoint from local names"
 unset PREVIEW_SUFFIX
 derive_preview_names "chore/enable-pipelines"
@@ -95,7 +76,6 @@ assert_contains "$PREVIEW_SEARXNG_APP" "-ci423704" "searxng app carries the suff
 assert_contains "$PREVIEW_MODAL_APP" "-ci423704" "modal app carries the suffix"
 assert_contains "$PREVIEW_NEON_BRANCH" "-ci423704" "neon branch carries the suffix"
 
-# ── Case 3: Fly 30-char app-name cap respected with suffix ──────────────────
 test_case "fly_app_name_cap" "all Fly app names <= 30 chars when suffixed"
 export PREVIEW_SUFFIX="ci423704"
 for branch in \
@@ -109,22 +89,17 @@ for branch in \
     assert_le "${#PREVIEW_SEARXNG_APP}" 30 "searxng app <= 30 ('${branch}' → ${PREVIEW_SEARXNG_APP})"
 done
 
-# ── Case 4: suffix sanitised with the same rules as the branch ───────────────
 test_case "suffix_sanitisation" "uppercase / slash / underscore in suffix are normalised"
 export PREVIEW_SUFFIX="CI/42_x"
 derive_preview_names "main"
 assert_contains "$PREVIEW_CORE_APP" "-ci-42-x" "suffix lowercased and / _ mapped to -"
 assert_eq "$PREVIEW_COMPONENT" "main-ci-42-x" "component is '<branch>-<sanitised suffix>'"
 
-# ── Case 5: truncated branch part never ends in a dangling hyphen ────────────
 test_case "no_dangling_hyphen" "branch truncation strips a trailing hyphen before joining"
 export PREVIEW_SUFFIX="ci423704"
-# 12-char budget - 8 suffix - 1 joiner = 3 branch chars; "ab-cdef" cuts to
-# "ab-" which must collapse to "ab" (no "ab--ci423704").
 derive_preview_names "ab-cdef"
 assert_eq "$PREVIEW_COMPONENT" "ab-ci423704" "component has no double hyphen"
 
-# ── Case 6: oversized suffix fails loudly ────────────────────────────────────
 test_case "oversized_suffix_fails" "suffix leaving no branch budget returns non-zero"
 export PREVIEW_SUFFIX="ci12345678901"  # 13 chars > 10-char max
 rc=0

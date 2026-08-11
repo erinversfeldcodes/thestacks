@@ -54,10 +54,6 @@ defmodule Stacks.Events do
           optional(:metadata) => map()
         }) :: {:ok, map()} | {:error, term()}
   def emit(%{event_type: _, aggregate_type: _, aggregate_id: _} = event) do
-    # Non-prod payload-contract guard (Stacks.Events.PayloadContract): a payload whose
-    # keys/version drift from the declared contract raises, failing the emitting test.
-    # Off in prod by default (flag unset) → zero runtime cost. Re-raised past the
-    # rescue below so it is loud, not swallowed into {:error, _}.
     if Application.get_env(:core, :validate_event_payload_contract, false),
       do: PayloadContract.validate!(event)
 
@@ -77,14 +73,6 @@ defmodule Stacks.Events do
 
     case Repo.insert_all(EventLog, [params]) do
       {1, _} ->
-        # Throughput signal. Tagged by event_type so we can see which
-        # flows are noisy (e.g. `book.created` vs `placement.moved`)
-        # and size the :events Oban queue accordingly. Aggregated by
-        # PromEx into `stacks_events_emitted_count_total` — see
-        # Core.PromEx.Plugins.Stacks. The event name here MUST match
-        # the `event_name:` key on the Counter definition in the
-        # PromEx plugin (not the metric name — that has the
-        # `:count, :total` suffix appended by Telemetry.Metrics).
         :telemetry.execute(
           [:stacks, :events, :emitted],
           %{count: 1},
@@ -98,7 +86,6 @@ defmodule Stacks.Events do
         {:error, :emit_failed}
     end
   rescue
-    # A contract violation must be loud (fail the test), not swallowed into {:error, _}.
     e in PayloadContract.Violation -> reraise e, __STACKTRACE__
     error -> {:error, error}
   end
