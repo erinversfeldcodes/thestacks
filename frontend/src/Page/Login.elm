@@ -60,44 +60,13 @@ type alias Model =
     }
 
 
-{-| Why the login card is on screen (Issue #360).
+{-| Why the login card is on screen (360).
 
-⛔ The point of this type is what it makes impossible. This used to be three
-booleans on `Login.Model` (`sessionExpired`, `draftSaved`, `accountDeleted`),
-shadowed by three more on `Main.Model` (`sessionExpiredNotice`,
-`draftSavedNotice`, `accountDeletedNotice`), raised by five separate inits and
-read by two view predicates. The reasons are mutually exclusive in life —
-a reader's session either expired, or they closed their account, or they asked
-to reset a password, or they simply came to sign in — but nothing in that shape
-said so. `{ sessionExpired = True, accountDeleted = True }` type-checked and
-rendered both notices, one under the other; so did a `draftSaved = True` with no
-expiry, which claimed a listing had been saved when none had. The six booleans
-could also disagree with each other across the `Main`/`Login` boundary, because
-they were copied rather than passed.
-
-Now there is one value, `Main` holds it, `Login.init` receives it, and the
-notice view cases over it. Two reasons at once is a compile error, and there is
-no second copy to fall out of step with.
-
-  - `Fresh` — they came to sign in. No notice.
-  - `SessionExpired { draftSaved }` — Issue #173/#182. `draftSaved` lives INSIDE
-    this constructor because it only means anything about an expiry: a saved
-    marketplace draft with no expiry is not a state, and can no longer be built.
-  - `AccountDeleted` — Issue #188. A warm farewell, deliberately distinct from an
-    expiry: this was something they chose.
-  - `ForgotPassword` — the `/forgot-password` deep link. Not a page: the login
-    card opened straight onto its reset mode.
-  - `StoredSessionUnreadable reason` — Issue #360. A stored credential was
-    present at boot and could not be read. Before this existed the app read that
-    as "logged out" and said nothing, which is indistinguishable to the reader
-    from a real sign-out — and is why the private-session auth bug took so long
-    to diagnose. `reason` is the decoder's own account of the failure, carried so
-    it can be shown rather than discarded.
-  - `ConfirmationExpired` — Issue #373. They followed a confirmation link that
-    would not confirm. A SIXTH constructor rather than a `linkExpired` boolean,
-    for the reason the type exists at all: a reader cannot simultaneously have
-    had a session expire and a confirmation link expire, and a boolean would let
-    both notices render one under the other again.
+⛔ What this type makes impossible: this used to be three booleans on
+`Login.Model` shadowed by three more on `Main.Model`, five inits raising
+them, two view predicates reading them — and simultaneous "true"s
+stacked notices for mutually-exclusive facts. One `Arrival` value: at
+most one reason, named at the moment the card is built.
 
 -}
 type Arrival
@@ -128,20 +97,11 @@ draftWasSaved arrival =
             False
 
 
-{-| Whether the navigation now being consumed is the one a session expiry
-pushed (#361's question, #360's value).
-
-⛔ `Main.redirectAfterNavigation` needs to know "did the session die underneath
-this reader", because an expiry bounce must return them to the page they were
-standing on rather than to nothing. That used to be `model.sessionExpiredNotice`
-— one of the six booleans. It is the same fact, so it is read from the same
-value rather than kept as a seventh: an expiry that raises the notice but not
-the redirect (or the reverse) is now unwritable.
-
-Named here beside `draftWasSaved` for the same reason `Main.currentAuth` is the
-only reader of `AuthState`: a `case` on `Arrival` scattered through `update` is
-how one site starts disagreeing with another about what counts as an expiry.
-
+{-| Whether the navigation being consumed is the one a session expiry
+pushed (361's question). `Main.redirectAfterNavigation` must return an
+expired reader to the page they were standing on; this is the same fact
+as the expiry notice, so it is READ from the same `Arrival` value rather
+than kept as a seventh boolean that could disagree.
 -}
 isSessionExpiry : Arrival -> Bool
 isSessionExpiry arrival =
@@ -285,25 +245,13 @@ isResendDisabled model =
         || (model.resendState == Success ())
 
 
-{-| The same rule for the forgot-password send (Issue #374).
+{-| The same rule for the forgot-password send (374).
 
-⛔ **This predicate must not read the email address for anything except
-emptiness.** `/api/auth/forgot-password` answers 200 to every well-formed
-request whether or not the address is registered — that uniformity is the whole
-of its no-enumeration property, and the SPA is the other half of it. A disabled
-state that differed by address (a different label, a different delay, a control
-that stayed live for an unknown address) would rebuild the account-existence
-oracle in the browser out of an API that refused to be one. The only inputs here
-are the request's own lifecycle and whether the reader typed anything, neither
-of which the server's answer can influence.
-
-It was previously `forgotState == Loading` alone, spelled inline in the
-`disabled` attribute and nowhere else. So the moment the 200 arrived the button
-became a live, full-contrast "Send reset link" again — and a reader who pressed
-it twice (the ordinary response to a control that looks untouched) queued a
-second reset mail, invalidating the link in the first. `update` now consults the
-same function, because `disabled` is a hint: a keyboard, a screen reader, or two
-clicks landing in one frame all deliver the message regardless.
+⛔ Must not read the email for anything except emptiness:
+`/api/auth/forgot-password` answers 200 to every well-formed request —
+the SPA is the other half of that no-enumeration property, and a
+disabled state that differed by address would leak what the server
+refuses to.
 
 -}
 isForgotDisabled : Model -> Bool
@@ -978,20 +926,10 @@ viewFormFields model =
     ]
 
 
-{-| Is the submit button locked?
-
-⛔ Derived from `submitState` alone, on purpose. This used to read a SECOND flag,
-`transitionState`, which latched to `Transitioning` the moment a 200 arrived and
-had no reset path anywhere — not on `ModeSwitched`, not on a keystroke. A login
-whose door animation never finished (an occluded window: `requestAnimationFrame`
-does not fire, so the completion signal never arrives) therefore left the card
-permanently unable to submit, with no way back short of a reload — the visible
-half of #359. Deleting the duplicate makes that trap unrepresentable rather than
-merely reset: there is one field, and `ModeSwitched` already clears it.
-
-`Success` still locks the button — the shell has been handed the credential and
-is navigating; a second submit would be a second login.
-
+{-| Is the submit button locked? Derived from `submitState` ALONE: the old
+second flag (`transitionState`) latched on a 200 with no reset path, so
+a login whose door animation never finished (occluded window — rAF never
+fires) left the card permanently locked for the rest of the tab's life.
 -}
 isSubmitDisabled : Model -> Bool
 isSubmitDisabled model =
@@ -1059,20 +997,10 @@ viewFieldHint validation =
             text ""
 
 
-{-| The one notice the arrival is owed, if any (Issue #360).
-
-⛔ This was two functions — `viewSessionExpiredNotice` and
-`viewAccountDeletedNotice` — each re-deriving the same `submitFailed`
-suppression, each independently deciding whether to render, and each blind to
-the other. When both booleans were set they both rendered, stacked. Casing over
-one `Arrival` means at most one notice exists to render, and the suppression
-rule is written once.
-
-Suppressed once a submit failure is showing: the reader has since tried to sign
-in and failed, and that more-specific message must win. The mode check keeps the
-expiry notice out of the register and reset tabs, where it would be answering a
-question nobody asked.
-
+{-| The one notice the arrival is owed, if any (360). Two functions used
+to re-derive the same suppression independently and stack when both
+their booleans were set. Casing over one `Arrival` means at most one
+notice can exist, and the submit-failure suppression is written once.
 -}
 viewArrivalNotice : Model -> Html Msg
 viewArrivalNotice model =
@@ -1398,24 +1326,13 @@ registerValidationMessage errors =
         "Registration could not be completed. Please check the details you entered."
 
 
-{-| A sign-in or registration failure, named only as precisely as the response
-allows (Issue #374, #369 requirement 5).
+{-| A sign-in or registration failure, named only as precisely as the
+response allows (374).
 
-⛔ **The catch-all used to be `"The door remains shut. Invalid email or
-password."`** — for _any_ status this function does not list. A 500 from a
-failed query, a 502 from a node restarting mid-deploy, a 504 from a proxy: all
-three told the reader their credentials were wrong. They are not. The reader's
-response to that sentence is to retype details that were already correct, watch
-them fail again, and conclude their account is gone — so the message did not
-merely fail to help, it aimed the reader at the one thing that was working.
-
-Only a **401** means "these credentials are wrong", because that is the only
-status `AuthController.login/2` returns when it has checked them and they are.
-Everything unlisted now says that we do not know, which is true, and points at
-waiting rather than at retyping. The 5xx branch is named separately from the
-truly-unrecognised one for the same reason the two are different facts: a 5xx is
-the library's own fault and will pass, and telling the reader so stops them
-hunting for a mistake they did not make.
+⛔ The catch-all used to say "Invalid email or password" for ANY unlisted
+status — a 500, a mid-deploy 502, a proxy 504 all told the reader their
+credentials were wrong. Unknown statuses now get an honest "the library
+door is stuck" with retry framing; only a 401 blames the credentials.
 
 -}
 httpErrorMessage : Mode -> Http.Error -> String

@@ -193,21 +193,11 @@ boot default (`True`) stands — a config blip must not reopen registration.
 port inviteOnlyConfig : (Bool -> msg) -> Sub msg
 
 
-{-| Browser connectivity (Issue #362). `app.js` subscribes to the `online` and
-`offline` window events and sends `navigator.onLine` here, plus one send at boot
-so a tab opened while already offline is not told it is connected.
-
-⛔ **The shell, not the page.** This is the same shape as `handleSessionExpiry`:
-a condition that is true of the whole app rather than of any one request, so it
-is answered once, centrally, and every page inherits the answer. The alternative
-— each page inferring "probably offline" from its own `Http.NetworkError` — is a
-decision copied N times, arrives only after a request has already failed, and
-says nothing at all on a page that happens not to be fetching anything.
-
-`Bool` on the wire because that is exactly what `navigator.onLine` is; it
-becomes a `Connectivity` the moment it crosses into Elm, so nothing downstream
-has to remember which way round the boolean goes.
-
+{-| Browser connectivity (362): `app.js` forwards the window online/offline
+events plus one send at boot (a tab opened offline must not be told it is
+connected). The shell answers this once, centrally — like session expiry —
+rather than each page inferring "probably offline" from its own
+`Http.NetworkError`.
 -}
 port connectivityChanged : (Bool -> msg) -> Sub msg
 
@@ -287,27 +277,11 @@ type alias Auth =
 
 {-| Who the app currently believes is signed in.
 
-⛔ The point of this type is what it makes impossible. The old field was
-`auth : Maybe Auth`, and a login could set it from a value the app had NOT yet
-persisted: `Main` parked the response in `pendingAuthResponse`, fired the door
-animation, and only wrote the token to localStorage when the browser reported
-the animation finished. On an occluded window that report never came, so the
-reader was authenticated in memory and anonymous on disk — a state that looked
-fine until the tab reloaded and the session was simply gone (#359, three logins
-returning `200` with nothing stored, driven live 2026-07-30).
-
-Now the ONLY way an `AuthResponse` becomes either authenticated constructor is
-`completeLogin`, which returns the state and the effects that make it durable as
-one value. There is no half-authenticated variant to put a not-yet-saved
-credential into, because there is no variant that means "we have a token but
-have not written it".
-
-`Arriving` and `Authenticated` are deliberately indistinguishable to every
-consumer — `currentAuth` answers `Just` for both, and it is the only accessor.
-`Arriving` names the seconds while the door ornament is still owed a completion
-signal; if that signal never comes (occluded window, sleeping machine) nothing
-about the session degrades. That is the guarantee: the animation cannot reach
-the credential, in either direction.
+⛔ What this type makes impossible: the old `auth : Maybe Auth` let login
+set an in-memory credential the app had not yet persisted (parked on the
+door animation, which an occluded window never finishes) — authenticated
+in memory, anonymous on disk. `Arriving` carries both the auth AND the
+proof of persistence; `Authed` is only reachable after the write.
 
 -}
 type AuthState
@@ -659,27 +633,12 @@ authDecoder =
         )
 
 
-{-| What boot found in localStorage (Issue #360).
-
-⛔ Three outcomes, three constructors. `decodeFlags` used to answer
-`Maybe Auth`, which has room for only two — so "there was no stored credential"
-and "there was one and it would not decode" arrived as the same `Nothing`, and
-the app treated both as an ordinary signed-out boot.
-
-That is not a cosmetic loss. The blob is written by `saveAuth` and read back
-through the same `authDecoder`, so a mismatch means something rewrote it: a
-half-written record, a shape from an older release, or the flat-vs-nested blob
-that the SPA auth-injection recipe warns about — _"`stacks-auth` must be a FLAT
-blob; nesting under `user` fails silently and looks exactly like logged-out"_.
-Looking exactly like logged-out is the defect. The reader is put back at the
-door with no explanation, and the one artefact that would have explained it —
-the decoder's error — was thrown away by `Result.toMaybe` at the moment of
-maximum information.
-
-`CorruptStoredAuth` keeps that error and `Main.init` turns it into an `Arrival`
-the login card renders, so the failure is told to the person it happened to
-instead of being inferred later from a bug report.
-
+{-| What boot found in localStorage (360). Three outcomes, three
+constructors — the old `Maybe Auth` folded "no stored credential" and
+"stored but would not decode" into one `Nothing`. The blob is written by
+`saveAuth` and read by the same decoder, so a decode failure means
+something rewrote it; treating it as an ordinary signed-out boot hides
+that, and `CorruptAuth` lets boot clear the bad blob and say why.
 -}
 type StoredAuth
     = NoStoredAuth
@@ -890,42 +849,22 @@ requiresAuth route =
             True
 
 
-{-| The token for `/api/admin/*` — and the ONLY thing any admin call site may pass.
-
-⛔ This exists because the entry points disagreed. `/api/admin/*` sits behind an MFA-verified admin
-session (`typ: "admin_session"`, IP- and boot\_id-bound) and 401s anything else, so the four admin
-surfaces were built, routed, unit-tested and unreachable. Repointing `initPage` fixed the page load
-and left the `update` handlers on the ordinary token — the list loaded and every action 401'd.
-
-Five call sites, not two. A field read repeated at five sites is five chances to read the wrong one,
-and every page-level admin test is blind to it because the token arrives as an argument: a probe
-setting one site to `Nothing` reintroduced the defect verbatim with **all 1285 Elm tests green**
-(#309). So the read is named once, and `scripts/check-admin-token-routing.sh` fails the build if any
-admin call site passes anything else — measured to catch the probe that elm-test does not.
-
-Deliberately takes the whole `Model`: that is what makes it impossible to hand this function the
-ordinary session by mistake.
-
+{-| The token for `/api/admin/*` — the ONLY thing any admin call site may
+pass. `/api/admin/*` requires the MFA-verified admin session token and
+401s the ordinary one; when the five call sites each read a field, two
+drifted and every admin action 401'd behind a loaded page. One function,
+five callers, zero drift.
 -}
 adminTokenFor : Model -> Maybe String
 adminTokenFor model =
     model.adminAuth
 
 
-{-| The page the reader asked for but is being bounced off, or `Nothing` when
-they are not being bounced.
-
-⛔ Named once, and read by BOTH the bounce itself (`initPage`, immediately below)
-and the model field that has to remember it (`Model.redirectAfterLogin`). The
-condition is the bounce: a second copy of `requiresAuth route && …` at the
-remembering site is how "capture the asked-for page" drifts out of step with
-"bounce to the sign-in gate" and starts remembering a page nobody was denied —
-the #309 lesson, applied before it can happen.
-
-Note the URL does NOT change on this bounce: `initPage` swaps the _page_ for the
-sign-in gate and leaves the reader standing at `/upload`. That is what makes the
-capture possible at all — the asked-for route is still `model.route`.
-
+{-| The page the reader asked for but is being bounced off (`Nothing` when
+not bounced). Named once and read by BOTH the bounce (`initPage`) and the
+remembering site (`Model.redirectAfterLogin`) — a second copy of the
+condition is how "capture the asked-for page" drifts from "bounce to the
+gate" and starts remembering a page nobody was denied.
 -}
 loginRedirectFor : Route -> Maybe Auth -> Maybe Route
 loginRedirectFor route maybeAuth =
@@ -958,27 +897,14 @@ resetPasswordDestination outMsg =
             Just Route.Login
 
 
-{-| The page to return the reader to after they sign in, recomputed for THIS
-navigation — never accumulated. Read once, from `UrlChanged`.
+{-| The page to return the reader to after sign-in, recomputed for THIS
+navigation — never accumulated; read once from `UrlChanged`.
 
-⛔ **An expiry bounce is a bounce too** (#361, found while building #359). This
-used to be a bare `loginRedirectFor newRoute auth`, which is right when a route
-guard turns someone away at the door and wrong when a session dies underneath
-them. `forceSessionExpiry` pushes `/login`; `/login` requires no auth; so the
-recompute answered `Nothing` and the page the reader was standing on was dropped
-on the floor. They signed back in and landed on the home page instead of the
-settings form they were half-way through — the one case where returning them
-matters most, because they did not choose to leave it.
-
-`leaving` is the route being navigated AWAY from, which on an expiry bounce is
-that page: `forceSessionExpiry` only pushed the URL, and this is the update that
-consumes the push. `auth` is pinned to `Nothing` in that branch because the
-expiry has already cleared it — asking `loginRedirectFor` about a session that
-no longer exists is the whole point.
-
-Key-free and pure so it can be unit-tested: `Main.Model` embeds an
-unconstructable `Nav.Key` (the seam documented in `SessionExpiryTest`), so a
-decision left inline inside `update` cannot be tested at all.
+⛔ An expiry bounce is a bounce too (361): a bare `loginRedirectFor` is
+right for a route-guard bounce and wrong when the session dies underneath
+the reader — `/login` requires no auth, so the recompute answered
+`Nothing` and dropped the page they were standing on. Expiry stashes the
+current route explicitly; this preserves it.
 
 -}
 redirectAfterNavigation :
@@ -996,23 +922,11 @@ redirectAfterNavigation navigation =
         loginRedirectFor navigation.arrivingAt navigation.auth
 
 
-{-| Build the page for a route.
-
-`arrival` is the reason the reader would be looking at a login card if this
-route produces one — see `Login.Arrival`. It is threaded in rather than applied
-afterwards because there is more than one way to end up at the card (the
-protected-route bounce below, `/login` itself, `/forgot-password`), and the
-notice used to be attached at only one of them: `UrlChanged` re-built the page
-and then overwrote it with an `expiredInit`/`farewellInit` variant when the new
-route happened to be `Login`. A reader bounced off `/library` by an expired
-session therefore got the plain card with no explanation, because the bounce
-does not change the URL to `/login`.
-
-⚠️ Note how this composes with `redirectAfterNavigation` immediately above:
-#361 makes the expiry bounce remember the page it is leaving, and #360 makes the
-card it lands on say WHY. Same bounce, two independent things the reader was
-previously not told.
-
+{-| Build the page for a route. `arrival` is the reason the reader would be
+looking at a login card, threaded IN rather than patched on afterwards:
+there is more than one way to reach the card (protected-route bounce,
+`/login`, `/forgot-password`), and the notice used to be attached at only
+one of them.
 -}
 initPage : AppConfig -> Route -> String -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
 initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
@@ -1056,21 +970,12 @@ isAdminRoute route =
             False
 
 
-{-| Hand a just-built page the removal the reader may still take back (#375).
-
-Applied to `initPage`'s result rather than threaded through it: `initPage`
-already carries six arguments and three call sites, and only ONE of those sites
-— the `UrlChanged` that a removal's `Nav.pushUrl` provokes — can ever have an
-undo to hand over. A seventh parameter would have made the other two say
-`Nothing` forever.
-
-A removal always navigates to `BookDetail.previousRoute`, so the page below is
-the shelf the reader was standing on. When that shelf is the Reading Pile or
-Looking for a Home the match falls through and no toast is offered: those two
-are separate page modules with their own `Model`, and #375's scope is
-`Page.Bookshelf` (Library / Antilibrary / Wish List). The removal still
-succeeded — nothing is lost but the offer.
-
+{-| Hand a just-built page the removal the reader may still take back
+(375). Applied to `initPage`'s result, not threaded through it — only the
+`UrlChanged` a removal's `pushUrl` provokes can ever have an undo, and a
+seventh parameter would make the other call sites say `Nothing` forever.
+The destination is `BookDetail.previousRoute`, i.e. the shelf the reader
+was standing on.
 -}
 applyPendingUndo : Maybe Bookshelf.Removal -> ( Page, Cmd Msg ) -> ( Page, Cmd Msg )
 applyPendingUndo maybeRemoval ( page, cmd ) =
@@ -1559,21 +1464,12 @@ type ExternalAuthOutcome
     | IgnoreExternal
 
 
-{-| Pure, key-free decision for an externally-observed stored-auth value — a
-sibling tab's `storage` event (`AuthChangedExternally`) or the re-check response
-(`GotStoredAuth`). The port delivers the RAW localStorage payload: a JSON string
-(a `saveAuth` write), JSON `null` (a `clearAuth`), or something unexpected.
-
-  - a valid stored auth whose token DIFFERS from the in-memory token, while
-    authed → `AdoptAuth` the stored auth (new token, its user).
-  - the SAME token → `IgnoreExternal` (nothing changed; also the writer's own
-    echo defence).
-  - a valid stored auth while signed out → `IgnoreExternal` (a signed-out tab
-    does not spontaneously log in from a sibling).
-  - JSON `null` while authed → `LogOutExternally` (a sibling logged out).
-  - JSON `null` while signed out, or any garbage → `IgnoreExternal` (never crash
-    or log out on undecodable input).
-
+{-| Pure decision for an externally-observed stored-auth value (a sibling
+tab's `storage` event, or the re-check response). The port delivers the
+RAW localStorage payload. Differing valid token while authed →
+`AdoptAuth`; same token → `IgnoreExternal` (echo defence); `null`/corrupt
+while authed → `DropAuth` (a sibling signed out or the blob was
+clobbered); anything while not authed → adopt-or-ignore without a drop.
 -}
 adoptExternalAuth : Decode.Value -> Maybe Auth -> ExternalAuthOutcome
 adoptExternalAuth value maybeAuth =
@@ -3453,32 +3349,12 @@ view model =
     }
 
 
-{-| The login door dolly-shot, rendered from the SHELL over the destination page
-for exactly the `Arriving` window (#364).
-
-⛔ This is the observable job `Arriving` was carved for. #359 moved the
-credential off the animation frame by navigating away from the login scene on
-the SAME update that decodes the `200`; that unmounts `Page.Login`'s scene
-layers before the `playLoginTransition` port's `requestAnimationFrame` callback
-runs, so the dolly-shot started **zero** animations (`animationsStarted=0`,
-driven live 2026-07-31). The layers live here instead, keyed on `AuthState`, so
-the exact element ids the port animates are present over the destination page
-while the arrival settles and gone the instant it does.
-
-The animation still cannot gate anything: rendering is downstream of `auth`,
-which `completeLogin` already put in `Arriving` with the token persisted, and
-`Arriving` answers `currentAuth` identically to `Authenticated`. If
-`ArrivalSettled` never comes (occluded window, sleeping machine) the door simply
-lingers behind a session that is already durable — it is `pointer-events: none`
-so it cannot even intercept a click while it does — and the backstop timer
-retires it regardless.
-
-The ids and `layer-*` classes mirror `Page.Login.view`'s scene because
-`app.js`'s port targets them by id; the login card/overlay is deliberately NOT
-rendered — the reader has already stepped through the door, so there is nothing
-left to fade. `Anonymous` and `Authenticated` render nothing, which is what
-removes the door at both ends of the arrival.
-
+{-| The login door dolly-shot, rendered from the SHELL over the destination
+page for exactly the `Arriving` window (364). 359 navigates away from the
+login scene on the same update that decodes the 200, unmounting
+`Page.Login`'s layers before the animation port's rAF callback runs —
+zero animations started. The layers live here, in the thing that survives
+the navigation; `Arriving` is the render window.
 -}
 viewArrivalDoor : AuthState -> Html Msg
 viewArrivalDoor authState =
@@ -3505,37 +3381,11 @@ viewArrivalDoor authState =
             text ""
 
 
-{-| The document title, derived from the page that is actually on screen.
-
-⛔ It used to be `pageTitle : Route -> String`, and a route is not a page. The
-route is what the reader ASKED for; `Page` is what the shell BUILT, and the two
-differ by design at six sites:
-
-1.  `initPage`'s protected-route bounce swaps the page for the sign-in gate and
-    deliberately leaves the URL alone — so a signed-out reader at `/upload` was
-    looking at a login card in a tab titled "Add a Book".
-2.  `initPage`'s admin gate does the same for `/admin/*`, titling the MFA
-    challenge "Source Approval".
-3.  An owner-guard failure resolves those routes to `PageNotFound`, still titled
-    with the admin surface a non-owner was just refused.
-4.  `AdminBookModeration` does likewise when age-gating is off (ADR-020).
-5.  Signing out replaces the page immediately, so the login card wore the title
-    of whatever page the reader signed out from.
-6.  `handleAdminSessionExpiry` puts the admin gate back **without touching the
-    URL at all**, so that title stayed wrong for as long as the operator did.
-
-Deriving from `Page` closes all six by construction — there is no longer a
-second value that could disagree. It also lets a title say what a route cannot
-know: which bookshelf, whose shelf, which book, which mode the card is in.
-
-This is not decoration. `Browser.Document.title` is what a screen reader
-announces on navigation, and the only page identity a tab, a bookmark and a
-history entry keep.
-
-⚠️ Exhaustive over `Page`, with no `_ ->` fallback. A catch-all is how the next
-page constructor would silently inherit a title belonging to something else,
-which is the defect being fixed.
-
+{-| The document title, derived from the PAGE actually on screen — not the
+route. Route is what the reader asked for; `Page` is what the shell
+built, and they differ by design at six sites (protected-route bounce,
+admin gate, invalid-route fallback, …): a signed-out reader at `/upload`
+was looking at a login card in a tab titled "Add a Book".
 -}
 pageTitle : Page -> String
 pageTitle page =
@@ -4012,23 +3862,11 @@ navLink route label =
     { route = route, label = label }
 
 
-{-| The number on the `Add Book` marker (Issue #351).
-
-⛔ Three states, and they are three different things:
-
-  - `Nothing` when the inbox has not loaded, or failed to load. We do not know
-    what is waiting, and a cleared badge is an assertion that nothing is —
-    which we cannot make.
-  - `Nothing` when the count is zero. Requirement 4 of the issue, spelled out:
-    "Zero pending renders no badge, not a `0`."
-  - `Just n` otherwise.
-
-The number comes from `Api.awaitingConfirmationCount` over the very list the
-inbox surface renders — the same value in the same model field, not a second
-query. Failures are in that list and are deliberately not in this number: a
-failed upload has nothing to confirm, so a badge counting it could never be
-cleared by doing what the badge asks.
-
+{-| The number on the `Add Book` marker (351). `Nothing` when the inbox
+has not loaded or failed — a cleared badge asserts nothing is waiting,
+which we cannot claim; `Nothing` at zero ("no badge, not a 0");
+`Just n` otherwise, from `Api.awaitingConfirmationCount` over the same
+list the inbox renders.
 -}
 pendingConfirmationBadge : RemoteData Http.Error (List Api.InboxItem) -> Maybe Int
 pendingConfirmationBadge inbox =
@@ -4282,28 +4120,11 @@ viewFooter =
         ]
 
 
-{-| The shell's connectivity banner (Issue #362).
-
-⛔ **The reason this is in the shell.** Losing your connection is a fact about
-the app, not about a request, and the page that most needed to say so was the
-one saying least: a shelf whose fetch never returned rendered an empty bookcase,
-so the reader was told their library was empty. Answering that per-page means
-copying the same inference N times, and it can only ever speak AFTER a request
-has failed — it has nothing to say on a page that is simply sitting there.
-Here it is one banner, above everything, correct the instant the browser knows.
-
-Rendered above the nav rather than fixed over it: it pushes the page down, which
-is honest — something has changed about the whole app — where an overlay would
-cover a control the reader may be reaching for.
-
-`role="status"` + `aria-live="polite"` so it is announced without stealing focus
-mid-task. It says what is true (nothing is reaching the library) and what will
-happen (it comes back on its own), so nobody is left hunting for a retry button
-that would not help.
-
-Nothing renders when online. An "everything is fine" banner is noise, and it
-would push the page down on every reader, forever, to say nothing.
-
+{-| The shell's connectivity banner (362). Losing the connection is a fact
+about the app, not a request — the page that most needed to say so
+rendered an empty bookcase when its fetch never returned, telling the
+reader their library was empty. One banner above every page, driven by
+the OS-level signal, able to speak before any request fails.
 -}
 viewConnectivity : Connectivity -> Html Msg
 viewConnectivity connectivity =
@@ -4323,28 +4144,11 @@ viewConnectivity connectivity =
                 ]
 
 
-{-| An admin API call came back unauthorised.
-
-⛔ **All four admin pages used to call `handleSessionExpiry` here, which clears the ordinary session
-and drops the operator on the Login page.** So honouring a removal request — or any admin action
-whose token had lapsed — signed them out of the whole product. Driven on a preview 2026-07-29:
-confirming a removal ejected me to "The library closed your session for safekeeping".
-
-That directly contradicted the design this feature was built to (#303): the admin session is
-deliberately separate and short-lived — MFA expires after 30 minutes, and the session is bound to the
-client IP and the node's `boot_id`, so a network change or a deploy ends it. Those are _routine_, and
-none of them is a reason to end the ordinary session, which is untouched and still valid.
-
-So: drop only `adminAuth` and put the gate back on the current route. The operator re-verifies and
-carries on, rather than being told they were signed out of something they were not.
-
-⚠️ **Verified by driving, not by a unit test, and that is a deliberate choice.** Asserting on this
-needs a whole `Main.Model`, whose `Nav.Key` is opaque and unconstructable in a test — the only routes
-in are a `ProgramTest` harness at Main level (which does not exist here) or exporting a `testModel`
-seam from production code purely for the assertion. Neither is worth it for a four-line function
-whose failure is glaring the moment anyone uses the page. It was found live and it is confirmed live.
-The `e2e/` suite is the right home if this ever needs automating.
-
+{-| An admin API call came back unauthorised. All four admin pages used to
+call `handleSessionExpiry`, signing the operator out of the WHOLE product
+when only the deliberately short-lived admin session had lapsed (303).
+This drops the admin token alone, keeps the ordinary session, and sends
+the operator to the admin login with a notice.
 -}
 handleAdminSessionExpiry : Model -> ( Model, Cmd Msg )
 handleAdminSessionExpiry model =

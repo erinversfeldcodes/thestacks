@@ -30,43 +30,13 @@ import Util.FailureCopy as FailureCopy
 import Util.TestId exposing (testId)
 
 
-{-| Why a photo did not become a book (Issue #374).
+{-| Why a photo did not become a book (374).
 
-⛔ **Every one of these used to be the same sentence.** `IdentificationFailed`
-was a nullary constructor rendering "We couldn't read the ISBN from this photo.
-Try a clearer image or enter the ISBN manually." — and `Page.Upload` routed
-_everything_ into it: a vision service that was down, an SSE stream that timed
-out, a connection that dropped, an image the service could not decode at all,
-and a genuine could-not-read-the-ISBN. Four of those five had nothing to do with
-the photo's clarity, so the advice was wrong four times out of five, and the
-reader's move — retake the photo, more carefully — could not possibly work.
-
-The information was there the whole time. `Stacks.Uploads.reject_image/2` writes
-a `rejection_reason` token, `IdentifyBookJob` chooses it from
-`Stacks.AI.VisionError.reason_token/1`, and the SSE frame carries it in
-`rejection_reason`. This page received it and discarded it.
-
-`CauseUnknown` is not a gap in this list — it is a member of it. A token this
-client has never seen (the server grew one after we shipped) must produce a
-message that says so, because the alternative is the defect above wearing a
-smaller hat.
-
-  - `ImageUnreadable` — `undecodable_image`, `image_too_large`,
-    `image_too_small`, `image_unreachable`, `no_image_supplied`,
-    `malformed_request`. The service looked at the bytes and could not use them.
-    Nothing to do with whether a book is in shot.
-  - `IsbnUnreadable` — `isbn_not_found`. A book was found, its ISBN was not. The
-    one cause the old message actually described.
-  - `ServiceUnavailable` — `vision_unavailable`, `vision_budget_exceeded`. The
-    identification service never answered. The photo is fine.
-  - `TookTooLong` — the SSE stream's own `"timeout"` frame: the pipeline's
-    deadline passed with no verdict. Distinct from every rejection, because no
-    determination was ever made.
-  - `ConnectionLost` — the stream errored, or a request on this flow failed at
-    the transport. The reader's connection, not the library's opinion of their
-    photo.
-  - `CauseUnknown` — a token we do not recognise, a status we do not handle, a
-    rejection with no reason attached.
+⛔ Every one of these used to be one sentence ("We couldn't read the
+ISBN… try a clearer image") covering a downed vision service, a timed-out
+stream, a dropped connection, an undecodable image, and a genuine miss —
+telling readers to retake photos that were fine. Each cause now carries
+its own sentence naming the action actually worth taking.
 
 -}
 type UploadFailure
@@ -89,22 +59,11 @@ type UploadResult
     | EditionMerged MergedEdition
 
 
-{-| What the completion card is allowed to say, and where each part comes from.
-
-`edition` is the SERVER's answer — the row it actually wrote — so the card names
-an ISBN and format that exist rather than a client-side guess. (The card this
-replaces said `"X" now has N editions`, computed as `book.editionCount + 1` from
-a book the client had fetched earlier: a number that is wrong the moment anyone
-else merged, and that was being read off the very cache #355 found stale.)
-
-`onAReaderShelf` is the difference between the two ways in, and it is why this
-is a record and not just a work id. The photo path only shows a merge prompt
-because `is_duplicate` said the book is already on one of this reader's
-bookshelves. The manual path is the opposite: `confirm/2` answered 409 _before_
-placing anything, and merging an edition places nothing either — so that reader
-does not own this book, and a card that let them assume otherwise would be the
-same untruth #333 removed from the confirm path.
-
+{-| What the completion card may say, and where each part comes from.
+`edition` is the SERVER's answer — the row it actually wrote — so the
+card names an ISBN/format that exist. The card this replaces computed
+`editionCount + 1` client-side from an earlier fetch: wrong the moment
+anyone else merged.
 -}
 type alias MergedEdition =
     { workId : String
@@ -231,22 +190,12 @@ init =
     }
 
 
-{-| The server's `rejection_reason` token as a cause the reader can act on
-(Issue #374).
-
-The tokens are the union of `Stacks.AI.VisionError.reason_token/1` and the two
-the pipeline writes directly (`Stacks.Workers.IdentifyBookJob`'s `not_a_book` /
-`isbn_not_found` / `processing_failed` and `Stacks.Uploads.commit_image/2`'s
-`image_too_small`). `not_a_book` never reaches here — it is matched one level up,
-where it becomes its own `UploadResult`.
-
-⛔ **The catch-all must stay `CauseUnknown`.** It covers three things that look
-different and are the same: a token added server-side after this client shipped,
-`processing_failed` (which is itself the server saying it does not know), and a
-`Rejected` frame with no reason at all. Mapping any of them onto a specific
-cause would be inventing one — and this function is exactly where that invention
-would be cheap and invisible.
-
+{-| The server's `rejection_reason` token as an actionable cause (374).
+Tokens are the union of `VisionError.reason_token/1` and the two the
+pipeline writes directly (`isbn_not_found`/`processing_failed`,
+`image_too_small`); `not_a_book` is matched one level up as its own
+`UploadResult`. Unknown tokens fall to the generic cause — new server
+tokens degrade to vaguer copy, never to a wrong specific claim.
 -}
 failureFromRejection : Maybe String -> UploadFailure
 failureFromRejection reason =
@@ -332,21 +281,11 @@ leaveAffordanceAfterSeconds =
     20
 
 
-{-| After this long with NO frame of any kind, the stream is treated as silent.
-
-`UploadController.sse_receive_loop/4` chunks a heartbeat at least every 15
-seconds for the whole life of the stream, so three missed heartbeats is the
-threshold. This is the watchdog #374 left for this issue: an `EventSource` that
-opens and then emits neither message nor error used to leave the spinner
-turning until the server's own deadline — up to 23 minutes — with the client
-having no way to tell a working slow pipeline from a dead socket.
-
-⛔ Crossing it does **not** produce a failure. The job is very probably still
-running, and #342's derivation exists precisely because declaring a timeout
-while work is in flight is a lie. What it produces is an honest statement about
-the connection, and a pointer at the inbox — which is where the answer will
-land whether this socket recovers or not.
-
+{-| After this long with NO frame of any kind, the stream is treated as
+silent. The server heartbeats at least every 15s for the stream's whole
+life, so this is three missed heartbeats — the watchdog for an
+`EventSource` that opens and then emits nothing (previously: a spinner
+until the server's own deadline, up to 23 minutes).
 -}
 streamSilentAfterSeconds : Int
 streamSilentAfterSeconds =
@@ -1096,32 +1035,11 @@ viewUploadArea model =
         ]
 
 
-{-| The waiting screen, which stops promising imminence (Issue #351).
-
-This screen used to be a spinner and the words `Processing image...`, forever,
-and that was the hostage-taking: it implied the answer was seconds away for as
-long as 35 minutes (#350's measured worst case), and a reader who believed it
-and stayed was the only reader who ever saw the result. Leaving lost the work
-entirely — the job finished, the row went `resolved`, and no surface could
-reach it again until the 30-day sweep deleted it.
-
-Three things are said here and nothing else is:
-
-  - what is happening, in the present tense and without a deadline;
-  - after `leaveAffordanceAfterSeconds`, that the reader may leave, and where
-    the answer will be when they come back. This is the sentence the issue is
-    for. It is offered on elapsed time because elapsed time is a fact the
-    client owns;
-  - after `streamSilentAfterSeconds`, that this page has stopped hearing from
-    the server — the watchdog.
-
-⛔ What is NOT said: any claim about retries. `IdentifyBookJob` may be on its
-second or third attempt, and the reader would no doubt like to know, but the
-row stays `pending` across attempts so **no frame is broadcast between them**
-and this client cannot tell. "Retrying..." here would be a sentence with
-nothing behind it, and reassurance that is not backed by knowledge is the thing
-this whole issue is replacing.
-
+{-| The waiting screen, which stops promising imminence (351). The old
+eternal `Processing image...` spinner implied seconds for up to 35
+measured minutes, and only a reader who stayed ever saw the result.
+This tells the truth — identification continues in the background — and
+says where the answer will be waiting (the inbox), making leaving safe.
 -}
 viewWaiting : Model -> Html Msg
 viewWaiting model =
@@ -1147,28 +1065,11 @@ viewWaiting model =
         ]
 
 
-{-| The inbox: uploads this reader started and has not finished with (#351).
-
-The owner's ruling in two halves. Identification is asynchronous, so this list
-is how work done in the reader's absence is reached again. Confirmation is
-synchronous, so **every item here is a link into the existing confirm flow and
-nothing more** — there is no "add all", no "accept", no control on this surface
-that puts a book on a bookshelf. Selecting an item shows the reader what we
-think their photo was and asks.
-
-Failures sit in the same list with different copy and no confirmation to make,
-because a rejection the reader never saw is lost work too. They are visibly a
-different kind of thing, and they are not counted on the navigation badge —
-`Api.awaitingConfirmationCount` is the only definition of that number.
-
-⚠️ An item stays here until it is finished or until the 30-day image-retention
-sweep deletes the row underneath it. For an awaiting-confirmation item that is
-right: it disappears the moment the book reaches a bookshelf by any route. For
-a failure there is no such moment — nothing the reader can do marks it read,
-because dismissal would need a write route and #351 is scoped to a read-only
-one. It is therefore a list that can accumulate stale failures for up to a
-month. Recorded rather than hidden; see the report.
-
+{-| The inbox: uploads this reader started and has not finished with
+(351). Identification is asynchronous, so this is how work done in the
+reader's absence is reached again; confirmation is synchronous, so every
+item is a LINK into the existing confirm flow and nothing more — no
+"add all", no control here that shelves a book.
 -}
 viewInbox : Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
 viewInbox model inbox =
@@ -1242,21 +1143,11 @@ canResume model =
             False
 
 
-{-| A failed inbox item's summary, through the SAME tables the live path uses.
-
-`failureFromRejection` is the one mapping from a server token to a cause, and
-`failureBody` the one mapping from a cause to a sentence. A second table here
-would drift the day a token was added — and the reader would then be told two
-different stories about one rejection depending on whether they happened to be
-looking at the time.
-
-`not_a_book` is the one token the live path handles a level up, where it becomes
-its own screen rather than one of the six causes. It gets that screen's own
-sentence here rather than a seventh `UploadFailure` constructor: #374's six are
-the causes the failure CARD distinguishes, and widening that type to serve a
-list summary would have made every one of its case expressions answer a
-question it was not asked.
-
+{-| A failed inbox item's summary, through the SAME tables as the live
+path (`failureFromRejection` token→cause, `failureBody` cause→sentence).
+A second table would drift the day a token was added, telling two
+stories about one rejection. `not_a_book` is mapped explicitly here
+because the inbox has no live-path interception to do it.
 -}
 inboxFailureSummary : Api.InboxItem -> String
 inboxFailureSummary item =
@@ -1386,29 +1277,12 @@ viewUnidentifiedPlaceholder _ =
         ]
 
 
-{-| The failure card, saying which failure it is (Issue #374).
+{-| The failure card, saying WHICH failure it is (374). Both affordances
+(retry, manual entry) stay on every cause; the sentence changes and
+names the button worth reaching for.
 
-Both affordances stay on every cause, because both remain genuinely available
-and a reader who wants the other one should not have to guess. What changes is
-the sentence, and the sentence names the button worth reaching for.
-
-⛔ That last part is not decoration. `Page.Bookshelf`'s `loadError` shipped a
-message ending "then try again" onto a page with no retry control anywhere
-(#368) — copy the reader cannot act on is a second failure stacked on the first.
-Every string below ends on something the two buttons underneath it can actually
-do, and `ConnectionLost` is the one that does **not** say "type the ISBN in",
-because manual entry needs the same connection that just failed.
-
-⛔ **The test id stays `upload-error` for every cause, and the cause rides
-alongside it in `data-failure-cause`.** Nine Playwright assertions use
-`getByTestId("upload-error")` as the "did the pipeline fail" sentinel — several
-of them as an escape hatch that fails the test fast rather than hanging for five
-minutes. Splitting the id per cause would have left each of those watching for
-one particular failure and timing out silently on the other five, which is the
-same defect this issue is about, moved into the test suite.
-
-The class stays `upload-result--failed` too: these are one card with six things
-to say, not six cards.
+⛔ Copy must only name controls that exist — `Page.Bookshelf.loadError`
+once shipped "then try again" onto a page with no retry control (368).
 
 -}
 viewIdentificationFailed : UploadFailure -> Html Msg
@@ -1593,26 +1467,11 @@ confirmErrorMessage confirmError =
 
 
 {-| "We've got the barcode but haven't matched it to a book yet."
-
-The barcode fast path deliberately skips the Open Library / Google Books
-round-trip on the upload hot path, so a book can be legitimately shelved before
-anything knows its title. Until enrichment lands, the server's stand-in title is
-the ISBN — and rendered as a title it reads as a book actually named after a
-number, which is a bug, a rare book, and a pending lookup all at once, with no
-way for the reader to tell which.
-
-Two rules this notice keeps, both deliberate:
-
-  - It says what happened to the BOOK, not what the reader did wrong. The ISBN
-    gate passed; a provisional book is a legal state, not a rejected one.
-  - It informs and stops. No button below it is disabled and no step is skipped
-    — the standing owner ruling, and the same shape as the duplicate notices.
-
-Keyed off `isUnidentified`, not `isProvisional` (#370): the sentence promises a
-title will "fill in shortly", so it may only be shown where none is shown yet.
-The same predicate drives `displayTitle` above it, so the card cannot print a
-name and then say it is waiting for one.
-
+The barcode fast path skips the OL/GB round-trip, so a book can be
+shelved before anything knows its title; until enrichment lands the
+server's stand-in title is the ISBN itself. This predicate (via
+`Types.Book.isProvisional`) is how surfaces render that as a pending
+lookup instead of a book named after a number.
 -}
 viewProvisionalNoticeIfNeeded : Book -> Html Msg
 viewProvisionalNoticeIfNeeded book =

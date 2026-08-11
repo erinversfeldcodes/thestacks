@@ -51,19 +51,13 @@ import Types.Shelf exposing (BookshelfResponse, Shelf)
 import Util.TestId exposing (testId)
 
 
-{-| Configuration that differs between bookshelf pages.
-Everything else (model, update, view structure) is identical.
+{-| Configuration that differs between bookshelf pages; everything else is
+identical. `readOnly` is the browse mode for another reader's shelf
+(`/u/:handle/:bookshelf_name`): profile-endpoint fetch, all mutating
+affordances stripped (US-10.5.3).
 
-`readOnly` toggles the browse mode used when viewing _another_ reader's shelf at
-`/u/:handle/:bookshelf_name`: the fetch targets the profile endpoint (via
-`profileHandle`) and all mutating affordances (add shelf, RSS feed, the
-per-placement visibility / move / remove controls) are stripped. See US-10.5.3.
-
-⚠️ **Read-only is enforced in `update`, not only in `view`.** Not rendering a
-control is a convention; `mutationToken` below is the structure. Every mutating
-organiser branch takes its credential from there, so a message that reaches this
-page by any other route — a stale click, a `Html.map` from a future caller, a
-test — still cannot produce a mutating effect. See `handleOrganiser`.
+⚠️ Read-only is enforced at `mutationToken` (the credential source),
+not just in the view — hiding a control is presentation, not security.
 
 -}
 type alias Config =
@@ -306,22 +300,11 @@ undoToastMillis =
     8000
 
 
-{-| Offer an undo on a page that has just been built for a reader arriving
-straight off a removal (US-1.6.4 extension, #375).
-
-Applied by `Main` **after** `init`, deliberately, rather than becoming a seventh
-argument to it: `init` already takes three, ten call sites pass them, and the
-undo is not part of building a bookshelf — it is one extra thing that is
-sometimes true about the moment of arrival. Composing over `( Model, Cmd Msg )`
-means the auto-dismiss timer is issued with the state it dismisses, the same
-discipline `init` states for `Loading`.
-
-⚠️ **No `readOnly` check here, and that is not an oversight.** The guard for
-this feature is `mutationToken`, in `update`, and putting a second one here
-would make `read_only_undo_is_inert_SECURITY` unfalsifiable — it would be
-asserting that a toast which was never seeded cannot mutate. See #332's lesson
-in `mutationToken` below: one enforcement point, reachable by the test.
-
+{-| Offer an undo on a page just built for a reader arriving straight off
+a removal (375). Applied by `Main` AFTER `init`, deliberately — the undo
+is not part of building a bookshelf, and a fourth argument would make
+ten call sites pass `Nothing` forever. Composing over `( Model, Cmd )`
+keeps the arrival-only concern at the one site where it can be true.
 -}
 withPendingUndo : Maybe Removal -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
 withPendingUndo maybeRemoval ( model, cmd ) =
@@ -492,30 +475,15 @@ navRows shelves =
             )
 
 
-{-| The credential a **mutating** organiser branch requires.
+{-| The credential a MUTATING organiser branch requires. `Nothing` whenever
+the page is read-only — whatever token the viewer carries — so every
+`Just token` branch is unselectable and dispatch falls to the silent
+catch-all.
 
-`Nothing` whenever the page is read-only, whatever token the viewer happens to be
-carrying — so in read-only mode every `Just token` branch below is simply not
-selectable and the dispatch falls through to the silent catch-all.
-
-⚠️ **This is the enforcement point for read-only, and it is deliberately one place.**
-It used to be `model.token`, and the only thing stopping a viewer's browse of
-someone else's shelf from issuing `POST /api/bookshelves/:name/shelves` was that
-`viewOrganiser` does not render the button (Issue #332, found by #330). That is a
-guarantee living in the view: strip the view, dispatch a synthetic `OrganiserMsg`,
-and the update function mutated happily. The blast radius was bounded — the request
-carries the _viewer's_ token, so the server scoped the write to the viewer's own
-bookshelf of that name rather than the owner's — but "the button isn't drawn" is a
-convention, not a structure.
-
-Reading the credential through one function rather than checking `config.readOnly`
-in five branches means a **new** mutating branch inherits the guard by construction:
-to issue a request it needs a token, and this is the only place a token comes from.
-A branch that reached past this into `model.token` would be reintroducing the bug.
-
-`view` keeps its own check (`viewOrganiser`, and the RSS/attribution branches):
-hiding an affordance a viewer cannot use is a separate, legitimate job — it just is
-no longer the thing standing between a read-only page and a write.
+⚠️ THE enforcement point for read-only, deliberately one place: it used
+to be `model.token`, and only view-level hiding stood between a viewer
+and mutating someone else's shelf. `read_only_undo_is_inert_SECURITY`
+pins it.
 
 -}
 mutationToken : Model -> Maybe String
@@ -619,20 +587,12 @@ moveToId draggedId targetId shelves =
             shelves
 
 
-{-| Refetch after a shelf mutation.
-
-⚠️ **Uses `getBookshelf` — the same call as the initial load — and that is the whole point.**
-This used to call `Api.getShelves` (`GET /api/bookshelves/:name/shelves`), whose payload
-carried a hardcoded empty `placements` list for every shelf. So adding, removing or
-reordering a shelf repainted the bookcase from placement-less shelves: nineteen books
-vanished, the organiser labelled a full shelf "empty", and `Remove` became enabled on a
-shelf the server would refuse to delete. Found by driving a preview; no unit test on either
-side of the wire could see it, because each half was self-consistent.
-
-Refetching the whole bookshelf also picks up `visibility` rather than carrying the stale
-value forward, and means there is exactly one shape and one decoder for "this bookshelf's
-shelves" — the two paths cannot drift apart again.
-
+{-| Refetch after a shelf mutation — via `getBookshelf`, the SAME call as
+the initial load, which is the point: the old `Api.getShelves` payload
+carried a hardcoded empty `placements` per shelf, so every shelf
+mutation repainted the bookcase placement-less (nineteen books vanished;
+the organiser called a full shelf "empty"). One endpoint, one shape,
+no lying refetch.
 -}
 reloadShelves : Model -> Cmd Msg
 reloadShelves model =
@@ -644,22 +604,11 @@ reloadShelves model =
             Cmd.none
 
 
-{-| A load failure in the reader's terms (Issue #362).
-
-The two cases split out from the generic "Please try again" are the two the
-reader can do something about, and both only became REACHABLE with this issue's
-timeout: before it, a stalled connection sat in `Loading` forever and never
-arrived here at all.
-
-  - `Timeout` — the request was given up on after `Api.standardTimeout`. Saying
-    "could not load" would be a shrug; naming the wait is what tells the reader
-    the shelf is not empty, the answer just never came.
-  - `NetworkError` — there is no connection. "Try again" alone would send them
-    round the same loop; the fix is upstream of the app.
-
-Everything else stays generic on purpose. A reader cannot act on a 500, and
-inventing detail for it would be noise dressed as helpfulness.
-
+{-| A load failure in the reader's terms (362). The two cases split from
+the generic copy are the two the reader can act on — `Timeout` (names
+the wait) and `Offline` (names the cause) — and both only became
+REACHABLE with this issue's timeout: a stalled connection used to sit in
+`Loading` forever.
 -}
 loadError : Config -> Http.Error -> String
 loadError config err =
@@ -796,25 +745,11 @@ view model =
         ]
 
 
-{-| The "Removed — Undo" toast (US-1.6.4 extension, #375).
-
-⚠️ **Hidden under `readOnly`, and that is the _second_ line of defence, not the
-first.** The same split as `viewOrganiser`: a control a viewer cannot use should
-not be drawn, but if this branch were deleted tomorrow the page would look wrong
-rather than act wrong — `mutationToken` in `UndoRemove` is what makes it inert,
-and `read_only_undo_is_inert_SECURITY` asserts that with the view out of the
-picture entirely.
-
-`role="status"` + `aria-live="polite"` because this appears without the reader
-asking and then leaves on a timer: a screen-reader user has to be told the offer
-exists while it still exists. Polite rather than assertive — it must not cut
-across whatever the shelf's own `aria-live` region is saying about the load that
-is running at the same moment.
-
-The failure state keeps the toast on screen with no Undo button: there is
-nothing left to press (the state machine has moved past `ToastOffered`), and a
-button that no longer does anything is worse than none.
-
+{-| The "Removed — Undo" toast (375). Hidden under `readOnly` as the
+SECOND line of defence: deleting this branch would make the page look
+wrong, not act wrong — `mutationToken` in `UndoRemove` is what makes a
+viewer's undo inert, and `read_only_undo_is_inert_SECURITY` asserts
+that with the view out of the picture.
 -}
 viewUndoToast : Model -> Html Msg
 viewUndoToast model =
@@ -868,28 +803,13 @@ viewEmptyBookshelf model =
         ]
 
 
-{-| The shelves are on their way (Issue #362).
+{-| The shelves are on their way (362).
 
-⛔ **`Loading` used to share `NotAsked`'s branch — an empty bookcase — which is
-also what `Success []` looks like.** Three different facts, one picture. Driven
-live on 2026-07-30, offline shelf navigation rendered a serene empty bookcase:
-the page told the reader their library was empty when the truth was that the
-request never completed.
-
-Every difference below is deliberate, because the two states have to be
-distinguishable by whatever a person or a test is actually looking at:
-
-  - **by structure** — `data-testid="bookshelf-loading"` against the empty
-    state's `bookshelf-empty`, so a test cannot pass in the wrong one;
-  - **by markup** — `role="status"` + `aria-busy="true"`, so a screen reader is
-    told a fetch is running rather than reading an empty shelf;
-  - **by words** — the shelf is named ("Fetching your Library…") where the empty
-    state offers an invitation to fill it;
-  - **by picture** — spine-shaped placeholders where the empty state has a
-    centred message on a bare plank.
-
-Any one of those alone would be a detail. Together they are the reason a reader
-who glances at the page for half a second draws the right conclusion.
+⛔ `Loading` used to share `NotAsked`'s empty-bookcase render — which is
+also what `Success []` looks like: three facts, one picture. Offline
+shelf navigation told the reader their library was empty when the
+request simply never completed. Loading now has its own visibly-waiting
+render, distinct from a genuinely empty shelf.
 
 -}
 viewLoadingBookshelf : Model -> Html Msg
@@ -986,21 +906,11 @@ viewBookshelfFromShelves model shelves =
                 ]
 
 
-{-| The shelf organiser (US-1.7.1 / #190), for the owner only.
-
-⚠️ **A separate panel, deliberately not a change to the spine layout.** The bookcase
-auto-flows placements into visual rows and does _not_ surface the physical `op.shelves`
-boundaries — a documented presentation choice (#151), noted in `SpineView` above. Rendering
-spines per shelf to make organisation visible would quietly reverse that decision. So this
-manages the physical shelves alongside the bookcase instead of reshaping it.
-
-Hidden when `readOnly` (someone else's bookshelf) or when there is no token: organising
-another reader's shelves is not a thing, and the controls would 403.
-
-⚠️ **This check hides the affordance; it no longer _is_ the guard.** `mutationToken`
-is (Issue #332). Both are wanted — a control that cannot work should not be drawn —
-but if this one were deleted tomorrow the page would look wrong, not act wrong.
-
+{-| The shelf organiser (US-1.7.1 / 190), owner only. A separate panel,
+deliberately NOT a change to the spine layout: the bookcase auto-flows
+placements and does not surface physical `op.shelves` boundaries (the
+151 presentation choice) — per-shelf spine rendering would quietly
+reverse that. This manages the physical shelves alongside.
 -}
 viewOrganiser : Model -> List Shelf -> Html Msg
 viewOrganiser model shelves =

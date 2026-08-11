@@ -207,30 +207,9 @@ module Api exposing
     )
 
 {-| Every HTTP call the SPA makes, and every decoder that reads a server
-response.
-
-A note on the size of the `exposing` list: several decoders here are exported
-only so `tests/TestHelpers.elm` and the program tests can wire the REAL decoder
-into their simulated effects. That is deliberate and is accepted repo practice.
-The alternative — a hand-written "mirror" of the decoder living in the test
-harness — is what let the upload SSE wire format drift for months: the mirrors
-and the fixtures agreed with each other while disagreeing with the server, and
-breaking every production wire field left the whole Elm suite green (Issue
-#328). A test that decodes with its own copy of the decoder is testing the
-copy.
-
-`elm-review`'s `NoUnused.Exports` reviews `src/` and `tests/` together, so each
-of these exports stays justified only while a test consumes it — land an
-exposure together with its consumer, never on its own.
-
-The same reasoning covers the `*Request` builders (`RequestSpec`,
-`confirmBookRequest`, `getBookRequest`, `mergeFormatRequest`): they carry a
-request's method/url/body as data so `TestHelpers`' simulated effects derive
-the request from the SAME definition production sends, instead of hand-building
-a copy (Issue #347). The demonstrated hole was exactly #328's, on the request
-side: hardcoding `confirmBook`'s `shelf_name` left all 1,353 Elm tests green,
-because the only test of that body asserted against the translator's copy.
-
+response. The large `exposing` list is deliberate: decoders are exported
+so tests wire the REAL decoder into simulated effects — a hand-written
+test mirror is what let the upload SSE wire format drift for months.
 -}
 
 import Dict
@@ -260,20 +239,11 @@ baseUrl =
     ""
 
 
-{-| A request's data — method, url, JSON body — apart from the `Http.request`
-that sends it (Issue #347).
-
-`elm-program-test` cannot run a real `Http.request`, so `TestHelpers`'
-translators must construct `SimulatedEffect`s. Before this seam they
-hand-copied the URL, method and body — and a divergence between the copy and
-the `Api.*` function it stood in for was invisible to the whole suite (the
-translator's merge-format request really had drifted: it sent an empty body
-where production sends the proto-encoded `{isbn, format_label}`). Production
-and the translator now consume one definition; only the transport differs.
-
-`body = Nothing` means an empty body — kept as data (not `Http.Body`) because
-`elm/http` and `SimulatedEffect.Http` have distinct body types.
-
+{-| A request's data — method, url, JSON body — apart from the
+`Http.request` that sends it (347). `elm-program-test` cannot run real
+requests, so test translators build `SimulatedEffect`s; before this seam
+they hand-copied url/method/body, and a drifted copy was invisible to
+the whole suite. Both production and tests now consume the same spec.
 -}
 type alias RequestSpec =
     { method : String
@@ -292,29 +262,14 @@ specHttpBody spec =
             Http.emptyBody
 
 
-{-| How long a request may hang before `elm/http` gives up and reports
-`Http.Timeout` (Issue #362).
+{-| How long a request may hang before `elm/http` reports `Http.Timeout`
+(362).
 
-⛔ **`timeout = Nothing` does not mean "no timeout configured". It means "wait
-forever".** Every request in this file carried it, and the consequence is not
-abstract: a connection that opens and then stalls — a machine that went to sleep
-mid-response, a proxy holding the socket, a captive portal — never resolves, so
-the page's `RemoteData` never leaves `Loading`. The `Failure` branch that every
-page carefully writes is, for that whole class of failure, dead code. The reader
-waits on a spinner with no end and no explanation, and their only move is to
-reload a page that gave them no reason to.
-
-A dropped connection is not this case: the browser reports `NetworkError` at
-once, and offline navigation is caught earlier still by the connectivity banner.
-This bound is for the failure that looks, from inside the app, exactly like a
-slow success.
-
-**Fifteen seconds.** Every JSON endpoint here answers in well under a second in
-practice; the slowest real path is a cold Fly machine, seconds not tens of
-seconds. Below ~10s a reader on a genuinely poor connection would be cut off
-mid-success; much above 15s and "it is broken" has already been the honest
-answer for some time. Fifteen buys the cold start and still fails inside the
-span of a person's patience.
+⛔ `timeout = Nothing` means "wait forever", not "no timeout": a stalled
+connection (sleeping machine, captive portal) never resolves, so
+`RemoteData` never leaves `Loading` and the page's `Failure` branch —
+where connectivity copy lives — is unreachable. Every request in this
+file carries this value.
 
 -}
 standardTimeout : Maybe Float
@@ -389,21 +344,14 @@ registrationResponseDecoder =
     Decode.map (\_ -> ()) (Decode.field "message" Decode.string)
 
 
-{-| The identification status of an uploaded image.
+{-| The identification status of an uploaded image. Wire statuses:
+`"pending"`, `"resolved"`, `"rejected"`, plus the SSE loop's synthetic
+`"timeout"`; unknown strings read as `Pending` (still in flight), never
+guessed terminal.
 
-The wire carries a status string from the DB (`"pending"`, `"resolved"`,
-`"rejected"`) plus the SSE loop's synthetic `"timeout"`. Anything else is a
-status the server grew after this client shipped, and is read as still-in-flight
-(`Pending`) rather than as a terminal outcome we would guess wrong.
-
-⛔ **`"timeout"` is not a rejection** (Issue #374). It used to decode to
-`Rejected` with a `null` rejection\_reason, and `Page.Upload` reads a
-`Rejected`-with-no-reason as "we could not read the ISBN" — so a reader whose
-photo the pipeline never answered for was told their photo was unreadable. The
-server knows the difference (`UploadController.sse_receive_loop/4` emits the two
-statuses from two different branches) and said so on the wire; it was this
-decoder that threw the distinction away. Keeping `TimedOut` separate is what
-lets the page say the one true thing it knows: no answer came back.
+⛔ `"timeout"` is not a rejection (374): it used to decode to `Rejected`
+with a null reason, so the reader was told their photo was refused when
+the pipeline had simply not answered yet. `TimedOut` is its own state.
 
 -}
 type PollStatus
@@ -430,26 +378,13 @@ type alias PollResponse =
     }
 
 
-{-| Decoder for SSE frames from `GET /api/upload/:image_id/stream`.
-
-There is exactly ONE wire shape, and the server owns it:
-`StacksWeb.ProtoJSON.poll_response/1`
-(`apps/core/lib/stacks_web/proto_json.ex:525-534`), mirrored by
-`proto/stacks/common/v1/upload.proto`'s `PollResponse`. It is snake\_case, and
-it always emits all six keys — `book_ids` defaults to `[]` and `is_duplicate`
-to `false` server-side, so neither is ever absent, and `book_id` /
-`rejection_reason` arrive as JSON `null` rather than going missing.
-
-Every field is therefore REQUIRED here. This decoder used to accept a
-camelCase alternative for five of the six and fall back to `Decode.succeed`
-defaults for all of them, which meant no test could ever notice a wire rename:
-the fixtures spoke camelCase, production spoke snake\_case, and both "passed".
-Do not reintroduce a `oneOf`/`succeed` fallback for a field the server always
-sends — that is precisely the hole (Issue #328).
-
-Heartbeat frames (`{"type":"heartbeat"}`) deliberately fail this decoder;
-`Page.Upload.StreamEvent` treats a decode error as "ignore, stay put".
-
+{-| Decoder for SSE frames from `GET /api/upload/:image_id/stream`. There
+is exactly ONE wire shape and the server owns it
+(`ProtoJSON.poll_response/1`, mirrored by upload.proto): snake\_case, all
+six keys always present (`book_ids` defaults `[]`, `is_duplicate`
+`false`; `book_id`/`rejection_reason` arrive as JSON null). The decoder
+matches that shape exactly — no defensive `oneOf` fallbacks that would
+mask a server-side contract break.
 -}
 streamEventDecoder : Decoder PollResponse
 streamEventDecoder =
@@ -483,19 +418,12 @@ streamEventDecoder =
         (Decode.field "is_duplicate" Decode.bool)
 
 
-{-| What an upload in the inbox is waiting for (Issue #351).
+{-| What an upload in the inbox is waiting for (351).
 
-⛔ These two are **not** a scale from good to bad, and must never be summed.
-`AwaitingConfirmation` is a job for the reader that the reader can finish;
-`Failed` is news they were never given, because the only place a rejection was
-ever rendered was a page they had already closed. The navigation badge counts
-the first kind and nothing else — a badge showing a number no action can clear
-is a worse defect than no badge, and it is the one a single `List.length` would
-produce.
-
-`KindUnknown` is deliberately absent: the server owns this vocabulary, and a
-token this client does not recognise is a wire break, not a third kind of
-waiting. The decoder fails on it rather than inventing a screen for it.
+⛔ Not a scale from good to bad; never sum them. `AwaitingConfirmation`
+is a job the reader can finish; `Failed` is news they were never given.
+The navigation badge counts the first kind ONLY — a number no action can
+clear is worse than no badge.
 
 -}
 type InboxKind
@@ -773,23 +701,11 @@ getImportRows token importId toMsg =
         }
 
 
-{-| A request failure the rate limiter may have caused, carrying the wait the
-server named (Issue #374).
-
-⛔ **This type exists because `Http.Error` structurally cannot carry it.**
-`Http.expectJson` and `Http.expectWhatever` collapse every non-2xx response into
-`Http.BadStatus Int`: the status number survives and the **headers do not**. But
-`retry-after` is a header — `StacksWeb.Plugs.RateLimiter` sets it beside the 429
-— so a caller holding an `Http.Error` has no way to learn how long to wait, and
-its copy must either say nothing or invent a number. Inventing one is the exact
-untruth this issue exists to remove: it would still read "wait 60 seconds" the
-day the plug changes to 30, and no test could notice.
-
-Endpoints in the `:auth` rate-limit bucket resolve through
-`expectStringResponse` and return this instead. The rest of the app keeps
-`Http.Error` and gets the unnumbered wait copy, which is what the 423 lockout
-message already says — a message with no interval in it is honest at any limit.
-
+{-| A request failure that may carry the server-named wait (374). Exists
+because `Http.Error` structurally cannot: `expectJson` collapses non-2xx
+into `BadStatus Int` — the status survives, the headers do not, and
+`retry-after` is a header. Built with `expectStringResponse` so the 429
+branch can read it; everything else maps onto the ordinary `Http.Error`.
 -}
 type RequestError
     = RateLimited (Maybe Int)
@@ -1227,35 +1143,14 @@ isNotFound err =
             False
 
 
-{-| An authenticated request's credential AND the handler for the one failure
-every authenticated request can suffer: the session is gone (Issue #361).
+{-| An authenticated request's credential AND the handler for the one
+failure every authed request can suffer: the session is gone (361).
 
-⛔ **Why this is a type and not a convention.** An authed call used to take a
-bare `String` token and a `Result Http.Error a -> msg` callback, which makes a
-401 just another `Err` — indistinguishable, at the type level, from a timeout.
-Noticing it was therefore opt-in, and three settings write-forms did not opt in:
-`Password`, `Profile` and `Notifications` each answered a mid-form 401 with
-"Please try again". That is a lie. The session is gone; retrying cannot work,
-and the reader retypes a password into a form that will 401 again. No test
-failed, and none could: there was no place in the types where the question was
-even asked. `isUnauthorized` exists, but a helper you have to remember to call
-is a convention, and this codebase has already measured what conventions are
-worth (#303/#309 — four admin surfaces, unit-tested and unreachable).
-
-A page cannot call an `Authed` endpoint without building one of these, and it
-cannot build one without naming `onExpired`: a record literal must supply every
-field. There is no default, no wildcard, and no `_ ->` branch to hide behind —
-unlike an exhaustiveness check, which `_ ->` satisfies. A page that ignores
-session expiry does not compile.
-
-`onExpired` is a plain `msg` rather than `Http.Error -> msg` on purpose: a 401
-on a request that definitely carried a credential means exactly one thing, so
-there is nothing left to inspect and no way to mistake it for a rate limit.
-
-Note the phrase "definitely carried a credential". This is for MANDATORY auth
-only. Optional-auth endpoints (`authHeaders : Maybe String -> …`, e.g.
-`getProfile`, `getListings`) are valid anonymously, so a 401 from one of those
-is not an expiry signal and must not be routed as one.
+⛔ A type, not a convention: with a bare token + callback, a 401 is just
+another `Err`, and noticing it was opt-in — three settings forms did not
+opt in and rendered "something went wrong" against a dead session. The
+constructor demands a session-expiry msg, so a call site that ignores
+expiry does not compile.
 
 -}
 type Authed err ok msg
@@ -2759,21 +2654,11 @@ confirmOutcomeFromSource source =
             ConfirmCreated
 
 
-{-| POST /api/books/confirm — the manual-entry verb (#343).
-
-One round trip does the whole of "add this ISBN to that bookshelf": resolve it
-against Open Library / Google Books, create the work and primary edition if the
-platform has never seen the ISBN, refuse (409) if it is a second edition of a
-work we already hold, and place it — atomically. The client used to reassemble
-this out of `GET /api/books/isbn/:isbn` plus
-`POST /api/bookshelves/:name/placements`, which could only ever add books the
-catalogue already had.
-
-The body is encoded inline rather than through `Stacks.Api.V1.Requests` because
-no `ConfirmBookRequest` message exists in `proto/stacks/api/v1/requests.proto`
-(the endpoint predates it and the controller reads raw params) — same as
-`setBookAgeGate`.
-
+{-| POST /api/books/confirm — the manual-entry verb (343). One atomic round
+trip: resolve the ISBN against OL/GB, create work+edition if unseen,
+409 on a duplicate edition, and place it. Replaces the client-side
+GET-then-place assembly, which could only add books the catalogue
+already held and left a non-atomic gap between the two calls.
 -}
 confirmBook :
     { isbn : String, shelfName : String }
@@ -2887,23 +2772,11 @@ updateProfile body request =
         }
 
 
-{-| Body for `PUT /api/settings/profile`.
-
-Each key that can be left unchanged is sent ONLY when it actually changed:
-
-  - `handle` is omitted unless edited. The field can render empty for a session
-    that carries no handle locally (e.g. an injected/minted session), and a
-    blank `handle` would otherwise write NULL over the user's real handle (the
-    column is NOT NULL — the server 500s). Omitting an unchanged handle keeps
-    the stored value; a genuine edit is still sent and server-validated.
-  - `email` + `current_password` are omitted unless the email changed. The
-    server treats a payload without an `email` key as a profile-only update
-    (`Accounts.update_profile/2` → `email_change?/2`), so an ordinary edit never
-    demands the current password.
-
-The proto-generated `Requests.encodeUpdateProfileRequest` always emits every
-field and so cannot express this conditional omission; the body is built here.
-
+{-| Body for `PUT /api/settings/profile`. Unchanged keys are OMITTED, not
+sent blank: `handle` can render empty for a session with no local handle,
+and a blank write would NULL the real handle (NOT NULL column — the
+server 500s). Omission keeps the stored value; genuine edits are sent
+and server-validated.
 -}
 encodeProfileBody :
     { displayName : String
@@ -4224,25 +4097,12 @@ adminSourcesResponseDecoder =
     Decode.map fromProtoSourceAdminListResponse ProtoSourceResp.decodeSourceAdminListResponse
 
 
-{-| The admin-session flow (#303).
-
-⚠️ **This is the layer whose absence made four admin pages dead.** `/api/admin/*` sits behind
-`pipeline :admin` → `AdminAuthPipeline` (requires a token whose `typ` is `"admin_session"`,
-IP- and boot\_id-bound) → `RequireMFA` (verified within 30 minutes). The pages were passing the
-ordinary Guardian token, which that pipeline rejects with **401** — so source approval, scraper
-health, book moderation and the removal queue had never loaded for anyone.
-
-The flow is two steps because MFA is a second factor, not a second password:
-
-1.  `adminLogin` — owner email + password → a `session_id` for an **unverified** admin session.
-    Refuses non-owners (403 `insufficient_role`) and owners with no MFA enrolled
-    (403 `mfa_not_enrolled`).
-2.  `adminVerifyMfa` — that `session_id` + a TOTP code → the **admin token**.
-
-`adminMfaSetup` / `adminMfaConfirm` are the one-off enrolment path, and they take the **ordinary**
-owner token rather than an admin one — necessarily, since you cannot hold an admin session before
-enrolling the factor it requires.
-
+{-| The admin-session flow (303) — the layer whose absence made four admin
+pages dead: `/api/admin/*` requires an MFA-verified `admin_session`
+token (IP- and boot\_id-bound), and the pages were passing the ordinary
+Guardian token, so every admin surface 401'd. Two steps: password →
+challenge id, TOTP → admin token; the token lives only in memory
+(`Model.adminSession`), never localStorage.
 -}
 type alias AdminSession =
     { sessionId : String }
