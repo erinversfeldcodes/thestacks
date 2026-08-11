@@ -1,24 +1,13 @@
 defmodule StacksWeb.Plugs.RouteGroup do
   @moduledoc """
-  Classifies the incoming request path into a feature group (`:auth`,
-  `:catalogue`, `:bookshelves`, `:upload`, `:gdpr`, `:settings`, `:health`,
-  `:metrics`, or `:other`) and stashes that tag on the conn so it can flow
-  through into telemetry metadata.
-
-  The tag feeds the SLO gate in Issue #136 — thresholds are computed per
-  route group against `phoenix.router_dispatch.stop.duration`.
-
-  The plug writes the tag to three places so downstream consumers can read
-  it in whichever form is most convenient:
-
-    * `conn.private[:route_group]`
-    * `conn.private[:telemetry_metadata][:route_group]`
-    * `conn.assigns[:route_group]`
-
-  `CoreWeb.Telemetry.attach_route_group_handler/0` attaches a telemetry
-  handler that copies `conn.private[:route_group]` into the
-  `[:phoenix, :router_dispatch, :stop]` metadata so the per-group Phoenix
-  metrics see the tag at emit time.
+  Classifies the request path into a feature group (`:auth`,
+  `:catalogue`, `:bookshelves`, `:upload`, `:gdpr`, `:settings`,
+  `:health`, `:metrics`, `:other`) for per-group SLO thresholds (136).
+  Writes the tag to `conn.private[:route_group]`,
+  `private[:telemetry_metadata][:route_group]` and
+  `assigns[:route_group]`;
+  `CoreWeb.Telemetry.attach_route_group_handler/0` copies it into
+  `[:phoenix, :router_dispatch, :stop]` metadata at emit time.
   """
 
   @behaviour Plug

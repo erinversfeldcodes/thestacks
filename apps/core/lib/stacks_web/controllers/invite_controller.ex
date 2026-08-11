@@ -1,18 +1,13 @@
 defmodule StacksWeb.InviteController do
   @moduledoc """
-  The public invitation lookup (US-14.1.3): `GET /api/auth/invite/:code`.
-
-  Deliberately absent from every payload: the owner's note, the bound email
-  (even masked), and the identity of anyone who has already redeemed. The code
-  is a bearer secret; a valid guess must reveal nothing about a person.
-  `email_bound` is a boolean so the form can say "this invitation was written
-  for a specific address" without naming it.
-
-  Distinct statuses per failure mode are safe only because the code space is
-  128 bits behind the display prefix and the shared `:auth` rate bucket caps
-  guessing — the same budget as login and password reset (#373), because a
-  code-guessing sweep and a password-guessing sweep are the same attack
-  against the same door.
+  Public invitation lookup (US-14.1.3): `GET /api/auth/invite/:code`.
+  Deliberately absent from every payload: the owner's note, the bound
+  email (even masked), and who redeemed — a valid guess must reveal
+  nothing about a person (`email_bound` is a boolean so the form can say
+  "written for a specific address" without naming it). Distinct statuses
+  per failure mode are safe only because the code space is 128 bits and
+  the shared `:auth` bucket caps guessing — the same budget as login,
+  because code-guessing and password-guessing are the same attack.
   """
 
   use CoreWeb, :controller

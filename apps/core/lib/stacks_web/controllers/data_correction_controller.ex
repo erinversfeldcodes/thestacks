@@ -1,56 +1,15 @@
 defmodule StacksWeb.DataCorrectionController do
   @moduledoc """
-  The platform owner's view of `Stacks.DataCorrection` (#340).
-
-  Two owner rulings during the 2026-07-30 campaign asked for the same thing: a
-  repair of bad production data should be a *reviewed operation*, not a `psql`
-  session. #339 built the mechanism; this is the surface that makes it something
-  the owner can actually reach on a running stack, where there is no shell and
-  no `mix`.
-
-  It is deliberately three verbs and no more:
-
-    * `index` shows every registered correction with its scope, its
-      reversibility, and — the point of the whole thing — the rows it *would*
-      change right now. It writes nothing. Dry-run is not a mode you opt into
-      here; it is what a GET means.
-    * `apply` runs one named correction, and requires a `reason`.
-    * `target` runs one named *targeted* correction (#376) against the rows the
-      operator names, and requires a `reason` too. It is a POST even to dry-run,
-      because a correction that takes an argument has nothing to say without a
-      body — so unlike `index`, dry-run here is `apply: false`, which is also
-      `Stacks.DataCorrection.run_targeted/3`'s default. The blast radius is in
-      the response either way, and seeing it before writing is still the point.
-
-  `target` resolves through `Registry.fetch_targeted/1` and never through
-  `fetch/1`: the two lists take different arguments, and a name that crossed
-  between them would apply something other than what the operator asked for.
-  The argument is cast by the *correction*, not by this controller — a targeted
-  correction declares the keys it accepts, so no request params map reaches a
-  write path. `Stacks.Books.merge_edition/2` keeps its narrow caller-supplied
-  field set for exactly that reason, and the inverse of an operation must not be
-  looser than the operation.
-
-  ## What this surface cannot do
-
-  `:name` resolves through `Stacks.DataCorrection.Registry.fetch/1`, so the only
-  rows reachable over HTTP are the ones a reviewed, committed correction module
-  already claims. There is no table parameter, no column parameter and no
-  predicate parameter, and adding one would turn a repair tool into the arbitrary
-  SQL endpoint `issues/138-prod-data-access-break-glass.md` rules out in as many
-  words. An unregistered name is a 404, not an error to work around.
-
-  ## Authorisation
-
-  The router puts this behind `:admin` (MFA-verified admin session) *and*
-  `:require_owner`, which re-checks the role on the loaded user at the point of
-  use. The admin login already refuses a non-owner, so the second check looks
-  redundant — it is not. An admin token outlives the role it was minted under:
-  demote the account and the pipeline happily keeps loading the user for the
-  remaining life of the session. For a read that is unfortunate; for a mutation
-  that rewrites production rows it is the difference between a stale token and a
-  stale token that can still write. Checking where the write happens, rather than
-  only where the session began, is the lesson #332 recorded.
+  The platform owner's HTTP surface for `Stacks.DataCorrection` (340) —
+  a repair should be a reviewed operation, not a `psql` session, and a
+  running stack has no shell. Three verbs, no more: `index` (every
+  registered correction + the rows it WOULD change — a GET means dry-run),
+  `apply` (one named correction, `reason` required), `target` (one named
+  targeted correction against operator-named rows, `reason` required).
+  `:name` resolves through `Registry.fetch/1`, so the reachable set is
+  exactly the reviewed list — no endpoint takes a table or column. Owner
+  role enforced by `:require_owner` AFTER `:admin` (a demoted admin token
+  must not reach this).
   """
 
   use CoreWeb, :controller

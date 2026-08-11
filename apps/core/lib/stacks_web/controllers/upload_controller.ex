@@ -126,34 +126,14 @@ defmodule StacksWeb.UploadController do
   end
 
   @doc """
-  POST /api/upload/:image_id/reject-identification — user clicked
-  "No, try again" on the model's guess.
-
-  Accepts a cumulative `rejected_book_ids` list (the frontend keeps
-  state; the server is stateless w.r.t. this list). The action:
-
-    1. Verifies the caller owns the upload row.
-    2. Resolves each book_id to a "Title by Author" string AND to its
-       primary edition's ISBN via `Stacks.Books.get_book_detail/1`.
-       Unresolvable IDs are skipped; if the resolved descriptor list is
-       empty, returns 422.
-    3. Removes any active placement the user holds for the rejected
-       book(s) so the retry can place a fresh one. Soft-delete via
-       `Stacks.Shelving.remove_book/2`. Missing placements are a no-op.
-    3b. Invalidates `Stacks.Books.TitleSearchCache` entries for EVERY
-       edition ISBN of each rejected book — the memoised title-search
-       result that produced the wrong pick would otherwise keep winning
-       round 1 of any fresh upload of the same image for up to 24 h.
-       Best-effort: a failure here logs a warning but never fails the 202.
-    4. Enqueues a fresh `IdentifyBookJob` with both `excluded_books`
-       (strings, steer the VLM) and `excluded_isbns` (strings, steer the
-       resolver away from previously-returned matches at the title-search
-       layer).
-
-  Returns 202 `{status: "pending", excluded_books: [...]}` on success.
-  Returns 401 without auth (handled by AuthPipeline).
-  Returns 404 when the upload doesn't belong to the caller (or is missing).
-  Returns 422 when no rejected_book_ids resolve to a known book.
+  POST /api/upload/:image_id/reject-identification — "No, try again" on
+  the model's guess. Takes a CUMULATIVE `rejected_book_ids` list (frontend
+  keeps state). Verifies ownership; resolves each id to "Title by Author"
+  + its edition ISBNs (empty resolved list → 422); soft-removes any active
+  placement so the retry can re-place; invalidates `TitleSearchCache` for
+  EVERY edition ISBN of each rejected book (the memoised wrong answer must
+  not survive into round one of the retry); re-enqueues `IdentifyBookJob`
+  with the rejected descriptors and `excluded_isbns`.
   """
   @spec reject_identification(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def reject_identification(conn, %{"image_id" => image_id} = params) do

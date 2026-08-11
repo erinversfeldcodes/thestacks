@@ -11,22 +11,13 @@ defmodule StacksWeb.SearchController do
   alias StacksWeb.ProtoJSON
 
   @doc """
-  GET /api/search?q=... — full-text search across book titles, sectioned (#285).
-
-  The response carries two sectioned views of the same query:
-
-    * `results` — DEPRECATED (#298): always an empty list. The flat, pre-#285
-      list is no longer populated — the SPA reads only the sectioned fields
-      (`collection`/`platform_hits`) since #285/#292 and drops `results`. The
-      proto field number stays reserved; the key is kept for wire-compat.
-    * `collection` — "Your Collection": the viewer's own active-placement title
-      matches, as `SearchHit`s with no provenance (owned by the viewer).
-    * `platform_hits` — "On the Platform": the platform-visible books EXCLUDING
-      those already in the viewer's collection, each a `SearchHit` carrying
-      optional discovery-source provenance (an active marketplace listing →
-      "listed" + handle + price; an always-visible `looking_for_home` placement
-      → "looking_for_home" + handle). An active listing takes precedence over a
-      looking_for_home label. Ordinary private placements leak no provenance.
+  GET /api/search?q=… — sectioned full-text search over book titles
+  (285). `collection` = the viewer's own active-placement matches (no
+  provenance); `platform_hits` = platform-visible books excluding the
+  viewer's collection, each with optional discovery provenance (listing /
+  looking_for_home). `results` is DEPRECATED (298): always empty, key kept
+  for wire-compat, proto field number reserved. Anonymous callers get only
+  `platform_hits`.
   """
   def index(conn, %{"q" => query}) when is_binary(query) and query != "" do
     limit = parse_limit(conn.params["limit"])

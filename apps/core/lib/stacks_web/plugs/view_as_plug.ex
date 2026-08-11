@@ -1,35 +1,12 @@
 defmodule StacksWeb.Plugs.ViewAsPlug do
   @moduledoc """
-  Two-phase ViewAs support for content preview.
-
-  ## Phase 1: Router pipeline plug (`call/2`)
-
-  Parses `?view_as=<perspective>` and stores the parsed perspective in
-  `conn.assigns[:requested_perspective]`. Halts with 422 on invalid or
-  unimplemented perspective formats. Does NOT check ownership.
-
-  ## Phase 2: Controller helper (`authorize_view_as/2`)
-
-  Called by controllers after loading the resource:
-
-      conn = ViewAsPlug.authorize_view_as(conn, resource_owner_id)
-
-  Checks whether the current user may use the requested perspective on
-  that resource, then sets `conn.assigns[:view_as_context]` or halts 403.
-
-  ## Permissions
-
-  - **Platform owner** (`role: "owner"`): any perspective on any resource.
-  - **Resource owner** (`user.id == resource_owner_id`): `"unauthenticated"`
-    and `"platform"` on their own resources.
-  - **Others**: 403.
-
-  ## Supported perspectives
-
-  - `"unauthenticated"` — simulate an anonymous visitor
-  - `"platform"` — simulate a generic authenticated platform user
-  - `"user:<uuid>"` — simulate a specific user (platform owner only)
-  - `"group:<uuid>"` — not yet implemented; halts 422
+  Two-phase ViewAs preview. Phase 1 (`call/2`, router): parses
+  `?view_as=<perspective>` into `assigns[:requested_perspective]`; 422 on
+  invalid/unimplemented. Does NOT check ownership. Phase 2
+  (`authorize_view_as/2`, controller, after loading the resource): checks
+  permission and sets `assigns[:view_as_context]` or halts 403.
+  Permissions: platform owner — any perspective anywhere; resource owner —
+  `"unauthenticated"`/`"platform"` on their own resources; others — 403.
   """
 
   import Plug.Conn

@@ -1,47 +1,16 @@
 defmodule StacksWeb.Plugs.RateLimiter do
   @moduledoc """
-  ETS-backed sliding window rate limiter Plug.
+  ETS-backed sliding-window rate limiter. Buckets: global 1000/60s per
+  IP; `:auth` 60/60s per IP; `:upload` 120/60s per user; `:social` 20/60s
+  per user; `:public` 200/60s per IP (`RATE_LIMIT_PUBLIC`);
+  `:password_change` 20/60s per IP.
 
-  - Global endpoints: 1000 requests / 60 seconds per IP
-  - Auth endpoints (`:auth` bucket): 60 requests / 60 seconds per IP
-  - Upload endpoints (`:upload` bucket): 120 requests / 60 seconds per authenticated user
-  - Social endpoints (`:social` bucket): 20 requests / 60 seconds per authenticated user
-  - Public read endpoints (`:public` bucket): 200 requests / 60 seconds per IP (env-tunable via `RATE_LIMIT_PUBLIC`)
-  - Password change (`:password_change` bucket): 20 requests / 60 seconds per IP
-
-  ## Sizing rationale (auth + password_change)
-
-  Per-IP rate-limiting alone is a weak credential-stuffing defence —
-  attackers rotate IPs trivially, and the only IPs the limit actually
-  hurts are corporate / mobile NATs sharing one address across many
-  legitimate users. The values here are sized to slow naive scripted
-  attempts without locking out NAT-shared real users:
-
-  - `:auth` 60/60s — 1 req/sec average with burst headroom. A real
-    user can mistype, retry, refresh a tab, open a new device, etc.
-    A scripted attacker still has to slow down materially.
-  - `:password_change` 20/60s — easily covers retries on a typo;
-    well below useful throughput for credential stuffing the
-    /api/settings/password endpoint.
-
-  The proper credential-stuffing defence (per-account lockout after N
-  failed attempts + CAPTCHA / proof-of-work after threshold) is
-  tracked separately. Without it, treat these IP caps as the floor of
-  abuse prevention, not the ceiling.
-
-  Both `:auth` and `:password_change` honour env-var overrides at
-  Server.init/1 time — RATE_LIMIT_AUTH and RATE_LIMIT_PASSWORD_CHANGE.
-  Use those for per-environment tuning (e.g. tighter on prod, looser
-  on isolated test/staging if needed).
-
-  The ETS table is managed by `StacksWeb.Plugs.RateLimiter.Server` which
-  must be started in the supervision tree before this plug runs.
-
-  Usage:
-    plug StacksWeb.Plugs.RateLimiter
-    plug StacksWeb.Plugs.RateLimiter, bucket: :auth
-    plug StacksWeb.Plugs.RateLimiter, bucket: :upload
-    plug StacksWeb.Plugs.RateLimiter, bucket: :social
+  Sizing: per-IP limiting is a weak credential-stuffing defence (attackers
+  rotate IPs; NATs share them), so auth values slow naive scripts without
+  locking out shared-address users — the real defences are per-ACCOUNT
+  lockout (`Accounts.authenticate_user/2`) and Argon2 cost. 429s carry
+  `retry-after`. State is per-node ETS: resets on deploy, unshared across
+  machines — acceptable for the current single-machine posture.
   """
 
   require Logger

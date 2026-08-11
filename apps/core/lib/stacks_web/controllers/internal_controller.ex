@@ -1,21 +1,13 @@
 defmodule StacksWeb.InternalController do
   @moduledoc """
-  Handles internal callbacks and smoke-test endpoints.
-
-  ## Vision associate callback
-
-  Protected by a timestamp-based HMAC scheme via the X-Vision-Signature header:
-    Value: "<unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.POST.<path>")>" (lowercase hex)
-    Valid window: ±60 seconds
-
-  No user authentication — service-to-service only.
-  Always returns 200 to the vision sidecar once auth passes (sidecar must not retry on app errors).
-
-  ## Smoke test endpoint
-
-  `POST /api/internal/smoke/circuit_breakers` — gated by `config :core, :smoke_tests_enabled`.
-  Protected by the same `X-Internal-Token` HMAC scheme used by the scraper service.
-  Returns 404 in production (default false).
+  Internal callbacks and smoke-test endpoints. The vision associate
+  callback is HMAC-authed via `X-Vision-Signature`
+  (`<ts>.<HMAC-SHA256(secret, "<ts>.POST.<path>")>`, ±60s window),
+  service-to-service only, and always returns 200 once auth passes — the
+  sidecar must not retry on app errors.
+  `POST /api/internal/smoke/circuit_breakers` is gated by
+  `:smoke_tests_enabled` (404 in production) behind the scraper's
+  `X-Internal-Token` scheme.
   """
 
   use CoreWeb, :controller
