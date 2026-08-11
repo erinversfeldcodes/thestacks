@@ -1,22 +1,9 @@
-"""The sidecar's half of the vision error contract.
-
-Core (`Stacks.AI.VisionError`) decides whether to retry an upload on a GPU by
-branching on the ``code`` in the error body. That only works if the codes this
-service actually puts on the wire are the ones core knows about, so these tests
-check three separate things that can each break independently:
-
-1. the constants in ``app.main`` are exactly the proto enum's non-zero values —
-   a typo here is invisible to mypy and to every other test in this suite;
-2. a deterministic failure really renders as a bare ``VisionError`` body, not as
-   FastAPI's default ``{"detail": ...}``;
-3. a failure that is *not* a determination about the image (auth, an unhandled
-   crash) carries no code at all — because a code tells core to stop retrying,
-   and telling it to stop retrying a transient fault is the more expensive
-   mistake of the two.
-
-The Elixir half is ``apps/core/test/stacks/ai/vision_error_test.exs``. Both read
-the enum from the proto rather than from a literal list, so they cannot drift
-apart without one of them failing.
+"""The sidecar's half of the vision error contract. Core branches
+retry/cancel on the ``code`` in the error body, so three independently
+breakable things are checked: the constants in ``app.main`` are exactly
+the proto enum's non-zero values (a typo is invisible to mypy);
+deterministic failures render as a bare ``VisionError`` body, not
+FastAPI's wrapper; transient faults do NOT get a VisionError body.
 """
 
 from __future__ import annotations

@@ -1,36 +1,11 @@
-"""
-Modal app: Qwen2.5-VL-7B-Instruct vision inference for The Stacks.
+"""Modal app: Qwen2.5-VL-7B-Instruct vision inference for The Stacks.
 
-Inference stack:
-  * Backend  — HuggingFace Transformers + accelerate (no vLLM).
-  * Model    — Qwen/Qwen2.5-VL-7B-Instruct loaded in bfloat16.
-  * GPU      — A10G. 7B bf16 weights fit with comfortable headroom; the
-                A10G is materially cheaper than H100 and matches the
-                empirically-clean baseline (commit dfef1333).
-  * Concurrency — single inference per container at a time. ``classify``
-                  and ``extract`` are sync ``@modal.method`` calls; Modal
-                  serialises them on the underlying CUDA context. Bursts
-                  scale out horizontally via ``max_containers=10`` rather
-                  than vertically via ``@modal.concurrent``.
-  * Flow     — two GPU calls per upload (``classify`` then, on a positive
-                classification, ``extract``). The FastAPI ``/analyze``
-                endpoint in ``app/main.py`` orchestrates the two calls and
-                short-circuits on confident ``not_book`` / ``ambiguous``.
-
-This file defines two Modal functions:
-
-  1. VisionModel  — GPU class (A10G) running Qwen2.5-VL-7B-Instruct in
-                    bfloat16. Exposes ``classify`` and ``extract`` Modal
-                    methods. Single-image inference only.
-  2. vision_api   — CPU function hosting the FastAPI app via @modal.asgi_app().
-                    HTTPS endpoint: https://erinversfeldcodes--{MODAL_APP_NAME}-vision-api.modal.run
-
-Deploy with:
-    modal deploy apps/vision/modal_app.py
-
-The model is baked into the container image at build time, so cold starts
-only pay the cost of loading weights into GPU memory (~30s on A10G) rather
-than downloading ~15GB from HuggingFace on every container start.
+Stack: HF Transformers + accelerate (no vLLM), bf16 on an A10G — the
+empirically-clean dfef1333 baseline; no vLLM/H100 without an eval
+framework. One inference per container (sync @modal.method calls,
+serialised); scale by container count, not in-process concurrency.
+300s function timeout — core's client timeout is DERIVED from this
+number and must never be below it (350).
 """
 
 import json

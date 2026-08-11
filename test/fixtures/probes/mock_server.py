@@ -1,22 +1,12 @@
 #!/usr/bin/env python3
 """Tiny HTTP mock server for probe-production tests.
 
-Usage:
-    mock_server.py --port 8765 --mode healthy
-    mock_server.py --port 8765 --mode fail-5xx --fail-ratio 0.25
-    mock_server.py --port 8765 --mode blackhole   # never respond
+    mock_server.py --port 8765 --mode healthy|fail-5xx|blackhole
 
-Modes:
-    healthy     — every endpoint returns 200. /api/auth/login returns
-                  {"token": "fake-token"}; /api/upload returns 202 with
-                  an image_id.
-    fail-5xx    — configurable fraction of GET /api/catalogue requests
-                  return 500. Auth and health still 200.
-    blackhole   — sleep forever on every request (simulates timeouts).
-    auth-fail   — POST /api/auth/login always 401 (hard failure).
-
-The server logs each request as a JSON line to stdout so tests can assert
-what probes actually ran.
+healthy: everything 200 (login returns a fake token, upload 202).
+fail-5xx: --fail-ratio of GET /api/catalogue return 500; auth/health 200.
+blackhole: never respond (probe-timeout path). State is in-process;
+each test spawns its own instance on its own port.
 """
 
 from __future__ import annotations

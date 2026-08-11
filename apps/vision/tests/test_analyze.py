@@ -1,23 +1,8 @@
-"""Tests for the /analyze endpoint — two-call classify-then-extract flow.
-
-The endpoint now orchestrates ``VisionClient.classify`` and
-``VisionClient.extract`` at the FastAPI layer (no single-pass
-``client.analyze``). These tests verify:
-
-- BOOK classification → ``extract`` is invoked and returned books surface
-  in the response.
-- NOT_BOOK classification → short-circuit; ``extract`` is NEVER called and
-  books is [].
-- AMBIGUOUS classification → short-circuit; ``extract`` is NEVER called
-  and books is []. (Different from the prior single-pass behaviour, which
-  preserved partial-signal books on AMBIGUOUS — see the docstring on the
-  ``/analyze`` handler for the rationale.)
-- BOOK + empty extract → response carries empty books, ``model_used``
-  is the VLM model name (not ``local_ocr``).
-- Local OCR short-circuit (barcode hit) → neither classify nor extract
-  is called; ``model_used`` is ``local_ocr``.
-- Input validation: missing image/image_url → 422; invalid base64 → 422.
-- HMAC auth is enforced (delegated to the same verify_hmac plug).
+"""/analyze two-call flow tests: BOOK -> extract invoked, books surface;
+NOT_BOOK and AMBIGUOUS -> short-circuit, extract NEVER called, books []
+(deliberately unlike the old single-pass behaviour, which preserved
+partial-signal books on ambiguity). Also covers the OCR pre-pass
+skipping classify on a clean barcode.
 """
 
 import base64

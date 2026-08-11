@@ -489,29 +489,15 @@ def _parse_extracted_books(parsed: dict[str, object]) -> list[ExtractedBook]:
     dependencies=[Depends(verify_hmac)],
 )
 async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
-    """Two-call classification + extraction in the FastAPI layer.
-
-    Flow:
-      1. Local OCR pre-pass — a clean barcode decode implies BOOK without
-         needing the vision model. ISBN barcodes have a checksum, so false
-         positives on non-books are effectively zero.
-      2. Classify (one `client.classify` call, focused prompt). On
-         confident NOT_BOOK or AMBIGUOUS we short-circuit and return with
-         empty books — `extract` is never invoked. This is the load-bearing
-         contract for the bunny-screenshot regression case and also halves
-         the Modal cost on non-book inputs.
-      3. Extract (one `client.extract` call, focused prompt) — only on
-         confirmed BOOK classifications. The per-book `confidence` field
-         from the extract prompt feeds Issue #167's enrichment-skip gate
-         downstream.
-
-    Previously this endpoint issued a single consolidated `client.analyze`
-    call. That collapsed prompt leaked classify reasoning into extract
-    reasoning and over-populated `books` on non-book inputs (e.g.
-    screenshot_bunny.jpg landed BOOK with empty books rather than
-    NOT_BOOK; rotated covers picked up confident wrong identifications).
-    The two-call flow restores the strict classification gate from
-    git ref dfef1333.
+    """Two-call classification + extraction in the FastAPI layer:
+    1. local OCR pre-pass — a clean barcode decode implies BOOK (ISBN
+       checksums make false positives ~zero) and skips the classify call;
+    2. classify — on confident NOT_BOOK or AMBIGUOUS, short-circuit with
+       empty books; ``extract`` is NEVER invoked (the load-bearing contract
+       for the bunny-screenshot regression, and half the Modal cost on
+       non-books);
+    3. extract — only for BOOK.
+    Returns the combined AnalyzeResponse shape core expects.
     """
     log = logger.bind(endpoint="/analyze")
 

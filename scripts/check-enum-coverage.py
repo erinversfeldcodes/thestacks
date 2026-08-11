@@ -1,54 +1,11 @@
 #!/usr/bin/env python3
-"""
-Fail the build when an Elixir consumer stops handling a proto enum value.
-
-## Why this exists
-
-Proto enums reach Elm as a closed custom type, so adding a value breaks every Elm
-`case` until it is handled. They reach Elixir as a bare string, so consumers match
-on string literals behind a mandatory catch-all — and a missed clause is invisible
-to the compiler, to `mix proto.sync --check`, and to the test suite.
-
-Commit f28c032e added `SCRAPE_OUTCOME_RATE_LIMITED` to proto, to the Rust scraper,
-and to two of the three Elixir files that interpret the outcome. The third,
-`trigger_price_scrape_job.ex`, silently routed it into its catch-all and treated a
-shop politely pacing us as an unrecognised failure. `price_snapshots` sat at zero
-rows for three campaigns while every gate stayed green.
-
-This check closes that hole from the outside: it finds every hand-written Elixir
-file that matches on an enum's wire values and asserts the matched set covers the
-whole enum.
-
-## What counts as a consumer
-
-Any file under `apps/core/lib` (excluding generated code) containing at least one
-double-quoted literal equal to one of that enum's wire values. Consumers are
-discovered, not registered, so a new one is covered the day it is written.
-
-## Declaring a deliberate omission
-
-Not every consumer must handle every value — but the omission has to be a
-statement someone can review, not an absence. Declare it in the consuming file:
-
-    # proto-enum-coverage: ScrapeOutcome ignore SCRAPE_OUTCOME_NOT_STOCKED,
-    #   SCRAPE_OUTCOME_ROBOTS_BLOCKED — determinations, not service faults; they
-    #   melt nothing and this module only decides what melts the fuse.
-
-The directive lives beside the code it excuses, so it turns up in the diff that
-creates the gap and in the diff that would have to widen it. A reason is
-mandatory. Undeclared omissions, and declarations naming a value that is not
-actually missing (or no longer exists), both fail.
-
-## The one global exemption
-
-A proto3 enum's zero value (`*_UNSPECIFIED`) is exempt everywhere. proto3 requires
-it to exist as the unset sentinel; it is never a determination a service makes, so
-handling it is the catch-all's job. This exemption is announced on every run rather
-than applied silently.
-
-Usage:
-    python3 scripts/check-enum-coverage.py           # fail on any undeclared gap
-    python3 scripts/check-enum-coverage.py --report  # print the inventory, never fail
+"""Fail the build when an Elixir consumer stops handling a proto enum
+value. Enums reach Elm as closed types (the compiler catches gaps) but
+Elixir as bare strings behind catch-alls — a missed clause is invisible
+to every other gate (f28c032e shipped exactly that). Files declare
+their consumption with `# proto-enum-coverage: <Enum> <mode>` lines;
+this script asserts every declared consumer matches every non-zero
+enum value. Runs in `bash scripts/lint-proto.sh`.
 """
 
 from __future__ import annotations

@@ -1,17 +1,10 @@
-"""Local barcode-based ISBN scanner.
-
-Uses pyzbar to decode barcodes from images and validates extracted data
-as ISBN-10 or ISBN-13. This provides a fast, cheap pre-pass that can
-short-circuit the VLM call when a clean barcode is present.
-
-If the image fails to decode as-uploaded, a sweep of cheap pixel
-transforms is attempted (horizontal mirror, 90/180/270 rotations,
-mirror + 90) — pyzbar cannot natively decode mirrored barcodes, which
-show up in screenshot-of-screenshot uploads. The happy path (original
-orientation decodes) still performs exactly one decode attempt.
-
-Safety contract: ``local_isbn_scan`` NEVER raises. It returns ``None``
-on any error (corrupt image, no barcode, unrecognised format, etc.).
+"""Local barcode-based ISBN scanner (pyzbar): the fast, cheap pre-pass
+that short-circuits the VLM when a clean barcode is present. If the
+as-uploaded image fails to decode, a sweep of cheap transforms is tried
+(mirror, rotations — pyzbar can't decode mirrored barcodes, which
+screenshot-of-screenshot uploads produce); the happy path stays one
+decode attempt. Safety contract: ``local_isbn_scan`` never raises —
+any failure returns None and the VLM path proceeds.
 """
 
 from __future__ import annotations

@@ -493,20 +493,12 @@ class TypeResolver:
         return result
 
     def compute_imports(self, file_def: FileDef) -> list[str]:
-        """Compute required cross-module imports for a file (Finding #1).
-
-        Scans all fields in all messages for TYPE_MESSAGE and TYPE_ENUM
-        references to types defined in OTHER proto files, then returns
-        the Elm import statements needed. Also collects transitive types
-        needed by default records of imported message types.
-
-        Known limitation: transitive default-record dependencies may pull in
-        symbols that are not directly referenced in this module's generated
-        code (e.g. BookshelfResponses imports Book symbols because
-        PlacementDetail's default record transitively references defaultBook).
-        A full usage-analysis pass over the generated Elm source would be
-        needed to prune these, but elm-make tolerates unused imports so this
-        is cosmetic only.
+        """Compute required cross-module Elm imports for a file: scans fields
+        for TYPE_MESSAGE/TYPE_ENUM references defined in OTHER proto files,
+        plus transitive types needed by imported messages' default records.
+        Known limitation: transitive default-record deps may import symbols not
+        directly referenced — harmless (Elm allows unused imports; elm-review
+        runs on src/, not generated code).
         """
         this_module = proto_file_to_elm_module(file_def.name)
         import_map: dict[str, set[str]] = {}

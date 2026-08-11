@@ -801,29 +801,12 @@ def _parse_deploy_output(output: str) -> dict[str, Any]:
 
 @mcp.tool()
 def run_e2e_gate(issue_number: int) -> dict[str, Any]:
-    """
-    Deploy a preview environment and run E2E tests against it.
+    """Deploy a preview environment and run E2E against it, via
+    scripts/deploy-preview.sh (Neon branch -> Fly preview -> Playwright ->
+    DAST -> cleanup). Output is parsed for PASS/FAIL lines.
 
-    Invokes scripts/deploy-preview.sh which:
-    1. Creates a Neon preview branch
-    2. Deploys to a Fly.io preview app
-    3. Runs Playwright E2E tests against the preview URL
-    4. Runs DAST scans (OWASP ZAP, Nuclei, jwt_tool, IDOR)
-    5. Cleans up on exit
-
-    The script's output is parsed for PASS/FAIL lines to determine the result.
-
-    Args:
-        issue_number: The issue number (used to derive the branch name for
-                      the preview deployment).
-
-    Returns a dict with:
-        - passed: bool — True if all E2E tests passed
-        - preview_url: str | None — the preview app URL
-        - summary: str — human-readable result summary
-        - pass_lines: list[str] — all PASS lines from the output
-        - fail_lines: list[str] — all FAIL lines from the output
-        - output: str — full output (truncated to last 5000 chars)
+    Args: issue_number (derives the preview branch name).
+    Returns: {passed, pass_lines, fail_lines, preview_url, log_path}.
     """
     deploy_script = REPO_ROOT / "scripts" / "deploy-preview.sh"
     if not deploy_script.exists():

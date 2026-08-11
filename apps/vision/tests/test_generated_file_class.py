@@ -1,19 +1,9 @@
-"""The proto drift check must distinguish local staleness from real drift.
-
-Issue #354. Drift in a GITIGNORED generated artefact can only ever be local:
-CI regenerates those from scratch on every run, so there is nothing there that
-*can* be stale and nothing that could have been committed wrong. Failing the
-gate for it cost two full `just ci` re-runs (Waves 4 and 5); Wave 5 reported
-three failing groups — `elixir: test`, `python: test`, `proto: lint` — which
-were one cause and zero real defects.
-
-Drift in a TRACKED generated artefact is the only thing this check exists to
-catch, and must still fail the build.
-
-These tests drive real git and the real working tree on purpose. Git is the
-oracle here — the project convention is to answer "is this tracked?" with git
-rather than by parsing .gitignore, because a hand-rolled matcher fails
-silently. A stubbed classifier would prove nothing about that.
+"""The proto drift check must split local staleness from real drift
+(354): a GITIGNORED generated artefact can only be locally stale (CI
+regenerates from scratch) and must be regenerated-and-passed, while a
+TRACKED artefact diverging from its .proto is the real defect and must
+still fail. Wave 4/5 burned two full `just ci` re-runs on the former
+being treated as the latter.
 """
 
 import os

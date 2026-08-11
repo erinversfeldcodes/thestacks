@@ -1,26 +1,8 @@
-"""Fuzz target for image input parsing in the Modal vision service.
-
-Exercises four distinct paths:
-  1. _fuzz_base64_and_size   — base64 decode + size check logic (unit level)
-  2. _fuzz_model_output_parsing — JSON parsing of model output (unit level)
-  3. _fuzz_http_body          — raw bytes as the HTTP request body through the full
-                                ASGI stack: FastAPI JSON parsing → Pydantic validation
-                                → base64 decode → size check
-  4. _fuzz_http_token         — raw bytes as the X-Internal-Token header value,
-                                exercising HMAC token parsing with adversarial inputs
-
-Running with Atheris (Linux only — requires: pip install atheris):
-    just fuzz-vision -- -atheris_runs=100000
-
-Running as a seed-corpus regression test (all platforms):
-    just fuzz-vision
-
-Always invoke via `just fuzz-vision` — the target sets PYTHONPATH=. so that
-`app` is importable. Running `python tests/fuzz_image_input.py` directly from
-inside `apps/vision/` will fail with ModuleNotFoundError without it.
-
-The seed corpus lives at <repo-root>/images/ and contains representative
-book cover photos used to prime coverage before Atheris mutates inputs.
+"""Fuzz target for image-input parsing: base64+size logic, model-output
+JSON parsing, raw bytes through the full ASGI stack (FastAPI -> Pydantic
+-> base64 -> size check), and raw bytes as the X-Internal-Token header
+(auth parse path). Property under test: any input yields a structured
+4xx/JSON error, never an unhandled exception or a 500.
 """
 
 import base64

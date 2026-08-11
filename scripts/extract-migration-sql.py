@@ -1,40 +1,11 @@
 #!/usr/bin/env python3
-"""Extract squawk-analysable SQL from an Ecto migration (#219).
-
-`security-squawk.sh` historically only linted SQL found inside `execute("...")`
-strings, so a migration hazard expressed with the Ecto **DSL** — e.g.
-`create unique_index(:users, [:handle], concurrently: false)`, which locks the
-table against writes for the whole build — was invisible to squawk. That is the
-DSL/raw-execute blind spot #210 fell into and #219 closes.
-
-This helper is the single source of truth for turning a migration file into a
-stream of SQL statements for squawk. Both `security-squawk.sh` and
-`security-squawk-test-wrapper.sh` shell out to it, so the two gates can never
-drift out of sync (drift being the exact failure mode #219 is about).
-
-It emits, one statement per stanza on stdout:
-  1. A bare `CREATE TABLE <name> ();` for every table the migration itself
-     creates via `create table(...)` / `create_if_not_exists table(...)`.
-     No columns are rendered — squawk only needs to know the table is *new in
-     this migration*, and knowing that suppresses a whole class of false
-     positives (#337). An index built non-concurrently on a table that does not
-     exist yet blocks nothing, so `require-concurrent-index-creation` must not
-     fire there; likewise `adding-not-nullable-field` on a brand-new table.
-     Without this stanza squawk saw a naked `CREATE INDEX` with no context and
-     flagged 32 historically-correct table-creation migrations, which is how a
-     gate gets switched off.
-  2. Raw SQL from every non-interpolated `execute(...)` block (as before).
-  3. A synthesised `CREATE [UNIQUE] INDEX ...` statement for every
-     `create index(...)` / `create unique_index(...)` DSL call, faithfully
-     reflecting whether the author asked for `concurrently: true`. A
-     non-concurrent build omits `CONCURRENTLY` and trips squawk's
-     `require-concurrent-index-creation`; a concurrent build is rendered with an
-     explicit name + `IF NOT EXISTS` so a genuinely-safe index still passes.
-
-Blocks containing Elixir interpolation (`#{...}`) or anonymous PL/pgSQL
-(`DO $$ ... $$`) are skipped — their effect isn't statically knowable.
-
-Usage: extract-migration-sql.py <migration.exs>
+"""Extract squawk-analysable SQL from an Ecto migration (219). squawk
+historically saw only `execute("...")` strings, so DSL-expressed
+hazards (e.g. a non-concurrent unique_index locking the table) were
+invisible — the 210 blind spot. Single source of truth for
+migration-file -> SQL-stream used by both security-squawk.sh and its
+test wrapper: runs the migration with a stubbed connection that
+records SQL instead of executing it, then emits DSL-derived DDL.
 """
 
 import re
