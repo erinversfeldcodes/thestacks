@@ -34,8 +34,12 @@ jobs:
 
           echo "Cleanup mode: dry_run=${DRY_RUN}"
 
-          CUTOFF_EPOCH="$(date -u -d '30 days ago' +%s)"
-          echo "Cutoff (epoch seconds, UTC): ${CUTOFF_EPOCH} ($(date -u -d "@${CUTOFF_EPOCH}" -Is))"
+          # Policy: keep the NEWEST 3 pre-rollback backups, delete the rest.
+          # A keep-count, not an age window: the project branch quota is 10
+          # and every rollback mints a backup, so a 30-day window filled the
+          # quota long before anything aged out (a restore then failed with
+          # BRANCHES_LIMIT_EXCEEDED).
+          KEEP_NEWEST=3
 
           # ── List all branches, following Neon's cursor pagination ─────
           # Neon's /branches endpoint returns at most 100 entries per page
@@ -92,41 +96,49 @@ jobs:
           : > /tmp/stale.ndjson
           : > /tmp/kept.ndjson
           : > /tmp/skipped.ndjson
+          : > /tmp/dated.ndjson
+
+          # Order by the UTC timestamp embedded in the branch NAME
+          # (pre-rollback-<sha>-<YYYYMMDDTHHMMSSZ>). Two hard-won facts:
+          #   * a restore-preserved branch INHERITS its parent's created_at,
+          #     so the API's date fields lie about when the backup was taken;
+          #   * this script's first version read `.creation_time` — a field
+          #     the API does not return — so it skipped every branch with a
+          #     warning and passed green having deleted nothing.
+          jq -c 'select(.name != null and (.name | startswith("pre-rollback-")))' \
+            /tmp/branches.ndjson > /tmp/prerollback.ndjson
 
           while IFS= read -r branch; do
             [[ -z "${branch}" ]] && continue
             name="$(jq -r '.name // empty' <<<"${branch}")"
             id="$(jq -r '.id // empty' <<<"${branch}")"
-            ctime="$(jq -r '.creation_time // empty' <<<"${branch}")"
-
-            case "${name}" in
-              pre-rollback-*) ;;
-              *) continue ;;
-            esac
+            ts="${name##*-}"
 
             if [[ -z "${id}" ]]; then
               echo "::warning::skipping pre-rollback branch with empty id (name=${name})"
               echo "${branch}" >> /tmp/skipped.ndjson
               continue
             fi
-            if [[ -z "${ctime}" ]]; then
-              echo "::warning::skipping ${id} (${name}): missing creation_time"
+            if ! [[ "${ts}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
+              echo "::warning::skipping ${id} (${name}): name carries no parseable timestamp"
               echo "${branch}" >> /tmp/skipped.ndjson
               continue
             fi
 
-            if ! ctime_epoch="$(date -u -d "${ctime}" +%s 2>/dev/null)"; then
-              echo "::warning::skipping ${id} (${name}): unparseable creation_time=${ctime}"
-              echo "${branch}" >> /tmp/skipped.ndjson
-              continue
-            fi
+            jq -c --arg ts "${ts}" '. + {sort_ts: $ts}' <<<"${branch}" >> /tmp/dated.ndjson
+          done < /tmp/prerollback.ndjson
 
-            if (( ctime_epoch < CUTOFF_EPOCH )); then
-              echo "${branch}" >> /tmp/stale.ndjson
-            else
-              echo "${branch}" >> /tmp/kept.ndjson
-            fi
-          done < /tmp/branches.ndjson
+          if [[ -s /tmp/prerollback.ndjson && ! -s /tmp/dated.ndjson ]]; then
+            echo "::error::pre-rollback branches exist but EVERY one was skipped — refusing to pass a sweep that swept nothing." >&2
+            exit 1
+          fi
+
+          if [[ -s /tmp/dated.ndjson ]]; then
+            jq -cs "sort_by(.sort_ts) | .[0:(length - ${KEEP_NEWEST} | if . < 0 then 0 else . end)] | .[]" \
+              /tmp/dated.ndjson >> /tmp/stale.ndjson
+            jq -cs "sort_by(.sort_ts) | .[(length - ${KEEP_NEWEST} | if . < 0 then 0 else . end):] | .[]" \
+              /tmp/dated.ndjson >> /tmp/kept.ndjson
+          fi
 
           stale_count="$(wc -l < /tmp/stale.ndjson | tr -d ' ')"
           kept_count="$(wc -l < /tmp/kept.ndjson | tr -d ' ')"

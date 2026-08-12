@@ -79,6 +79,31 @@ if [[ -z "${PRE_MIGRATE_LSN:-}" ]]; then
 else
     PRESERVE_NAME="pre-rollback-${GITHUB_SHA:0:7}-$(date -u +%Y%m%dT%H%M%SZ)"
     echo ""
+
+    # The restore mints a pre-rollback-* backup branch, and Neon's project
+    # branch quota is small — a restore once failed BRANCHES_LIMIT_EXCEEDED
+    # against nine accumulated backups. Reap down to the newest two first
+    # (this restore's backup makes three). Ordering comes from the UTC
+    # timestamp in the NAME: restore-preserved branches inherit the parent's
+    # created_at, so the API field lies about their age. Best-effort — a
+    # failed reap still attempts the restore, which fails loudly on its own.
+    _KEEP_BACKUPS=2
+    _BRANCH_LIST=$(curl -sL \
+        -H "Authorization: Bearer ${NEON_API_KEY}" \
+        "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches?limit=200" 2>/dev/null || echo '{}')
+    _STALE_IDS=$(jq -r '
+        [.branches[]? | select(.name | startswith("pre-rollback-"))
+         | {id, ts: (.name | split("-") | last)}]
+        | sort_by(.ts) | .[0:(length - '"$_KEEP_BACKUPS"')] | .[]?.id
+    ' <<<"$_BRANCH_LIST" 2>/dev/null || true)
+    for _stale in $_STALE_IDS; do
+        echo "==> Reaping stale pre-rollback backup branch ${_stale}..."
+        curl -sL -o /dev/null -X DELETE \
+            -H "Authorization: Bearer ${NEON_API_KEY}" \
+            "https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}/branches/${_stale}" \
+            || echo "WARN rollback: could not delete ${_stale} (continuing)" >&2
+    done
+
     echo "==> Restoring Neon prod branch to LSN ${PRE_MIGRATE_LSN} (backup: ${PRESERVE_NAME})..."
     _NEON_BODY=$(jq -nc \
         --arg src "$NEON_BRANCH_ID" \
