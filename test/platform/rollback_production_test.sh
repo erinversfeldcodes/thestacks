@@ -105,6 +105,18 @@ fi
 assert_contains "$(cat "$INVOCATION_LOG")" "deployment-01abc" "fly deploy carries the prev image sha"
 assert_contains "$(cat "$INVOCATION_LOG")" "deadbeef" "modal deploy carries the prev commit"
 
+# The rollback must deploy the old image WITHOUT the current release_command —
+# the old image may not implement it (a real rollback aborted on
+# UndefinedFunctionError for exactly this). Assert the deploy passes an
+# explicit config and that the config carries no release_command.
+assert_contains "$(cat "$INVOCATION_LOG")" "--config" "fly deploy passes an explicit rollback config"
+ROLLBACK_CFG=$(grep -o '\-\-config [^ ]*' "$INVOCATION_LOG" | head -1 | awk '{print $2}')
+if [[ -n "$ROLLBACK_CFG" && -f "$ROLLBACK_CFG" ]] && ! grep -q 'release_command' "$ROLLBACK_CFG"; then
+    _record_pass "rollback config exists and strips release_command"
+else
+    _record_fail "rollback config missing or still carries release_command (cfg=$ROLLBACK_CFG)"
+fi
+
 test_case "missing_core_prev_image" "no CORE_PREV_IMAGE → exit non-zero with clear error"
 unset CORE_PREV_IMAGE
 MODAL_PREV_COMMIT="deadbeefcafef00d" \

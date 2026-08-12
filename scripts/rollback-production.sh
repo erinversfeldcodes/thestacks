@@ -39,7 +39,17 @@ if [[ -n "$_CURRENT_IMAGE" && "$_CURRENT_IMAGE" == "$CORE_PREV_IMAGE" ]]; then
     echo "    (migration-failure path: image was never cut over; DB + vision legs still run)"
 else
     echo "==> Rolling core back to image ${CORE_PREV_IMAGE}..."
-    if ! fly deploy --app "$CORE_APP" --image "$CORE_PREV_IMAGE" --depot=false; then
+    # The rollback deploys an OLD image, so it must not run the CURRENT
+    # config's release_command — the old image may predate whatever that
+    # command calls (a rollback once aborted on UndefinedFunctionError
+    # because the previous image had no Stacks.Release.deploy/0). The DB is
+    # already migrated ahead of the old code (expand-contract), so skipping
+    # the release step is both safe and the point.
+    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    ROLLBACK_CONFIG="$(mktemp -d)/fly.rollback.toml"
+    grep -v '^[[:space:]]*release_command' "$REPO_ROOT/deploy/fly.core.toml" > "$ROLLBACK_CONFIG"
+    echo "    (release_command stripped for rollback: $ROLLBACK_CONFIG)"
+    if ! fly deploy --app "$CORE_APP" --config "$ROLLBACK_CONFIG" --image "$CORE_PREV_IMAGE" --depot=false; then
         echo "FAIL rollback: fly deploy (core) failed — NOT attempting modal rollback" >&2
         exit 1
     fi
