@@ -206,8 +206,14 @@ except: pass" 2>/dev/null || true)"
         return
     fi
 
-    # Direct PUT to storage. Content-Type must match init's or the presigned
-    # signature is rejected.
+    # init returns the upload_url RELATIVE (`/api/upload/:id/data` — the
+    # app-mediated PUT); resolve it against the base like the SPA does. An
+    # absolute URL (a future direct-to-storage presign) passes through.
+    if [[ "$upload_url" == /* ]]; then
+        upload_url="${BASE_URL}${upload_url}"
+    fi
+
+    # Content-Type must match init's or a presigned target rejects the PUT.
     http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
         --max-time "$UPLOAD_POST_TIMEOUT" \
         -X PUT "$upload_url" \

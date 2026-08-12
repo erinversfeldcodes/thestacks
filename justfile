@@ -364,7 +364,11 @@ combine-dependabot:
     trap 'git switch "$ORIG" >/dev/null 2>&1 || true' EXIT
 
     echo "==> Collecting open Dependabot PRs..."
-    mapfile -t ROWS < <(gh pr list --state open --json number,headRefName,title,author -L 200 \
+    # while-read rather than mapfile: macOS ships bash 3.2, which lacks it.
+    ROWS=()
+    while IFS= read -r _row; do
+        [[ -n "$_row" ]] && ROWS+=("$_row")
+    done < <(gh pr list --state open --json number,headRefName,title,author -L 200 \
         --jq '.[] | select(.author.login=="app/dependabot") | "\(.number)\t\(.headRefName)\t\(.title)"')
     if [[ ${#ROWS[@]} -eq 0 ]]; then echo "No open Dependabot PRs — nothing to combine."; exit 0; fi
     echo "    Found ${#ROWS[@]} Dependabot PR(s)."

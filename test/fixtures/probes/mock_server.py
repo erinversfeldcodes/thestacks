@@ -91,12 +91,15 @@ def make_handler(mode: str, fail_ratio: float):
                     self._respond(200, b'{"token":"fake-token"}')
                 return
             if self.path.startswith("/api/upload/init"):
-                host, port = self.server.server_address
+                # RELATIVE like the real server (Uploads.init_upload returns
+                # "/api/upload/:id/data"): the probe must resolve it against
+                # the base URL, and an unresolved relative URL fails curl —
+                # the exact defect that read a healthy deploy as 47% available.
                 image_id = "00000000-0000-0000-0000-000000000000"
                 body = json.dumps(
                     {
                         "image_id": image_id,
-                        "upload_url": f"http://{host}:{port}/r2/{image_id}",
+                        "upload_url": f"/r2/{image_id}",
                         "expires_in": 900,
                     }
                 ).encode()
