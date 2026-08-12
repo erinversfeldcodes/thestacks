@@ -3,7 +3,8 @@
 
     mock_server.py --port 8765 --mode healthy|fail-5xx|blackhole
 
-healthy: everything 200 (login returns a fake token, upload 202).
+healthy: everything succeeds (login returns a fake token; the presigned
+upload flow answers init 201 → PUT 200 → commit 202).
 fail-5xx: --fail-ratio of GET /api/catalogue return 500; auth/health 200.
 blackhole: never respond (probe-timeout path). State is in-process;
 each test spawns its own instance on its own port.
@@ -13,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -21,6 +21,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 def make_handler(mode: str, fail_ratio: float):
     class Handler(BaseHTTPRequestHandler):
+        catalogue_hits = 0
+
         def log_message(self, *_args):
             pass
 
@@ -54,10 +56,16 @@ def make_handler(mode: str, fail_ratio: float):
                 self._respond(200, b'{"status":"ok"}')
                 return
             if self.path.startswith("/api/catalogue"):
-                if mode == "fail-5xx" and random.random() < fail_ratio:
+                # Deterministic failure schedule: with few samples in a short
+                # test window, random draws can produce zero 4xx (or zero 5xx)
+                # and flake the assertions that expect both to appear.
+                Handler.catalogue_hits += 1
+                period = max(2, round(1 / fail_ratio)) if fail_ratio else 0
+                failing = period and Handler.catalogue_hits % period == 0
+                if mode == "fail-5xx" and failing:
                     self._respond(500, b'{"error":"simulated"}')
-                elif mode == "fail-4xx-and-5xx" and random.random() < fail_ratio:
-                    if random.random() < 0.5:
+                elif mode == "fail-4xx-and-5xx" and period and Handler.catalogue_hits % period < 2:
+                    if Handler.catalogue_hits % period == 0:
                         self._respond(500, b'{"error":"simulated"}')
                     else:
                         self._respond(401, b'{"error":"unauthorised"}')
@@ -82,8 +90,34 @@ def make_handler(mode: str, fail_ratio: float):
                 else:
                     self._respond(200, b'{"token":"fake-token"}')
                 return
-            if self.path.startswith("/api/upload"):
-                self._respond(202, b'{"image_id":"00000000-0000-0000-0000-000000000000"}')
+            if self.path.startswith("/api/upload/init"):
+                host, port = self.server.server_address
+                image_id = "00000000-0000-0000-0000-000000000000"
+                body = json.dumps(
+                    {
+                        "image_id": image_id,
+                        "upload_url": f"http://{host}:{port}/r2/{image_id}",
+                        "expires_in": 900,
+                    }
+                ).encode()
+                self._respond(201, body)
+                return
+            if self.path.startswith("/api/upload/") and self.path.endswith("/commit"):
+                self._respond(202, b'{"status":"accepted"}')
+                return
+            # The retired single-POST /api/upload deliberately 404s, so a probe
+            # regression back to the old endpoint fails these tests.
+            self._respond(404)
+
+        def do_PUT(self):
+            if mode == "blackhole":
+                time.sleep(60)
+                return
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            if length:
+                self.rfile.read(length)
+            if self.path.startswith("/r2/"):
+                self._respond(200)
                 return
             self._respond(404)
 

@@ -155,10 +155,14 @@ probe_bookshelf() {
     _record_sample "$BOOKSHELF_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
 }
 
+# Drives the presigned upload flow end to end — init, direct PUT, commit —
+# and records ONE sample covering the whole chain. Probing a retired
+# single-POST endpoint is how the gate once read a healthy launch as 45%
+# available: every canary 404'd against a route that no longer existed.
 _probe_upload_canary() {
     local canary="$1"
     local canary_name="$2"
-    local t0 t1 http_code exit_code kind body_file body token image_id
+    local t0 t1 http_code exit_code kind body_file body token image_id upload_url
     token=""
     if [[ -f "$WORK_DIR/last_token" ]]; then
         token="$(cat "$WORK_DIR/last_token")"
@@ -176,14 +180,13 @@ _probe_upload_canary() {
     t0="$(_now_ms)"
     http_code="$(curl -4 -s -o "$body_file" -w '%{http_code}' \
         --max-time "$UPLOAD_POST_TIMEOUT" \
-        -X POST "$BASE_URL/api/upload" \
+        -X POST "$BASE_URL/api/upload/init" \
         -H "Authorization: Bearer ${token}" \
-        -F "image=@${canary}" \
+        -H "Content-Type: application/json" \
+        -d '{"content_type":"image/jpeg"}' \
         2>/dev/null)" || true
     exit_code=$?
-    t1="$(_now_ms)"
     kind="$(_classify "$exit_code" "${http_code:-000}")"
-    _record_sample "$UPLOAD_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
 
     body="$(cat "$body_file" 2>/dev/null || true)"
     rm -f "$body_file"
@@ -191,8 +194,47 @@ _probe_upload_canary() {
         "import json,sys
 try: print(json.load(sys.stdin).get('image_id','') or '')
 except: pass" 2>/dev/null || true)"
+    upload_url="$(printf '%s' "$body" | python3 -c \
+        "import json,sys
+try: print(json.load(sys.stdin).get('upload_url','') or '')
+except: pass" 2>/dev/null || true)"
 
-    if [[ -z "$image_id" ]] || [[ "$kind" != "ok" ]]; then
+    if [[ "$kind" != "ok" ]] || [[ -z "$image_id" ]] || [[ -z "$upload_url" ]]; then
+        t1="$(_now_ms)"
+        _record_sample "$UPLOAD_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
+        echo "${kind}" > "$WORK_DIR/last_upload_outcome_${canary_name}"
+        return
+    fi
+
+    # Direct PUT to storage. Content-Type must match init's or the presigned
+    # signature is rejected.
+    http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
+        --max-time "$UPLOAD_POST_TIMEOUT" \
+        -X PUT "$upload_url" \
+        -H "Content-Type: image/jpeg" \
+        --data-binary "@${canary}" \
+        2>/dev/null)" || true
+    exit_code=$?
+    kind="$(_classify "$exit_code" "${http_code:-000}")"
+
+    if [[ "$kind" != "ok" ]]; then
+        t1="$(_now_ms)"
+        _record_sample "$UPLOAD_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
+        echo "${kind}" > "$WORK_DIR/last_upload_outcome_${canary_name}"
+        return
+    fi
+
+    http_code="$(curl -4 -s -o /dev/null -w '%{http_code}' \
+        --max-time "$UPLOAD_POST_TIMEOUT" \
+        -X POST "$BASE_URL/api/upload/${image_id}/commit" \
+        -H "Authorization: Bearer ${token}" \
+        2>/dev/null)" || true
+    exit_code=$?
+    t1="$(_now_ms)"
+    kind="$(_classify "$exit_code" "${http_code:-000}")"
+    _record_sample "$UPLOAD_LOG" "${http_code:-000}" "$((t1 - t0))" "$kind"
+
+    if [[ "$kind" != "ok" ]]; then
         echo "${kind}" > "$WORK_DIR/last_upload_outcome_${canary_name}"
         return
     fi
