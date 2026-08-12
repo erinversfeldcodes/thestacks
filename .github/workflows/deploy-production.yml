@@ -449,9 +449,11 @@ jobs:
           print()
           print("### SLI table")
           print()
-          print("| SLI | Value | Threshold | Breached |")
-          print("|-----|-------|-----------|----------|")
+          print("| SLI | Value | Threshold | Breached | Note |")
+          print("|-----|-------|-----------|----------|------|")
           for s in obs.get("slis", []):
               flag = "yes" if s.get("breached") else "no"
-              print(f"| {s['name']} | {s['value']} | {s['threshold']} | {flag} |")
+              if s.get("advisory") and s.get("over_threshold"):
+                  flag = "advisory ⚠️"
+              print(f"| {s['name']} | {s['value']} | {s['threshold']} | {flag} | {s.get('note', '')} |")
           PY

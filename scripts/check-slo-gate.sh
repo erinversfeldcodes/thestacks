@@ -565,21 +565,32 @@ def _queue_samples_for(repo_label: str) -> int:
             return int(r["value"])
     return 0
 
+# The 20ms bar is the TARGET, kept visible in every deploy summary — but
+# ADVISORY for now: the probe storm the gate itself generates (~125 real
+# uploads per window, ~25x organic launch load) queues the pools at p95
+# 28-36ms while every user-facing SLI stays green, and two healthy launches
+# were auto-rolled-back over it. Capacity work to meet (and then tighten)
+# the bar is planned; when it lands, flip advisory back to gating.
 for repo_label, sli_name, threshold in [
     ("Core.Repo", "db_pool_queue_p95_ms", 20),
     ("Core.ObanRepo", "oban_repo_queue_p95_ms", 20),
 ]:
     samples = _queue_samples_for(repo_label)
     p95 = histogram_p95_by_group(DB_QUEUE_METRIC, "repo", repo_label)
+    over_threshold = samples >= DB_QUEUE_MIN_SAMPLES and p95 > threshold
     entry = {
         "name": sli_name,
         "value": int(p95),
         "threshold": threshold,
         "samples": samples,
         "min_samples": DB_QUEUE_MIN_SAMPLES,
-        "breached": samples >= DB_QUEUE_MIN_SAMPLES and p95 > threshold,
+        "breached": False,
+        "advisory": True,
+        "over_threshold": over_threshold,
     }
-    if samples < DB_QUEUE_MIN_SAMPLES:
+    if over_threshold:
+        entry["note"] = "OVER the 20ms target — advisory pending pool-capacity work; not gating"
+    elif samples < DB_QUEUE_MIN_SAMPLES:
         entry["note"] = "below min_samples; not gating"
     slis.append(entry)
 
