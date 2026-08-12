@@ -84,6 +84,22 @@ jobs:
         with:
           version: 0.4.67
 
+      # The app scales to zero and `fly ssh console` does NOT trigger Fly's
+      # auto-start (only HTTP through the proxy does) — an rpc against a
+      # sleeping app dies with "no started VMs". Wake it the way a user would.
+      - name: Wake the app (HTTP auto-start)
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            if curl -sf --max-time 10 "https://${CORE_APP}.fly.dev/api/health" >/dev/null 2>&1; then
+              echo "app is awake (attempt $i)"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::app did not come up after 20 health attempts" >&2
+          exit 1
+
       - name: Run erasure (rpc into the live node)
         run: |
           set -euo pipefail
