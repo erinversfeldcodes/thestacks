@@ -452,7 +452,7 @@ lock-vision:
     set -euo pipefail
     docker run --rm -v "$PWD":/repo -w /repo python:3.14-slim bash -c '
       set -e
-      pip install --quiet --root-user-action=ignore 'pip==25.1.1' pip-tools==7.5.3
+      pip install --quiet --root-user-action=ignore --require-hashes -r .github/requirements/pip-tools.txt
       pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
         --output-file apps/vision/requirements.lock apps/vision/requirements.txt
       pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \

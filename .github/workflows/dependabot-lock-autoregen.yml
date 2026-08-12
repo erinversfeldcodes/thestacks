@@ -29,7 +29,8 @@ jobs:
       - name: Regenerate vision locks
         run: |
           set -euo pipefail
-          pip install --quiet --root-user-action=ignore pip-tools==7.5.3
+          pip install --quiet --root-user-action=ignore --require-hashes \
+            -r .github/requirements/pip-tools.txt
           pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
             --output-file apps/vision/requirements.lock apps/vision/requirements.txt
           pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
