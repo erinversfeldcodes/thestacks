@@ -24,6 +24,8 @@ permissions:
   contents: read
   actions: read
   pull-requests: read
+  # For the production Deployment shown on the repo home page sidebar.
+  deployments: write
 
 jobs:
   deploy-production:
@@ -365,6 +367,65 @@ jobs:
             gate-observations-post-rollback.json
             rollback-record.json
           if-no-files-found: warn
+
+      # Surfaces the deploy outcome on the repo HOME PAGE two ways:
+      #   * a GitHub Deployment for the `production` environment (right
+      #     sidebar) — green with a link to the live site on success, red
+      #     "failure" when the gate breached but the rollback restored the
+      #     previous build, red "error" when deploy AND rollback both failed
+      #     and the serving version may be degraded;
+      #   * the repo About homepage/description (best-effort — needs a
+      #     REPO_ADMIN_TOKEN secret with repo-metadata write; the default
+      #     workflow token cannot edit repo settings, so without the secret
+      #     this half is skipped with a notice).
+      - name: publish deploy state — repo deployment + About link
+        if: ${{ always() && !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+          SITE_URL: https://www.readinginthestacks.com
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WARN_MARKER: "⚠️ the live deployment may be degraded"
+        run: |
+          set -euo pipefail
+
+          if [[ "$GATE_OUTCOME" == "success" ]]; then
+            STATE="success"
+            DESC="Live at ${SITE_URL}"
+          elif [[ "$ROLLBACK_OUTCOME" == "success" ]]; then
+            STATE="failure"
+            DESC="Gate breached; rolled back to the previous build"
+          else
+            STATE="error"
+            DESC="Deploy AND rollback failed — the serving version may be degraded"
+          fi
+          echo "deploy state: $STATE — $DESC"
+
+          DEP_ID=$(jq -n --arg ref "$GITHUB_SHA" --arg desc "$DESC" \
+              '{ref: $ref, environment: "production", auto_merge: false,
+                required_contexts: [], description: $desc}' \
+            | gh api "repos/${GITHUB_REPOSITORY}/deployments" --input - --jq '.id')
+          jq -n --arg state "$STATE" --arg url "$SITE_URL" --arg log "$RUN_URL" --arg desc "$DESC" \
+              '{state: $state, environment_url: $url, log_url: $log,
+                description: $desc, auto_inactive: true}' \
+            | gh api "repos/${GITHUB_REPOSITORY}/deployments/${DEP_ID}/statuses" --input - --jq '.state'
+
+          if [[ -z "${ADMIN_TOKEN}" ]]; then
+            echo "::notice::REPO_ADMIN_TOKEN not set — skipping About homepage/description update."
+            exit 0
+          fi
+          CURRENT_DESC=$(GH_TOKEN="$ADMIN_TOKEN" gh api "repos/${GITHUB_REPOSITORY}" --jq '.description // ""')
+          CLEAN_DESC="${CURRENT_DESC#"${WARN_MARKER}"}"
+          CLEAN_DESC="${CLEAN_DESC# — }"
+          if [[ "$STATE" == "error" ]]; then
+            NEW_DESC="${WARN_MARKER} — ${CLEAN_DESC}"
+          else
+            NEW_DESC="$CLEAN_DESC"
+          fi
+          GH_TOKEN="$ADMIN_TOKEN" gh api -X PATCH "repos/${GITHUB_REPOSITORY}" \
+            -f homepage="$SITE_URL" -f description="$NEW_DESC" --jq '.homepage'
 
       - name: summary — post gate observations to the workflow summary
         if: ${{ always() }}
