@@ -517,9 +517,11 @@ jobs:
       - name: Regenerate vision locks and fail on drift
         run: |
           set -euo pipefail
-          # pip is pinned because the python:3.14-slim tag floats: a newer
-          # image's pip removed internals pip-tools imports (stdlib_pkgs).
-          pip install --quiet --root-user-action=ignore 'pip==25.1.1' pip-tools==7.5.3
+          # Hash-pinned (scorecard pinned-dependencies): the requirements file
+          # pins pip itself too, because the python:3.14-slim tag floats and a
+          # newer pip once broke pip-tools' internals (stdlib_pkgs).
+          pip install --quiet --root-user-action=ignore --require-hashes \
+            -r .github/requirements/pip-tools.txt
           pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
             --output-file apps/vision/requirements.lock apps/vision/requirements.txt
           pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
@@ -565,7 +567,12 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install squawk
-        run: npm install -g squawk-cli@2.47.0
+        # Tarball + checksum rather than a bare npm install: registry tags are
+        # mutable, the artefact hash is not (scorecard pinned-dependencies).
+        run: |
+          curl -sSLo /tmp/squawk-cli.tgz https://registry.npmjs.org/squawk-cli/-/squawk-cli-2.47.0.tgz
+          echo "68478416ef537f92d1e9c1cd62f903ff3cb0e93fb4a86504f0ce0a484de32903  /tmp/squawk-cli.tgz" | sha256sum -c -
+          npm install -g /tmp/squawk-cli.tgz
       - name: Lint changed migrations
         run: |
           set +e
@@ -696,7 +703,12 @@ jobs:
         with:
           github_token: ${{ github.token }}
       - name: Install squawk
-        run: npm install -g squawk-cli@2.47.0
+        # Tarball + checksum rather than a bare npm install: registry tags are
+        # mutable, the artefact hash is not (scorecard pinned-dependencies).
+        run: |
+          curl -sSLo /tmp/squawk-cli.tgz https://registry.npmjs.org/squawk-cli/-/squawk-cli-2.47.0.tgz
+          echo "68478416ef537f92d1e9c1cd62f903ff3cb0e93fb4a86504f0ce0a484de32903  /tmp/squawk-cli.tgz" | sha256sum -c -
+          npm install -g /tmp/squawk-cli.tgz
 
       - name: squawk — destructive migration rules
         run: |

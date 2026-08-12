@@ -4,7 +4,7 @@
 # repo root (deploy-stack.sh runs `fly deploy` from there).
 # checkov:skip=CKV_DOCKER_3: upstream grafana image runs as the non-root `grafana` user (uid 472)
 # checkov:skip=CKV_DOCKER_2: liveness owned by Fly [[checks]] (fly.grafana.toml), not Docker HEALTHCHECK
-FROM grafana/grafana:11.1.0
+FROM grafana/grafana:11.1.0@sha256:83c197f05ad57b51f5186ca902f0c95fcce45810e7fe738a84cc38f481a2227a
 
 # Datasource (→ 6PN VictoriaMetrics) + dashboard provider.
 COPY deploy/grafana/provisioning /etc/grafana/provisioning
