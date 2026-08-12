@@ -56,13 +56,17 @@ on:
 
 permissions:
   contents: read
-  actions: read
-  pull-requests: read
-  # For the production Deployment shown on the repo home page sidebar.
-  deployments: write
 
 jobs:
   deploy-production:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      # For the production Deployment shown on the repo home page sidebar.
+      # Job-level rather than workflow-level (scorecard token-permissions):
+      # only this job may write deployments.
+      deployments: write
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
