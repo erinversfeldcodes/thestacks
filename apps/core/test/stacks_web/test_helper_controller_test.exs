@@ -1,19 +1,20 @@
 defmodule StacksWeb.TestHelperControllerTest do
   @moduledoc """
-  Guards the test-only confirmation-token endpoint (Issue #124, Phase 3).
+      Guards the test-only confirmation-token endpoint.
 
-  This endpoint leaks an account-activation token, so the security-critical
-  property under test is that it is *disabled* unless the server env flag
-  `STACKS_E2E_TEST_HELPERS == "1"` is set. In production the flag is never
-  set, so the route returns 404 for every request.
+      This endpoint leaks an account-activation token, so the security-critical
+      property under test is that it is *disabled* unless the server env flag
+      `STACKS_E2E_TEST_HELPERS == "1"` is set. In production the flag is never
+      set, so the route returns 404 for every request.
 
-  `async: false` because the tests mutate a process-global environment
-  variable; running serially keeps them from leaking into async tests.
+      `async: false` because the tests mutate a process-global environment
+      variable; running serially keeps them from leaking into async tests.
   """
   use CoreWeb.ConnCase, async: false
 
   import Stacks.Factory
 
+  alias Stacks.Books.ISBN
   alias Swoosh.Adapters.Local.Storage.Memory
 
   @flag "STACKS_E2E_TEST_HELPERS"
@@ -86,8 +87,6 @@ defmodule StacksWeb.TestHelperControllerTest do
 
       conn = get(conn, "/api/test/confirmation-token", email: user.email)
 
-      # Exact-map assertion proves the body contains the token and nothing else
-      # (no email, no password_hash, no id, no other PII).
       assert json_response(conn, 200) == %{"token" => "super-secret-token-on"}
     end
 
@@ -128,13 +127,6 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert conn.status == 404
     end
 
-    # ── Scoping: only e2e/test-domain emails resolve (Issue #124 PE-gate) ──────
-    #
-    # Even with the flag ON (as on a public preview app, especially one carrying
-    # the `preview-real-email` label), the helper must NEVER leak a real user's
-    # confirmation token. A real user's email is never in the reserved
-    # `.test` TLD, so any non-`@thestacks.test` email is treated as not-found.
-
     test "returns 404 for a NON-e2e-domain email even when that user exists with a token", %{
       conn: conn
     } do
@@ -148,7 +140,6 @@ defmodule StacksWeb.TestHelperControllerTest do
       conn = get(conn, "/api/test/confirmation-token", email: user.email)
 
       assert conn.status == 404
-      # The real user's activation token must never appear in the response.
       refute conn.resp_body =~ "super-secret-real-user-token"
     end
 
@@ -167,11 +158,6 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
-  # ── GET /api/test/sent-emails (WS2 — prove the email was actually sent) ──────
-  #
-  # Reads the Swoosh Local mailbox so the E2E suite can assert an email was
-  # delivered and extract its link. Same `@thestacks.test`-only scoping as the
-  # other helpers — a real user's mail can never surface here.
   describe "GET /api/test/sent-emails with the flag ON" do
     setup do
       System.put_env(@flag, "1")
@@ -247,11 +233,6 @@ defmodule StacksWeb.TestHelperControllerTest do
     |> Memory.push()
   end
 
-  # ── PUT /api/test/age-verification (ADR-020) ─────────────────────────────────
-  #
-  # E2E/tests use this to create an age-verified user without a real KYC
-  # provider. Scoped to `@thestacks.test` emails ONLY — the same guard as the
-  # confirmation-token endpoint — so it can never flip a real account.
   describe "PUT /api/test/age-verification with the flag ON" do
     setup do
       System.put_env(@flag, "1")
@@ -333,13 +314,6 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
-  # ── POST /api/test/session (Issue #192 — mint a confirmed session) ─────────
-  #
-  # This endpoint MINTS AUTHENTICATION, so the security-critical properties are
-  # the same as the other helpers (404 whenever the flag is not exactly "1")
-  # plus a hard `.test`-domain allowlist on user creation: it must be
-  # impossible to mint a session for a real (non-test-TLD) account, even on a
-  # public preview where the flag is on.
   describe "POST /api/test/session with the flag ON" do
     setup do
       System.put_env(@flag, "1")
@@ -357,12 +331,8 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert user, "minted user must exist as an ordinary op.users row"
       assert user.email_confirmed == true
 
-      # The token must be a REAL session token minted via the same path as
-      # AuthController.login — including the refresh-token family invariant
-      # (Issue #179: every live access token is tracked by exactly one family).
       assert Core.Repo.get_by(Stacks.Accounts.AuthTokenFamily, user_id: user.id)
 
-      # Proof the token authenticates: drive an :authenticated route with it.
       authed =
         build_conn()
         |> put_req_header("authorization", "Bearer " <> token)
@@ -440,12 +410,6 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
-  # ── POST /api/test/book-description (#284 — seed a description-bearing book) ──
-  #
-  # Deep search matches book DESCRIPTIONS, but the seed carries 0 books with a
-  # non-empty description, so the E2E slice needs a helper to insert one. This
-  # writes catalogue metadata only (no user data/PII) and inserts a fresh row, so
-  # the security surface is just the flag gate (404 unless the flag is "1").
   describe "POST /api/test/book-description with the flag ON" do
     setup do
       System.put_env(@flag, "1")
@@ -464,11 +428,9 @@ defmodule StacksWeb.TestHelperControllerTest do
 
       book = Stacks.Books.get_book_detail(book_id)
       assert book.description == "A study of bioluminescent creatures of the deep sea."
-      # Public + single primary edition so it surfaces on the platform search.
       assert book.visibility_tier == "public"
       assert length(book.editions) == 1
 
-      # Deep search finds it by description; the default title scope does not.
       deep = Stacks.Books.search_books("bioluminescent", scope: :deep)
       assert book_id in Enum.map(deep, & &1.id)
       assert Stacks.Books.search_books("bioluminescent") == []
@@ -490,10 +452,10 @@ defmodule StacksWeb.TestHelperControllerTest do
       assert first["book_id"] != second["book_id"]
 
       isbn = Stacks.Books.get_book_detail(first["book_id"]).editions |> hd() |> Map.get(:isbn)
-      assert Stacks.Books.valid_isbn_checksum?(isbn)
+      assert ISBN.valid_isbn_checksum?(isbn)
     end
 
-    test "auto-generated ISBN carries the recognisable E2E-seed block (Issue #297)", %{conn: conn} do
+    test "auto-generated ISBN carries the recognisable E2E-seed block", %{conn: conn} do
       %{"book_id" => book_id} =
         json_response(
           post(conn, "/api/test/book-description", %{title: "Marker", description: "z"}),
@@ -502,12 +464,9 @@ defmodule StacksWeb.TestHelperControllerTest do
 
       isbn = Stacks.Books.get_book_detail(book_id).editions |> hd() |> Map.get(:isbn)
 
-      # The reserved synthetic block (978-99999-…) flags the row as E2E-seeded so it
-      # can never be confused with a verified catalogue ISBN; still a well-formed,
-      # checksum-valid ISBN-13 so Books.create accepts it past the ISBN Hard Gate.
       assert String.starts_with?(isbn, "97899999")
       assert String.length(isbn) == 13
-      assert Stacks.Books.valid_isbn_checksum?(isbn)
+      assert ISBN.valid_isbn_checksum?(isbn)
     end
 
     test "honours an explicit ISBN", %{conn: conn} do
@@ -566,16 +525,10 @@ defmodule StacksWeb.TestHelperControllerTest do
     end
   end
 
-  # ── Rate limiting (flag ON) ─────────────────────────────────────────────────
-  #
-  # On a public preview the endpoint is reachable, so it must be rate-limited
-  # per IP to bound brute-force user-enumeration / token-harvesting attempts.
   describe "GET /api/test/confirmation-token rate limiting (flag ON)" do
     setup do
       System.put_env(@flag, "1")
 
-      # Rate limiting is disabled in the test config by default; enable it and
-      # pin a tiny limit so the boundary can be exercised with a short loop.
       original_enabled = Application.get_env(:core, :rate_limiting_enabled)
       original_limit = Application.get_env(:core, :rate_limit_e2e_helper)
       Application.put_env(:core, :rate_limiting_enabled, true)
@@ -605,13 +558,11 @@ defmodule StacksWeb.TestHelperControllerTest do
         email_confirmation_token: "super-secret-token-rl"
       )
 
-      # The first 3 requests (limit pinned to 3) from this IP are allowed.
       for _ <- 1..3 do
         resp = get(conn, "/api/test/confirmation-token", email: "e2e-rl@thestacks.test")
         assert resp.status == 200
       end
 
-      # The 4th request from the same IP is blocked with 429.
       resp = get(conn, "/api/test/confirmation-token", email: "e2e-rl@thestacks.test")
 
       assert resp.status == 429

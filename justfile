@@ -1,4 +1,3 @@
-# The Stacks — Task Runner
 set dotenv-load
 
 # Start all available services for local development.
@@ -14,7 +13,7 @@ dev:
     just db-migrate
 
     echo "==> Generating Ecto schemas from proto..."
-    cd apps/core && mix proto.sync && cd ../..
+    (cd apps/core && mix proto.sync)/..
 
     echo "==> Generating Elm proto decoders..."
     bash scripts/gen-elm-proto.sh
@@ -22,7 +21,6 @@ dev:
     echo "==> Building assets (Elm + CSS via esbuild)..."
     (cd apps/core/assets && npm run deploy)
 
-    # Kill any stale processes from a previous dev session on our ports.
     echo "==> Cleaning up stale dev processes..."
     lsof -ti :4000 | xargs kill -9 2>/dev/null || true
     lsof -ti :8000 | xargs kill -9 2>/dev/null || true
@@ -63,6 +61,15 @@ dev:
 # Bootstrap the full development environment (idempotent)
 setup:
     bash setup.sh
+
+# Make a fresh git worktree buildable (idempotent). Run it from INSIDE the
+# worktree. Copies the untracked state a worktree does not inherit — .env, the
+# proto-generated gen/ tree, the esbuild index.html — then runs deps.get and all
+# FIVE codegen targets, and verifies there is no drift. A no-op in the main
+# checkout. Agents building in worktrees should run this first, instead of
+# rediscovering the steps by hand.
+bootstrap-worktree *ARGS:
+    bash scripts/bootstrap-worktree.sh {{ARGS}}
 
 # Install git hooks and ensure Claude Code hook scripts are executable.
 # Claude Code hooks (.claude/settings.json) activate automatically — this
@@ -194,6 +201,50 @@ db-reset:
     mix ecto.reset
     mix run apps/core/priv/repo/seeds.exs
 
+# Regenerate all FIVE proto codegen targets and verify no drift remains.
+#
+# Run this in the MAIN checkout after merging anything that touched a .proto file.
+# Most generated artefacts are gitignored, so a stale tree looks clean in `git status`
+# and only announces itself as a gate failure — in three groups at once, since the
+# Elixir and Python suites compile against the stale code (Issue #354).
+#
+# `just bootstrap-worktree` does this for a worktree; this is the main-checkout door.
+regen-proto:
+    bash scripts/regen-proto.sh
+
+# Regenerate every target after a .proto change, then name the steps codegen CANNOT do.
+#
+# Added 2026-07-28 after adding five proto fields cost three separate gate failures in one
+# day: `mix proto.sync` writes the Ecto schema, the dbt model and the migration, but four
+# follow-ons are hand-written and each fails in a different place — one of them silently.
+#
+# The codegen itself is `regen-proto` — one list of generators, so this recipe cannot
+# fall behind it. (It did: this used to run four of the five, omitting the Python
+# target, which is exactly the artefact Wave 5 tripped over.)
+proto-sync-all: regen-proto
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo ""
+    echo "==> Codegen done. Four things it CANNOT do for you:"
+    echo ""
+    echo "  1. CAST THE FIELD  — changesets here are hand-written on purpose, so a new"
+    echo "     column is NOT writable until you add it to the cast list. Dropping a field"
+    echo "     is SILENT: no error, the column just stays nil."
+    echo "       guarded by: apps/core/test/stacks/changeset_field_coverage_test.exs"
+    echo ""
+    echo "  2. DECIDE ON THE FACTORY — set the field, or skip-list it with a reason."
+    echo "       guarded by: apps/core/test/stacks/factory_proto_validation_test.exs"
+    echo ""
+    echo "  3. DESCRIBE IT FOR dbt — add the column to dbt/models/staging/sources.yml."
+    echo "       guarded by: just lint-dbt  (source-has-all-columns)"
+    echo ""
+    echo "  4. COMMENT IT FOR buf — every field needs its own comment, not a shared block."
+    echo "       guarded by: buf lint proto/"
+    echo ""
+    echo "  All four are gates, so nothing ships broken — but 1 is the one that fails"
+    echo "  silently at RUNTIME if its test is not run. Finish with: just run just verify"
+
 # Run Playwright E2E tests (requires just dev to be running on :4000/:4001)
 test-e2e:
     cd e2e && npm test
@@ -261,10 +312,8 @@ deploy-preview:
 run *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Non-interactive shells often lack nix on PATH even when it is installed.
     export PATH="/nix/var/nix/profiles/default/bin:${HOME}/.nix-profile/bin:${PATH}"
     if [[ -n "${STACKS_DEV_SHELL:-}" ]]; then
-        # Already inside the pinned dev shell — run directly, don't re-wrap.
         exec {{ARGS}}
     fi
     if ! command -v nix >/dev/null 2>&1; then
@@ -307,8 +356,6 @@ combine-dependabot:
     BASE="${DEPENDABOT_BASE:-main}"
     COMBINE_BRANCH="combined-deps"
 
-    # Only tracked changes block us — untracked files (e.g. local plans/*.md)
-    # ride along safely across the branch switch + cherry-picks.
     if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
         echo "ERROR: uncommitted tracked changes — commit or stash before combining (untracked files are fine)." >&2
         exit 1
@@ -356,8 +403,6 @@ combine-dependabot:
         body+=$'\n'"## Skipped (same-file conflicts — NOT in this PR; merge individually or re-run \`just combine-dependabot\` after this merges)"$'\n'"$(printf '%s\n' "${skipped[@]}" | sed 's/^/- /')"$'\n'
     fi
     body+=$'\n'"After merging this PR: \`just close-dependabot-prs <this-pr-number>\`"
-    # Machine-readable marker so close-dependabot-prs closes ONLY the bundled PRs
-    # (never the skipped ones, which still carry un-merged updates).
     body+=$'\n\n'"<!-- combined-includes: ${nums} -->"
 
     existing="$(gh pr list --head "$COMBINE_BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || true)"
@@ -381,9 +426,6 @@ close-dependabot-prs COMBINED:
         echo "ERROR: PR #{{COMBINED}} is not merged yet — refusing to close Dependabot PRs." >&2
         exit 1
     fi
-    # Close ONLY the PRs actually bundled into the combined PR — read the
-    # machine-readable marker its body carries. Skipped/conflicting PRs are left
-    # open because they still carry updates that never reached main.
     body="$(gh pr view {{COMBINED}} --json body --jq .body)"
     nums="$(printf '%s\n' "$body" | grep -oE 'combined-includes:[0-9 ]+' | head -1 | sed 's/combined-includes://')"
     if [[ -z "${nums// /}" ]]; then
@@ -404,10 +446,9 @@ close-dependabot-prs COMBINED:
 lock-vision:
     #!/usr/bin/env bash
     set -euo pipefail
-    # pip-tools pinned so output is byte-identical to the CI drift-guard.
     docker run --rm -v "$PWD":/repo -w /repo python:3.14-slim bash -c '
       set -e
-      pip install --quiet --root-user-action=ignore pip-tools==7.5.3
+      pip install --quiet --root-user-action=ignore 'pip==25.1.1' pip-tools==7.5.3
       pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
         --output-file apps/vision/requirements.lock apps/vision/requirements.txt
       pip-compile --quiet --generate-hashes --allow-unsafe --strip-extras \
@@ -434,3 +475,13 @@ observe-down:
 render-gate:
     docker compose -f infra/local-observability/docker-compose.yml up -d
     scripts/dashboard-render-gate.sh
+
+# Is a staff-campaign wave actually done? Reads plans/<slug>-state.json and refuses
+# unbacked completion claims (no issue file, open DoD boxes, a wave "done" with open
+# items). Exists because campaign-level completion used to be prose an agent asserted
+# and a human had to challenge — twice, wrongly. Ask the tree, not the agent.
+#   just wave-status                          # newest campaign
+#   just wave-status staff-campaign-2026-07-27
+#   just wave-status staff-campaign-2026-07-27 --next
+wave-status *ARGS:
+    @bash scripts/wave-status.sh {{ARGS}}

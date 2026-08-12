@@ -1,10 +1,10 @@
 defmodule Stacks.Workers.DataExportJobTest do
   @moduledoc """
-  Tests for Stacks.Workers.DataExportJob.
+      Tests for Stacks.Workers.DataExportJob.
 
-  The worker calls GDPR.Export.export_user_data/1:
-  - Returns :ok when the user exists (export succeeds).
-  - Returns {:error, _} when the user does not exist (export raises, returning {:error, reason}).
+      The worker calls GDPR.Export.export_user_data/1:
+      - Returns:ok when the user exists (export succeeds).
+      - Returns {:error, _} when the user does not exist (export raises, returning {:error, reason}).
   """
 
   use Core.DataCase, async: true
@@ -22,15 +22,12 @@ defmodule Stacks.Workers.DataExportJobTest do
     end
 
     test "returns {:error, _} for a nonexistent user_id" do
-      # Export.export_user_data raises Ecto.NoResultsError via get!/1
-      # which the export function rescues and converts to {:error, reason}.
-      # The worker then propagates that as {:error, reason}.
       assert {:error, _reason} =
                perform_job(DataExportJob, %{"user_id" => Ecto.UUID.generate()})
     end
   end
 
-  describe "job config (Issue #121 §6)" do
+  describe "job config" do
     test "runs on the :default queue" do
       assert DataExportJob.__opts__()[:queue] == :default
     end

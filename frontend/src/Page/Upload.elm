@@ -2,9 +2,13 @@ module Page.Upload exposing
     ( Model
     , Msg(..)
     , OutMsg(..)
+    , UploadFailure(..)
     , UploadResult(..)
     , UploadStep(..)
     , init
+    , replayFrame
+    , sendError
+    , tickSeconds
     , update
     , view
     )
@@ -14,24 +18,59 @@ import Components.ISBNInput exposing (isValidISBN, isbnInput)
 import File exposing (File)
 import File.Select as Select
 import Html exposing (Html, a, button, div, h1, h2, img, input, label, li, p, span, text, ul)
-import Html.Attributes exposing (alt, attribute, checked, class, href, src, type_)
+import Html.Attributes exposing (alt, attribute, checked, class, disabled, href, src, type_)
 import Html.Events exposing (onCheck, onClick, preventDefaultOn)
 import Http
 import Json.Decode as Decode
 import Navigation.Route as Route
-import Types.Book exposing (Book, VisibilityTier(..), authorName, bookCoverImageUrl)
+import Types.Book exposing (Book, Edition, VisibilityTier(..), authorName, bookCoverImageUrl, bookIsbn, displayTitle, isUnidentified)
 import Types.Placement exposing (Placement)
 import Types.RemoteData exposing (RemoteData(..))
+import Util.FailureCopy as FailureCopy
 import Util.TestId exposing (testId)
+
+
+{-| Why a photo did not become a book.
+
+⛔ Every one of these used to be one sentence ("We couldn't read the
+ISBN… try a clearer image") covering a downed vision service, a timed-out
+stream, a dropped connection, an undecodable image, and a genuine miss —
+telling readers to retake photos that were fine. Each cause now carries
+its own sentence naming the action actually worth taking.
+
+-}
+type UploadFailure
+    = ImageUnreadable
+    | IsbnUnreadable
+    | ServiceUnavailable
+    | TookTooLong
+    | ConnectionLost
+    | CauseUnknown
 
 
 type UploadResult
     = NoResult
     | Identified (List Book)
-    | IdentificationFailed
+    | IdentificationFailed UploadFailure
     | NotABook
     | ManualISBNEntry
     | DuplicateDetected Book
+    | SameWorkFound String (Maybe Book)
+    | EditionMerged MergedEdition
+
+
+{-| What the completion card may say, and where each part comes from.
+`edition` is the SERVER's answer — the row it actually wrote — so the
+card names an ISBN/format that exist. The card this replaces computed
+`editionCount + 1` client-side from an earlier fetch: wrong the moment
+anyone else merged.
+-}
+type alias MergedEdition =
+    { workId : String
+    , work : Maybe Book
+    , edition : Edition
+    , onAReaderShelf : Bool
+    }
 
 
 {-| The step within the upload flow after a book has been identified.
@@ -45,8 +84,6 @@ type UploadStep
 
 type alias Model =
     { file : Maybe File
-
-    -- Loading = upload in flight; Success imageId = upload accepted, SSE stream in progress.
     , uploadState : RemoteData Http.Error String
     , result : UploadResult
     , manualIsbn : String
@@ -54,51 +91,26 @@ type alias Model =
     , isDragging : Bool
     , duplicateShelf : String
     , duplicateMoveState : RemoteData Http.Error ()
-
-    -- Accumulate multiple book fetches before showing the result.
     , pendingBookIds : List String
     , collectedBooks : List Book
-
-    -- Multi-book partial-failure tracking: book IDs whose fetch failed.
-    -- Used to render a "Could not identify" placeholder per failed book
-    -- in the identified list, alongside the successfully fetched books.
     , failedBookIds : List String
-
-    -- Verification step state machine
     , step : UploadStep
     , selectedShelf : String
     , placementState : RemoteData Api.PlaceError Placement
-
-    -- User "adults only" (age-gate raise) toggle for the book being placed.
-    -- When True, ConfirmPlacement also fires the raise-only user age-gate
-    -- endpoint. `ageGateError` surfaces a soft failure that must NOT block
-    -- the placement itself.
     , markAdultsOnly : Bool
     , ageGateError : Maybe String
-
-    -- Server-provided runtime flag (ADR-020). When `False` (production
-    -- default) every age-gating affordance in the upload flow is hidden —
-    -- the "adults only" checkbox, the age-gate notice — and confirming a
-    -- placement never fires the raise-only age-gate call.
     , ageGatingEnabled : Bool
-
-    -- ISBN lookup state
-    , isbnLookupState : RemoteData Http.Error ()
-
-    -- Merge format flow
+    , embedded : Bool
+    , confirmState : RemoteData Api.ConfirmError ()
+    , confirmOutcome : Maybe Api.ConfirmOutcome
+    , existingShelves : List String
     , mergeFormatState : RemoteData Http.Error MergeFormatResponse
     , mergeIsbn : String
     , mergeFormatLabel : String
-
-    -- True once a terminal SSE event (resolved/rejected) has been received.
-    -- Used to suppress spurious StreamError after the server closes the connection.
     , sseTerminalReceived : Bool
-
-    -- Cumulative list of book IDs the user has rejected via "No, try again"
-    -- for the current image upload. Reset on Reset or a successful Confirm.
-    -- The server uses this list to exclude already-rejected books from the
-    -- vision pipeline's next pass.
     , rejectedBookIds : List String
+    , waitedSeconds : Int
+    , silentSeconds : Int
     }
 
 
@@ -107,6 +119,7 @@ type OutMsg
     | NavigateTo Route.Route
     | OpenStream String
     | SessionExpired
+    | RefreshInbox
 
 
 type Msg
@@ -137,8 +150,11 @@ type Msg
     | ConfirmPlacement
     | PlacementCompleted (Result Api.PlaceError Placement)
     | AgeGateSet (Result Http.Error ())
-    | IsbnLookupResult (Result Http.Error BookDetailResponse)
+    | ConfirmCompleted (Result Api.ConfirmError Api.ConfirmResponse)
+    | GotSameWorkBook (Result Http.Error BookDetailResponse)
     | GoToShelf String
+    | WaitTick
+    | ResumeInboxItem Api.InboxItem
 
 
 init : Model
@@ -160,12 +176,179 @@ init =
     , markAdultsOnly = False
     , ageGateError = Nothing
     , ageGatingEnabled = False
-    , isbnLookupState = NotAsked
+    , embedded = False
+    , confirmState = NotAsked
+    , confirmOutcome = Nothing
+    , existingShelves = []
     , mergeFormatState = NotAsked
     , mergeIsbn = ""
     , mergeFormatLabel = ""
     , sseTerminalReceived = False
     , rejectedBookIds = []
+    , waitedSeconds = 0
+    , silentSeconds = 0
+    }
+
+
+{-| The server's `rejection_reason` token as an actionable cause.
+Tokens are the union of `VisionError.reason_token/1` and the two the
+pipeline writes directly (`isbn_not_found`/`processing_failed`,
+`image_too_small`); `not_a_book` is matched one level up as its own
+`UploadResult`. Unknown tokens fall to the generic cause — new server
+tokens degrade to vaguer copy, never to a wrong specific claim.
+-}
+failureFromRejection : Maybe String -> UploadFailure
+failureFromRejection reason =
+    case reason of
+        Just "undecodable_image" ->
+            ImageUnreadable
+
+        Just "image_too_large" ->
+            ImageUnreadable
+
+        Just "image_too_small" ->
+            ImageUnreadable
+
+        Just "image_unreachable" ->
+            ImageUnreadable
+
+        Just "no_image_supplied" ->
+            ImageUnreadable
+
+        Just "malformed_request" ->
+            ImageUnreadable
+
+        Just "isbn_not_found" ->
+            IsbnUnreadable
+
+        Just "vision_unavailable" ->
+            ServiceUnavailable
+
+        Just "vision_budget_exceeded" ->
+            ServiceUnavailable
+
+        _ ->
+            CauseUnknown
+
+
+{-| A transport failure on the upload flow as a cause.
+
+Only the two `Http.Error` constructors that describe themselves get their own
+cause. A `BadStatus` is a number, and a number is not a reason a reader can act
+on — 500, 502 and 503 all mean "not now, and not because of you", which is what
+`CauseUnknown` says.
+
+-}
+failureFromHttpError : Http.Error -> UploadFailure
+failureFromHttpError err =
+    case err of
+        Http.Timeout ->
+            TookTooLong
+
+        Http.NetworkError ->
+            ConnectionLost
+
+        _ ->
+            CauseUnknown
+
+
+{-| How many seconds one `WaitTick` stands for.
+
+`Main` drives the tick, so this constant and that subscription's interval are
+one fact in two places; a 1000ms subscription against a 5 here would make the
+page claim a minute had passed after twelve seconds. Both are named, and the
+thresholds below are coarse enough (20s, 45s) that the pairing is checkable by
+reading rather than by stopwatch.
+
+-}
+tickSeconds : Int
+tickSeconds =
+    5
+
+
+{-| After this long, the page stops implying the answer is imminent and offers
+the reader the door.
+
+20 seconds is not a guess about the pipeline; it is a guess about patience, and
+deliberately so. measured warm vision calls at a median of 5–8s and a p95
+of 15–30s, with cold starts reaching 60s — so at 20 seconds the common case has
+already answered, and a reader still watching is in the tail this issue exists
+to release them from.
+
+-}
+leaveAffordanceAfterSeconds : Int
+leaveAffordanceAfterSeconds =
+    20
+
+
+{-| After this long with NO frame of any kind, the stream is treated as
+silent. The server heartbeats at least every 15s for the stream's whole
+life, so this is three missed heartbeats — the watchdog for an
+`EventSource` that opens and then emits nothing (previously: a spinner
+until the server's own deadline, up to 23 minutes).
+-}
+streamSilentAfterSeconds : Int
+streamSilentAfterSeconds =
+    45
+
+
+{-| Is this page waiting on an identification right now?
+
+`Success imageId` means the upload was accepted and a stream was opened;
+`NoResult` with `step == Uploading` means nothing has come back yet. Anything
+else — a result, a verify step, a shelf picker — is the reader's turn, and the
+clocks must not run during it.
+
+-}
+isWaiting : Model -> Bool
+isWaiting model =
+    case ( model.uploadState, model.result, model.step ) of
+        ( Success _, NoResult, Uploading ) ->
+            True
+
+        _ ->
+            False
+
+
+{-| The SSE frame an inbox item would have arrived as, had the reader stayed.
+
+This is the whole of the inbox's "resume" logic, and it is a data conversion
+rather than a flow: every screen it can lead to already exists, reached by the
+function the live stream reaches it by.
+
+-}
+replayFrame : Api.InboxItem -> PollResponse
+replayFrame item =
+    { imageId = item.imageId
+    , status =
+        case item.kind of
+            Api.AwaitingConfirmation ->
+                Resolved
+
+            Api.Failed ->
+                Rejected
+    , bookId = List.head item.bookIds
+    , bookIds = item.bookIds
+    , rejectionReason = item.rejectionReason
+    , isDuplicate = False
+    }
+
+
+{-| Settle on a terminal result and clear the in-flight bookkeeping with it.
+
+Four call sites were writing the same six-field update by hand, and the fields
+are not optional: leaving `pendingBookIds` populated behind a terminal result
+lets a late `GotIdentifiedBook` overwrite the message the reader is reading.
+
+-}
+terminal : Model -> UploadResult -> Model
+terminal model result =
+    { model
+        | result = result
+        , pendingBookIds = []
+        , collectedBooks = []
+        , failedBookIds = []
+        , sseTerminalReceived = True
     }
 
 
@@ -175,18 +358,12 @@ update msg model maybeToken =
         GotFile file ->
             case maybeToken of
                 Nothing ->
-                    -- Not authenticated — send to login rather than silently hanging.
                     ( { model | file = Just file, isDragging = False }
                     , Cmd.none
                     , NoOut
                     )
 
                 Just token ->
-                    -- Three-step presigned-URL flow:
-                    --   1. Init: ask backend for an image_id + presigned R2 PUT URL.
-                    --   2. PUT the file bytes directly to R2 (bypasses Phoenix).
-                    --   3. Commit: tell backend the PUT landed; backend enqueues
-                    --      the vision pipeline and we open the SSE stream.
                     ( { model
                         | file = Just file
                         , uploadState = Loading
@@ -205,7 +382,7 @@ update msg model maybeToken =
                 ( model, Cmd.none, SessionExpired )
 
             else
-                ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+                ( { model | uploadState = Failure err }, Cmd.none, NoOut )
 
         UploadInitialised file token (Ok init_) ->
             ( model
@@ -213,8 +390,8 @@ update msg model maybeToken =
             , NoOut
             )
 
-        R2PutCompleted _ _ (Err _) ->
-            ( { model | uploadState = Failure Http.NetworkError }, Cmd.none, NoOut )
+        R2PutCompleted _ _ (Err err) ->
+            ( { model | uploadState = Failure err }, Cmd.none, NoOut )
 
         R2PutCompleted imageId token (Ok ()) ->
             ( model
@@ -234,10 +411,9 @@ update msg model maybeToken =
         UploadAccepted result ->
             case result of
                 Ok imageId ->
-                    -- Upload accepted; open SSE stream for identification result.
                     case maybeToken of
                         Just token ->
-                            ( { model | uploadState = Success imageId }
+                            ( { model | uploadState = Success imageId, waitedSeconds = 0, silentSeconds = 0 }
                             , Cmd.none
                             , OpenStream ("/api/upload/" ++ imageId ++ "/stream?token=" ++ token)
                             )
@@ -254,7 +430,6 @@ update msg model maybeToken =
                     case response.status of
                         Resolved ->
                             let
-                                -- Prefer the book_ids array; fall back to singleton book_id.
                                 ids =
                                     if List.isEmpty response.bookIds then
                                         case response.bookId of
@@ -269,14 +444,12 @@ update msg model maybeToken =
                             in
                             case ( ids, maybeToken ) of
                                 ( [], _ ) ->
-                                    -- Resolved without any book IDs means not_a_book.
                                     ( { model | result = NotABook }, Cmd.none, NoOut )
 
                                 ( [ singleId ], Just token ) ->
-                                    -- Single book: check for duplicate, then fetch.
                                     let
                                         callback =
-                                            if response.isDuplicate == Just True then
+                                            if response.isDuplicate then
                                                 GotDuplicateBook
 
                                             else
@@ -288,7 +461,6 @@ update msg model maybeToken =
                                     )
 
                                 ( multiIds, Just token ) ->
-                                    -- Multiple books: fetch all in parallel.
                                     ( { model
                                         | pendingBookIds = multiIds
                                         , collectedBooks = []
@@ -309,37 +481,38 @@ update msg model maybeToken =
                         Rejected ->
                             case response.rejectionReason of
                                 Just "not_a_book" ->
-                                    ( { model | result = NotABook, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
+                                    ( terminal model NotABook, Cmd.none, NoOut )
 
-                                _ ->
-                                    ( { model | result = IdentificationFailed, pendingBookIds = [], collectedBooks = [], failedBookIds = [], sseTerminalReceived = True }, Cmd.none, NoOut )
+                                reason ->
+                                    ( terminal model (IdentificationFailed (failureFromRejection reason)), Cmd.none, NoOut )
+
+                        TimedOut ->
+                            ( terminal model (IdentificationFailed TookTooLong), Cmd.none, NoOut )
 
                         Pending ->
                             ( model, Cmd.none, NoOut )
 
-                Err _ ->
-                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                Err err ->
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
 
         StreamEvent rawJson ->
+            let
+                heard =
+                    { model | silentSeconds = 0 }
+            in
             case Decode.decodeString Api.streamEventDecoder rawJson of
                 Ok pollResponse ->
-                    update (StatusReceived (Ok pollResponse)) model maybeToken
+                    update (StatusReceived (Ok pollResponse)) heard maybeToken
 
                 Err _ ->
-                    -- Malformed event (e.g. heartbeat) — ignore, stay in current state.
-                    ( model, Cmd.none, NoOut )
+                    ( heard, Cmd.none, NoOut )
 
         StreamError ->
-            -- Ignore the error if we already received a terminal SSE event.
-            -- When the server closes the connection immediately after sending
-            -- resolved/rejected, the browser fires onerror right after the
-            -- message — before book fetches complete. The flag prevents that
-            -- connection-close error from overwriting the correct pipeline state.
             if model.sseTerminalReceived then
                 ( model, Cmd.none, NoOut )
 
             else
-                ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                ( { model | result = IdentificationFailed ConnectionLost }, Cmd.none, NoOut )
 
         GotIdentifiedBook bookId result ->
             case result of
@@ -355,8 +528,6 @@ update msg model maybeToken =
                             List.filter (\bid -> bid /= bookId) model.pendingBookIds
                     in
                     if List.isEmpty remaining then
-                        -- All books fetched — enter Verifying step for single book,
-                        -- or show multi-book list for multiple.
                         case newCollected of
                             [ singleBook ] ->
                                 ( { model
@@ -364,6 +535,8 @@ update msg model maybeToken =
                                     , collectedBooks = []
                                     , pendingBookIds = []
                                     , step = Verifying singleBook
+                                    , existingShelves =
+                                        List.filterMap .bookshelfName response.placements
                                   }
                                 , Cmd.none
                                 , NoOut
@@ -374,6 +547,7 @@ update msg model maybeToken =
                                     | result = Identified newCollected
                                     , collectedBooks = []
                                     , pendingBookIds = []
+                                    , existingShelves = []
                                   }
                                 , Cmd.none
                                 , NoOut
@@ -388,11 +562,7 @@ update msg model maybeToken =
                         , NoOut
                         )
 
-                Err _ ->
-                    -- One book fetch failed — remove from pending and remember
-                    -- the failed ID so the multi-book identified view can render
-                    -- a "Could not identify" placeholder for it. Show what we
-                    -- have if everything else is done, otherwise keep waiting.
+                Err err ->
                     let
                         remaining =
                             List.filter (\bid -> bid /= bookId) model.pendingBookIds
@@ -403,7 +573,7 @@ update msg model maybeToken =
                     if List.isEmpty remaining then
                         case model.collectedBooks of
                             [] ->
-                                ( { model | result = IdentificationFailed, failedBookIds = newFailed }, Cmd.none, NoOut )
+                                ( { model | result = IdentificationFailed (failureFromHttpError err), failedBookIds = newFailed }, Cmd.none, NoOut )
 
                             books ->
                                 ( { model
@@ -442,8 +612,8 @@ update msg model maybeToken =
                     , NoOut
                     )
 
-                Err _ ->
-                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                Err err ->
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
 
         ManualIsbnChanged isbn ->
             ( { model | manualIsbn = isbn, showIsbnError = False }, Cmd.none, NoOut )
@@ -452,8 +622,11 @@ update msg model maybeToken =
             if isValidISBN model.manualIsbn then
                 case maybeToken of
                     Just token ->
-                        ( { model | isbnLookupState = Loading }
-                        , Api.lookupByIsbn model.manualIsbn token IsbnLookupResult
+                        ( { model | confirmState = Loading, existingShelves = [] }
+                        , Api.confirmBook
+                            { isbn = model.manualIsbn, shelfName = model.selectedShelf }
+                            token
+                            ConfirmCompleted
                         , NoOut
                         )
 
@@ -463,27 +636,57 @@ update msg model maybeToken =
             else
                 ( { model | showIsbnError = True }, Cmd.none, NoOut )
 
-        IsbnLookupResult result ->
-            case result of
-                Ok response ->
-                    ( { model
-                        | isbnLookupState = Success ()
-                        , result = Identified [ response.book ]
-                        , step = Verifying response.book
-                      }
+        ConfirmCompleted (Ok response) ->
+            ( { model
+                | confirmState = Success ()
+                , confirmOutcome = Just response.outcome
+                , result = Identified [ response.book ]
+                , step = Complete response.book model.selectedShelf
+                , existingShelves = otherShelves model.selectedShelf response.placements
+              }
+            , Cmd.none
+            , RefreshInbox
+            )
+
+        ConfirmCompleted (Err (Api.ConfirmMergeRequired workId)) ->
+            ( { model
+                | confirmState = NotAsked
+                , result = SameWorkFound workId Nothing
+                , mergeIsbn = model.manualIsbn
+                , mergeFormatState = NotAsked
+              }
+            , case maybeToken of
+                Just token ->
+                    Api.getBook workId (Just token) GotSameWorkBook
+
+                Nothing ->
+                    Cmd.none
+            , NoOut
+            )
+
+        ConfirmCompleted (Err (Api.ConfirmHttpError err)) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | confirmState = Failure (Api.ConfirmHttpError err) }, Cmd.none, NoOut )
+
+        ConfirmCompleted (Err confirmError) ->
+            ( { model | confirmState = Failure confirmError }, Cmd.none, NoOut )
+
+        GotSameWorkBook result ->
+            case ( result, model.result ) of
+                ( Ok response, SameWorkFound workId _ ) ->
+                    ( { model | result = SameWorkFound workId (Just response.book) }
                     , Cmd.none
                     , NoOut
                     )
 
-                Err err ->
-                    if Api.isUnauthorized err then
-                        ( model, Cmd.none, SessionExpired )
-
-                    else
-                        ( { model | isbnLookupState = Failure err }, Cmd.none, NoOut )
+                _ ->
+                    ( model, Cmd.none, NoOut )
 
         EnterManualMode ->
-            ( { model | result = ManualISBNEntry, isbnLookupState = NotAsked }, Cmd.none, NoOut )
+            ( { model | result = ManualISBNEntry, confirmState = NotAsked }, Cmd.none, NoOut )
 
         ConfirmMergeFormat bookId ->
             case maybeToken of
@@ -500,7 +703,6 @@ update msg model maybeToken =
                     ( model, Cmd.none, NoOut )
 
         SkipMerge ->
-            -- User chose "No, add as separate" — proceed to normal shelf picker.
             case model.result of
                 DuplicateDetected book ->
                     ( { model
@@ -517,27 +719,13 @@ update msg model maybeToken =
         MergeFormatCompleted result ->
             case result of
                 Ok response ->
-                    case model.result of
-                        DuplicateDetected book ->
-                            let
-                                newEditionCount =
-                                    book.editionCount + 1
-                            in
-                            ( { model
-                                | mergeFormatState = Success response
-                                , result =
-                                    DuplicateDetected
-                                        { book | editionCount = newEditionCount }
-                              }
-                            , Cmd.none
-                            , NoOut
-                            )
-
-                        _ ->
-                            ( { model | mergeFormatState = Success response }
-                            , Cmd.none
-                            , NoOut
-                            )
+                    ( { model
+                        | mergeFormatState = Success response
+                        , result = mergeCompletionFor response.edition model.result
+                      }
+                    , Cmd.none
+                    , NoOut
+                    )
 
                 Err err ->
                     if Api.isUnauthorized err then
@@ -584,22 +772,15 @@ update msg model maybeToken =
                     )
 
                 _ ->
-                    -- No image / no token / not in Verifying step — fall back to
-                    -- the legacy full reset so we never wedge in a half-state.
                     ( init, Cmd.none, NoOut )
 
         RejectIdentificationCompleted result ->
             case result of
                 Ok () ->
-                    -- The HTTP 202 only acknowledges the request. The SSE stream
-                    -- is the real signal source for the re-run vision pipeline.
                     ( model, Cmd.none, NoOut )
 
-                Err _ ->
-                    -- The server didn't accept the rejection. Surface the
-                    -- failure on the same screen the user would see on a
-                    -- pipeline failure rather than wedging in the spinner.
-                    ( { model | result = IdentificationFailed }, Cmd.none, NoOut )
+                Err err ->
+                    ( { model | result = IdentificationFailed (failureFromHttpError err) }, Cmd.none, NoOut )
 
         ShelfSelected shelf ->
             ( { model | selectedShelf = shelf }, Cmd.none, NoOut )
@@ -610,11 +791,6 @@ update msg model maybeToken =
         ConfirmPlacement ->
             case ( model.step, maybeToken ) of
                 ( ChoosingShelf book, Just token ) ->
-                    -- Place the book, and (if the user marked it "adults only")
-                    -- fire the raise-only user age-gate endpoint alongside. A
-                    -- failure of the age-gate call must not block placement, so
-                    -- both run together and the age-gate result is handled
-                    -- softly in AgeGateSet.
                     let
                         ageGateCmd =
                             if model.ageGatingEnabled && model.markAdultsOnly then
@@ -640,8 +816,6 @@ update msg model maybeToken =
                     ( model, Cmd.none, NoOut )
 
                 Err _ ->
-                    -- Soft failure: the book was still placed. Surface a gentle
-                    -- notice rather than failing the whole flow.
                     ( { model | ageGateError = Just "We couldn't mark this book as adults only. You can change it later from the book's page." }
                     , Cmd.none
                     , NoOut
@@ -656,7 +830,7 @@ update msg model maybeToken =
                         , rejectedBookIds = []
                       }
                     , Cmd.none
-                    , NoOut
+                    , RefreshInbox
                     )
 
                 ( Err Api.PlaceReadingPileFull, _ ) ->
@@ -674,6 +848,28 @@ update msg model maybeToken =
 
         GoToShelf shelfName ->
             ( model, Cmd.none, NavigateTo (shelfRoute shelfName) )
+
+        WaitTick ->
+            if isWaiting model then
+                ( { model
+                    | waitedSeconds = model.waitedSeconds + tickSeconds
+                    , silentSeconds = model.silentSeconds + tickSeconds
+                  }
+                , Cmd.none
+                , NoOut
+                )
+
+            else
+                ( { model | waitedSeconds = 0, silentSeconds = 0 }, Cmd.none, NoOut )
+
+        ResumeInboxItem item ->
+            update
+                (StatusReceived (Ok (replayFrame item)))
+                { init
+                    | ageGatingEnabled = model.ageGatingEnabled
+                    , uploadState = Success item.imageId
+                }
+                maybeToken
 
 
 {-| Minimal placement stub — only used to track success state.
@@ -697,8 +893,8 @@ placementStub =
     }
 
 
-view : Model -> Maybe String -> Html Msg
-view model maybeToken =
+view : Model -> Maybe String -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+view model maybeToken inbox =
     div [ class "page page--upload" ]
         [ h1 [ class "page__title" ] [ text "Add a Book" ]
         , div [ attribute "aria-live" "polite", class "upload-status-region" ]
@@ -709,13 +905,13 @@ view model maybeToken =
                 Just _ ->
                     case model.step of
                         Verifying book ->
-                            viewVerifying model.ageGatingEnabled book
+                            viewVerifying model.ageGatingEnabled model.existingShelves book
 
                         ChoosingShelf book ->
                             viewChoosingShelf model book
 
                         Complete book shelfName ->
-                            viewComplete model.ageGateError book shelfName
+                            viewComplete model book shelfName
 
                         Uploading ->
                             case model.result of
@@ -725,8 +921,8 @@ view model maybeToken =
                                 Identified books ->
                                     viewIdentified books model.failedBookIds
 
-                                IdentificationFailed ->
-                                    viewIdentificationFailed
+                                IdentificationFailed cause ->
+                                    viewIdentificationFailed cause
 
                                 NotABook ->
                                     viewNotABook
@@ -736,7 +932,19 @@ view model maybeToken =
 
                                 DuplicateDetected book ->
                                     viewDuplicate model book
+
+                                SameWorkFound workId maybeBook ->
+                                    viewSameWork model workId maybeBook
+
+                                EditionMerged merged ->
+                                    viewEditionMerged merged
             ]
+        , case maybeToken of
+            Nothing ->
+                text ""
+
+            Just _ ->
+                viewInbox model inbox
         ]
 
 
@@ -785,18 +993,19 @@ viewUploadArea model =
                 Loading ->
                     div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
                         [ span [ class "spinner" ] []
-                        , p [] [ text "Processing image..." ]
+                        , p [] [ text "Sending your photo..." ]
                         ]
 
                 Success _ ->
-                    div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
-                        [ span [ class "spinner" ] []
-                        , p [] [ text "Processing image..." ]
-                        ]
+                    viewWaiting model
 
-                Failure _ ->
-                    div [ class "upload-area__error", testId "upload-error" ]
-                        [ p [] [ text "Upload failed. Please try again." ]
+                Failure err ->
+                    div
+                        [ class "upload-area__error"
+                        , testId "upload-error"
+                        , attribute "data-failure-cause" "not-sent"
+                        ]
+                        [ p [] [ text (sendError err) ]
                         , button [ class "btn btn--primary", onClick Reset ]
                             [ text "Try Again" ]
                         ]
@@ -811,7 +1020,191 @@ viewUploadArea model =
                 ]
                 [ text "Enter ISBN manually instead" ]
             ]
+        , if model.embedded then
+            text ""
+
+          else
+            div [ class "upload-import-link" ]
+                [ a
+                    [ class "btn btn--ghost"
+                    , href (Route.toPath Route.Import)
+                    , testId "upload-import-link"
+                    ]
+                    [ text "Coming from Goodreads? Import your whole library" ]
+                ]
         ]
+
+
+{-| The waiting screen, which stops promising imminence. The old
+eternal `Processing image...` spinner implied seconds for up to 35
+measured minutes, and only a reader who stayed ever saw the result.
+This tells the truth — identification continues in the background — and
+says where the answer will be waiting (the inbox), making leaving safe.
+-}
+viewWaiting : Model -> Html Msg
+viewWaiting model =
+    div [ class "upload-area__loading", testId "upload-loading", attribute "role" "status" ]
+        [ span [ class "spinner" ] []
+        , p [] [ text "Reading your photo..." ]
+        , if model.silentSeconds >= streamSilentAfterSeconds then
+            p
+                [ class "upload-waiting__stream-silent"
+                , testId "upload-stream-silent"
+                ]
+                [ text "This page has stopped hearing back from the library. Identification is still running — the result will be waiting for you under Add a Book whenever you return." ]
+
+          else if model.waitedSeconds >= leaveAffordanceAfterSeconds then
+            p
+                [ class "upload-waiting__leave-note"
+                , testId "upload-leave-note"
+                ]
+                [ text "This one is taking a while. You don't have to wait — you can close this page and carry on. We'll keep going, and the result will be waiting for you under Add a Book." ]
+
+          else
+            text ""
+        ]
+
+
+{-| The inbox: uploads this reader started and has not finished with. Identification is asynchronous, so this is how work done in the
+reader's absence is reached again; confirmation is synchronous, so every
+item is a LINK into the existing confirm flow and nothing more — no
+"add all", no control here that shelves a book.
+-}
+viewInbox : Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+viewInbox model inbox =
+    case inbox of
+        Success [] ->
+            text ""
+
+        Success items ->
+            div [ class "upload-inbox", testId "upload-inbox" ]
+                [ h2 [ class "upload-inbox__heading" ] [ text "Waiting for you" ]
+                , p [ class "upload-inbox__intro" ]
+                    [ text "Photos you sent earlier that we finished without you." ]
+                , ul [ class "upload-inbox__list" ] (List.map (viewInboxItem model) items)
+                ]
+
+        Failure _ ->
+            p [ class "upload-inbox__error", testId "upload-inbox-error" ]
+                [ text "We couldn't check whether anything is waiting for you. Reload the page to try again." ]
+
+        _ ->
+            text ""
+
+
+viewInboxItem : Model -> Api.InboxItem -> Html Msg
+viewInboxItem model item =
+    let
+        ( itemClass, copy, action ) =
+            case item.kind of
+                Api.AwaitingConfirmation ->
+                    ( "upload-inbox__item"
+                    , "We found a book in this photo. Have a look and tell us if we got it right."
+                    , "Check this one"
+                    )
+
+                Api.Failed ->
+                    ( "upload-inbox__item upload-inbox__item--failed"
+                    , inboxFailureSummary item
+                    , "See what happened"
+                    )
+    in
+    li
+        [ class itemClass
+        , testId "upload-inbox-item"
+        , attribute "data-inbox-kind" (inboxKindToken item.kind)
+        ]
+        [ p [ class "upload-inbox__item-text" ] [ text copy ]
+        , button
+            [ class "btn btn--secondary"
+            , testId "upload-inbox-resume"
+            , onClick (ResumeInboxItem item)
+            , disabled (not (canResume model))
+            ]
+            [ text action ]
+        ]
+
+
+{-| Whether picking up an inbox item now would destroy work in progress.
+
+The reader is free to resume from the drop prompt or from a finished result;
+they are not free to do it from the middle of a verify or shelf-picker step,
+where the click would silently discard the book they were in the act of filing.
+
+-}
+canResume : Model -> Bool
+canResume model =
+    case model.step of
+        Uploading ->
+            not (isWaiting model)
+
+        _ ->
+            False
+
+
+{-| A failed inbox item's summary, through the SAME tables as the live
+path (`failureFromRejection` token→cause, `failureBody` cause→sentence).
+A second table would drift the day a token was added, telling two
+stories about one rejection. `not_a_book` is mapped explicitly here
+because the inbox has no live-path interception to do it.
+-}
+inboxFailureSummary : Api.InboxItem -> String
+inboxFailureSummary item =
+    case item.rejectionReason of
+        Just "not_a_book" ->
+            notABookBody
+
+        reason ->
+            failureBody (failureFromRejection reason)
+
+
+inboxKindToken : Api.InboxKind -> String
+inboxKindToken kind =
+    case kind of
+        Api.AwaitingConfirmation ->
+            "awaiting-confirmation"
+
+        Api.Failed ->
+            "failed"
+
+
+{-| Why the photo never reached the library at all.
+
+This is the failure BEFORE identification: the presign, the R2 PUT or the commit
+did not go through. It read "Upload failed. Please try again." for every one of
+them, including a 429 — where trying again immediately is precisely the thing
+that will fail — and a 413, where trying the same file again cannot ever work.
+
+The 429 arrives here as a bare `Http.BadStatus 429`: these endpoints are
+authenticated and go through `Api.authedExpect`, which has already discarded the
+headers by the time a caller sees the error, so `retry-after` is unavailable and
+the copy names no interval. See `Api.RequestError` for why that is a deliberate
+silence rather than a gap.
+
+-}
+sendError : Http.Error -> String
+sendError err =
+    case err of
+        Http.BadStatus 413 ->
+            "That photo is too large to send. A smaller one — or your phone's own resized copy — will go through."
+
+        Http.BadStatus 415 ->
+            "That file is not an image we can read. A JPEG or PNG photo of the cover will work."
+
+        Http.BadStatus 429 ->
+            FailureCopy.rateLimited Nothing
+
+        Http.BadStatus 503 ->
+            "The library is briefly overloaded. Please try again in a few seconds."
+
+        Http.NetworkError ->
+            "The library is unreachable, so your photo was never sent. Check your connection, then try again."
+
+        Http.Timeout ->
+            "Sending your photo took too long and we stopped waiting. A stronger connection, or a smaller photo, usually gets it there."
+
+        _ ->
+            "Your photo could not be sent, and we cannot say why. Please try again in a moment."
 
 
 viewDropPrompt : Html Msg
@@ -855,7 +1248,8 @@ viewIdentified books failedBookIds =
 viewIdentifiedBook : Book -> Html Msg
 viewIdentifiedBook book =
     li [ class "upload-result__book-item" ]
-        [ p [ class "upload-result__book-title" ] [ text book.title ]
+        [ p [ class "upload-result__book-title" ] [ text (displayTitle book) ]
+        , viewProvisionalNoticeIfNeeded book
         , p [ class "upload-result__book-author" ] [ text (authorName book) ]
         , a
             [ href (Route.toPath (Route.BookDetail book.id))
@@ -882,34 +1276,135 @@ viewUnidentifiedPlaceholder _ =
         ]
 
 
-viewIdentificationFailed : Html Msg
-viewIdentificationFailed =
-    div [ class "upload-result upload-result--failed", testId "upload-error" ]
-        [ h2 [] [ text "Could Not Identify Book" ]
-        , p []
-            [ text
-                "We couldn't read the ISBN from this photo. Try a clearer image or enter the ISBN manually."
-            ]
+{-| The failure card, saying WHICH failure it is. Both affordances
+(retry, manual entry) stay on every cause; the sentence changes and
+names the button worth reaching for.
+
+⛔ Copy must only name controls that exist — `Page.Bookshelf.loadError`
+once shipped "then try again" onto a page with no retry control.
+
+-}
+viewIdentificationFailed : UploadFailure -> Html Msg
+viewIdentificationFailed cause =
+    div
+        [ class "upload-result upload-result--failed"
+        , testId "upload-error"
+        , attribute "data-failure-cause" (failureCause cause)
+        ]
+        [ h2 [] [ text (failureHeading cause) ]
+        , p [] [ text (failureBody cause) ]
         , button [ class "btn btn--primary", onClick Reset ] [ text "Try Another Photo" ]
         , button [ class "btn btn--secondary", onClick EnterManualMode ]
             [ text "Enter ISBN Manually" ]
         ]
 
 
+{-| The cause as a stable machine-readable token, for tests and for a live drive.
+
+Deliberately not the server's own `rejection_reason`: several tokens map to one
+cause, and a card is identified by what it SAYS, not by which of the synonyms
+produced it.
+
+-}
+failureCause : UploadFailure -> String
+failureCause cause =
+    case cause of
+        ImageUnreadable ->
+            "image-unreadable"
+
+        IsbnUnreadable ->
+            "isbn-unreadable"
+
+        ServiceUnavailable ->
+            "service-unavailable"
+
+        TookTooLong ->
+            "timed-out"
+
+        ConnectionLost ->
+            "connection-lost"
+
+        CauseUnknown ->
+            "unknown"
+
+
+failureHeading : UploadFailure -> String
+failureHeading cause =
+    case cause of
+        ImageUnreadable ->
+            "That Photo Could Not Be Opened"
+
+        IsbnUnreadable ->
+            "Could Not Read the ISBN"
+
+        ServiceUnavailable ->
+            "The Cataloguing Desk Is Closed"
+
+        TookTooLong ->
+            "No Answer Came Back"
+
+        ConnectionLost ->
+            "The Library Is Unreachable"
+
+        CauseUnknown ->
+            "Something Went Wrong"
+
+
+failureBody : UploadFailure -> String
+failureBody cause =
+    case cause of
+        ImageUnreadable ->
+            "The image itself could not be read — it may be damaged, or too large, or in a format we cannot open. A photo taken afresh usually works; so does typing the ISBN in."
+
+        IsbnUnreadable ->
+            "We found a book but could not make out its ISBN. A closer photo of the barcode or the copyright page will usually do it — or type the number in."
+
+        ServiceUnavailable ->
+            "The service that reads book covers is not answering. There is nothing wrong with your photo. Type the ISBN in to add the book now, or try the photo again later."
+
+        TookTooLong ->
+            "Your photo was accepted, but no verdict ever came back for it. Nothing has been added to your shelves. Try the photo again, or type the ISBN in."
+
+        ConnectionLost ->
+            "We lost the connection before hearing how your photo went. Check your connection, then try again."
+
+        CauseUnknown ->
+            "Your photo did not become a book, and we cannot say why. It may be nothing to do with the photo. Try again in a moment, or type the ISBN in."
+
+
+{-| The one sentence for `not_a_book`, shared by the card and the inbox summary. Named rather than duplicated so the two surfaces cannot come to disagree
+about what happened to the same photo.
+-}
+notABookBody : String
+notABookBody =
+    "We couldn't detect a book in that image. Please try a photo of a book cover."
+
+
 viewNotABook : Html Msg
 viewNotABook =
-    div [ class "upload-result upload-result--not-book", testId "upload-error" ]
+    div
+        [ class "upload-result upload-result--not-book"
+        , testId "upload-error"
+        , attribute "data-failure-cause" "not-a-book"
+        ]
         [ h2 [] [ text "That Doesn't Look Like a Book" ]
-        , p []
-            [ text
-                "We couldn't detect a book in that image. Please try a photo of a book cover."
-            ]
+        , p [] [ text notABookBody ]
         , button [ class "btn btn--primary", onClick Reset ] [ text "Try Again" ]
         , button [ class "btn btn--secondary", onClick EnterManualMode ]
             [ text "Enter ISBN Manually" ]
         ]
 
 
+{-| Manual ISBN entry, now a single screen and a single request.
+
+The bookshelf is chosen here rather than on a later step because
+`Books.confirm/2` creates and places in one transaction — asking afterwards
+would mean either placing on a shelf the reader never picked or filing the book
+twice. There is no intervening "We think this is…" step either: that exists on
+the photo path because a vision model GUESSED, and the resolved title is shown
+on the completion card. The reader typed the ISBN; the ISBN is the identity.
+
+-}
 viewManualEntry : Model -> Html Msg
 viewManualEntry model =
     div [ class "upload-result upload-result--manual" ]
@@ -919,30 +1414,85 @@ viewManualEntry model =
             , onInput = ManualIsbnChanged
             , showError = model.showIsbnError
             }
-        , case model.isbnLookupState of
+        , viewShelfChoices model.selectedShelf
+        , case model.confirmState of
             Loading ->
                 div [ class "upload-manual__loading" ]
                     [ span [ class "spinner" ] []
-                    , p [] [ text "Looking up book..." ]
+                    , p [] [ text "Adding your book..." ]
                     ]
 
-            Failure _ ->
+            Failure confirmError ->
                 div [ class "upload-manual__error" ]
                     [ p [ class "upload-manual__error-text" ]
-                        [ text "Book not found. Please check the ISBN and try again." ]
-                    , button [ class "btn btn--primary", testId "upload-manual-isbn-submit", onClick SubmitManualIsbn ]
-                        [ text "Look Up Book" ]
+                        [ text (confirmErrorMessage confirmError) ]
+                    , viewManualSubmit model.selectedShelf
                     ]
 
             _ ->
-                button [ class "btn btn--primary", testId "upload-manual-isbn-submit", onClick SubmitManualIsbn ]
-                    [ text "Look Up Book" ]
+                viewManualSubmit model.selectedShelf
         , button [ class "btn btn--ghost", onClick Reset ] [ text "Cancel" ]
         ]
 
 
+viewManualSubmit : String -> Html Msg
+viewManualSubmit selectedShelf =
+    button
+        [ class "btn btn--primary"
+        , testId "upload-manual-isbn-submit"
+        , onClick SubmitManualIsbn
+        ]
+        [ text ("Add to " ++ shelfLabel selectedShelf) ]
+
+
+{-| A wrong ISBN and a broken server are different problems and get different
+sentences — the old copy said "check the ISBN" for both, which was actively
+misleading for the case this issue exists to fix (a correct ISBN the catalogue
+simply had never seen). `ConfirmMergeRequired` never reaches here: it is an
+outcome with its own screen, not a failure.
+-}
+confirmErrorMessage : Api.ConfirmError -> String
+confirmErrorMessage confirmError =
+    case confirmError of
+        Api.ConfirmIsbnNotFound ->
+            "We couldn't find a book with that ISBN. Please check the number and try again."
+
+        Api.ConfirmMergeRequired _ ->
+            "This looks like another edition of a book we already have."
+
+        Api.ConfirmHttpError _ ->
+            "We couldn't add that book just now. Please try again."
+
+
+{-| "We've got the barcode but haven't matched it to a book yet."
+The barcode fast path skips the OL/GB round-trip, so a book can be
+shelved before anything knows its title; until enrichment lands the
+server's stand-in title is the ISBN itself. This predicate (via
+`Types.Book.isProvisional`) is how surfaces render that as a pending
+lookup instead of a book named after a number.
+-}
+viewProvisionalNoticeIfNeeded : Book -> Html Msg
+viewProvisionalNoticeIfNeeded book =
+    if isUnidentified book then
+        p
+            [ class "upload-provisional-notice"
+            , testId "upload-provisional-notice"
+            , attribute "role" "status"
+            ]
+            [ text
+                ("We read the barcode ("
+                    ++ bookIsbn book
+                    ++ ") but haven't matched it to a catalogue record yet. "
+                    ++ "The title and cover will fill in shortly — you can shelve it now."
+                )
+            ]
+
+    else
+        text ""
+
+
 {-| Render an in-flow age-gate notice when the resolved book is
-age-gated AND age-gating is enabled (ADR-020). Per US-1.1.4 the upload
+age-gated AND age-gating is enabled. Per the upload
 flow proceeds normally for the identification step, but the user is
 informed that the book is age-restricted. There is no self-serve
 "verify age" action anymore (verification is provider-sourced, shipped
@@ -966,12 +1516,149 @@ viewAgeGateNoticeIfNeeded ageGatingEnabled book =
             text ""
 
 
+{-| "You already have this on your Library shelf." — the manual-ISBN duplicate
+notice.
+
+The photo path has told the reader about a duplicate since the SSE payload's
+`is_duplicate`; typing the ISBN by hand told them nothing at all, so a second
+placement happened silently. This informs and then gets out of the way: no
+button is disabled, no step is skipped, and a book on two bookshelves is a
+state the reader is allowed to want. `looking_for_home` is included here (it
+is still "you already have this"), unlike the book-detail multi-shelf notice,
+whose job is tidying up duplicate _collection_ entries.
+
+-}
+viewExistingShelvesNotice : List String -> Html Msg
+viewExistingShelvesNotice shelfNames =
+    case List.map shelfLabel shelfNames of
+        [] ->
+            text ""
+
+        labels ->
+            p
+                [ class "upload-verify__already-yours"
+                , testId "upload-already-yours"
+                ]
+                [ text ("You already have this on your " ++ joinWithAnd labels ++ ".") ]
+
+
+{-| The same notice on the completion card. The manual path learns the
+reader's other bookshelves from the confirm response, which by definition
+arrives after the placement — so this is where it can be said. Same wording,
+same muted register; still nothing but a sentence.
+-}
+viewCompleteExistingShelvesNotice : List String -> Html Msg
+viewCompleteExistingShelvesNotice shelfNames =
+    case List.map shelfLabel shelfNames of
+        [] ->
+            text ""
+
+        labels ->
+            p
+                [ class "upload-complete__already-yours"
+                , testId "upload-already-yours"
+                ]
+                [ text ("You already have this on your " ++ joinWithAnd labels ++ ".") ]
+
+
+{-| Every bookshelf the reader has this book on EXCEPT the one this action just
+used — that one is already named in the heading, so repeating it would read as
+a duplicate that isn't one.
+-}
+otherShelves : String -> List Placement -> List String
+otherShelves usedShelf placements =
+    placements
+        |> List.filterMap .bookshelfName
+        |> List.filter (\name -> name /= usedShelf)
+
+
+{-| The screen a merge lands on, given the prompt it was answered from.
+
+Both prompts that offer "Yes, merge" end in the same completion card, but only
+one of them means the reader has this book: see `MergedEdition`. Anything else
+is a merge with no prompt behind it, which nothing can produce — leaving the
+result untouched keeps that unreachable case from inventing a screen.
+
+-}
+mergeCompletionFor : Edition -> UploadResult -> UploadResult
+mergeCompletionFor edition result =
+    case result of
+        DuplicateDetected book ->
+            EditionMerged
+                { workId = book.id
+                , work = Just book
+                , edition = edition
+                , onAReaderShelf = True
+                }
+
+        SameWorkFound workId maybeBook ->
+            EditionMerged
+                { workId = workId
+                , work = maybeBook
+                , edition = edition
+                , onAReaderShelf = False
+                }
+
+        other ->
+            other
+
+
+{-| How a heading names the book it is about.
+
+A quoted title is how you refer to a book by name, so it is only used when the
+book has one. An unidentified book does not — quoting `Not yet identified` would
+present a status as if it were the title, which is the same untruth as quoting
+the ISBN. `this book` is what a person would say.
+
+Asks `isUnidentified`, not `isProvisional`: "does this book have a name"
+is exactly the question a quoted heading needs answered, and whether a provider
+confirmed its ISBN is not that question.
+
+-}
+headingSubject : Book -> String
+headingSubject book =
+    if isUnidentified book then
+        "This book"
+
+    else
+        "\"" ++ book.title ++ "\""
+
+
+{-| The heading for each branch of `Books.confirm/2`.
+-}
+completeHeading : Maybe Api.ConfirmOutcome -> Book -> String -> String
+completeHeading outcome book shelfName =
+    case outcome of
+        Just Api.ConfirmAlreadyPlaced ->
+            headingSubject book ++ " is already on your " ++ shelfLabel shelfName
+
+        _ ->
+            headingSubject book ++ " added to " ++ shelfLabel shelfName
+
+
+{-| "A", "A and B", "A, B and C".
+-}
+joinWithAnd : List String -> String
+joinWithAnd labels =
+    case List.reverse labels of
+        [] ->
+            ""
+
+        [ only ] ->
+            only
+
+        last :: rest ->
+            String.join ", " (List.reverse rest) ++ " and " ++ last
+
+
 {-| Verification step: "We think this is..." with confirm/reject.
 -}
-viewVerifying : Bool -> Book -> Html Msg
-viewVerifying ageGatingEnabled book =
+viewVerifying : Bool -> List String -> Book -> Html Msg
+viewVerifying ageGatingEnabled existingShelves book =
     div [ class "upload-verify", testId "upload-verify" ]
         [ h2 [ class "upload-verify__heading" ] [ text "We think this is…" ]
+        , viewExistingShelvesNotice existingShelves
+        , viewProvisionalNoticeIfNeeded book
         , viewAgeGateNoticeIfNeeded ageGatingEnabled book
         , div [ class "upload-verify__content" ]
             [ div [ class "upload-verify__book-info" ]
@@ -988,7 +1675,7 @@ viewVerifying ageGatingEnabled book =
                         div [ class "upload-verify__cover upload-verify__cover--placeholder" ]
                             [ text "No cover" ]
                 , div [ class "upload-verify__details" ]
-                    [ p [ class "upload-verify__title" ] [ text book.title ]
+                    [ p [ class "upload-verify__title" ] [ text (displayTitle book) ]
                     , p [ class "upload-verify__author" ] [ text (authorName book) ]
                     ]
                 ]
@@ -1026,24 +1713,10 @@ viewChoosingShelf : Model -> Book -> Html Msg
 viewChoosingShelf model book =
     div [ class "upload-shelf-picker", testId "upload-shelf-picker" ]
         [ h2 [ class "upload-shelf-picker__heading" ]
-            [ text ("Add \"" ++ book.title ++ "\" to a shelf") ]
-        , div [ class "upload-shelf-picker__shelves" ]
-            (List.map
-                (\shelf ->
-                    button
-                        [ class
-                            (if shelf.value == model.selectedShelf then
-                                "upload-shelf-picker__shelf upload-shelf-picker__shelf--selected"
-
-                             else
-                                "upload-shelf-picker__shelf"
-                            )
-                        , onClick (ShelfSelected shelf.value)
-                        ]
-                        [ text shelf.label ]
-                )
-                allShelves
-            )
+            [ text ("Add " ++ headingSubject book ++ " to a shelf") ]
+        , viewExistingShelvesNotice model.existingShelves
+        , viewProvisionalNoticeIfNeeded book
+        , viewShelfChoices model.selectedShelf
         , if model.ageGatingEnabled then
             viewAdultsOnlyToggle model.markAdultsOnly
 
@@ -1086,6 +1759,31 @@ viewChoosingShelf model book =
         ]
 
 
+{-| The five bookshelves, as a row of selectable buttons. Shared by the shelf
+picker (photo path) and the manual-entry screen so the two ways of
+adding a book offer the same choice in the same markup.
+-}
+viewShelfChoices : String -> Html Msg
+viewShelfChoices selectedShelf =
+    div [ class "upload-shelf-picker__shelves" ]
+        (List.map
+            (\shelf ->
+                button
+                    [ class
+                        (if shelf.value == selectedShelf then
+                            "upload-shelf-picker__shelf upload-shelf-picker__shelf--selected"
+
+                         else
+                            "upload-shelf-picker__shelf"
+                        )
+                    , onClick (ShelfSelected shelf.value)
+                    ]
+                    [ text shelf.label ]
+            )
+            allShelves
+        )
+
+
 {-| "Adults only" (age-gate raise) opt-in checkbox shown on the shelf
 picker. When ticked, ConfirmPlacement additionally fires the raise-only
 user age-gate endpoint for the book being placed.
@@ -1109,19 +1807,22 @@ viewAdultsOnlyToggle isChecked =
 
 
 {-| Success step: book placed on shelf.
+
+The heading distinguishes `Books.confirm/2`'s `:already_placed` branch from the
+two that changed something. Saying "added to your Wish List" when the book was
+already sitting there is the same class of untruth as the pre-silent
+second placement — the reader must be able to tell what actually happened.
+`Nothing` is the photo path, which places directly and always added.
+
 -}
-viewComplete : Maybe String -> Book -> String -> Html Msg
-viewComplete ageGateError book shelfName =
+viewComplete : Model -> Book -> String -> Html Msg
+viewComplete model book shelfName =
     div [ class "upload-complete", testId "upload-complete", attribute "role" "status" ]
         [ h2 [ class "upload-complete__heading" ]
-            [ text
-                ("\""
-                    ++ book.title
-                    ++ "\" added to "
-                    ++ shelfLabel shelfName
-                )
-            ]
-        , case ageGateError of
+            [ text (completeHeading model.confirmOutcome book shelfName) ]
+        , viewCompleteExistingShelvesNotice model.existingShelves
+        , viewProvisionalNoticeIfNeeded book
+        , case model.ageGateError of
             Just err ->
                 p [ class "upload-complete__age-gate-error", testId "upload-adults-only-error" ]
                     [ text err ]
@@ -1172,9 +1873,6 @@ viewDuplicate model book =
                 )
             ]
         , case model.mergeFormatState of
-            Success _ ->
-                viewMergeSuccess book
-
             Loading ->
                 div [ class "upload-duplicate__merge-loading" ]
                     [ span [ class "spinner" ] []
@@ -1188,6 +1886,9 @@ viewDuplicate model book =
                     ]
 
             NotAsked ->
+                viewMergePrompt book
+
+            Success _ ->
                 viewMergePrompt book
         , div [ class "upload-duplicate__secondary" ]
             [ a
@@ -1223,31 +1924,158 @@ viewMergePrompt book =
         ]
 
 
-viewMergeSuccess : Book -> Html Msg
-viewMergeSuccess book =
-    div [ class "upload-duplicate__merge-success" ]
-        [ p [ class "upload-duplicate__merge-success-text" ]
-            [ text
-                ("\""
-                    ++ book.title
-                    ++ "\" now has "
-                    ++ String.fromInt book.editionCount
-                    ++ " edition"
-                    ++ (if book.editionCount == 1 then
-                            ""
+{-| , reached from the manual path's 409.
 
-                        else
-                            "s"
-                       )
-                )
+`Books.confirm/2` matched the ISBN's resolved title+author to a work already in
+the catalogue (Jaro-Winkler > 0.8) and refused to create a second one. The
+matching is entirely server-side — this screen only consumes the work id it
+was handed, and fetches the work purely to name it.
+
+There is deliberately no "no, add it separately": the server has no such
+affordance, and offering a button that cannot work is worse than not offering
+it. A reader who disagrees with the match can go and look at the work.
+
+-}
+viewSameWork : Model -> String -> Maybe Book -> Html Msg
+viewSameWork model workId maybeBook =
+    div [ class "upload-result upload-result--duplicate", testId "upload-same-work" ]
+        [ h2 [] [ text "Already in the Catalogue" ]
+        , p [] [ text (sameWorkPrompt maybeBook) ]
+        , case model.mergeFormatState of
+            Loading ->
+                div [ class "upload-duplicate__merge-loading" ]
+                    [ span [ class "spinner" ] []
+                    , p [] [ text "Merging format..." ]
+                    ]
+
+            Failure _ ->
+                div [ class "upload-duplicate__merge-error" ]
+                    [ p [] [ text "Merge failed. Please try again." ]
+                    , viewSameWorkActions workId
+                    ]
+
+            NotAsked ->
+                viewSameWorkActions workId
+
+            Success _ ->
+                viewSameWorkActions workId
+        , div [ class "upload-duplicate__secondary" ]
+            [ a
+                [ href (Route.toPath (Route.BookDetail workId))
+                , class "btn btn--ghost"
+                ]
+                [ text "View Book" ]
+            , button [ class "btn btn--ghost", onClick Reset ] [ text "Go Back" ]
             ]
-        , a
-            [ href (Route.toPath (Route.BookDetail book.id))
-            , class "btn btn--primary"
-            ]
-            [ text "View book details" ]
-        , button [ class "btn btn--secondary", onClick Reset ] [ text "Add another" ]
         ]
+
+
+viewSameWorkActions : String -> Html Msg
+viewSameWorkActions workId =
+    div [ class "upload-duplicate__merge" ]
+        [ div [ class "upload-duplicate__merge-actions" ]
+            [ button
+                [ class "btn btn--primary"
+                , testId "upload-same-work-merge"
+                , onClick (ConfirmMergeFormat workId)
+                ]
+                [ text "Yes, merge" ]
+            ]
+        ]
+
+
+{-| copy: "You own [Title] as a [format]. Add the [new format]
+edition?" — degraded to a title-free sentence when the work could not be
+fetched, which is a cosmetic loss rather than a dead end.
+-}
+sameWorkPrompt : Maybe Book -> String
+sameWorkPrompt maybeBook =
+    case maybeBook of
+        Just book ->
+            "You already have \""
+                ++ book.title
+                ++ "\" by "
+                ++ authorName book
+                ++ ". Add this edition to it?"
+
+        Nothing ->
+            "We already have this book in the catalogue. Add this edition to it?"
+
+
+{-| The card an accepted merge lands on — completion.
+
+Deliberately the same shape as `viewComplete`: heading, notice, actions, and
+`role="status"` so a screen reader is told the screen changed. Both merge
+prompts end here, and neither of them is still on screen when it does.
+
+Every sentence is checkable against something the reader can then go and look
+at. The ISBN and format are the server's own answer, and "on the book's page"
+is only true because the merge now evicts `BookDetailCache` — before that fix,
+this card would have named an edition that `View book details` did not show,
+which is the same defect in better clothes.
+
+-}
+viewEditionMerged : MergedEdition -> Html Msg
+viewEditionMerged merged =
+    div [ class "upload-complete", testId "upload-merge-complete", attribute "role" "status" ]
+        [ h2 [ class "upload-complete__heading" ] [ text (mergedHeading merged.work) ]
+        , p [ class "upload-complete__detail" ] [ text (mergedDetail merged.edition) ]
+        , viewMergedShelfHint merged.onAReaderShelf
+        , div [ class "upload-complete__actions" ]
+            [ a
+                [ href (Route.toPath (Route.BookDetail merged.workId))
+                , class "btn btn--primary"
+                ]
+                [ text "View book details" ]
+            , button [ class "btn btn--secondary", onClick Reset ] [ text "Add another" ]
+            ]
+        ]
+
+
+{-| Same naming rule as `completeHeading` — `headingSubject` decides whether the
+book has a title worth quoting, so a provisional work is never quoted as if
+`Not yet identified` were its name.
+
+`Nothing` is the work whose fetch failed: it is fetched purely so the prompt can
+name it, so losing it degrades the sentence rather than stranding the reader.
+
+-}
+mergedHeading : Maybe Book -> String
+mergedHeading maybeBook =
+    case maybeBook of
+        Just book ->
+            headingSubject book ++ " has a new edition"
+
+        Nothing ->
+            "Edition added"
+
+
+{-| The merged edition, described from the row the server actually wrote.
+-}
+mergedDetail : Edition -> String
+mergedDetail edition =
+    case edition.formatLabel of
+        Just label ->
+            "The " ++ label ++ " edition (ISBN " ++ edition.isbn ++ ") is now listed on the book's page."
+
+        Nothing ->
+            "ISBN " ++ edition.isbn ++ " is now listed on the book's page as another edition."
+
+
+{-| The one thing a merge does NOT do, said only to the reader for whom it is
+news. A merge adds an edition to the catalogue; it places nothing on anybody's
+bookshelf. The photo path's reader already has the book — that is why they were
+offered a merge at all — so telling them would be noise. The manual path's
+reader asked to add a book and, so far, has not got one.
+-}
+viewMergedShelfHint : Bool -> Html Msg
+viewMergedShelfHint onAReaderShelf =
+    if onAReaderShelf then
+        text ""
+
+    else
+        p [ class "upload-complete__shelf-hint", testId "upload-merge-shelf-hint" ]
+            [ text "It isn't on one of your bookshelves yet — open the book to add it." ]
 
 
 {-| Map a shelf value to its display label.

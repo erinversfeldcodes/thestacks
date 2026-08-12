@@ -3,7 +3,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import { mintSession, injectSession, assertSeedOrSkip } from "./helpers";
 
 /**
- * Issue #276 — the 50-book Reading Pile cap is enforced at the write path.
+ * — the 50-book Reading Pile cap is enforced at the write path.
  *
  * A user whose pile already holds 50 books attempts to move a 51st book onto
  * it from the Library and must see the specific full-pile message (not the
@@ -53,13 +53,11 @@ async function openLibraryBookOverlay(page: Page) {
   return overlay;
 }
 
-test.describe("Reading Pile 50-book limit (#276)", () => {
+test.describe("Reading Pile 50-book limit", () => {
   test("moving a 51st book onto a full pile shows the full-pile message", async ({
     page,
     request,
   }) => {
-    // Isolated user: this spec fills a pile to the cap, which must never
-    // happen to the shared suite users.
     const session = await mintSession(request, {
       displayName: "Pile Limit Tester",
     });
@@ -70,15 +68,11 @@ test.describe("Reading Pile 50-book limit (#276)", () => {
     if (!session) return;
 
     const bookIds = await catalogueBookIds(request);
-    // Seed guarantee (#280): on a full-seed stack (E2E_EXPECT_FULL_SEEDS=1) a
-    // catalogue too thin to stage a 51st placement is a seed regression, not a
-    // reason to skip; elsewhere (prod-shaped/thin targets) skip loudly.
     assertSeedOrSkip(
       bookIds.length >= PILE_CAP + 1,
       `needs ${PILE_CAP + 1} catalogue books to stage a full pile, found ${bookIds.length}`
     );
 
-    // Fill the pile to exactly the cap via the real placement API.
     for (const bookId of bookIds.slice(0, PILE_CAP)) {
       const status = await apiPlace(
         request,
@@ -89,14 +83,11 @@ test.describe("Reading Pile 50-book limit (#276)", () => {
       expect(status, `seeding placement for ${bookId}`).toBe(201);
     }
 
-    // The 51st book goes on the Library — the book the user will try to move.
     const extraBookId = bookIds[PILE_CAP];
     expect(
       await apiPlace(request, session.token, "library", extraBookId)
     ).toBe(201);
 
-    // Boundary, API side: a 51st pile placement is rejected with the
-    // documented error code (sanity-check before driving the UI).
     const overflow = await request.post(
       "/api/bookshelves/reading_pile/placements",
       {
@@ -107,8 +98,6 @@ test.describe("Reading Pile 50-book limit (#276)", () => {
     expect(overflow.status()).toBe(422);
     expect((await overflow.json()).error).toBe("reading_pile_full");
 
-    // Now the real user journey: Library → book overlay → shelf mover →
-    // Reading Pile → Move → the specific full-pile message.
     await injectSession(page, session);
     const overlay = await openLibraryBookOverlay(page);
 
@@ -121,12 +110,10 @@ test.describe("Reading Pile 50-book limit (#276)", () => {
     await expect(fullMsg).toBeVisible({ timeout: 10000 });
     await expect(fullMsg).toHaveText(FULL_PILE_MESSAGE);
 
-    // Distinct from the generic move failure.
     await expect(
       overlay.getByText("Failed to move book. Please try again.")
     ).toHaveCount(0);
 
-    // And nothing snuck onto the pile: still exactly 50.
     const pileResp = await request.get("/api/bookshelves/reading_pile", {
       headers: { Authorization: `Bearer ${session.token}` },
     });

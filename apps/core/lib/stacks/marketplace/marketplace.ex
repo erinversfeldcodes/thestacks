@@ -1,17 +1,17 @@
 defmodule Stacks.Marketplace do
   @moduledoc """
-  Context for marketplace features: listings, offer threads, offer messages,
-  and transactions.
+      Context for marketplace features: listings, offer threads, offer messages,
+      and transactions.
 
-  Listing state machine:
+      Listing state machine:
 
-      draft ──→ active ──→ removed
-                  │
-                  ├──→ expired
-                  │
-                  └──→ sold
+          draft ──→ active ──→ removed
+                      │
+                      ├──→ expired
+                      │
+                      └──→ sold
 
-  Valid transitions: draft→active, active→removed, active→expired, active→sold.
+      Valid transitions: draft→active, active→removed, active→expired, active→sold.
   """
 
   @dialyzer :no_opaque
@@ -33,15 +33,11 @@ defmodule Stacks.Marketplace do
 
   @default_limit 50
 
-  # ---------------------------------------------------------------------------
-  # Create
-  # ---------------------------------------------------------------------------
-
   @doc """
-  Creates a new listing in `draft` status.
+      Creates a new listing in `draft` status.
 
-  Validates that the seller has an active (non-removed) placement of the book
-  on one of their bookshelves. Returns `{:error, :no_placement}` if they don't.
+      Validates that the seller has an active (non-removed) placement of the book
+      on one of their bookshelves. Returns `{:error,:no_placement}` if they don't.
   """
   @spec create_listing(binary(), map()) ::
           {:ok, Listing.t()} | {:error, :no_placement | Ecto.Changeset.t()}
@@ -78,9 +74,23 @@ defmodule Stacks.Marketplace do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Read
-  # ---------------------------------------------------------------------------
+  defp unexpired(query) do
+    now = DateTime.utc_now()
+
+    where(query, [l], l.status == "active" and (is_nil(l.expires_at) or l.expires_at > ^now))
+  end
+
+  defp with_effective_status(nil), do: nil
+
+  defp with_effective_status(%Listing{status: "active", expires_at: %DateTime{} = at} = listing) do
+    if DateTime.compare(at, DateTime.utc_now()) == :gt do
+      listing
+    else
+      %{listing | status: "expired"}
+    end
+  end
+
+  defp with_effective_status(%Listing{} = listing), do: listing
 
   @doc "Fetches a single listing with book and seller preloaded."
   @spec get_listing(binary()) :: Listing.t() | nil
@@ -88,6 +98,7 @@ defmodule Stacks.Marketplace do
     Listing
     |> Repo.get(id)
     |> Repo.preload([:book, :seller])
+    |> with_effective_status()
   end
 
   @doc "Returns active listings, most recently listed first. Limited to `limit` (default 50)."
@@ -96,7 +107,7 @@ defmodule Stacks.Marketplace do
     limit = Keyword.get(opts, :limit, @default_limit)
 
     Listing
-    |> where([l], l.status == "active")
+    |> unexpired()
     |> order_by([l], desc: l.listed_at)
     |> limit(^limit)
     |> preload([:book, :seller])
@@ -104,14 +115,14 @@ defmodule Stacks.Marketplace do
   end
 
   @doc """
-  Builds discovery labels for the active listings of the given book ids (#285).
+      Builds discovery labels for the active listings of the given book ids.
 
-  Returns a map `%{book_id => %{source: "listed", owner_handle: handle, price: formatted}}`
-  for every book that has an active marketplace listing. An active listing is
-  discoverable by design (US-7.2), so its seller's public handle and formatted
-  price are surfaced as the search-hit provenance. When several active listings
-  exist for one book, the most recently listed wins (deterministic). Books with
-  no active listing are simply absent from the map.
+      Returns a map `%{book_id => %{source: "listed", owner_handle: handle, price: formatted}}`
+      for every book that has an active marketplace listing. An active listing is
+      discoverable by design, so its seller's public handle and formatted
+      price are surfaced as the search-hit provenance. When several active listings
+      exist for one book, the most recently listed wins (deterministic). Books with
+      no active listing are simply absent from the map.
   """
   @spec active_listing_labels([binary()]) :: %{binary() => map()}
   def active_listing_labels([]), do: %{}
@@ -119,7 +130,8 @@ defmodule Stacks.Marketplace do
   def active_listing_labels(book_ids) when is_list(book_ids) do
     Listing
     |> join(:inner, [l], s in assoc(l, :seller))
-    |> where([l], l.status == "active" and l.book_id in ^book_ids)
+    |> unexpired()
+    |> where([l], l.book_id in ^book_ids)
     |> order_by([l], desc: l.listed_at)
     |> select([l, s], {l.book_id, s.handle, l.price_cents, l.currency})
     |> Repo.all()
@@ -133,9 +145,9 @@ defmodule Stacks.Marketplace do
   end
 
   @doc """
-  Formats a listing price for display (#285). ZAR renders with the "R" symbol;
-  any other currency falls back to its code prefix. Whole-rand amounts omit the
-  decimals ("R120"); fractional amounts keep two ("R120.50").
+      Formats a listing price for display. ZAR renders with the "R" symbol;
+      any other currency falls back to its code prefix. Whole-rand amounts omit the
+      decimals ("R120"); fractional amounts keep two ("R120.50").
   """
   @spec format_price(integer(), String.t()) :: String.t()
   def format_price(cents, currency) when is_integer(cents) do
@@ -161,17 +173,14 @@ defmodule Stacks.Marketplace do
     |> limit(^limit)
     |> preload([:book, :seller])
     |> Repo.all()
+    |> Enum.map(&with_effective_status/1)
   end
 
-  # ---------------------------------------------------------------------------
-  # State transitions
-  # ---------------------------------------------------------------------------
-
   @doc """
-  Activates a draft listing: draft → active.
+      Activates a draft listing: draft → active.
 
-  Sets `listed_at` to now, sets `expires_at` to 30 days from now,
-  and denormalizes `listing_status = "active"` on the seller's placement.
+      Sets `listed_at` to now, sets `expires_at` to 30 days from now,
+      and denormalizes `listing_status = "active"` on the seller's placement.
   """
   @spec activate_listing(Listing.t(), binary()) ::
           {:ok, Listing.t()} | {:error, :unauthorized | :invalid_transition | Ecto.Changeset.t()}
@@ -213,9 +222,9 @@ defmodule Stacks.Marketplace do
   end
 
   @doc """
-  Deactivates an active listing: active → removed.
+      Deactivates an active listing: active → removed.
 
-  Clears `listing_status` on the seller's placement.
+      Clears `listing_status` on the seller's placement.
   """
   @spec deactivate_listing(Listing.t(), binary()) ::
           {:ok, Listing.t()} | {:error, :unauthorized | :invalid_transition | Ecto.Changeset.t()}
@@ -250,9 +259,9 @@ defmodule Stacks.Marketplace do
   end
 
   @doc """
-  Marks an active listing as sold: active → sold.
+      Marks an active listing as sold: active → sold.
 
-  Sets `sold_at` to now and clears `listing_status` on the seller's placement.
+      Sets `sold_at` to now and clears `listing_status` on the seller's placement.
   """
   @spec sold_listing(Listing.t(), binary()) ::
           {:ok, Listing.t()} | {:error, :unauthorized | :invalid_transition | Ecto.Changeset.t()}
@@ -289,10 +298,10 @@ defmodule Stacks.Marketplace do
   end
 
   @doc """
-  Expires an active listing: active → expired.
+      Expires an active listing: active → expired.
 
-  Called by ListingExpiryJob for listings past their `expires_at`.
-  Clears `listing_status` on the seller's placement.
+      Called by ListingExpiryJob for listings past their `expires_at`.
+      Clears `listing_status` on the seller's placement.
   """
   @spec expire_listing(Listing.t()) ::
           {:ok, Listing.t()} | {:error, :invalid_transition | Ecto.Changeset.t()}
@@ -323,10 +332,6 @@ defmodule Stacks.Marketplace do
       {:error, _, reason, _} -> {:error, reason}
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Changesets
-  # ---------------------------------------------------------------------------
 
   @listing_required_fields [:book_id, :seller_id, :pricing_mode, :price_cents, :condition]
   @listing_optional_fields [
@@ -409,10 +414,6 @@ defmodule Stacks.Marketplace do
     |> validate_inclusion(:payment_status, @transaction_valid_payment_statuses)
     |> validate_inclusion(:shipping_status, @transaction_valid_shipping_statuses)
   end
-
-  # ---------------------------------------------------------------------------
-  # Private helpers
-  # ---------------------------------------------------------------------------
 
   defp verify_ownership(%Listing{seller_id: seller_id}, user_id) do
     if seller_id == user_id, do: :ok, else: {:error, :unauthorized}

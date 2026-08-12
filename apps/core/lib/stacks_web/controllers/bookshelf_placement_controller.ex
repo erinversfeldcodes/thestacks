@@ -29,8 +29,6 @@ defmodule StacksWeb.BookshelfPlacementController do
           |> put_status(201)
           |> json(%{placement: ProtoJSON.placement_ref(placement)})
 
-        # #276: stable error code the Elm client matches on to show the
-        # specific "reading pile is full" message.
         {:error, :reading_pile_full} ->
           conn
           |> put_status(422)
@@ -73,8 +71,6 @@ defmodule StacksWeb.BookshelfPlacementController do
           |> put_status(403)
           |> json(%{error: "forbidden"})
 
-        # #276: stable error code the Elm client matches on to show the
-        # specific "reading pile is full" message.
         {:error, :reading_pile_capacity, :reading_pile_full, _} ->
           conn
           |> put_status(422)
@@ -86,9 +82,6 @@ defmodule StacksWeb.BookshelfPlacementController do
           |> json(%{error: inspect(reason)})
       end
     else
-      # Mirror create/2: reject an unknown bookshelf name at the boundary with a
-      # 422, before the context tries to lazily create it (get_or_create_bookshelf
-      # would otherwise raise on the invalid name).
       conn
       |> put_status(422)
       |> json(%{error: "invalid bookshelf name"})
@@ -218,10 +211,6 @@ defmodule StacksWeb.BookshelfPlacementController do
   def delete(conn, %{"id" => placement_id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    # remove_book/2 now owns the missing-id (404) and ownership (403) checks, so
-    # the controller maps its tuples directly rather than pre-loading here. A
-    # soft-deleted row still exists, so a repeat DELETE re-finds it, passes
-    # ownership, re-stamps removed_at, and returns 204 — idempotent, not a 404.
     case Shelving.remove_book(placement_id, user.id) do
       {:ok, _placement} ->
         send_resp(conn, 204, "")
@@ -235,6 +224,47 @@ defmodule StacksWeb.BookshelfPlacementController do
         conn
         |> put_status(403)
         |> json(%{error: "forbidden"})
+
+      {:error, changeset} ->
+        conn
+        |> put_status(422)
+        |> json(%{errors: format_errors(changeset)})
+    end
+  end
+
+  @doc """
+      POST /api/placements/:id/restore — undo a removal (extension).
+
+      Clears `removed_at` on the SAME row `delete/2` stamped, so the placement keeps
+      its id, its `placed_at`, its formats/rating/notes and its history. See
+      `Shelving.restore_placement/2` for why a fresh placement would not do.
+
+      409 is the collision answer, and it is deliberately distinct from 422: the
+      request was well-formed and the caller did nothing wrong — the book is simply
+      already back on that bookshelf, because the reader re-added it before pressing
+      Undo. The Elm client matches on the status to say exactly that.
+  """
+  def restore(conn, %{"id" => placement_id}) do
+    user = Guardian.Plug.current_resource(conn)
+
+    case Shelving.restore_placement(placement_id, user.id) do
+      {:ok, placement} ->
+        json(conn, %{placement: ProtoJSON.placement_ref(placement)})
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(404)
+        |> json(%{error: "not found"})
+
+      {:error, :unauthorized} ->
+        conn
+        |> put_status(403)
+        |> json(%{error: "forbidden"})
+
+      {:error, :already_shelved} ->
+        conn
+        |> put_status(409)
+        |> json(%{error: "already_shelved"})
 
       {:error, changeset} ->
         conn

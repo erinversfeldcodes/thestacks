@@ -1,47 +1,22 @@
 defmodule Stacks.AI.Client do
   @moduledoc """
-  HTTP client for calling the Modal vision service.
+      HTTP client for the Modal vision service. Wire contract:
+      `proto/stacks/internal/v1/vision.proto`. Swappable via
+      `config:core,:vision_client` (real vs `MockClient`); all callers go
+      through `call_vision/2`.
 
-  Wire contract: `proto/stacks/internal/v1/vision.proto`
-  (ClassifyRequest/Response, ExtractRequest/Response, AssociateRequest/Response/Callback)
+      Auth: timestamp-based HMAC in `X-Internal-Token` —
+      `<unix_ts>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>`, ±60s replay
+      window, secret in `VISION_HMAC_SECRET`.
 
-  The actual implementation is swappable via Application env:
-    config :core, :vision_client, Stacks.AI.Client      # real HTTP client
-    config :core, :vision_client, Stacks.AI.MockClient  # for tests
-
-  All callers go through `call_vision/2`, which delegates to the configured module.
-
-  ## Service-to-Service Authentication
-
-  Requests to the Modal vision service are authenticated using a timestamp-based HMAC scheme:
-
-    - Header: `X-Internal-Token`
-    - Value: `<unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.<METHOD>.<path>")>` (hex-encoded)
-    - Replay window: ±60 seconds (enforced by the Modal service)
-    - Secret: `VISION_HMAC_SECRET` env var (shared between core and Modal vision service)
-
-  ## Circuit Breaker
-
-  Protected by `:vision_fuse` — managed by `Stacks.CircuitBreakers`.
-  When blown, `call_vision/2` returns `{:error, :circuit_open}`.
-
-  ## Cost Tracking
-
-  Every Finch request to the vision service charges a fixed per-call cost to
-  `BudgetTracker` under the `:modal` provider key. The cost is incurred whether
-  the response is success, non-200, or transport error — Modal bills for GPU
-  time regardless of whether we end up using the result.
-
-  The per-call amount defaults to 1 cent and is configurable via
-  `config :core, :modal_cost_per_call_cents`. This is a coarse approximation;
-  precise per-call billing arrives via `RefreshCostsJob` reading the Modal
-  usage API. The BudgetTracker counter exists to enforce the daily/monthly
-  budget cap in real time and to surface a non-zero number on the cost
-  dashboard between RefreshCostsJob runs.
+      Failures are members of `Stacks.AI.VisionError.t/0` (closed set), so
+      callers can distinguish a determination about the image from a transient
+      fault.
   """
 
   alias Stacks.AI.BudgetTracker
   alias Stacks.AI.ClientBehaviour
+  alias Stacks.AI.VisionError
   alias Stacks.Proto.Vision.AssociateRequest
   alias Stacks.Proto.Vision.ExtractRequest
 
@@ -49,6 +24,35 @@ defmodule Stacks.AI.Client do
 
   @fuse_name :vision_fuse
   @default_modal_cost_per_call_cents 1
+
+  @modal_function_timeout_ms 300_000
+
+  @transport_slack_ms 30_000
+
+  @receive_timeout_ms @modal_function_timeout_ms + @transport_slack_ms
+
+  @doc """
+      Modal's own per-call deadline, in milliseconds — mirrored from
+      `apps/vision/modal_app.py`'s `@app.cls(timeout: …)`.
+
+      Exposed so the invariant `receive_timeout_ms >= modal_function_timeout_ms`
+      is a statement about two named quantities that a test can make, rather than
+      about two literals in different languages that a reader has to compare by eye.
+  """
+  @spec modal_function_timeout_ms() :: pos_integer()
+  def modal_function_timeout_ms, do: @modal_function_timeout_ms
+
+  @doc """
+      Ceiling on a single vision HTTP call, in ms — DERIVED as Modal's own
+      300s inference deadline plus slack, never a smaller "latency budget".
+      Pre-350 this was 210s (< 300s): the client hung up on calls Modal was
+      still working on, the GPU work continued and was billed, the give-up was
+      classified `:transient`, and the retry queued a fresh cold start behind
+      the same contended GPU. Giving up before the server's deadline buys
+      nothing; after it, Modal has already answered 504.
+  """
+  @spec receive_timeout_ms() :: pos_integer()
+  def receive_timeout_ms, do: @receive_timeout_ms
 
   @impl true
   def call_vision(endpoint, payload) do
@@ -66,18 +70,18 @@ defmodule Stacks.AI.Client do
           :blown -> {:error, :circuit_open}
         end
 
-      {:error, reason} ->
-        {:error, reason}
+      {:error, _daily_or_monthly} ->
+        {:error, :budget_exceeded}
     end
   end
 
   @doc """
-  POST /associate — asks the vision service to associate a known ISBN with a cover image.
-  Returns {:ok, job_id} on success, {:error, reason} on failure.
+      POST /associate — asks the vision service to associate a known ISBN with a cover image.
+      Returns {:ok, job_id} on success, {:error, reason} on failure.
 
-  Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
-  Request/response shape: `AssociateRequest` / `AssociateResponse` in vision.proto.
-  The result arrives later via the InternalController callback (`AssociateCallback`).
+      Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
+      Request/response shape: `AssociateRequest` / `AssociateResponse` in vision.proto.
+      The result arrives later via the InternalController callback (`AssociateCallback`).
   """
   @spec associate_isbn(String.t(), String.t(), String.t(), String.t()) ::
           {:ok, String.t()} | {:error, term()}
@@ -97,8 +101,8 @@ defmodule Stacks.AI.Client do
   end
 
   @doc """
-  POST /extract — extract ISBNs from a book cover image at a URL.
-  Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
+      POST /extract — extract ISBNs from a book cover image at a URL.
+      Delegates to `call_vision/2`, so the configured client (real or mock) is always respected.
   """
   @spec extract_from_url(String.t()) :: {:ok, map()} | {:error, term()}
   def extract_from_url(image_url) do
@@ -119,10 +123,6 @@ defmodule Stacks.AI.Client do
 
   defp endpoint_path("is_book"), do: "classify"
   defp endpoint_path("extract_isbn"), do: "extract"
-  # Single-request classify + extract — the vision service composes both
-  # steps and short-circuits on non-books internally. Prefer this over
-  # calling "is_book" and "extract_isbn" separately; see
-  # Stacks.Moderation.run_pipeline/1.
   defp endpoint_path("analyze"), do: "analyze"
   defp endpoint_path("associate"), do: "associate"
 
@@ -156,11 +156,12 @@ defmodule Stacks.AI.Client do
       %{endpoint: endpoint}
     )
 
-    # 210s gives the Modal service headroom beyond its own 300s inference timeout.
-    result = Finch.request(req, Stacks.Finch, receive_timeout: 210_000)
+    result =
+      Finch.request(req, Stacks.Finch,
+        receive_timeout: @receive_timeout_ms,
+        request_timeout: @receive_timeout_ms
+      )
 
-    # Record the per-call cost regardless of outcome. Rejection ≠ free —
-    # Modal bills for GPU time whether or not we use the result.
     record_vision_call_cost()
 
     case result do
@@ -173,7 +174,7 @@ defmodule Stacks.AI.Client do
           %{endpoint: endpoint, status: 200}
         )
 
-        Jason.decode(resp_body)
+        decode_success_body(resp_body)
 
       {:ok, %Finch.Response{status: status, body: resp_body}} ->
         duration = System.monotonic_time() - start_time
@@ -184,8 +185,9 @@ defmodule Stacks.AI.Client do
           %{endpoint: endpoint, status: status}
         )
 
-        Stacks.CircuitBreakers.melt(@fuse_name)
-        {:error, %{status: status, body: resp_body}}
+        error = VisionError.from_http_error(status, resp_body)
+        maybe_melt(error)
+        {:error, error}
 
       {:error, reason} ->
         duration = System.monotonic_time() - start_time
@@ -193,11 +195,54 @@ defmodule Stacks.AI.Client do
         :telemetry.execute(
           [:stacks, :vision, :request, :exception],
           %{duration: duration},
-          %{endpoint: endpoint, kind: :error, reason: reason}
+          %{endpoint: endpoint, kind: :error, reason: reason, reason_class: reason_class(reason)}
         )
 
-        Stacks.CircuitBreakers.melt(@fuse_name)
-        {:error, reason}
+        error = VisionError.from_transport(reason)
+        maybe_melt(error)
+        {:error, error}
+    end
+  end
+
+  @typedoc """
+    The bounded vocabulary for "no answer arrived", so a transport failure can be
+    counted by kind on `[:stacks,:vision,:request,:exception]`.
+  """
+  @type reason_class :: :timeout | :closed | :unreachable | :protocol | :other
+
+  @doc false
+  @spec reason_class(term()) :: reason_class()
+  def reason_class(%Finch.TransportError{reason: reason}), do: transport_class(reason)
+  def reason_class(%Mint.TransportError{reason: reason}), do: transport_class(reason)
+  def reason_class(%Finch.HTTPError{}), do: :protocol
+  def reason_class(%Mint.HTTPError{}), do: :protocol
+  def reason_class(_other), do: :other
+
+  defp transport_class(:timeout), do: :timeout
+  defp transport_class(:closed), do: :closed
+
+  defp transport_class(reason)
+       when reason in [:econnrefused, :nxdomain, :ehostunreach, :enetunreach, :ehostdown],
+       do: :unreachable
+
+  defp transport_class(_other), do: :other
+
+  defp decode_success_body(resp_body) do
+    case Jason.decode(resp_body) do
+      {:ok, decoded} ->
+        {:ok, decoded}
+
+      {:error, _} ->
+        error = VisionError.from_transport(:malformed_response)
+        maybe_melt(error)
+        {:error, error}
+    end
+  end
+
+  defp maybe_melt(error) do
+    case VisionError.determination(error) do
+      :transient -> Stacks.CircuitBreakers.melt(@fuse_name)
+      :deterministic -> :ok
     end
   end
 

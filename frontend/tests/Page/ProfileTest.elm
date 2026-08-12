@@ -1,6 +1,6 @@
 module Page.ProfileTest exposing (suite)
 
-{-| #214 — the public profile hub at `/u/:handle`.
+{-| — the public profile hub at `/u/:handle`.
 
 Drives `Page.Profile.update` through the fetch outcomes and asserts the view:
 a loaded profile renders the reader's identity, meta, and one browse link per
@@ -29,8 +29,8 @@ sampleProfile =
     , city = "London"
     , countryCode = "GB"
     , bookshelves =
-        [ ProfileShelfSummary "library"
-        , ProfileShelfSummary "wishlist"
+        [ ProfileShelfSummary "library" False
+        , ProfileShelfSummary "wishlist" False
         ]
     }
 
@@ -56,7 +56,7 @@ outMsgFor result =
 
 suite : Test
 suite =
-    describe "Page.Profile — public profile hub (#214)"
+    describe "Page.Profile — public profile hub"
         [ test "renders the reader's display name and handle" <|
             \_ ->
                 received (Ok sampleProfile)
@@ -110,9 +110,6 @@ suite =
                 outMsgFor (Err (Http.BadStatus 401))
                     |> Expect.equal SessionExpired
         , -- Paired contract (#220): the Elixir serializer key-set assertions live in
-          -- apps/core/test/stacks_web/proto_json_test.exs (public_profile/2 +
-          -- public_profile_summary/1). This decoder and that serializer MUST describe
-          -- the same redacted shape — update both sides together or CI drifts.
           describe "publicProfileDecoder (redaction + null tolerance)"
             [ test "decodes a full payload" <|
                 \_ ->
@@ -128,7 +125,7 @@ suite =
                                 , websiteUrl = "https://a.dev"
                                 , city = "London"
                                 , countryCode = "GB"
-                                , bookshelves = [ ProfileShelfSummary "library" ]
+                                , bookshelves = [ ProfileShelfSummary "library" False ]
                                 }
                             )
             , test "tolerates null/absent optional fields incl. display_name (no false not-found)" <|
@@ -149,8 +146,6 @@ suite =
                             )
             , test "ignores any leaked account/PII keys (redaction is structural)" <|
                 \_ ->
-                    -- Even if the server erroneously included email/role/consent, the
-                    -- decoder's record type has no such fields, so they cannot surface.
                     """
                     {"handle":"ada","display_name":"Ada","email":"a@x.com","role":"admin",
                      "consent_analytics":true,"bookshelves":[]}

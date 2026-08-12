@@ -2,7 +2,9 @@ module Page.Admin.SourceApproval exposing
     ( Model
     , Msg(..)
     , OutMsg(..)
+    , StatusFilter(..)
     , init
+    , statusFilterToString
     , update
     , view
     )
@@ -20,6 +22,7 @@ import Html.Attributes exposing (class, disabled)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.TestId exposing (testId)
 
 
 type StatusFilter
@@ -182,17 +185,13 @@ statusFilterToString filter =
             Nothing
 
         Pending ->
-            Just "pending"
+            Just "pending_review"
 
         Approved ->
             Just "approved"
 
         Rejected ->
-            Just "rejected"
-
-
-
--- VIEW
+            Just "dismissed"
 
 
 view : Model -> Html Msg
@@ -291,17 +290,19 @@ viewSourceRow actionInProgress source =
         , td [] [ text (String.fromFloat source.confidenceScore) ]
         , td [] [ viewStatusBadge source.status ]
         , td []
-            (if source.status == "pending" then
+            (if source.status == "pending_review" then
                 [ button
                     [ class "btn btn--primary btn--sm"
                     , onClick (ApproveClicked source.id)
                     , disabled isProcessing
+                    , testId "source-approve"
                     ]
                     [ text "Approve" ]
                 , button
                     [ class "btn btn--danger btn--sm"
                     , onClick (RejectClicked source.id)
                     , disabled isProcessing
+                    , testId "source-reject"
                     ]
                     [ text "Reject" ]
                 ]

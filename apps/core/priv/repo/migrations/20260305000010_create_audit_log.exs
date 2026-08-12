@@ -1,9 +1,6 @@
 defmodule Core.Repo.Migrations.CreateAuditLog do
   use Ecto.Migration
 
-  # This table is append-only. Application layer enforces no UPDATE/DELETE.
-  # Partitioning by month is handled in migration 20 (roles/grants).
-
   def change do
     create table(:audit_log, prefix: "audit", primary_key: false) do
       add :id, :binary_id, primary_key: true

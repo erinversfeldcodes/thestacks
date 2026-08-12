@@ -1,47 +1,11 @@
 defmodule Core.PromEx.PlatformOpsDriftTest do
   @moduledoc """
-  Drift guard for the platform / ops dashboard-as-code (Issue #240, epic
-  #231). Mirrors `Core.PromEx.GdprDataRightsDriftTest` (the #238 guard) but
-  scoped to `grafana/platform_ops.json`.
-
-  Unlike the single-domain dashboards (#237/#238/#239), this one visualises
-  families across MANY prefixes — `stacks_rate_limit_`, `stacks_events_`,
-  `stacks_fuse_`, `stacks_repo_`, `stacks_router_`, `stacks_upload_` — so the
-  lock-step is asserted against the FULL registered set (like
-  `Core.PromEx.DashboardDriftTest` derives `registered_families`), NOT a narrow
-  prefix. CI fails on either kind of drift:
-
-    * a panel that queries a `stacks_*` metric name **not registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * the NEW #240 `stacks_rate_limit_client_ip` trusted-client-IP-source
-      family with **no panel** (an invisible metric — the whole point of the
-      issue).
-
-  This intentionally does NOT assert the reverse "every registered family has a
-  panel" direction: the registered set spans auth/gdpr/moderation/etc. families
-  that live on OTHER dashboards, so a full-reverse lock-step here would be
-  wrong. `Core.PromEx.DashboardDriftTest` (#228) owns the moderation/age-gate
-  reverse lock-step and is left untouched.
-
-  PromEx-builtin metrics (Ecto/Phoenix/Beam/Oban plugins) are non-`stacks_`
-  names; the `stacks_[a-zA-Z0-9_]+` panel-scan regex below naturally EXCLUDES
-  them, so they are out of the lock-step (they are not in the Stacks plugin's
-  registered set). This dashboard queries only `stacks_*` families, so no
-  builtin exclusion list is needed.
-
-  Registered names are read from the plugin at runtime (never hard-coded): the
-  exported Prometheus family name for a `Telemetry.Metrics` metric is its
-  `name` list joined by `_`, exactly how the plugin's `[:stacks, :rate_limit,
-  :client_ip, :count, :total]` becomes
-  `stacks_rate_limit_client_ip_count_total`.
-
-  Distributions differ from counters on the wire: a `distribution` named
-  `[:stacks, :repo, :query, :duration, :milliseconds]` is exported by
-  TelemetryMetricsPrometheus as three series suffixed `_bucket` / `_sum` /
-  `_count` under the base name `stacks_repo_query_duration_milliseconds`.
-  Panels query the `_bucket` variant (for `histogram_quantile`), so referenced
-  names are normalised back to that registered base before comparison.
+      Drift guard for the platform/ops dashboard-as-code (240,;
+      grafana/platform_ops.json). Unlike the single-domain dashboards, this
+      one spans many prefixes (`stacks_rate_limit_`, `stacks_events_`,
+      `stacks_fuse_`, `stacks_repo_`, `stacks_router_`, `stacks_upload_`), so
+      lock-step is asserted against the FULL registered set. Renames blanking
+      panels or new ops families shipping invisible both fail CI.
   """
 
   use ExUnit.Case, async: true
@@ -50,19 +14,13 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
 
   @dashboard_relative_path "grafana/platform_ops.json"
 
-  # The NEW #240 family this dashboard exists to surface. It MUST be queried by
-  # at least one panel — an unwatched trusted-client-IP-source counter is a gap.
   @new_family "stacks_rate_limit_client_ip_count_total"
 
-  # Histogram/summary wire suffixes that a `distribution` produces. A panel
-  # queries the `_bucket` variant; normalise it back to the registered base.
   @histogram_suffixes ["_bucket", "_sum", "_count"]
 
   defp dashboard_path,
     do: Application.app_dir(:core, Path.join("priv", @dashboard_relative_path))
 
-  # Registered Prometheus family names, derived from the plugin's declared
-  # Telemetry.Metrics structs — the same join TelemetryMetricsPrometheus uses.
   defp registered_families do
     StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
@@ -70,15 +28,12 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
     |> MapSet.new()
   end
 
-  # Recursively collect every panel (including panels nested inside Grafana
-  # "row" panels) from a decoded dashboard.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel -> [panel | all_panels(panel)] end)
   end
 
   defp all_panels(_), do: []
 
-  # Only panels that actually render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
@@ -89,19 +44,12 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
     dashboard_path() |> File.read!() |> Jason.decode!()
   end
 
-  # Strip a trailing distribution wire-suffix (`_bucket`/`_sum`/`_count`) so a
-  # `histogram_quantile(...stacks_repo_query_duration_milliseconds_bucket...)`
-  # reference collapses to the registered base name. Counters end in `_total`,
-  # never a bare histogram suffix, so this never mangles a counter name.
   defp normalise(name) do
     Enum.find_value(@histogram_suffixes, name, fn suffix ->
       if String.ends_with?(name, suffix), do: String.trim_trailing(name, suffix)
     end)
   end
 
-  # All `stacks_*` metric names referenced by any panel target `expr`,
-  # normalised back to their registered base names. The regex excludes
-  # PromEx-builtin (non-`stacks_`) metrics by construction.
   defp panel_metric_names(dashboard) do
     for panel <- data_panels(dashboard),
         target <- panel["targets"] || [],
@@ -147,7 +95,7 @@ defmodule Core.PromEx.PlatformOpsDriftTest do
     end
   end
 
-  describe "drift: the NEW #240 trusted-client-IP-source family has a panel" do
+  describe "drift: the NEW trusted-client-IP-source family has a panel" do
     test "stacks_rate_limit_client_ip is both registered and queried by >=1 panel" do
       registered = registered_families()
       referenced = panel_metric_names(decoded_dashboard())

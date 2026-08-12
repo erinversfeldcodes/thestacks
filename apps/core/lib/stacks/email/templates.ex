@@ -5,9 +5,6 @@ defmodule Stacks.Email.Templates do
 
   @doc "Confirmation email sent after registration."
   def registration_confirmation(confirmation_url) do
-    # Derive the stated expiry from the single source of truth so the copy can
-    # never drift from the actual link lifetime (the confirm flow and the daily
-    # expired-unverified reaper both use this same TTL).
     expiry_hours = div(Accounts.unverified_account_ttl_seconds(), 3600)
 
     """
@@ -54,7 +51,7 @@ defmodule Stacks.Email.Templates do
     """
   end
 
-  @doc "Marketplace sale notification — role is :seller or :buyer."
+  @doc "Marketplace sale notification — role is:seller or:buyer."
   def marketplace_sale(role, book_title) do
     message =
       case role do

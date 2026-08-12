@@ -1,11 +1,11 @@
 defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
   @moduledoc """
-  Issue #184 — consent-revocation purge for the writing assistant.
+      — consent-revocation purge for the writing assistant.
 
-  Proves the worker deletes the four personal AI data sets (sessions +
-  cascaded turn_feedback/retrieval_log, embeddings, content-access), PRESERVES
-  the shared book_content_chunks corpus and the user row, is idempotent (safe to
-  perform twice), and only touches the target user's data.
+      Proves the worker deletes the four personal AI data sets (sessions +
+      cascaded turn_feedback/retrieval_log, embeddings, content-access), PRESERVES
+      the shared book_content_chunks corpus and the user row, is idempotent (safe to
+      perform twice), and only touches the target user's data.
   """
   use Core.DataCase, async: false
   use Oban.Testing, repo: Core.Repo
@@ -63,14 +63,12 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
 
     assert :ok = perform_job(WritingAssistantDataPurgeWorker, %{"user_id" => user.id})
 
-    # Sessions + cascaded feedback/retrieval, embeddings, content-access all gone.
     refute Repo.get(Session, g.session.id)
     refute Repo.get(TurnFeedback, g.feedback.id)
     refute Repo.get(RetrievalLog, g.retrieval.id)
     refute Repo.get(Embedding, g.embedding.id)
     refute Repo.get(UserBookContentAccess, g.access.id)
 
-    # PRESERVED: shared corpus (no user_id) and the user themselves stay.
     assert Repo.get(BookContentChunk, g.chunk.id)
     assert Repo.get(User, user.id)
   end
@@ -99,7 +97,6 @@ defmodule Stacks.Workers.WritingAssistantDataPurgeWorkerTest do
 
     assert :ok = perform_job(WritingAssistantDataPurgeWorker, %{"user_id" => victim.id})
 
-    # Bystander's data is intact.
     assert Repo.get(Session, b.session.id)
     assert Repo.get(TurnFeedback, b.feedback.id)
     assert Repo.get(RetrievalLog, b.retrieval.id)

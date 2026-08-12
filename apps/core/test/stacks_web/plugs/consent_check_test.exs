@@ -7,8 +7,6 @@ defmodule StacksWeb.Plugs.ConsentCheckTest do
   alias Stacks.GDPR.Consent
   alias StacksWeb.Plugs.ConsentCheck
 
-  # Puts the user into the Guardian private storage so that
-  # Guardian.Plug.current_resource/1 returns it from within the plug under test.
   defp with_current_user(conn, user) do
     Guardian.Plug.put_current_resource(conn, user)
   end
@@ -66,7 +64,6 @@ defmodule StacksWeb.Plugs.ConsentCheckTest do
     end
 
     test "halts with 403 when writing_assistant consent is not granted", %{conn: conn} do
-      # analytics-only consent must NOT satisfy the writing_assistant gate.
       user = insert(:user)
       {:ok, _} = Consent.grant_consent(user.id, "analytics")
       conn = with_current_user(conn, user)

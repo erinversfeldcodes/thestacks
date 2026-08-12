@@ -1,25 +1,5 @@
 name: Reseed staging Neon branch
 
-# Keeps the `staging` branch in the `thestacks-staging` Neon project in
-# sync with main's seeds.exs + migrations. Every preview/<pr> branch is a
-# Neon copy-on-write clone of `staging`, so a fresh staging means previews
-# inherit fresh fixtures with zero per-preview cost. Without this workflow,
-# staging drifts every time seeds.exs is updated and previews silently
-# inherit stale fixtures (which is exactly what caused the IDOR smoke
-# test to fail with "owner has no placements").
-#
-# Triggers:
-#   - push to main when seeds.exs or any migration file changes — the
-#     paths-filter is the same set deploy-stack.sh's preview-seed
-#     diff-check looks at.
-#   - workflow_dispatch — operator-initiated reseed. Use after a manual
-#     edit to the staging branch, or to verify the workflow itself works.
-#
-# Idempotency: seeds.exs uses `on_conflict: :nothing` / `:replace_all` so
-# re-running adds only missing rows. Existing preview branches are NOT
-# affected — they're already-forked CoW clones, so updates to staging
-# don't propagate to them. The next preview deploy after reseed picks up
-# the fresh fixtures via a new fork.
 on:
   push:
     branches: [main]
@@ -38,13 +18,10 @@ jobs:
     env:
       MIX_ENV: prod
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Read .versions
         id: v
         run: |
-          # .versions uses UPPERCASE shell-var format (OTP_VERSION=28) —
-          # source it like scripts/ci.sh does. The previous lowercase grep
-          # matched nothing, feeding setup-beam empty inputs.
           source .versions
           {
             echo "otp=${OTP_VERSION}"
@@ -63,14 +40,9 @@ jobs:
         env:
           NEON_STAGING_PROJECT_ID: ${{ secrets.NEON_STAGING_PROJECT_ID }}
           NEON_STAGING_API_KEY: ${{ secrets.NEON_STAGING_API_KEY }}
-        # curl output is piped to python3 purely to parse the Neon API JSON
-        # response — nothing fetched from the network is executed as code.
         # nosemgrep: yaml.github-actions.security.gha-curl-pipe-shell.gha-curl-pipe-shell
         run: |
           set -euo pipefail
-          # Find the `staging` branch ID. Filter on name rather than `default`
-          # because `staging` is the project's default branch but explicit
-          # name-matching surfaces a clearer error if someone renames it.
           BRANCH_ID="$(curl -sfL \
             -H "Authorization: Bearer $NEON_STAGING_API_KEY" \
             "https://console.neon.tech/api/v2/projects/$NEON_STAGING_PROJECT_ID/branches" \
@@ -85,9 +57,6 @@ jobs:
             exit 1
           fi
           echo "branch-id=$BRANCH_ID" >> "$GITHUB_OUTPUT"
-          # Get the connection URI for the staging branch. The Neon API
-          # `connection_uri` endpoint is the supported way to retrieve a
-          # ready-to-use URI for any existing branch.
           URI="$(curl -sfL \
             -H "Authorization: Bearer $NEON_STAGING_API_KEY" \
             "https://console.neon.tech/api/v2/projects/$NEON_STAGING_PROJECT_ID/connection_uri?branch_id=$BRANCH_ID&database_name=neondb&role_name=neondb_owner&pooled=true" \
@@ -96,7 +65,6 @@ jobs:
             echo "::error::could not resolve connection URI for staging branch"
             exit 1
           fi
-          # Mask the URI in logs (it contains credentials).
           echo "::add-mask::$URI"
           echo "uri=$URI" >> "$GITHUB_OUTPUT"
 
@@ -107,22 +75,11 @@ jobs:
       - name: Generate Ecto schemas from proto
         run: bash scripts/gen-ecto-proto.sh
 
-      # gen-ecto-proto.sh only emits the *persisted* Ecto schemas. The full app
-      # (which `mix ecto.migrate` compiles below) also references non-persisted
-      # inter-service proto structs — Stacks.Proto.Vision.AssociateRequest /
-      # AssociateCallback, Stacks.Proto.Scraper.ScrapeRequest — which are
-      # generated separately and gitignored. deploy-stack.sh generates these at
-      # lines 749-751; this step is the reseed workflow's equivalent. Without it
-      # the migrate step fails to compile (undefined struct errors).
       - name: Generate inter-service Elixir proto structs
         run: bash scripts/gen-elixir-proto.sh
 
       - name: Apply migrations to staging
         working-directory: apps/core
-        # MIX_ENV=prod (job-level) loads config/runtime.exs, which fail-fasts on
-        # these prod secrets even though migrate only touches the DB. They exist
-        # as repo secrets (deploy-production uses them). VISION_SERVICE_URL is a
-        # non-secret URL that only needs to be non-empty here.
         env:
           DATABASE_URL: ${{ steps.neon.outputs.uri }}
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
@@ -136,7 +93,6 @@ jobs:
 
       - name: Run seeds against staging
         working-directory: apps/core
-        # Same prod-secret requirement as the migrate step above (runtime.exs).
         env:
           DATABASE_URL: ${{ steps.neon.outputs.uri }}
           CLOAK_KEY: ${{ secrets.CLOAK_KEY }}
@@ -147,10 +103,6 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           VISION_SERVICE_URL: http://localhost:8000
           ALLOW_SEEDS: "true"
-        # `mix run priv/repo/seeds.exs` directly (rather than going through
-        # Stacks.Release.seed/0) because we're running from a checked-out
-        # source tree, not a release. The seeds.exs file is the single
-        # source of truth for the fixture set.
         run: mix run priv/repo/seeds.exs
 
       - name: Summary

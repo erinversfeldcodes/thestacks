@@ -1,11 +1,11 @@
 defmodule Stacks.Workers.FetchAuthorRSSJob do
   @moduledoc """
-  Daily Oban cron worker that polls RSS feeds for all authors with an rss_feed_url.
+      Daily Oban cron worker that polls RSS feeds for all authors with an rss_feed_url.
 
-  Fetches each feed, parses entries from the last 24 hours, and emits an
-  `enrichment.author_updated` event with the new entries in the payload.
+      Fetches each feed, parses entries from the last 24 hours, and emits an
+      `enrichment.author_updated` event with the new entries in the payload.
 
-  On feed parse failure: logs a warning and skips the author (does not crash).
+      On feed parse failure: logs a warning and skips the author (does not crash).
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -101,10 +101,6 @@ defmodule Stacks.Workers.FetchAuthorRSSJob do
   @doc false
   @spec try_rfc2822(String.t()) :: DateTime.t() | nil
   def try_rfc2822(date_string) do
-    # RSS feeds use RFC 2822 dates which have 4-digit years. Timex's {RFC1123}
-    # matches this format (e.g. "Tue, 05 Mar 2013 23:25:19 +0200"), while
-    # {RFC822} expects 2-digit years. Try both {RFC1123} variants, then fall
-    # back to {RFC822} for legacy feeds.
     with {:error, _} <- try_timex_format(date_string, "{RFC1123}"),
          {:error, _} <- try_timex_format(date_string, "{RFC1123z}"),
          {:error, _} <- try_timex_format(date_string, "{RFC822}"),

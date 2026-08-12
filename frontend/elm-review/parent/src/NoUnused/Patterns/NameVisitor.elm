@@ -176,10 +176,6 @@ withValueAndTypeVisitors { valueVisitor, typeVisitor } rule =
         |> Rule.withExpressionEnterVisitor (expressionVisitor visitor)
 
 
-
---- VISITORS
-
-
 declarationListVisitor :
     Visitor context
     -> (List (Node Declaration) -> context -> ( List (Error {}), context ))
@@ -192,10 +188,6 @@ expressionVisitor : Visitor context -> (Node Expression -> context -> ( List (Er
 expressionVisitor visitor node context =
     visitExpression node
         |> folder visitor context
-
-
-
---- FOLDER
 
 
 folder :
@@ -265,10 +257,6 @@ applyTypeVisitor visitor =
 noopVisitor : VisitorFunction context
 noopVisitor _ context =
     ( [], context )
-
-
-
---- PRIVATE
 
 
 visitDeclarationList : List (Node Declaration) -> List Name
@@ -464,10 +452,6 @@ visitValue node =
 visitType : Node ( ModuleName, String ) -> List Name
 visitType node =
     [ Type node ]
-
-
-
---- High Performance List
 
 
 fastConcatMap : (a -> List b) -> List a -> List b

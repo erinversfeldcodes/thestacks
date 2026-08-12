@@ -7,7 +7,6 @@ defmodule Core.PromEx.MetricsPusherTest do
     test "appends the import path + app extra_label and trims a trailing slash" do
       url = MetricsPusher.build_url("http://vm.internal:8428/")
       assert String.starts_with?(url, "http://vm.internal:8428/api/v1/import/prometheus?")
-      # `extra_label=app=<name>` — the `=` between app and name is URL-encoded (%3D).
       assert url =~ "extra_label=app%3D"
       refute url =~ "8428//api"
     end
@@ -43,7 +42,6 @@ defmodule Core.PromEx.MetricsPusherTest do
       assert {:ok, state} = MetricsPusher.init([])
       assert state.url =~ "/api/v1/import/prometheus?extra_label=app%3D"
       assert state.interval == 40
-      # schedule/1 sent a :push to this process (we're standing in for the GenServer).
       assert_receive :push, 500
     end
   end

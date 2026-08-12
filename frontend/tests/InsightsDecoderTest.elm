@@ -2,10 +2,10 @@ module InsightsDecoderTest exposing (suite)
 
 {-| Decoder tests for the personal-inferences payload (Api.personalInferencesDecoder).
 
-Verifies the load-bearing decoder rules from issue #242:
+Verifies the load-bearing decoder rules from issue:
 
   - `risk_inferences` is ABSENT (not null) in the default payload -> Nothing.
-  - `risk_inferences` present in the reveal payload -> Just [ ... ].
+  - `risk_inferences` present in the reveal payload -> Just [... ].
   - `median_days_to_finish` / `most_active_hour` null -> Nothing.
   - `others_sharing_all` null -> Nothing; the `0` / "unique" case decodes.
 

@@ -1,27 +1,11 @@
 defmodule Stacks.Storage.R2 do
   @moduledoc """
-  Cloudflare R2 object storage backend via ExAws S3-compatible API.
-
-  Configuration (runtime.exs):
-
-      config :core, Stacks.Storage.R2,
-        bucket: "thestacks-uploads",
-        public_url: "https://uploads.thestacks.app"
-
-      config :ex_aws, :s3,
-        scheme: "https://",
-        host: "<account_id>.r2.cloudflarestorage.com",
-        region: "auto"
-
-      config :ex_aws,
-        access_key_id: ...,
-        secret_access_key: ...
-
-  Protected by `:r2_fuse` — managed by `Stacks.CircuitBreakers`. When
-  the fuse is blown (R2 is unreachable, rate-limiting us, or returning
-  5xx), `put/3` and `delete/1` fast-fail with `{:error, :circuit_open}`
-  instead of blocking the caller on a slow HTTPS round-trip. `presigned_url/2`
-  is not fuse-gated because it's a local SigV4 signing op — no upstream call.
+      Cloudflare R2 object storage via the ExAws S3 API (config under
+      `Stacks.Storage.R2` + `:ex_aws` in runtime.exs). Protected by
+      `:r2_fuse`: when blown, `put/3` and `delete/1` fast-fail
+      `{:error,:circuit_open}` instead of blocking on a slow round-trip.
+      `presigned_url/2` is NOT fuse-gated — it's a local SigV4 signing
+      operation with no upstream call.
   """
 
   @behaviour Stacks.Storage.StorageBehaviour
@@ -79,11 +63,6 @@ defmodule Stacks.Storage.R2 do
   @spec presigned_put_url(String.t(), pos_integer(), keyword()) ::
           {:ok, String.t()} | {:error, term()}
   def presigned_put_url(key, ttl_seconds \\ 900, _opts \\ []) do
-    # Presigned PUT is a local SigV4 signing op — no network call — so
-    # no fuse gate here. The actual upload is client → R2 directly, not
-    # client → us → R2, so our fuse would see no traffic to melt on
-    # anyway. The fuse still protects `put/3` for any server-side
-    # writes we do (e.g. migrations, admin tools).
     config = ExAws.Config.new(:s3)
 
     case ExAws.S3.presigned_url(config, :put, bucket(), key, expires_in: ttl_seconds) do

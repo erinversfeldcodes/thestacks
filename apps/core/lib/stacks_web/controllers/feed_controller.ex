@@ -1,28 +1,47 @@
 defmodule StacksWeb.FeedController do
   @moduledoc """
-  Public controller for Atom feed generation per bookshelf.
+      Public controller for Atom feed generation per bookshelf.
 
-  Serves Atom 1.0 XML with proper content type, ETag caching,
-  and 304 Not Modified support.
+      Serves Atom 1.0 XML with proper content type, ETag caching,
+      and 304 Not Modified support.
   """
 
   use CoreWeb, :controller
 
+  alias Stacks.Accounts
+  alias Stacks.Accounts.Guardian
   alias Stacks.Feeds
 
   @doc """
-  GET /api/feeds/:user_id/:bookshelf_name — serves Atom XML for a public bookshelf.
+      GET /api/feeds/u/:handle/:bookshelf_name — serves Atom XML for a public bookshelf.
 
-  Serves the persisted `op.feed_cache` row on a hit; on a miss it generates the
-  feed, fills the cache, and serves the fresh result (`Feeds.fetch_feed/2`).
+      The handle form is canonical; `/api/feeds/:user_id/:bookshelf_name` still resolves for
+      anything holding a direct link.
 
-  Sets `Content-Type: application/atom+xml` and includes an ETag header.
-  Returns 304 Not Modified if the client sends a matching `If-None-Match` header.
-  Returns 404 if the bookshelf does not exist.
-  Returns 403 if the bookshelf is not platform-visible.
+      Serves the persisted `op.feed_cache` row on a hit; on a miss it generates the
+      feed, fills the cache, and serves the fresh result (`Feeds.fetch_feed/2`).
+
+      Sets `Content-Type: application/atom+xml` and includes an ETag header.
+      Returns 304 Not Modified if the client sends a matching `If-None-Match` header.
+      Returns 404 if the bookshelf does not exist.
+      Returns 403 if the bookshelf is not platform-visible.
   """
+  def show(conn, %{"handle" => handle, "bookshelf_name" => bookshelf_name}) do
+    case Accounts.get_user_by_handle(handle) do
+      nil ->
+        conn
+        |> put_status(404)
+        |> json(%{error: "Reader not found"})
+
+      user ->
+        show(conn, %{"user_id" => user.id, "bookshelf_name" => bookshelf_name})
+    end
+  end
+
   def show(conn, %{"user_id" => user_id, "bookshelf_name" => bookshelf_name}) do
-    case Feeds.fetch_feed(user_id, bookshelf_name) do
+    viewer = Guardian.Plug.current_resource(conn)
+
+    case Feeds.fetch_feed(user_id, bookshelf_name, viewer) do
       {:ok, xml, etag} ->
         client_etag = get_req_header(conn, "if-none-match") |> List.first()
 
@@ -46,7 +65,7 @@ defmodule StacksWeb.FeedController do
       {:error, :not_public} ->
         conn
         |> put_status(403)
-        |> json(%{error: "Feed is only available for platform-visible bookshelves"})
+        |> json(%{error: "Feed is only available for bookshelves shared with the platform"})
     end
   end
 end

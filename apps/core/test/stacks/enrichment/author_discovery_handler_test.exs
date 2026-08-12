@@ -1,13 +1,13 @@
 defmodule Stacks.Enrichment.Handlers.AuthorDiscoveryHandlerTest do
   @moduledoc """
-  Tests for the no-op handler. Per-book `DiscoverAuthorSourcesJob`
-  enqueue was removed because it exhausted Brave Search's free-tier
-  quota (2000/month ≈ 67/day) within hours of traffic. Batch-mode
-  discovery now runs from cron — see `config/config.exs`.
+      Tests for the no-op handler. Per-book `DiscoverAuthorSourcesJob`
+      enqueue was removed because it exhausted Brave Search's free-tier
+      quota (2000/month ≈ 67/day) within hours of traffic. Batch-mode
+      discovery now runs from cron — see `config/config.exs`.
 
-  These tests verify the handler behaves as a no-op for every event
-  shape it might receive, so the registry wiring can stay in place
-  without side-effects.
+      These tests verify the handler behaves as a no-op for every event
+      shape it might receive, so the registry wiring can stay in place
+      without side-effects.
   """
 
   use Core.DataCase, async: true

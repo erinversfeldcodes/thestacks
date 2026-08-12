@@ -1,12 +1,12 @@
 defmodule StacksWeb.MeInferenceControllerTest do
   @moduledoc """
-  Tests for GET /api/me/inferences — the authed, own-only personal inference
-  view (Issue #242, ADR-019 §3a).
+      Tests for GET /api/me/inferences — the authed, own-only personal inference
+      view.
 
-  Load-bearing invariants (the point of the feature):
-    * strict own-only authz — no param/route can reach another user's data;
-    * ephemeral — a view request persists nothing;
-    * consent gate — the risk section is server-gated behind `?reveal_risk=true`.
+      Load-bearing invariants (the point of the feature):
+        * strict own-only authz — no param/route can reach another user's data;
+        * ephemeral — a view request persists nothing;
+        * consent gate — the risk section is server-gated behind `?reveal_risk=true`.
   """
 
   use CoreWeb.ConnCase, async: true
@@ -46,7 +46,6 @@ defmodule StacksWeb.MeInferenceControllerTest do
       bob_bs = insert(:bookshelf, user: bob)
       shelve(bob, bookshelf: bob_bs, subjects: ["gardening"])
 
-      # Bob calls the endpoint and even tries to smuggle Alice's id as a param.
       body =
         conn
         |> auth_conn(bob)

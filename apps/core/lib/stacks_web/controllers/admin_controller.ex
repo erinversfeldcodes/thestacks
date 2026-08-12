@@ -1,11 +1,11 @@
 defmodule StacksWeb.AdminController do
   @moduledoc """
-  Admin data access controller.
+      Admin data access controller.
 
-  Provides break-glass admin endpoints for querying user data, audit logs,
-  platform statistics, and performing GDPR operations. All endpoints require
-  a valid admin token with MFA verification and are audited via the
-  `AuditAdminCall` plug.
+      Provides break-glass admin endpoints for querying user data, audit logs,
+      platform statistics, and performing GDPR operations. All endpoints require
+      a valid admin token with MFA verification and are audited via the
+      `AuditAdminCall` plug.
   """
 
   use CoreWeb, :controller
@@ -118,7 +118,6 @@ defmodule StacksWeb.AdminController do
     end
   end
 
-  # Parse an ISO 8601 datetime string, or return a default (for missing optional params).
   defp parse_datetime(nil, :from) do
     {:ok, DateTime.add(DateTime.utc_now(), -30, :day)}
   end

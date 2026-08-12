@@ -1,24 +1,10 @@
 defmodule Core.PromEx.VisibilitySocialDriftTest do
   @moduledoc """
-  Drift guard for the visibility / social / ViewAs dashboard-as-code (Issue
-  #236, epic #231). Mirrors `Core.PromEx.AuthSecurityDriftTest` (the #237 guard)
-  but scoped to `grafana/visibility_social.json`.
-
-  Proves the dashboard stays in lock-step with the metrics the code actually
-  registers, so CI fails on either kind of drift:
-
-    * a panel that queries a metric name **not registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * a **new #236 visibility/social/ViewAs family** (profile-change, ceiling-
-      rejection, recap + capped sums, block/unblock/block_error, view_as
-      usage/error) with **no panel** (an invisible metric).
-
-  Registered names are read from the plugin at runtime (never hard-coded): the
-  exported Prometheus family name for a `Telemetry.Metrics` metric is its
-  `name` list joined by `_`, exactly how the plugin's `[:stacks, :visibility,
-  :profile_change, :count, :total]` becomes
-  `stacks_visibility_profile_change_count_total`.
+      Drift guard for the visibility/social/ViewAs dashboard-as-code (236,; grafana/visibility_social.json):
+      panels may only query metric families registered by
+      `Core.PromEx.Plugins.Stacks`, and every registered 236 visibility/social family must have
+      a panel. Either direction of drift — a renamed metric silently blanking
+      a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true
@@ -27,9 +13,6 @@ defmodule Core.PromEx.VisibilitySocialDriftTest do
 
   @dashboard_relative_path "grafana/visibility_social.json"
 
-  # The NEW families this dashboard exists to surface (#236). Every registered
-  # family under each prefix MUST be queried by at least one panel — an
-  # unwatched registered counter is a gap.
   @new_family_prefixes [
     "stacks_visibility_",
     "stacks_social_",
@@ -39,8 +22,6 @@ defmodule Core.PromEx.VisibilitySocialDriftTest do
   defp dashboard_path,
     do: Application.app_dir(:core, Path.join("priv", @dashboard_relative_path))
 
-  # Registered Prometheus family names, derived from the plugin's declared
-  # Telemetry.Metrics structs — the same join TelemetryMetricsPrometheus uses.
   defp registered_families do
     StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
@@ -48,15 +29,12 @@ defmodule Core.PromEx.VisibilitySocialDriftTest do
     |> MapSet.new()
   end
 
-  # Recursively collect every panel (including panels nested inside Grafana
-  # "row" panels) from a decoded dashboard.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel -> [panel | all_panels(panel)] end)
   end
 
   defp all_panels(_), do: []
 
-  # Only panels that actually render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
@@ -67,7 +45,6 @@ defmodule Core.PromEx.VisibilitySocialDriftTest do
     dashboard_path() |> File.read!() |> Jason.decode!()
   end
 
-  # All `stacks_*` metric names referenced by any panel target `expr`.
   defp panel_metric_names(dashboard) do
     for panel <- data_panels(dashboard),
         target <- panel["targets"] || [],
@@ -113,14 +90,12 @@ defmodule Core.PromEx.VisibilitySocialDriftTest do
     end
   end
 
-  describe "drift: every NEW #236 visibility/social/ViewAs family has a panel" do
+  describe "drift: every NEW visibility/social/ViewAs family has a panel" do
     test "each registered visibility/social/view_as family is queried by >=1 panel" do
       registered = registered_families()
       referenced = panel_metric_names(decoded_dashboard())
 
       for prefix <- @new_family_prefixes do
-        # Sanity: at least one family is actually registered under this prefix
-        # (guards against the plugin being changed without this test noticing).
         registered_matches =
           Enum.filter(registered, &String.starts_with?(&1, prefix))
 
@@ -128,7 +103,6 @@ defmodule Core.PromEx.VisibilitySocialDriftTest do
                "expected a registered family under prefix #{inspect(prefix)}, " <>
                  "registered: " <> inspect(Enum.sort(MapSet.to_list(registered)))
 
-        # Every registered family under this new prefix must be on a panel.
         missing =
           registered_matches
           |> MapSet.new()

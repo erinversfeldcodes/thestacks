@@ -4,10 +4,10 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   alias Mix.Tasks.ProtoSync.TypeMapper
 
   @doc """
-  Generates an Ecto migration module for a CREATE TABLE statement.
+      Generates an Ecto migration module for a CREATE TABLE statement.
 
-  Only called for tables with `migration_exists: false` in the manifest.
-  Tables with `migration_exists: true` already have hand-written migrations.
+      Only called for tables with `migration_exists: false` in the manifest.
+      Tables with `migration_exists: true` already have hand-written migrations.
   """
   def generate_create_table(table, fields, timestamp) do
     overrides = Map.get(table, :field_overrides, %{})
@@ -57,15 +57,56 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     """
   end
 
-  @doc """
-  Generates an Ecto migration module for ALTER TABLE ADD COLUMN statements.
+  @slug_budget 120
 
-  Called when proto fields exist that are not in the current migration history.
+  @doc """
+      Descriptive slug for an ADD COLUMN migration: `add_<columns>_to_<table>`.
+
+      The single source of truth for this name. It used to be derived independently
+      here and in `Mix.Tasks.Proto.Sync.generate_delta_migration/3` — the filename in
+      one place, the module name in the other — so capping either alone would have
+      silently desynchronised them.
+
+      When the column list would exceed `@slug_budget`, as many names as fit are kept
+      and the remainder is summarised, so the name stays descriptive and, more
+      importantly, deterministic: the same field set always produces the same slug.
+  """
+  def add_columns_slug(new_fields, table_name) do
+    suffix = "_to_#{table_name}"
+    names = Enum.map(new_fields, & &1.name)
+    full = "add_" <> Enum.join(names, "_") <> suffix
+
+    if byte_size(full) <= @slug_budget do
+      full
+    else
+      reserved = byte_size(suffix) + byte_size("add_") + byte_size("_and_#{length(names)}_more")
+      {kept, dropped} = split_within(names, @slug_budget - reserved)
+      "add_" <> Enum.join(kept, "_") <> "_and_#{length(dropped)}_more" <> suffix
+    end
+  end
+
+  defp split_within([first | rest], budget) do
+    {kept, dropped} =
+      Enum.reduce(rest, {[first], []}, fn name, {kept, dropped} ->
+        if dropped == [] and
+             byte_size(Enum.join(kept ++ [name], "_")) <= budget do
+          {kept ++ [name], dropped}
+        else
+          {kept, dropped ++ [name]}
+        end
+      end)
+
+    {kept, dropped}
+  end
+
+  @doc """
+      Generates an Ecto migration module for ALTER TABLE ADD COLUMN statements.
+
+      Called when proto fields exist that are not in the current migration history.
   """
   def generate_add_columns(table, new_fields, timestamp) do
     overrides = Map.get(table, :field_overrides, %{})
-    slug = Enum.map_join(new_fields, "_", & &1.name)
-    module_name = migration_module_name("add_#{slug}_to_#{table.table_name}", timestamp)
+    module_name = migration_module_name(add_columns_slug(new_fields, table.table_name), timestamp)
 
     column_lines =
       new_fields
@@ -102,9 +143,9 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   end
 
   @doc """
-  Scans existing migration files to find which columns already exist for a table.
+      Scans existing migration files to find which columns already exist for a table.
 
-  Returns a MapSet of column name strings.
+      Returns a MapSet of column name strings.
   """
   def existing_columns(migrations_dir, table_name) do
     if File.dir?(migrations_dir) do
@@ -136,7 +177,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   end
 
   @doc """
-  Generates a migration timestamp string (YYYYMMDDhhmmss).
+      Generates a migration timestamp string (YYYYMMDDhhmmss).
   """
   def generate_timestamp do
     {{y, m, d}, {h, min, s}} = :calendar.universal_time()
@@ -144,8 +185,6 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     :io_lib.format("~4..0B~2..0B~2..0B~2..0B~2..0B~2..0B", [y, m, d, h, min, s])
     |> IO.iodata_to_binary()
   end
-
-  # --- Private helpers ---
 
   defp column_line(field, overrides, schema_prefix) do
     field_name = String.to_atom(field.name)
@@ -212,10 +251,6 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     "\n\n      timestamps(type: :utc_datetime_usec)"
   end
 
-  # Append-only tables (`updated_at: false`) still need the `created_at` column.
-  # Without this clause the catch-all emitted no timestamps block, so the
-  # generated migration lacked `created_at` while the generated Ecto schema
-  # (EctoGenerator handles this case) expected it — an insert-time mismatch.
   defp timestamps_block(%{timestamps: {:standard, updated_at: false}}) do
     "\n\n      timestamps(type: :utc_datetime_usec, updated_at: false)"
   end
@@ -226,11 +261,6 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     overrides = Map.get(table, :field_overrides, %{})
     explicit_indexes = Map.get(table, :indexes, [])
 
-    # Columns already served by an explicit single-column index. The auto FK
-    # index on such a column would be an exact duplicate (a single-column
-    # unique index — the upsert conflict target — fully covers FK lookups), so
-    # suppress it. Composite indexes are left alone: their leading column is a
-    # separate optimization decision, not an exact cover (Issue #266).
     fk_columns_with_index =
       for %{columns: [col]} <- explicit_indexes, into: MapSet.new(), do: col
 
@@ -240,9 +270,6 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
       |> Enum.reject(fn {field_name, _} -> MapSet.member?(fk_columns_with_index, field_name) end)
       |> Enum.sort_by(fn {field_name, _} -> field_name end)
       |> Enum.map_join("\n", fn {field_name, _} ->
-        # Foreign-key indexes are always non-unique, named implicitly by Ecto.
-        # `concurrently: true` keeps the lint-clean invariant uniform across
-        # every index this generator emits.
         "    create index(:#{table.table_name}, [:#{field_name}], prefix: \"#{table.schema_prefix}\", concurrently: true)"
       end)
 
@@ -259,10 +286,6 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
     end
   end
 
-  # Every generated index uses `concurrently: true`. Squawk enforces this in
-  # CI; more importantly, CONCURRENTLY lets Postgres build the index without
-  # blocking writes, which is the safe default for any future additions to
-  # already-populated tables.
   defp format_index_line(idx, table) do
     cols = format_index_columns(idx.columns)
     prefix = table.schema_prefix
@@ -279,11 +302,6 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
   defp format_index_columns(columns) do
     cols =
       Enum.map_join(columns, ", ", fn
-        # Ecto's `create index` supports mixed asc/desc columns via keyword
-        # syntax: `[:a, :b, desc: :c]` for `a, b, c DESC`. Keyword members
-        # must come after positional atoms, which is how the manifest
-        # declares them in practice (descending columns are conventionally
-        # last, e.g. `{:desc, :occurred_at}`).
         {:desc, col} -> "desc: :#{col}"
         col when is_atom(col) -> ":#{col}"
       end)
@@ -330,12 +348,7 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
       String.contains?(content, "\"#{table_name}\"")
   end
 
-  # Extracts columns belonging to a specific table by finding `create table`
-  # or `alter table` blocks for that table name and only scanning within them.
-  # Only considers blocks in `def up do...end` — ignores `def down do...end`.
   defp extract_columns_for_table(content, table_name) do
-    # Extract forward-migration body: `def up do...end` or `def change do...end`.
-    # Avoids counting `def down` removes as additions.
     up_content =
       case Regex.run(~r/def up do\n(.*?)(?=\n\s+def down\b|\n\s+end\n\z)/s, content) do
         [_, body] ->
@@ -348,9 +361,6 @@ defmodule Mix.Tasks.ProtoSync.MigrationGenerator do
           end
       end
 
-    # Match blocks like: create table(:table_name, ...) do ... end
-    # or: alter table(:table_name, ...) do ... end
-    # Match `end` only at start of line (indented) to avoid matching `on_delete: :delete_all`.
     table_pattern =
       ~r/(?:create|alter)\s+table\(:#{Regex.escape(table_name)}\b[^)]*\)\s+do(.*?)^\s+end/ms
 

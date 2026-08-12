@@ -15,9 +15,8 @@ defmodule StacksWeb.OptOutControllerTest do
           email: "owner@mybookshop.com"
         })
 
-      assert %{"message" => "Source has been opted out successfully."} = json_response(conn, 200)
+      assert %{"status" => "removed"} = json_response(conn, 200)
 
-      # Verify the source was actually excluded
       source = Stacks.Discovery.get_source_by_url("https://mybookshop.com")
       assert source.status == "excluded"
       assert source.exclusion_email == "owner@mybookshop.com"
@@ -59,7 +58,6 @@ defmodule StacksWeb.OptOutControllerTest do
     test "does not require authentication", %{conn: conn} do
       insert(:discovered_source, url: "https://noauth.com")
 
-      # No auth headers — should still work
       conn =
         post(conn, "/api/opt-out", %{
           url: "https://noauth.com",

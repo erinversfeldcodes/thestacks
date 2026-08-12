@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import type { APIRequestContext, APIResponse } from "@playwright/test";
+import type { APIRequestContext, APIResponse, Page } from "@playwright/test";
 import {
   uniqueEmail,
   mintOrSkip,
@@ -9,15 +9,15 @@ import {
 } from "./helpers";
 
 /**
- * Browser E2E for the public-profile epic (#210) — the reader-facing half of the
+ * Browser E2E for the public-profile epic — the reader-facing half of the
  * visibility model. Drives the REAL preview stack (no mocking) across the
  * viewer perspective the visibility matrix cares about:
  *
- *   US-10.5.2 (view profile)  — /u/:handle renders the reader's identity + only
+ *   (view profile)  — /u/:handle renders the reader's identity + only
  *                               the bookshelves the viewer may see.
- *   US-10.5.3 (browse shelf)  — /u/:handle/:name renders the shelf read-only:
+ *   (browse shelf)  — /u/:handle/:name renders the shelf read-only:
  *                               visible spines, NO owner controls.
- *   US-10.5.4 (discover)      — people search surfaces a discoverable reader and
+ *   (discover)      — people search surfaces a discoverable reader and
  *                               links to their profile.
  *   Ghost gate                — an unknown/ghost handle is "Reader not found"
  *                               (indistinguishable from absent, by design).
@@ -30,12 +30,12 @@ import {
  *     B never touches the browser — API only.
  *   - VIEWER (A): drives the browser as a second signed-in reader.
  *
- * Every fixture is minted via POST /api/test/session (Issue #280) — one call
+ * Every fixture is minted via POST /api/test/session — one call
  * that creates a confirmed user AND returns its session token/user id, OUTSIDE
  * the `:auth` rate bucket. This replaces the register→confirmation-token→confirm
  * →login dance (and its 429-backoff): the parallel suite shares the `:auth`
  * budget (60/60s per IP), and this spec's back-to-back fresh-user creation under
- * #116's consolidated preview gate was the proven 429 source (PE P2-1). Browser
+ * consolidated preview gate was the proven 429 source (PE P2-1). Browser
  * fixtures inject the minted session directly; API-only fixtures use the token.
  * `mintOrSkip` skips cleanly where the helper is unavailable, matching
  * gdpr/reading-journey.
@@ -45,18 +45,35 @@ import {
  * clear it, and we assert the overlay is gone before interacting.
  */
 
-// Deterministic seed ISBNs (see apps/core/priv/repo/seeds.exs). Pinning the
-// visible spine + the age-gated row to KNOWN books removes the old reliance on
-// "whatever per_page=1 returns first".
 const VISIBLE_ISBN = "9780061120084"; // "The Left Hand of Darkness" — public
 const AGE_GATED_ISBN = "9780140449242"; // "Demons" — age_gated
+
+/**
+ * A shelf row on the profile hub, identified by its own BROWSE LINK.
+ *
+ * ⚠️ Not by the row's text. A `.profile__shelf` row is an `<li>` that holds the browse
+ * anchor AND — when the shelf advertises an Atom feed — a sibling "Feed" anchor
+ * (`Page.Profile.viewFeedLink`). Playwright matches a RegExp `hasText` against the
+ * element's whole `textContent`, so the row reads `"LibraryFeed"` and the anchored
+ * `/^Library$/` this spec used to pass matched NOTHING once the subscribe link shipped.
+ * The row was rendering correctly the whole time; the locator described a DOM that had
+ * stopped existing.
+ *
+ * `exact: true` keeps this at least as tight as the anchored regex was meant to be — the
+ * row must carry the "Library" link, never a "Library of Babel" one — while staying
+ * immune to further additive siblings inside the row.
+ */
+function shelfRow(page: Page, label: string) {
+  return page
+    .locator(".profile__shelf")
+    .filter({ has: page.getByRole("link", { name: label, exact: true }) });
+}
 
 test.describe("Public profiles — view, browse & discover (live browser journey)", () => {
   test("a discoverable reader's profile shows visible shelves only, browses read-only, and is discoverable by search", async ({
     page,
     request,
   }) => {
-    // ── OWNER (B) — API only ──────────────────────────────────────────────
     const ownerName = `E2E Reader ${Math.floor(Math.random() * 1_000_000)}`;
     const owner = await mintOrSkip(request, {
       email: uniqueEmail("e2e-profile-owner"),
@@ -64,8 +81,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     });
     const ownerAuth = owner.token;
 
-    // A fresh user defaults to profile_visibility "owner" (a ghost). Loosen to
-    // "platform" so another signed-in reader can discover and view the profile.
     await expectOk(
       request.put("/api/settings/profile_visibility", {
         headers: { Authorization: `Bearer ${ownerAuth}` },
@@ -74,8 +89,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       "loosen profile"
     );
 
-    // Claim a handle (US-10.5.1). The 200 echoes the normalised (lowercased)
-    // value, which is exactly what /u/:handle resolves.
     const handle = `e2e_reader_${Math.floor(Math.random() * 1_000_000)}`;
     const setHandle = await expectOk(
       request.put("/api/settings/profile", {
@@ -86,12 +99,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     );
     const ownerHandle = ((await setHandle.json()).handle as string) ?? handle;
 
-    // Age-verify the OWNER first (ADR-020: provider-sourced, set via the
-    // STACKS_E2E_TEST_HELPERS helper). With AGE_GATING_ENABLED=true in E2E, the
-    // catalogue includes age-gated books ONLY for an age-verified browser; a
-    // freshly-registered owner defaults `age_verified` false, so the age-gated
-    // "Demons" (AGE_GATED_ISBN) would be hidden and resolveCatalogueIds would
-    // throw. The owner is verified here so it can resolve BOTH pinned books.
     await expectOk(
       request.put("/api/test/age-verification", {
         data: { email: owner.email, verified: true },
@@ -99,45 +106,28 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       "owner age-verify"
     );
 
-    // Resolve deterministic catalogue book ids by ISBN so the visible spine and
-    // the age-gate row are PINNED to known seed books. The catalogue includes
-    // age-gated books only for an age-verified browser, which is why the owner
-    // is age-verified first (above); the owner token is used for the read.
     const [visibleBookId, ageGatedBookId] = await resolveCatalogueIds(
       request,
       ownerAuth,
       [VISIBLE_ISBN, AGE_GATED_ISBN]
     );
 
-    // A platform-visible "library" with one platform-visible, NON-age-gated
-    // placed book (the deterministic visible spine). Order matters and mirrors
-    // the visibility ceiling: a placement may not exceed its bookshelf's
-    // visibility, so the bookshelf is loosened to "platform" BEFORE the placement
-    // (which itself defaults to "owner"). A platform bookshelf alone would still
-    // hide every spine — visibility is enforced per-placement.
     const placementId = await placeBook(request, ownerAuth, "library", visibleBookId);
     await setBookshelfVisibility(request, ownerAuth, "library", "platform");
     await setPlacementVisibility(request, ownerAuth, placementId, "platform");
 
-    // A PUBLIC "antilibrary" holding ONLY the age-gated "Demons", so the shelf's
-    // viewer-visible `count` is a clean age-gate signal: 0 when the gated spine is
-    // suppressed, 1 once the viewer is age-verified. Public (not platform) so the
-    // anonymous age-gate check below can reach the shelf at all (#225).
     const gatedPlacementId = await placeBook(request, ownerAuth, "antilibrary", ageGatedBookId);
     await setBookshelfVisibility(request, ownerAuth, "antilibrary", "public");
     await setPlacementVisibility(request, ownerAuth, gatedPlacementId, "public");
 
-    // An owner-only "wishlist" that must NOT surface to the viewer.
     await setBookshelfVisibility(request, ownerAuth, "wishlist", "owner");
 
-    // ── VIEWER (A) — browser ──────────────────────────────────────────────
     const viewer = await mintOrSkip(request, {
       email: uniqueEmail("e2e-profile-viewer"),
     });
     await injectSession(page, viewer);
     await ensureBookOnLibrary(page);
 
-    // ── US-10.5.2 — the profile hub shows identity + visible shelves only ──
     await page.goto(`/u/${ownerHandle}`);
     await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
     await expect(page.locator(".profile__name")).toHaveText(ownerName, {
@@ -145,34 +135,22 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     });
     await expect(page.locator(".profile__handle")).toHaveText(`@${ownerHandle}`);
 
-    // The platform "library" is browsable; the owner-only "wishlist" is not.
-    const shelfLinks = page.locator(".profile__shelf");
-    await expect(shelfLinks.filter({ hasText: /^Library$/ })).toHaveCount(1);
-    await expect(shelfLinks.filter({ hasText: "Wish List" })).toHaveCount(0);
+    await expect(shelfRow(page, "Library")).toHaveCount(1);
+    await expect(shelfRow(page, "Wish List")).toHaveCount(0);
 
-    // ── US-10.5.3 — browse the shelf read-only ────────────────────────────
-    await shelfLinks.filter({ hasText: /^Library$/ }).getByRole("link").click();
+    await shelfRow(page, "Library")
+      .getByRole("link", { name: "Library", exact: true })
+      .click();
     await expect(page).toHaveURL((url) => url.pathname === `/u/${ownerHandle}/library`);
     await expect(page.getByTestId("bookshelf-page")).toBeVisible({ timeout: 10000 });
-    // At least one visible spine renders…
     await expect(page.getByTestId("book-spine").first()).toBeVisible();
-    // …and NO owner control leaks into the read-only view (SECURITY).
     await expect(page.getByRole("button", { name: "Add shelf" })).toHaveCount(0);
 
-    // ── Age gate — the age-gated spine is suppressed unless the viewer is verified ──
-    // The "antilibrary" holds exactly one PUBLIC but AGE-GATED
-    // placement, so the profile-shelf endpoint's viewer-visible `count` is a
-    // clean age-gate signal — a suppressed spine reads as a shelf with no gap
-    // (count 0), never a leak that a gated book exists.
     const gatedShelfPath = `/api/u/${ownerHandle}/bookshelves/antilibrary`;
 
-    // Anonymous viewer — never age-verified → the gated spine is suppressed.
     const anonGated = await expectOk(request.get(gatedShelfPath), "anon gated shelf");
     expect((await anonGated.json()).count, "anon must not see the age-gated spine").toBe(0);
 
-    // The signed-in viewer is a fresh reader (age_verified defaults false), so the
-    // gated spine is still suppressed. Reuse the browser session's own token
-    // (no extra :auth login) for the viewer-scoped reads.
     const viewerAuth = (
       await page.evaluate(() =>
         JSON.parse(localStorage.getItem("stacks-auth") || "{}")
@@ -189,10 +167,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       "unverified viewer must not see the age-gated spine"
     ).toBe(0);
 
-    // Once the viewer verifies their age, the same gated placement becomes visible.
-    // ADR-020: verification is provider-sourced — set via the STACKS_E2E_TEST_HELPERS
-    // helper (scoped to the viewer's `@thestacks.test` email), not the removed
-    // self-declared `PUT /api/settings/age_verification` endpoint.
     await expectOk(
       request.put("/api/test/age-verification", {
         data: { email: viewer.email, verified: true },
@@ -210,19 +184,14 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       "verified viewer sees the age-gated spine"
     ).toBe(1);
 
-    // ── Ghost gate — an unknown handle is "Reader not found" ──────────────
     const unknownHandle = `nobody_${Math.floor(Math.random() * 1_000_000)}`;
     await page.goto(`/u/${unknownHandle}`);
     await expect(page.locator(".profile__name")).toHaveText("Reader not found", {
       timeout: 10000,
     });
-    // The rendered "not found" text passes identically for a 403; assert the
-    // WIRE status is 404 so the 404-not-403 ghost-indistinguishability invariant
-    // (the epic's core security property) is actually proven, not just implied.
     const unknownResp = await request.get(`/api/u/${unknownHandle}`);
     expect(unknownResp.status(), "unknown handle must be 404, never 403").toBe(404);
 
-    // ── US-10.5.4 — people search discovers the reader → profile ──────────
     await page.goto("/search");
     await expect(page.getByTestId("onboarding-overlay")).not.toBeVisible();
     await page.getByTestId("search-input").fill(ownerName);
@@ -231,7 +200,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await expect(readerCard).toHaveCount(1, { timeout: 10000 });
     await expect(readerCard).toContainText(`@${ownerHandle}`);
 
-    // The card links to the profile — follow it and land on the hub.
     await readerCard.click();
     await expect(page).toHaveURL((url) => url.pathname === `/u/${ownerHandle}`);
     await expect(page.locator(".profile__name")).toHaveText(ownerName, {
@@ -242,7 +210,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
   test("a blocked viewer gets 404 at the wire, while others still see the profile", async ({
     request,
   }) => {
-    // A discoverable owner.
     const owner = await mintOrSkip(request, {
       email: uniqueEmail("e2e-profile-blocktarget"),
     });
@@ -264,8 +231,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     );
     const ownerId = owner.userId;
 
-    // A viewer who blocks the owner must no longer resolve them — and the 404 is
-    // indistinguishable from an absent user (never 403). Block is bidirectional.
     const viewer = await mintOrSkip(request, {
       email: uniqueEmail("e2e-profile-blocker"),
     });
@@ -282,23 +247,14 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     });
     expect(blocked.status(), "blocked viewer must get 404, never 403").toBe(404);
 
-    // An uninvolved anonymous viewer still sees the public profile — proving the
-    // 404 is block-specific, not a broken profile.
     const anon = await request.get(`/api/u/${handle}`);
     expect(anon.status()).toBe(200);
   });
 
-  // ── #226 item 1 — anon RENDERED: public vs platform (Members) ───────────────
-  // The core #225 promise, rendered: a logged-out browser SEES a `public` profile
-  // + browses its `public` shelf spine, but a `platform` (Members) profile reads
-  // as "Reader not found". Previously only wire-level (status codes) — this proves
-  // the shipped Elm actually renders the anon projection.
   test("an anonymous browser renders a public profile + public shelf, but a platform profile is not found", async ({
     browser,
     request,
   }) => {
-    // Public owner (B) — discoverable, with a PUBLIC library holding one public,
-    // non-age-gated spine so an anon viewer has something to render.
     const publicName = `E2E Public ${Math.floor(Math.random() * 1_000_000)}`;
     const pub = await mintOrSkip(request, {
       email: uniqueEmail("e2e-anon-public"),
@@ -312,7 +268,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await setBookshelfVisibility(request, pubAuth, "library", "public");
     await setPlacementVisibility(request, pubAuth, pubPlacementId, "public");
 
-    // Platform owner (C) — signed-in-only; an anon viewer must NOT resolve it.
     const plat = await mintOrSkip(request, {
       email: uniqueEmail("e2e-anon-platform"),
     });
@@ -320,24 +275,21 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await setProfileVisibility(request, platAuth, "platform");
     const platHandle = await claimHandle(request, platAuth, "e2e_platform");
 
-    // A pristine ANONYMOUS browser context (no stored auth).
     const anonCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
     const page = await anonCtx.newPage();
     try {
-      // Public profile renders identity + the public shelf link…
       await page.goto(`/u/${pubHandle}`);
       await expect(page.locator(".profile__name")).toHaveText(publicName, { timeout: 10000 });
-      const shelfLinks = page.locator(".profile__shelf");
-      await expect(shelfLinks.filter({ hasText: /^Library$/ })).toHaveCount(1);
+      await expect(shelfRow(page, "Library")).toHaveCount(1);
 
-      // …and the public shelf browses read-only with a visible spine, no controls.
-      await shelfLinks.filter({ hasText: /^Library$/ }).getByRole("link").click();
+      await shelfRow(page, "Library")
+        .getByRole("link", { name: "Library", exact: true })
+        .click();
       await expect(page).toHaveURL((url) => url.pathname === `/u/${pubHandle}/library`);
       await expect(page.getByTestId("bookshelf-page")).toBeVisible({ timeout: 10000 });
       await expect(page.getByTestId("book-spine").first()).toBeVisible();
       await expect(page.getByRole("button", { name: "Add shelf" })).toHaveCount(0);
 
-      // The platform (Members) profile is "Reader not found" to a logged-out viewer.
       await page.goto(`/u/${platHandle}`);
       await expect(page.locator(".profile__name")).toHaveText("Reader not found", {
         timeout: 10000,
@@ -347,9 +299,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     }
   });
 
-  // ── #226 item 5 — block on the profile HUB, RENDERED ────────────────────────
-  // The existing block test asserts the wire 404; this asserts the blocked viewer
-  // actually RENDERS "Reader not found" on the hub (browser), not just a status.
   test("a signed-in blocked viewer renders 'Reader not found' on the profile hub", async ({
     page,
     request,
@@ -362,7 +311,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     const ownerHandle = await claimHandle(request, ownerAuth, "e2e_blockhub");
     const ownerId = owner.userId;
 
-    // Viewer blocks the owner, then drives the browser to the owner's hub.
     const viewer = await mintOrSkip(request, {
       email: uniqueEmail("e2e-blockhub-viewer"),
     });
@@ -382,10 +330,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     });
   });
 
-  // ── #226 item 4 — view_as actually RE-SCOPES the owner's own shelf ──────────
-  // privacy.spec.ts only proves the banner renders. This drives the real
-  // ViewAsPlug + resolver on the live stack: the owner's platform placement is
-  // present in their own view, but hidden under `?view_as=unauthenticated`.
   test("view_as=unauthenticated re-scopes the owner's own shelf (platform placement hidden)", async ({
     page,
     request,
@@ -396,20 +340,12 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await injectSession(page, owner);
     const ownerAuth = owner.token;
 
-    // A PUBLIC library (reachable by anon) holding a single PLATFORM placement
-    // (signed-in-only). Profile is public so the public shelf is within the
-    // ceiling. This isolates placement-level re-scoping: the shelf stays visible
-    // to anon (200) while the platform spine is what disappears — not the shelf.
     await setProfileVisibility(request, ownerAuth, "public");
     const [visibleBookId] = await resolveCatalogueIds(request, ownerAuth, [VISIBLE_ISBN]);
     const placementId = await placeBook(request, ownerAuth, "library", visibleBookId);
     await setBookshelfVisibility(request, ownerAuth, "library", "public");
     await setPlacementVisibility(request, ownerAuth, placementId, "platform");
 
-    // Drive the fetch FROM the authenticated browser so it runs through the real
-    // ViewAsPlug (which requires :authenticated). The owner sees their own
-    // platform placement; the anonymous projection hides it while the (public)
-    // shelf itself stays reachable.
     const own = await apiCallFromPage(page, "GET", "/api/bookshelves/library");
     expect(own.status).toBe(200);
     expect((own.data as { count: number }).count, "owner sees own platform placement").toBe(1);
@@ -426,11 +362,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     ).toBe(0);
   });
 
-  // ── #226 item 6 — marketplace ceiling-punch, live E2E ───────────────────────
-  // An ACTIVE looking_for_home listing makes an owner-rung placement visible to a
-  // signed-in viewer (punch), surfaces in the public listings browse, but stays
-  // hidden from an anonymous profile-shelf reader. Complements the resolver unit
-  // (visibility_test.exs) and the new controller test (profile_controller_test).
   test("an active looking_for_home listing punches through for a signed-in viewer, not for anon", async ({
     request,
   }) => {
@@ -441,8 +372,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     await setProfileVisibility(request, ownerAuth, "public");
     const ownerHandle = await claimHandle(request, ownerAuth, "e2e_mkt");
 
-    // An owner-rung placement on a PUBLIC looking_for_home shelf (the shelf is
-    // reachable; only the placement's rung is restrictive).
     const [bookId] = await resolveCatalogueIds(request, ownerAuth, [VISIBLE_ISBN]);
     const placementId = await placeBook(request, ownerAuth, "looking_for_home", bookId);
     await setBookshelfVisibility(request, ownerAuth, "looking_for_home", "public");
@@ -450,7 +379,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
 
     const shelfPath = `/api/u/${ownerHandle}/bookshelves/looking_for_home`;
 
-    // Before listing: owner-rung placement is hidden from a signed-in viewer.
     const viewer = await mintOrSkip(request, {
       email: uniqueEmail("e2e-mkt-viewer"),
     });
@@ -459,7 +387,6 @@ test.describe("Public profiles — view, browse & discover (live browser journey
     const before = await expectOk(request.get(shelfPath, { headers: beforeAuthed }), "pre-listing");
     expect((await before.json()).count, "owner-rung placement hidden before listing").toBe(0);
 
-    // Create + activate a marketplace listing on that placement's book.
     const created = await expectOk(
       request.post("/api/listings", {
         headers: { Authorization: `Bearer ${ownerAuth}` },
@@ -475,18 +402,15 @@ test.describe("Public profiles — view, browse & discover (live browser journey
       "activate listing"
     );
 
-    // Punch-through: the signed-in viewer now sees the placement…
     const afterAuthed = await expectOk(
       request.get(shelfPath, { headers: beforeAuthed }),
       "post-listing authed"
     );
     expect((await afterAuthed.json()).count, "active listing punches through for a platform viewer").toBe(1);
 
-    // …an anonymous profile-shelf reader still does NOT (punch is platform-only)…
     const afterAnon = await expectOk(request.get(shelfPath), "post-listing anon");
     expect((await afterAnon.json()).count, "no punch-through for an anonymous viewer").toBe(0);
 
-    // …and the active listing is discoverable in the public listings browse.
     const listings = await expectOk(request.get("/api/listings"), "public listings browse");
     const ids = ((await listings.json()).listings ?? []).map((l: { id: string }) => l.id);
     expect(ids, "the active listing surfaces in the public browse").toContain(listingId);
@@ -516,7 +440,6 @@ async function resolveCatalogueIds(
   let page = 1;
   let total = Infinity;
   let seen = 0;
-  // Bound the loop defensively; 100/page over the seed set is a handful of pages.
   while (seen < total && wanted.size > byIsbn.size && page <= 50) {
     const resp = await expectOk(
       request.get(`/api/catalogue?per_page=100&page=${page}`, {

@@ -1,8 +1,3 @@
--- Punch list #15 (test-audit-plan.md):
--- For resolved uploaded_images, every UUID in book_ids[] must reference
--- a real stg_books.id. dbt's built-in `relationships` test only handles
--- scalar foreign keys, so we unnest the array and left-join to stg_books.
--- A non-empty result indicates orphan references.
 select
     ui.id as uploaded_image_id,
     elem.book_id as missing_book_id

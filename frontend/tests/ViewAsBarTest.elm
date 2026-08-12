@@ -29,7 +29,7 @@ urlFrom str =
 
 suite : Test
 suite =
-    describe "Components.ViewAsBar (US-10.3.1)"
+    describe "Components.ViewAsBar"
         [ describe "banner render"
             [ test "renders the bar when view_as is present" <|
                 \_ ->

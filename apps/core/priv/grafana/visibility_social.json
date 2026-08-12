@@ -51,7 +51,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Visibility, social & ViewAs (Issue #236 — emitted by #197)",
+      "title": "Visibility, social & ViewAs (— emitted by)",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "panels": []
@@ -60,7 +60,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Profile-visibility changes by direction",
-      "description": "WHAT: rate of profile-visibility changes, split by direction (tighten = profile made more private / loosen = made more public / same = re-saved at equal exposure). HOW: rate() over stacks_visibility_profile_change_count_total, emitted by Stacks.Visibility.emit_profile_visibility_change/2 with a bounded direction atom classified from old→new audience exposure. MEANS: a low background mix is normal profile editing; the balance of tighten vs loosen is the privacy-sentiment signal. WATCH: a sharp swing toward tighten means users are pulling back visibility en masse (a privacy scare, a confusing new default, or a moderation/harassment event) — expect a matching visibility-recap spike; a loosen surge means profiles are opening up (a discovery-feature launch or a UX change worth confirming was intended.",
+      "description": "WHAT: rate of profile-visibility changes, split by direction (tighten = profile made more private / loosen = made more public / same = re-saved at equal exposure). HOW: rate over stacks_visibility_profile_change_count_total, emitted by Stacks.Visibility.emit_profile_visibility_change/2 with a bounded direction atom classified from old→new audience exposure. MEANS: a low background mix is normal profile editing; the balance of tighten vs loosen is the privacy-sentiment signal. WATCH: a sharp swing toward tighten means users are pulling back visibility en masse (a privacy scare, a confusing new default, or a moderation/harassment event) — expect a matching visibility-recap spike; a loosen surge means profiles are opening up (a discovery-feature launch or a UX change worth confirming was intended.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
       "fieldConfig": {
@@ -84,7 +84,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Blocks / unblocks + block errors",
-      "description": "WHAT: rate of user block actions — successful blocks, successful unblocks, and failed block attempts split by reason (already_blocked = duplicate / invalid = malformed request). HOW: rate() over stacks_social_block_count_total, stacks_social_unblock_count_total and stacks_social_block_error_count_total{reason}, emitted by Stacks.Social.block_user/2 and unblock_user/2. MEANS: a low, steady block/unblock trickle is normal community self-moderation; block_error is mostly benign already_blocked double-clicks. WATCH: a block spike concentrated in time is a harassment wave (or a brigading/pile-on) worth correlating with the profile-tighten panel; a rising invalid block_error series points to a client/API regression sending malformed block requests, not user behaviour.",
+      "description": "WHAT: rate of user block actions — successful blocks, successful unblocks, and failed block attempts split by reason (already_blocked = duplicate / invalid = malformed request). HOW: rate over stacks_social_block_count_total, stacks_social_unblock_count_total and stacks_social_block_error_count_total{reason}, emitted by Stacks.Social.block_user/2 and unblock_user/2. MEANS: a low, steady block/unblock trickle is normal community self-moderation; block_error is mostly benign already_blocked double-clicks. WATCH: a block spike concentrated in time is a harassment wave (or a brigading/pile-on) worth correlating with the profile-tighten panel; a rising invalid block_error series points to a client/API regression sending malformed block requests, not user behaviour.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
       "fieldConfig": {
@@ -120,7 +120,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "ViewAs usage & errors",
-      "description": "WHAT: rate of ViewAs owner-preview requests — usage split by perspective kind (unauthenticated / platform / specific_user) and errors split by reason+phase (invalid_perspective, not_implemented, forbidden × parse|authorize). HOW: rate() over stacks_view_as_usage_count_total{perspective} and stacks_view_as_error_count_total{reason,phase}, emitted by StacksWeb.Plugs.ViewAsPlug (perspective is the KIND only, never the raw uuid). MEANS: usage measures adoption of the 'preview my profile as X' feature; a small error background is normal (owners hand-editing the query param). WATCH: an error series that dominates usage means a perspective is broken (a forbidden climb = an ownership-check regression; a not_implemented climb = users reaching for the unbuilt group perspective); a usage flatline after a UI ship means the preview control is not wired up.",
+      "description": "WHAT: rate of ViewAs owner-preview requests — usage split by perspective kind (unauthenticated / platform / specific_user) and errors split by reason+phase (invalid_perspective, not_implemented, forbidden × parse|authorize). HOW: rate over stacks_view_as_usage_count_total{perspective} and stacks_view_as_error_count_total{reason,phase}, emitted by StacksWeb.Plugs.ViewAsPlug (perspective is the KIND only, never the raw uuid). MEANS: usage measures adoption of the 'preview my profile as X' feature; a small error background is normal (owners hand-editing the query param). WATCH: an error series that dominates usage means a perspective is broken (a forbidden climb = an ownership-check regression; a not_implemented climb = users reaching for the unbuilt group perspective); a usage flatline after a UI ship means the preview control is not wired up.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": {
@@ -150,7 +150,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Ceiling rejections by resource type",
-      "description": "WHAT: rate of mutations refused because the requested visibility exceeded the parent's ceiling, split by resource_type (bookshelf / placement / post / other). HOW: rate() over stacks_visibility_ceiling_rejection_count_total{resource_type}, emitted by Stacks.Visibility.emit_ceiling_rejection/1 from the genuine user-facing rejection branches (NOT the batch-tighten path). MEANS: this should sit near zero in healthy operation — it only fires when a user tries to set a shelf/placement/post more open than their own profile allows. WATCH: a sustained rise means users are repeatedly hitting an invisible ceiling and being blocked (confusing UX — the form offers an option the ceiling forbids); a spike isolated to one resource_type points a fix at that specific editor/form rather than the whole visibility model.",
+      "description": "WHAT: rate of mutations refused because the requested visibility exceeded the parent's ceiling, split by resource_type (bookshelf / placement / post / other). HOW: rate over stacks_visibility_ceiling_rejection_count_total{resource_type}, emitted by Stacks.Visibility.emit_ceiling_rejection/1 from the genuine user-facing rejection branches (NOT the batch-tighten path). MEANS: this should sit near zero in healthy operation — it only fires when a user tries to set a shelf/placement/post more open than their own profile allows. WATCH: a sustained rise means users are repeatedly hitting an invisible ceiling and being blocked (confusing UX — the form offers an option the ceiling forbids); a spike isolated to one resource_type points a fix at that specific editor/form rather than the whole visibility model.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
       "fieldConfig": {
@@ -174,7 +174,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Visibility-recap outcomes & capped counts",
-      "description": "WHAT: the async VisibilityRecapJob — run rate by outcome (noop = nothing to cap / capped = resources tightened / error = job failed) plus the batch sizes of bookshelves, placements and posts capped down to a user's new (more private) profile ceiling. HOW: rate() over stacks_visibility_recap_count_total{outcome} for the run counter and over the stacks_visibility_recap_{bookshelves,placements,posts}_capped_total sums for the batch sizes, all emitted by Stacks.Workers.VisibilityRecapJob after a profile goes more restrictive. MEANS: capped runs and non-zero capped-counts trail the profile-tighten panel — they are the system bringing stored shelf/placement/post visibility into line after a profile is locked down. WATCH: ANY error outcome is alert-worthy (the recap job is failing and stored visibility is drifting from the profile ceiling — read enforcement still holds, but stored state is stale); a capped-count spike simply mirrors a mass profile-tighten event.",
+      "description": "WHAT: the async VisibilityRecapJob — run rate by outcome (noop = nothing to cap / capped = resources tightened / error = job failed) plus the batch sizes of bookshelves, placements and posts capped down to a user's new (more private) profile ceiling. HOW: rate over stacks_visibility_recap_count_total{outcome} for the run counter and over the stacks_visibility_recap_{bookshelves,placements,posts}_capped_total sums for the batch sizes, all emitted by Stacks.Workers.VisibilityRecapJob after a profile goes more restrictive. MEANS: capped runs and non-zero capped-counts trail the profile-tighten panel — they are the system bringing stored shelf/placement/post visibility into line after a profile is locked down. WATCH: ANY error outcome is alert-worthy (the recap job is failing and stored visibility is drifting from the profile ceiling — read enforcement still holds, but stored state is stale); a capped-count spike simply mirrors a mass profile-tighten event.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 17 },
       "fieldConfig": {

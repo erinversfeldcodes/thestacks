@@ -7,10 +7,6 @@ defmodule Stacks.SocialTest do
   alias Core.Repo
   alias Stacks.Social
 
-  # ---------------------------------------------------------------------------
-  # block_user/2
-  # ---------------------------------------------------------------------------
-
   describe "block_user/2" do
     test "valid block → {:ok, block} and block row exists in DB" do
       blocker = insert(:user)
@@ -60,10 +56,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # unblock_user/2
-  # ---------------------------------------------------------------------------
-
   describe "unblock_user/2" do
     test "existing block → {:ok, :unblocked} and row removed" do
       blocker = insert(:user)
@@ -112,10 +104,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # blocked?/2
-  # ---------------------------------------------------------------------------
-
   describe "blocked?/2" do
     test "A blocks B: blocked?(b_id, a_id) → true (bidirectional)" do
       user_a = insert(:user)
@@ -142,10 +130,6 @@ defmodule Stacks.SocialTest do
       assert false == Social.blocked?(user_a.id, user_b.id)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # blocked_by?/2
-  # ---------------------------------------------------------------------------
 
   describe "list_blocked_users/2" do
     test "returns {[], 0} when user has no blocks" do
@@ -207,7 +191,6 @@ defmodule Stacks.SocialTest do
       blocker = insert(:user)
       base = DateTime.utc_now() |> DateTime.truncate(:second)
 
-      # Insert 25 blocks with strictly increasing created_at timestamps.
       for i <- 0..24 do
         insert(:user_block,
           blocker: blocker,
@@ -219,12 +202,9 @@ defmodule Stacks.SocialTest do
       {page1, _total} = Social.list_blocked_users(blocker.id, page: 1)
       blocked_ats = Enum.map(page1, & &1.blocked_at)
 
-      # Returned in descending created_at order (newest first)…
       assert blocked_ats == Enum.sort(blocked_ats, {:desc, DateTime})
-      # …and not ascending — proves the ordering is genuinely desc, not incidental.
       refute blocked_ats == Enum.sort(blocked_ats, {:asc, DateTime})
 
-      # Page 1 holds the 20 most-recent; page 2 the 5 oldest.
       {page2, _} = Social.list_blocked_users(blocker.id, page: 2)
       newest_on_page2 = page2 |> Enum.map(& &1.blocked_at) |> Enum.max(DateTime)
       oldest_on_page1 = Enum.min(blocked_ats, DateTime)
@@ -252,10 +232,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # create_group/2
-  # ---------------------------------------------------------------------------
-
   describe "create_group/2" do
     test "happy path: group created, owner is member, event emitted" do
       owner = insert(:user)
@@ -266,12 +242,10 @@ defmodule Stacks.SocialTest do
       assert group.name == "Book Club"
       assert group.owner_id == owner.id
 
-      # Owner should be a member
       assert {:ok, members} = Social.list_group_members(group.id, owner.id)
       assert length(members) == 1
       assert hd(members).user_id == owner.id
 
-      # Event emitted
       event_count =
         Repo.one(
           from(e in "event_log",
@@ -291,10 +265,6 @@ defmodule Stacks.SocialTest do
                Social.create_group(owner.id, %{name: "", type: "close_friends"})
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # get_group/2
-  # ---------------------------------------------------------------------------
 
   describe "get_group/2" do
     test "returns group for member" do
@@ -336,10 +306,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # list_user_groups/1
-  # ---------------------------------------------------------------------------
-
   describe "list_user_groups/1" do
     test "returns groups where user is a member" do
       owner = insert(:user)
@@ -362,10 +328,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # update_group/3
-  # ---------------------------------------------------------------------------
-
   describe "update_group/3" do
     test "owner can update name" do
       owner = insert(:user)
@@ -384,10 +346,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # delete_group/2
-  # ---------------------------------------------------------------------------
-
   describe "delete_group/2" do
     test "owner can delete" do
       owner = insert(:user)
@@ -405,10 +363,6 @@ defmodule Stacks.SocialTest do
       assert {:error, :unauthorized} = Social.delete_group(group.id, other.id)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # invite_member/3
-  # ---------------------------------------------------------------------------
 
   describe "invite_member/3" do
     test "happy path: invitation created, event emitted" do
@@ -485,22 +439,15 @@ defmodule Stacks.SocialTest do
 
     test "email is preferred over display_name when both could match the identifier" do
       owner = insert(:user)
-      # email_user has an email that matches the identifier
       email_user = insert(:user, email: "overlap@example.com")
-      # name_user has a display_name that also matches the identifier
       name_user = insert(:user, display_name: "overlap@example.com")
       {:ok, group} = Social.create_group(owner.id, %{name: "Group", type: "close_friends"})
 
       assert {:ok, invitation} = Social.invite_member(group.id, owner.id, "overlap@example.com")
-      # Email match (email_user) should win over display_name match (name_user)
       assert invitation.invited_user_id == email_user.id
       refute invitation.invited_user_id == name_user.id
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # accept_invitation/2
-  # ---------------------------------------------------------------------------
 
   describe "accept_invitation/2" do
     test "creates GroupMember, updates invitation to accepted, event emitted" do
@@ -513,7 +460,6 @@ defmodule Stacks.SocialTest do
       assert updated.status == "accepted"
       assert updated.responded_at != nil
 
-      # Invitee is now a member
       groups = Social.list_user_groups(invitee.id)
       assert length(groups) == 1
 
@@ -545,10 +491,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # decline_invitation/2
-  # ---------------------------------------------------------------------------
-
   describe "decline_invitation/2" do
     test "updates invitation to declined" do
       owner = insert(:user)
@@ -576,10 +518,6 @@ defmodule Stacks.SocialTest do
       assert {:error, :unauthorized} = Social.decline_invitation(invitation.id, wrong_user.id)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # leave_group/2
-  # ---------------------------------------------------------------------------
 
   describe "leave_group/2" do
     test "member can leave, event emitted" do
@@ -618,10 +556,6 @@ defmodule Stacks.SocialTest do
       assert {:error, :not_member} = Social.leave_group(group.id, stranger.id)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # remove_member/3
-  # ---------------------------------------------------------------------------
 
   describe "remove_member/3" do
     test "owner can remove member, event emitted" do
@@ -667,10 +601,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # grant_visibility/3
-  # ---------------------------------------------------------------------------
-
   describe "grant_visibility/3" do
     test "happy path: grant created for group-visibility bookshelf" do
       owner = insert(:user)
@@ -714,10 +644,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # revoke_visibility/3
-  # ---------------------------------------------------------------------------
-
   describe "revoke_visibility/3" do
     test "happy path: grant deleted" do
       owner = insert(:user)
@@ -750,10 +676,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # list_visibility_grants/2
-  # ---------------------------------------------------------------------------
-
   describe "list_visibility_grants/2" do
     test "returns grants for bookshelf owner" do
       owner = insert(:user)
@@ -775,10 +697,6 @@ defmodule Stacks.SocialTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # has_visibility_grant?/2
-  # ---------------------------------------------------------------------------
-
   describe "has_visibility_grant?/2" do
     test "returns true when grant exists" do
       owner = insert(:user)
@@ -797,10 +715,6 @@ defmodule Stacks.SocialTest do
       refute Social.has_visibility_grant?(bookshelf.id, grantee.id)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # list_group_members/2
-  # ---------------------------------------------------------------------------
 
   describe "list_group_members/2" do
     test "returns members for a group member viewer" do

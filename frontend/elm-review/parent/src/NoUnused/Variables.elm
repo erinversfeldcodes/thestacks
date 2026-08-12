@@ -262,8 +262,6 @@ fromModuleToProject =
                 moduleContext.localTypes
                     |> Dict.map (\_ customType -> customType.variants)
                     |> Dict.singleton moduleName
-
-            -- Will be ignored in foldProjectContexts
             , isApplication = True
             }
         )
@@ -307,10 +305,6 @@ details =
     ]
 
 
-
--- ELM.JSON VISITOR
-
-
 elmJsonVisitor : Maybe { a | project : Elm.Project.Project } -> ProjectContext -> ProjectContext
 elmJsonVisitor maybeElmJson projectContext =
     case Maybe.map .project maybeElmJson of
@@ -321,12 +315,7 @@ elmJsonVisitor maybeElmJson projectContext =
             { projectContext | isApplication = False }
 
         Nothing ->
-            -- Sensible default, because now `main` won't be reported.
             { projectContext | isApplication = True }
-
-
-
--- DEPENDENCIES VISITOR
 
 
 dependenciesVisitor : Dict String Dependency -> ProjectContext -> ( List (Error nothing), ProjectContext )
@@ -358,10 +347,6 @@ unionsToDict unions =
         (\{ name, tags } acc -> Dict.insert name (List.map Tuple.first tags) acc)
         Dict.empty
         unions
-
-
-
--- MODULE DEFINITION VISITOR
 
 
 moduleDefinitionVisitor : Node Module -> ModuleContext -> ModuleContext
@@ -724,8 +709,6 @@ topLevelExposeToExposedElement rangeToRemove (Node range value) =
                         |> Just
 
                 Nothing ->
-                    -- Can't happen with `elm-syntax`. If open is Nothing, then this we'll have a
-                    -- `Exposing.TypeOrAliasExpose`, not a `Exposing.TypeExpose`.
                     Nothing
 
 
@@ -1036,8 +1019,6 @@ letDeclarationToRemoveRange letBlockContext range =
             range
 
         HasNoOtherDeclarations letDeclarationsRange ->
-            -- If there are no other declarations in the let in block,
-            -- we also need to remove the `let in` keywords.
             letDeclarationsRange
 
 
@@ -1196,10 +1177,6 @@ introducesVariable nodes =
                     introducesVariable restOfNodes
 
 
-
--- DECLARATION LIST VISITOR
-
-
 declarationListVisitor : List (Node Declaration) -> ModuleContext -> ModuleContext
 declarationListVisitor nodes context =
     List.foldl registerTypes context nodes
@@ -1295,10 +1272,6 @@ registerTypeAlias range { name, typeAnnotation } context =
             { context | localTypes = localTypes }
 
 
-
--- DECLARATION ENTER VISITOR
-
-
 declarationEnterVisitor : Node Declaration -> ModuleContext -> ( List (Error {}), ModuleContext )
 declarationEnterVisitor node context =
     case Node.value node of
@@ -1325,7 +1298,6 @@ declarationEnterVisitor node context =
                 newContextWhereFunctionIsRegistered =
                     if
                         context.exposesEverything
-                            -- The main function is "exposed" by default for applications
                             || (context.isApplication && functionName == "main")
                     then
                         context
@@ -1417,10 +1389,6 @@ declarationEnterVisitor node context =
             ( [], context )
 
 
-
--- DECLARATION EXIT VISITOR
-
-
 declarationExitVisitor : Node Declaration -> ModuleContext -> ( List (Error {}), ModuleContext )
 declarationExitVisitor node context =
     case Node.value node of
@@ -1429,10 +1397,6 @@ declarationExitVisitor node context =
 
         _ ->
             ( [], context )
-
-
-
--- FINAL EVALUATION
 
 
 finalEvaluation : ModuleContext -> List (Error {})
@@ -1483,7 +1447,6 @@ finalEvaluation context =
                             , details = details
                             }
                             under
-                            -- If the constructors are not used but the type itself is, then only remove the `(..)`
                             [ Fix.removeRange openRange ]
 
                     else
@@ -1869,10 +1832,6 @@ makeReportHelp { declared, used, namesToIgnore } =
     ( errors, nonUsedVars )
 
 
-
--- RANGE MANIPULATION
-
-
 {-| Include everything until the line after the end.
 -}
 untilStartOfNextLine : Range -> Range
@@ -1910,8 +1869,4 @@ rangeUpUntil range position =
 
 positionAsInt : { row : Int, column : Int } -> Int
 positionAsInt { row, column } =
-    -- This is a quick and simple heuristic to be able to sort ranges.
-    -- It is entirely based on the assumption that no line is longer than
-    -- 1.000.000 characters long. Then, as long as ranges don't overlap,
-    -- this should work fine.
     row * 1000000 + column

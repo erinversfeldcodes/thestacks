@@ -1,31 +1,10 @@
 defmodule Core.PromEx.GdprDataRightsDriftTest do
   @moduledoc """
-  Drift guard for the GDPR data-rights dashboard-as-code (Issue #238, epic
-  #231). Mirrors `Core.PromEx.AuthSecurityDriftTest` (the #237 guard) but
-  scoped to `grafana/gdpr_data_rights.json`.
-
-  Proves the dashboard stays in lock-step with the metrics the code actually
-  registers, so CI fails on either kind of drift:
-
-    * a panel that queries a metric name **not registered** by
-      `Core.PromEx.Plugins.Stacks` (a rename that would silently blank the
-      panel), OR
-    * a registered **GDPR family** (export/deletion outcomes + the new latency
-      distributions, consent grant/revoke, image expired/stuck/orphan, audit
-      write + the new audit-read counter) with **no panel** (an invisible
-      metric).
-
-  Registered names are read from the plugin at runtime (never hard-coded): the
-  exported Prometheus family name for a `Telemetry.Metrics` metric is its
-  `name` list joined by `_`, exactly how the plugin's `[:stacks, :gdpr, :audit,
-  :read, :count, :total]` becomes `stacks_gdpr_audit_read_count_total`.
-
-  Distributions differ from counters on the wire: a `distribution` named
-  `[:stacks, :gdpr, :export, :duration, :milliseconds]` is exported by
-  TelemetryMetricsPrometheus as three series suffixed `_bucket` / `_sum` /
-  `_count` under the base name `stacks_gdpr_export_duration_milliseconds`.
-  Panels query the `_bucket` variant (for `histogram_quantile`), so referenced
-  names are normalised back to that registered base before comparison.
+      Drift guard for the GDPR data-rights dashboard-as-code (238,; grafana/gdpr_data_rights.json):
+      panels may only query metric families registered by
+      `Core.PromEx.Plugins.Stacks`, and every registered GDPR family must have
+      a panel. Either direction of drift — a renamed metric silently blanking
+      a panel, or a new family shipping invisible — fails CI.
   """
 
   use ExUnit.Case, async: true
@@ -34,27 +13,19 @@ defmodule Core.PromEx.GdprDataRightsDriftTest do
 
   @dashboard_relative_path "grafana/gdpr_data_rights.json"
 
-  # Every registered family under this prefix MUST be queried by at least one
-  # panel — an unwatched GDPR counter/distribution is a gap.
   @gdpr_prefix "stacks_gdpr_"
 
-  # The two NEW #238 gap-closing metrics (latency distributions + audit-read).
-  # Each MUST be surfaced by a panel — that is the point of the issue.
   @new_metric_families [
     "stacks_gdpr_export_duration_milliseconds",
     "stacks_gdpr_deletion_duration_milliseconds",
     "stacks_gdpr_audit_read_count_total"
   ]
 
-  # Histogram/summary wire suffixes that a `distribution` produces. A panel
-  # queries the `_bucket` variant; normalise it back to the registered base.
   @histogram_suffixes ["_bucket", "_sum", "_count"]
 
   defp dashboard_path,
     do: Application.app_dir(:core, Path.join("priv", @dashboard_relative_path))
 
-  # Registered Prometheus family names, derived from the plugin's declared
-  # Telemetry.Metrics structs — the same join TelemetryMetricsPrometheus uses.
   defp registered_families do
     StacksPlugin.event_metrics([])
     |> Enum.flat_map(& &1.metrics)
@@ -62,15 +33,12 @@ defmodule Core.PromEx.GdprDataRightsDriftTest do
     |> MapSet.new()
   end
 
-  # Recursively collect every panel (including panels nested inside Grafana
-  # "row" panels) from a decoded dashboard.
   defp all_panels(%{"panels" => panels}) when is_list(panels) do
     Enum.flat_map(panels, fn panel -> [panel | all_panels(panel)] end)
   end
 
   defp all_panels(_), do: []
 
-  # Only panels that actually render data (skip "row" separators).
   defp data_panels(dashboard) do
     dashboard
     |> all_panels()
@@ -81,18 +49,12 @@ defmodule Core.PromEx.GdprDataRightsDriftTest do
     dashboard_path() |> File.read!() |> Jason.decode!()
   end
 
-  # Strip a trailing distribution wire-suffix (`_bucket`/`_sum`/`_count`) so a
-  # `histogram_quantile(...stacks_gdpr_export_duration_milliseconds_bucket...)`
-  # reference collapses to the registered base name. Counters end in `_total`,
-  # never a bare histogram suffix, so this never mangles a counter name.
   defp normalise(name) do
     Enum.find_value(@histogram_suffixes, name, fn suffix ->
       if String.ends_with?(name, suffix), do: String.trim_trailing(name, suffix)
     end)
   end
 
-  # All `stacks_*` metric names referenced by any panel target `expr`,
-  # normalised back to their registered base names.
   defp panel_metric_names(dashboard) do
     for panel <- data_panels(dashboard),
         target <- panel["targets"] || [],
@@ -148,8 +110,6 @@ defmodule Core.PromEx.GdprDataRightsDriftTest do
         |> Enum.filter(&String.starts_with?(&1, @gdpr_prefix))
         |> MapSet.new()
 
-      # Sanity: the GDPR families are actually registered (guards against the
-      # plugin being changed without this test noticing).
       assert MapSet.size(gdpr_families) > 0,
              "expected registered families under prefix #{inspect(@gdpr_prefix)}, " <>
                "registered: " <> inspect(Enum.sort(MapSet.to_list(registered)))
@@ -162,7 +122,7 @@ defmodule Core.PromEx.GdprDataRightsDriftTest do
     end
   end
 
-  describe "drift: the two NEW #238 gap metrics are each on a panel" do
+  describe "drift: the two NEW gap metrics are each on a panel" do
     test "export/deletion latency distributions + audit-read counter are queried and registered" do
       registered = registered_families()
       referenced = panel_metric_names(decoded_dashboard())

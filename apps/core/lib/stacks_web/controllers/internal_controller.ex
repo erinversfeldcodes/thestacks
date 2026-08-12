@@ -1,21 +1,13 @@
 defmodule StacksWeb.InternalController do
   @moduledoc """
-  Handles internal callbacks and smoke-test endpoints.
-
-  ## Vision associate callback
-
-  Protected by a timestamp-based HMAC scheme via the X-Vision-Signature header:
-    Value: "<unix_timestamp_seconds>.<HMAC-SHA256(secret, "<ts>.POST.<path>")>" (lowercase hex)
-    Valid window: ±60 seconds
-
-  No user authentication — service-to-service only.
-  Always returns 200 to the vision sidecar once auth passes (sidecar must not retry on app errors).
-
-  ## Smoke test endpoint
-
-  `POST /api/internal/smoke/circuit_breakers` — gated by `config :core, :smoke_tests_enabled`.
-  Protected by the same `X-Internal-Token` HMAC scheme used by the scraper service.
-  Returns 404 in production (default false).
+      Internal callbacks and smoke-test endpoints. The vision associate
+      callback is HMAC-authed via `X-Vision-Signature`
+      (`<ts>.<HMAC-SHA256(secret, "<ts>.POST.<path>")>`, ±60s window),
+      service-to-service only, and always returns 200 once auth passes — the
+      sidecar must not retry on app errors.
+      `POST /api/internal/smoke/circuit_breakers` is gated by
+      `:smoke_tests_enabled` (404 in production) behind the scraper's
+      `X-Internal-Token` scheme.
   """
 
   use CoreWeb, :controller
@@ -34,9 +26,6 @@ defmodule StacksWeb.InternalController do
   @smoke_path "/api/internal/smoke/circuit_breakers"
   @replay_window_seconds 60
 
-  # Proto AssociationStatus enum wire-format strings.
-  # These MUST match the JSON names in stacks/internal/v1/vision.proto.
-  # See docs/runbooks/vision-service-rollback.md for deploy ordering.
   @status_confirmed "ASSOCIATION_STATUS_CONFIRMED"
   @status_rejected "ASSOCIATION_STATUS_REJECTED"
 
@@ -52,13 +41,13 @@ defmodule StacksWeb.InternalController do
   end
 
   @doc """
-  POST /api/internal/smoke/circuit_breakers — smoke-test all 5 circuit breakers.
+      POST /api/internal/smoke/circuit_breakers — smoke-test all 5 circuit breakers.
 
-  Gated by `config :core, :smoke_tests_enabled, true`. Returns 404 if disabled.
-  Protected by the `X-Internal-Token` HMAC scheme (same as scraper).
+      Gated by `config:core,:smoke_tests_enabled, true`. Returns 404 if disabled.
+      Protected by the `X-Internal-Token` HMAC scheme (same as scraper).
 
-  Blows all 5 fuses via real failure paths, waits up to 60s for probe-driven
-  recovery, and returns a structured JSON result.
+      Blows all 5 fuses via real failure paths, waits up to 60s for probe-driven
+      recovery, and returns a structured JSON result.
   """
   def smoke_circuit_breakers(conn, _params) do
     if Application.get_env(:core, :smoke_tests_enabled, false) do
@@ -69,10 +58,6 @@ defmodule StacksWeb.InternalController do
       |> json(%{error: "not found"})
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Smoke test implementation
-  # ---------------------------------------------------------------------------
 
   defp run_smoke_circuit_breakers(conn) do
     if valid_internal_token?(conn) do
@@ -93,13 +78,8 @@ defmodule StacksWeb.InternalController do
       :google_books_fuse
     ]
 
-    # Save original config
     original = save_original_config()
 
-    # Reinstall all fuses with tight thresholds: threshold=1 → blows on 2nd melt.
-    # {:reset, 30_000}: backstop half-open after 30s. This ensures the test
-    # completes in ~35s (well within Fly's 60s edge-proxy timeout), while
-    # still giving the probe-based recovery path ~15–30s to succeed first.
     Enum.each(all_fuses, fn name ->
       try do
         :fuse.remove(name)
@@ -112,10 +92,8 @@ defmodule StacksWeb.InternalController do
       :fuse.install(name, {{:standard, 1, 60_000}, {:reset, 30_000}})
     end)
 
-    # Trigger 2 failures per fuse via real code paths
     blow_all_fuses(original)
 
-    # Assert all blown
     blown_check =
       Enum.map(all_fuses, fn name ->
         {name, :fuse.ask(name, :sync) == :blown}
@@ -135,7 +113,6 @@ defmodule StacksWeb.InternalController do
         not_blown: Enum.map(not_blown, fn {name, _} -> Atom.to_string(name) end)
       })
     else
-      # Wait for probe-driven recovery (up to 30s)
       start_ms = System.monotonic_time(:millisecond)
       recovery_results = poll_for_recovery(all_fuses, start_ms, %{})
 
@@ -158,7 +135,6 @@ defmodule StacksWeb.InternalController do
   end
 
   defp blow_all_fuses(original) do
-    # :vision_fuse — override URL to unreachable port
     Application.put_env(:core, :vision_service_url, "http://localhost:1")
     Application.put_env(:core, :vision_client, AIClient)
 
@@ -169,7 +145,6 @@ defmodule StacksWeb.InternalController do
     Application.put_env(:core, :vision_service_url, original.vision_service_url)
     Application.put_env(:core, :vision_client, original.vision_client)
 
-    # :scraper_fuse — override URL to unreachable port
     Application.put_env(:core, :scraper_service_url, "http://localhost:1")
     Application.put_env(:core, :scraper_client, ScraperClient)
 
@@ -180,8 +155,6 @@ defmodule StacksWeb.InternalController do
     Application.put_env(:core, :scraper_service_url, original.scraper_service_url)
     Application.put_env(:core, :scraper_client, original.scraper_client)
 
-    # :together_ai_fuse — override base URL to unreachable port; ensure a non-nil
-    # API key so TogetherClient proceeds to the HTTP call (which then fails).
     Application.put_env(:core, :together_ai_base_url, "http://localhost:1")
     Application.put_env(:core, :together_client, TogetherClient)
     Application.put_env(:core, :vision_together_api_key, "smoke-test-dummy-key")
@@ -193,7 +166,6 @@ defmodule StacksWeb.InternalController do
     Application.put_env(:core, :together_ai_base_url, original.together_ai_base_url)
     Application.put_env(:core, :together_client, original.together_client)
 
-    # :open_library_fuse + :google_books_fuse — use FailingHttpClient
     Application.put_env(:core, :isbn_http_client, Stacks.Testing.FailingHttpClient)
 
     for _ <- 1..2 do
@@ -257,11 +229,9 @@ defmodule StacksWeb.InternalController do
 
     cond do
       still_pending == [] ->
-        # All recovered
         updated
 
       elapsed >= 60_000 ->
-        # Timeout — mark remaining as not recovered
         Enum.reduce(still_pending, updated, fn name, acc ->
           Map.put(acc, name, %{recovered: false, recovery_ms: 60_000})
         end)
@@ -272,13 +242,6 @@ defmodule StacksWeb.InternalController do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Vision associate internals
-  # ---------------------------------------------------------------------------
-
-  # Decode the raw JSON params into a typed AssociateCallback struct, then dispatch.
-  # Required fields default to "" for validation; optional `reason` defaults to nil
-  # (consistent with the proto3 optional field default).
   defp handle_association(conn, params) do
     callback = %AssociateCallback{
       isbn: Map.get(params, "isbn", ""),
@@ -383,10 +346,6 @@ defmodule StacksWeb.InternalController do
     json(conn, %{ok: true})
   end
 
-  # ---------------------------------------------------------------------------
-  # Auth helpers
-  # ---------------------------------------------------------------------------
-
   defp valid_vision_signature?(conn) do
     case get_req_header(conn, "x-vision-signature") do
       [provided] -> verify_vision_token(provided)
@@ -402,8 +361,6 @@ defmodule StacksWeb.InternalController do
   end
 
   defp verify_vision_hmac(ts_str, provided_sig) do
-    # The vision sidecar must sign the string: "<ts>.POST./api/internal/vision/associate"
-    # using HMAC-SHA256 with the shared VISION_HMAC_SECRET.
     with {ts, ""} <- Integer.parse(ts_str),
          now = System.os_time(:second),
          true <- abs(now - ts) <= @replay_window_seconds,

@@ -4,10 +4,10 @@ module ProtoDecoderTest exposing (suite)
 
 These tests verify that:
 
-1.  Each decoder parses the JSON shape defined by the corresponding .proto file.
+1.  Each decoder parses the JSON shape defined by the corresponding.proto file.
 2.  Each encoder produces JSON that the decoder can read back unchanged.
 
-If these tests break after a .proto change, the proto/gen/elm/ decoders must
+If these tests break after a.proto change, the proto/gen/elm/ decoders must
 be regenerated or updated by hand to match the new schema.
 
 -}
@@ -204,12 +204,6 @@ suite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Location
--- ---------------------------------------------------------------------------
-
-
 locationSuite : Test
 locationSuite =
     describe "Location decoders"
@@ -338,12 +332,6 @@ locationSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- EventBus
--- ---------------------------------------------------------------------------
 
 
 eventBusSuite : Test
@@ -495,12 +483,6 @@ eventBusSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Book (enums + messages + embedded fields)
--- ---------------------------------------------------------------------------
-
-
 bookSuite : Test
 bookSuite =
     describe "Book decoders"
@@ -647,6 +629,7 @@ bookSuite =
                         , openLibraryId = ""
                         , googleBooksId = ""
                         , bookId = ""
+                        , verificationSource = "open_library"
                         , createdAt = ""
                         , updatedAt = ""
                         }
@@ -668,12 +651,6 @@ bookSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- User (>8 fields, andThen pattern)
--- ---------------------------------------------------------------------------
 
 
 userSuite : Test
@@ -731,6 +708,7 @@ userSuite =
                         , city = "London"
                         , consentAnalytics = False
                         , consentWritingAssistant = False
+                        , syndicationDefault = True
                         , ageVerified = True
                         , ageVerifiedAt = ""
                         , ageVerificationProvider = ""
@@ -784,12 +762,6 @@ userSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- Placement (cross-module reference to Book)
--- ---------------------------------------------------------------------------
 
 
 placementSuite : Test
@@ -901,12 +873,6 @@ placementSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- SourceHealthCheck (optional + enums + >8 fields)
--- ---------------------------------------------------------------------------
 
 
 sourceHealthCheckSuite : Test
@@ -1086,12 +1052,6 @@ sourceHealthCheckSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Response-level tests (BookDetailResponse, AuthResponse, BookshelfResponse)
--- ---------------------------------------------------------------------------
-
-
 responseSuite : Test
 responseSuite =
     describe "Response decoders"
@@ -1195,6 +1155,7 @@ responseSuite =
                                 , bookshelfVisibility = "platform"
                                 }
                         , myWriting = [ { id = "w-1", title = "Review", publishedAt = "2026-03-20T00:00:00Z" } ]
+                        , placements = []
                         }
 
                     result =
@@ -1265,6 +1226,7 @@ responseSuite =
                             , city = "London"
                             , consentAnalytics = False
                             , consentWritingAssistant = False
+                            , syndicationDefault = True
                             , ageVerified = True
                             , ageVerifiedAt = ""
                             , ageVerificationProvider = ""
@@ -1398,12 +1360,6 @@ responseSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Blog (BlogPost, BlogPostSummary, BookAssociation, BlogVisibility)
--- ---------------------------------------------------------------------------
-
-
 blogSuite : Test
 blogSuite =
     describe "Blog decoders"
@@ -1464,6 +1420,7 @@ blogSuite =
                         , visibilityGroupId = ""
                         , authorDisplayName = "Fable Quill"
                         , authorHandle = "fable_quill"
+                        , syndicated = True
                         }
 
                     result =
@@ -1573,12 +1530,6 @@ blogSuite =
                     ]
                     ()
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- Listing
--- ---------------------------------------------------------------------------
 
 
 listingSuite : Test
@@ -1692,12 +1643,6 @@ listingSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Blog response-level decoders
--- ---------------------------------------------------------------------------
-
-
 blogResponseSuite : Test
 blogResponseSuite =
     describe "Blog response-level decoders"
@@ -1751,6 +1696,7 @@ blogResponseSuite =
                             , createdAt = "2026-03-20T00:00:00Z"
                             , updatedAt = "2026-03-21T01:00:00Z"
                             , visibilityGroupId = ""
+                            , syndicated = True
                             , authorDisplayName = "Fable Quill"
                             , authorHandle = "fable_quill"
                             }
@@ -1943,12 +1889,6 @@ blogResponseSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Listing response-level decoders
--- ---------------------------------------------------------------------------
-
-
 listingResponseSuite : Test
 listingResponseSuite =
     describe "Listing response-level decoders"
@@ -2059,12 +1999,6 @@ listingResponseSuite =
                     Err e ->
                         Expect.fail (D.errorToString e)
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- Source response-level decoders
--- ---------------------------------------------------------------------------
 
 
 sourceResponseSuite : Test
@@ -2279,12 +2213,6 @@ sourceResponseSuite =
         ]
 
 
-
--- ---------------------------------------------------------------------------
--- Upload (UploadAccepted, PollResponse, PollStatus)
--- ---------------------------------------------------------------------------
-
-
 uploadSuite : Test
 uploadSuite =
     describe "Upload decoders"
@@ -2423,12 +2351,6 @@ uploadSuite =
                     ]
                     ()
         ]
-
-
-
--- ---------------------------------------------------------------------------
--- Admin (MetricsDashboard, CostItem)
--- ---------------------------------------------------------------------------
 
 
 adminSuite : Test

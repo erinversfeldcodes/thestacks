@@ -46,16 +46,13 @@ defmodule Stacks.AuditTest do
 
     test "handles non-UUID resource_id gracefully (encode_uuid returns nil)" do
       user = insert(:user)
-      # Passing a non-UUID string as resource_id hits encode_uuid's :error branch
+
       assert {:ok, _entry} =
                Audit.log(user.id, "test.action", resource_id: "not-a-uuid-string")
     end
   end
 
   describe "log_rollback/1" do
-    # Helper: subscribe the test process to a list of telemetry events. The
-    # handler is auto-detached on test exit so events don't leak between tests.
-    # Mirrors the pattern used in Stacks.ObservabilityTelemetryTest.
     defp attach_telemetry(events) do
       test_pid = self()
       ref = make_ref()
@@ -73,13 +70,6 @@ defmodule Stacks.AuditTest do
       ExUnit.Callbacks.on_exit(fn -> :telemetry.detach(handler_id) end)
     end
 
-    # Convention chosen for these tests (and to be enforced on the
-    # implementer): the helper carries the failed git SHA in metadata under the
-    # atom key :failed_sha (NOT "failed_sha" string, NOT :sha). This is
-    # deliberate because Stacks.Audit.log/3's encode_uuid private helper
-    # returns nil for non-UUID strings, so the SHA cannot live in the
-    # resource_id column.
-
     @valid_attrs %{
       failed_sha: "deadbeefcafebabe1234567890abcdef12345678",
       target_image: "registry.fly.io/the-stacks-core:deployment-prev-1234",
@@ -94,7 +84,6 @@ defmodule Stacks.AuditTest do
       assert entry.action == "system.rollback"
       assert entry.resource_type == "deploy"
 
-      # All five fields land in metadata
       assert entry.metadata[:failed_sha] == @valid_attrs.failed_sha
       assert entry.metadata[:target_image] == @valid_attrs.target_image
       assert entry.metadata[:modal_prev_commit] == @valid_attrs.modal_prev_commit
@@ -105,8 +94,6 @@ defmodule Stacks.AuditTest do
     test "resource_id is nil because a git SHA is not a UUID; SHA lives in metadata" do
       assert {:ok, entry} = Audit.log_rollback(@valid_attrs)
 
-      # encode_uuid returns nil for non-UUID strings (existing behaviour of
-      # Stacks.Audit.log/3). The SHA must therefore be carried in metadata.
       assert entry.resource_id == nil
       assert entry.metadata[:failed_sha] == @valid_attrs.failed_sha
     end
@@ -149,8 +136,6 @@ defmodule Stacks.AuditTest do
 
       assert {:ok, entry} = Audit.log_rollback(attrs)
 
-      # nil is preserved in metadata — the helper does not crash and does
-      # not synthesise a placeholder string.
       assert Map.has_key?(entry.metadata, :modal_prev_commit)
       assert entry.metadata[:modal_prev_commit] == nil
     end
@@ -164,27 +149,18 @@ defmodule Stacks.AuditTest do
 
       assert measurements == %{count: 1}
 
-      # Telemetry metadata mirrors the audit row metadata.
       assert metadata[:failed_sha] == @valid_attrs.failed_sha
       assert metadata[:target_image] == @valid_attrs.target_image
       assert metadata[:modal_prev_commit] == @valid_attrs.modal_prev_commit
       assert metadata[:reason] == @valid_attrs.reason
       assert metadata[:triggered_by] == @valid_attrs.triggered_by
 
-      # Exactly once — no duplicate event.
       refute_receive {:telemetry_event, [:stacks, :system, :rollback], _, _}, 50
     end
 
     test "does NOT emit telemetry when the underlying audit insert fails" do
       attach_telemetry([[:stacks, :system, :rollback]])
 
-      # Force the insert to fail by smuggling a non-JSON-encodable term
-      # (a raw tuple) into the reason. Stacks.Audit.log/3 calls
-      # Jason.encode!/1 on the metadata map, which raises
-      # Protocol.UndefinedError for tuples; the rescue clause converts that
-      # into {:error, _}. This path should NOT emit telemetry — otherwise
-      # we'd have a misleading "we rolled back" signal for a rollback that
-      # never recorded.
       bad_attrs = %{@valid_attrs | reason: {:not, :encodable}}
 
       assert {:error, _reason} = Audit.log_rollback(bad_attrs)
@@ -193,15 +169,13 @@ defmodule Stacks.AuditTest do
     end
   end
 
-  describe "log/3 with admin-call fields (Issue #138 Phase 1)" do
+  describe "log/3 with admin-call fields" do
     # Phase 1 extends audit.audit_log with five additive nullable columns
     # carrying admin-call shape: endpoint, latency_ms, success, row_count,
     # operator_session_id. Stacks.Audit.log/3 must accept and persist them
     # via :opts. Until the migration + module update land, these tests fail
     # because the columns don't exist (Postgrex.Error: undefined_column).
 
-    # Helper: read the most recent audit_log row's raw column values via
-    # Repo.query (decouples from any not-yet-regenerated Ecto schema).
     defp fetch_admin_columns(entry_id) do
       {:ok, %{rows: [row], columns: cols}} =
         Repo.query(
@@ -258,7 +232,6 @@ defmodule Stacks.AuditTest do
     test "omitting admin-call opts leaves columns null (backwards-compatible with existing callers)" do
       user = insert(:user)
 
-      # Old-style call site — no admin-call opts.
       assert {:ok, entry} = Audit.log(user.id, "user.login", resource_type: "user")
 
       cols = fetch_admin_columns(entry.id)
@@ -282,9 +255,6 @@ defmodule Stacks.AuditTest do
     end
 
     test "result map echoes the admin-call fields back to the caller" do
-      # The :ok tuple should reflect what the caller passed in (mirrors how
-      # Audit.log/3 already echoes :metadata in plaintext form). Lets the
-      # AuditAdminCall plug rely on the return value without re-querying.
       user = insert(:user)
       session_id = Ecto.UUID.generate()
 

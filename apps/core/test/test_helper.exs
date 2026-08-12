@@ -1,3 +1,3 @@
-ExUnit.configure(exclude: [:deployed_only, :sla])
+ExUnit.configure(exclude: [:deployed_only])
 ExUnit.start()
 Ecto.Adapters.SQL.Sandbox.mode(Core.Repo, :manual)

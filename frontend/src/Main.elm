@@ -1,26 +1,46 @@
 port module Main exposing
     ( AppConfig
     , Auth
+    , AuthState(..)
+    , CompletedLogin
+    , Connectivity(..)
     , ExternalAuthOutcome(..)
     , LoginEffect(..)
     , Msg(..)
+    , NavMenu(..)
     , Page(..)
     , PendingLogout
+    , StoredAuth(..)
     , StoredAuthResolution(..)
     , adoptExternalAuth
+    , applyPendingUndo
+    , arrivalForBoot
+    , completeLogin
+    , connectivityFromOnline
+    , consumeArrival
+    , currentAuth
     , decodeConfig
     , decodeFlags
     , decodeSwipe
     , initPage
     , loginEffects
+    , loginRedirectFor
     , main
+    , pageTitle
     , parkPending
+    , reconnectShouldRefetch
+    , redirectAfterNavigation
     , renewAuthToken
     , requiresAuth
+    , resetPasswordDestination
     , resolveRecheck
+    , settleArrival
     , shouldShowOnboarding
+    , storedSession
+    , toggleNavMenu
+    , viewArrivalDoor
+    , viewConnectivity
     , viewFooter
-    , viewHome
     , viewNav
     , viewNotFound
     )
@@ -32,10 +52,11 @@ import Browser.Dom
 import Browser.Events
 import Browser.Navigation as Nav
 import Components.OnboardingOverlay as OnboardingOverlay
+import Components.Syndication as Syndication
 import Components.UserMenu as UserMenu
 import Components.ViewAsBar as ViewAsBar
-import Html exposing (Html, a, div, footer, h1, header, li, main_, nav, p, text, ul)
-import Html.Attributes exposing (attribute, class, href, id, tabindex)
+import Html exposing (Html, a, button, div, footer, h1, header, li, main_, nav, p, span, text, ul)
+import Html.Attributes exposing (attribute, class, href, id, style, tabindex)
 import Html.Events
 import Http
 import Json.Decode as Decode
@@ -44,7 +65,10 @@ import Navigation.Route as Route exposing (ConfirmStatus(..), Route(..), isSetti
 import Navigation.SwipeNavigation as SwipeNavigation
 import Page.About as AboutPage
 import Page.Admin.BookModeration as AdminBookModeration
+import Page.Admin.Invites as AdminInvites
+import Page.Admin.RemovalRequests as AdminRemovalRequests
 import Page.Admin.ScraperConfig as AdminScraperConfig
+import Page.Admin.Session as AdminSession
 import Page.Admin.SourceApproval as AdminSourceApproval
 import Page.Blog.Archive as BlogArchive
 import Page.Blog.Editor as BlogEditor
@@ -57,7 +81,10 @@ import Page.Catalogue as Catalogue
 import Page.CostTransparency as CostTransparency
 import Page.Groups as Groups
 import Page.Groups.Detail as GroupsDetail
+import Page.Home as Home
+import Page.Import as ImportPage
 import Page.Insights as Insights
+import Page.ListingRemoval as ListingRemoval
 import Page.Login as Login
 import Page.Marketplace.Browse as MarketplaceBrowse
 import Page.Marketplace.CreateListing as CreateListing
@@ -69,7 +96,6 @@ import Page.ResetPassword as ResetPassword
 import Page.Search as Search
 import Page.Settings as Settings
 import Page.Settings.AuditLog as AuditLog
-import Page.Settings.Consent as Consent
 import Page.Settings.Notifications as Notifications
 import Page.Settings.Password as Password
 import Page.Settings.Privacy as Privacy
@@ -77,10 +103,12 @@ import Page.Settings.Profile as Profile
 import Page.Upload as Upload
 import Process
 import Task
+import Time
 import Types.Placement
-import Types.RemoteData
+import Types.RemoteData exposing (RemoteData(..))
 import Types.User exposing (AuthToken, User)
 import Url exposing (Url)
+import Util.TestId exposing (testId)
 
 
 port onSwipe : (Decode.Value -> msg) -> Sub msg
@@ -111,7 +139,7 @@ port uploadStreamEvent : (String -> msg) -> Sub msg
 
 
 {-| Persist / clear / request an in-progress marketplace listing draft in
-localStorage (Issue #182). `saveListingDraft` is fired when a session expires
+localStorage. `saveListingDraft` is fired when a session expires
 mid-compose; `requestListingDraft` is fired when the create page is (re)built and
 its answer arrives on `gotListingDraft` (the parsed value, or `null` when absent).
 -}
@@ -127,7 +155,7 @@ port requestListingDraft : () -> Cmd msg
 port gotListingDraft : (Decode.Value -> msg) -> Sub msg
 
 
-{-| Cross-tab token propagation (Issue #180 Phase 2). Fires when ANOTHER tab
+{-| Cross-tab token propagation. Fires when ANOTHER tab
 writes `stacks-auth` in localStorage: `saveAuth` (a sibling tab just rotated its
 token → the raw new JSON string) or `clearAuth` (a sibling logged out → `null`).
 The writing tab never receives its own event, so there is no feedback loop. The
@@ -136,7 +164,7 @@ payload is the raw string / `null`; it is decoded in Elm via `adoptExternalAuth`
 port authChanged : (Decode.Value -> msg) -> Sub msg
 
 
-{-| Belt-and-suspenders re-check net (Issue #180 Phase 2). Asks JS to read the
+{-| Belt-and-suspenders re-check net. Asks JS to read the
 CURRENT `stacks-auth` from localStorage; the answer arrives on `gotStoredAuth`.
 Fired just before a 401-driven session expiry so a token another tab refreshed
 can be adopted instead of logging everyone out.
@@ -147,7 +175,7 @@ port requestStoredAuth : () -> Cmd msg
 port gotStoredAuth : (Decode.Value -> msg) -> Sub msg
 
 
-{-| Server-config channel (ADR-020). Elm boots immediately with age-gating OFF
+{-| Server-config channel. Elm boots immediately with age-gating OFF
 (the fail-safe production default); `GET /api/config` is fetched in the
 background by `app.js` and its result is delivered here a beat after boot, so a
 network round-trip never blocks first paint. The payload is the resolved
@@ -155,6 +183,36 @@ network round-trip never blocks first paint. The payload is the resolved
 (`False`) stands.
 -}
 port ageGatingConfig : (Bool -> msg) -> Sub msg
+
+
+{-| Second server-config flag, same channel shape as
+`ageGatingConfig`. app.js sends the resolved `inviteOnly` boolean from the same
+`GET /api/config` fetch; on ANY failure it sends nothing and the fail-CLOSED
+boot default (`True`) stands — a config blip must not reopen registration.
+-}
+port inviteOnlyConfig : (Bool -> msg) -> Sub msg
+
+
+{-| Browser connectivity: `app.js` forwards the window online/offline
+events plus one send at boot (a tab opened offline must not be told it is
+connected). The shell answers this once, centrally — like session expiry —
+rather than each page inferring "probably offline" from its own
+`Http.NetworkError`.
+-}
+port connectivityChanged : (Bool -> msg) -> Sub msg
+
+
+{-| Clipboard write for the syndication panel — the one place the
+project needs a clipboard port, because the Clipboard API has no Elm
+equivalent. The JS side MUST answer on `copyResult` whether the write
+succeeded or was refused — a port that swallows a rejection produces a copy
+button that appears to work and does not, which is exactly the "built but not
+wired" shape. The False answer is what makes the textarea fallback reachable.
+-}
+port copyToClipboard : String -> Cmd msg
+
+
+port copyResult : (Bool -> msg) -> Sub msg
 
 
 main : Program Decode.Value Model Msg
@@ -169,20 +227,16 @@ main =
         }
 
 
-
--- MODEL
-
-
 type Page
-    = PageHome
+    = PageHome Home.Model
     | PageLogin Login.Model
     | PageBookshelf Bookshelf.Model
     | PageReadingPile ReadingPile.Model
     | PageLookingForHome LookingForHome.Model
     | PageBookDetail BookDetail.Model
     | PageUpload Upload.Model
+    | PageImport ImportPage.Model
     | PageSearch Search.Model
-    | PageSettingsConsent Consent.Model
     | PageSettingsAuditLog AuditLog.Model
     | PageInsights Insights.Model
     | PageSettingsProfile Profile.Model
@@ -191,6 +245,7 @@ type Page
     | PageCostTransparency CostTransparency.Model
     | PageMetrics MetricsPage.Model
     | PageAbout
+    | PageListingRemoval ListingRemoval.Model
     | PageCatalogue Catalogue.Model
     | PageMarketplaceBrowse MarketplaceBrowse.Model
     | PageMarketplaceCreate CreateListing.Model
@@ -201,8 +256,11 @@ type Page
     | PageBlogEditor BlogEditor.Model
     | PageBlogPost BlogPostPage.Model
     | PageAdminSourceApproval AdminSourceApproval.Model
+    | PageAdminInvites AdminInvites.Model
     | PageAdminScraperConfig AdminScraperConfig.Model
     | PageAdminBookModeration AdminBookModeration.Model
+    | PageAdminRemovalRequests AdminRemovalRequests.Model
+    | PageAdminGate Route AdminSession.Model
     | PageGroups Groups.Model
     | PageGroupsDetail GroupsDetail.Model
     | PageProfile ProfilePage.Model
@@ -217,12 +275,137 @@ type alias Auth =
     }
 
 
-{-| A parked session-expiry intent (Issue #180 Phase 2). Raised when an
+{-| Who the app currently believes is signed in.
+
+⛔ What this type makes impossible: the old `auth: Maybe Auth` let login
+set an in-memory credential the app had not yet persisted (parked on the
+door animation, which an occluded window never finishes) — authenticated
+in memory, anonymous on disk. `Arriving` carries both the auth AND the
+proof of persistence; `Authed` is only reachable after the write.
+
+-}
+type AuthState
+    = Anonymous
+    | Arriving Auth
+    | Authenticated Auth
+
+
+{-| Whether the browser currently has a network connection.
+
+A two-constructor type rather than `isOffline: Bool` on the model. The banner
+is the only reader today, but a boolean named for one of its two states is how
+`not online` and `offline` end up being written in different places and drifting;
+this cannot be read backwards.
+
+-}
+type Connectivity
+    = Online
+    | Offline
+
+
+{-| Read a `navigator.onLine` boolean at the port boundary, so the rest of the
+app never sees the boolean at all.
+-}
+connectivityFromOnline : Bool -> Connectivity
+connectivityFromOnline isOnline =
+    if isOnline then
+        Online
+
+    else
+        Offline
+
+
+{-| The whole refetch decision, pure: refetch exactly when the
+connectivity change is the offline→online TRANSITION (not a repeated `online`
+event, not going offline) and the routed page lost its content to the network.
+-}
+reconnectShouldRefetch : Connectivity -> Connectivity -> Page -> Bool
+reconnectShouldRefetch before after page =
+    before == Offline && after == Online && pageLostToNetwork page
+
+
+{-| Whether the routed page's PRIMARY content was lost to a `NetworkError` —
+the one failure reconnecting actually fixes.
+
+Scope rule, stated: reconnect recovery is a SHARED Main-level behaviour (the
+connectivity signal lives here, and re-entering a route is Main's job — a
+per-page copy in every module is the duplication collapsed), but pages
+opt IN by naming their content field here. Seeded with the shelf/book family
+the drive covered. The catch-all is honest: a page not named simply
+keeps today's behaviour (its own error copy), it does not break — and
+`Timeout`/5xx deliberately never trigger a refetch, because reconnecting is
+not what fixes those (split, kept).
+
+-}
+pageLostToNetwork : Page -> Bool
+pageLostToNetwork page =
+    let
+        lost : RemoteData Http.Error a -> Bool
+        lost remote =
+            case remote of
+                Failure Http.NetworkError ->
+                    True
+
+                _ ->
+                    False
+    in
+    case page of
+        PageBookshelf m ->
+            lost m.shelves
+
+        PageReadingPile m ->
+            lost m.books
+
+        PageLookingForHome m ->
+            lost m.books
+
+        PageBookDetail m ->
+            lost m.book
+
+        PageCatalogue m ->
+            lost m.books
+
+        _ ->
+            False
+
+
+{-| The session, whatever stage of arrival it is in. The ONE accessor — nothing
+outside this function may pattern-match `AuthState` to decide whether a request
+can be made, or `Arriving` would start meaning "not really signed in".
+-}
+currentAuth : AuthState -> Maybe Auth
+currentAuth authState =
+    case authState of
+        Anonymous ->
+            Nothing
+
+        Arriving auth ->
+            Just auth
+
+        Authenticated auth ->
+            Just auth
+
+
+{-| Settle an arrival. Total and idempotent on purpose: it is driven by two
+racing sources — the door animation's completion signal from JS, and the
+`ArmArrivalBackstop` timer — and either may arrive first, twice, or never.
+-}
+settleArrival : AuthState -> AuthState
+settleArrival authState =
+    case authState of
+        Arriving auth ->
+            Authenticated auth
+
+        settled ->
+            settled
+
+
+{-| A parked session-expiry intent. Raised when an
 authenticated 401 wants to log out; the actual clear+redirect is deferred one
 port round-trip (`requestStoredAuth` → `gotStoredAuth`) so a token another tab
 refreshed can be adopted first.
 
-  - `draftSaved` carries the marketplace-draft-saved notice (#182) across that
+  - `draftSaved` carries the marketplace-draft-saved notice across that
     round-trip so it still shows on the login page.
   - `fromRenewal` records whether the expiry originated from a CONSUMED proactive
     renewal tick (a failed silent refresh). Only then does adopting a newer token
@@ -234,8 +417,7 @@ type alias PendingLogout =
     { draftSaved : Bool, fromRenewal : Bool }
 
 
-{-| Merge a new parked expiry with any intent already in flight (Issue #180
-Phase 2, P2). Both flags are STICKY (OR-ed): a later plain expiry must not erase
+{-| Merge a new parked expiry with any intent already in flight. Both flags are STICKY (OR-ed): a later plain expiry must not erase
 a `draftSaved` reassurance a draft-expiry parked, and if any origin consumed a
 renewal tick the eventual adopt must still re-arm renewal. Pure + testable.
 -}
@@ -257,49 +439,39 @@ type alias Model =
     { key : Nav.Key
     , url : Url
     , route : Route
-    , auth : Maybe Auth
+    , auth : AuthState
+    , adminAuth : Maybe String
     , page : Page
     , previousRoute : Maybe Route
     , transition : Maybe String
-    , pendingAuthResponse : Maybe Api.AuthResponse
+    , redirectAfterLogin : Maybe Route
     , bookDetailOverlay : Maybe BookDetailOverlay
     , userMenu : UserMenu.Model
+    , openNavMenu : Maybe NavMenu
     , onboarding : OnboardingOverlay.Model
     , onboardingCompleted : Bool
     , hasAnyPlacements : Bool
+    , pendingUndo : Maybe Bookshelf.Removal
+    , arrival : Login.Arrival
 
-    -- Raised by `sessionExpired`; consumed when the Login page is (re)built so the
-    -- global session-expiry notice survives the redirect's `UrlChanged`.
-    , sessionExpiredNotice : Bool
-
-    -- Raised alongside `sessionExpiredNotice` when the expiry happened while
-    -- composing a marketplace listing (Issue #182), so the login notice can
-    -- reassure the user their draft was saved.
-    , draftSavedNotice : Bool
-
-    -- Raised after a successful account-deletion request (Issue #188); consumed
-    -- when the Login page is (re)built so a warm farewell survives the redirect's
-    -- `UrlChanged`, mirroring `sessionExpiredNotice`.
-    , accountDeletedNotice : Bool
-
-    -- A deferred session-expiry intent (Issue #180 Phase 2): set while the
+    -- A deferred session-expiry intent (Phase 2): set while the
     -- re-check-before-logout port round-trip is in flight, cleared when it
     -- resolves (adopt a newer token, or proceed to `forceSessionExpiry`).
     , pendingLogout : Maybe PendingLogout
-
-    -- Server-provided runtime config (ADR-020), fetched via `GET /api/config`
-    -- and merged into the boot flags. The app's first global config channel;
-    -- keep it minimal and extensible. Currently just the age-gating flag.
     , config : AppConfig
+    , connectivity : Connectivity
+    , uploadInbox : RemoteData Http.Error (List Api.InboxItem)
     }
 
 
 {-| Server-provided runtime configuration, delivered in the boot flags from
-`GET /api/config` (ADR-020). The frontend's first global config channel —
+`GET /api/config`. The frontend's first global config channel —
 extend this record as new server-driven flags land.
 -}
 type alias AppConfig =
-    { ageGatingEnabled : Bool }
+    { ageGatingEnabled : Bool
+    , inviteOnly : Bool
+    }
 
 
 {-| The fail-safe default config: age-gating OFF (all age UI hidden). Used when
@@ -307,7 +479,15 @@ type alias AppConfig =
 -}
 defaultConfig : AppConfig
 defaultConfig =
-    { ageGatingEnabled = False }
+    { ageGatingEnabled = False
+
+    -- Fail CLOSED (): a gate on account creation must not reopen
+    -- because a config fetch blipped. The server's real value arrives over
+    -- `inviteOnlyConfig` a beat after boot; until then Register shows the
+    -- invite panel, which an open-registration deployment replaces almost
+    -- immediately.
+    , inviteOnly = True
+    }
 
 
 {-| Decode the runtime config out of the boot flags. A missing or malformed
@@ -315,10 +495,15 @@ defaultConfig =
 -}
 configDecoder : Decode.Decoder AppConfig
 configDecoder =
-    Decode.map AppConfig
+    Decode.map2 AppConfig
         (Decode.oneOf
             [ Decode.field "ageGatingEnabled" Decode.bool
             , Decode.succeed False
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "inviteOnly" Decode.bool
+            , Decode.succeed True
             ]
         )
 
@@ -335,8 +520,14 @@ decodeConfig flags =
 init : Decode.Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
     let
-        maybeAuth =
+        stored =
             decodeFlags flags
+
+        maybeAuth =
+            storedSession stored
+
+        arrival =
+            arrivalForBoot stored
 
         config =
             decodeConfig flags
@@ -345,26 +536,30 @@ init flags url key =
             Route.fromUrl url
 
         ( page, cmd ) =
-            initPage config route maybeAuth Nothing
+            initPage config route (originOf url) maybeAuth Nothing Nothing arrival
     in
     ( { key = key
       , url = url
       , route = route
-      , auth = maybeAuth
+      , auth =
+            maybeAuth |> Maybe.map Authenticated |> Maybe.withDefault Anonymous
+      , adminAuth = Nothing
       , page = page
       , previousRoute = Nothing
       , transition = Nothing
-      , pendingAuthResponse = Nothing
+      , redirectAfterLogin = loginRedirectFor route maybeAuth
       , bookDetailOverlay = Nothing
       , userMenu = UserMenu.init
+      , openNavMenu = Nothing
       , onboarding = OnboardingOverlay.init
       , onboardingCompleted = False
       , hasAnyPlacements = True
-      , sessionExpiredNotice = False
-      , draftSavedNotice = False
-      , accountDeletedNotice = False
+      , pendingUndo = Nothing
+      , arrival = consumeArrival page arrival
       , pendingLogout = Nothing
       , config = config
+      , connectivity = Online
+      , uploadInbox = NotAsked
       }
     , Cmd.batch
         [ cmd
@@ -374,6 +569,7 @@ init flags url key =
                     [ Cmd.map OnboardingMsg (OnboardingOverlay.initCmd auth.token)
                     , Api.getMyPlacements auth.token GotPlacementCheck
                     , scheduleRenewal
+                    , Api.getUploadInbox auth.token GotUploadInbox
                     ]
 
             Nothing ->
@@ -382,14 +578,30 @@ init flags url key =
     )
 
 
+{-| Ask the server what is waiting for this reader.
+
+Called at boot, on sign-in, and whenever `Page.Upload` says something changed.
+Anonymous is a `Cmd.none` rather than a failure: there is no inbox to have.
+
+-}
+fetchUploadInbox : Maybe Auth -> Cmd Msg
+fetchUploadInbox maybeAuth =
+    case maybeAuth of
+        Just auth ->
+            Api.getUploadInbox auth.token GotUploadInbox
+
+        Nothing ->
+            Cmd.none
+
+
 {-| Decoder for a stored-auth JSON object (the exact shape `encodeAuth` writes to
 localStorage `stacks-auth`). Lifted to the top level so both `decodeFlags` (boot)
-and `adoptExternalAuth` (cross-tab propagation, Issue #180) share one contract.
+and `adoptExternalAuth` (cross-tab propagation,) share one contract.
 -}
 authDecoder : Decode.Decoder Auth
 authDecoder =
-    Decode.map8
-        (\token userId email displayName handle role consentAnalytics consentWritingAssistant ->
+    Decode.map6
+        (\token userId email displayName handle role ->
             { user =
                 { id = userId
                 , email = email
@@ -398,8 +610,8 @@ authDecoder =
                 , role = role
                 , countryCode = Nothing
                 , city = Nothing
-                , consentAnalytics = consentAnalytics
-                , consentWritingAssistant = consentWritingAssistant
+                , consentAnalytics = False
+                , consentWritingAssistant = False
                 }
             , token = token
             }
@@ -418,22 +630,123 @@ authDecoder =
             , Decode.succeed "user"
             ]
         )
-        (Decode.oneOf
-            [ Decode.field "consentAnalytics" Decode.bool
-            , Decode.succeed False
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "consentWritingAssistant" Decode.bool
-            , Decode.succeed False
-            ]
-        )
 
 
-decodeFlags : Decode.Value -> Maybe Auth
+{-| What boot found in localStorage. Three outcomes, three
+constructors — the old `Maybe Auth` folded "no stored credential" and
+"stored but would not decode" into one `Nothing`. The blob is written by
+`saveAuth` and read by the same decoder, so a decode failure means
+something rewrote it; treating it as an ordinary signed-out boot hides
+that, and `CorruptAuth` lets boot clear the bad blob and say why.
+-}
+type StoredAuth
+    = NoStoredAuth
+    | CorruptStoredAuth String
+    | ValidStoredAuth Auth
+
+
+{-| The session a boot recovered, if any. The ONE accessor — mirroring
+`currentAuth` for `AuthState` — so no consumer pattern-matches `StoredAuth` to
+decide whether a request can be made and accidentally makes `CorruptStoredAuth`
+mean something other than "signed out".
+-}
+storedSession : StoredAuth -> Maybe Auth
+storedSession stored =
+    case stored of
+        ValidStoredAuth auth ->
+            Just auth
+
+        NoStoredAuth ->
+            Nothing
+
+        CorruptStoredAuth _ ->
+            Nothing
+
+
+{-| What a boot owes the reader an explanation for.
+
+⛔ This is the whole point of `CorruptStoredAuth`: the boot outcome is
+turned into something the reader can SEE. Before, `decodeFlags` answered
+`Nothing` and `init` simply started anonymous — the app knew a credential had
+been found and rejected, and told nobody. A silent sign-out is indistinguishable
+from a deliberate one, so the failure could only ever be diagnosed from the
+outside, which is exactly what made the private-session auth bug expensive.
+
+Named and exposed rather than inlined in `init`, because `init` needs a
+`Nav.Key` and is therefore unreachable from elm-test: the whole chain from raw
+boot flags to rendered notice would otherwise have no test that could run.
+
+-}
+arrivalForBoot : StoredAuth -> Login.Arrival
+arrivalForBoot stored =
+    case stored of
+        CorruptStoredAuth reason ->
+            Login.StoredSessionUnreadable reason
+
+        NoStoredAuth ->
+            Login.Fresh
+
+        ValidStoredAuth _ ->
+            Login.Fresh
+
+
+{-| The flag keys that mean "a stored credential was here". `authDecoder`
+failing tells us the blob is not a session; these tell us a blob was _attempted_,
+which is the difference between a corrupt credential and a clean signed-out boot.
+
+`user` is in the list although no valid blob has it: it is the exact shape of the
+nested-blob mistake, and the whole point is to name that case rather than let it
+fall through to "never signed in". Every other entry is a field `encodeAuth`
+writes, so any partial or truncated write is caught by at least one.
+
+-}
+storedAuthMarkers : List String
+storedAuthMarkers =
+    [ "token", "userId", "user", "email", "displayName" ]
+
+
+{-| Read the stored credential out of the boot flags.
+
+`storedAuthUnreadable` is checked first: `app.js` cannot hand over a blob it
+could not `JSON.parse`, or could not read at all because `localStorage` threw
+(private browsing, storage disabled), so it sends the reason under that key
+instead of dropping it in a bare `catch`. Those are the two failure modes Elm
+cannot see for itself.
+
+-}
+decodeFlags : Decode.Value -> StoredAuth
 decodeFlags flags =
-    Decode.decodeValue authDecoder flags
-        |> Result.toMaybe
+    case Decode.decodeValue (Decode.field "storedAuthUnreadable" Decode.string) flags of
+        Ok reason ->
+            CorruptStoredAuth reason
+
+        Err _ ->
+            case Decode.decodeValue authDecoder flags of
+                Ok auth ->
+                    ValidStoredAuth auth
+
+                Err decodeError ->
+                    if hasStoredAuthMarker flags then
+                        CorruptStoredAuth (Decode.errorToString decodeError)
+
+                    else
+                        NoStoredAuth
+
+
+{-| Whether the flags carry any trace of a stored credential.
+-}
+hasStoredAuthMarker : Decode.Value -> Bool
+hasStoredAuthMarker flags =
+    List.any
+        (\field ->
+            case Decode.decodeValue (Decode.field field Decode.value) flags of
+                Ok _ ->
+                    True
+
+                Err _ ->
+                    False
+        )
+        storedAuthMarkers
 
 
 isOwner : Maybe Auth -> Bool
@@ -444,6 +757,28 @@ isOwner maybeAuth =
 
         Nothing ->
             False
+
+
+{-| The browser origin (scheme://host[:port]) — what turns a post id into its
+canonical absolute address client-side.
+-}
+originOf : Url -> String
+originOf url =
+    let
+        scheme =
+            case url.protocol of
+                Url.Http ->
+                    "http://"
+
+                Url.Https ->
+                    "https://"
+
+        portPart =
+            url.port_
+                |> Maybe.map (\p -> ":" ++ String.fromInt p)
+                |> Maybe.withDefault ""
+    in
+    scheme ++ url.host ++ portPart
 
 
 requiresAuth : Route -> Bool
@@ -462,6 +797,9 @@ requiresAuth route =
             False
 
         About ->
+            False
+
+        ListingRemoval ->
             False
 
         Catalogue ->
@@ -489,15 +827,15 @@ requiresAuth route =
             False
 
         Search ->
-            -- People-search is optional-auth (US-10.5.4): an anonymous visitor can
-            -- discover readers even though book search still needs a token. Keeping
-            -- /search open exercises the optional-auth backend anonymously.
             False
 
         ConfirmEmail _ ->
             False
 
         ForgotPassword ->
+            False
+
+        ResendConfirmation ->
             False
 
         ResetPassword _ ->
@@ -510,13 +848,147 @@ requiresAuth route =
             True
 
 
-initPage : AppConfig -> Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
-initPage config route maybeAuth maybePreviousRoute =
+{-| The token for `/api/admin/*` — the ONLY thing any admin call site may
+pass. `/api/admin/*` requires the MFA-verified admin session token and
+401s the ordinary one; when the five call sites each read a field, two
+drifted and every admin action 401'd behind a loaded page. One function,
+five callers, zero drift.
+-}
+adminTokenFor : Model -> Maybe String
+adminTokenFor model =
+    model.adminAuth
+
+
+{-| The page the reader asked for but is being bounced off (`Nothing` when
+not bounced). Named once and read by BOTH the bounce (`initPage`) and the
+remembering site (`Model.redirectAfterLogin`) — a second copy of the
+condition is how "capture the asked-for page" drifts from "bounce to the
+gate" and starts remembering a page nobody was denied.
+-}
+loginRedirectFor : Route -> Maybe Auth -> Maybe Route
+loginRedirectFor route maybeAuth =
     if requiresAuth route && maybeAuth == Nothing then
-        ( PageLogin Login.init, Cmd.none )
+        Just route
 
     else
-        initPageAuthenticated config route maybeAuth maybePreviousRoute
+        Nothing
+
+
+{-| Where a finished password reset carries the reader, or `Nothing` when the
+reset page is not asking to go anywhere.
+
+⛔ Key-free and exposed on purpose. `Model` embeds an unconstructable `Nav.Key`,
+so `update`'s `ResetPasswordMsg` branch cannot be driven from a test — and a
+wire whose far end is untestable is a wire that gets stubbed and stays stubbed
+(the seam /found, where both ends were right and the join between them
+was never exercised). `update` **calls** this rather than re-deciding the
+destination inline, so the branch a test can reach is the branch that ships:
+change the answer here and the running app changes with it.
+
+-}
+resetPasswordDestination : ResetPassword.OutMsg -> Maybe Route
+resetPasswordDestination outMsg =
+    case outMsg of
+        ResetPassword.NoOut ->
+            Nothing
+
+        ResetPassword.AdvanceToLogin ->
+            Just Route.Login
+
+
+{-| The page to return the reader to after sign-in, recomputed for THIS
+navigation — never accumulated; read once from `UrlChanged`.
+
+⛔ An expiry bounce is a bounce too: a bare `loginRedirectFor` is
+right for a route-guard bounce and wrong when the session dies underneath
+the reader — `/login` requires no auth, so the recompute answered
+`Nothing` and dropped the page they were standing on. Expiry stashes the
+current route explicitly; this preserves it.
+
+-}
+redirectAfterNavigation :
+    { arrivingAt : Route
+    , leaving : Route
+    , sessionExpiring : Bool
+    , auth : Maybe Auth
+    }
+    -> Maybe Route
+redirectAfterNavigation navigation =
+    if navigation.arrivingAt == Login && navigation.sessionExpiring then
+        loginRedirectFor navigation.leaving Nothing
+
+    else
+        loginRedirectFor navigation.arrivingAt navigation.auth
+
+
+{-| Build the page for a route. `arrival` is the reason the reader would be
+looking at a login card, threaded IN rather than patched on afterwards:
+there is more than one way to reach the card (protected-route bounce,
+`/login`, `/forgot-password`), and the notice used to be attached at only
+one of them.
+-}
+initPage : AppConfig -> Route -> String -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
+initPage config route origin maybeAuth adminToken maybePreviousRoute arrival =
+    if loginRedirectFor route maybeAuth /= Nothing then
+        ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
+
+    else if isAdminRoute route && adminToken == Nothing then
+        -- ⛔ The gate that makes four surfaces reachable. `/api/admin/*` needs an
+        -- MFA-verified admin-session token, NOT the ordinary Guardian one; the pages were handed
+        -- the latter and every request 401'd, so all four had never loaded for anyone. Rather than
+        -- let a page render and fail, the route resolves to the sign-in gate until a real admin
+        -- token exists — so a page never holds a token it cannot use.
+        ( PageAdminGate route AdminSession.init, Cmd.none )
+
+    else
+        initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival
+
+
+{-| The routes behind the `:admin` pipeline. Exhaustive on purpose — a `_ -> False` catch-all would
+silently leave a newly added admin route ungated, which is the bug this whole change is fixing.
+-}
+isAdminRoute : Route -> Bool
+isAdminRoute route =
+    case route of
+        Route.AdminSourceApproval ->
+            True
+
+        Route.AdminInvites ->
+            True
+
+        Route.AdminScraperConfig ->
+            True
+
+        Route.AdminBookModeration ->
+            True
+
+        Route.AdminRemovalRequests ->
+            True
+
+        _ ->
+            False
+
+
+{-| Hand a just-built page the removal the reader may still take back. Applied to `initPage`'s result, not threaded through it — only the
+`UrlChanged` a removal's `pushUrl` provokes can ever have an undo, and a
+seventh parameter would make the other call sites say `Nothing` forever.
+The destination is `BookDetail.previousRoute`, i.e. the shelf the reader
+was standing on.
+-}
+applyPendingUndo : Maybe Bookshelf.Removal -> ( Page, Cmd Msg ) -> ( Page, Cmd Msg )
+applyPendingUndo maybeRemoval ( page, cmd ) =
+    case ( maybeRemoval, page ) of
+        ( Just _, PageBookshelf bookshelfModel ) ->
+            let
+                ( withToast, toastCmd ) =
+                    Bookshelf.withPendingUndo maybeRemoval ( bookshelfModel, Cmd.none )
+            in
+            ( PageBookshelf withToast
+            , Cmd.batch [ cmd, Cmd.map BookshelfMsg toastCmd ]
+            )
+
+        _ ->
+            ( page, cmd )
 
 
 initBookshelf : Bookshelf.Config -> Maybe Auth -> ( Page, Cmd Msg )
@@ -534,18 +1006,22 @@ initBookshelf config maybeAuth =
     ( PageBookshelf model, Cmd.map BookshelfMsg cmd )
 
 
-initPageAuthenticated : AppConfig -> Route -> Maybe Auth -> Maybe Route -> ( Page, Cmd Msg )
-initPageAuthenticated config route maybeAuth maybePreviousRoute =
+initPageAuthenticated : AppConfig -> Route -> String -> Maybe Auth -> Maybe String -> Maybe Route -> Login.Arrival -> ( Page, Cmd Msg )
+initPageAuthenticated config route origin maybeAuth adminToken maybePreviousRoute arrival =
     let
         maybeToken =
             Maybe.map .token maybeAuth
     in
     case route of
         Home ->
-            ( PageHome, Cmd.none )
+            let
+                ( subModel, subCmd ) =
+                    Home.init maybeToken
+            in
+            ( PageHome subModel, Cmd.map HomeMsg subCmd )
 
         Login ->
-            ( PageLogin Login.init, Cmd.none )
+            ( PageLogin (Login.init arrival |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         Library ->
             initBookshelf Bookshelf.libraryConfig maybeAuth
@@ -586,22 +1062,11 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             in
             ( PageUpload { uploadModel | ageGatingEnabled = config.ageGatingEnabled }, Cmd.none )
 
+        Import ->
+            ( PageImport ImportPage.init, Cmd.none )
+
         Search ->
             ( PageSearch Search.init, Cmd.none )
-
-        SettingsConsent ->
-            let
-                consentSeed =
-                    case maybeAuth of
-                        Just auth ->
-                            { analytics = auth.user.consentAnalytics
-                            , writingAssistant = auth.user.consentWritingAssistant
-                            }
-
-                        Nothing ->
-                            { analytics = False, writingAssistant = False }
-            in
-            ( PageSettingsConsent (Consent.init consentSeed), Cmd.none )
 
         SettingsAuditLog ->
             let
@@ -634,24 +1099,15 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
         About ->
             ( PageAbout, Cmd.none )
 
+        ListingRemoval ->
+            ( PageListingRemoval ListingRemoval.init, Cmd.none )
+
         Catalogue ->
             let
                 ( model, cmd ) =
                     Catalogue.init maybeToken
             in
             ( PageCatalogue model, Cmd.map CatalogueMsg cmd )
-
-        Settings ->
-            let
-                profileModel =
-                    case maybeAuth of
-                        Just auth ->
-                            Profile.init auth.user
-
-                        Nothing ->
-                            Profile.init { id = "", email = "", displayName = "", handle = "", role = "user", countryCode = Nothing, city = Nothing, consentAnalytics = False, consentWritingAssistant = False }
-            in
-            ( PageSettingsProfile profileModel, Cmd.none )
 
         SettingsProfile ->
             let
@@ -687,8 +1143,6 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
                 ( model, cmd ) =
                     CreateListing.init maybeToken
             in
-            -- Ask JS for any persisted draft; the answer arrives on
-            -- `gotListingDraft` and is routed to CreateListing.DraftLoaded (#182).
             ( PageMarketplaceCreate model
             , Cmd.batch
                 [ Cmd.map CreateListingMsg cmd
@@ -712,8 +1166,18 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
 
         SettingsPrivacy ->
             let
+                consentSeed =
+                    case maybeAuth of
+                        Just auth ->
+                            { analytics = auth.user.consentAnalytics
+                            , writingAssistant = auth.user.consentWritingAssistant
+                            }
+
+                        Nothing ->
+                            { analytics = False, writingAssistant = False }
+
                 ( privacyModel, privacyCmd ) =
-                    Privacy.initWithToken maybeToken
+                    Privacy.initWithToken maybeToken consentSeed
             in
             ( PageSettingsPrivacy privacyModel, Cmd.map PrivacyMsg privacyCmd )
 
@@ -749,7 +1213,7 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
                         |> Maybe.withDefault False
 
                 ( postModel, postCmd ) =
-                    BlogPostPage.init postId maybeToken currentUserId writingAssistantConsent
+                    BlogPostPage.init postId maybeToken currentUserId writingAssistantConsent origin
             in
             ( PageBlogPost postModel, Cmd.map BlogPostMsg postCmd )
 
@@ -757,9 +1221,20 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             if isOwner maybeAuth then
                 let
                     ( subModel, subCmd ) =
-                        AdminSourceApproval.init maybeToken
+                        AdminSourceApproval.init adminToken
                 in
                 ( PageAdminSourceApproval subModel, Cmd.map AdminSourceApprovalMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminInvites ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminInvites.init adminToken
+                in
+                ( PageAdminInvites subModel, Cmd.map AdminInvitesMsg subCmd )
 
             else
                 ( PageNotFound, Cmd.none )
@@ -768,7 +1243,7 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             if isOwner maybeAuth then
                 let
                     ( subModel, subCmd ) =
-                        AdminScraperConfig.init maybeToken
+                        AdminScraperConfig.init adminToken
                 in
                 ( PageAdminScraperConfig subModel, Cmd.map AdminScraperConfigMsg subCmd )
 
@@ -776,16 +1251,23 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
                 ( PageNotFound, Cmd.none )
 
         Route.AdminBookModeration ->
-            -- Owner-only AND gated behind the age-gating flag (ADR-020). While
-            -- age-gating ships dark the moderation surface is unavailable — a
-            -- flag-off route resolves to NotFound, exactly like an unauthorised
-            -- owner-guarded route.
             if isOwner maybeAuth && config.ageGatingEnabled then
                 let
                     ( subModel, subCmd ) =
-                        AdminBookModeration.init maybeToken
+                        AdminBookModeration.init adminToken
                 in
                 ( PageAdminBookModeration subModel, Cmd.map AdminBookModerationMsg subCmd )
+
+            else
+                ( PageNotFound, Cmd.none )
+
+        Route.AdminRemovalRequests ->
+            if isOwner maybeAuth then
+                let
+                    ( subModel, subCmd ) =
+                        AdminRemovalRequests.init adminToken
+                in
+                ( PageAdminRemovalRequests subModel, Cmd.map AdminRemovalRequestsMsg subCmd )
 
             else
                 ( PageNotFound, Cmd.none )
@@ -818,19 +1300,16 @@ initPageAuthenticated config route maybeAuth maybePreviousRoute =
             ( PageProfile m, Cmd.map PublicProfileMsg cmd )
 
         ProfileShelf handle bookshelfName ->
-            -- Browse another reader's shelf read-only (#215 / US-10.5.3): the
-            -- Bookshelf module in its profile config fetches the profile endpoint
-            -- and strips every mutating affordance.
             initBookshelf (Bookshelf.profileConfig handle bookshelfName) maybeAuth
 
         ConfirmEmail status ->
             ( PageConfirmEmail status, Cmd.none )
 
         ForgotPassword ->
-            -- The forgot-password form is a mode of the login card, not a
-            -- standalone page — deep-linking /forgot-password opens the login
-            -- card straight onto that mode.
-            ( PageLogin Login.forgotInit, Cmd.none )
+            ( PageLogin (Login.init Login.ForgotPassword |> Login.withInviteOnly config.inviteOnly), Cmd.none )
+
+        ResendConfirmation ->
+            ( PageLogin (Login.init Login.ConfirmationExpired |> Login.withInviteOnly config.inviteOnly), Cmd.none )
 
         ResetPassword token ->
             ( PageResetPassword (ResetPassword.init token), Cmd.none )
@@ -848,13 +1327,10 @@ encodeAuth auth =
         , ( "displayName", Json.Encode.string auth.user.displayName )
         , ( "handle", Json.Encode.string auth.user.handle )
         , ( "role", Json.Encode.string auth.user.role )
-        , ( "consentAnalytics", Json.Encode.bool auth.user.consentAnalytics )
-        , ( "consentWritingAssistant", Json.Encode.bool auth.user.consentWritingAssistant )
         ]
 
 
-{-| The single, central deferred session-expiry entry point (Issue #173 + #180
-Phase 2). EVERY authenticated page routes its `SessionExpired` OutMsg here, and a
+{-| The single, central deferred session-expiry entry point. EVERY authenticated page routes its `SessionExpired` OutMsg here, and a
 failed silent renewal falls through here too — so the re-check net lives in ONE
 place, not scattered across the ~25 call sites.
 
@@ -884,7 +1360,7 @@ handleSessionExpiryFromRenewal model =
     )
 
 
-{-| As `handleSessionExpiry`, but for the marketplace-compose expiry (#182): the
+{-| As `handleSessionExpiry`, but for the marketplace-compose expiry: the
 in-progress draft is persisted immediately, and the parked intent remembers to
 raise the draft-saved notice if the round-trip does end in a logout.
 -}
@@ -898,10 +1374,10 @@ handleSessionExpiryWithDraft draft model =
     )
 
 
-{-| The actual, irreversible session-expiry path (Issue #173). Reached only after
+{-| The actual, irreversible session-expiry path. Reached only after
 the re-check net (`handleSessionExpiry` → `gotStoredAuth`) confirms there is no
 newer token to adopt, or from a sibling-tab `clearAuth`. Mirrors sign-out: clears
-`model.auth`, drops the `clearAuth ()` port, and redirects to `/login` — raising
+`model.auth`, drops the `clearAuth` port, and redirects to `/login` — raising
 `sessionExpiredNotice` (and `draftSavedNotice` when a draft was parked) so the
 login page shows an "expired" message distinct from invalid-credentials. The
 notice survives the `Nav.pushUrl`-driven `UrlChanged` re-init via the flag.
@@ -909,10 +1385,13 @@ notice survives the `Nav.pushUrl`-driven `UrlChanged` re-init via the flag.
 forceSessionExpiry : Bool -> Model -> ( Model, Cmd Msg )
 forceSessionExpiry draftSaved model =
     ( { model
-        | auth = Nothing
-        , sessionExpiredNotice = True
-        , draftSavedNotice = model.draftSavedNotice || draftSaved
+        | auth = Anonymous
+        , adminAuth = Nothing
+        , arrival =
+            Login.SessionExpired
+                { draftSaved = draftSaved || Login.draftWasSaved model.arrival }
         , userMenu = UserMenu.init
+        , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
         , pendingLogout = Nothing
       }
@@ -923,8 +1402,7 @@ forceSessionExpiry draftSaved model =
     )
 
 
-{-| The farewell/logout path after a successful account-deletion request
-(Issue #188). The backend has queued the erasure; here we tear down the local
+{-| The farewell/logout path after a successful account-deletion request. The backend has queued the erasure; here we tear down the local
 session the same way a deliberate sign-out does — clear `model.auth`, reset the
 user menu, wipe any persisted listing draft (it carries PII), and redirect to
 `/login`. Rather than a bare login page, we raise `accountDeletedNotice` so the
@@ -936,9 +1414,11 @@ successful action.
 handleAccountDeleted : Model -> ( Model, Cmd Msg )
 handleAccountDeleted model =
     ( { model
-        | auth = Nothing
-        , accountDeletedNotice = True
+        | auth = Anonymous
+        , adminAuth = Nothing
+        , arrival = Login.AccountDeleted
         , userMenu = UserMenu.init
+        , openNavMenu = Nothing
         , bookDetailOverlay = Nothing
         , pendingLogout = Nothing
       }
@@ -950,7 +1430,28 @@ handleAccountDeleted model =
     )
 
 
-{-| The outcome of interpreting a stored-auth value (Issue #180 Phase 2), used
+{-| Spend the pending arrival once a login card has actually been built with it.
+
+⛔ The condition is "a login card was rendered", NOT "the route is `/login`".
+The three booleans this replaced were each cleared by `… && newRoute /= Login`,
+which is the same test written three times and wrong in the same way three
+times: the protected-route bounce (`initPage`) shows the login card **without
+changing the URL**, so an expiry notice raised on `/library` was never marked as
+delivered and would resurface on the reader's next navigation. Asking the page
+that was built removes the possibility of the two disagreeing.
+
+-}
+consumeArrival : Page -> Login.Arrival -> Login.Arrival
+consumeArrival page arrival =
+    case page of
+        PageLogin _ ->
+            Login.Fresh
+
+        _ ->
+            arrival
+
+
+{-| The outcome of interpreting a stored-auth value, used
 for BOTH cross-tab propagation and the 401 re-check net.
 -}
 type ExternalAuthOutcome
@@ -959,21 +1460,12 @@ type ExternalAuthOutcome
     | IgnoreExternal
 
 
-{-| Pure, key-free decision for an externally-observed stored-auth value — a
-sibling tab's `storage` event (`AuthChangedExternally`) or the re-check response
-(`GotStoredAuth`). The port delivers the RAW localStorage payload: a JSON string
-(a `saveAuth` write), JSON `null` (a `clearAuth`), or something unexpected.
-
-  - a valid stored auth whose token DIFFERS from the in-memory token, while
-    authed → `AdoptAuth` the stored auth (new token, its user).
-  - the SAME token → `IgnoreExternal` (nothing changed; also the writer's own
-    echo defence).
-  - a valid stored auth while signed out → `IgnoreExternal` (a signed-out tab
-    does not spontaneously log in from a sibling).
-  - JSON `null` while authed → `LogOutExternally` (a sibling logged out).
-  - JSON `null` while signed out, or any garbage → `IgnoreExternal` (never crash
-    or log out on undecodable input).
-
+{-| Pure decision for an externally-observed stored-auth value (a sibling
+tab's `storage` event, or the re-check response). The port delivers the
+RAW localStorage payload. Differing valid token while authed →
+`AdoptAuth`; same token → `IgnoreExternal` (echo defence); `null`/corrupt
+while authed → `DropAuth` (a sibling signed out or the blob was
+clobbered); anything while not authed → adopt-or-ignore without a drop.
 -}
 adoptExternalAuth : Decode.Value -> Maybe Auth -> ExternalAuthOutcome
 adoptExternalAuth value maybeAuth =
@@ -994,8 +1486,6 @@ adoptExternalAuth value maybeAuth =
                     IgnoreExternal
 
         Ok Nothing ->
-            -- JSON null: a sibling `clearAuth`. Log this tab out too, but only if
-            -- it is currently authed (a signed-out tab has nothing to clear).
             case maybeAuth of
                 Just _ ->
                     LogOutExternally
@@ -1004,12 +1494,11 @@ adoptExternalAuth value maybeAuth =
                     IgnoreExternal
 
         Err _ ->
-            -- Not a string and not null (unexpected shape): ignore, never log out.
             IgnoreExternal
 
 
 {-| The resolution of a re-check (`gotStoredAuth`) answer against the parked
-intent (Issue #180 Phase 2). Pure, so the reschedule decision — opaque as a `Cmd`
+intent. Pure, so the reschedule decision — opaque as a `Cmd`
 — is unit-testable.
 
   - `ResolveAdopt auth reschedule` — adopt `auth`, cancel the logout; `reschedule`
@@ -1058,7 +1547,7 @@ renewAuthToken authResponse auth =
 
 
 {-| How long to wait after receiving an access token before silently renewing it.
-The access token TTL is 8h (server-side, Issue #124); we refresh comfortably
+The access token TTL is 8h (server-side,); we refresh comfortably
 before that so an active session never hits a hard 401. A single fixed delay is
 used rather than decoding the JWT `exp` claim (the token is opaque to the SPA).
 -}
@@ -1084,38 +1573,107 @@ login must run the _same_ effects, otherwise `hasAnyPlacements` never leaves its
 optimistic init value (`True`) and the onboarding overlay can never appear for a
 brand-new, placement-free user. Exposed so tests can assert the fetch happens.
 
+`PlayDoorAnimation` is in this list rather than in a branch of its own so that
+"the animation runs last" is a fact about ONE ordered value a test can read,
+instead of an ordering buried in a `Cmd.batch` nobody can inspect.
+
 -}
 type LoginEffect
     = PersistAuth
-    | NavigateHome
     | FetchPlacements
     | InitOnboarding
     | ScheduleRenewal
+    | NavigateToRequestedPage
+    | ArmArrivalBackstop
+    | PlayDoorAnimation
 
 
-{-| Effects performed when a login completes (form login, both the immediate and
-post-transition paths). Mirrors what `init` does for a stored auth.
+{-| Effects performed when a login completes. Mirrors what `init` does for a
+stored auth, plus the arrival ornament.
+
+⛔ The ORDER is the fix. `PersistAuth` is first and `PlayDoorAnimation` is
+last, and every one of them is fired from the single update that decodes the
+`200` — nothing here waits for a message from the browser. It used to be the
+other way round: the animation was started, and the token was written only when
+the browser reported the animation had finished. `requestAnimationFrame` does
+not fire while a window is occluded, so on a backgrounded tab the report never
+came and the login was discarded in silence. Anything a browser may decline to
+run belongs after the credential is durable, never in front of it.
+
 -}
 loginEffects : List LoginEffect
 loginEffects =
     [ PersistAuth
-    , NavigateHome
     , FetchPlacements
     , InitOnboarding
     , ScheduleRenewal
+    , NavigateToRequestedPage
+    , ArmArrivalBackstop
+    , PlayDoorAnimation
     ]
 
 
-{-| Realise a single `LoginEffect` as a concrete `Cmd` for a completed login.
+{-| Everything a completed login produces, as one indivisible value: the session
+to hold in memory, the state that session puts the app in, and the effects that
+make it durable.
+
+⛔ This is the ONLY function that turns an `AuthResponse` into an `AuthState`.
+Returning the state and its effects together is what makes "authenticated but
+never saved" unwritable: a caller cannot reach `Arriving auth` without also
+being handed the `PersistAuth` that backs it.
+
 -}
-loginEffectCmd : Nav.Key -> Auth -> LoginEffect -> Cmd Msg
-loginEffectCmd key auth effect =
+type alias CompletedLogin =
+    { session : Auth
+    , authState : AuthState
+    , effects : List LoginEffect
+    }
+
+
+{-| Build the completed login for a `200` from `POST /api/auth/login`. Pure and
+key-free, so the persist-first guarantee is unit-testable rather than only
+observable in a browser.
+-}
+completeLogin : Api.AuthResponse -> CompletedLogin
+completeLogin authResponse =
+    let
+        session =
+            { user =
+                { id = authResponse.userId
+                , email = authResponse.email
+                , displayName = authResponse.displayName
+                , handle = authResponse.handle
+                , role = authResponse.role
+                , countryCode = Nothing
+                , city = Nothing
+                , consentAnalytics = authResponse.consentAnalytics
+                , consentWritingAssistant = authResponse.consentWritingAssistant
+                }
+            , token = authResponse.token
+            }
+    in
+    { session = session
+    , authState = Arriving session
+    , effects = loginEffects
+    }
+
+
+{-| How long the app will wait for the door ornament to report itself finished
+before settling the arrival anyway. Comfortably past the 4 s animation.
+-}
+arrivalBackstopMs : Float
+arrivalBackstopMs =
+    6000
+
+
+{-| Realise a single `LoginEffect` as a concrete `Cmd` for a completed login.
+`redirect` is the page the reader was bounced off, if any.
+-}
+loginEffectCmd : Nav.Key -> Maybe Route -> Auth -> LoginEffect -> Cmd Msg
+loginEffectCmd key redirect auth effect =
     case effect of
         PersistAuth ->
             saveAuth (encodeAuth auth)
-
-        NavigateHome ->
-            Nav.pushUrl key (Route.toPath AntiLibrary)
 
         FetchPlacements ->
             Api.getMyPlacements auth.token GotPlacementCheck
@@ -1126,17 +1684,51 @@ loginEffectCmd key auth effect =
         ScheduleRenewal ->
             scheduleRenewal
 
+        NavigateToRequestedPage ->
+            Nav.pushUrl key (Route.toPath (Maybe.withDefault AntiLibrary redirect))
+
+        ArmArrivalBackstop ->
+            Process.sleep arrivalBackstopMs |> Task.perform (\_ -> ArrivalSettled)
+
+        PlayDoorAnimation ->
+            playLoginTransition
+                (Json.Encode.object [ ( "duration", Json.Encode.int 4000 ) ])
+
 
 {-| All commands a completed login must fire, given the base command already
 produced by the login sub-update.
 -}
-loginCompletionCmd : Nav.Key -> Auth -> Cmd Msg -> Cmd Msg
-loginCompletionCmd key auth baseCmd =
-    Cmd.batch (baseCmd :: List.map (loginEffectCmd key auth) loginEffects)
+loginCompletionCmd : Nav.Key -> Maybe Route -> CompletedLogin -> Cmd Msg -> Cmd Msg
+loginCompletionCmd key redirect arrival baseCmd =
+    Cmd.batch
+        (baseCmd
+            :: List.map (loginEffectCmd key redirect arrival.session) arrival.effects
+        )
 
 
+{-| The top-level navigation disclosures whose open/closed state Elm owns
+(TR-1). Each corresponds to a `<button aria-haspopup aria-expanded>` in the
+nav; `Model.openNavMenu` holds the one that is open. Compared with `==`, so it
+must stay a plain, argument-free custom type.
+-}
+type NavMenu
+    = BookshelvesMenu
+    | MarketplaceMenu
+    | AdminMenu
 
--- UPDATE
+
+{-| Toggle a nav disclosure: opening the one that is closed, closing the one
+that is open, and switching directly from any other. This is the pure core that
+both the trigger button (`ToggleNavMenu`) and the keyboard path run through, so
+it is the unit-test oracle for "keyboard/click toggles the menu".
+-}
+toggleNavMenu : NavMenu -> Maybe NavMenu -> Maybe NavMenu
+toggleNavMenu menu current =
+    if current == Just menu then
+        Nothing
+
+    else
+        Just menu
 
 
 type Msg
@@ -1145,14 +1737,15 @@ type Msg
     | TransitionEnded String
     | LoginMsg Login.Msg
     | ResetPasswordMsg ResetPassword.Msg
-    | LoginTransitionCompleted
+    | ArrivalSettled
+    | HomeMsg Home.Msg
     | BookshelfMsg Bookshelf.Msg
     | ReadingPileMsg ReadingPile.Msg
     | LookingForHomeMsg LookingForHome.Msg
     | BookDetailMsg BookDetail.Msg
     | UploadMsg Upload.Msg
+    | ImportPageMsg ImportPage.Msg
     | SearchMsg Search.Msg
-    | ConsentMsg Consent.Msg
     | AuditLogMsg AuditLog.Msg
     | InsightsMsg Insights.Msg
     | ProfileMsg Profile.Msg
@@ -1161,6 +1754,7 @@ type Msg
     | CostTransparencyMsg CostTransparency.Msg
     | MetricsMsg MetricsPage.Msg
     | CatalogueMsg Catalogue.Msg
+    | ListingRemovalMsg ListingRemoval.Msg
     | MarketplaceBrowseMsg MarketplaceBrowse.Msg
     | CreateListingMsg CreateListing.Msg
     | MyListingsMsg MyListings.Msg
@@ -1170,14 +1764,17 @@ type Msg
     | BlogEditorMsg BlogEditor.Msg
     | BlogPostMsg BlogPostPage.Msg
     | AdminSourceApprovalMsg AdminSourceApproval.Msg
+    | AdminInvitesMsg AdminInvites.Msg
     | AdminScraperConfigMsg AdminScraperConfig.Msg
     | AdminBookModerationMsg AdminBookModeration.Msg
+    | AdminRemovalRequestsMsg AdminRemovalRequests.Msg
+    | AdminSessionMsg AdminSession.Msg
     | GroupsMsg Groups.Msg
     | GroupsDetailMsg GroupsDetail.Msg
     | PublicProfileMsg ProfilePage.Msg
     | UserMenuMsg UserMenu.Msg
-    | LogoutCompleted
-    | SettingsMobileNavChanged String
+    | ToggleNavMenu NavMenu
+    | CloseNavMenu
     | SwipeReceived String
     | SwipeIgnored
     | OverlayBookDetailMsg BookDetail.Msg
@@ -1186,11 +1783,14 @@ type Msg
     | OnboardingStatusReceived Bool
     | FocusResult
     | GotPlacementCheck (Result Http.Error (List Types.Placement.Placement))
+    | GotUploadInbox (Result Http.Error (List Api.InboxItem))
     | RenewToken
     | TokenRefreshed (Result Http.Error Api.AuthResponse)
     | AuthChangedExternally Decode.Value
     | GotStoredAuth Decode.Value
     | AgeGatingConfigReceived Bool
+    | InviteOnlyConfigReceived Bool
+    | ConnectivityChanged Bool
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -1221,48 +1821,37 @@ update msg model =
                 transition =
                     Just (transitionClass model.route newRoute)
 
-                ( initialisedPage, cmd ) =
-                    initPage model.config newRoute model.auth (Just model.route)
-
-                -- Consume a pending session-expiry notice: when the redirect lands
-                -- on /login, build the Login page in its expired-notice state so the
-                -- message survives this `UrlChanged` re-init.
-                page =
-                    if newRoute == Login && model.accountDeletedNotice then
-                        PageLogin Login.farewellInit
-
-                    else if newRoute == Login && model.sessionExpiredNotice then
-                        if model.draftSavedNotice then
-                            PageLogin Login.expiredDraftInit
-
-                        else
-                            PageLogin Login.expiredInit
-
-                    else
-                        initialisedPage
+                ( page, cmd ) =
+                    initPage model.config
+                        newRoute
+                        (originOf url)
+                        (currentAuth model.auth)
+                        (adminTokenFor model)
+                        (Just model.route)
+                        model.arrival
+                        |> applyPendingUndo model.pendingUndo
             in
             ( { model
                 | url = url
                 , route = newRoute
                 , page = page
                 , previousRoute = Just model.route
+                , pendingUndo = Nothing
                 , transition = transition
+                , redirectAfterLogin =
+                    redirectAfterNavigation
+                        { arrivingAt = newRoute
+                        , leaving = model.route
+                        , sessionExpiring = Login.isSessionExpiry model.arrival
+                        , auth = currentAuth model.auth
+                        }
                 , userMenu = UserMenu.init
-                , sessionExpiredNotice =
-                    model.sessionExpiredNotice && newRoute /= Login
-                , draftSavedNotice =
-                    model.draftSavedNotice && newRoute /= Login
-                , accountDeletedNotice =
-                    model.accountDeletedNotice && newRoute /= Login
+                , arrival = consumeArrival page model.arrival
               }
             , cmd
             )
 
         TransitionEnded animationName ->
-            -- Clear the navigation transition class once its own animation has
-            -- finished, so the next navigation re-adds it and the browser
-            -- restarts the animation (US-1.2.5, issue #277). The bubbling
-            -- filter lives in Animation.Transition, where it is unit-tested.
             ( { model
                 | transition =
                     Transition.clearOnAnimationEnd animationName model.transition
@@ -1287,87 +1876,23 @@ update msg model =
                         Login.NoOut ->
                             ( baseModel, baseCmd )
 
-                        Login.StartTransition authResponse ->
-                            ( { baseModel | pendingAuthResponse = Just authResponse }
-                            , Cmd.batch
-                                [ baseCmd
-                                , playLoginTransition
-                                    (Json.Encode.object
-                                        [ ( "duration", Json.Encode.int 4000 ) ]
-                                    )
-                                ]
-                            )
-
                         Login.LoggedIn authResponse ->
                             let
-                                auth =
-                                    { user =
-                                        { id = authResponse.userId
-                                        , email = authResponse.email
-                                        , displayName = authResponse.displayName
-                                        , handle = authResponse.handle
-                                        , role = authResponse.role
-                                        , countryCode = Nothing
-                                        , city = Nothing
-                                        , consentAnalytics = authResponse.consentAnalytics
-                                        , consentWritingAssistant = authResponse.consentWritingAssistant
-                                        }
-                                    , token = authResponse.token
-                                    }
+                                arrival =
+                                    completeLogin authResponse
                             in
-                            ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , loginCompletionCmd model.key auth baseCmd
+                            ( { baseModel | auth = arrival.authState }
+                            , loginCompletionCmd model.key model.redirectAfterLogin arrival baseCmd
                             )
 
                         Login.RegistrationSucceeded _ ->
-                            -- Registration only sends a confirmation email; no JWT is
-                            -- issued and no navigation happens. The Login page has already
-                            -- switched itself to the pending state via its own model.
                             ( baseModel, baseCmd )
 
                 _ ->
                     ( model, Cmd.none )
 
-        LoginTransitionCompleted ->
-            case ( model.page, model.pendingAuthResponse ) of
-                ( PageLogin subModel, Just authResponse ) ->
-                    let
-                        ( newSubModel, subCmd, outMsg ) =
-                            Login.update (Login.TransitionCompleted authResponse) subModel
-
-                        baseModel =
-                            { model | page = PageLogin newSubModel }
-
-                        baseCmd =
-                            Cmd.map LoginMsg subCmd
-                    in
-                    case outMsg of
-                        Login.LoggedIn ar ->
-                            let
-                                auth =
-                                    { user =
-                                        { id = ar.userId
-                                        , email = ar.email
-                                        , displayName = ar.displayName
-                                        , handle = ar.handle
-                                        , role = ar.role
-                                        , countryCode = Nothing
-                                        , city = Nothing
-                                        , consentAnalytics = ar.consentAnalytics
-                                        , consentWritingAssistant = ar.consentWritingAssistant
-                                        }
-                                    , token = ar.token
-                                    }
-                            in
-                            ( { baseModel | auth = Just auth, pendingAuthResponse = Nothing }
-                            , loginCompletionCmd model.key auth baseCmd
-                            )
-
-                        _ ->
-                            ( baseModel, baseCmd )
-
-                _ ->
-                    ( model, Cmd.none )
+        ArrivalSettled ->
+            ( { model | auth = settleArrival model.auth }, Cmd.none )
 
         BookshelfMsg subMsg ->
             case model.page of
@@ -1460,6 +1985,29 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        HomeMsg subMsg ->
+            case model.page of
+                PageHome subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            Home.update subMsg subModel
+
+                        baseModel =
+                            { model | page = PageHome newSubModel }
+
+                        baseCmd =
+                            Cmd.map HomeMsg subCmd
+                    in
+                    case outMsg of
+                        Home.NoOut ->
+                            ( baseModel, baseCmd )
+
+                        Home.SessionExpired ->
+                            handleSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
         LookingForHomeMsg subMsg ->
             case model.page of
                 PageLookingForHome subModel ->
@@ -1488,7 +2036,7 @@ update msg model =
                 PageBookDetail subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             BookDetail.update subMsg subModel maybeToken
@@ -1510,14 +2058,10 @@ update msg model =
                             ( baseModel, baseCmd )
 
                         BookDetail.NavigateTo route ->
-                            ( baseModel
+                            ( { baseModel | pendingUndo = newSubModel.undoableRemoval }
                             , Cmd.batch
                                 [ baseCmd
                                 , Nav.pushUrl model.key (Route.toPath route)
-
-                                -- Match the overlay path: after a remove on the
-                                -- full-page route, focus the main landmark so it
-                                -- is not lost to <body> (#295 item b).
                                 , focusMainContent
                                 ]
                             )
@@ -1530,7 +2074,7 @@ update msg model =
                 PageUpload subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Upload.update subMsg subModel maybeToken
@@ -1564,6 +2108,36 @@ update msg model =
                                 ]
                             )
 
+                        Upload.RefreshInbox ->
+                            ( baseModel
+                            , Cmd.batch
+                                [ baseCmd
+                                , fetchUploadInbox (currentAuth model.auth)
+                                ]
+                            )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        ImportPageMsg subMsg ->
+            case model.page of
+                PageImport subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            ImportPage.update subMsg subModel maybeToken
+                    in
+                    case outMsg of
+                        ImportPage.NoOut ->
+                            ( { model | page = PageImport newSubModel }
+                            , Cmd.map ImportPageMsg subCmd
+                            )
+
+                        ImportPage.SessionExpired ->
+                            handleSessionExpiry model
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -1572,7 +2146,7 @@ update msg model =
                 PageSearch subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Search.update subMsg subModel maybeToken
@@ -1597,28 +2171,6 @@ update msg model =
                             ( overlayModel
                             , Cmd.batch [ Cmd.map SearchMsg subCmd, overlayCmd ]
                             )
-
-                _ ->
-                    ( model, Cmd.none )
-
-        ConsentMsg subMsg ->
-            case model.page of
-                PageSettingsConsent subModel ->
-                    let
-                        maybeToken =
-                            Maybe.map .token model.auth
-
-                        ( newSubModel, subCmd, outMsg ) =
-                            Consent.update subMsg subModel maybeToken
-                    in
-                    case outMsg of
-                        Consent.NoOut ->
-                            ( { model | page = PageSettingsConsent newSubModel }
-                            , Cmd.map ConsentMsg subCmd
-                            )
-
-                        Consent.SessionExpired ->
-                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1666,14 +2218,19 @@ update msg model =
                 PageSettingsProfile subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Profile.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsProfile newSubModel }
-                    , Cmd.map ProfileMsg subCmd
-                    )
+                    case outMsg of
+                        Profile.NoOut ->
+                            ( { model | page = PageSettingsProfile newSubModel }
+                            , Cmd.map ProfileMsg subCmd
+                            )
+
+                        Profile.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1683,14 +2240,19 @@ update msg model =
                 PageSettingsPassword subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Password.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsPassword newSubModel }
-                    , Cmd.map PasswordMsg subCmd
-                    )
+                    case outMsg of
+                        Password.NoOut ->
+                            ( { model | page = PageSettingsPassword newSubModel }
+                            , Cmd.map PasswordMsg subCmd
+                            )
+
+                        Password.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1699,11 +2261,19 @@ update msg model =
             case model.page of
                 PageResetPassword subModel ->
                     let
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             ResetPassword.update subMsg subModel
+
+                        advanced =
+                            case resetPasswordDestination outMsg of
+                                Just route ->
+                                    [ Nav.pushUrl model.key (Route.toPath route) ]
+
+                                Nothing ->
+                                    []
                     in
                     ( { model | page = PageResetPassword newSubModel }
-                    , Cmd.map ResetPasswordMsg subCmd
+                    , Cmd.batch (Cmd.map ResetPasswordMsg subCmd :: advanced)
                     )
 
                 _ ->
@@ -1714,14 +2284,19 @@ update msg model =
                 PageSettingsNotifications subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
-                        ( newSubModel, subCmd ) =
+                        ( newSubModel, subCmd, outMsg ) =
                             Notifications.update subMsg subModel maybeToken
                     in
-                    ( { model | page = PageSettingsNotifications newSubModel }
-                    , Cmd.map NotificationsMsg subCmd
-                    )
+                    case outMsg of
+                        Notifications.NoOut ->
+                            ( { model | page = PageSettingsNotifications newSubModel }
+                            , Cmd.map NotificationsMsg subCmd
+                            )
+
+                        Notifications.SessionExpired ->
+                            handleSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1754,12 +2329,26 @@ update msg model =
                 _ ->
                     ( model, Cmd.none )
 
+        ListingRemovalMsg subMsg ->
+            case model.page of
+                PageListingRemoval subModel ->
+                    let
+                        ( newSubModel, subCmd ) =
+                            ListingRemoval.update subMsg subModel
+                    in
+                    ( { model | page = PageListingRemoval newSubModel }
+                    , Cmd.map ListingRemovalMsg subCmd
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         CatalogueMsg subMsg ->
             case model.page of
                 PageCatalogue subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Catalogue.update subMsg subModel maybeToken
@@ -1795,10 +2384,10 @@ update msg model =
                 PageMarketplaceCreate subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         maybeUserId =
-                            Maybe.map (.user >> .id) model.auth
+                            Maybe.map (.user >> .id) (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             CreateListing.update subMsg subModel maybeToken maybeUserId
@@ -1820,7 +2409,7 @@ update msg model =
                             -- Persist the draft and run the deferred expiry path,
                             -- remembering (via the parked intent) to raise the
                             -- draft-saved login notice IF the re-check ends in a
-                            -- logout (#182 + #180 Phase 2).
+                            -- logout.
                             handleSessionExpiryWithDraft draft model
 
                         CreateListing.ClearDraft ->
@@ -1847,7 +2436,7 @@ update msg model =
                 PageMarketplaceMyListings subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             MyListings.update subMsg subModel maybeToken
@@ -1883,7 +2472,7 @@ update msg model =
                 PageSettingsPrivacy subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             Privacy.update subMsg subModel maybeToken
@@ -1922,7 +2511,7 @@ update msg model =
                 PageBlogEditor subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             BlogEditor.update subMsg subModel maybeToken
@@ -1944,7 +2533,7 @@ update msg model =
                 PageBlogPost subModel ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newSubModel, subCmd, outMsg ) =
                             BlogPostPage.update subMsg subModel maybeToken
@@ -1958,6 +2547,19 @@ update msg model =
                         BlogPostPage.SessionExpired ->
                             handleSessionExpiry model
 
+                        BlogPostPage.EscapeUnhandled ->
+                            ( { model | page = PageBlogPost newSubModel }
+                            , Cmd.map BlogPostMsg subCmd
+                            )
+
+                        BlogPostPage.RequestCopy payload ->
+                            ( { model | page = PageBlogPost newSubModel }
+                            , Cmd.batch
+                                [ Cmd.map BlogPostMsg subCmd
+                                , copyToClipboard payload
+                                ]
+                            )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -1965,11 +2567,11 @@ update msg model =
             case model.page of
                 PageAdminSourceApproval subModel ->
                     let
-                        maybeToken =
-                            Maybe.map .token model.auth
+                        adminToken =
+                            adminTokenFor model
 
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminSourceApproval.update subMsg subModel maybeToken
+                            AdminSourceApproval.update subMsg subModel adminToken
                     in
                     case outMsg of
                         AdminSourceApproval.NoOut ->
@@ -1978,7 +2580,26 @@ update msg model =
                             )
 
                         AdminSourceApproval.SessionExpired ->
-                            handleSessionExpiry model
+                            handleAdminSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminInvitesMsg subMsg ->
+            case model.page of
+                PageAdminInvites subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminInvites.update subMsg subModel (adminTokenFor model)
+                    in
+                    case outMsg of
+                        AdminInvites.NoOut ->
+                            ( { model | page = PageAdminInvites newSubModel }
+                            , Cmd.map AdminInvitesMsg subCmd
+                            )
+
+                        AdminInvites.SessionExpired ->
+                            handleAdminSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -1997,7 +2618,7 @@ update msg model =
                             )
 
                         AdminScraperConfig.SessionExpired ->
-                            handleSessionExpiry model
+                            handleAdminSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -2006,11 +2627,11 @@ update msg model =
             case model.page of
                 PageAdminBookModeration subModel ->
                     let
-                        maybeToken =
-                            Maybe.map .token model.auth
+                        adminToken =
+                            adminTokenFor model
 
                         ( newSubModel, subCmd, outMsg ) =
-                            AdminBookModeration.update subMsg subModel maybeToken
+                            AdminBookModeration.update subMsg subModel adminToken
                     in
                     case outMsg of
                         AdminBookModeration.NoOut ->
@@ -2019,7 +2640,63 @@ update msg model =
                             )
 
                         AdminBookModeration.SessionExpired ->
-                            handleSessionExpiry model
+                            handleAdminSessionExpiry model
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminSessionMsg subMsg ->
+            case model.page of
+                PageAdminGate gatedRoute subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminSession.update subMsg subModel (Maybe.map .token (currentAuth model.auth))
+                    in
+                    case outMsg of
+                        AdminSession.NoOut ->
+                            ( { model | page = PageAdminGate gatedRoute newSubModel }
+                            , Cmd.map AdminSessionMsg subCmd
+                            )
+
+                        AdminSession.Authenticated adminToken ->
+                            let
+                                withToken =
+                                    { model | adminAuth = Just adminToken }
+
+                                ( page, pageCmd ) =
+                                    initPage model.config
+                                        gatedRoute
+                                        (originOf model.url)
+                                        (currentAuth model.auth)
+                                        (adminTokenFor withToken)
+                                        (Just model.route)
+                                        model.arrival
+                            in
+                            ( { withToken | page = page, arrival = consumeArrival page model.arrival }
+                            , pageCmd
+                            )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        AdminRemovalRequestsMsg subMsg ->
+            case model.page of
+                PageAdminRemovalRequests subModel ->
+                    let
+                        adminToken =
+                            adminTokenFor model
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            AdminRemovalRequests.update subMsg subModel adminToken
+                    in
+                    case outMsg of
+                        AdminRemovalRequests.NoOut ->
+                            ( { model | page = PageAdminRemovalRequests newSubModel }
+                            , Cmd.map AdminRemovalRequestsMsg subCmd
+                            )
+
+                        AdminRemovalRequests.SessionExpired ->
+                            handleAdminSessionExpiry model
 
                 _ ->
                     ( model, Cmd.none )
@@ -2075,6 +2752,11 @@ update msg model =
                                 ]
                             )
 
+                        GroupsDetail.EscapeUnhandled ->
+                            ( { model | page = PageGroupsDetail newSubModel }
+                            , Cmd.map GroupsDetailMsg subCmd
+                            )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -2102,7 +2784,7 @@ update msg model =
                 Just overlay ->
                     let
                         maybeToken =
-                            Maybe.map .token model.auth
+                            Maybe.map .token (currentAuth model.auth)
 
                         ( newDetail, subCmd, outMsg ) =
                             BookDetail.update subMsg overlay.detail maybeToken
@@ -2125,10 +2807,10 @@ update msg model =
                             )
 
                         BookDetail.NavigateTo route ->
-                            -- Remove-success path: tear down the overlay, land on
-                            -- the previous shelf, and move focus to the main
-                            -- landmark so it is not lost to <body> (#295 item b).
-                            ( { model | bookDetailOverlay = Nothing }
+                            ( { model
+                                | bookDetailOverlay = Nothing
+                                , pendingUndo = newDetail.undoableRemoval
+                              }
                             , Cmd.batch
                                 [ Nav.pushUrl model.key (Route.toPath route)
                                 , focusMainContent
@@ -2153,154 +2835,138 @@ update msg model =
             in
             case outMsg of
                 UserMenu.NoOut ->
-                    ( { model | userMenu = newUserMenu }, Cmd.none )
+                    ( { model | userMenu = newUserMenu, openNavMenu = Nothing }, Cmd.none )
 
-                UserMenu.NavigateToSettings ->
-                    ( { model | userMenu = newUserMenu }
-                    , Nav.pushUrl model.key (Route.toPath SettingsProfile)
+                UserMenu.NavigateTo path ->
+                    ( { model | userMenu = newUserMenu, openNavMenu = Nothing }
+                    , Nav.pushUrl model.key path
                     )
 
                 UserMenu.SignOut ->
                     let
                         logoutCmd =
-                            case model.auth of
+                            case currentAuth model.auth of
                                 Just auth ->
-                                    Api.logout auth.token (always LogoutCompleted)
+                                    Api.logout auth.token (always FocusResult)
 
                                 Nothing ->
                                     Cmd.none
                     in
-                    ( { model | userMenu = newUserMenu, auth = Nothing, page = PageLogin Login.init }
+                    ( { model
+                        | userMenu = newUserMenu
+                        , auth = Anonymous
+                        , adminAuth = Nothing
+                        , page = PageLogin (Login.init Login.Fresh |> Login.withInviteOnly model.config.inviteOnly)
+                        , arrival = Login.Fresh
+                      }
                     , Cmd.batch
                         [ logoutCmd
                         , clearAuth ()
-
-                        -- Defense-in-depth (#182): a deliberate sign-out also
-                        -- wipes any persisted listing draft (it carries PII).
-                        -- NB: the session-expiry path deliberately does NOT do
-                        -- this — it must preserve the draft across the redirect.
                         , clearListingDraft ()
                         , Nav.pushUrl model.key (Route.toPath Login)
                         ]
                     )
 
-        LogoutCompleted ->
-            ( model, Cmd.none )
+        ToggleNavMenu menu ->
+            ( { model
+                | openNavMenu = toggleNavMenu menu model.openNavMenu
+                , userMenu = UserMenu.init
+              }
+            , Cmd.none
+            )
 
-        SettingsMobileNavChanged path ->
-            ( model, Nav.pushUrl model.key path )
+        CloseNavMenu ->
+            ( { model | openNavMenu = Nothing }, Cmd.none )
 
         EscapePressed ->
-            case model.bookDetailOverlay of
-                Just overlay ->
-                    let
-                        maybeToken =
-                            Maybe.map .token model.auth
+            if onboardingShowing model then
+                update (OnboardingMsg OnboardingOverlay.EscapePressed) model
 
-                        -- Give the overlay first dibs on Escape: it dismisses a
-                        -- nested surface (remove modal / progress-edit form) if
-                        -- one is open, else returns RequestCloseOverlay.
-                        ( newDetail, subCmd, outMsg ) =
-                            BookDetail.update BookDetail.EscapePressed overlay.detail maybeToken
-
-                        returnFocusCmd =
-                            case overlay.triggerSpineId of
-                                Just spineId ->
-                                    Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
-
-                                Nothing ->
-                                    Cmd.none
-                    in
-                    case outMsg of
-                        BookDetail.RequestCloseOverlay ->
-                            -- No nested surface consumed it: close the overlay and
-                            -- return focus to the triggering spine.
-                            ( { model | bookDetailOverlay = Nothing }, returnFocusCmd )
-
-                        _ ->
-                            -- The overlay closed a nested surface and stays open;
-                            -- run its (focus-return) command.
-                            ( { model | bookDetailOverlay = Just { overlay | detail = newDetail } }
-                            , Cmd.map OverlayBookDetailMsg subCmd
-                            )
-
-                Nothing ->
-                    -- No overlay is open. On the full-page BookDetail route,
-                    -- give the page first dibs on Escape so its nested surfaces
-                    -- (remove modal / progress-edit form) dismiss too (#295 item
-                    -- e) — the same consumed/not-consumed pattern as the overlay.
-                    case model.page of
-                        PageBookDetail subModel ->
-                            let
-                                maybeToken =
-                                    Maybe.map .token model.auth
-
-                                ( newSubModel, subCmd, outMsg ) =
-                                    BookDetail.update BookDetail.EscapePressed subModel maybeToken
-                            in
-                            case outMsg of
-                                BookDetail.RequestCloseOverlay ->
-                                    -- No nested surface consumed it; there is no
-                                    -- overlay to close on the page route, so fall
-                                    -- back to the default (close the user menu).
-                                    closeUserMenuOnEscape model
-
-                                _ ->
-                                    -- The page dismissed a nested surface and
-                                    -- stays put; run its (focus-return) command.
-                                    ( { model | page = PageBookDetail newSubModel }
-                                    , Cmd.map BookDetailMsg subCmd
-                                    )
-
-                        _ ->
-                            closeUserMenuOnEscape model
+            else
+                escapeForPage model
 
         OnboardingMsg subMsg ->
             let
+                maybeToken =
+                    Maybe.map .token (currentAuth model.auth)
+
                 ( newOnboarding, subCmd, outMsg ) =
-                    OnboardingOverlay.update subMsg model.onboarding
+                    OnboardingOverlay.update maybeToken subMsg model.onboarding
 
-                -- When the user clicks Next, record the completed step via the API
-                apiCmd =
-                    case ( subMsg, model.auth ) of
-                        ( OnboardingOverlay.NextStep, Just auth ) ->
-                            Cmd.map OnboardingMsg
-                                (OnboardingOverlay.completeStep auth.token model.onboarding.step)
+                baseModel =
+                    { model | onboarding = newOnboarding }
 
-                        _ ->
-                            Cmd.none
+                baseCmd =
+                    Cmd.map OnboardingMsg subCmd
             in
             case outMsg of
-                OnboardingOverlay.SkipCompleted ->
-                    ( { model | onboarding = newOnboarding, onboardingCompleted = True }
-                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, saveOnboardingCompleted () ]
+                OnboardingOverlay.OnboardingFinished ->
+                    ( { baseModel | onboardingCompleted = True }
+                    , Cmd.batch [ baseCmd, saveOnboardingCompleted () ]
                     )
 
-                OnboardingOverlay.FinishCompleted ->
-                    ( { model | onboarding = newOnboarding, onboardingCompleted = True }
-                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, saveOnboardingCompleted () ]
-                    )
+                OnboardingOverlay.UploadOpenStream url ->
+                    ( baseModel, Cmd.batch [ baseCmd, openUploadStream { url = url } ] )
+
+                OnboardingOverlay.UploadRefreshInbox ->
+                    ( baseModel, Cmd.batch [ baseCmd, fetchUploadInbox (currentAuth model.auth) ] )
+
+                OnboardingOverlay.UploadNavigate route ->
+                    ( baseModel, Cmd.batch [ baseCmd, Nav.pushUrl model.key (Route.toPath route) ] )
+
+                OnboardingOverlay.SessionExpired ->
+                    handleSessionExpiry model
 
                 OnboardingOverlay.NoOut ->
-                    ( { model | onboarding = newOnboarding }
-                    , Cmd.batch [ Cmd.map OnboardingMsg subCmd, apiCmd ]
-                    )
+                    ( baseModel, baseCmd )
 
         OnboardingStatusReceived completed ->
             ( { model | onboardingCompleted = completed }, Cmd.none )
 
+        InviteOnlyConfigReceived enabled ->
+            let
+                config =
+                    model.config
+
+                page =
+                    case model.page of
+                        PageLogin loginModel ->
+                            PageLogin (Login.withInviteOnly enabled loginModel)
+
+                        other ->
+                            other
+            in
+            ( { model | config = { config | inviteOnly = enabled }, page = page }, Cmd.none )
+
         AgeGatingConfigReceived enabled ->
-            -- The background `GET /api/config` fetch resolved (ADR-020). Adopt the
-            -- server-provided flag; in production it is `False` (no-op vs. the
-            -- boot default), and only flips age UI on where the flag is set.
             let
                 config =
                     model.config
             in
             ( { model | config = { config | ageGatingEnabled = enabled } }, Cmd.none )
 
+        ConnectivityChanged isOnline ->
+            let
+                connectivity =
+                    connectivityFromOnline isOnline
+            in
+            if reconnectShouldRefetch model.connectivity connectivity model.page then
+                let
+                    ( page, cmd ) =
+                        initPage model.config
+                            model.route
+                            (originOf model.url)
+                            (currentAuth model.auth)
+                            (adminTokenFor model)
+                            (Just model.route)
+                            model.arrival
+                in
+                ( { model | connectivity = connectivity, page = page }, cmd )
+
+            else
+                ( { model | connectivity = connectivity }, Cmd.none )
+
         FocusResult ->
-            -- Focus attempt completed (success or failure); nothing to do.
             ( model, Cmd.none )
 
         GotPlacementCheck result ->
@@ -2315,10 +2981,20 @@ update msg model =
                     else
                         ( model, Cmd.none )
 
+        GotUploadInbox result ->
+            case result of
+                Ok items ->
+                    ( { model | uploadInbox = Success items }, Cmd.none )
+
+                Err err ->
+                    if Api.isUnauthorized err then
+                        handleSessionExpiry model
+
+                    else
+                        ( { model | uploadInbox = Failure err }, Cmd.none )
+
         RenewToken ->
-            -- Proactive silent renewal tick. Only meaningful while authenticated;
-            -- a signed-out session simply drops the tick.
-            case model.auth of
+            case currentAuth model.auth of
                 Just auth ->
                     ( model, Api.refresh auth.token TokenRefreshed )
 
@@ -2326,15 +3002,13 @@ update msg model =
                     ( model, Cmd.none )
 
         TokenRefreshed (Ok authResponse) ->
-            -- Renewal succeeded: adopt the fresh token (keeping the same user),
-            -- persist it, and roll the next renewal. No navigation, no logout.
-            case model.auth of
+            case currentAuth model.auth of
                 Just auth ->
                     let
                         renewedAuth =
                             renewAuthToken authResponse auth
                     in
-                    ( { model | auth = Just renewedAuth }
+                    ( { model | auth = Authenticated renewedAuth }
                     , Cmd.batch [ saveAuth (encodeAuth renewedAuth), scheduleRenewal ]
                     )
 
@@ -2342,46 +3016,25 @@ update msg model =
                     ( model, Cmd.none )
 
         TokenRefreshed (Err _) ->
-            -- Renewal failed (token already expired/revoked, or the service is
-            -- down): fall through to the session-expiry path, tagged as
-            -- renewal-origin so a re-check adopt re-arms the consumed tick (P1b).
             handleSessionExpiryFromRenewal model
 
         AuthChangedExternally value ->
-            -- A sibling tab wrote `stacks-auth` (Issue #180 Phase 2).
-            case adoptExternalAuth value model.auth of
+            case adoptExternalAuth value (currentAuth model.auth) of
                 AdoptAuth newAuth ->
-                    -- Adopt the token another tab rotated in. No `saveAuth` (that
-                    -- tab already persisted it) and NO reschedule: this tab still
-                    -- has its own renewal tick armed, so re-arming here would let
-                    -- every rotation spawn an extra timer per tab (a growing
-                    -- refresh storm — exactly what #180 fights).
-                    --
-                    -- P1a: adopting a VALID token also cancels any parked expiry —
-                    -- otherwise an in-flight `gotStoredAuth` (whose stored value now
-                    -- equals this adopted token → IgnoreExternal) would force a
-                    -- logout on a tab that just adopted a live credential.
-                    ( { model | auth = Just newAuth, pendingLogout = Nothing }
+                    ( { model | auth = Authenticated newAuth, pendingLogout = Nothing }
                     , Cmd.none
                     )
 
                 LogOutExternally ->
-                    -- A sibling `clearAuth`: a logout in one tab logs out all.
                     forceSessionExpiry False model
 
                 IgnoreExternal ->
                     ( model, Cmd.none )
 
         GotStoredAuth value ->
-            -- The re-check-before-logout answer (Issue #180 Phase 2). The pure
-            -- resolver folds in the parked intent (origin + draft flags); a stray
-            -- answer with no parked intent is a no-op (P1a).
-            case resolveRecheck model.pendingLogout (adoptExternalAuth value model.auth) of
+            case resolveRecheck model.pendingLogout (adoptExternalAuth value (currentAuth model.auth)) of
                 ResolveAdopt newAuth reschedule ->
-                    -- localStorage holds a newer token than the one that 401'd —
-                    -- adopt it and cancel the logout. Re-arm renewal ONLY for a
-                    -- renewal-origin expiry, whose proactive tick was consumed (P1b).
-                    ( { model | auth = Just newAuth, pendingLogout = Nothing }
+                    ( { model | auth = Authenticated newAuth, pendingLogout = Nothing }
                     , if reschedule then
                         scheduleRenewal
 
@@ -2390,8 +3043,6 @@ update msg model =
                     )
 
                 ResolveForceLogout draftSaved ->
-                    -- Nothing newer stored (same token / cleared / garbage):
-                    -- proceed to the real logout, carrying the draft notice.
                     forceSessionExpiry draftSaved model
 
                 ResolveNoop ->
@@ -2427,7 +3078,7 @@ openOverlay model bookId =
 
 
 {-| Move focus to the persistent main-content landmark. Used after a book is
-removed from its shelf (#295 item b): the remove-success path navigates to the
+removed from its shelf (item b): the remove-success path navigates to the
 previous shelf route, and without an explicit target focus would drop to
 `<body>`, stranding keyboard and screen-reader users. The landmark carries
 `tabindex -1` so this focus lands. It is always in the DOM (the app shell), so
@@ -2439,7 +3090,8 @@ focusMainContent =
 
 
 {-| The default top-level Escape behaviour when no book overlay is open and the
-current page has nothing nested to dismiss: close the user menu.
+current page has nothing nested to dismiss: close whichever menu is open — the
+account menu and every nav disclosure (TR-1).
 -}
 closeUserMenuOnEscape : Model -> ( Model, Cmd Msg )
 closeUserMenuOnEscape model =
@@ -2447,20 +3099,115 @@ closeUserMenuOnEscape model =
         ( newUserMenu, _ ) =
             UserMenu.update UserMenu.Close model.userMenu
     in
-    ( { model | userMenu = newUserMenu }, Cmd.none )
+    ( { model | userMenu = newUserMenu, openNavMenu = Nothing }, Cmd.none )
+
+
+{-| Whether the onboarding overlay is the topmost, interactive surface: the
+view-gate (`shouldShowOnboarding`) is satisfied AND the overlay still wants to
+render. Used so Escape reaches onboarding before any page-level handler.
+-}
+onboardingShowing : Model -> Bool
+onboardingShowing model =
+    shouldShowOnboarding (currentAuth model.auth) model.onboardingCompleted model.hasAnyPlacements
+        && OnboardingOverlay.isVisible model.onboarding
+
+
+{-| The Escape handling for whatever page/overlay is showing when onboarding is
+NOT up. Extracted from `update` so the onboarding-first-dibs branch stays a
+one-liner (the body is unchanged from before 8b).
+-}
+escapeForPage : Model -> ( Model, Cmd Msg )
+escapeForPage model =
+    case model.bookDetailOverlay of
+        Just overlay ->
+            let
+                maybeToken =
+                    Maybe.map .token (currentAuth model.auth)
+
+                ( newDetail, subCmd, outMsg ) =
+                    BookDetail.update BookDetail.EscapePressed overlay.detail maybeToken
+
+                returnFocusCmd =
+                    case overlay.triggerSpineId of
+                        Just spineId ->
+                            Task.attempt (always FocusResult) (Browser.Dom.focus spineId)
+
+                        Nothing ->
+                            Cmd.none
+            in
+            case outMsg of
+                BookDetail.RequestCloseOverlay ->
+                    ( { model | bookDetailOverlay = Nothing }, returnFocusCmd )
+
+                _ ->
+                    ( { model | bookDetailOverlay = Just { overlay | detail = newDetail } }
+                    , Cmd.map OverlayBookDetailMsg subCmd
+                    )
+
+        Nothing ->
+            case model.page of
+                PageBookDetail subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            BookDetail.update BookDetail.EscapePressed subModel maybeToken
+                    in
+                    case outMsg of
+                        BookDetail.RequestCloseOverlay ->
+                            closeUserMenuOnEscape model
+
+                        _ ->
+                            ( { model | page = PageBookDetail newSubModel }
+                            , Cmd.map BookDetailMsg subCmd
+                            )
+
+                PageBlogPost subModel ->
+                    let
+                        maybeToken =
+                            Maybe.map .token (currentAuth model.auth)
+
+                        ( newSubModel, subCmd, outMsg ) =
+                            BlogPostPage.update BlogPostPage.EscapePressed subModel maybeToken
+                    in
+                    case outMsg of
+                        BlogPostPage.EscapeUnhandled ->
+                            closeUserMenuOnEscape model
+
+                        _ ->
+                            ( { model | page = PageBlogPost newSubModel }
+                            , Cmd.map BlogPostMsg subCmd
+                            )
+
+                PageGroupsDetail subModel ->
+                    let
+                        ( newSubModel, subCmd, outMsg ) =
+                            GroupsDetail.update GroupsDetail.EscapePressed subModel
+                    in
+                    case outMsg of
+                        GroupsDetail.EscapeUnhandled ->
+                            closeUserMenuOnEscape model
+
+                        _ ->
+                            ( { model | page = PageGroupsDetail newSubModel }
+                            , Cmd.map GroupsDetailMsg subCmd
+                            )
+
+                _ ->
+                    closeUserMenuOnEscape model
 
 
 {-| Open the book detail overlay, returning focus to an explicit trigger
 element id on close. Shelf pages trigger from a `spine-<bookId>` element
 (`openOverlay`); the search results list triggers from its own
-`search-result-<bookId>` button (#289) — both compose with the #114
-focus-return mechanism via `triggerSpineId`.
+`search-result-<bookId>` button — both compose with the focus-return mechanism via `triggerSpineId`.
 -}
 openOverlayWithTrigger : Model -> String -> String -> ( Model, Cmd Msg )
 openOverlayWithTrigger model bookId triggerId =
     let
         maybeToken =
-            Maybe.map .token model.auth
+            Maybe.map .token (currentAuth model.auth)
 
         ( detailModel, detailCmd ) =
             BookDetail.init bookId maybeToken (Just model.route)
@@ -2474,29 +3221,22 @@ openOverlayWithTrigger model bookId triggerId =
     ( { model | bookDetailOverlay = Just overlay }
     , Cmd.batch
         [ Cmd.map OverlayBookDetailMsg detailCmd
-
-        -- #295 item a: focus the labelled dialog card on open (not the close
-        -- button), so a screen reader announces the book first. The card is
-        -- `tabindex -1`, so the first forward Tab still lands on the close
-        -- button and the focus trap is unaffected.
         , Task.attempt (always FocusResult) (Browser.Dom.focus BookDetail.cardFocusId)
         ]
     )
-
-
-
--- SUBSCRIPTIONS
 
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
         [ onSwipe decodeSwipe
-        , onLoginTransitionComplete (\_ -> LoginTransitionCompleted)
+        , onLoginTransitionComplete (\_ -> ArrivalSettled)
         , onOnboardingStatus OnboardingStatusReceived
         , authChanged AuthChangedExternally
         , gotStoredAuth GotStoredAuth
         , ageGatingConfig AgeGatingConfigReceived
+        , inviteOnlyConfig InviteOnlyConfigReceived
+        , connectivityChanged ConnectivityChanged
         , Browser.Events.onKeyDown
             (Decode.field "key" Decode.string
                 |> Decode.andThen
@@ -2508,23 +3248,52 @@ subscriptions model =
                             Decode.fail "not handled"
                     )
             )
-        , case model.page of
-            PageUpload _ ->
-                uploadStreamEvent
-                    (\raw ->
-                        case Decode.decodeString (Decode.field "type" Decode.string) raw of
-                            Ok "error" ->
-                                UploadMsg Upload.StreamError
+        , if onboardingShowing model && OnboardingOverlay.isOnUploadStep model.onboarding then
+            uploadSubscriptions (OnboardingMsg << OnboardingOverlay.UploadMsg)
 
-                            _ ->
-                                UploadMsg (Upload.StreamEvent raw)
-                    )
+          else
+            case model.page of
+                PageUpload _ ->
+                    uploadSubscriptions UploadMsg
 
-            PageMarketplaceCreate _ ->
-                gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)
+                PageImport _ ->
+                    Time.every (toFloat ImportPage.pollSeconds * 1000)
+                        (\_ -> ImportPageMsg ImportPage.PollTick)
 
-            _ ->
-                Sub.none
+                PageBlogPost _ ->
+                    copyResult
+                        (BlogPostMsg
+                            << BlogPostPage.SyndicationMsg
+                            << Syndication.CopyOutcome
+                        )
+
+                PageMarketplaceCreate _ ->
+                    gotListingDraft (CreateListingMsg << CreateListing.DraftLoaded)
+
+                _ ->
+                    Sub.none
+        ]
+
+
+{-| The two subscriptions the upload flow needs, parameterised by how
+its messages are tagged so they can drive either the standalone upload page
+(`UploadMsg`) or the embedded onboarding-step flow
+(`OnboardingMsg << OnboardingOverlay.UploadMsg`).
+-}
+uploadSubscriptions : (Upload.Msg -> Msg) -> Sub Msg
+uploadSubscriptions tag =
+    Sub.batch
+        [ uploadStreamEvent
+            (\raw ->
+                case Decode.decodeString (Decode.field "type" Decode.string) raw of
+                    Ok "error" ->
+                        tag Upload.StreamError
+
+                    _ ->
+                        tag (Upload.StreamEvent raw)
+            )
+        , Time.every (toFloat Upload.tickSeconds * 1000)
+            (\_ -> tag Upload.WaitTick)
         ]
 
 
@@ -2538,26 +3307,19 @@ decodeSwipe value =
             SwipeIgnored
 
 
-
--- VIEW
-
-
 view : Model -> Browser.Document Msg
 view model =
-    { title = pageTitle model.route
+    { title = pageTitle model.page
     , body =
         [ viewOverlay model
         , viewOnboarding model
         , ViewAsBar.view model.url
         , div [ class "app" ]
             [ a [ class "skip-link", href "#main-content" ] [ text "Skip to main content" ]
-            , viewNav model.route model.auth model.userMenu
+            , viewConnectivity model.connectivity
+            , viewNav model.route (currentAuth model.auth) model.openNavMenu model.userMenu model.uploadInbox
             , main_
                 [ id "main-content"
-
-                -- `tabindex -1` makes the main landmark programmatically
-                -- focusable: it is both the skip-link target and where focus
-                -- lands after a book is removed from its shelf (#295 item b).
                 , tabindex -1
                 , class
                     ("app__main"
@@ -2577,187 +3339,299 @@ view model =
                 [ viewPage model ]
             , viewFooter
             ]
+        , viewArrivalDoor model.auth
         ]
     }
 
 
-pageTitle : Route -> String
-pageTitle route =
-    case route of
-        Home ->
+{-| The login door dolly-shot, rendered from the SHELL over the destination
+page for exactly the `Arriving` window. 359 navigates away from the
+login scene on the same update that decodes the 200, unmounting
+`Page.Login`'s layers before the animation port's rAF callback runs —
+zero animations started. The layers live here, in the thing that survives
+the navigation; `Arriving` is the render window.
+-}
+viewArrivalDoor : AuthState -> Html Msg
+viewArrivalDoor authState =
+    case authState of
+        Arriving _ ->
+            div
+                [ class "arrival-door"
+                , attribute "aria-hidden" "true"
+                , testId "arrival-door"
+                ]
+                [ div [ class "layer-arrival" ] []
+                , div [ class "layer-passage", id "passage" ] []
+                , div [ class "layer-passage-bright", id "passageBright" ] []
+                , div [ class "layer-bookshelf", id "bookshelf" ] []
+                , div [ class "layer-bookshelf-dim", id "bookshelfDim" ] []
+                , div [ class "layer-vignette", id "vignette" ] []
+                , div [ class "layer-wash", id "wash" ] []
+                ]
+
+        Anonymous ->
+            text ""
+
+        Authenticated _ ->
+            text ""
+
+
+{-| The document title, derived from the PAGE actually on screen — not the
+route. Route is what the reader asked for; `Page` is what the shell
+built, and they differ by design at six sites (protected-route bounce,
+admin gate, invalid-route fallback, …): a signed-out reader at `/upload`
+was looking at a login card in a tab titled "Add a Book".
+-}
+pageTitle : Page -> String
+pageTitle page =
+    case page of
+        PageHome _ ->
             "The Stacks"
 
-        Login ->
-            "Sign In — The Stacks"
+        PageLogin loginModel ->
+            titled (loginCardTitle loginModel.mode)
 
-        Library ->
-            "Library — The Stacks"
+        PageBookshelf bookshelfModel ->
+            titled (bookshelfTitle bookshelfModel)
 
-        AntiLibrary ->
-            "Antilibrary — The Stacks"
+        PageReadingPile _ ->
+            titled "Reading Pile"
 
-        WishList ->
-            "Wish List — The Stacks"
+        PageLookingForHome _ ->
+            titled "Looking for a Home"
 
-        ReadingPile ->
-            "Reading Pile — The Stacks"
+        PageBookDetail detailModel ->
+            titled (bookDetailTitle detailModel)
 
-        LookingForHome ->
-            "Looking for a Home — The Stacks"
+        PageUpload _ ->
+            titled "Add a Book"
 
-        BookDetail _ ->
-            "Book — The Stacks"
+        PageImport _ ->
+            titled "Import Your Library"
 
-        Upload ->
-            "Add a Book — The Stacks"
+        PageSearch _ ->
+            titled "Search"
 
-        Search ->
-            "Search — The Stacks"
+        PageSettingsAuditLog _ ->
+            titled "Audit Log"
 
-        Settings ->
-            "Settings — The Stacks"
+        PageInsights _ ->
+            titled "What Your Data Reveals"
 
-        SettingsProfile ->
-            "Profile — The Stacks"
+        PageSettingsProfile _ ->
+            titled "Profile"
 
-        SettingsPassword ->
-            "Password — The Stacks"
+        PageSettingsPassword _ ->
+            titled "Password"
 
-        SettingsNotifications ->
-            "Notifications — The Stacks"
+        PageSettingsNotifications _ ->
+            titled "Notifications"
 
-        SettingsConsent ->
-            "Privacy Settings — The Stacks"
+        PageCostTransparency _ ->
+            titled "Cost Transparency"
 
-        SettingsAuditLog ->
-            "Audit Log — The Stacks"
+        PageMetrics _ ->
+            titled "What We Measure"
 
-        Insights ->
-            "What Your Data Reveals — The Stacks"
+        PageAbout ->
+            titled "About"
 
-        CostTransparency ->
-            "Cost Transparency — The Stacks"
+        PageListingRemoval _ ->
+            titled "Remove a listing"
 
-        Metrics ->
-            "What We Measure — The Stacks"
+        PageCatalogue _ ->
+            titled "Catalogue"
 
-        About ->
-            "About — The Stacks"
+        PageMarketplaceBrowse _ ->
+            titled "Marketplace"
 
-        Catalogue ->
-            "Catalogue — The Stacks"
+        PageMarketplaceCreate _ ->
+            titled "Create Listing"
 
-        MarketplaceBrowse ->
-            "Marketplace — The Stacks"
+        PageMarketplaceMyListings _ ->
+            titled "My Listings"
 
-        MarketplaceCreate ->
-            "Create Listing — The Stacks"
+        PageMarketplaceDetail _ ->
+            titled "Listing"
 
-        MarketplaceMyListings ->
-            "My Listings — The Stacks"
+        PageSettingsPrivacy _ ->
+            titled "Privacy"
 
-        MarketplaceDetail _ ->
-            "Listing — The Stacks"
+        PageBlogArchive _ ->
+            titled "Blog"
 
-        SettingsPrivacy ->
-            "Privacy — The Stacks"
+        PageBlogEditor editorModel ->
+            case editorModel.mode of
+                BlogEditor.New ->
+                    titled "New Post"
 
-        BlogArchive ->
-            "Blog — The Stacks"
+                BlogEditor.Edit _ ->
+                    titled "Edit Post"
 
-        BlogNew ->
-            "New Post — The Stacks"
+        PageBlogPost _ ->
+            titled "Blog Post"
 
-        BlogEdit _ ->
-            "Edit Post — The Stacks"
+        PageAdminSourceApproval _ ->
+            titled "Source Approval"
 
-        BlogPost _ ->
-            "Blog Post — The Stacks"
+        PageAdminInvites _ ->
+            titled "Invitations"
 
-        Route.AdminSourceApproval ->
-            "Source Approval — The Stacks"
+        PageAdminScraperConfig _ ->
+            titled "Scraper Health"
 
-        Route.AdminScraperConfig ->
-            "Scraper Health — The Stacks"
+        PageAdminBookModeration _ ->
+            titled "Book Moderation"
 
-        Route.AdminBookModeration ->
-            "Book Moderation — The Stacks"
+        PageAdminRemovalRequests _ ->
+            titled "Removal Requests"
 
-        Groups ->
-            "My Groups — The Stacks"
+        PageAdminGate _ _ ->
+            titled "Admin Sign-In"
 
-        GroupDetail _ ->
-            "Group — The Stacks"
+        PageGroups _ ->
+            titled "My Groups"
 
-        Profile _ ->
-            "Reader — The Stacks"
+        PageGroupsDetail _ ->
+            titled "Group"
 
-        ProfileShelf _ _ ->
-            "Reader — The Stacks"
+        PageProfile profileModel ->
+            titled ("@" ++ profileModel.handle)
 
-        ConfirmEmail EmailConfirmed ->
-            "Email Confirmed — The Stacks"
+        PageConfirmEmail EmailConfirmed ->
+            titled "Email Confirmed"
 
-        ConfirmEmail EmailConfirmFailed ->
-            "Confirmation Failed — The Stacks"
+        PageConfirmEmail EmailConfirmFailed ->
+            titled "Confirmation Failed"
 
-        ForgotPassword ->
-            "Reset Password — The Stacks"
+        PageResetPassword _ ->
+            titled "Reset Password"
 
-        ResetPassword _ ->
-            "Reset Password — The Stacks"
-
-        NotFound ->
-            "Not Found — The Stacks"
+        PageNotFound ->
+            titled "Not Found"
 
 
-viewNav : Route -> Maybe Auth -> UserMenu.Model -> Html Msg
-viewNav route maybeAuth userMenu =
+{-| Every title but the home page's is the page's own name followed by the
+product's. Written once, so a stray dash or a missing suffix cannot appear on
+one page out of forty.
+-}
+titled : String -> String
+titled name =
+    name ++ " — The Stacks"
+
+
+{-| The login card names its current mode. Drift sites 1 and 5 — the
+protected-route bounce and sign-out both render this card — resolve here.
+-}
+loginCardTitle : Login.Mode -> String
+loginCardTitle mode =
+    case mode of
+        Login.LoginMode ->
+            "Sign In"
+
+        Login.RegisterMode ->
+            "Create Account"
+
+        Login.RegistrationPending _ ->
+            "Check Your Email"
+
+        Login.ForgotPasswordMode ->
+            "Reset Password"
+
+        Login.ResendConfirmationMode ->
+            "Confirm Your Email"
+
+
+{-| Library, Antilibrary and Wish List all render through one `PageBookshelf`,
+and so does another reader's shelf — so the route was the only thing that could
+tell them apart, and for `/u/:handle/:bookshelf` it gave up and said "Reader".
+The page itself knows: its config carries the shelf's label and, when it is
+being browsed read-only, whose shelf it is.
+-}
+bookshelfTitle : Bookshelf.Model -> String
+bookshelfTitle bookshelfModel =
+    case bookshelfModel.config.profileHandle of
+        Just handle ->
+            bookshelfModel.config.label ++ " — @" ++ handle
+
+        Nothing ->
+            bookshelfModel.config.label
+
+
+{-| Once the book has loaded, the tab says which book. A route can only say
+"Book", which is what every book-detail tab, bookmark and history entry used to
+say — indistinguishable from one another.
+-}
+bookDetailTitle : BookDetail.Model -> String
+bookDetailTitle detailModel =
+    case detailModel.book of
+        Types.RemoteData.Success book ->
+            book.title
+
+        _ ->
+            "Book"
+
+
+viewNav : Route -> Maybe Auth -> Maybe NavMenu -> UserMenu.Model -> RemoteData Http.Error (List Api.InboxItem) -> Html Msg
+viewNav route maybeAuth openNavMenu userMenu inbox =
     header [ class "app-header" ]
-        [ div [ class "app-header__brand app-nav__dropdown" ]
-            [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
-            , ul [ class "app-nav__dropdown-menu" ]
-                [ li []
-                    [ a [ href (Route.toPath About), class "app-nav__dropdown-link" ]
-                        [ text "About" ]
-                    ]
-                ]
-            ]
+        [ a [ href "/", class "app-header__logo" ] [ text "The Stacks" ]
         , nav [ class "app-nav", attribute "aria-label" "Main navigation" ]
             [ ul [ class "app-nav__list" ]
                 (case maybeAuth of
                     Nothing ->
                         [ navItem route Catalogue "Catalogue"
+                        , navItem route Search "Search"
                         , navItem route MarketplaceBrowse "Marketplace"
+                        , navItem route About "About"
                         , navItem route Login "Sign In"
                         ]
 
                     Just auth ->
-                        [ navItem route Library "Library"
-                        , navItem route AntiLibrary "Antilibrary"
-                        , navItem route WishList "Wish List"
-                        , navItem route ReadingPile "Reading Pile"
-                        , navItem route LookingForHome "Looking for a Home"
-                        , navDropdown route
-                            Catalogue
-                            "Catalogue"
-                            [ ( Search, "Search" )
-                            , ( Upload, "Add Book" )
-                            ]
-                        , navDropdown route
-                            MarketplaceBrowse
-                            "Marketplace"
-                            [ ( MarketplaceCreate, "Create Listing" )
-                            , ( MarketplaceMyListings, "My Listings" )
-                            ]
+                        [ -- The five bookshelves, grouped under one disclosure
+                          navDisclosure
+                            { menu = BookshelvesMenu
+                            , label = "Bookshelves"
+                            , isActive = isBookshelfRoute route
+                            , isOpen = openNavMenu == Just BookshelvesMenu
+                            , items =
+                                List.map viewNavDropdownLink
+                                    [ navLink Library "Library"
+                                    , navLink AntiLibrary "Antilibrary"
+                                    , navLink WishList "Wish List"
+                                    , navLink ReadingPile "Reading Pile"
+                                    , navLink LookingForHome "Looking for a Home"
+                                    ]
+                            }
+                        , navItem route Search "Search"
+                        , viewAddBook route (pendingConfirmationBadge inbox)
+                        , navDisclosure
+                            { menu = MarketplaceMenu
+                            , label = "Marketplace"
+                            , isActive = isMarketplaceRoute route
+                            , isOpen = openNavMenu == Just MarketplaceMenu
+                            , items =
+                                List.map viewNavDropdownLink
+                                    [ navLink MarketplaceBrowse "Browse"
+                                    , navLink MarketplaceCreate "Create Listing"
+                                    , navLink MarketplaceMyListings "My Listings"
+                                    ]
+                            }
+                        , navItem route About "About"
                         , if auth.user.role == "owner" then
-                            navDropdown route
-                                Route.AdminSourceApproval
-                                "Admin"
-                                [ ( Route.AdminSourceApproval, "Sources" )
-                                , ( Route.AdminScraperConfig, "Scrapers" )
-                                , ( Route.AdminBookModeration, "Book Moderation" )
-                                ]
+                            navDisclosure
+                                { menu = AdminMenu
+                                , label = "Admin"
+                                , isActive = isAdminRoute route
+                                , isOpen = openNavMenu == Just AdminMenu
+                                , items =
+                                    List.map viewNavDropdownLink
+                                        [ navLink Route.AdminSourceApproval "Sources"
+                                        , navLink Route.AdminScraperConfig "Scrapers"
+                                        , navLink Route.AdminBookModeration "Book Moderation"
+                                        , navLink Route.AdminRemovalRequests "Removal Requests"
+                                        ]
+                                }
 
                           else
                             text ""
@@ -2771,12 +3645,184 @@ viewNav route maybeAuth userMenu =
                                 )
                             ]
                             [ Html.map UserMenuMsg
-                                (UserMenu.view auth.user userMenu)
+                                (UserMenu.view auth.user settingsLinks userMenu)
                             ]
                         ]
                 )
             ]
         ]
+
+
+{-| The settings family exposed by the account menu (TR-1). Before this,
+only the profile page was reachable from nav; the rest of the settings routes
+had no nav affordance at all. Paths come from `Route.toPath` so there is one
+source of truth for where each item goes.
+-}
+settingsLinks : List UserMenu.SettingsLink
+settingsLinks =
+    [ { label = "Profile", path = Route.toPath SettingsProfile }
+    , { label = "Privacy", path = Route.toPath SettingsPrivacy }
+    , { label = "Notifications", path = Route.toPath SettingsNotifications }
+    , { label = "Password", path = Route.toPath SettingsPassword }
+    , { label = "Activity Log", path = Route.toPath SettingsAuditLog }
+    , { label = "Reading Insights", path = Route.toPath Insights }
+    ]
+
+
+{-| `True` for the five bookshelf routes AND for a book-detail, which is a child
+of the shelves. This is what keeps the Bookshelves nav item highlighted while
+you are reading a book you reached from a shelf (TR-1, child-route
+highlight).
+-}
+isBookshelfRoute : Route -> Bool
+isBookshelfRoute route =
+    case route of
+        Library ->
+            True
+
+        AntiLibrary ->
+            True
+
+        WishList ->
+            True
+
+        ReadingPile ->
+            True
+
+        LookingForHome ->
+            True
+
+        BookDetail _ ->
+            True
+
+        _ ->
+            False
+
+
+isMarketplaceRoute : Route -> Bool
+isMarketplaceRoute route =
+    case route of
+        MarketplaceBrowse ->
+            True
+
+        MarketplaceCreate ->
+            True
+
+        MarketplaceMyListings ->
+            True
+
+        MarketplaceDetail _ ->
+            True
+
+        _ ->
+            False
+
+
+{-| A top-level nav disclosure: a real `<button aria-haspopup aria-expanded>`
+whose menu is in the DOM ONLY when open (TR-1). This replaced the CSS
+`:hover`/`:focus-within` reveal, which put the menu in the DOM always and was
+unreachable by touch or keyboard. Open/close is owned by `Model.openNavMenu`;
+the backdrop catches an outside click, and Escape is handled in `update`.
+-}
+navDisclosure :
+    { menu : NavMenu
+    , label : String
+    , isActive : Bool
+    , isOpen : Bool
+    , items : List (Html Msg)
+    }
+    -> Html Msg
+navDisclosure config =
+    li
+        [ class
+            (if config.isActive then
+                "app-nav__item app-nav__item--active app-nav__dropdown"
+
+             else
+                "app-nav__item app-nav__dropdown"
+            )
+        ]
+        [ button
+            [ class "app-nav__link app-nav__disclosure"
+            , Html.Events.onClick (ToggleNavMenu config.menu)
+            , attribute "aria-haspopup" "true"
+            , attribute "aria-expanded" (boolAttr config.isOpen)
+            ]
+            [ text config.label
+            , span [ class "app-nav__caret", attribute "aria-hidden" "true" ] []
+            ]
+        , if config.isOpen then
+            div []
+                [ -- Transparent full-screen layer that turns an outside click
+                  div
+                    [ class "app-nav__backdrop"
+                    , style "position" "fixed"
+                    , style "top" "0"
+                    , style "left" "0"
+                    , style "width" "100vw"
+                    , style "height" "100vh"
+                    , style "z-index" "999"
+                    , Html.Events.onClick CloseNavMenu
+                    ]
+                    []
+                , ul
+                    [ class "app-nav__dropdown-menu"
+                    , style "z-index" "1000"
+                    ]
+                    config.items
+                ]
+
+          else
+            text ""
+        ]
+
+
+{-| The persistent "Add Book" primary action (TR-1). An always-present
+`btn btn--primary` link — no hover menu in front of it — so it is reachable on
+touch and by keyboard. The pending-confirmation badge rides here now that
+the Catalogue dropdown it used to live in is gone.
+-}
+viewAddBook : Route -> Maybe Int -> Html Msg
+viewAddBook route badge =
+    li
+        [ class
+            (if route == Upload then
+                "app-nav__item app-nav__item--active"
+
+             else
+                "app-nav__item"
+            )
+        ]
+        [ a
+            [ href (Route.toPath Upload)
+            , class "btn btn--primary btn--sm app-nav__add-book"
+            ]
+            (text "Add Book"
+                :: (case badge of
+                        Just count ->
+                            [ span
+                                [ class "app-nav__badge"
+                                , testId "nav-upload-badge"
+                                , attribute "aria-label"
+                                    (String.fromInt count ++ " waiting to be confirmed")
+                                ]
+                                [ text (String.fromInt count) ]
+                            ]
+
+                        Nothing ->
+                            []
+                   )
+            )
+        ]
+
+
+boolAttr : Bool -> String
+boolAttr b =
+    if b then
+        "true"
+
+    else
+        "false"
 
 
 navItem : Route -> Route -> String -> Html Msg
@@ -2798,41 +3844,53 @@ navItem currentRoute targetRoute label =
         ]
 
 
-navDropdown : Route -> Route -> String -> List ( Route, String ) -> Html Msg
-navDropdown currentRoute primaryRoute primaryLabel subItems =
-    let
-        isActive =
-            (currentRoute == primaryRoute)
-                || List.any (\( r, _ ) -> currentRoute == r) subItems
+{-| One entry inside a navigation disclosure menu.
+-}
+type alias NavLink =
+    { route : Route
+    , label : String
+    }
 
-        activeClass =
-            if isActive then
-                "app-nav__item app-nav__item--active app-nav__dropdown"
 
-            else
-                "app-nav__item app-nav__dropdown"
-    in
-    li [ class activeClass ]
-        [ a [ href (Route.toPath primaryRoute), class "app-nav__link" ]
-            [ text primaryLabel ]
-        , ul [ class "app-nav__dropdown-menu" ]
-            (List.map
-                (\( route, label ) ->
-                    li []
-                        [ a [ href (Route.toPath route), class "app-nav__dropdown-link" ]
-                            [ text label ]
-                        ]
-                )
-                subItems
-            )
+navLink : Route -> String -> NavLink
+navLink route label =
+    { route = route, label = label }
+
+
+{-| The number on the `Add Book` marker. `Nothing` when the inbox
+has not loaded or failed — a cleared badge asserts nothing is waiting,
+which we cannot claim; `Nothing` at zero ("no badge, not a 0");
+`Just n` otherwise, from `Api.awaitingConfirmationCount` over the same
+list the inbox renders.
+-}
+pendingConfirmationBadge : RemoteData Http.Error (List Api.InboxItem) -> Maybe Int
+pendingConfirmationBadge inbox =
+    case inbox of
+        Success items ->
+            case Api.awaitingConfirmationCount items of
+                0 ->
+                    Nothing
+
+                count ->
+                    Just count
+
+        _ ->
+            Nothing
+
+
+viewNavDropdownLink : NavLink -> Html Msg
+viewNavDropdownLink item =
+    li []
+        [ a [ href (Route.toPath item.route), class "app-nav__dropdown-link" ]
+            [ text item.label ]
         ]
 
 
 viewPage : Model -> Html Msg
 viewPage model =
     case model.page of
-        PageHome ->
-            viewHome
+        PageHome subModel ->
+            Html.map HomeMsg (Home.view subModel)
 
         PageLogin subModel ->
             Html.map LoginMsg (Login.view subModel)
@@ -2850,14 +3908,17 @@ viewPage model =
             Html.map BookDetailMsg (BookDetail.view subModel)
 
         PageUpload subModel ->
-            Html.map UploadMsg (Upload.view subModel (Maybe.map .token model.auth))
+            Html.map UploadMsg
+                (Upload.view subModel
+                    (Maybe.map .token (currentAuth model.auth))
+                    model.uploadInbox
+                )
+
+        PageImport subModel ->
+            Html.map ImportPageMsg (ImportPage.view subModel)
 
         PageSearch subModel ->
             Html.map SearchMsg (Search.view subModel)
-
-        PageSettingsConsent subModel ->
-            viewSettingsHub model.route
-                (Html.map ConsentMsg (Consent.view subModel))
 
         PageSettingsAuditLog subModel ->
             viewSettingsHub model.route
@@ -2887,6 +3948,9 @@ viewPage model =
 
         PageAbout ->
             AboutPage.view
+
+        PageListingRemoval subModel ->
+            Html.map ListingRemovalMsg (ListingRemoval.view subModel)
 
         PageCatalogue subModel ->
             Html.map CatalogueMsg (Catalogue.view subModel)
@@ -2919,11 +3983,20 @@ viewPage model =
         PageAdminSourceApproval subModel ->
             Html.map AdminSourceApprovalMsg (AdminSourceApproval.view subModel)
 
+        PageAdminInvites subModel ->
+            Html.map AdminInvitesMsg (AdminInvites.view subModel)
+
         PageAdminScraperConfig subModel ->
             Html.map AdminScraperConfigMsg (AdminScraperConfig.view subModel)
 
         PageAdminBookModeration subModel ->
             Html.map AdminBookModerationMsg (AdminBookModeration.view subModel)
+
+        PageAdminRemovalRequests subModel ->
+            Html.map AdminRemovalRequestsMsg (AdminRemovalRequests.view subModel)
+
+        PageAdminGate _ subModel ->
+            Html.map AdminSessionMsg (AdminSession.view subModel)
 
         PageGroups subModel ->
             Html.map GroupsMsg (Groups.view subModel)
@@ -2949,7 +4022,6 @@ viewSettingsHub currentRoute content =
     Settings.view
         { currentRoute = currentRoute
         , content = content
-        , onMobileNavChange = SettingsMobileNavChanged
         }
 
 
@@ -2981,34 +4053,18 @@ who haven't completed onboarding yet.
 -}
 viewOnboarding : Model -> Html Msg
 viewOnboarding model =
-    if shouldShowOnboarding model.auth model.onboardingCompleted model.hasAnyPlacements then
-        Html.map OnboardingMsg (OnboardingOverlay.view model.onboarding)
+    if shouldShowOnboarding (currentAuth model.auth) model.onboardingCompleted model.hasAnyPlacements then
+        Html.map OnboardingMsg
+            (OnboardingOverlay.view model.onboarding
+                (Maybe.map .token (currentAuth model.auth))
+            )
 
     else
         text ""
 
 
-viewHome : Html Msg
-viewHome =
-    div [ class "page page--home" ]
-        [ h1 [ class "home__title" ] [ text "The Stacks" ]
-        , p [ class "home__subtitle" ]
-            [ text "Your personal collection, beautifully organised." ]
-        , div [ class "home__actions" ]
-            [ a [ href (Route.toPath About), class "btn btn--primary home__link--about" ]
-                [ text "About The Stacks" ]
-            , a [ href (Route.toPath MarketplaceBrowse), class "btn btn--secondary home__link--marketplace" ]
-                [ text "Browse the Marketplace" ]
-            ]
-        ]
-
-
 viewConfirmEmail : ConfirmStatus -> Html Msg
 viewConfirmEmail status =
-    -- Reuse the login page's static scene (library background + dim + vignette)
-    -- so the email-confirmation result matches the login and reset-password cards.
-    -- The animated door layers are login-only; this renders the background
-    -- statically — no animation.
     div [ class "page page--login" ]
         [ div [ class "layer-arrival" ] []
         , div [ class "layer-bookshelf" ] []
@@ -3032,8 +4088,13 @@ viewConfirmEmailCard status =
         EmailConfirmFailed ->
             [ h1 [ class "login-card__title" ] [ text "Confirmation failed" ]
             , p [ class "login-card__subtitle" ]
-                [ text "This confirmation link is no longer valid — it may have expired, already been used, or its account may no longer exist. Please register again to receive a fresh confirmation email." ]
-            , a [ class "btn btn--primary", href (Route.toPath Login) ] [ text "Back to sign in" ]
+                [ text "This confirmation link is no longer valid — it may have expired, or already been used. If it has already been used, you can simply sign in." ]
+            , a
+                [ class "btn btn--primary"
+                , href (Route.toPath ResendConfirmation)
+                ]
+                [ text "Send me a new link" ]
+            , a [ class "btn btn--secondary", href (Route.toPath Login) ] [ text "Back to sign in" ]
             ]
 
 
@@ -3052,3 +4113,43 @@ viewFooter =
         [ p [ class "app-footer__text" ]
             [ text "The Stacks — open source book management" ]
         ]
+
+
+{-| The shell's connectivity banner. Losing the connection is a fact
+about the app, not a request — the page that most needed to say so
+rendered an empty bookcase when its fetch never returned, telling the
+reader their library was empty. One banner above every page, driven by
+the OS-level signal, able to speak before any request fails.
+-}
+viewConnectivity : Connectivity -> Html Msg
+viewConnectivity connectivity =
+    case connectivity of
+        Online ->
+            text ""
+
+        Offline ->
+            div
+                [ class "connectivity-banner"
+                , testId "connectivity-offline"
+                , attribute "role" "status"
+                , attribute "aria-live" "polite"
+                ]
+                [ p [ class "connectivity-banner__text" ]
+                    [ text "You are offline. The Stacks can’t reach the library right now — anything already on screen stays put, and this will clear as soon as you reconnect." ]
+                ]
+
+
+{-| An admin API call came back unauthorised. All four admin pages used to
+call `handleSessionExpiry`, signing the operator out of the WHOLE product
+when only the deliberately short-lived admin session had lapsed.
+This drops the admin token alone, keeps the ordinary session, and sends
+the operator to the admin login with a notice.
+-}
+handleAdminSessionExpiry : Model -> ( Model, Cmd Msg )
+handleAdminSessionExpiry model =
+    ( { model
+        | adminAuth = Nothing
+        , page = PageAdminGate model.route AdminSession.init
+      }
+    , Cmd.none
+    )

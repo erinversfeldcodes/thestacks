@@ -1,14 +1,14 @@
 defmodule Stacks.AgeGatingFlagOffTest do
   @moduledoc """
-  Shipped-dark behaviour (ADR-020): with `:age_gating_enabled` OFF, all three
-  enforcement points are no-ops — age-gated content behaves exactly like public.
+      Shipped-dark behaviour: with `:age_gating_enabled` OFF, all three
+      enforcement points are no-ops — age-gated content behaves exactly like public.
 
-  The test env defaults the flag ON (so the enforcement suite keeps exercising
-  the gate); these tests temporarily flip it OFF and restore it. `async: false`
-  because the flag is a process-global Application env value.
+      The test env defaults the flag ON (so the enforcement suite keeps exercising
+      the gate); these tests temporarily flip it OFF and restore it. `async: false`
+      because the flag is a process-global Application env value.
 
-  The flag-ON counterparts live in `StacksWeb.Plugs.AgeGateTest`,
-  `Stacks.VisibilityTest`, and `StacksWeb.CatalogueControllerTest`.
+      The flag-ON counterparts live in `StacksWeb.Plugs.AgeGateTest`,
+      `Stacks.VisibilityTest`, and `StacksWeb.CatalogueControllerTest`.
   """
 
   use CoreWeb.ConnCase, async: false
@@ -29,7 +29,6 @@ defmodule Stacks.AgeGatingFlagOffTest do
   end
 
   test "(a) AgeGate.enforce does NOT 403 an unverified user on an age-gated book", %{conn: conn} do
-    # No Guardian resource set → unauthenticated/unverified viewer.
     result = AgeGate.enforce(conn, @age_gated_book)
 
     refute result.halted
@@ -55,7 +54,6 @@ defmodule Stacks.AgeGatingFlagOffTest do
 
   test "(b) list_catalogue INCLUDES age-gated books for an unverified viewer" do
     book = insert(:book, title: "Dark Matter", visibility_tier: "age_gated")
-    insert(:book_edition, book: book, is_primary: true)
 
     unverified = insert(:user, age_verified: false)
     viewer = {:platform_user, unverified.id, false}

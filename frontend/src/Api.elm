@@ -1,11 +1,17 @@
 module Api exposing
-    ( AdminBook
+    ( AdminAuthError(..)
+    , AdminBook
     , AdminBooksResponse
+    , AdminInvite
+    , AdminMfaEnrolment
+    , AdminSession
     , AdminSource
     , AdminSourcesResponse
     , AuditLogEntry
     , AuditLogResponse
     , AuthResponse
+    , Authed
+    , AuthorEvent
     , Behaviour
     , BisacCount
     , BlockError(..)
@@ -14,8 +20,17 @@ module Api exposing
     , BookDetailResponse
     , CatalogueResponse
     , CollectionHit
+    , ConfirmError(..)
+    , ConfirmOutcome(..)
+    , ConfirmResponse
     , Deanonymisation
+    , ImportError(..)
+    , ImportRow
+    , InboxItem
+    , InboxKind(..)
     , InterestProfile
+    , InviteStatus
+    , LibraryImport
     , ListingParams
     , LiveSignals(..)
     , MergeFormatResponse
@@ -36,11 +51,17 @@ module Api exposing
     , PublicProfile
     , PublicProfileSummary
     , RegisterError(..)
+    , RemovalOutcome(..)
+    , RemovalRequest
+    , RequestError(..)
+    , RequestSpec
     , RiskInference
     , SearchSections
     , ShelfVisibilitySetting
     , SourceHealth
     , SubjectCount
+    , Syndication
+    , SyndicationExport
     , TransparencyEntry
     , TransparencyMetrics
     , UploadInit
@@ -49,34 +70,58 @@ module Api exposing
     , adminBookDecoder
     , adminBooksResponseDecoder
     , adminListBooks
+    , adminLogin
+    , adminMfaConfirm
+    , adminMfaSetup
     , adminSetBookAgeGate
+    , adminVerifyMfa
     , approveSource
     , auditLogResponseDecoder
+    , authResponseDecoder
+    , authed
+    , awaitingConfirmationCount
     , blockUser
+    , bookDetailResponseDecoder
+    , catalogueResponseDecoder
+    , checkInvite
     , commitUpload
     , completeOnboardingStep
     , confirmAssociation
+    , confirmBook
+    , confirmBookRequest
+    , confirmResponseToResult
+    , createAdminInvite
     , createBlogPost
     , createComment
+    , createGoodreadsImport
     , createGroup
     , createListing
+    , createShelf
     , deactivateListing
     , declineInvitation
+    , declineRemovalRequest
     , deleteAccount
     , deleteComment
+    , deleteShelf
     , dismissAssociation
     , encodeProfileBody
+    , fetchSyndicationExport
     , foldProgress
     , forgotPassword
+    , getAdminInvites
     , getAdminSources
     , getAuditLog
+    , getAuthorEvents
     , getBlogPost
     , getBlogPosts
     , getBook
+    , getBookRequest
     , getBookshelf
     , getCatalogue
     , getGroup
     , getGroupFeed
+    , getImport
+    , getImportRows
     , getInferences
     , getListings
     , getMyListings
@@ -87,10 +132,14 @@ module Api exposing
     , getPrivacySettings
     , getProfile
     , getProfileShelf
+    , getRemovalRequests
     , getSourceHealth
     , getTransparencyMetrics
+    , getUploadInbox
     , getUserPlacements
+    , honourRemovalRequest
     , initUpload
+    , interpretAuthed
     , inviteToGroup
     , isNotFound
     , isUnauthorized
@@ -98,33 +147,49 @@ module Api exposing
     , listBlockedUsers
     , login
     , logout
-    , lookupByIsbn
     , mergeFormat
+    , mergeFormatRequest
+    , mergeFormatResponseDecoder
     , moveBook
     , moveResponseToResult
     , personalInferencesDecoder
     , placeBook
     , placeResponseToResult
+    , placementsMineDecoder
     , progressErrorMessage
     , progressResponseToResult
     , publicProfileDecoder
     , publicProfileSummaryDecoder
     , publishBlogPost
     , putFileToR2
+    , recordSyndication
     , refresh
     , register
     , rejectIdentification
     , rejectSource
     , removeBook
+    , reorderShelves
     , requestExport
+    , requestListingRemoval
+    , resendConfirmation
     , resetPassword
+    , resolveAuthResponse
+    , resolveNoContent
+    , resolveProfile
+    , resolveRegister
+    , resolveWhatever
+    , restoreBook
+    , retryAfterSeconds
+    , revokeAdminInvite
     , saveConsent
     , saveWritingAssistantConsent
     , searchBooks
     , searchResponseDecoder
     , searchUsers
     , setBookAgeGate
+    , setPostSyndicated
     , soldListing
+    , standardTimeout
     , streamEventDecoder
     , transparencyMetricsDecoder
     , unblockUser
@@ -137,8 +202,17 @@ module Api exposing
     , updateProfileVisibility
     , updateProgress
     , updateShelfVisibility
+    , updateSyndicationUrl
+    , uploadTimeout
     )
 
+{-| Every HTTP call the SPA makes, and every decoder that reads a server
+response. The large `exposing` list is deliberate: decoders are exported
+so tests wire the REAL decoder into simulated effects — a hand-written
+test mirror is what let the upload SSE wire format drift for months.
+-}
+
+import Dict
 import File exposing (File)
 import Http
 import Json.Decode as Decode exposing (Decoder)
@@ -163,6 +237,60 @@ import Url.Builder
 baseUrl : String
 baseUrl =
     ""
+
+
+{-| A request's data — method, url, JSON body — apart from the
+`Http.request` that sends it. `elm-program-test` cannot run real
+requests, so test translators build `SimulatedEffect`s; before this seam
+they hand-copied url/method/body, and a drifted copy was invisible to
+the whole suite. Both production and tests now consume the same spec.
+-}
+type alias RequestSpec =
+    { method : String
+    , url : String
+    , body : Maybe Encode.Value
+    }
+
+
+specHttpBody : RequestSpec -> Http.Body
+specHttpBody spec =
+    case spec.body of
+        Just value ->
+            Http.jsonBody value
+
+        Nothing ->
+            Http.emptyBody
+
+
+{-| How long a request may hang before `elm/http` reports `Http.Timeout`.
+
+⛔ `timeout = Nothing` means "wait forever", not "no timeout": a stalled
+connection (sleeping machine, captive portal) never resolves, so
+`RemoteData` never leaves `Loading` and the page's `Failure` branch —
+where connectivity copy lives — is unreachable. Every request in this
+file carries this value.
+
+-}
+standardTimeout : Maybe Float
+standardTimeout =
+    Just 15000
+
+
+{-| The bound for a request whose body is a file.
+
+Two minutes, not fifteen seconds, because this clock is measuring something
+else. `standardTimeout` bounds _waiting for an answer_; an upload's elapsed time
+is mostly **bytes crossing the wire**, and a phone photo on a weak connection can
+legitimately take a minute. Cancelling that would turn a slow success into a
+failure — the timeout would be the bug.
+
+It is still bounded. A stalled upload that will never finish is exactly as
+useless as a stalled read, and "wait forever" is not the alternative on offer.
+
+-}
+uploadTimeout : Maybe Float
+uploadTimeout =
+    Just 120000
 
 
 type alias AuthResponse =
@@ -215,18 +343,29 @@ registrationResponseDecoder =
     Decode.map (\_ -> ()) (Decode.field "message" Decode.string)
 
 
-{-| The identification status of an uploaded image.
-Fails loudly on unknown values rather than silently falling through.
+{-| The identification status of an uploaded image. Wire statuses:
+`"pending"`, `"resolved"`, `"rejected"`, plus the SSE loop's synthetic
+`"timeout"`; unknown strings read as `Pending` (still in flight), never
+guessed terminal.
+
+⛔ `"timeout"` is not a rejection: it used to decode to `Rejected`
+with a null reason, so the reader was told their photo was refused when
+the pipeline had simply not answered yet. `TimedOut` is its own state.
+
 -}
 type PollStatus
     = Pending
     | Resolved
     | Rejected
+    | TimedOut
 
 
-{-| Response from GET /api/upload/:image\_id/status.
-bookId is present only when status is Resolved and a book was identified.
-isDuplicate is true when the identified book is already on one of the user's shelves.
+{-| The SSE frame from `GET /api/upload/:image_id/stream`.
+
+`bookId` is present only when the status is Resolved and a single book was
+identified; `isDuplicate` is True when the identified book is already on one of
+the user's bookshelves.
+
 -}
 type alias PollResponse =
     { imageId : String
@@ -234,15 +373,17 @@ type alias PollResponse =
     , bookId : Maybe String
     , bookIds : List String
     , rejectionReason : Maybe String
-    , isDuplicate : Maybe Bool
+    , isDuplicate : Bool
     }
 
 
-{-| Decoder for SSE stream events from /api/upload/:id/stream.
-
-SSE events use camelCase JSON keys (standard JSON API convention), while the
-proto-generated decoder uses snake\_case. This decoder handles both.
-
+{-| Decoder for SSE frames from `GET /api/upload/:image_id/stream`. There
+is exactly ONE wire shape and the server owns it
+(`ProtoJSON.poll_response/1`, mirrored by upload.proto): snake\_case, all
+six keys always present (`book_ids` defaults `[]`, `is_duplicate`
+`false`; `book_id`/`rejection_reason` arrive as JSON null). The decoder
+matches that shape exactly — no defensive `oneOf` fallbacks that would
+mask a server-side contract break.
 -}
 streamEventDecoder : Decoder PollResponse
 streamEventDecoder =
@@ -258,63 +399,423 @@ streamEventDecoder =
                         Rejected
 
                     "timeout" ->
-                        Rejected
+                        TimedOut
 
                     _ ->
                         Pending
-            , bookId = emptyToNothing (Maybe.withDefault "" bookId)
+            , bookId = Maybe.andThen emptyToNothing bookId
             , bookIds = bookIds
-            , rejectionReason = emptyToNothing (Maybe.withDefault "" rejectionReason)
-            , isDuplicate =
-                if isDuplicate == Just True then
-                    Just True
+            , rejectionReason = Maybe.andThen emptyToNothing rejectionReason
+            , isDuplicate = isDuplicate
+            }
+        )
+        (Decode.field "image_id" Decode.string)
+        (Decode.field "status" Decode.string)
+        (Decode.field "book_id" (Decode.nullable Decode.string))
+        (Decode.field "book_ids" (Decode.list Decode.string))
+        (Decode.field "rejection_reason" (Decode.nullable Decode.string))
+        (Decode.field "is_duplicate" Decode.bool)
+
+
+{-| What an upload in the inbox is waiting for.
+
+⛔ Not a scale from good to bad; never sum them. `AwaitingConfirmation`
+is a job the reader can finish; `Failed` is news they were never given.
+The navigation badge counts the first kind ONLY — a number no action can
+clear is worse than no badge.
+
+-}
+type InboxKind
+    = AwaitingConfirmation
+    | Failed
+
+
+{-| One unfinished upload — `stacks.common.v1.UploadInboxItem`.
+
+`bookIds` are the candidates the reader has NOT already shelved by some other
+route; the server does that filtering, because it is the only party that can
+see the reader's bookshelves and the upload row at the same moment. Empty for a
+`Failed` item, which has nothing to confirm.
+
+`rejectionReason` is the same token vocabulary the SSE frame carries, so
+`Page.Upload.failureFromRejection` maps it with no second table. That is the
+whole reason the field is a token and not a sentence.
+
+-}
+type alias InboxItem =
+    { imageId : String
+    , kind : InboxKind
+    , bookIds : List String
+    , rejectionReason : Maybe String
+    }
+
+
+{-| The badge number, derived from the inbox itself.
+
+⛔ This function is the ONLY definition of the count, and the list it is given
+is the same list the inbox surface renders. The server deliberately ships no
+count field alongside the items (see `stacks.common.v1.UploadInbox`): two
+separately-derived numbers are two things that can disagree, and a badge that
+disagrees with the page it points at teaches the reader to ignore it.
+
+-}
+awaitingConfirmationCount : List InboxItem -> Int
+awaitingConfirmationCount items =
+    List.length (List.filter (\item -> item.kind == AwaitingConfirmation) items)
+
+
+inboxKindDecoder : Decoder InboxKind
+inboxKindDecoder =
+    Decode.string
+        |> Decode.andThen
+            (\raw ->
+                case raw of
+                    "awaiting_confirmation" ->
+                        Decode.succeed AwaitingConfirmation
+
+                    "failed" ->
+                        Decode.succeed Failed
+
+                    other ->
+                        Decode.fail ("Unknown upload inbox kind: " ++ other)
+            )
+
+
+inboxItemDecoder : Decoder InboxItem
+inboxItemDecoder =
+    Decode.map4 InboxItem
+        (Decode.field "image_id" Decode.string)
+        (Decode.field "kind" inboxKindDecoder)
+        (Decode.field "book_ids" (Decode.list Decode.string))
+        (Decode.field "rejection_reason" (Decode.nullable Decode.string))
+
+
+{-| `GET /api/uploads/inbox` — every upload this reader has not finished with.
+
+Every field is required, for the same reason `streamEventDecoder`'s are: `StacksWeb.ProtoJSON.upload_inbox_item/1` emits all four on every
+branch, `book_ids` defaulting to `[]` and `rejection_reason` arriving as JSON
+`null`. A `Decode.succeed` fallback here would mean a wire rename could never
+redden a test.
+
+-}
+uploadInboxDecoder : Decoder (List InboxItem)
+uploadInboxDecoder =
+    Decode.field "items" (Decode.list inboxItemDecoder)
+
+
+getUploadInbox : String -> (Result Http.Error (List InboxItem) -> msg) -> Cmd msg
+getUploadInbox token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/uploads/inbox"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg uploadInboxDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| One bookstore event for an author, scraped from the shop's own page.
+`eventDate` is Nothing when the page states none — the shop's page has the
+details, and the card must not pretend to a date it doesn't hold.
+-}
+type alias AuthorEvent =
+    { id : String
+    , title : String
+    , eventDate : Maybe String
+    , location : Maybe String
+    , url : Maybe String
+    , storeName : Maybe String
+    }
+
+
+authorEventDecoder : Decoder AuthorEvent
+authorEventDecoder =
+    Decode.map6 AuthorEvent
+        (Decode.field "id" Decode.string)
+        (Decode.field "title" Decode.string)
+        (Decode.field "event_date" (Decode.nullable Decode.string))
+        (Decode.field "location" (Decode.nullable Decode.string))
+        (Decode.field "url" (Decode.nullable Decode.string))
+        (Decode.field "store_name" (Decode.nullable Decode.string))
+
+
+{-| `GET /api/authors/:id/events` — public, no token.
+-}
+getAuthorEvents : String -> (Result Http.Error (List AuthorEvent) -> msg) -> Cmd msg
+getAuthorEvents authorId toMsg =
+    Http.get
+        { url = baseUrl ++ "/api/authors/" ++ authorId ++ "/events"
+        , expect = Http.expectJson toMsg (Decode.field "events" (Decode.list authorEventDecoder))
+        }
+
+
+{-| An import's summary — the progress counters the reader watches while the
+job works through their library, and the durable record afterwards.
+-}
+type alias LibraryImport =
+    { id : String
+    , status : String
+    , filename : String
+    , rowCount : Int
+    , processedCount : Int
+    , shelvedCount : Int
+    , duplicateCount : Int
+    , unverifiedCount : Int
+    , unreadableCount : Int
+    }
+
+
+{-| One row of the per-row report. `outcome` is `Nothing` until the job
+reaches the row.
+-}
+type alias ImportRow =
+    { rowNumber : Int
+    , title : String
+    , author : String
+    , isbn13 : String
+    , goodreadsShelf : String
+    , outcome : Maybe String
+    , reason : Maybe String
+    }
+
+
+{-| Upload refusals the page owes distinct copy for. The server answers each
+with a distinct status, so the STATUS is the discriminant —
+no body parse to drift.
+-}
+type ImportError
+    = ImportInProgress
+    | ImportFileTooLarge
+    | ImportUnrecognised
+    | ImportRequestFailed Http.Error
+
+
+libraryImportDecoder : Decoder LibraryImport
+libraryImportDecoder =
+    Decode.succeed LibraryImport
+        |> andMap (Decode.field "id" Decode.string)
+        |> andMap (Decode.field "status" Decode.string)
+        |> andMap (Decode.field "filename" Decode.string)
+        |> andMap (Decode.field "row_count" Decode.int)
+        |> andMap (Decode.field "processed_count" Decode.int)
+        |> andMap (Decode.field "shelved_count" Decode.int)
+        |> andMap (Decode.field "duplicate_count" Decode.int)
+        |> andMap (Decode.field "unverified_count" Decode.int)
+        |> andMap (Decode.field "unreadable_count" Decode.int)
+
+
+importRowDecoder : Decoder ImportRow
+importRowDecoder =
+    Decode.map7 ImportRow
+        (Decode.field "row_number" Decode.int)
+        (Decode.field "title" Decode.string)
+        (Decode.field "author" Decode.string)
+        (Decode.field "isbn13" Decode.string)
+        (Decode.field "goodreads_shelf" Decode.string)
+        (Decode.field "outcome" (Decode.nullable Decode.string))
+        (Decode.field "reason" (Decode.nullable Decode.string))
+
+
+{-| `POST /api/imports/goodreads` — the export CSV as a multipart `file`.
+The parse happens synchronously server-side, so a refusal (wrong file, one
+already running, too large) arrives on THIS response, not minutes later.
+-}
+createGoodreadsImport : String -> File -> (Result ImportError LibraryImport -> msg) -> Cmd msg
+createGoodreadsImport token file toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/imports/goodreads"
+        , body = Http.multipartBody [ Http.filePart "file" file ]
+        , expect = expectImport toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+expectImport : (Result ImportError LibraryImport -> msg) -> Http.Expect msg
+expectImport toMsg =
+    Http.expectStringResponse toMsg <|
+        \response ->
+            case response of
+                Http.GoodStatus_ _ body ->
+                    Decode.decodeString (Decode.field "import" libraryImportDecoder) body
+                        |> Result.mapError
+                            (\err -> ImportRequestFailed (Http.BadBody (Decode.errorToString err)))
+
+                Http.BadStatus_ metadata _ ->
+                    case metadata.statusCode of
+                        409 ->
+                            Err ImportInProgress
+
+                        413 ->
+                            Err ImportFileTooLarge
+
+                        422 ->
+                            Err ImportUnrecognised
+
+                        status ->
+                            Err (ImportRequestFailed (Http.BadStatus status))
+
+                Http.BadUrl_ url ->
+                    Err (ImportRequestFailed (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (ImportRequestFailed Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (ImportRequestFailed Http.NetworkError)
+
+
+{-| `GET /api/imports/:id` — polled while the job runs.
+-}
+getImport : String -> String -> (Result Http.Error LibraryImport -> msg) -> Cmd msg
+getImport token importId toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/imports/" ++ importId
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "import" libraryImportDecoder)
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `GET /api/imports/:id/rows` — the per-row report.
+-}
+getImportRows : String -> String -> (Result Http.Error (List ImportRow) -> msg) -> Cmd msg
+getImportRows token importId toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/imports/" ++ importId ++ "/rows"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "rows" (Decode.list importRowDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| A request failure that may carry the server-named wait. Exists
+because `Http.Error` structurally cannot: `expectJson` collapses non-2xx
+into `BadStatus Int` — the status survives, the headers do not, and
+`retry-after` is a header. Built with `expectStringResponse` so the 429
+branch can read it; everything else maps onto the ordinary `Http.Error`.
+-}
+type RequestError
+    = RateLimited (Maybe Int)
+    | RequestFailed Http.Error
+
+
+{-| The wait a 429 named, in seconds — `Nothing` when it named none, or named
+something that is not a positive whole number of seconds.
+
+RFC 9110 permits `retry-after` to be an HTTP-date as well as a delay in seconds,
+and this deliberately does **not** parse the date form. Turning a date into a
+delay needs the current time, which is not available where a response is
+resolved, and guessing is worse than not knowing: the copy that falls back to
+`Nothing` is true, and a wrong number is not. `StacksWeb.Plugs.RateLimiter`
+sends the delay form.
+
+`Http.Metadata.headers` is keyed by lower-cased header name, so this looks up
+one spelling and there is no second one to get wrong.
+
+-}
+retryAfterSeconds : Http.Metadata -> Maybe Int
+retryAfterSeconds metadata =
+    Dict.get "retry-after" metadata.headers
+        |> Maybe.map String.trim
+        |> Maybe.andThen String.toInt
+        |> Maybe.andThen
+            (\seconds ->
+                if seconds > 0 then
+                    Just seconds
 
                 else
                     Nothing
-            }
-        )
-        (Decode.oneOf [ Decode.field "imageId" Decode.string, Decode.field "image_id" Decode.string, Decode.succeed "" ])
-        (Decode.oneOf [ Decode.field "status" Decode.string, Decode.succeed "" ])
-        (Decode.oneOf
-            [ Decode.field "bookId" (Decode.nullable Decode.string)
-            , Decode.field "book_id" (Decode.nullable Decode.string)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "bookIds" (Decode.list Decode.string)
-            , Decode.field "book_ids" (Decode.list Decode.string)
-            , Decode.succeed []
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "rejectionReason" (Decode.nullable Decode.string)
-            , Decode.field "rejection_reason" (Decode.nullable Decode.string)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.field "isDuplicate" (Decode.nullable Decode.bool)
-            , Decode.field "is_duplicate" (Decode.nullable Decode.bool)
-            , Decode.succeed Nothing
-            ]
-        )
+            )
+
+
+{-| Classify a `Http.BadStatus_` as either the rate limiter or something else.
+
+One place decides what "throttled" means, so every `:auth` endpoint agrees.
+
+-}
+badStatusToRequestError : Http.Metadata -> RequestError
+badStatusToRequestError metadata =
+    if metadata.statusCode == 429 then
+        RateLimited (retryAfterSeconds metadata)
+
+    else
+        RequestFailed (Http.BadStatus metadata.statusCode)
+
+
+{-| The `Http.Response` → `Result RequestError a` translation, given a decoder
+for the 2xx body.
+
+Exported (via `resolveAuthResponse` / `resolveNoContent`) so `TestHelpers`'
+simulated effects run the **real** resolver rather than a hand-written mirror of
+it. `registerResponseResult` used to be such a mirror, and is the record of
+what mirrors cost: the copy and the fixtures agree with each other while both
+disagree with the server, and the suite stays green through a wire rename.
+
+-}
+resolveRequest : (String -> Result String a) -> Http.Response String -> Result RequestError a
+resolveRequest decode response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (RequestFailed (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (RequestFailed Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (RequestFailed Http.NetworkError)
+
+        Http.BadStatus_ metadata _ ->
+            Err (badStatusToRequestError metadata)
+
+        Http.GoodStatus_ _ bodyText ->
+            decode bodyText |> Result.mapError (Http.BadBody >> RequestFailed)
+
+
+{-| Resolver for a sign-in response. Shared with the program-test harness.
+-}
+resolveAuthResponse : Http.Response String -> Result RequestError AuthResponse
+resolveAuthResponse =
+    resolveRequest
+        (Decode.decodeString authResponseDecoder >> Result.mapError Decode.errorToString)
+
+
+{-| Resolver for an endpoint whose success body carries nothing the caller may
+act on — `forgot-password` and `resend-confirmation`, both of which answer
+identically for every address on purpose. Shared with the program-test harness.
+-}
+resolveNoContent : Http.Response String -> Result RequestError ()
+resolveNoContent =
+    resolveRequest (\_ -> Ok ())
 
 
 {-| A registration failure.
 
 A 422 carries per-field validation errors (keyed by field name — `email`,
 `password`, `display_name`) so the UI can explain the _actual_ problem rather
-than guessing. Every other failure (network, timeout, unexpected status, or a
-422 whose body we could not parse) is a `RegisterRequestFailed`.
+than guessing. A 429 carries the rate limiter's wait. Every other
+failure (network, timeout, unexpected status, or a 422 whose body we could not
+parse) is a `RegisterRequestFailed`.
 
 -}
 type RegisterError
     = RegisterValidationFailed (List ( String, List String ))
+    | RegisterRateLimited (Maybe Int)
+    | RegisterInviteRefused String
     | RegisterRequestFailed Http.Error
 
 
-{-| Decode the backend's `{"errors": {field: [msg, ...]}}` 422 body. See
+{-| Decode the backend's `{"errors": {field: [msg,...]}}` 422 body. See
 `format_errors/1` in the Elixir `StacksWeb.ChangesetHelpers`.
 -}
 registerErrorsDecoder : Decoder (List ( String, List String ))
@@ -322,72 +823,155 @@ registerErrorsDecoder =
     Decode.field "errors" (Decode.keyValuePairs (Decode.list Decode.string))
 
 
+{-| The invite gate's refusal body — only `invite_*` reasons qualify, so an
+unrelated `{"error":...}` still reads as its plain HTTP status.
+-}
+inviteErrorDecoder : Decoder String
+inviteErrorDecoder =
+    Decode.field "error" Decode.string
+        |> Decode.andThen
+            (\reason ->
+                if String.startsWith "invite_" reason then
+                    Decode.succeed reason
+
+                else
+                    Decode.fail "not an invite refusal"
+            )
+
+
+{-| What `GET /api/auth/invite/:code` says about a redeemable code.
+Deliberately tiny: the server never reveals the note, the bound address, or a
+redeemer — `emailBound` is a boolean so the form can say "written for a
+specific address" without naming it.
+-}
+type alias InviteStatus =
+    { expiresAt : Maybe String
+    , emailBound : Bool
+    }
+
+
+inviteStatusDecoder : Decoder InviteStatus
+inviteStatusDecoder =
+    Decode.map2 InviteStatus
+        (Decode.field "expires_at" (Decode.nullable Decode.string))
+        (Decode.field "email_bound" Decode.bool)
+
+
+{-| Look an invitation code up before offering the Register form.
+The failure statuses arrive as `BadStatus` — the card maps
+them to copy; it never needs the body's error string because the status alone
+distinguishes the four refusals.
+-}
+checkInvite : String -> (Result Http.Error InviteStatus -> msg) -> Cmd msg
+checkInvite code toMsg =
+    Http.request
+        { method = "GET"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/invite/" ++ code
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg inviteStatusDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
 register :
-    { email : String, password : String, displayName : String }
+    { email : String, password : String, displayName : String, inviteCode : String }
     -> (Result RegisterError () -> msg)
     -> Cmd msg
 register body toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/auth/register"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/register"
         , body =
             Http.jsonBody
                 (Requests.encodeRegisterRequest
                     { email = body.email
                     , password = body.password
                     , displayName = body.displayName
+                    , inviteCode = body.inviteCode
                     }
                 )
         , expect = expectRegister toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
 {-| `Http.expectJson` discards the response body on a non-2xx status, which
-would throw away the structured `{"errors": ...}` payload a 422 carries. This
+would throw away the structured `{"errors":...}` payload a 422 carries. This
 custom expect keeps those field errors so the caller can surface the real
-reason a registration was rejected.
+reason a registration was rejected — and, since, the 429's `retry-after`
+for the same reason: it is the only place the number is still readable.
+
+The resolver is a named top-level function rather than a lambda so the
+program-test harness can run **this** function instead of the hand-written
+mirror of it that `TestHelpers` used to carry.
+
 -}
 expectRegister : (Result RegisterError () -> msg) -> Http.Expect msg
 expectRegister toMsg =
-    Http.expectStringResponse toMsg <|
-        \response ->
-            case response of
-                Http.BadUrl_ url ->
-                    Err (RegisterRequestFailed (Http.BadUrl url))
+    Http.expectStringResponse toMsg resolveRegister
 
-                Http.Timeout_ ->
-                    Err (RegisterRequestFailed Http.Timeout)
 
-                Http.NetworkError_ ->
-                    Err (RegisterRequestFailed Http.NetworkError)
+{-| Resolver for a registration response. Shared with the program-test harness.
+-}
+resolveRegister : Http.Response String -> Result RegisterError ()
+resolveRegister response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (RegisterRequestFailed (Http.BadUrl url))
 
-                Http.BadStatus_ metadata bodyText ->
-                    if metadata.statusCode == 422 then
-                        case Decode.decodeString registerErrorsDecoder bodyText of
-                            Ok errors ->
-                                Err (RegisterValidationFailed errors)
+        Http.Timeout_ ->
+            Err (RegisterRequestFailed Http.Timeout)
 
-                            Err _ ->
-                                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+        Http.NetworkError_ ->
+            Err (RegisterRequestFailed Http.NetworkError)
 
-                    else
+        Http.BadStatus_ metadata bodyText ->
+            if metadata.statusCode == 422 then
+                case Decode.decodeString registerErrorsDecoder bodyText of
+                    Ok errors ->
+                        Err (RegisterValidationFailed errors)
+
+                    Err _ ->
                         Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
 
-                Http.GoodStatus_ _ bodyText ->
-                    case Decode.decodeString registrationResponseDecoder bodyText of
-                        Ok value ->
-                            Ok value
+            else if metadata.statusCode == 429 then
+                Err (RegisterRateLimited (retryAfterSeconds metadata))
 
-                        Err err ->
-                            Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
+            else
+                case Decode.decodeString inviteErrorDecoder bodyText of
+                    Ok reason ->
+                        Err (RegisterInviteRefused reason)
+
+                    Err _ ->
+                        Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString registrationResponseDecoder bodyText of
+                Ok value ->
+                    Ok value
+
+                Err err ->
+                    Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
 
 
+{-| POST /api/auth/login. Answers with `RequestError` rather than `Http.Error`
+so a 429 arrives with the wait the server named; this endpoint is
+in the `:auth` rate-limit bucket, which is the tightest one in the app, and a
+mistyped password is the commonest way a reader reaches it.
+-}
 login :
     { email : String, password : String }
-    -> (Result Http.Error AuthResponse -> msg)
+    -> (Result RequestError AuthResponse -> msg)
     -> Cmd msg
 login body toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/auth/login"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/login"
         , body =
             Http.jsonBody
                 (Requests.encodeLoginRequest
@@ -395,19 +979,49 @@ login body toMsg =
                     , password = body.password
                     }
                 )
-        , expect = Http.expectJson toMsg authResponseDecoder
+        , expect = Http.expectStringResponse toMsg resolveAuthResponse
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
 {-| Request a password-reset email. The backend always responds 200 (no user
-enumeration), so the caller only distinguishes success from a transport error.
+enumeration), so the caller only distinguishes a throttle from any other
+transport error — never one address from another.
 -}
-forgotPassword : String -> (Result Http.Error () -> msg) -> Cmd msg
+forgotPassword : String -> (Result RequestError () -> msg) -> Cmd msg
 forgotPassword email toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/auth/forgot-password"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/forgot-password"
         , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
-        , expect = Http.expectWhatever toMsg
+        , expect = Http.expectStringResponse toMsg resolveNoContent
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| Ask for a fresh email-confirmation link.
+
+Same shape as `forgotPassword` and for the same reason: the backend answers
+identically for an address awaiting confirmation, an address already confirmed
+and an address with no account at all, so there is nothing here to decode. A
+`Result` with a \`\` in it is the honest type — the caller genuinely cannot learn
+which of the three happened, and giving it a richer type would be inventing an
+answer the server deliberately refused to give.
+
+-}
+resendConfirmation : String -> (Result RequestError () -> msg) -> Cmd msg
+resendConfirmation email toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/resend-confirmation"
+        , body = Http.jsonBody (Encode.object [ ( "email", Encode.string email ) ])
+        , expect = Http.expectStringResponse toMsg resolveNoContent
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -419,8 +1033,10 @@ resetPassword :
     -> (Result Http.Error () -> msg)
     -> Cmd msg
 resetPassword body toMsg =
-    Http.post
-        { url = baseUrl ++ "/api/auth/reset-password"
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/auth/reset-password"
         , body =
             Http.jsonBody
                 (Encode.object
@@ -429,7 +1045,71 @@ resetPassword body toMsg =
                     ]
                 )
         , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
+
+
+{-| The outcome of a listing-removal request.
+
+Two outcomes, kept distinct on purpose. A request from an address on the listing's own
+domain is applied immediately; anything else is recorded and waits for a human. Telling a
+business their listing is gone when it is still live would be worse than telling them it
+is pending, so the caller must not be able to collapse these into "success".
+
+-}
+type RemovalOutcome
+    = Removed
+    | PendingReview
+
+
+{-| POST /api/opt-out — ask for a business listing to be removed.
+
+Unauthenticated by design (: "does not require account creation"). The contact
+address is how the request is verified: a matching domain is applied at once, anything
+else is queued for review.
+
+404 means no listing matches the URL, 422 means the address was not a valid email.
+
+-}
+requestListingRemoval :
+    { url : String, email : String, reason : String }
+    -> (Result Http.Error RemovalOutcome -> msg)
+    -> Cmd msg
+requestListingRemoval body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/opt-out"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "url", Encode.string body.url )
+                    , ( "email", Encode.string body.email )
+                    , ( "reason", Encode.string body.reason )
+                    ]
+                )
+        , expect = Http.expectJson toMsg removalOutcomeDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+removalOutcomeDecoder : Decoder RemovalOutcome
+removalOutcomeDecoder =
+    Decode.field "status" Decode.string
+        |> Decode.andThen
+            (\status ->
+                case status of
+                    "removed" ->
+                        Decode.succeed Removed
+
+                    "pending_review" ->
+                        Decode.succeed PendingReview
+
+                    other ->
+                        Decode.fail ("unknown removal status: " ++ other)
+            )
 
 
 {-| True when an `Http.Error` is an authentication failure (HTTP 401) from an
@@ -461,8 +1141,149 @@ isNotFound err =
             False
 
 
+{-| An authenticated request's credential AND the handler for the one
+failure every authed request can suffer: the session is gone.
+
+⛔ A type, not a convention: with a bare token + callback, a 401 is just
+another `Err`, and noticing it was opt-in — three settings forms did not
+opt in and rendered "something went wrong" against a dead session. The
+constructor demands a session-expiry msg, so a call site that ignores
+expiry does not compile.
+
+-}
+type Authed err ok msg
+    = Authed
+        { token : String
+        , onExpired : msg
+        , onResult : Result err ok -> msg
+        }
+
+
+{-| Build the credential-plus-handlers an authenticated endpoint requires.
+
+The record is the gate: `onExpired` cannot be omitted, defaulted, or inferred.
+
+-}
+authed :
+    String
+    -> { onExpired : msg, onResult : Result err ok -> msg }
+    -> Authed err ok msg
+authed token handlers =
+    Authed
+        { token = token
+        , onExpired = handlers.onExpired
+        , onResult = handlers.onResult
+        }
+
+
+{-| The `Authorization` header for an authenticated request. Unconditional by
+construction — an `Authed` always holds a token — which is what makes a 401 from
+one of these requests unambiguous.
+
+`scripts/check-session-expiry-coverage.sh` reads this function's name to decide
+which `Api` endpoints are mandatorily authenticated, so keep the header
+construction here rather than inlining it at a call site.
+
+-}
+authedHeaders : Authed err ok msg -> List Http.Header
+authedHeaders (Authed request) =
+    [ Http.header "Authorization" ("Bearer " ++ request.token) ]
+
+
+{-| The `Http.Expect` for an authenticated request: a 401 is diverted to
+`onExpired` before the endpoint's own resolver ever sees the response.
+
+Built on `expectStringResponse` rather than `expectJson`/`expectWhatever`
+because those two collapse every non-2xx into an opaque `BadStatus` after the
+fact — by then the status is a number in an error value that a caller may
+ignore. Here the branch happens before the caller is handed anything.
+
+-}
+authedExpect :
+    (Http.Response String -> Result err ok)
+    -> Authed err ok msg
+    -> Http.Expect msg
+authedExpect resolve request =
+    Http.expectStringResponse unwrapNever
+        (\response -> Ok (interpretAuthed resolve request response))
+
+
+{-| `Http.expectStringResponse` insists on a `Result`; `interpretAuthed` already
+produces the final message, so the error side is uninhabited.
+-}
+unwrapNever : Result Never a -> a
+unwrapNever result =
+    case result of
+        Ok value ->
+            value
+
+        Err impossible ->
+            never impossible
+
+
+{-| The whole 401 decision, as a pure function of the response — so it can be
+tested directly instead of through a simulated effect that mirrors it (,
+: a test that re-implements the thing under test agrees only with itself).
+-}
+interpretAuthed :
+    (Http.Response String -> Result err ok)
+    -> Authed err ok msg
+    -> Http.Response String
+    -> msg
+interpretAuthed resolve (Authed request) response =
+    case response of
+        Http.BadStatus_ metadata _ ->
+            if metadata.statusCode == 401 then
+                request.onExpired
+
+            else
+                request.onResult (resolve response)
+
+        _ ->
+            request.onResult (resolve response)
+
+
+{-| Resolver for an authenticated endpoint whose 2xx body is ignored — the
+`Http.expectWhatever` equivalent.
+-}
+resolveWhatever : Http.Response String -> Result Http.Error ()
+resolveWhatever =
+    resolveBody (\_ -> Ok ())
+
+
+{-| Resolver for an authenticated endpoint whose 2xx body is JSON — the
+`Http.expectJson` equivalent.
+-}
+resolveJson : Decoder a -> Http.Response String -> Result Http.Error a
+resolveJson decoder =
+    resolveBody (Decode.decodeString decoder >> Result.mapError Decode.errorToString)
+
+
+{-| The standard `Http.Response` → `Result Http.Error` translation that
+`expectJson`/`expectWhatever` perform internally and do not export. The 401 case
+never reaches here: `interpretAuthed` has already claimed it.
+-}
+resolveBody : (String -> Result String a) -> Http.Response String -> Result Http.Error a
+resolveBody decode response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (Http.BadUrl url)
+
+        Http.Timeout_ ->
+            Err Http.Timeout
+
+        Http.NetworkError_ ->
+            Err Http.NetworkError
+
+        Http.BadStatus_ metadata _ ->
+            Err (Http.BadStatus metadata.statusCode)
+
+        Http.GoodStatus_ _ bodyText ->
+            decode bodyText |> Result.mapError Http.BadBody
+
+
 {-| POST /api/auth/refresh — exchange the current (still-valid) access token for
-a fresh one before it expires (Issue #173 proactive silent renewal). The 200
+a fresh one before it expires. The 200
 body is byte-identical to login's, so we reuse `authResponseDecoder`. A 401/error
 here means the session is no longer renewable and the caller falls through to the
 session-expiry interceptor.
@@ -478,13 +1299,13 @@ refresh token toMsg =
         , url = baseUrl ++ "/api/auth/refresh"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg authResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
 {-| DELETE /api/auth/logout — invalidate the current session server-side
-(revokes the token via guardian\_db, Issue #124 A2). The method MUST be DELETE
+(revokes the token via guardian\_db, A2). The method MUST be DELETE
 to match the router; a POST silently 404s the SPA catch-all, leaving the token
 valid until its TTL — caught by the logout E2E (auth.spec.ts).
 -}
@@ -499,13 +1320,9 @@ logout token toMsg =
         , url = baseUrl ++ "/api/auth/logout"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- TRANSPARENCY (#241 → #235)
 
 
 {-| A single curated transparency signal, carrying the teaching metadata the
@@ -578,16 +1395,21 @@ transparencyMetricsDecoder =
 
 
 {-| `GET /api/transparency/metrics` — the public, unauthenticated transparency
-payload (#241). No auth header: the endpoint is public and returns only curated,
+payload. No auth header: the endpoint is public and returns only curated,
 anonymised aggregates.
 -}
 getTransparencyMetrics :
     (Result Http.Error TransparencyMetrics -> msg)
     -> Cmd msg
 getTransparencyMetrics toMsg =
-    Http.get
-        { url = baseUrl ++ "/api/transparency/metrics"
+    Http.request
+        { method = "GET"
+        , headers = []
+        , url = baseUrl ++ "/api/transparency/metrics"
+        , body = Http.emptyBody
         , expect = Http.expectJson toMsg transparencyMetricsDecoder
+        , timeout = standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -609,8 +1431,10 @@ decodeUploadInit =
 
 
 {-| `POST /api/upload/init` — allocates an image\_id server-side and
-returns a presigned R2 PUT URL the client can upload to directly. The
-Phoenix handler only touches the DB + SigV4 signing, not the bytes.
+returns a Phoenix-served `upload_url` (`PUT /api/upload/:id/data`) the
+client PUTs the bytes to. Phoenix proxies them to the configured storage
+backend (R2 in production, Local in dev/preview); same-origin, so no R2
+CORS allowlisting is needed.
 -}
 initUpload :
     String
@@ -626,7 +1450,7 @@ initUpload contentType token toMsg =
             Http.jsonBody
                 (Encode.object [ ( "content_type", Encode.string contentType ) ])
         , expect = Http.expectJson toMsg decodeUploadInit
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -636,6 +1460,11 @@ Elm's Http uses XHR under the hood, so the JS-side compression
 monkey-patch in `apps/core/assets/js/app.js` intercepts this
 automatically. No auth header — the presigned URL signature IS the
 authorisation.
+
+The one request on `uploadTimeout` rather than `standardTimeout`: it is the only
+one carrying a file body, so its elapsed time is bytes moving rather than a
+server thinking. See `uploadTimeout`.
+
 -}
 putFileToR2 :
     String
@@ -649,7 +1478,7 @@ putFileToR2 url file toMsg =
         , url = url
         , body = Http.fileBody file
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = uploadTimeout
         , tracker = Nothing
         }
 
@@ -671,7 +1500,7 @@ commitUpload imageId token toMsg =
         , url = baseUrl ++ "/api/upload/" ++ imageId ++ "/commit"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "image_id" Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -697,17 +1526,25 @@ rejectIdentification { imageId, rejectedBookIds, token } toMsg =
                     [ ( "rejected_book_ids", Encode.list Encode.string rejectedBookIds ) ]
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
-{-| Response from GET /api/books/:id — book with optional placement data.
+{-| Response from GET /api/books/:id — book with the viewer's placement data.
+
+`placements` carries EVERY bookshelf the viewer has this book on; a book may
+legally sit on several at once. `placement` is the first of them, kept
+because most of the page only ever needs one (the rating, the visibility
+control, the progress card all belong to a single placement) — but anything
+answering "where is this book of mine?" must read `placements`.
+
 -}
 type alias BookDetailResponse =
     { book : Book
     , placement : Maybe Placement
     , bookshelfVisibility : Maybe String
+    , placements : List Placement
     }
 
 
@@ -719,23 +1556,21 @@ decoded through the existing app-level decoders which already delegate to proto.
 -}
 bookDetailResponseDecoder : Decoder BookDetailResponse
 bookDetailResponseDecoder =
-    Decode.map3 BookDetailResponse
+    Decode.map4 BookDetailResponse
         (Decode.field "book" bookDecoder)
-        -- Decode.maybe alone is insufficient here: the proto-generated placementDecoder
-        -- decodes JSON null as a default struct (all fields empty/zero) because each
-        -- field uses `D.oneOf [D.field "..." ..., D.succeed default]`. Using
-        -- Decode.nullable ensures JSON null → Nothing; non-null → Just placement.
-        -- Decode.oneOf handles the case where the field is absent entirely.
         (Decode.oneOf
             [ Decode.field "placement" (Decode.nullable placementDecoder)
             , Decode.succeed Nothing
             ]
         )
-        -- The parent bookshelf's visibility (the placement ceiling), denormalised
-        -- onto the placement payload. Absent → Nothing (no client-side greying).
         (Decode.oneOf
             [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
             , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "placements" (Decode.list placementDecoder)
+            , Decode.succeed []
             ]
         )
 
@@ -764,8 +1599,12 @@ getBook :
     -> (Result Http.Error BookDetailResponse -> msg)
     -> Cmd msg
 getBook bookId maybeToken toMsg =
+    let
+        spec =
+            getBookRequest bookId
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers =
             case maybeToken of
                 Just token ->
@@ -773,12 +1612,22 @@ getBook bookId maybeToken toMsg =
 
                 Nothing ->
                     []
-        , url = baseUrl ++ "/api/books/" ++ bookId
-        , body = Http.emptyBody
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg bookDetailResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `getBook`'s request — see `RequestSpec`.
+-}
+getBookRequest : String -> RequestSpec
+getBookRequest bookId =
+    { method = "GET"
+    , url = baseUrl ++ "/api/books/" ++ bookId
+    , body = Nothing
+    }
 
 
 searchBooks :
@@ -789,10 +1638,6 @@ searchBooks :
     -> Cmd msg
 searchBooks query deep token toMsg =
     let
-        -- Deep search opts into description/review matching via `scope=deep`
-        -- (#284). The default (title-only) search emits NO scope param, so the
-        -- backend's default behaviour is unchanged and the wire URL stays
-        -- byte-identical to the pre-#284 request.
         queryParams =
             Url.Builder.string "q" query
                 :: (if deep then
@@ -807,14 +1652,8 @@ searchBooks query deep token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = Url.Builder.crossOrigin baseUrl [ "api", "search" ] queryParams
         , body = Http.emptyBody
-
-        -- SearchController.index returns the SearchResponse envelope carrying
-        -- `collection` (the viewer's own placements) and `platform_hits`
-        -- (platform-visible books, some label-bearing). Decode it through the
-        -- generated proto decoder (mirrors catalogueResponseDecoder) into the
-        -- typed `SearchSections` the search page renders as two sections (#285).
         , expect = Http.expectJson toMsg searchResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -831,12 +1670,12 @@ getBookshelf shelfName token toMsg =
         , url = baseUrl ++ "/api/bookshelves/" ++ shelfName
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg bookshelfResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
-{-| Error type for `moveBook` (#276). The backend rejects a move that would
+{-| Error type for `moveBook`. The backend rejects a move that would
 take the reading pile past its 50-book cap with a 422 whose body carries the
 stable `reading_pile_full` code; `Http.expectWhatever` would discard that
 body, so a custom expect surfaces it as a distinguishable constructor.
@@ -900,7 +1739,7 @@ moveBook placementId targetBookshelf token toMsg =
                     { bookshelf = targetBookshelf }
                 )
         , expect = expectMove toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -917,13 +1756,40 @@ removeBook placementId token toMsg =
         , url = baseUrl ++ "/api/placements/" ++ placementId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
+{-| `POST /api/placements/:id/restore` — undo a removal (extension).
 
--- READING PROGRESS (US-1.6.6)
+Takes the id `removeBook` was given, because the undo clears `removed_at` on
+that same row rather than placing the book again; see
+`Stacks.Shelving.restore_placement/2` for what a fresh placement would lose.
+
+The response body is the restored placement, and the caller deliberately does
+not decode it: `Page.Bookshelf` refetches the whole bookshelf afterwards for the
+reason `reloadShelves` documents — the server's answer about where a book sits
+is the only trustworthy one. `expectWhatever` still surfaces the status, which
+is what matters here, because **409 is a real answer**: the reader re-added the
+book before pressing Undo.
+
+-}
+restoreBook :
+    String
+    -> String
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+restoreBook placementId token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/restore"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
 
 
 {-| The reading-progress fields returned by `PUT /api/placements/:id/progress`
@@ -946,7 +1812,7 @@ A 422 carrying per-field `{errors: {current_page: [...]}}` (the page-count
 ceiling, a negative page, or an invalid status) is surfaced as
 `ProgressValidationFailed` so the page can explain "that page is past the end of
 the book". Every other failure — including the missing-status 422, which uses
-the `{error: ...}` shape — is a `ProgressRequestFailed`.
+the `{error:...}` shape — is a `ProgressRequestFailed`.
 
 -}
 type ProgressError
@@ -978,7 +1844,7 @@ progressDecoder =
 {-| Fold the reading-progress fields returned by the API into the placement the
 host page already holds, so the badge and progress line re-render in place. One
 home for the byte-identical fold both BookDetail and the Reading Pile card used
-(#281 item 5).
+(item 5).
 -}
 foldProgress : Placement -> Progress -> Placement
 foldProgress placement progress =
@@ -991,7 +1857,7 @@ foldProgress placement progress =
 
 
 {-| The user-facing copy for a failed progress save, shared by every host so the
-message and the current-page special case live in one place (#281 item 5). The
+message and the current-page special case live in one place (item 5). The
 host wraps this string in its own error element (classes differ per surface).
 -}
 progressErrorMessage : ProgressError -> String
@@ -1010,7 +1876,7 @@ progressErrorMessage error =
 
 {-| Map the raw HTTP response into a typed progress result. Pure so the
 elm-program-test simulated effect can reuse the exact mapping (mirrors
-`moveResponseToResult`). A 422 whose body carries `{errors: ...}` becomes
+`moveResponseToResult`). A 422 whose body carries `{errors:...}` becomes
 `ProgressValidationFailed`; everything else is a `ProgressRequestFailed`.
 -}
 progressResponseToResult : Http.Response String -> Result ProgressError Progress
@@ -1063,7 +1929,7 @@ updateProgress placementId body token toMsg =
         , url = baseUrl ++ "/api/placements/" ++ placementId ++ "/progress"
         , body = Http.jsonBody (encodeProgressBody body)
         , expect = Http.expectStringResponse toMsg progressResponseToResult
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1100,7 +1966,7 @@ requestExport token toMsg =
         , url = baseUrl ++ "/api/gdpr/export"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1124,7 +1990,7 @@ deleteAccount token toMsg =
         , url = baseUrl ++ "/api/gdpr/account"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1143,14 +2009,14 @@ saveConsent consent token toMsg =
         , url = baseUrl ++ "/api/gdpr/consent"
         , body = Http.jsonBody (Requests.encodeConsentRequest { consent = consent })
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
 {-| POST /api/gdpr/consent — save the user's writing-assistant consent
 preference. Sends `type: "writing_assistant"` so the backend targets the
-`consent_writing_assistant` flag (Issue #184). Revoking triggers a server-side
+`consent_writing_assistant` flag. Revoking triggers a server-side
 purge of the user's writing-assistant data.
 -}
 saveWritingAssistantConsent :
@@ -1171,7 +2037,7 @@ saveWritingAssistantConsent consent token toMsg =
                     ]
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1206,25 +2072,26 @@ catalogueResponseDecoder =
 
 {-| A book the viewer already holds, matched by the search query, tagged with the
 bookshelf it sits on (raw name, e.g. `"library"` / `"reading_pile"`). Rendered in
-the "Your Collection" section (#285). Mapped from a proto `SearchHit` whose
+the "Your Collection" section. Mapped from a proto `SearchHit` whose
 `collection` entries populate `bookshelf_name` and leave the label fields empty.
 `snippet` is a deep-search `ts_headline` excerpt (`<mark>`-wrapped), non-empty
-only when the match was on the description/review under `scope=deep` (#284).
+only when the match was on the description/review under `scope=deep`.
 -}
 type alias CollectionHit =
     { book : Book
     , bookshelfName : String
+    , bookshelfNames : List String
     , snippet : String
     }
 
 
 {-| A platform-visible book surfaced by the search, with its discoverable-by-design
-provenance (#285). `source` is `""` (a plain platform result — no label),
+provenance. `source` is `""` (a plain platform result — no label),
 `"looking_for_home"` (an always-visible LFH advert → owner handle), or `"listed"`
 (an active marketplace listing → owner handle + formatted price). Rendered in the
 "On the Platform" section; the label is shown only when `source` is non-empty.
 `snippet` is a deep-search `ts_headline` excerpt, non-empty only for a
-description/review match under `scope=deep` (#284).
+description/review match under `scope=deep`.
 -}
 type alias PlatformHit =
     { book : Book
@@ -1249,6 +2116,12 @@ fromProtoCollectionHit : ProtoBookResp.SearchHit -> CollectionHit
 fromProtoCollectionHit hit =
     { book = Types.Book.fromProtoBook hit.book
     , bookshelfName = hit.bookshelfName
+    , bookshelfNames =
+        if List.isEmpty hit.bookshelfNames then
+            List.filter (\name -> name /= "") [ hit.bookshelfName ]
+
+        else
+            hit.bookshelfNames
     , snippet = hit.snippet
     }
 
@@ -1339,7 +2212,7 @@ getAuditLog token toMsg =
         , url = baseUrl ++ "/api/settings/audit-log?page=1"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg auditLogResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1507,12 +2380,12 @@ getInferences revealRisk token toMsg =
                    )
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg personalInferencesDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
-{-| Error type for `placeBook` (#276/#281). The direct-place path — Upload,
+{-| Error type for `placeBook`. The direct-place path — Upload,
 Catalogue, and BookDetail "Add to Collection" — can hit the same reading-pile
 cap the move path does: the backend rejects a placement that would take the
 pile past 50 with a 422 whose body carries the stable `reading_pile_full`
@@ -1587,7 +2460,7 @@ placeBook bookshelfName bookId token toMsg =
                     { bookId = bookId }
                 )
         , expect = expectPlace toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1608,7 +2481,7 @@ setBookAgeGate bookId token toMsg =
         , url = baseUrl ++ "/api/books/" ++ bookId ++ "/age-gate"
         , body = Http.jsonBody (Encode.object [ ( "adults_only", Encode.bool True ) ])
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1625,33 +2498,201 @@ getUserPlacements token toMsg =
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
-        , expect =
-            Http.expectJson toMsg
-                (Decode.map .placements ProtoBookshelfResp.decodePlacementsMineResponse
-                    |> Decode.map (List.map fromProtoPlacementSummary)
-                )
-        , timeout = Nothing
+        , expect = Http.expectJson toMsg placementsMineDecoder
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
-{-| GET /api/books/isbn/:isbn — look up a book by ISBN.
+{-| The `GET /api/placements/mine` body: `{"placements": [...]}`, built by
+`StacksWeb.BookshelfPlacementController.mine/2` straight off
+`Shelving.get_user_placements_summary/1` (no ProtoJSON serializer in between).
+Named and exported so the Catalogue program test decodes the real thing.
 -}
-lookupByIsbn :
-    String
+placementsMineDecoder : Decoder (List PlacementSummary)
+placementsMineDecoder =
+    Decode.map .placements ProtoBookshelfResp.decodePlacementsMineResponse
+        |> Decode.map (List.map fromProtoPlacementSummary)
+
+
+{-| Which of `Books.confirm/2`'s branches answered.
+
+The verb is one round trip that resolves the ISBN, creates the work and its
+primary edition if the platform has never seen it, and places it — so the
+outcome is not derivable from "did it 2xx". `source` carries it on the wire:
+absent on the created branch, `"catalogue"` when the work already existed and
+this request placed it, `"collection"` when it was already on the requested
+bookshelf and nothing changed.
+
+-}
+type ConfirmOutcome
+    = ConfirmCreated
+    | ConfirmPlacedFromCatalogue
+    | ConfirmAlreadyPlaced
+
+
+{-| Response body of `POST /api/books/confirm`.
+
+`placements` is EVERY active placement the reader now has of this book, oldest
+first; `placement` is the one this request produced or matched. The difference
+between the two is the duplicate notice — informational, never blocking (owner
+ruling 2026-07-30).
+
+-}
+type alias ConfirmResponse =
+    { book : Book
+    , placement : Maybe Placement
+    , placements : List Placement
+    , outcome : ConfirmOutcome
+    }
+
+
+{-| A confirm failure the page has to tell apart.
+
+`ConfirmMergeRequired` is the 409: the resolved title+author fuzzy-matched an
+existing work (`Books.find_same_work/2`, Jaro-Winkler > 0.8), so the server
+refused to mint a second work and named the one to merge into. It is the
+prompt's trigger, not an error to show as "something went wrong" —
+collapsing it into `Http.BadStatus 409` is what would lose it.
+
+-}
+type ConfirmError
+    = ConfirmMergeRequired String
+    | ConfirmIsbnNotFound
+    | ConfirmHttpError Http.Error
+
+
+{-| Pure request → result mapping, so the elm-program-test simulated effect
+reuses the exact mapping the real `Cmd` does (mirrors `placeResponseToResult`).
+-}
+confirmResponseToResult : Http.Response String -> Result ConfirmError ConfirmResponse
+confirmResponseToResult response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (ConfirmHttpError (Http.BadUrl url))
+
+        Http.Timeout_ ->
+            Err (ConfirmHttpError Http.Timeout)
+
+        Http.NetworkError_ ->
+            Err (ConfirmHttpError Http.NetworkError)
+
+        Http.BadStatus_ metadata bodyText ->
+            Err (confirmErrorFromBody metadata.statusCode bodyText)
+
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString confirmResponseDecoder bodyText of
+                Ok confirmed ->
+                    Ok confirmed
+
+                Err err ->
+                    Err (ConfirmHttpError (Http.BadBody (Decode.errorToString err)))
+
+
+confirmErrorFromBody : Int -> String -> ConfirmError
+confirmErrorFromBody statusCode bodyText =
+    let
+        errorCode =
+            Decode.decodeString (Decode.field "error" Decode.string) bodyText
+
+        workId =
+            Decode.decodeString (Decode.field "work_id" Decode.string) bodyText
+    in
+    case ( statusCode, errorCode, workId ) of
+        ( 409, Ok "merge_required", Ok id ) ->
+            ConfirmMergeRequired id
+
+        ( 422, Ok "isbn_not_found", _ ) ->
+            ConfirmIsbnNotFound
+
+        _ ->
+            ConfirmHttpError (Http.BadStatus statusCode)
+
+
+{-| Adapter: the `BookConfirmResponse` wire shape → the app-level record.
+
+Hand-rolled over the app-level `bookDecoder` / `placementDecoder` for the same
+reason `bookDetailResponseDecoder` is: the proto-generated placement decoder
+turns a JSON `null` into a default struct rather than `Nothing`.
+
+-}
+confirmResponseDecoder : Decoder ConfirmResponse
+confirmResponseDecoder =
+    Decode.map4 ConfirmResponse
+        (Decode.field "book" bookDecoder)
+        (Decode.oneOf
+            [ Decode.field "placement" (Decode.nullable placementDecoder)
+            , Decode.succeed Nothing
+            ]
+        )
+        (Decode.oneOf
+            [ Decode.field "placements" (Decode.list placementDecoder)
+            , Decode.succeed []
+            ]
+        )
+        (Decode.map confirmOutcomeFromSource
+            (Decode.oneOf
+                [ Decode.field "source" Decode.string
+                , Decode.succeed ""
+                ]
+            )
+        )
+
+
+confirmOutcomeFromSource : String -> ConfirmOutcome
+confirmOutcomeFromSource source =
+    case source of
+        "catalogue" ->
+            ConfirmPlacedFromCatalogue
+
+        "collection" ->
+            ConfirmAlreadyPlaced
+
+        _ ->
+            ConfirmCreated
+
+
+{-| POST /api/books/confirm — the manual-entry verb. One atomic round
+trip: resolve the ISBN against OL/GB, create work+edition if unseen,
+409 on a duplicate edition, and place it. Replaces the client-side
+GET-then-place assembly, which could only add books the catalogue
+already held and left a non-atomic gap between the two calls.
+-}
+confirmBook :
+    { isbn : String, shelfName : String }
     -> String
-    -> (Result Http.Error BookDetailResponse -> msg)
+    -> (Result ConfirmError ConfirmResponse -> msg)
     -> Cmd msg
-lookupByIsbn isbn token toMsg =
+confirmBook body token toMsg =
+    let
+        spec =
+            confirmBookRequest body
+    in
     Http.request
-        { method = "GET"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/isbn/" ++ isbn
-        , body = Http.emptyBody
-        , expect = Http.expectJson toMsg bookDetailResponseDecoder
-        , timeout = Nothing
+        , url = spec.url
+        , body = specHttpBody spec
+        , expect = Http.expectStringResponse toMsg confirmResponseToResult
+        , timeout = standardTimeout
         , tracker = Nothing
         }
+
+
+{-| The data of `confirmBook`'s request — see `RequestSpec`.
+-}
+confirmBookRequest : { isbn : String, shelfName : String } -> RequestSpec
+confirmBookRequest body =
+    { method = "POST"
+    , url = baseUrl ++ "/api/books/confirm"
+    , body =
+        Just
+            (Encode.object
+                [ ( "isbn", Encode.string body.isbn )
+                , ( "shelf_name", Encode.string body.shelfName )
+                ]
+            )
+    }
 
 
 {-| GET /api/catalogue — fetch paginated book catalogue.
@@ -1680,7 +2721,7 @@ getCatalogue params toMsg =
         , url = Url.Builder.absolute [ "api", "catalogue" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg catalogueResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1715,38 +2756,25 @@ updateProfile :
     , emailChanged : Bool
     , handleChanged : Bool
     }
-    -> String
-    -> (Result ProfileError String -> msg)
+    -> Authed ProfileError String msg
     -> Cmd msg
-updateProfile body token toMsg =
+updateProfile body request =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = baseUrl ++ "/api/settings/profile"
         , body = Http.jsonBody (encodeProfileBody body)
-        , expect = expectProfile toMsg
-        , timeout = Nothing
+        , expect = authedExpect resolveProfile request
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
-{-| Body for `PUT /api/settings/profile`.
-
-Each key that can be left unchanged is sent ONLY when it actually changed:
-
-  - `handle` is omitted unless edited. The field can render empty for a session
-    that carries no handle locally (e.g. an injected/minted session), and a
-    blank `handle` would otherwise write NULL over the user's real handle (the
-    column is NOT NULL — the server 500s). Omitting an unchanged handle keeps
-    the stored value; a genuine edit is still sent and server-validated.
-  - `email` + `current_password` are omitted unless the email changed. The
-    server treats a payload without an `email` key as a profile-only update
-    (`Accounts.update_profile/2` → `email_change?/2`), so an ordinary edit never
-    demands the current password.
-
-The proto-generated `Requests.encodeUpdateProfileRequest` always emits every
-field and so cannot express this conditional omission; the body is built here.
-
+{-| Body for `PUT /api/settings/profile`. Unchanged keys are OMITTED, not
+sent blank: `handle` can render empty for a session with no local handle,
+and a blank write would NULL the real handle (NOT NULL column — the
+server 500s). Omission keeps the stored value; genuine edits are sent
+and server-validated.
 -}
 encodeProfileBody :
     { displayName : String
@@ -1780,57 +2808,60 @@ encodeProfileBody body =
         )
 
 
-{-| Keep the structured `{"errors": ...}` payload a 422 carries so the caller
+{-| Keep the structured `{"errors":...}` payload a 422 carries so the caller
 can surface the real reason a profile save was rejected (mirrors
 `expectRegister`). On success it hands back the server-normalised handle (the
 200 body echoes the lowercased value) so the settings page can reflect it.
+
+There is deliberately no 401 branch: `interpretAuthed` diverts a 401 to
+`onExpired` before this runs, so "session expired" cannot arrive here disguised
+as `ProfileRequestFailed (BadStatus 401)` — which is precisely how the page
+came to render "Please try again" at it.
+
 -}
-expectProfile : (Result ProfileError String -> msg) -> Http.Expect msg
-expectProfile toMsg =
-    Http.expectStringResponse toMsg <|
-        \response ->
-            case response of
-                Http.BadUrl_ url ->
-                    Err (ProfileRequestFailed (Http.BadUrl url))
+resolveProfile : Http.Response String -> Result ProfileError String
+resolveProfile response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (ProfileRequestFailed (Http.BadUrl url))
 
-                Http.Timeout_ ->
-                    Err (ProfileRequestFailed Http.Timeout)
+        Http.Timeout_ ->
+            Err (ProfileRequestFailed Http.Timeout)
 
-                Http.NetworkError_ ->
-                    Err (ProfileRequestFailed Http.NetworkError)
+        Http.NetworkError_ ->
+            Err (ProfileRequestFailed Http.NetworkError)
 
-                Http.BadStatus_ metadata bodyText ->
-                    if metadata.statusCode == 422 then
-                        case Decode.decodeString registerErrorsDecoder bodyText of
-                            Ok errors ->
-                                Err (ProfileValidationFailed errors)
+        Http.BadStatus_ metadata bodyText ->
+            if metadata.statusCode == 422 then
+                case Decode.decodeString registerErrorsDecoder bodyText of
+                    Ok errors ->
+                        Err (ProfileValidationFailed errors)
 
-                            Err _ ->
-                                Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
-
-                    else
+                    Err _ ->
                         Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
 
-                Http.GoodStatus_ _ bodyText ->
-                    case Decode.decodeString (Decode.field "handle" Decode.string) bodyText of
-                        Ok handle ->
-                            Ok handle
+            else
+                Err (ProfileRequestFailed (Http.BadStatus metadata.statusCode))
 
-                        Err _ ->
-                            Ok ""
+        Http.GoodStatus_ _ bodyText ->
+            case Decode.decodeString (Decode.field "handle" Decode.string) bodyText of
+                Ok handle ->
+                    Ok handle
+
+                Err _ ->
+                    Ok ""
 
 
 {-| PUT /api/settings/location — update the user's location.
 -}
 updateLocation :
     { countryCode : String, city : String }
-    -> String
-    -> (Result Http.Error () -> msg)
+    -> Authed Http.Error () msg
     -> Cmd msg
-updateLocation body token toMsg =
+updateLocation body request =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = "/api/settings/location"
         , body =
             Http.jsonBody
@@ -1839,8 +2870,8 @@ updateLocation body token toMsg =
                     , city = body.city
                     }
                 )
-        , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , expect = authedExpect resolveWhatever request
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1849,13 +2880,12 @@ updateLocation body token toMsg =
 -}
 updatePassword :
     { currentPassword : String, newPassword : String }
-    -> String
-    -> (Result Http.Error () -> msg)
+    -> Authed Http.Error () msg
     -> Cmd msg
-updatePassword body token toMsg =
+updatePassword body request =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = baseUrl ++ "/api/settings/password"
         , body =
             Http.jsonBody
@@ -1864,8 +2894,8 @@ updatePassword body token toMsg =
                     , newPassword = body.newPassword
                     }
                 )
-        , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , expect = authedExpect resolveWhatever request
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1886,17 +2916,16 @@ hardcoded defaults. The endpoint always returns all four booleans (never null),
 so a strict field decoder is safe.
 -}
 getNotifications :
-    String
-    -> (Result Http.Error NotificationPreferences -> msg)
+    Authed Http.Error NotificationPreferences msg
     -> Cmd msg
-getNotifications token toMsg =
+getNotifications request =
     Http.request
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = baseUrl ++ "/api/settings/notifications"
         , body = Http.emptyBody
-        , expect = Http.expectJson toMsg notificationPreferencesDecoder
-        , timeout = Nothing
+        , expect = authedExpect (resolveJson notificationPreferencesDecoder) request
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1919,13 +2948,12 @@ notificationPreferencesDecoder =
 -}
 updateNotifications :
     NotificationPreferences
-    -> String
-    -> (Result Http.Error () -> msg)
+    -> Authed Http.Error () msg
     -> Cmd msg
-updateNotifications prefs token toMsg =
+updateNotifications prefs request =
     Http.request
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , headers = authedHeaders request
         , url = baseUrl ++ "/api/settings/notifications"
         , body =
             Http.jsonBody
@@ -1936,8 +2964,8 @@ updateNotifications prefs token toMsg =
                     , notifyEventMatches = prefs.eventAlerts
                     }
                 )
-        , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , expect = authedExpect resolveWhatever request
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -1967,25 +2995,35 @@ mergeFormat :
     -> (Result Http.Error MergeFormatResponse -> msg)
     -> Cmd msg
 mergeFormat bookId body token toMsg =
+    let
+        spec =
+            mergeFormatRequest bookId body
+    in
     Http.request
-        { method = "POST"
+        { method = spec.method
         , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
-        , url = baseUrl ++ "/api/books/" ++ bookId ++ "/merge-format"
-        , body =
-            Http.jsonBody
-                (Requests.encodeMergeFormatRequest
-                    { isbn = body.isbn
-                    , formatLabel = body.formatLabel
-                    }
-                )
+        , url = spec.url
+        , body = specHttpBody spec
         , expect = Http.expectJson toMsg mergeFormatResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
-
--- MARKETPLACE LISTINGS
+{-| The data of `mergeFormat`'s request — see `RequestSpec`.
+-}
+mergeFormatRequest : String -> { isbn : String, formatLabel : String } -> RequestSpec
+mergeFormatRequest bookId body =
+    { method = "POST"
+    , url = baseUrl ++ "/api/books/" ++ bookId ++ "/merge-format"
+    , body =
+        Just
+            (Requests.encodeMergeFormatRequest
+                { isbn = body.isbn
+                , formatLabel = body.formatLabel
+                }
+            )
+    }
 
 
 {-| Parameters for creating a new listing.
@@ -2019,7 +3057,7 @@ getListings maybeToken toMsg =
         , url = baseUrl ++ "/api/listings"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg listingsResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2037,7 +3075,7 @@ getMyListings token toMsg =
         , url = baseUrl ++ "/api/listings/mine"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg listingsResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2058,7 +3096,6 @@ createListing params token toMsg =
             Http.jsonBody
                 (Requests.encodeCreateListingRequest
                     { -- Backend Marketplace.create_listing reads book_id; the
-                      -- legacy placement_id field is left empty.
                       placementId = ""
                     , bookId = params.bookId
                     , condition = params.condition
@@ -2069,7 +3106,7 @@ createListing params token toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2088,7 +3125,7 @@ activateListing listingId token toMsg =
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/activate"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2107,7 +3144,7 @@ deactivateListing listingId token toMsg =
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/deactivate"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2126,7 +3163,7 @@ soldListing listingId token toMsg =
         , url = baseUrl ++ "/api/listings/" ++ listingId ++ "/sold"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "listing" listingDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2145,13 +3182,9 @@ getMyPlacements token toMsg =
         , url = baseUrl ++ "/api/placements/mine"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "placements" (Decode.list placementSummaryDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- BLOG
 
 
 {-| GET /api/blog/posts — fetch all blog posts.
@@ -2173,7 +3206,7 @@ getBlogPosts maybeToken toMsg =
         , url = baseUrl ++ "/api/blog/posts"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "posts" (Decode.list blogPostSummaryDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2198,7 +3231,7 @@ getBlogPost postId maybeToken toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "post" blogPostDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2224,7 +3257,7 @@ createBlogPost postData token toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2251,7 +3284,129 @@ updateBlogPost postId postData token toMsg =
                     }
                 )
         , expect = Http.expectJson toMsg (Decode.at [ "post", "id" ] Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| The paste-ready copy of a post for Substack's editor.
+-}
+type alias SyndicationExport =
+    { format : String
+    , canonicalUrl : String
+    , body : String
+    }
+
+
+{-| One recorded act of syndication. `syndicatedUrl` is Nothing until the
+writer pastes the live Substack URL back ("Also published at").
+-}
+type alias Syndication =
+    { id : String
+    , target : String
+    , method : String
+    , canonicalUrl : String
+    , syndicatedUrl : Maybe String
+    , createdAt : String
+    }
+
+
+syndicationDecoder : Decoder Syndication
+syndicationDecoder =
+    Decode.map6 Syndication
+        (Decode.field "id" Decode.string)
+        (Decode.field "target" Decode.string)
+        (Decode.field "method" Decode.string)
+        (Decode.field "canonical_url" Decode.string)
+        (Decode.field "syndicated_url" (Decode.nullable Decode.string))
+        (Decode.field "created_at" Decode.string)
+
+
+{-| `GET /api/blog/posts/:id/syndication?format=html|markdown`.
+-}
+fetchSyndicationExport :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error SyndicationExport -> msg)
+    -> Cmd msg
+fetchSyndicationExport token postId format toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndication?format=" ++ format
+        , body = Http.emptyBody
+        , expect =
+            Http.expectJson toMsg
+                (Decode.map3 SyndicationExport
+                    (Decode.field "format" Decode.string)
+                    (Decode.field "canonical_url" Decode.string)
+                    (Decode.field "body" Decode.string)
+                )
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `POST /api/blog/posts/:id/syndications` — record that a copy went out.
+-}
+recordSyndication :
+    String
+    -> String
+    -> String
+    -> (Result Http.Error Syndication -> msg)
+    -> Cmd msg
+recordSyndication token postId method toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications"
+        , body = Http.jsonBody (Encode.object [ ( "method", Encode.string method ) ])
+        , expect = Http.expectJson toMsg (Decode.field "syndication" syndicationDecoder)
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `PUT /api/blog/posts/:id/syndications/:sid` — paste the live Substack URL
+back in, closing the POSSE loop.
+-}
+updateSyndicationUrl :
+    String
+    -> String
+    -> String
+    -> String
+    -> (Result Http.Error Syndication -> msg)
+    -> Cmd msg
+updateSyndicationUrl token postId sid url toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/syndications/" ++ sid
+        , body = Http.jsonBody (Encode.object [ ( "syndicated_url", Encode.string url ) ])
+        , expect = Http.expectJson toMsg (Decode.field "syndication" syndicationDecoder)
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| `PUT /api/blog/posts/:id` with ONLY `syndicated` — the per-post feed
+tickbox. Partial on purpose: title/body/visibility stay untouched.
+-}
+setPostSyndicated :
+    String
+    -> String
+    -> Bool
+    -> (Result Http.Error Bool -> msg)
+    -> Cmd msg
+setPostSyndicated token postId syndicated toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/blog/posts/" ++ postId
+        , body = Http.jsonBody (Encode.object [ ( "syndicated", Encode.bool syndicated ) ])
+        , expect = Http.expectJson toMsg (Decode.at [ "post", "syndicated" ] Decode.bool)
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2270,7 +3425,7 @@ publishBlogPost postId token toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/publish"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2290,7 +3445,7 @@ confirmAssociation postId associationId token toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/confirm"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2310,7 +3465,7 @@ dismissAssociation postId associationId token toMsg =
         , url = baseUrl ++ "/api/blog/posts/" ++ postId ++ "/associations/" ++ associationId ++ "/dismiss"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2335,7 +3490,7 @@ getPostComments postId maybeToken toMsg =
         , url = baseUrl ++ "/api/posts/" ++ postId ++ "/comments"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "comments" (Decode.list commentDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2369,7 +3524,7 @@ createComment postId body maybeParentId token toMsg =
                     ([ ( "body", Encode.string body ) ] ++ parentField)
                 )
         , expect = Http.expectJson toMsg (Decode.field "comment" commentDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2388,13 +3543,9 @@ deleteComment commentId token toMsg =
         , url = baseUrl ++ "/api/comments/" ++ commentId
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- PRIVACY / VISIBILITY
 
 
 {-| PUT /api/settings/profile\_visibility — update profile visibility.
@@ -2415,7 +3566,7 @@ updateProfileVisibility visibility token toMsg =
                     { profileVisibility = visibility }
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2439,7 +3590,7 @@ updateShelfVisibility shelfName visibility token toMsg =
                     { visibility = visibility }
                 )
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2469,13 +3620,9 @@ updatePlacementVisibility placementId visibility token toMsg =
                     { visibility = visibility }
                 )
         , expect = Http.expectJson toMsg (Decode.field "visibility" Decode.string)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- BLOCKING / SOCIAL
 
 
 {-| A block failure.
@@ -2528,7 +3675,7 @@ blockedUsersResponseDecoder =
         (Decode.field "page" Decode.int)
 
 
-{-| `Http.expectWhatever` would collapse the backend's `{"error": ...}` body
+{-| `Http.expectWhatever` would collapse the backend's `{"error":...}` body
 into an opaque `BadStatus`, losing the difference between `already_blocked`,
 `cannot_block_self`, and `not_found`. This custom expect keeps that reason so
 the UI can explain what actually happened.
@@ -2581,7 +3728,7 @@ blockUser targetUserId token toMsg =
         , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
         , body = Http.emptyBody
         , expect = expectBlock toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2601,7 +3748,7 @@ unblockUser targetUserId token toMsg =
         , url = baseUrl ++ "/api/users/" ++ targetUserId ++ "/block"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2622,7 +3769,7 @@ listBlockedUsers token page toMsg =
         , url = baseUrl ++ "/api/settings/blocked-users?page=" ++ String.fromInt page
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg blockedUsersResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2642,6 +3789,8 @@ user sees their stored values rather than hardcoded defaults.
 type alias PrivacySettings =
     { profileVisibility : String
     , shelves : List ShelfVisibilitySetting
+    , consentAnalytics : Bool
+    , consentWritingAssistant : Bool
     }
 
 
@@ -2654,9 +3803,11 @@ shelfVisibilitySettingDecoder =
 
 privacySettingsDecoder : Decoder PrivacySettings
 privacySettingsDecoder =
-    Decode.map2 PrivacySettings
+    Decode.map4 PrivacySettings
         (Decode.field "profile_visibility" Decode.string)
         (Decode.field "shelves" (Decode.list shelfVisibilitySettingDecoder))
+        (Decode.field "consent_analytics" Decode.bool)
+        (Decode.field "consent_writing_assistant" Decode.bool)
 
 
 {-| GET /api/settings/privacy — the current user's saved profile visibility and
@@ -2673,13 +3824,9 @@ getPrivacySettings token toMsg =
         , url = baseUrl ++ "/api/settings/privacy"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg privacySettingsDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- PUBLIC PROFILE (/u/:handle) — #214
 
 
 {-| A user's public profile as seen by a viewer: redacted identity fields plus
@@ -2696,7 +3843,9 @@ type alias PublicProfile =
 
 
 type alias ProfileShelfSummary =
-    { name : String }
+    { name : String
+    , hasFeed : Bool
+    }
 
 
 publicProfileDecoder : Decoder PublicProfile
@@ -2712,7 +3861,9 @@ publicProfileDecoder =
 
 profileShelfSummaryDecoder : Decoder ProfileShelfSummary
 profileShelfSummaryDecoder =
-    Decode.map ProfileShelfSummary (Decode.field "name" Decode.string)
+    Decode.map2 ProfileShelfSummary
+        (Decode.field "name" Decode.string)
+        (Decode.oneOf [ Decode.field "has_feed" Decode.bool, Decode.succeed False ])
 
 
 {-| Decodes a string field that may be absent or JSON null, defaulting to "".
@@ -2738,7 +3889,72 @@ getProfile maybeToken handle toMsg =
         , url = baseUrl ++ "/api/u/" ++ handle
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg publicProfileDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| Add a shelf to the bottom of a bookshelf.
+
+`POST /api/bookshelves/:bookshelfName/shelves`. Takes no body: position is the server's
+to assign, and letting the client propose one invites two tabs choosing the same.
+
+-}
+createShelf : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+createShelf bookshelfName token toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
+        , body = Http.jsonBody (Encode.object [])
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| Remove a shelf.
+
+`DELETE /api/shelves/:id`.
+
+⚠️ **422 means the shelf still has books on it** and the server refused. That is a real
+outcome a reader must be told about, not a transport failure to swallow — deleting a shelf
+out from under its books would strand them.
+
+-}
+deleteShelf : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+deleteShelf shelfId token toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/shelves/" ++ shelfId
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| Set the order of every shelf in a bookshelf.
+
+`PUT /api/bookshelves/:bookshelfName/shelves/reorder` with the full ordered id list.
+
+Sends the **whole** order rather than "move shelf X to position N": the server then has no
+ambiguity to resolve, and two reorders racing produce one of the two orders rather than an
+interleaving neither reader asked for.
+
+-}
+reorderShelves : String -> List String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+reorderShelves bookshelfName shelfIds token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/bookshelves/" ++ bookshelfName ++ "/shelves/reorder"
+        , body =
+            Http.jsonBody
+                (Encode.object [ ( "shelf_ids", Encode.list Encode.string shelfIds ) ])
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2763,13 +3979,9 @@ getProfileShelf maybeToken handle bookshelfName toMsg =
         , url = baseUrl ++ "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg shelvesResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- PEOPLE SEARCH (/api/search/users) — #217
 
 
 {-| A single people-search result — the redacted `public_profile_summary` shape
@@ -2809,7 +4021,7 @@ searchUsers maybeToken query toMsg =
         , url = Url.Builder.crossOrigin baseUrl [ "api", "search", "users" ] [ Url.Builder.string "q" query ]
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2822,10 +4034,6 @@ authHeaders maybeToken =
 
         Nothing ->
             []
-
-
-
--- ADMIN: SOURCE APPROVAL
 
 
 {-| A source as returned by the admin sources API.
@@ -2887,6 +4095,390 @@ adminSourcesResponseDecoder =
     Decode.map fromProtoSourceAdminListResponse ProtoSourceResp.decodeSourceAdminListResponse
 
 
+{-| The admin-session flow — the layer whose absence made four admin
+pages dead: `/api/admin/*` requires an MFA-verified `admin_session`
+token (IP- and boot\_id-bound), and the pages were passing the ordinary
+Guardian token, so every admin surface 401'd. Two steps: password →
+challenge id, TOTP → admin token; the token lives only in memory
+(`Model.adminSession`), never localStorage.
+-}
+type alias AdminSession =
+    { sessionId : String }
+
+
+{-| Why a distinct error type rather than passing `Http.Error` up: every failure here has a
+different remedy, and an operator staring at "something went wrong" cannot tell which. A wrong
+password, a non-owner account, an unenrolled factor and a stale code are four different next
+actions.
+-}
+type AdminAuthError
+    = InvalidCredentials
+    | NotAnOwner
+    | MfaNotEnrolled
+    | InvalidCode
+    | InvalidSession
+    | AlreadyVerified
+    | AdminAuthTransport Http.Error
+
+
+{-| POST /api/admin/auth/login — step 1. Returns an UNVERIFIED session id, not a usable token.
+-}
+adminLogin :
+    { email : String, password : String }
+    -> (Result AdminAuthError AdminSession -> msg)
+    -> Cmd msg
+adminLogin body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/admin/auth/login"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "email", Encode.string body.email )
+                    , ( "password", Encode.string body.password )
+                    ]
+                )
+        , expect =
+            expectAdminJson toMsg
+                (Decode.map AdminSession (Decode.field "session_id" Decode.string))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/admin/auth/verify\_mfa — step 2. Returns the admin token.
+-}
+adminVerifyMfa :
+    { sessionId : String, code : String }
+    -> (Result AdminAuthError String -> msg)
+    -> Cmd msg
+adminVerifyMfa body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = baseUrl ++ "/api/admin/auth/verify_mfa"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "session_id", Encode.string body.sessionId )
+                    , ( "totp_code", Encode.string body.code )
+                    ]
+                )
+        , expect = expectAdminJson toMsg (Decode.field "token" Decode.string)
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| What enrolment hands back: the `otpauth://` URI for an authenticator app, and one-time
+recovery codes the operator must record before continuing.
+-}
+type alias AdminMfaEnrolment =
+    { provisioningUri : String
+    , recoveryCodes : List String
+    }
+
+
+{-| POST /api/admin/auth/mfa/setup — takes the ORDINARY owner token (no admin session exists yet).
+-}
+adminMfaSetup : String -> (Result Http.Error AdminMfaEnrolment -> msg) -> Cmd msg
+adminMfaSetup ownerToken toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ ownerToken) ]
+        , url = baseUrl ++ "/api/admin/auth/mfa/setup"
+        , body = Http.jsonBody (Encode.object [])
+        , expect =
+            Http.expectJson toMsg
+                (Decode.map2 AdminMfaEnrolment
+                    (Decode.field "provisioning_uri" Decode.string)
+                    (Decode.field "recovery_codes" (Decode.list Decode.string))
+                )
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/admin/auth/mfa/confirm — completes enrolment.
+
+Pass `secret` **exactly as it appears in the provisioning URI** — the `secret=` parameter, base32,
+unmodified.
+
+⚠️ It used to demand base64 of the raw bytes, which no client could produce: `adminMfaSetup` returns
+only the URI, and the secret inside it is base32. Getting it wrong returned `422 invalid_code`,
+reading as clock skew rather than an encoding mismatch. The endpoint was changed to accept what its
+own setup call publishes (2026-07-29) rather than have every client base32-decode and re-encode.
+**Do not "fix" this by implementing base32 in Elm** — the contract is correct now.
+
+-}
+adminMfaConfirm :
+    String
+    -> { code : String, secret : String, recoveryCodes : List String }
+    -> (Result Http.Error () -> msg)
+    -> Cmd msg
+adminMfaConfirm ownerToken body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ ownerToken) ]
+        , url = baseUrl ++ "/api/admin/auth/mfa/confirm"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    [ ( "totp_code", Encode.string body.code )
+                    , ( "secret", Encode.string body.secret )
+                    , ( "recovery_codes", Encode.list Encode.string body.recoveryCodes )
+                    ]
+                )
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| Maps the endpoint's `{"error": "..."}` bodies onto `AdminAuthError`, so each failure keeps the
+remedy the operator needs. An unrecognised shape stays transport-level rather than being guessed at.
+-}
+expectAdminJson : (Result AdminAuthError a -> msg) -> Decode.Decoder a -> Http.Expect msg
+expectAdminJson toMsg decoder =
+    Http.expectStringResponse toMsg
+        (\response ->
+            case response of
+                Http.GoodStatus_ _ body ->
+                    Decode.decodeString decoder body
+                        |> Result.mapError (Http.BadBody << Decode.errorToString)
+                        |> Result.mapError AdminAuthTransport
+
+                Http.BadStatus_ _ body ->
+                    Err (adminErrorFromBody body)
+
+                Http.BadUrl_ url ->
+                    Err (AdminAuthTransport (Http.BadUrl url))
+
+                Http.Timeout_ ->
+                    Err (AdminAuthTransport Http.Timeout)
+
+                Http.NetworkError_ ->
+                    Err (AdminAuthTransport Http.NetworkError)
+        )
+
+
+adminErrorFromBody : String -> AdminAuthError
+adminErrorFromBody body =
+    case Decode.decodeString (Decode.field "error" Decode.string) body of
+        Ok "invalid_credentials" ->
+            InvalidCredentials
+
+        Ok "insufficient_role" ->
+            NotAnOwner
+
+        Ok "mfa_not_enrolled" ->
+            MfaNotEnrolled
+
+        Ok "invalid_code" ->
+            InvalidCode
+
+        Ok "invalid_session" ->
+            InvalidSession
+
+        Ok "already_verified" ->
+            AlreadyVerified
+
+        _ ->
+            AdminAuthTransport (Http.BadBody body)
+
+
+{-| A business waiting on a human decision about its listing.
+
+`GET /api/admin/removal-requests`. A removal request whose contact address was not on the
+listing's own domain cannot be auto-verified, so it parks with `exclusion_requested_at` set
+and the listing **still live** until someone rules on it.
+
+`email` is the whole reason a human is looking — it is what the reviewer judges. Without it
+the queue is a list of names.
+
+-}
+type alias RemovalRequest =
+    { id : String
+    , name : String
+    , url : String
+    , sourceType : String
+    , email : Maybe String
+    , requestedAt : Maybe String
+    }
+
+
+removalRequestDecoder : Decoder RemovalRequest
+removalRequestDecoder =
+    Decode.map6 RemovalRequest
+        (Decode.field "id" Decode.string)
+        (Decode.field "name" Decode.string)
+        (Decode.field "url" Decode.string)
+        (Decode.field "type" Decode.string)
+        (Decode.maybe (Decode.field "exclusion_email" Decode.string))
+        (Decode.maybe (Decode.field "requested_at" Decode.string))
+
+
+{-| GET /api/admin/removal-requests — the pending queue, oldest first.
+-}
+getRemovalRequests : String -> (Result Http.Error (List RemovalRequest) -> msg) -> Cmd msg
+getRemovalRequests token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/removal-requests"
+        , body = Http.emptyBody
+        , expect =
+            Http.expectJson toMsg (Decode.field "requests" (Decode.list removalRequestDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| An invitation as the owner's list sees it: `codePrefix` only —
+the full code is unrecoverable after issue, and only `createAdminInvite`'s
+response ever carries it.
+-}
+type alias AdminInvite =
+    { id : String
+    , codePrefix : String
+    , note : Maybe String
+    , invitedEmail : Maybe String
+    , maxUses : Int
+    , useCount : Int
+    , expiresAt : Maybe String
+    , revokedAt : Maybe String
+    , redeemedAt : Maybe String
+    , redeemedByHandle : Maybe String
+    }
+
+
+andMap : Decoder a -> Decoder (a -> b) -> Decoder b
+andMap =
+    Decode.map2 (|>)
+
+
+adminInviteDecoder : Decoder AdminInvite
+adminInviteDecoder =
+    Decode.succeed AdminInvite
+        |> andMap (Decode.field "id" Decode.string)
+        |> andMap (Decode.field "code_prefix" Decode.string)
+        |> andMap (Decode.field "note" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "invited_email" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "max_uses" Decode.int)
+        |> andMap (Decode.field "use_count" Decode.int)
+        |> andMap (Decode.field "expires_at" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "revoked_at" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "redeemed_at" (Decode.nullable Decode.string))
+        |> andMap (Decode.field "redeemed_by_handle" (Decode.nullable Decode.string))
+
+
+{-| GET /api/admin/invites — every invitation, newest first.
+-}
+getAdminInvites : String -> (Result Http.Error (List AdminInvite) -> msg) -> Cmd msg
+getAdminInvites token toMsg =
+    Http.request
+        { method = "GET"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/invites"
+        , body = Http.emptyBody
+        , expect = Http.expectJson toMsg (Decode.field "invites" (Decode.list adminInviteDecoder))
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| POST /api/admin/invites — write an invitation. The `code` in this response
+is the ONLY time the full code exists in the clear.
+-}
+createAdminInvite :
+    String
+    -> { note : String, invitedEmail : String, maxUses : Int, expiresInDays : Maybe Int }
+    -> (Result Http.Error ( AdminInvite, String ) -> msg)
+    -> Cmd msg
+createAdminInvite token body toMsg =
+    Http.request
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/invites"
+        , body =
+            Http.jsonBody
+                (Encode.object
+                    (List.filterMap identity
+                        [ blankAsAbsent "note" body.note
+                        , blankAsAbsent "invited_email" body.invitedEmail
+                        , Just ( "max_uses", Encode.int body.maxUses )
+                        , Maybe.map (\days -> ( "expires_in_days", Encode.int days )) body.expiresInDays
+                        ]
+                    )
+                )
+        , expect =
+            Http.expectJson toMsg
+                (Decode.field "invite"
+                    (Decode.map2 Tuple.pair adminInviteDecoder (Decode.field "code" Decode.string))
+                )
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+blankAsAbsent : String -> String -> Maybe ( String, Encode.Value )
+blankAsAbsent key value =
+    if String.trim value == "" then
+        Nothing
+
+    else
+        Just ( key, Encode.string (String.trim value) )
+
+
+{-| DELETE /api/admin/invites/:id — revoke. A timestamp, never a row delete.
+-}
+revokeAdminInvite : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+revokeAdminInvite token id toMsg =
+    Http.request
+        { method = "DELETE"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/invites/" ++ id
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
+{-| PUT /api/admin/removal-requests/:id/honour — **take the listing down.**
+
+⚠️ **Not `approveSource`.** `approveSource` _publishes_ a listing; this unpublishes one. Two
+actions that sound alike, act on the same row, and do opposite things — so both the endpoint
+and this function are named for what happens to the _listing_, not for the reviewer's verdict
+on the request. Read the name twice before wiring a button to it.
+
+-}
+honourRemovalRequest : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+honourRemovalRequest requestId token toMsg =
+    removalDecision requestId "honour" token toMsg
+
+
+{-| PUT /api/admin/removal-requests/:id/decline — the listing stays up.
+-}
+declineRemovalRequest : String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+declineRemovalRequest requestId token toMsg =
+    removalDecision requestId "decline" token toMsg
+
+
+removalDecision : String -> String -> String -> (Result Http.Error () -> msg) -> Cmd msg
+removalDecision requestId action token toMsg =
+    Http.request
+        { method = "PUT"
+        , headers = [ Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = baseUrl ++ "/api/admin/removal-requests/" ++ requestId ++ "/" ++ action
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = standardTimeout
+        , tracker = Nothing
+        }
+
+
 {-| GET /api/admin/sources — fetch paginated admin sources, optionally filtered by status.
 -}
 getAdminSources :
@@ -2908,7 +4500,7 @@ getAdminSources params token toMsg =
         , url = Url.Builder.absolute [ "api", "admin", "sources" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminSourcesResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2927,7 +4519,7 @@ approveSource sourceId token toMsg =
         , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/approve"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -2946,16 +4538,12 @@ rejectSource sourceId token toMsg =
         , url = baseUrl ++ "/api/admin/sources/" ++ sourceId ++ "/reject"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "source" adminSourceDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
 
-
--- ADMIN: BOOK MODERATION (age gate)
-
-
-{-| A book as returned by the owner moderation API (#118).
+{-| A book as returned by the owner moderation API.
 -}
 type alias AdminBook =
     { id : String
@@ -3020,7 +4608,7 @@ adminListBooks params token toMsg =
         , url = Url.Builder.absolute [ "api", "admin", "books" ] queryParams
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg adminBooksResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3041,13 +4629,9 @@ adminSetBookAgeGate bookId ageGated token toMsg =
         , url = baseUrl ++ "/api/admin/books/" ++ bookId ++ "/age-gate"
         , body = Http.jsonBody (Encode.object [ ( "age_gated", Encode.bool ageGated ) ])
         , expect = Http.expectJson toMsg (Decode.field "book" adminBookDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
-
-
-
--- SOURCE HEALTH (admin scraper page)
 
 
 {-| Source health record from GET /api/admin/source-health.
@@ -3098,7 +4682,7 @@ getSourceHealth token toMsg =
         , url = baseUrl ++ "/api/admin/source-health"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg sourceHealthListDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3141,7 +4725,7 @@ getOnboardingStatus token toMsg =
         , url = baseUrl ++ "/api/onboarding/status"
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg onboardingStatusDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3160,7 +4744,7 @@ completeOnboardingStep step token toMsg =
         , url = baseUrl ++ "/api/onboarding/step/" ++ step
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg onboardingStatusDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3183,7 +4767,7 @@ createGroup name token toMsg =
                     ]
                 )
         , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3200,7 +4784,7 @@ getGroup groupId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg (Decode.field "group" groupDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3227,7 +4811,7 @@ getGroupFeed groupId token maybeCursor toMsg =
         , url = url
         , body = Http.emptyBody
         , expect = Http.expectJson toMsg feedResponseDecoder
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3250,7 +4834,7 @@ inviteToGroup groupId identifier token toMsg =
                     ]
                 )
         , expect = Http.expectJson toMsg (Decode.field "invitation" groupInvitationDecoder)
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3268,7 +4852,7 @@ acceptInvitation groupId invitationId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/accept"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3286,7 +4870,7 @@ declineInvitation groupId invitationId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/invitations/" ++ invitationId ++ "/decline"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }
 
@@ -3303,6 +4887,6 @@ leaveGroup groupId token toMsg =
         , url = baseUrl ++ "/api/groups/" ++ groupId ++ "/leave"
         , body = Http.emptyBody
         , expect = Http.expectWhatever toMsg
-        , timeout = Nothing
+        , timeout = standardTimeout
         , tracker = Nothing
         }

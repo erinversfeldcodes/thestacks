@@ -22,7 +22,6 @@ test.describe("Reading Pile hover diagnostics", () => {
     const box = await targetBook.boundingBox();
     console.log("Target book box:", JSON.stringify(box));
 
-    // Screenshot before
     await page.screenshot({ path: "test-results/pile-00-before.png", fullPage: true });
 
     expect(box).toBeTruthy();
@@ -35,14 +34,12 @@ test.describe("Reading Pile hover diagnostics", () => {
     await page.waitForTimeout(200);
     await page.screenshot({ path: "test-results/pile-01-mouse-move.png", fullPage: true });
 
-    // Check what element is under the cursor
     const elementAtPoint = await page.evaluate(({x, y}) => {
       const el = document.elementFromPoint(x, y);
       return el ? { tag: el.tagName, classes: el.className, text: el.textContent?.substring(0, 50) } : null;
     }, { x: centerX, y: centerY });
     console.log("Element under cursor:", JSON.stringify(elementAtPoint));
 
-    // Force hover by adding a class manually to test the styles work
     await targetBook.evaluate((el) => el.classList.add("force-hover"));
     await page.addStyleTag({ content: `
       .book-pile__book.force-hover {
@@ -67,7 +64,6 @@ test.describe("Reading Pile hover diagnostics", () => {
     });
     console.log("Forced hover styles:", JSON.stringify(forcedStyles, null, 2));
 
-    // Check computed styles on the hovered book
     const hoveredStyles = await targetBook.evaluate((el) => {
       const cs = getComputedStyle(el);
       return {
@@ -85,7 +81,6 @@ test.describe("Reading Pile hover diagnostics", () => {
     });
     console.log("Hovered book styles:", JSON.stringify(hoveredStyles, null, 2));
 
-    // Check if the inner .book got the tilt animation
     const innerBook = targetBook.locator(".book").first();
     const innerStyles = await innerBook.evaluate((el) => {
       const cs = getComputedStyle(el);
@@ -97,7 +92,6 @@ test.describe("Reading Pile hover diagnostics", () => {
     });
     console.log("Inner .book styles:", JSON.stringify(innerStyles, null, 2));
 
-    // Move mouse away
     await page.mouse.move(0, 0);
     await page.waitForTimeout(500);
     await page.screenshot({ path: "test-results/pile-05-unhovered.png", fullPage: true });

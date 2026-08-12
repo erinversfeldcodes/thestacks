@@ -2,14 +2,12 @@ defmodule Core.Repo.Migrations.AddBooksTsvectorColumn do
   use Ecto.Migration
 
   def up do
-    # Add a GENERATED ALWAYS AS stored tsvector column for efficient FTS
     execute("""
     ALTER TABLE op.books
     ADD COLUMN title_tsv tsvector
     GENERATED ALWAYS AS (to_tsvector('english', coalesce(title, ''))) STORED
     """)
 
-    # Drop the old functional index and replace with a stored column index
     execute("DROP INDEX IF EXISTS op.idx_books_title_fts")
 
     execute("""

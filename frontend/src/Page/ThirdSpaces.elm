@@ -5,15 +5,18 @@ module Page.ThirdSpaces exposing
     , ThirdSpace
     , ThirdSpaceEvent
     , init
+    , thirdSpacesResponseDecoder
     , update
     , view
     )
 
-import Html exposing (Html, button, div, h3, li, p, text, ul)
-import Html.Attributes exposing (class)
+import Api
+import Html exposing (Html, a, button, div, h3, li, p, text, ul)
+import Html.Attributes exposing (class, href)
 import Html.Events exposing (onClick)
 import Http
 import Json.Decode as Decode
+import Navigation.Route as Route
 import Types.RemoteData exposing (RemoteData(..))
 
 
@@ -70,7 +73,7 @@ init maybeToken =
         , url = "/api/third-spaces"
         , body = Http.emptyBody
         , expect = Http.expectJson SpacesLoaded thirdSpacesResponseDecoder
-        , timeout = Nothing
+        , timeout = Api.standardTimeout
         , tracker = Nothing
         }
     )
@@ -168,4 +171,9 @@ viewSpaceDetail space =
                     space.upcomingEvents
                 )
         , button [ class "btn btn--ghost", onClick CloseDetail ] [ text "Close" ]
+        , a
+            [ class "third-spaces__claim"
+            , href (Route.toPath Route.ListingRemoval)
+            ]
+            [ text "Is this your business?" ]
         ]

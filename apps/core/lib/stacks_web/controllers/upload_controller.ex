@@ -13,95 +13,27 @@ defmodule StacksWeb.UploadController do
   alias Stacks.Books.TitleSearchCache
   alias Stacks.Books.UploadedImage
   alias Stacks.Shelving
+  alias Stacks.Uploads
   alias Stacks.Workers.IdentifyBookJob
   alias StacksWeb.ProtoJSON
 
   @doc """
-  POST /api/upload/identify — synchronously identifies candidate books from an image.
+      POST /api/upload/init — first step of the presigned-URL upload flow.
 
-  Accepts a JSON body with either `image_b64` (base64-encoded image bytes) or
-  `image_url` (publicly accessible image URL). Calls the vision client inline and
-  returns a list of candidate maps immediately — no Oban job is enqueued.
+      Body: `{content_type: "image/jpeg"}` (optional, defaults to image/jpeg).
 
-  Returns 200 `{status: "identified", candidates: [...]}` on success.
-  Returns 422 when neither `image_b64` nor `image_url` is provided.
-  """
-  @spec identify(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def identify(conn, %{"image_b64" => image_b64}) when is_binary(image_b64) do
-    user = Guardian.Plug.current_resource(conn)
-    run_identify(conn, user.id, {:b64, image_b64})
-  end
-
-  def identify(conn, %{"image_url" => image_url}) when is_binary(image_url) do
-    user = Guardian.Plug.current_resource(conn)
-    run_identify(conn, user.id, {:url, image_url})
-  end
-
-  def identify(conn, _params) do
-    conn
-    |> put_status(422)
-    |> json(%{error: "image_b64 or image_url is required"})
-  end
-
-  defp run_identify(conn, user_id, image_input) do
-    case Books.identify(user_id, image_input) do
-      {:ok, candidates} ->
-        json(conn, %{status: "identified", candidates: candidates})
-
-      {:error, _reason} ->
-        conn
-        |> put_status(500)
-        |> json(%{error: "identification_failed"})
-    end
-  end
-
-  @doc """
-  POST /api/upload — legacy multipart image upload.
-
-  Deprecated in favour of the init/commit flow (`POST /api/upload/init`
-  + `POST /api/upload/:id/commit`) which keeps R2 upload off the
-  Phoenix handler pool. Kept for backward compatibility and as a
-  rollback target.
-  """
-  def create(conn, %{"image" => %Plug.Upload{} = upload}) do
-    user = Guardian.Plug.current_resource(conn)
-
-    with {:ok, image} <- Books.store_upload(user.id, upload),
-         {:ok, _job} <- Books.upload_and_identify(user.id, image.id, image.storage_path) do
-      conn
-      |> put_status(202)
-      |> json(%{status: "accepted", image_id: image.id})
-    else
-      {:error, _reason} ->
-        conn
-        |> put_status(500)
-        |> json(%{error: "upload_failed"})
-    end
-  end
-
-  def create(conn, _params) do
-    conn
-    |> put_status(422)
-    |> json(%{error: "no image provided"})
-  end
-
-  @doc """
-  POST /api/upload/init — first step of the presigned-URL upload flow.
-
-  Body: `{content_type: "image/jpeg"}` (optional, defaults to image/jpeg).
-
-  Returns: `{image_id, upload_url, expires_in}`. Client PUTs the image
-  bytes directly to `upload_url` (R2), then calls
-  `POST /api/upload/:id/commit` to signal completion. Phoenix never
-  sees the bytes — the POST here is a lightweight DB insert + local
-  SigV4 signing operation (~50ms typical).
+      Returns: `{image_id, upload_url, expires_in}`. Client PUTs the image
+      bytes directly to `upload_url` (R2), then calls
+      `POST /api/upload/:id/commit` to signal completion. Phoenix never
+      sees the bytes — the POST here is a lightweight DB insert + local
+      SigV4 signing operation (~50ms typical).
   """
   @spec init(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def init(conn, params) do
     user = Guardian.Plug.current_resource(conn)
     content_type = Map.get(params, "content_type", "image/jpeg")
 
-    case Books.init_upload(user.id, content_type: content_type) do
+    case Uploads.init_upload(user.id, content_type: content_type) do
       {:ok, %{image_id: image_id, upload_url: url, expires_in: expires_in}} ->
         conn
         |> put_status(201)
@@ -115,17 +47,17 @@ defmodule StacksWeb.UploadController do
   end
 
   @doc """
-  POST /api/upload/:image_id/commit — second step of the presigned-URL
-  flow. Verifies that the client's direct PUT to R2 landed (HEAD),
-  flips the row from `awaiting_upload` to `pending`, and enqueues
-  `IdentifyBookJob`. The SSE stream endpoint works against the
-  resulting row exactly as before.
+      POST /api/upload/:image_id/commit — second step of the presigned-URL
+      flow. Verifies that the client's direct PUT to R2 landed (HEAD),
+      flips the row from `awaiting_upload` to `pending`, and enqueues
+      `IdentifyBookJob`. The SSE stream endpoint works against the
+      resulting row exactly as before.
   """
   @spec commit(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def commit(conn, %{"image_id" => image_id}) do
     user = Guardian.Plug.current_resource(conn)
 
-    case Books.commit_upload(user.id, image_id) do
+    case Uploads.commit_upload(user.id, image_id) do
       {:ok, %{image_id: id, job_id: _}} ->
         conn
         |> put_status(202)
@@ -140,23 +72,26 @@ defmodule StacksWeb.UploadController do
       {:error, :already_committed} ->
         conn |> put_status(409) |> json(%{error: "already_committed"})
 
+      {:error, :image_too_small} ->
+        conn |> put_status(422) |> json(%{error: "image_too_small"})
+
       {:error, _reason} ->
         conn |> put_status(500) |> json(%{error: "commit_failed"})
     end
   end
 
   @doc """
-  PUT /api/upload/:image_id/data — receive file bytes for the init/commit upload flow.
+      PUT /api/upload/:image_id/data — receive file bytes for the init/commit upload flow.
 
-  No authentication: the image_id UUID (128-bit random) is effectively unguessable,
-  and `commit_upload` verifies ownership before enqueuing work. Phoenix stores the
-  bytes via the configured storage backend (R2 in production, Local in dev/preview).
+      No authentication: the image_id UUID (128-bit random) is effectively unguessable,
+      and `commit_upload` verifies ownership before enqueuing work. Phoenix stores the
+      bytes via the configured storage backend (R2 in production, Local in dev/preview).
   """
   @spec upload_data(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def upload_data(conn, %{"image_id" => image_id}) do
     {:ok, body, conn} = Plug.Conn.read_body(conn, length: 20_971_520)
 
-    case Books.store_upload_bytes(image_id, body) do
+    case Uploads.store_upload_bytes(image_id, body) do
       :ok ->
         send_resp(conn, 200, "")
 
@@ -170,34 +105,35 @@ defmodule StacksWeb.UploadController do
   end
 
   @doc """
-  POST /api/upload/:image_id/reject-identification — user clicked
-  "No, try again" on the model's guess.
+      GET /api/uploads/inbox — the uploads this reader has not finished with.
 
-  Accepts a cumulative `rejected_book_ids` list (the frontend keeps
-  state; the server is stateless w.r.t. this list). The action:
+      Read-only, and scoped to the caller by `Stacks.Uploads.list_awaiting_attention/1`'s
+      `user_id` clause — there is no id in the path to tamper with, so the only
+      upload rows this can ever return are the ones belonging to the token holder.
 
-    1. Verifies the caller owns the upload row.
-    2. Resolves each book_id to a "Title by Author" string AND to its
-       primary edition's ISBN via `Stacks.Books.get_book_detail/1`.
-       Unresolvable IDs are skipped; if the resolved descriptor list is
-       empty, returns 422.
-    3. Removes any active placement the user holds for the rejected
-       book(s) so the retry can place a fresh one. Soft-delete via
-       `Stacks.Shelving.remove_book/2`. Missing placements are a no-op.
-    3b. Invalidates `Stacks.Books.TitleSearchCache` entries for EVERY
-       edition ISBN of each rejected book — the memoised title-search
-       result that produced the wrong pick would otherwise keep winning
-       round 1 of any fresh upload of the same image for up to 24 h.
-       Best-effort: a failure here logs a warning but never fails the 202.
-    4. Enqueues a fresh `IdentifyBookJob` with both `excluded_books`
-       (strings, steer the VLM) and `excluded_isbns` (strings, steer the
-       resolver away from previously-returned matches at the title-search
-       layer).
+      Returns 200 `{items: [...]}`, newest first. An empty inbox is `{items: []}`,
+      never a 404: "nothing to do" is a successful answer to the question.
 
-  Returns 202 `{status: "pending", excluded_books: [...]}` on success.
-  Returns 401 without auth (handled by AuthPipeline).
-  Returns 404 when the upload doesn't belong to the caller (or is missing).
-  Returns 422 when no rejected_book_ids resolve to a known book.
+      ⚠️ **Nothing here places a book.** The response carries candidate ids; the
+      reader still walks confirm → choose-shelf → place. See the module doc on
+      `Stacks.Uploads.list_awaiting_attention/1`.
+  """
+  @spec inbox(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def inbox(conn, _params) do
+    user = Guardian.Plug.current_resource(conn)
+
+    json(conn, ProtoJSON.upload_inbox(Uploads.list_awaiting_attention(user.id)))
+  end
+
+  @doc """
+      POST /api/upload/:image_id/reject-identification — "No, try again" on
+      the model's guess. Takes a CUMULATIVE `rejected_book_ids` list (frontend
+      keeps state). Verifies ownership; resolves each id to "Title by Author"
+      + its edition ISBNs (empty resolved list → 422); soft-removes any active
+      placement so the retry can re-place; invalidates `TitleSearchCache` for
+      EVERY edition ISBN of each rejected book (the memoised wrong answer must
+      not survive into round one of the retry); re-enqueues `IdentifyBookJob`
+      with the rejected descriptors and `excluded_isbns`.
   """
   @spec reject_identification(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def reject_identification(conn, %{"image_id" => image_id} = params) do
@@ -248,12 +184,6 @@ defmodule StacksWeb.UploadController do
 
   defp resolve_excluded_books(_), do: []
 
-  # Resolve the cumulative rejected_book_ids list to the primary edition
-  # ISBN for each book. These ISBNs are forwarded as `excluded_isbns` to
-  # the IdentifyBookJob → Moderation → ISBNResolver so the resolver layer
-  # can skip OL/GB search results whose ISBN matches a rejected book —
-  # without this, a slightly-different VLM title variant can collapse to
-  # the same wrong ISBN on every retry.
   defp resolve_excluded_isbns(book_ids) when is_list(book_ids) do
     book_ids
     |> Enum.uniq()
@@ -302,12 +232,6 @@ defmodule StacksWeb.UploadController do
 
   defp describe_book(_), do: nil
 
-  # Kill the poisoned title-search memo(s) for the rejected book(s).
-  # Uses ALL edition ISBNs (not just the primary) so an entry cached
-  # against any edition of the rejected work is invalidated too.
-  # Best-effort by design: cache invalidation failing must not fail the
-  # user-facing 202 — the retry job carries excluded_isbns and bypasses
-  # the cache regardless; this protects the FIRST round of future uploads.
   defp invalidate_title_search_cache(book_ids) when is_list(book_ids) do
     book_ids
     |> Enum.uniq()
@@ -342,10 +266,27 @@ defmodule StacksWeb.UploadController do
 
   defp extract_edition_isbns(_), do: []
 
+  # Decision: undo exactly ONE placement — the most recent — not all of
+  # them.
+  #
+  # This is the reject-identification path: the reader is saying "that book was
+  # never in my photo", so we withdraw what the identification put on a shelf.
+  # Under the owner's multi-shelf ruling that book may legitimately sit on
+  # several bookshelves, and the other placements are ones the reader made
+  # deliberately — removing them would be destroying their data to undo our
+  # mistake. The identification's own placement was created last, so the newest
+  # active placement is the one to withdraw.
+  #
+  # "Newest" is a heuristic, not provenance: if the reader shelved the book by
+  # hand in the seconds between identification and rejection, the newest is
+  # theirs. The honest fix is a provenance column on the placement, which is
+  # scope (`verification_source`) — until then, undoing one placement is
+  # the conservative error: an extra shelf entry the reader can remove beats a
+  # deliberate one we deleted for them.
   defp remove_placements_for_books(user_id, book_ids) do
     Enum.each(book_ids, fn book_id ->
       with {:ok, uuid} <- Ecto.UUID.cast(book_id),
-           %{id: placement_id} <- Shelving.get_placement_for_book(user_id, uuid) do
+           %{id: placement_id} <- List.last(Shelving.get_placements_for_book(user_id, uuid)) do
         Shelving.remove_book(placement_id, user_id)
       end
     end)
@@ -382,7 +323,6 @@ defmodule StacksWeb.UploadController do
   defp render_stream(conn, image_id) do
     user = Guardian.Plug.current_resource(conn)
 
-    # Subscribe to PubSub BEFORE reading DB status to avoid race condition
     Phoenix.PubSub.subscribe(Core.PubSub, "upload:#{image_id}")
 
     result =
@@ -457,9 +397,13 @@ defmodule StacksWeb.UploadController do
       |> put_resp_header("x-accel-buffering", "no")
       |> send_chunked(200)
 
-    max_ms = Application.get_env(:core, :sse_max_timeout_ms, 60_000)
-    deadline = System.monotonic_time(:millisecond) + max_ms
+    deadline = System.monotonic_time(:millisecond) + sse_max_timeout_ms()
     sse_receive_loop(conn, image_id, user, deadline)
+  end
+
+  defp sse_max_timeout_ms do
+    Application.get_env(:core, :sse_max_timeout_ms) ||
+      IdentifyBookJob.worst_case_lifetime_ms() + 5_000
   end
 
   defp sse_receive_loop(conn, image_id, user, deadline) do

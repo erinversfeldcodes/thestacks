@@ -247,6 +247,22 @@ message Placement {
 
   // Foreign key to the physical shelf within the bookshelf.
   string shelf_id = 21 [json_name = "shelf_id"];
+
+  // Foreign key to the specific edition (ISBN/format) the user holds. Nullable:
+  // `book_id` remains the work-level key every existing read path uses, and a
+  // placement made before this field existed carries the work's primary edition
+  // (backfilled). This is the precondition for per-edition owned/wishlist
+  // annotation — `formats` (field 7) is deliberately KEPT alongside it; retiring
+  // it is later work. DB-only: every placement wire shape is a Map.take subset
+  // that does not include it.
+  string book_edition_id = 22 [json_name = "book_edition_id"];
+
+  // Provenance of the placement: "manual", "upload", or
+  // "goodreads_import". A real product fact — the reader should be able to
+  // tell which shelf entries came from Goodreads years later, and it is the
+  // only way an import report's counts reconcile after the row-level data is
+  // purged (30 days).
+  string source = 23 [json_name = "source"];
 }
 
 // PlacementHistory records a book movement between bookshelves.

@@ -7,22 +7,13 @@ module Page.CostTransparency exposing
     , view
     )
 
-{-| Public cost transparency page.
-
-Displays the platform's infrastructure costs with consumer-friendly
-explanations. No authentication required. All data is aggregate
-operational costs — no user data is ever exposed.
-
-Follows the 5-layer model from the cost transparency research:
-
-1.  Total at the top (the human number)
-2.  Story-driven breakdown (what happens when you use the app)
-3.  Per-service detail (expandable category cards)
-4.  Real usage metrics from the database
-5.  Monthly trend over time
-
+{-| Public cost-transparency page: aggregate infrastructure costs with
+consumer-friendly explanations; no auth, no user data. Follows the
+5-layer model — total, story-driven breakdown, per-service cards, real
+usage metrics, sustainability footer.
 -}
 
+import Api
 import Html exposing (Html, div, h1, h2, h3, p, span, text)
 import Html.Attributes exposing (class)
 import Http
@@ -31,10 +22,6 @@ import Stacks.Api.V1.Admin as ProtoAdmin
 import Types.ProtoHelpers exposing (emptyToNothing)
 import Types.RemoteData exposing (RemoteData(..))
 import Util.TestId exposing (testId)
-
-
-
--- MODEL
 
 
 type alias CostItem =
@@ -91,10 +78,6 @@ init =
     )
 
 
-
--- UPDATE
-
-
 type Msg
     = CostsReceived (Result Http.Error CostBreakdown)
 
@@ -108,15 +91,20 @@ update msg model =
             )
 
 
-
--- HTTP
-
-
+{-| `Http.request` rather than the shorter `Http.get`, because `Http.get` has no
+`timeout` field at all — it is `Nothing` by construction, i.e. wait forever. The extra four lines are what buys this page a reachable `Failure`
+branch.
+-}
 fetchCosts : Cmd Msg
 fetchCosts =
-    Http.get
-        { url = "/api/costs"
+    Http.request
+        { method = "GET"
+        , headers = []
+        , url = "/api/costs"
+        , body = Http.emptyBody
         , expect = Http.expectJson CostsReceived costBreakdownDecoder
+        , timeout = Api.standardTimeout
+        , tracker = Nothing
         }
 
 
@@ -175,10 +163,6 @@ costBreakdownDecoder =
         (Decode.map fromProtoCostBreakdown ProtoAdmin.decodeCostBreakdown)
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--costs curator-desk" ]
@@ -211,10 +195,6 @@ viewBreakdown breakdown =
         ]
 
 
-
--- LAYER 1: The Human Number
-
-
 viewTotalBanner : CostBreakdown -> Html Msg
 viewTotalBanner breakdown =
     div [ class "costs__banner" ]
@@ -232,10 +212,6 @@ viewTotalBanner breakdown =
                 |> List.intersperse (span [ class "costs__banner-plus" ] [ text " + " ])
             )
         ]
-
-
-
--- LAYER 2: Story-driven breakdown
 
 
 viewStorySection : CostBreakdown -> Html Msg
@@ -284,10 +260,6 @@ viewStoryCard title narrative cents =
         ]
 
 
-
--- LAYER 3: Per-service detail
-
-
 viewCategoryCards : List CostCategory -> Html Msg
 viewCategoryCards categories =
     div [ class "costs__categories" ]
@@ -317,10 +289,6 @@ viewServiceItem item =
             [ text (Maybe.withDefault "" item.description) ]
         , div [ class "costs__service-amount" ] [ text (formatCents item.amountCents) ]
         ]
-
-
-
--- LAYER 4: Monthly trend
 
 
 viewMonthlyTrend : List MonthlyTotal -> Html Msg
@@ -363,10 +331,6 @@ viewTrendBar maxCents total =
         ]
 
 
-
--- LAYER 5: Philosophy
-
-
 viewPhilosophy : Html Msg
 viewPhilosophy =
     div [ class "costs__philosophy" ]
@@ -380,10 +344,6 @@ viewPhilosophy =
                 )
             ]
         ]
-
-
-
--- HELPERS
 
 
 formatCents : Int -> String

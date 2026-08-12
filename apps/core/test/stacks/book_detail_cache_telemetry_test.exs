@@ -1,17 +1,15 @@
 defmodule Stacks.Books.BookDetailCacheTelemetryTest do
   @moduledoc """
-  Telemetry firing tests for `Stacks.Books.BookDetailCache` (Issue #114, Phase 2).
+      Telemetry firing tests for `Stacks.Books.BookDetailCache`.
 
-  Verifies that `get/1` emits `[:stacks, :book_detail_cache, :hit]` on a cache
-  hit and `[:stacks, :book_detail_cache, :miss]` on a cold lookup and on an
-  expired entry (expired-as-miss). These events feed the cache hit-rate metric.
+      Verifies that `get/1` emits `[:stacks,:book_detail_cache,:hit]` on a cache
+      hit and `[:stacks,:book_detail_cache,:miss]` on a cold lookup and on an
+      expired entry (expired-as-miss). These events feed the cache hit-rate metric.
 
-  GDPR: the cache is book-keyed. Telemetry metadata carries `book_id` ONLY —
-  never a user identifier — and this is pinned by the "GDPR" test below.
+      GDPR: the cache is book-keyed. Telemetry metadata carries `book_id` ONLY —
+      never a user identifier — and this is pinned by the "GDPR" test below.
   """
 
-  # async: false — telemetry handlers and the :book_detail_cache ETS table are
-  # global state shared across the suite.
   use ExUnit.Case, async: false
 
   alias Stacks.Books.BookDetailCache
@@ -70,8 +68,6 @@ defmodule Stacks.Books.BookDetailCacheTelemetryTest do
     test "emits :miss for an entry past its TTL (expired-as-miss)", %{book_id: book_id} do
       attach(@miss)
 
-      # Seed the ETS table directly with a timestamp older than the 5-minute TTL
-      # so get/1 takes the expired branch (which must count as a miss).
       stale = System.monotonic_time(:millisecond) - 400_000
       :ets.insert(:book_detail_cache, {book_id, %{title: "stale"}, stale})
 
@@ -106,7 +102,6 @@ defmodule Stacks.Books.BookDetailCacheTelemetryTest do
       assert_receive {:telemetry, [:stacks, :book_detail_cache, :miss], _, miss_meta}, 1_000
       assert_receive {:telemetry, [:stacks, :book_detail_cache, :hit], _, hit_meta}, 1_000
 
-      # The only metadata key is :book_id — a book identifier, never a user FK.
       assert Map.keys(miss_meta) == [:book_id]
       assert Map.keys(hit_meta) == [:book_id]
     end

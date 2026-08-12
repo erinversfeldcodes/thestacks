@@ -4,11 +4,10 @@ defmodule Stacks.EmailTest do
 
   import Stacks.Factory
 
+  alias Stacks.Accounts
+  alias Stacks.Accounts.AuthTokenFamily
   alias Stacks.Email
 
-  # A user whose confirmation token has been persisted the way
-  # Accounts.register/1 does it — a signed Phoenix.Token. Both
-  # send_registration_confirmation/1 and confirm_email/1 operate on this token.
   defp user_with_confirmation_token(attrs \\ []) do
     user = insert(:user, Keyword.merge([email_confirmed: false], attrs))
     token = Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", user.id)
@@ -37,9 +36,6 @@ defmodule Stacks.EmailTest do
 
       assert {:ok, returned} = Email.send_registration_confirmation(user)
 
-      # The async handler must never overwrite the token Accounts.register/1
-      # persisted — otherwise a token already read for this user is invalidated
-      # (the register↔handler race this fixes).
       assert returned.email_confirmation_token == original
       assert Core.Repo.reload!(user).email_confirmation_token == original
     end
@@ -114,6 +110,34 @@ defmodule Stacks.EmailTest do
       assert {:error, :invalid} = Email.reset_password("bad-token", "newpassword123")
     end
 
+    test "revokes every live session so a pre-reset token cannot outlive the password" do
+      user = insert(:user)
+      fid = Ecto.UUID.generate()
+
+      {:ok, _family} =
+        Accounts.rotate_token_family(%{
+          family_id: fid,
+          user_id: user.id,
+          current_jti: "jti-before-reset",
+          session_started_at: DateTime.utc_now()
+        })
+
+      refute Core.Repo.get(AuthTokenFamily, fid).revoked_at,
+             "precondition: the family must start live, or this test proves nothing"
+
+      Email.send_password_reset(user.email)
+      token = Core.Repo.reload!(user).password_reset_token
+
+      assert {:ok, _} = Email.reset_password(token, "newpassword123")
+
+      assert Core.Repo.get(AuthTokenFamily, fid).revoked_at,
+             "the session family minted before the reset is still live"
+
+      assert {:error, :session_revoked} =
+               Accounts.check_token_family(fid, "jti-before-reset", to_string(user.id)),
+             "the pre-reset token still authenticates after a password reset"
+    end
+
     test "returns {:error, :expired} with an expired token" do
       user = insert(:user)
 
@@ -147,6 +171,25 @@ defmodule Stacks.EmailTest do
       final_user = Core.Repo.reload!(user)
       assert final_user.password_reset_token == nil
       assert final_user.password_reset_sent_at == nil
+    end
+
+    test "a spent reset token cannot be replayed (single-use)" do
+      user = insert(:user)
+      Email.send_password_reset(user.email)
+      token = Core.Repo.reload!(user).password_reset_token
+
+      assert {:ok, _} = Email.reset_password(token, "newpassword123"),
+             "precondition: the first use must succeed, or the replay proves nothing"
+
+      assert {:error, :invalid} = Email.reset_password(token, "attackerpassword456")
+
+      final_user = Core.Repo.reload!(user)
+
+      assert Argon2.verify_pass("newpassword123", final_user.password_hash),
+             "the replayed reset overwrote the password the legitimate user set"
+
+      refute Argon2.verify_pass("attackerpassword456", final_user.password_hash),
+             "a replayed reset token set a new password — the link is not single-use"
     end
   end
 end

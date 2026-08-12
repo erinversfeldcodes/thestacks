@@ -3,13 +3,11 @@ version: 2
 sources:
   - name: op
     schema: op
-    # Freshness is checked against updated_at; warn if data is >24 h old, error if >48 h.
     loaded_at_field: updated_at
     freshness:
       warn_after: { count: 24, period: hour }
       error_after: { count: 48, period: hour }
     tables:
-      # ── Core tables ──────────────────────────────────────────────────
       - name: books
         description: Works in the catalogue; each book may have multiple editions.
         columns:
@@ -63,6 +61,12 @@ sources:
             description: Google Books volume ID.
           - name: is_primary
             description: Whether this is the primary/default edition of the work.
+          - name: verification_source
+            description: >
+              Where this edition's ISBN verification came from — open_library,
+              google_books, or barcode_unverified (scanned but never confirmed
+              against an external catalogue). Makes "never externally verified"
+              auditable rather than inferable.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -125,6 +129,11 @@ sources:
             description: Primary key (UUID).
           - name: book_id
             description: FK to books.
+          - name: book_edition_id
+            description: >
+              FK to book_editions — the specific edition the reader shelved.
+              Nullable (ON DELETE SET NULL) so removing an edition can never
+              take a reader's placement with it.
           - name: bookshelf_id
             description: FK to bookshelves.
           - name: position
@@ -138,7 +147,7 @@ sources:
           - name: personal_rating
             description: User's personal rating for the book.
           - name: notes
-            description: User's private notes about this placement.
+            description: User's private notes about this placement. Present in the DB but deliberately EXCLUDED from the staging model (#338 — user free-text never enters the warehouse; the wh schema has no erasure path).
           - name: visibility
             description: Per-placement visibility override.
           - name: listing_mode
@@ -155,6 +164,8 @@ sources:
             description: Last modification timestamp (UTC).
           - name: reading_status
             description: Reading lifecycle status (to_read, reading, completed, abandoned).
+          - name: source
+            description: Capture provenance (manual, upload, goodreads_import).
           - name: current_page
             description: Current page the user is on (null if not reading).
           - name: started_at
@@ -186,7 +197,7 @@ sources:
           - name: book_id
             description: Legacy FK to books (single-book uploads).
           - name: storage_path
-            description: Object storage path for the image file.
+            description: Object storage path for the image file. Present in the DB but deliberately EXCLUDED from the staging model (#386 — a sensitive per-user pointer never enters the warehouse; the wh schema has no erasure path).
           - name: status
             description: Processing status (pending, classified, rejected, expired).
           - name: rejection_reason
@@ -243,6 +254,8 @@ sources:
             description: Whether the user consented to writing-assistant personalisation.
           - name: consent_writing_assistant_at
             description: Timestamp of writing-assistant consent decision.
+          - name: syndication_default
+            description: Account-level default for new posts' syndication-feed inclusion.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -268,15 +281,14 @@ sources:
           - name: password_reset_sent_at
             description: Timestamp when password reset email was sent.
           - name: failed_login_count
-            description: Failed-login counter for per-account lockout (Issue #161).
+            description: Failed-login counter for per-account lockout.
           - name: failed_login_first_at
-            description: Timestamp of the first failure in the current rolling window (Issue #161).
+            description: Timestamp of the first failure in the current rolling window.
           - name: locked_until
-            description: When non-null and in the future, the account is locked (Issue #161).
+            description: When non-null and in the future, the account is locked.
 
       - name: bookstores
         description: Partner bookstores whose prices are scraped.
-        # No freshness check -- populated by scraper (Phase 2A), may be empty in dev
         freshness: null
         columns:
           - name: id
@@ -286,26 +298,112 @@ sources:
           - name: website_url
             description: Bookstore website URL.
           - name: search_template
-            description: URL template for ISBN search (contains {isbn} placeholder).
+            description: >
+              Deprecated and normally null. It recorded an ISBN-substitution
+              contract that does not exist: Shopify's storefront search matches an
+              ISBN in no field, so most stores can never be queried that way.
           - name: has_physical
             description: Whether the store has a physical location.
           - name: country_code
             description: ISO 3166-1 alpha-2 country code.
           - name: scraper_module
             description: Rust scraper module name for this store.
+          - name: price_source
+            description: >
+              Observed product API: shopify_products_json, woo_store_api, or none.
+              Derived by the scraper, never hand-authored — shops replatform, and a
+              declared platform turns that into a silent outage.
+          - name: isbn_location
+            description: >
+              Where the ISBN was observed on this store's products: handle, sku,
+              barcode, body, or none.
+          - name: lookup_mode
+            description: >
+              How one ISBN becomes one product: direct (handle is the ISBN, so a 404
+              means not stocked), native_search, or local_index.
+          - name: capability_probed_at
+            description: >
+              When the three fields above were last observed. Null means never;
+              stale means not observed lately.
+          - name: canary_isbn
+            description: >
+              An ISBN this store is known to carry. If it stops resolving, the store
+              changed underneath us and its capability must be re-derived.
+          - name: robots_blocked_path
+            description: >
+              Set when robots.txt forbids the path we would need. Configuration is
+              retained so the store resumes by itself if the rule is lifted.
+          - name: robots_blocked_rule
+            description: >
+              The Disallow line that blocked us, e.g. "Disallow: /search" or
+              "Disallow: /". Distinguishes a narrow block (try another path) from a
+              total one (the store is unscrapable), which the path alone cannot.
+          - name: robots_blocked_at
+            description: >
+              When the block was last observed. Makes a block re-checkable rather than
+              permanent: these three are written and cleared together.
+          - name: unscrapable_reason
+            description: >
+              Why this store cannot be priced, when price_source is "none". Free text
+              for a human operator — banks the research so the same shop is not
+              re-investigated from scratch. Null means "not yet configured" rather than
+              "ruled out".
+          - name: latitude
+            description: >
+              Decimal degrees, WGS 84. Null until geocoded. Needed because the 500 m
+              third-space pairing rule requires coordinates on BOTH sides.
+          - name: longitude
+            description: Decimal degrees, WGS 84. Null until geocoded.
+          - name: events_path
+            description: >
+              Where this shop's events live, resolved from its own sitemap. The job used
+              to fetch a hardcoded /events on every store, and it 404s on every
+              scrapeable one — which is why the events pipeline had never written a row.
+              Null means not resolved; see events_unresolved_reason for why.
+          - name: events_path_checked_at
+            description: >
+              When resolution was last attempted. This is what separates "we looked and
+              found nothing" from "we have not looked yet" — an empty events_path alone
+              cannot tell those apart, and treating the second as the first writes a shop
+              off permanently. Also makes a negative verdict re-checkable.
+          - name: events_unresolved_reason
+            description: >
+              Why the last attempt resolved nothing. Free text for a human operator. The
+              distinctions are operational: "no sitemap declared" is a shop we could not
+              ask, while "no candidate matched" is a shop that genuinely lists no events
+              page.
+          - name: events_page_etag
+            description: >
+              ETag from the last fetch of events_path, sent back as If-None-Match so the
+              shop can answer 304 with no body. Stored verbatim — an ETag is opaque, and
+              normalising it makes it silently stop matching.
+          - name: events_page_last_modified
+            description: >
+              Last-Modified from the last fetch of events_path, sent back as
+              If-Modified-Since. Stored verbatim, as above.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
             description: Last modification timestamp (UTC).
 
       - name: price_snapshots
-        description: Point-in-time price observations from bookstore scrapers.
+        description: >
+          Point-in-time price observations from bookstore scrapers, one row per
+          (edition, store). A price is a fact about an edition, not a work —
+          shops stock whichever edition they stock, at different prices.
         freshness: null
         columns:
           - name: id
             description: Primary key (UUID).
+          - name: book_edition_id
+            description: >
+              FK to book_editions. The real grain: uniqueness is
+              (book_edition_id, store_id).
           - name: book_id
-            description: FK to books.
+            description: >
+              FK to books. Derived from the edition at the single write site,
+              never supplied by callers; retained because proto field numbers
+              cannot be reused.
           - name: store_id
             description: FK to bookstores.
           - name: price_cents
@@ -376,6 +474,11 @@ sources:
             description: Timestamp when the source was excluded.
           - name: exclusion_email
             description: Email address that requested exclusion (GDPR).
+          - name: exclusion_requested_at
+            description: >
+              When a removal was requested, as distinct from applied. Set while status
+              is not yet 'excluded' means the request awaits owner review, because the
+              contact address did not belong to the listed website's domain.
 
       - name: bookstore_events
         description: Events hosted by partner bookstores (author signings, readings).
@@ -426,6 +529,29 @@ sources:
             description: Whether the space has been verified by the platform.
           - name: last_active_at
             description: Timestamp of last known activity.
+          - name: latitude
+            description: >
+              Decimal degrees, WGS 84. Null until geocoded. Replaced a `city` string
+              looked up in a hardcoded six-entry map, which silently dropped any space
+              outside those six cities.
+          - name: longitude
+            description: >
+              Decimal degrees, WGS 84. Null until geocoded. Range -180..180, so a
+              viewport crossing the antimeridian arrives with east < west.
+          - name: nearest_bookshop_km
+            description: >
+              Kilometres to the nearest bookshop, computed once at geocode time so the
+              500 m rule is a scalar comparison rather than a per-pan recomputation.
+              Null means "not computed", which is not the same as "no bookshop near".
+          - name: curated
+            description: >
+              Owner-marked as worth recommending — what "well-regarded" means here (no
+              stars, no third-party ratings). Also the second tier of the 500 m rule:
+              beyond 500 m a space qualifies only if curated.
+          - name: curated_note
+            description: >
+              The owner's own words for the cork board poster ("a good window seat and no
+              music"). Free text, deliberately not a score.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -483,10 +609,6 @@ sources:
           - name: published_at
             description: Timestamp when the event was published to subscribers.
 
-      # my_writing_links: deprecated (superseded by blog_posts + users.website_url).
-      # See docs/technical-architecture.md — table was never created.
-
-      # ── Social tables (Issue #043) ───────────────────────────────────
       - name: user_blocks
         description: User-to-user block relationships.
         freshness: null
@@ -571,7 +693,6 @@ sources:
           - name: created_at
             description: Row creation timestamp (UTC).
 
-      # ── Blog tables (Issue #043) ─────────────────────────────────────
       - name: blog_posts
         description: User blog posts with per-post visibility controls.
         columns:
@@ -589,6 +710,8 @@ sources:
             description: FK to groups; non-null when visibility is "group".
           - name: published_at
             description: Timestamp when the post was published (null if draft).
+          - name: syndicated
+            description: Whether the post is included in the author's public syndication feed.
           - name: created_at
             description: Row creation timestamp (UTC).
           - name: updated_at
@@ -630,7 +753,6 @@ sources:
           - name: created_at
             description: Row creation timestamp (UTC).
 
-      # ── Partner tables (Issue #145) ──────────────────────────────────
       - name: partners
         description: Third-space businesses (bookshops, cafes, reading groups) registered as platform partners.
         columns:
@@ -684,7 +806,6 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
 
-      # ── Marketplace tables (Issue #043) ──────────────────────────────
       - name: offer_threads
         description: Conversation threads between buyer and seller for a placement listing.
         columns:
@@ -789,7 +910,6 @@ sources:
           - name: created_at
             description: Row creation timestamp (UTC).
 
-      # ── Monitoring tables (Issue #043) ───────────────────────────────
       - name: source_health_checks
         description: Health-check status for external data sources (bookstores, APIs).
         columns:
@@ -843,11 +963,6 @@ sources:
           - name: updated_at
             description: Last modification timestamp (UTC).
 
-      # ── Writing-assistant / embeddings (Issue #183 / #184) ────────────
-      # The vector tables (op.embeddings, op.book_content_chunks) are skip_dbt
-      # (raw vectors / query text never enter the warehouse) so have no source
-      # here. The three append-only tables override loaded_at_field to created_at
-      # (they have no updated_at column).
       - name: blog_assistant_sessions
         description: Writing-assistant chat sessions (user-scoped).
         columns:
@@ -917,6 +1032,103 @@ sources:
             description: When access was granted.
           - name: created_at
             description: Row creation timestamp.
+
+      - name: invite_codes
+        description: >
+          Beta invitation codes. The staging model excludes
+          `code_hash` (a credential), `note` and `invited_email` (the owner's
+          private notes about a person, and an address) — the warehouse sees
+          lifecycle and counts only.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: code_prefix
+            description: First characters of the code, for owner-side identification (never the code).
+          - name: code_hash
+            description: SHA-256 of the full code (credential; excluded from staging).
+          - name: note
+            description: The owner's note about the invitee (PII; excluded from staging).
+          - name: invited_email
+            description: Optional email binding (PII; excluded from staging).
+          - name: issued_by_id
+            description: FK to users (the issuing owner).
+          - name: max_uses
+            description: How many redemptions the code allows.
+          - name: use_count
+            description: Redemptions so far.
+          - name: expires_at
+            description: When the code stops working.
+          - name: redeemed_by_id
+            description: FK to users (latest redeemer; nullable).
+          - name: redeemed_at
+            description: When last redeemed (nullable).
+          - name: revoked_at
+            description: When revoked (nullable).
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
+      - name: library_imports
+        description: >
+          Goodreads library imports — the durable per-import summary.
+          The raw per-row table (library_import_rows) is deliberately ABSENT
+          from the warehouse: it carries the reader's own free text (reviews,
+          private notes) under a 30-day retention, and wh has no erasure path.
+          `filename` exists on the op table but is excluded from the staging
+          model — a reader's filename often carries their own name.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: user_id
+            description: FK to users (the importing reader).
+          - name: source
+            description: Import source (goodreads).
+          - name: filename
+            description: Uploaded filename (PII-adjacent; excluded from staging).
+          - name: status
+            description: Import status (enqueued, running, complete, failed).
+          - name: row_count
+            description: Total rows parsed from the export.
+          - name: processed_count
+            description: Rows with an outcome written so far.
+          - name: shelved_count
+            description: Rows that became placements.
+          - name: duplicate_count
+            description: Rows already on the destination bookshelf.
+          - name: unverified_count
+            description: Rows refused by the ISBN hard gate.
+          - name: unreadable_count
+            description: Rows the CSV parser could not read.
+          - name: started_at
+            description: When the job began processing.
+          - name: finished_at
+            description: When the import reached a terminal status.
+          - name: created_at
+            description: Row creation timestamp (UTC).
+          - name: updated_at
+            description: Last modification timestamp (UTC).
+
+      - name: post_syndications
+        description: >
+          POSSE syndication records — which post went where, by
+          which mechanism, and the canonical URL as published. No free text:
+          the canonical URL embeds the post UUID, never a title-derived slug.
+        columns:
+          - name: id
+            description: Primary key (UUID).
+          - name: post_id
+            description: FK to blog_posts (cascade on delete).
+          - name: target
+            description: Syndication target (substack).
+          - name: method
+            description: How the copy went out (rss or export).
+          - name: canonical_url
+            description: The permanent Stacks address, stored as published.
+          - name: syndicated_url
+            description: The live copy's URL, pasted back by the writer (nullable).
+          - name: created_at
+            description: Row creation timestamp (UTC).
 
   - name: audit
     schema: audit

@@ -11,7 +11,6 @@ select
     removed_at,
     formats,
     personal_rating,
-    notes,
     visibility,
     listing_mode,
     listing_status,
@@ -22,6 +21,8 @@ select
     started_at,
     finished_at,
     shelf_id,
+    book_edition_id,
+    source,
     created_at,
     updated_at
 from {{ source('op', 'bookshelf_placements') }}

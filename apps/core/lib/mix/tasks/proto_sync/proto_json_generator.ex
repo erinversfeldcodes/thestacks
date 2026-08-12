@@ -4,14 +4,14 @@ defmodule Mix.Tasks.ProtoSync.ProtoJsonGenerator do
   alias Mix.Tasks.ProtoSync.Descriptor
 
   @doc """
-  Generates the ProtoJSON.Gen module with one function per proto message.
+      Generates the ProtoJSON.Gen module with one function per proto message.
 
-  Each function extracts all fields from an Ecto struct and returns a map
-  with keys matching the proto `json_name` annotations. Controllers compose
-  these base functions with business logic in the hand-written ProtoJSON module.
+      Each function extracts all fields from an Ecto struct and returns a map
+      with keys matching the proto `json_name` annotations. Controllers compose
+      these base functions with business logic in the hand-written ProtoJSON module.
 
-  Uses the `proto_json` manifest config to determine which messages to generate
-  and how to map Ecto struct fields to JSON keys.
+      Uses the `proto_json` manifest config to determine which messages to generate
+      and how to map Ecto struct fields to JSON keys.
   """
   def generate(manifest, descriptor) do
     configs = Map.get(manifest, :proto_json, [])
@@ -39,7 +39,6 @@ defmodule Mix.Tasks.ProtoSync.ProtoJsonGenerator do
 
     has_id = Enum.any?(fields, &(&1.name == "id"))
 
-    # Build field lines: extract from struct, map to json_name
     field_lines =
       fields
       |> Enum.reject(fn f ->

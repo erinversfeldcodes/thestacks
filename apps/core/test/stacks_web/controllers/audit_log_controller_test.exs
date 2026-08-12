@@ -1,11 +1,11 @@
 defmodule StacksWeb.AuditLogControllerTest do
   @moduledoc """
-  Tests for the read-only GDPR audit-log endpoint
-  (`GET /api/settings/audit-log`).
+      Tests for the read-only GDPR audit-log endpoint
+      (`GET /api/settings/audit-log`).
 
-  The endpoint returns ONLY the authenticated user's own audit rows,
-  paginated, with `metadata` decrypted for display and hashed IPs never
-  exposed.
+      The endpoint returns ONLY the authenticated user's own audit rows,
+      paginated, with `metadata` decrypted for display and hashed IPs never
+      exposed.
   """
 
   use CoreWeb.ConnCase, async: true
@@ -92,8 +92,6 @@ defmodule StacksWeb.AuditLogControllerTest do
       refute Map.has_key?(entry, "ip_address")
       refute Map.has_key?(entry, "ip_hash")
 
-      # Belt-and-braces: the SHA-256 hash of the IP must not leak anywhere in
-      # the serialised payload (raw or hashed).
       ip_hash = :crypto.hash(:sha256, "203.0.113.7") |> Base.encode16(case: :lower)
       serialised = Jason.encode!(body)
       refute serialised =~ ip_hash
@@ -147,7 +145,6 @@ defmodule StacksWeb.AuditLogControllerTest do
       assert body1["per_page"] == 2
       assert length(body1["entries"]) == 2
 
-      # Newest first: action.3 was inserted last.
       assert [%{"action" => "action.3"}, %{"action" => "action.2"}] = body1["entries"]
 
       conn2 =

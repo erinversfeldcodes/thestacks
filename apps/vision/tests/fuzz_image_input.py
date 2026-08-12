@@ -1,26 +1,8 @@
-"""Fuzz target for image input parsing in the Modal vision service.
-
-Exercises four distinct paths:
-  1. _fuzz_base64_and_size   — base64 decode + size check logic (unit level)
-  2. _fuzz_model_output_parsing — JSON parsing of model output (unit level)
-  3. _fuzz_http_body          — raw bytes as the HTTP request body through the full
-                                ASGI stack: FastAPI JSON parsing → Pydantic validation
-                                → base64 decode → size check
-  4. _fuzz_http_token         — raw bytes as the X-Internal-Token header value,
-                                exercising HMAC token parsing with adversarial inputs
-
-Running with Atheris (Linux only — requires: pip install atheris):
-    just fuzz-vision -- -atheris_runs=100000
-
-Running as a seed-corpus regression test (all platforms):
-    just fuzz-vision
-
-Always invoke via `just fuzz-vision` — the target sets PYTHONPATH=. so that
-`app` is importable. Running `python tests/fuzz_image_input.py` directly from
-inside `apps/vision/` will fail with ModuleNotFoundError without it.
-
-The seed corpus lives at <repo-root>/images/ and contains representative
-book cover photos used to prime coverage before Atheris mutates inputs.
+"""Fuzz target for image-input parsing: base64+size logic, model-output
+JSON parsing, raw bytes through the full ASGI stack (FastAPI -> Pydantic
+-> base64 -> size check), and raw bytes as the X-Internal-Token header
+(auth parse path). Property under test: any input yields a structured
+4xx/JSON error, never an unhandled exception or a 500.
 """
 
 import base64
@@ -33,10 +15,8 @@ import time
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-# Must precede app imports — config reads VISION_ENVIRONMENT at module load time.
 os.environ.setdefault("VISION_ENVIRONMENT", "test")
 
-# Atheris is Linux-only; import conditionally so the file can be loaded on macOS.
 try:
     import atheris
 
@@ -51,14 +31,11 @@ from app.main import app
 
 _CORPUS_DIR = Path(__file__).parent.parent.parent.parent / "images"
 
-# Fixed mock responses — HTTP fuzzing exercises request handling, not model calls.
 _MOCK_EXTRACT = {"choices": [{"message": {"content": '{"books":[]}'}}]}
 _MOCK_CLASSIFY = {
     "choices": [{"message": {"content": '{"classification":"ambiguous","confidence":0.5}'}}]
 }
 
-# Patch VisionClient methods permanently so no requests reach Modal.
-# Safe: this file is not collected by pytest (name does not match test_*.py / *_test.py).
 _extract_patcher = patch(
     "app.services.vision_client.VisionClient.extract",
     new_callable=AsyncMock,
@@ -72,7 +49,6 @@ _classify_patcher = patch(
 _extract_patcher.start()
 _classify_patcher.start()
 
-# Persistent TestClient — enter lifespan once for the entire fuzzing session.
 _http_client = TestClient(app)
 _http_client.__enter__()
 
@@ -86,7 +62,6 @@ def _make_auth_header(path: str) -> dict[str, str]:
 
 def _fuzz_base64_and_size(raw: bytes) -> None:
     """Simulate the per-image validation path shared by /extract and /classify."""
-    # Path 1: treat raw bytes as image content, encode and re-decode (nominal path).
     b64 = base64.b64encode(raw).decode()
     try:
         decoded = base64.b64decode(b64, validate=True)
@@ -94,7 +69,6 @@ def _fuzz_base64_and_size(raw: bytes) -> None:
     except Exception:
         pass
 
-    # Path 2: treat raw bytes as an attacker-supplied base64 string.
     try:
         as_str = raw.decode("latin-1")
         decoded = base64.b64decode(as_str, validate=True)

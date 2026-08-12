@@ -1,23 +1,12 @@
 defmodule Stacks.Insights do
   @moduledoc """
-  Personal inference & de-anonymisation education (Issue #242, ADR-019 §3a).
-
-  Computes, **on the fly and strictly own-only**, a display payload teaching a
-  signed-in user (a) what can be inferred about them from their own shelf
-  behaviour and (b) how they could be de-anonymised even though the platform
-  keeps no PII.
-
-  ## Invariants (the point of the feature)
-
-  - **Strict own-only.** Every read is hard-scoped to the given `user.id`.
-    There is no parameter or code path that can select another user's data.
-  - **Ephemeral — NEVER persisted.** Nothing here writes an inference, profile,
-    or rarity row to `op.*` / `wh.*`. Persisting derived sensitive inferences
-    would create a new special-category PII store needing its own
-    erasure/export/consent — precisely what we must avoid. Compute and return.
-  - **Honestly labelled.** Real facts (top subjects, counts) are shown as fact;
-    `risk_inferences` are labelled illustrations of what a third party *could*
-    infer, never asserted or stored, and are gated behind an explicit reveal.
+      Personal inference & de-anonymisation education:
+      computes, on the fly, what can be inferred about a user from their own
+      shelf behaviour. Invariants (the point of the feature): STRICT own-only
+      (every read hard-scoped to `user.id`); EPHEMERAL (nothing persisted —
+      a stored inference would be a new special-category PII store needing its
+      own erasure/export/consent); honestly labelled (facts as facts,
+      inferences as guesses with their limits stated).
   """
 
   import Ecto.Query
@@ -29,22 +18,19 @@ defmodule Stacks.Insights do
   alias Stacks.Books.Book
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
 
-  # Number of rarest books that form the de-anonymisation fingerprint.
   @fingerprint_size 5
-  # How many top items to surface for interest/subject profiles.
   @top_subjects 8
   @top_bisac 8
-  # How many subject clusters to turn into risk illustrations.
   @risk_illustration_count 3
 
   @doc """
-  Builds the personal-inference payload for `user`, own-only.
+      Builds the personal-inference payload for `user`, own-only.
 
-  Options:
+      Options:
 
-    * `:reveal_risk` (boolean, default `false`) — when `true`, includes the
-      `:risk_inferences` section (the consent-gated "what could be inferred"
-      illustrations). When `false`, that key is omitted entirely.
+        * `:reveal_risk` (boolean, default `false`) — when `true`, includes the
+          `:risk_inferences` section (the consent-gated "what could be inferred"
+          illustrations). When `false`, that key is omitted entirely.
   """
   @spec personal_inferences(User.t(), keyword()) :: map()
   def personal_inferences(%User{id: user_id}, opts \\ []) do
@@ -71,10 +57,6 @@ defmodule Stacks.Insights do
     end
   end
 
-  # ── Own-only reads ─────────────────────────────────────────────────
-
-  # All active (non-removed) placements for the user, joined to their book so we
-  # can read subjects/BISAC. Hard-scoped to `user_id` via the bookshelf join.
   defp active_placements(user_id) do
     from(p in Placement,
       join: bs in Bookshelf,
@@ -96,8 +78,6 @@ defmodule Stacks.Insights do
     |> Repo.all()
   end
 
-  # Movement timestamps from the user's own placement history. History rows
-  # reference bookshelf UUIDs, so we scope to bookshelves the user owns.
   defp history_move_times(user_id) do
     bookshelf_ids =
       from(bs in Bookshelf, where: bs.user_id == ^user_id, select: bs.id) |> Repo.all()
@@ -112,8 +92,6 @@ defmodule Stacks.Insights do
       |> Repo.all()
     end
   end
-
-  # ── Section 1: interest profile (fact) ─────────────────────────────
 
   defp interest_profile(placements) do
     top_subjects =
@@ -131,8 +109,6 @@ defmodule Stacks.Insights do
     %{top_subjects: top_subjects, top_bisac: top_bisac}
   end
 
-  # Flatten lists-of-lists, drop blanks, frequency-count, sort by count desc then
-  # value asc (deterministic), take the top n.
   defp top_counts(lists, n) do
     lists
     |> List.flatten()
@@ -141,8 +117,6 @@ defmodule Stacks.Insights do
     |> Enum.sort_by(fn {value, count} -> {-count, value} end)
     |> Enum.take(n)
   end
-
-  # ── Section 2: behaviour (fact) ────────────────────────────────────
 
   defp behaviour(placements, history_times) do
     total = length(placements)
@@ -170,7 +144,6 @@ defmodule Stacks.Insights do
     |> median()
   end
 
-  # Most frequent hour-of-day across placement + move timestamps; nil if none.
   defp most_active_hour(placements, history_times) do
     hours =
       (Enum.map(placements, & &1.placed_at) ++ history_times)
@@ -199,14 +172,9 @@ defmodule Stacks.Insights do
     if rem(n, 2) == 1 do
       Enum.at(sorted, mid)
     else
-      # Round to a whole day: median_days_to_finish is an integer count on the
-      # wire (the Elm decoder is `Decode.int`); an even-count float would fail
-      # the whole payload decode.
       round((Enum.at(sorted, mid - 1) + Enum.at(sorted, mid)) / 2)
     end
   end
-
-  # ── Section 3: risk inferences (illustration; consent-gated) ───────
 
   defp risk_inferences(%{top_subjects: top_subjects}) do
     top_subjects
@@ -220,8 +188,6 @@ defmodule Stacks.Insights do
       }
     end)
   end
-
-  # ── Section 4: de-anonymisation demonstration (the point) ──────────
 
   defp deanonymisation(user_id, placements) do
     distinct_books = placements |> Enum.map(& &1.book_id) |> Enum.uniq()
@@ -249,8 +215,6 @@ defmodule Stacks.Insights do
     end
   end
 
-  # The N rarest books by community read-count. Ties (and the all-zero case in a
-  # fresh DB) break deterministically by book_id.
   defp rarest_books(distinct_books) do
     counts = community_read_counts(distinct_books)
 
@@ -259,11 +223,6 @@ defmodule Stacks.Insights do
     |> Enum.take(@fingerprint_size)
   end
 
-  # Community read-counts for the whole book set in ONE query (avoids an N+1 of
-  # `Books.community_read_count/1` per shelved book — shelf size is unbounded).
-  # `book_id::text` so the map keys match the Ecto.UUID string ids from the
-  # shelf query. Degrades to an empty map (→ all-zero, deterministic by-id
-  # ordering) if the mart is absent, mirroring `Books.community_read_count/1`.
   defp community_read_counts([]), do: %{}
 
   defp community_read_counts(book_ids) do
@@ -280,10 +239,6 @@ defmodule Stacks.Insights do
       %{}
   end
 
-  # One live SQL query: how many OTHER users have ALL of the fingerprint books on
-  # a non-removed placement. book_ids come from the user's OWN shelf and are
-  # bound as a parameter ($1) — never from request params. Degrades to nil (not a
-  # misleading number, not a 500) on any DB/mart hiccup.
   defp count_others_sharing_all(user_id, book_ids, sample_size) do
     sql = """
     SELECT count(*) FROM (

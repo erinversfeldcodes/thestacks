@@ -1,11 +1,15 @@
 defmodule Stacks.Workers.IdentifyBookJob do
   @moduledoc """
-  Oban worker that processes an uploaded image through the Modal vision service
-  to identify and create/update a book record.
+      Oban worker running an uploaded image through the vision service to
+      identify books. New jobs carry a `storage_key` and presign at execution;
+      legacy in-flight `image_b64` jobs still match.
 
-  New jobs receive a `storage_key` in args and fetch a presigned URL at execution
-  time. Legacy in-flight jobs that still carry `image_b64` are handled via
-  backwards-compatible pattern matching.
+      The terminal guarantee: NO exit may leave the `uploaded_images` row
+      `pending`. Every return, raise, throw and overlong attempt passes through
+      `with_terminal_guarantee/3`; on the final attempt the row is marked
+      rejected and the reader's SSE stream closes with a real answer. Written as
+      a wrapper because the bug's SHAPE recurs — the two live instances it
+      replaced looked nothing alike.
   """
 
   use Oban.Worker, queue: :vision, max_attempts: 3
@@ -15,17 +19,73 @@ defmodule Stacks.Workers.IdentifyBookJob do
   import Ecto.Query
 
   alias Core.Repo
+  alias Stacks.AI.Client, as: AIClient
+  alias Stacks.AI.VisionError
   alias Stacks.Books.UploadedImage
   alias Stacks.Events
   alias Stacks.Moderation
   alias Stacks.Storage
 
-  # ── New path: storage_key ─────────────────────────────────────────────────
+  @max_attempts 3
 
-  @impl true
-  def perform(%Oban.Job{
-        args: %{"user_id" => user_id, "image_id" => image_id, "storage_key" => storage_key} = args
-      }) do
+  @attempt_slack_ms 30_000
+
+  @doc """
+      Seconds to wait before the next attempt.
+
+      Deliberately deterministic, where `Oban.Worker`'s default adds up to 10%
+      jitter. Jitter exists to desynchronise a thundering herd of jobs retrying
+      together; one job per upload is not that, and what we get in exchange is a
+      retry schedule whose total is exactly computable — which is what lets
+      `worst_case_lifetime_ms/0` state when this job is certainly dead instead of
+      approximating it. The curve itself matches Oban's default (15s pad, doubling).
+  """
+  @impl Oban.Worker
+  def backoff(%Oban.Job{attempt: attempt}), do: 15 + Integer.pow(2, attempt)
+
+  @doc """
+      Ceiling on ONE attempt, in ms — composed from what an attempt actually
+      waits on: two sequential `AI.Client.receive_timeout_ms/0` waits
+      (/analyze, then per-candidate resolution) plus `#{@attempt_slack_ms}ms`
+      slack. Deliberately NOT `c:Oban.Worker.timeout/1`: that delivers an async
+      exit a `try/catch` cannot intercept, which would skip the terminal
+      guarantee — the exact bug this module prevents. `run_bounded/1` enforces
+      the ceiling from inside. `:identify_attempt_timeout_ms` overrides for
+      fast tests.
+  """
+  @spec attempt_timeout_ms() :: pos_integer()
+  def attempt_timeout_ms do
+    Application.get_env(:core, :identify_attempt_timeout_ms) ||
+      2 * AIClient.receive_timeout_ms() + @attempt_slack_ms
+  end
+
+  @doc """
+      The longest this job can stay alive, in milliseconds, from first attempt to
+      the moment its last attempt can no longer be running.
+
+      Every attempt runs at most `attempt_timeout_ms/0`, and every gap between
+      attempts is exactly `backoff/1` — so this is a sum, not an estimate. It exists
+      so the reader's SSE deadline can be *derived* from when the job actually dies
+      rather than picked to sit near it: see `StacksWeb.UploadController`.
+  """
+  @spec worst_case_lifetime_ms() :: pos_integer()
+  def worst_case_lifetime_ms do
+    backoff_ms =
+      Enum.sum(for attempt <- 1..(@max_attempts - 1), do: backoff(%Oban.Job{attempt: attempt})) *
+        1_000
+
+    @max_attempts * attempt_timeout_ms() + backoff_ms
+  end
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: args} = job) do
+    with_terminal_guarantee(job, Map.get(args, "image_id"), fn -> dispatch(job) end)
+  end
+
+  defp dispatch(%Oban.Job{
+         args:
+           %{"user_id" => user_id, "image_id" => image_id, "storage_key" => storage_key} = args
+       }) do
     Logger.info("IdentifyBookJob: processing image #{image_id} for user #{user_id}")
 
     case Storage.get_image_url(storage_key) do
@@ -50,11 +110,9 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # ── Legacy path: image_b64 (backwards compat for in-flight jobs) ──────────
-
-  def perform(%Oban.Job{
-        args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64} = args
-      }) do
+  defp dispatch(%Oban.Job{
+         args: %{"user_id" => user_id, "image_id" => image_id, "image_b64" => image_b64} = args
+       }) do
     Logger.info(
       "IdentifyBookJob: processing image #{image_id} for user #{user_id} (legacy b64 path)"
     )
@@ -71,10 +129,15 @@ defmodule Stacks.Workers.IdentifyBookJob do
     run_pipeline(context, image_id)
   end
 
-  # Carries the cumulative rejected-books list from the args map into the
-  # moderation context. Missing or non-list values are normalised to an
-  # empty list so downstream callers can `Map.get(context, :excluded_books, [])`
-  # without worrying about shape.
+  defp dispatch(%Oban.Job{args: args}) do
+    Logger.error(
+      "IdentifyBookJob: job args match no dispatch clause " <>
+        "(keys: #{inspect(args |> Map.keys() |> Enum.sort())})"
+    )
+
+    {:cancel, "malformed job args"}
+  end
+
   defp put_excluded_books(context, args) do
     case Map.get(args, "excluded_books") do
       list when is_list(list) -> Map.put(context, :excluded_books, list)
@@ -82,16 +145,92 @@ defmodule Stacks.Workers.IdentifyBookJob do
     end
   end
 
-  # Carries the cumulative rejected-ISBNs list from the args map into the
-  # moderation context. The resolver layer consumes this to skip OL/GB
-  # search hits whose ISBN matches a previously-rejected book, preventing
-  # a slightly-different VLM title variant from collapsing back to the
-  # same wrong ISBN on every retry. Distinct from `excluded_books` (which
-  # is VLM-bound for the extract prompt) — this list is Elixir-side only.
   defp put_excluded_isbns(context, args) do
     case Map.get(args, "excluded_isbns") do
       list when is_list(list) -> Map.put(context, :excluded_isbns, list)
       _ -> context
+    end
+  end
+
+  defp with_terminal_guarantee(job, image_id, body) do
+    case run_bounded(body) do
+      {:returned, result} ->
+        finalise(job, image_id, result)
+
+      {:raised, kind, reason, stacktrace} ->
+        Logger.error(
+          "IdentifyBookJob: unhandled #{kind} for image #{inspect(image_id)}: " <>
+            Exception.format(kind, reason, stacktrace)
+        )
+
+        if final_attempt?(job), do: mark_rejected(image_id, "processing_failed")
+        :erlang.raise(kind, reason, stacktrace)
+
+      :timed_out ->
+        Logger.error(
+          "IdentifyBookJob: attempt #{job.attempt}/#{job.max_attempts} for image " <>
+            "#{inspect(image_id)} exceeded #{attempt_timeout_ms()}ms and was killed"
+        )
+
+        finalise(job, image_id, {:error, :attempt_timeout})
+    end
+  end
+
+  defp run_bounded(body) do
+    metadata = Logger.metadata()
+
+    task =
+      Task.async(fn ->
+        Logger.metadata(metadata)
+
+        try do
+          {:returned, body.()}
+        catch
+          kind, reason -> {:raised, kind, reason, __STACKTRACE__}
+        end
+      end)
+
+    case Task.yield(task, attempt_timeout_ms()) || Task.shutdown(task, :brutal_kill) do
+      {:ok, outcome} -> outcome
+      _timed_out_or_killed -> :timed_out
+    end
+  end
+
+  defp finalise(_job, _image_id, :ok), do: :ok
+
+  defp finalise(_job, image_id, {:reject, token, message}) do
+    mark_rejected(image_id, token)
+    {:cancel, message}
+  end
+
+  defp finalise(_job, nil, {:cancel, message}), do: {:cancel, message}
+
+  defp finalise(_job, image_id, {:cancel, message}) do
+    mark_rejected(image_id, "processing_failed")
+    {:cancel, message}
+  end
+
+  defp finalise(job, image_id, {:error, reason}) do
+    if final_attempt?(job) do
+      Logger.error(
+        "IdentifyBookJob: image #{inspect(image_id)} exhausted #{job.max_attempts} attempts; " <>
+          "last error: #{inspect(reason)}"
+      )
+
+      mark_rejected(image_id, rejection_token(reason))
+    end
+
+    {:error, reason}
+  end
+
+  defp final_attempt?(%Oban.Job{attempt: attempt, max_attempts: max_attempts}),
+    do: attempt >= max_attempts
+
+  defp rejection_token(reason) do
+    if VisionError.vision_error?(reason) do
+      VisionError.reason_token(reason)
+    else
+      "processing_failed"
     end
   end
 
@@ -114,34 +253,27 @@ defmodule Stacks.Workers.IdentifyBookJob do
 
       {:error, :not_a_book} ->
         Logger.warning("IdentifyBookJob: image #{image_id} is not a book")
-        mark_rejected(image_id, "not_a_book")
-        {:cancel, "image does not contain a book"}
+        {:reject, "not_a_book", "image does not contain a book"}
 
       {:error, :isbn_not_found} ->
         Logger.warning("IdentifyBookJob: could not extract ISBN from image #{image_id}")
-        mark_rejected(image_id, "isbn_not_found")
-        {:cancel, "isbn_not_found"}
+        {:reject, "isbn_not_found", "isbn_not_found"}
 
       {:error, reason} ->
         Logger.error("IdentifyBookJob: pipeline failed: #{inspect(reason)}")
-        {:error, reason}
+        classify_failure(reason)
     end
-  rescue
-    exception ->
-      Logger.error(
-        "IdentifyBookJob: unhandled exception for image #{image_id}: #{Exception.format(:error, exception, __STACKTRACE__)}"
-      )
-
-      {:error, exception}
   end
 
-  # Emits one `image.rejected` event per failed candidate from a
-  # multi-book partial-resolve. The aggregate_id stays the same `image_id`
-  # so the events tie back to the upload — observability tools can group
-  # by aggregate to reconstruct the per-image outcome (1+ resolved + N
-  # rejected). The image's row stays `resolved` because at least one
-  # candidate succeeded; that's the all-or-nothing rejection contract at
-  # the upload level.
+  defp classify_failure(reason) do
+    if VisionError.vision_error?(reason) and
+         VisionError.determination(reason) == :deterministic do
+      {:reject, VisionError.reason_token(reason), VisionError.message(reason)}
+    else
+      {:error, reason}
+    end
+  end
+
   defp emit_partial_rejections(_image_id, []), do: :ok
 
   defp emit_partial_rejections(image_id, rejected) when is_list(rejected) do
@@ -162,10 +294,6 @@ defmodule Stacks.Workers.IdentifyBookJob do
   defp primary_isbn(_book), do: "unknown"
 
   defp mark_resolved(image_id, book_ids) when is_list(book_ids) do
-    # Scope the update to rows still in `pending` so Oban retries that re-enter
-    # this path after a successful run do not re-touch the row and double-emit
-    # the [:stacks, :upload, :terminal] telemetry event. Only a real
-    # pending -> resolved transition fires the counter.
     query = from(i in UploadedImage, where: i.id == ^image_id and i.status == "pending")
 
     {count, _} =
@@ -208,49 +336,5 @@ defmodule Stacks.Workers.IdentifyBookJob do
       Logger.error("IdentifyBookJob: failed to resolve image #{image_id}: #{inspect(error)}")
   end
 
-  defp mark_rejected(image_id, reason) do
-    # Scope to rows still in `pending` so an Oban retry that re-enters this
-    # path after a successful rejection cannot re-emit
-    # [:stacks, :upload, :terminal]. Only real pending -> rejected transitions
-    # fire the counter.
-    query = from(i in UploadedImage, where: i.id == ^image_id and i.status == "pending")
-
-    {count, _} =
-      Repo.update_all(
-        query,
-        set: [
-          status: "rejected",
-          rejection_reason: reason,
-          updated_at: DateTime.utc_now()
-        ]
-      )
-
-    if count > 0 do
-      Logger.info("IdentifyBookJob: rejected image #{image_id} (#{reason})")
-
-      :telemetry.execute(
-        [:stacks, :upload, :terminal],
-        %{count: 1},
-        %{outcome: :rejected}
-      )
-
-      Phoenix.PubSub.broadcast(
-        Core.PubSub,
-        "upload:#{image_id}",
-        {:upload_complete, %{status: "rejected", rejection_reason: reason}}
-      )
-
-      Events.emit_safe(%{
-        event_type: "image.rejected",
-        aggregate_type: "image",
-        aggregate_id: image_id,
-        payload: %{reason: reason}
-      })
-    else
-      Logger.warning("IdentifyBookJob: image #{image_id} not found for reject")
-    end
-  rescue
-    error ->
-      Logger.error("IdentifyBookJob: failed to reject image #{image_id}: #{inspect(error)}")
-  end
+  defp mark_rejected(image_id, reason), do: Stacks.Uploads.reject_image(image_id, reason)
 end

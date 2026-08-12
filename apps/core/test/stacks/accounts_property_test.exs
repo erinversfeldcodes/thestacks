@@ -1,9 +1,9 @@
 defmodule Stacks.AccountsPropertyTest do
   @moduledoc """
-  StreamData property-based tests for User changesets that parse untrusted input.
+      StreamData property-based tests for User changesets that parse untrusted input.
 
-  Verifies that changesets never crash on arbitrary strings and always return
-  a well-formed `%Ecto.Changeset{}` — whether valid or with errors.
+      Verifies that changesets never crash on arbitrary strings and always return
+      a well-formed `%Ecto.Changeset{}` — whether valid or with errors.
   """
 
   use Core.DataCase, async: false
@@ -33,15 +33,11 @@ defmodule Stacks.AccountsPropertyTest do
             ) do
         user = build(:user)
         cs = Accounts.location_changeset(user, %{"country_code" => country})
-        # No country_code error when length is exactly 2
         refute Map.has_key?(cs.errors |> Map.new(fn {k, _} -> {k, true} end), :country_code)
       end
     end
 
     property "rejects country_code of any length other than 2" do
-      # Generate lengths 1, 3..10 directly instead of filtering length==2 out of
-      # an unbounded string generator — StreamData otherwise hits FilterTooNarrow
-      # when early (small-size) generations keep producing rejected values.
       len_gen = one_of([constant(1), integer(3..10)])
 
       check all(

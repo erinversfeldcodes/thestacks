@@ -1,6 +1,4 @@
 defmodule StacksWeb.UploadControllerTest do
-  # async: false because identify tests swap Application.put_env(:core, :vision_client),
-  # which is global state.
   use CoreWeb.ConnCase, async: false
   use Oban.Testing, repo: Core.Repo
 
@@ -17,42 +15,6 @@ defmodule StacksWeb.UploadControllerTest do
     {:ok, token, _} = Guardian.encode_and_sign(user)
     authed_conn = put_req_header(conn, "authorization", "Bearer #{token}")
     %{conn: authed_conn, user: user}
-  end
-
-  describe "POST /api/upload" do
-    test "accepts image upload and enqueues IdentifyBookJob", %{conn: conn, user: user} do
-      tmp_path = Path.join(System.tmp_dir!(), "test_upload_#{System.unique_integer()}.jpg")
-      File.write!(tmp_path, "fake image content")
-
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "test_book.jpg",
-        content_type: "image/jpeg"
-      }
-
-      conn = post(conn, "/api/upload", %{"image" => upload})
-
-      assert %{"status" => "accepted", "image_id" => image_id} = json_response(conn, 202)
-      assert is_binary(image_id)
-
-      assert_enqueued(
-        worker: IdentifyBookJob,
-        args: %{"user_id" => user.id, "image_id" => image_id}
-      )
-
-      File.rm(tmp_path)
-    end
-
-    test "returns 422 when no image provided", %{conn: conn} do
-      conn = post(conn, "/api/upload", %{})
-      assert %{"error" => "no image provided"} = json_response(conn, 422)
-    end
-
-    test "returns 401 without auth token" do
-      conn = build_conn()
-      conn = post(conn, "/api/upload", %{"image" => "not_a_file"})
-      assert json_response(conn, 401)
-    end
   end
 
   describe "POST /api/upload/init" do
@@ -93,8 +55,7 @@ defmodule StacksWeb.UploadControllerTest do
 
   describe "POST /api/upload/:id/commit" do
     setup %{user: user} do
-      # Seed an awaiting_upload row as if the user had already called init.
-      {:ok, init} = Stacks.Books.init_upload(user.id)
+      {:ok, init} = Stacks.Uploads.init_upload(user.id)
       {:ok, init: init}
     end
 
@@ -103,8 +64,7 @@ defmodule StacksWeb.UploadControllerTest do
       user: user,
       init: init
     } do
-      # Mock backend: seed bytes at the storage_path so head_image returns {:ok, _}.
-      StorageMock.seed("uploads/#{init.image_id}", "fake image bytes")
+      StorageMock.seed("uploads/#{init.image_id}", String.duplicate("fake image bytes ", 128))
 
       conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
 
@@ -116,13 +76,11 @@ defmodule StacksWeb.UploadControllerTest do
         args: %{"user_id" => user.id, "image_id" => init.image_id}
       )
 
-      # Status must flip from awaiting_upload → pending.
       row = Core.Repo.get!(UploadedImage, init.image_id)
       assert row.status == "pending"
     end
 
     test "returns 409 not_yet_uploaded when R2 object is missing", %{conn: conn, init: init} do
-      # Don't seed — HEAD will 404.
       conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
 
       assert %{"error" => "not_yet_uploaded"} = json_response(conn, 409)
@@ -131,7 +89,6 @@ defmodule StacksWeb.UploadControllerTest do
     end
 
     test "returns 404 when image_id does not belong to the caller", %{init: init} do
-      # A different user tries to commit the first user's upload.
       other = insert(:user)
       {:ok, other_token, _} = Guardian.encode_and_sign(other)
       other_conn = build_conn() |> put_req_header("authorization", "Bearer #{other_token}")
@@ -142,11 +99,22 @@ defmodule StacksWeb.UploadControllerTest do
       assert %{"error" => "not_found"} = json_response(conn, 404)
     end
 
+    test "returns 422 image_too_small and rejects the row for an empty object", %{
+      conn: conn,
+      init: init
+    } do
+      StorageMock.seed("uploads/#{init.image_id}", "")
+
+      conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
+
+      assert %{"error" => "image_too_small"} = json_response(conn, 422)
+      assert Core.Repo.get!(UploadedImage, init.image_id).status == "rejected"
+      refute_enqueued(worker: IdentifyBookJob, args: %{"image_id" => init.image_id})
+    end
+
     test "returns 409 already_committed on repeat commit", %{conn: conn, init: init} do
-      StorageMock.seed("uploads/#{init.image_id}", "fake")
-      # First commit: succeeds, flips to pending.
+      StorageMock.seed("uploads/#{init.image_id}", String.duplicate("fake image bytes ", 128))
       post(conn, "/api/upload/#{init.image_id}/commit", %{})
-      # Second commit: row is no longer awaiting_upload.
       conn = post(conn, "/api/upload/#{init.image_id}/commit", %{})
       assert %{"error" => "already_committed"} = json_response(conn, 409)
     end
@@ -157,78 +125,17 @@ defmodule StacksWeb.UploadControllerTest do
     end
   end
 
-  describe "POST /api/upload/identify" do
-    test "returns 200 with identified candidates when image_b64 provided", %{conn: conn} do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
-
-        conn =
-          post(conn, "/api/upload/identify", %{"image_b64" => Base.encode64("fake image bytes")})
-
-        assert %{"status" => "identified", "candidates" => candidates} = json_response(conn, 200)
-        assert is_list(candidates)
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "returns 200 with identified candidates when image_url provided", %{conn: conn} do
-      original = Application.get_env(:core, :vision_client)
-
-      try do
-        Application.put_env(:core, :vision_client, Stacks.AI.MockClient)
-
-        conn =
-          post(conn, "/api/upload/identify", %{
-            "image_url" => "https://example.com/cover.jpg"
-          })
-
-        assert %{"status" => "identified", "candidates" => candidates} = json_response(conn, 200)
-        assert is_list(candidates)
-      after
-        Application.put_env(:core, :vision_client, original)
-      end
-    end
-
-    test "returns 422 when neither image_b64 nor image_url is provided", %{conn: conn} do
-      conn = post(conn, "/api/upload/identify", %{})
-      assert %{"error" => _} = json_response(conn, 422)
-    end
-
-    test "returns 401 without auth token" do
-      conn = build_conn()
-      conn = post(conn, "/api/upload/identify", %{"image_b64" => "abc"})
-      assert json_response(conn, 401)
-    end
-  end
-
   describe "GET /api/upload/:image_id/stream" do
-    test "returns status for a pending image via SSE", %{conn: conn, user: user} do
+    test "returns status for a pending image via SSE", %{user: user} do
       alias Stacks.Accounts.Guardian
       {:ok, token, _} = Guardian.encode_and_sign(user)
 
-      tmp_path = Path.join(System.tmp_dir!(), "status_test_#{System.unique_integer()}.jpg")
-      File.write!(tmp_path, "fake image content")
+      image = insert(:uploaded_image, status: "pending", user_id: user.id)
 
-      upload = %Plug.Upload{
-        path: tmp_path,
-        filename: "test_book.jpg",
-        content_type: "image/jpeg"
-      }
-
-      %{"image_id" => image_id} =
-        conn
-        |> post("/api/upload", %{"image" => upload})
-        |> json_response(202)
-
-      conn2 = get(build_conn(), "/api/upload/#{image_id}/stream?token=#{token}")
+      conn2 = get(build_conn(), "/api/upload/#{image.id}/stream?token=#{token}")
       assert conn2.status == 200
       [content_type | _] = get_resp_header(conn2, "content-type")
       assert String.contains?(content_type, "text/event-stream")
-
-      File.rm(tmp_path)
     end
 
     test "returns 404 for unknown image_id", %{user: user} do
@@ -322,9 +229,6 @@ defmodule StacksWeb.UploadControllerTest do
           storage_path: "uploads/#{Ecto.UUID.generate()}"
         )
 
-      # Simulate the prior placement created when the user confirmed
-      # the (now-rejected) identification. We expect the reject action
-      # to soft-delete this so the retry can place a fresh book.
       {:ok, _placement} = Stacks.Shelving.place_book(user.id, book.id, "library")
 
       conn =
@@ -346,8 +250,37 @@ defmodule StacksWeb.UploadControllerTest do
         }
       )
 
-      # Placement should be soft-deleted (removed_at set).
-      assert Stacks.Shelving.get_placement_for_book(user.id, book.id) == nil
+      assert Stacks.Shelving.get_placements_for_book(user.id, book.id) == []
+    end
+
+    test "a rejection withdraws only the newest placement, not the reader's own", %{
+      conn: conn,
+      user: user
+    } do
+      book = insert(:book, title: "Kept On Purpose")
+      insert(:book_edition, book: book, isbn: "9780743273565")
+
+      kept =
+        insert(:placement, book: book, bookshelf: insert(:bookshelf, user: user, name: "library"))
+
+      from_identification =
+        insert(:placement,
+          book: book,
+          bookshelf: insert(:bookshelf, user: user, name: "wishlist")
+        )
+
+      image = insert(:uploaded_image, status: "resolved", user_id: user.id)
+
+      conn =
+        post(conn, "/api/upload/#{image.id}/reject-identification", %{
+          "rejected_book_ids" => [book.id]
+        })
+
+      assert json_response(conn, 202)
+
+      remaining = Stacks.Shelving.get_placements_for_book(user.id, book.id)
+      assert Enum.map(remaining, & &1.id) == [kept.id]
+      refute from_identification.id in Enum.map(remaining, & &1.id)
     end
 
     test "falls back to title-only descriptor when the book has no author", %{
@@ -424,7 +357,6 @@ defmodule StacksWeb.UploadControllerTest do
     } do
       image = insert(:uploaded_image, status: "resolved", user_id: user.id)
 
-      # All-unresolvable: random UUIDs that don't correspond to any book.
       conn =
         post(conn, "/api/upload/#{image.id}/reject-identification", %{
           "rejected_book_ids" => [Ecto.UUID.generate(), Ecto.UUID.generate()]
@@ -437,12 +369,14 @@ defmodule StacksWeb.UploadControllerTest do
 
     test "enqueues IdentifyBookJob with excluded_isbns resolved from rejected_book_ids",
          %{conn: conn, user: user} do
-      # Rejection-retry plumbing: the controller resolves each book_id
-      # to its primary edition ISBN and threads the list through the
-      # Oban args so Moderation / ISBNResolver can suppress matches.
       author = insert(:author, name: "Orson Scott Card")
-      book = insert(:book, title: "Crystal City", author: author)
-      insert(:book_edition, book: book, isbn: "9781429964500", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "Crystal City",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9781429964500")]
+        )
 
       image = insert(:uploaded_image, status: "resolved", user_id: user.id)
 
@@ -466,13 +400,14 @@ defmodule StacksWeb.UploadControllerTest do
 
     test "deduplicates excluded_isbns when the same book_id appears twice in the rejected list",
          %{conn: conn, user: user} do
-      # The frontend posts a cumulative list. If a book_id is double-
-      # listed (e.g. retry round 2 sends [book_a, book_a, book_b] because
-      # the user clicked the same suggestion twice), the controller
-      # dedupes the resolved ISBN list.
       author = insert(:author, name: "A")
-      book = insert(:book, title: "B", author: author)
-      insert(:book_edition, book: book, isbn: "9780743273565", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "B",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9780743273565")]
+        )
 
       image = insert(:uploaded_image, status: "resolved", user_id: user.id)
 
@@ -498,15 +433,18 @@ defmodule StacksWeb.UploadControllerTest do
       TitleSearchCache.invalidate_all()
 
       author = insert(:author, name: "Orson Scott Card")
-      book = insert(:book, title: "Crystal City", author: author)
-      insert(:book_edition, book: book, isbn: "9781429964500", is_primary: true)
+
+      book =
+        insert(:book,
+          title: "Crystal City",
+          author: author,
+          editions: [build(:primary_book_edition, isbn: "9781429964500")]
+        )
+
       insert(:book_edition, book: book, isbn: "9780765341297", is_primary: false)
 
       image = insert(:uploaded_image, status: "resolved", user_id: user.id)
 
-      # Poisoned round-1 memos: a junk title-search result that resolved
-      # to the rejected book's primary edition, plus one cached against a
-      # secondary edition ISBN.
       :ok =
         TitleSearchCache.put(
           "The Tramp's Crystal City",
@@ -517,7 +455,6 @@ defmodule StacksWeb.UploadControllerTest do
 
       :ok = TitleSearchCache.put("Crystal City", "Card", nil, {:ok, "9780765341297", %{}})
 
-      # Unrelated warm entry must survive the rejection.
       :ok = TitleSearchCache.put("Dune", "Herbert", nil, {:ok, "9780441172719", %{}})
 
       conn =
@@ -530,6 +467,71 @@ defmodule StacksWeb.UploadControllerTest do
       assert :miss = TitleSearchCache.get("The Tramp's Crystal City", nil, nil)
       assert :miss = TitleSearchCache.get("Crystal City", "Card", nil)
       assert {:ok, {:ok, "9780441172719", _}} = TitleSearchCache.get("Dune", "Herbert", nil)
+    end
+  end
+
+  describe "GET /api/uploads/inbox" do
+    test "returns this reader's unfinished uploads, newest first", %{conn: conn, user: user} do
+      book = insert(:book)
+
+      insert(:uploaded_image,
+        user_id: user.id,
+        status: "resolved",
+        book_ids: [book.id],
+        uploaded_at: ~U[2026-01-01 00:00:00.000000Z]
+      )
+
+      failed =
+        insert(:uploaded_image,
+          user_id: user.id,
+          status: "rejected",
+          rejection_reason: "vision_unavailable",
+          uploaded_at: ~U[2026-06-01 00:00:00.000000Z]
+        )
+
+      assert %{"items" => [first, second]} = json_response(get(conn, "/api/uploads/inbox"), 200)
+
+      assert first["image_id"] == failed.id
+      assert first["kind"] == "failed"
+      assert first["rejection_reason"] == "vision_unavailable"
+      assert first["book_ids"] == []
+
+      assert second["kind"] == "awaiting_confirmation"
+      assert second["book_ids"] == [book.id]
+      assert second["rejection_reason"] == nil
+    end
+
+    test "never returns another reader's uploads", %{conn: conn} do
+      stranger = insert(:user)
+      book = insert(:book)
+
+      insert(:uploaded_image, user_id: stranger.id, status: "resolved", book_ids: [book.id])
+
+      insert(:uploaded_image,
+        user_id: stranger.id,
+        status: "rejected",
+        rejection_reason: "not_a_book"
+      )
+
+      assert %{"items" => []} = json_response(get(conn, "/api/uploads/inbox"), 200)
+    end
+
+    test "an empty inbox is 200 with an empty list, not a 404", %{conn: conn} do
+      assert %{"items" => []} = json_response(get(conn, "/api/uploads/inbox"), 200)
+    end
+
+    test "returns 401 without auth token" do
+      assert build_conn() |> get("/api/uploads/inbox") |> json_response(401)
+    end
+
+    test "reading the inbox places nothing on a bookshelf", %{conn: conn, user: user} do
+      book = insert(:book)
+      insert(:uploaded_image, user_id: user.id, status: "resolved", book_ids: [book.id])
+
+      assert %{"items" => [%{"kind" => "awaiting_confirmation"}]} =
+               json_response(get(conn, "/api/uploads/inbox"), 200)
+
+      refute Stacks.Shelving.book_on_any_shelf?(user.id, book.id)
     end
   end
 end

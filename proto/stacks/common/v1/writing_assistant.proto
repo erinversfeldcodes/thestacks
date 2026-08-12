@@ -1,8 +1,8 @@
 // writing_assistant.proto — Operational tables backing the writing-assistant /
-// embeddings feature (US-12.2.1, US-5.1, US-8.1). JSON on the wire. Field
+// embeddings feature. JSON on the wire. Field
 // numbers are forever — never reuse a number.
 //
-// GDPR data-model foundation (Issue #183). Ownership + erasure classification:
+// GDPR data-model foundation. Ownership + erasure classification:
 //   Embedding                — PERSONAL (user-scoped). Erasure: cascade-deleted.
 //   BlogAssistantSession     — PERSONAL (user-scoped). Erasure: cascade-deleted.
 //   TurnFeedback             — PERSONAL (session-child). Erasure: cascade-deleted.

@@ -76,9 +76,6 @@ defmodule Stacks.Books.HttpClientTest do
 
   describe "get/1" do
     test "connection refused returns {:error, :transport_error}" do
-      # Bind an ephemeral port, then close the listener so a connect to
-      # it is refused — exercises the real Finch 0.23 error path
-      # (%Finch.TransportError{reason: :econnrefused}) end to end.
       {:ok, socket} = :gen_tcp.listen(0, [])
       {:ok, port} = :inet.port(socket)
       :ok = :gen_tcp.close(socket)

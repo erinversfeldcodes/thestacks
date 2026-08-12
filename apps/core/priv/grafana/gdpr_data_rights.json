@@ -51,7 +51,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "GDPR data-rights (Issue #238 — export · deletion · consent · retention · audit)",
+      "title": "GDPR data-rights (— export · deletion · consent · retention · audit)",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "panels": []
@@ -60,7 +60,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Data-export requests by result",
-      "description": "WHAT: rate of GDPR data-export (right-to-portability) jobs, split by result (ok / error). HOW: rate() over stacks_gdpr_export_count_total{result}, emitted once per Stacks.Workers.DataExportJob run with a bounded result atom. MEANS: the ok series is portability-request throughput (how often users pull their data); a small error background can be transient (a user deleted mid-export). WATCH: a sustained or dominating error series means export generation is broken for real users (a schema/serialisation regression in GDPR.Export or object-storage failure) and the right-to-portability promise is not being met — cross-check the latency panel and the export job logs.",
+      "description": "WHAT: rate of GDPR data-export (right-to-portability) jobs, split by result (ok / error). HOW: rate over stacks_gdpr_export_count_total{result}, emitted once per Stacks.Workers.DataExportJob run with a bounded result atom. MEANS: the ok series is portability-request throughput (how often users pull their data); a small error background can be transient (a user deleted mid-export). WATCH: a sustained or dominating error series means export generation is broken for real users (a schema/serialisation regression in GDPR.Export or object-storage failure) and the right-to-portability promise is not being met — cross-check the latency panel and the export job logs.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
       "fieldConfig": {
@@ -114,7 +114,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Account deletion by result & failed step",
-      "description": "WHAT: rate of GDPR account-deletion (right-to-erasure) jobs, split both by result (ok / error) and by failed_step (the Ecto.Multi step id where an erasure broke, e.g. delete_user; :none on success). HOW: rate() over stacks_gdpr_deletion_count_total, one event per Stacks.Workers.AccountDeletionJob run. MEANS: the ok series is successful erasures; failed_step turns a broken erasure from merely alertable into diagnosable — it names WHICH cascade branch failed. WATCH: ANY rising error / non-:none failed_step is serious — an erasure that did not complete means personal data was NOT deleted (a right-to-erasure breach); a failed_step concentrated on one step points the fix at that specific deletion branch rather than the whole cascade.",
+      "description": "WHAT: rate of GDPR account-deletion (right-to-erasure) jobs, split both by result (ok / error) and by failed_step (the Ecto.Multi step id where an erasure broke, e.g. delete_user;:none on success). HOW: rate over stacks_gdpr_deletion_count_total, one event per Stacks.Workers.AccountDeletionJob run. MEANS: the ok series is successful erasures; failed_step turns a broken erasure from merely alertable into diagnosable — it names WHICH cascade branch failed. WATCH: ANY rising error / non-:none failed_step is serious — an erasure that did not complete means personal data was NOT deleted (a right-to-erasure breach); a failed_step concentrated on one step points the fix at that specific deletion branch rather than the whole cascade.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
       "fieldConfig": {
@@ -144,7 +144,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Consent grants & revocations by feature",
-      "description": "WHAT: rate of consent transitions per feature (analytics, writing_assistant, …), split into grants and revocations. HOW: rate() over stacks_gdpr_consent_grant_count_total{feature} and stacks_gdpr_consent_revoke_count_total{feature}, one event per successful consent change (recorded with a timestamp). MEANS: the grant vs revoke balance per feature is the opt-in adoption / withdrawal signal — a healthy feature shows grants outpacing revokes as users discover it. WATCH: a revoke surge on one feature means users are withdrawing consent en masse (a trust/UX problem, or a scary new default) and any consent-gated processing for that feature must stop for them; a grant flatline after a feature launch means the consent prompt is not reaching users.",
+      "description": "WHAT: rate of consent transitions per feature (analytics, writing_assistant, …), split into grants and revocations. HOW: rate over stacks_gdpr_consent_grant_count_total{feature} and stacks_gdpr_consent_revoke_count_total{feature}, one event per successful consent change (recorded with a timestamp). MEANS: the grant vs revoke balance per feature is the opt-in adoption / withdrawal signal — a healthy feature shows grants outpacing revokes as users discover it. WATCH: a revoke surge on one feature means users are withdrawing consent en masse (a trust/UX problem, or a scary new default) and any consent-gated processing for that feature must stop for them; a grant flatline after a feature launch means the consent prompt is not reaching users.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
       "fieldConfig": {
@@ -174,7 +174,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Image retention purges (expired · stuck · orphan)",
-      "description": "WHAT: rate of images removed under the 30-day image-retention promise, as THREE SEPARATE series — expired (natural-TTL sweep, split by reason), stuck (safety-net sweep of pending uploads), and orphan (images past expiry still in the DB — a retention-gap alarm). HOW: rate() over stacks_gdpr_image_expired_count_total{reason}, stacks_gdpr_image_stuck_count_total and stacks_gdpr_image_orphan_count_total. CAVEAT: the expired metric's reason=\"stuck\" series MIRRORS the stuck metric — these are kept as distinct series and MUST NOT be summed into one number (doing so double-counts the stuck cleanups; see the note in Core.PromEx.Plugins.Stacks). MEANS: expired is the routine purge cadence; a steady low baseline is healthy. WATCH: a climbing stuck series means uploads are getting wedged in pending and only the safety net is clearing them; ANY non-zero orphan is alert-worthy — images past their deadline are still stored (a retention-gap the 30-day promise forbids).",
+      "description": "WHAT: rate of images removed under the 30-day image-retention promise, as THREE SEPARATE series — expired (natural-TTL sweep, split by reason), stuck (safety-net sweep of pending uploads), and orphan (images past expiry still in the DB — a retention-gap alarm). HOW: rate over stacks_gdpr_image_expired_count_total{reason}, stacks_gdpr_image_stuck_count_total and stacks_gdpr_image_orphan_count_total. CAVEAT: the expired metric's reason=\"stuck\" series MIRRORS the stuck metric — these are kept as distinct series and MUST NOT be summed into one number (doing so double-counts the stuck cleanups; see the note in Core.PromEx.Plugins.Stacks). MEANS: expired is the routine purge cadence; a steady low baseline is healthy. WATCH: a climbing stuck series means uploads are getting wedged in pending and only the safety net is clearing them; ANY non-zero orphan is alert-worthy — images past their deadline are still stored (a retention-gap the 30-day promise forbids).",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
       "fieldConfig": {
@@ -210,7 +210,7 @@
       "id": 7,
       "type": "timeseries",
       "title": "Audit-log writes & reads",
-      "description": "WHAT: rate of audit-log activity — writes split by action and resource_type (the volume of recorded data-access/admin actions) plus the total audit-log READ rate (how often users list their own audit trail). HOW: rate() over stacks_gdpr_audit_write_count_total{action,resource_type} for writes and stacks_gdpr_audit_read_count_total (untagged, no PII) for reads, emitted by Stacks.Audit.log/3 and list_for_user/2. MEANS: writes are the append-only audit throughput; reads are transparency-page engagement — both are steady low-rate signals in normal operation. WATCH: a write-rate flatline to zero while the app is active means audit logging has silently stalled (a compliance gap — actions are happening unrecorded); an unusual write spike on a sensitive action/resource_type flags a burst of data-access activity worth correlating; a read spike simply tracks users exercising the transparency surface.",
+      "description": "WHAT: rate of audit-log activity — writes split by action and resource_type (the volume of recorded data-access/admin actions) plus the total audit-log READ rate (how often users list their own audit trail). HOW: rate over stacks_gdpr_audit_write_count_total{action,resource_type} for writes and stacks_gdpr_audit_read_count_total (untagged, no PII) for reads, emitted by Stacks.Audit.log/3 and list_for_user/2. MEANS: writes are the append-only audit throughput; reads are transparency-page engagement — both are steady low-rate signals in normal operation. WATCH: a write-rate flatline to zero while the app is active means audit logging has silently stalled (a compliance gap — actions are happening unrecorded); an unusual write spike on a sensitive action/resource_type flags a burst of data-access activity worth correlating; a read spike simply tracks users exercising the transparency surface.",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
       "fieldConfig": {

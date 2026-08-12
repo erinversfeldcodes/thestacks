@@ -1,6 +1,6 @@
 module Page.Settings.PasswordTest exposing (suite)
 
-{-| #126 punch 18/19 — the Settings → Password change form.
+{-| /19 — the Settings → Password change form.
 
 Drives `Page.Settings.Password.update`/`view` through the change lifecycle:
 `init` is empty and idle; the three setters update their fields and clear any
@@ -20,12 +20,21 @@ import Test.Html.Selector as Selector
 import Types.RemoteData exposing (RemoteData(..))
 
 
+{-| The model out of the page's `( Model, Cmd Msg, OutMsg)` triple. The page
+gained an `OutMsg` in so a mid-form 401 can reach the global session-expiry
+interceptor; the `OutMsg` itself is asserted in `Page.SessionExpiryPagesTest`.
+-}
+modelOf : ( Password.Model, Cmd Msg, Password.OutMsg ) -> Password.Model
+modelOf ( model, _, _ ) =
+    model
+
+
 {-| Apply one message with a token present (the save-dispatch path only fires
 with a token; the non-dispatch branches ignore it).
 -}
 applyWithToken : Msg -> Password.Model -> Password.Model
 applyWithToken msg model =
-    Password.update msg model (Just "test-token") |> Tuple.first
+    Password.update msg model (Just "test-token") |> modelOf
 
 
 {-| A model with valid, matching input ready to save.
@@ -40,7 +49,7 @@ validInput =
 
 suite : Test
 suite =
-    describe "Page.Settings.Password (#126 punch 18/19)"
+    describe "Page.Settings.Password"
         [ describe "init"
             [ test "starts with every field empty and saving NotAsked" <|
                 \_ ->
@@ -73,8 +82,6 @@ suite =
                         |> Expect.equal "brand-new"
             , test "a setter clears a prior save result back to NotAsked" <|
                 \_ ->
-                    -- A completed (or failed) save must not linger while the user
-                    -- retypes; editing any field resets the banner.
                     validInput
                         |> applyWithToken (SaveCompleted (Ok ()))
                         |> applyWithToken (SetNewPassword "typing-again")
@@ -146,7 +153,7 @@ suite =
             , test "valid input without a token is a no-op (no dispatch)" <|
                 \_ ->
                     Password.update SavePassword validInput Nothing
-                        |> Tuple.first
+                        |> modelOf
                         |> .saving
                         |> Expect.equal NotAsked
             ]

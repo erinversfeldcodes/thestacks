@@ -1,11 +1,14 @@
 defmodule Stacks.Factory do
   @moduledoc """
-  ExMachina factory for test data. Use `build/2` for in-memory structs
-  and `insert/2` for persisted records.
+      ExMachina factory for test data. Use `build/2` for in-memory structs
+      and `insert/2` for persisted records.
   """
 
   use ExMachina.Ecto, repo: Core.Repo
 
+  import Ecto.Query, only: [from: 2]
+
+  alias Stacks.Accounts
   alias Stacks.Accounts.User
   alias Stacks.Blog.{Post, PostBookAssociation, PostComment}
   alias Stacks.Books.{Author, Book, BookEdition, UploadedImage}
@@ -36,8 +39,43 @@ defmodule Stacks.Factory do
     UserBookContentAccess
   }
 
+  @doc """
+      A user whose email is confirmed — the state `RequireConfirmedEmail` demands,
+      so this is what nearly every test wants.
+
+      "Confirmed" is not a *starting* state: it is the result of
+      `Accounts.mark_confirmed/1` running over a registered, unconfirmed account
+      (accounts.ex:438-446). So rather than asserting the end state by hand, this
+      builds the registered state and pushes it through the very changeset
+      `mark_confirmed/1` uses. The two cannot drift: if confirmation ever clears
+      another field or sets a confirmed_at, the factory picks it up for free.
+  """
   def user_factory do
+    :unconfirmed_user
+    |> build()
+    |> Accounts.email_confirmation_changeset(%{
+      email_confirmed: true,
+      email_confirmation_token: nil
+    })
+    |> Ecto.Changeset.apply_changes()
+  end
+
+  @doc """
+      A registered-but-unconfirmed account — the state EVERY real signup passes
+      through, and the one `ExpiredUnverifiedAccountsJob` exists to reap.
+
+      `Accounts.register/1` commits `email_confirmed: false` plus a `Phoenix.Token`
+      signed with the `"email_confirm"` salt over the user's OWN id
+      (accounts.ex:527-545). The id is therefore generated here rather than left to
+      the database, so the token genuinely verifies — a random string would fixture
+      a token no confirmation link could ever carry, and the confirmation flow
+      would be untestable from the factory.
+  """
+  def unconfirmed_user_factory do
+    id = Ecto.UUID.generate()
+
     %User{
+      id: id,
       email: sequence(:email, &"user#{&1}@example.com"),
       password_hash: Argon2.hash_pwd_salt("password123"),
       display_name: sequence(:display_name, &"User #{&1}"),
@@ -46,7 +84,8 @@ defmodule Stacks.Factory do
       profile_visibility: "owner",
       age_verified: false,
       consent_analytics: false,
-      email_confirmed: true
+      email_confirmed: false,
+      email_confirmation_token: Phoenix.Token.sign(CoreWeb.Endpoint, "email_confirm", id)
     }
   end
 
@@ -65,7 +104,18 @@ defmodule Stacks.Factory do
   end
 
   def book_factory do
+    %{editionless_book_factory() | editions: [build(:primary_book_edition)]}
+  end
+
+  @doc """
+      A work with NO edition — the one state the ISBN hard gate forbids.
+
+      Only for tests *about* the gate (or `primary_edition/1` returning nil).
+      Everything else wants `:book`.
+  """
+  def editionless_book_factory do
     %Book{
+      id: Ecto.UUID.generate(),
       title: sequence(:title, &"Book Title #{&1}"),
       description: "A great book.",
       language: "en",
@@ -81,18 +131,67 @@ defmodule Stacks.Factory do
 
   def book_edition_factory do
     %BookEdition{
-      isbn: sequence(:isbn, &"978074327#{String.pad_leading(to_string(&1), 4, "0")}"),
+      id: Ecto.UUID.generate(),
+      isbn: next_isbn(),
+      format_label: "Hardcover",
+      page_count: 300,
+      publisher: "Test Publisher",
+      publication_year: 2020,
+      is_primary: false,
+      verification_source: "open_library",
+      book: build(:book)
+    }
+  end
+
+  @doc """
+      The primary edition a work is created WITH — never on its own.
+
+      `book: nil` because it is inserted through the work's `has_many:editions`,
+      which fills `book_id` in. `op.book_editions` has a partial unique index
+      (`book_editions_one_primary_per_book`), so hanging one of these off a work
+      that already has its primary edition raises — which is the point.
+
+      Use it to pin the work's ISBN or format:
+
+          insert(:book, editions: [build(:primary_book_edition, isbn: "9780593098233")])
+  """
+  def primary_book_edition_factory do
+    %BookEdition{
+      id: Ecto.UUID.generate(),
+      isbn: next_isbn(),
       format_label: "Paperback",
       page_count: 300,
       publisher: "Test Publisher",
       publication_year: 2020,
       is_primary: true,
-      book: build(:book)
+      verification_source: "open_library",
+      book: nil
     }
+  end
+
+  defp next_isbn do
+    sequence(:isbn, fn n ->
+      with_check_digit("97817" <> String.pad_leading(to_string(n), 7, "0"))
+    end)
+  end
+
+  defp with_check_digit(body) do
+    sum =
+      body
+      |> String.graphemes()
+      |> Enum.map(&String.to_integer/1)
+      |> Enum.with_index()
+      |> Enum.reduce(0, fn {digit, index}, acc ->
+        weight = if rem(index, 2) == 0, do: 1, else: 3
+        acc + digit * weight
+      end)
+
+    body <> Integer.to_string(rem(10 - rem(sum, 10), 10))
   end
 
   def bookshelf_factory do
     %Bookshelf{
+      id: Ecto.UUID.generate(),
       name: "library",
       visibility: "owner",
       user: build(:user)
@@ -106,7 +205,11 @@ defmodule Stacks.Factory do
     }
   end
 
-  def placement_factory do
+  def placement_factory(attrs) do
+    {bookshelf, attrs} = Map.pop_lazy(attrs, :bookshelf, fn -> build(:bookshelf) end)
+    {shelf, attrs} = Map.pop_lazy(attrs, :shelf, fn -> default_shelf_for(bookshelf) end)
+    {book, attrs} = Map.pop_lazy(attrs, :book, fn -> build(:book) end)
+
     %Placement{
       position: 1,
       placed_at: DateTime.utc_now(),
@@ -116,10 +219,45 @@ defmodule Stacks.Factory do
       current_page: nil,
       started_at: nil,
       finished_at: nil,
-      book: build(:book),
-      bookshelf: build(:bookshelf),
-      shelf: build(:shelf)
+      book: book,
+      book_edition_id: primary_edition_id_of(book),
+      bookshelf_id: bookshelf.id,
+      bookshelf: Ecto.put_meta(bookshelf, state: :loaded),
+      shelf: shelf
     }
+    |> merge_attributes(attrs)
+  end
+
+  defp primary_edition_id_of(%Book{editions: editions}) when is_list(editions) do
+    editions
+    |> Enum.sort_by(&{not &1.is_primary, &1.id})
+    |> case do
+      [] -> nil
+      [edition | _] -> edition.id
+    end
+  end
+
+  defp primary_edition_id_of(%Book{id: book_id}) when is_binary(book_id) do
+    Core.Repo.one(
+      from e in BookEdition,
+        where: e.book_id == type(^book_id, Ecto.UUID),
+        order_by: [desc: e.is_primary, asc: e.created_at, asc: e.id],
+        limit: 1,
+        select: e.id
+    )
+  end
+
+  defp primary_edition_id_of(_book), do: nil
+
+  defp default_shelf_for(%Bookshelf{__meta__: %{state: :loaded}} = bookshelf) do
+    case Core.Repo.get_by(Shelf, bookshelf_id: bookshelf.id, position: 0) do
+      nil -> build(:shelf, bookshelf: bookshelf)
+      shelf -> shelf
+    end
+  end
+
+  defp default_shelf_for(%Bookshelf{} = bookshelf) do
+    build(:shelf, bookshelf: bookshelf)
   end
 
   def uploaded_image_factory do
@@ -127,22 +265,10 @@ defmodule Stacks.Factory do
       status: "pending",
       uploaded_at: DateTime.utc_now(),
       expires_at: DateTime.add(DateTime.utc_now(), 30, :day),
-      user_id: Ecto.UUID.generate()
+      user_id: nil
     }
   end
 
-  # book_id / from_bookshelf / to_bookshelf intentionally default to random
-  # UUIDs, so a bare `insert(:placement_history)` WILL violate the three FKs on
-  # op.bookshelf_placement_history (book_id is null: false → the failure you
-  # hit first). That is BY DESIGN, not a factory bug: the history table is an
-  # append-only audit trail deliberately decoupled from Ecto associations
-  # (proto/persisted.exs:525-542 maps these columns as plain :binary_id, never
-  # belongs_to, so a book/bookshelf delete never cascades its history away).
-  # Because there is no association, ExMachina cannot lazily insert real rows
-  # on insert — always override the FKs with real records, e.g. the
-  # `seed_move_history/3` pattern in shelving_test.exs:
-  #   insert(:placement_history, book_id: book.id,
-  #     from_bookshelf: bookshelf.id, to_bookshelf: bookshelf.id)
   def placement_history_factory do
     %PlacementHistory{
       book_id: Ecto.UUID.generate(),
@@ -151,10 +277,6 @@ defmodule Stacks.Factory do
       moved_at: DateTime.utc_now()
     }
   end
-
-  # ---------------------------------------------------------------------------
-  # Social
-  # ---------------------------------------------------------------------------
 
   def user_block_factory do
     %UserBlock{
@@ -198,16 +320,21 @@ defmodule Stacks.Factory do
     }
   end
 
-  # ---------------------------------------------------------------------------
-  # Blog
-  # ---------------------------------------------------------------------------
-
   def post_factory do
     %Post{
       user: build(:user),
       title: sequence(:post_title, &"Post #{&1}"),
       body: "Some markdown body.",
       visibility: "owner"
+    }
+  end
+
+  def post_syndication_factory do
+    %Stacks.Blog.PostSyndication{
+      post: build(:post),
+      target: "substack",
+      method: "export",
+      canonical_url: "https://thestacks.test/blog/00000000-0000-0000-0000-000000000000"
     }
   end
 
@@ -229,10 +356,6 @@ defmodule Stacks.Factory do
       visible: true
     }
   end
-
-  # ---------------------------------------------------------------------------
-  # Marketplace
-  # ---------------------------------------------------------------------------
 
   def offer_thread_factory do
     %OfferThread{
@@ -266,20 +389,19 @@ defmodule Stacks.Factory do
   end
 
   def transaction_factory do
+    listing = build(:listing)
+
     %Transaction{
-      listing: build(:listing),
+      listing: listing,
       buyer: build(:user),
-      seller: build(:user),
+      seller_id: listing.seller.id,
+      seller: Ecto.put_meta(listing.seller, state: :loaded),
       amount_cents: 15_000,
       currency: "ZAR",
       payment_provider_ref: sequence(:payment_ref, &"stitch-#{&1}"),
       payment_status: "pending"
     }
   end
-
-  # ---------------------------------------------------------------------------
-  # Monitoring
-  # ---------------------------------------------------------------------------
 
   def source_health_check_factory do
     %SourceHealthCheck{
@@ -291,10 +413,6 @@ defmodule Stacks.Factory do
       total_failures: 0
     }
   end
-
-  # ---------------------------------------------------------------------------
-  # Costs
-  # ---------------------------------------------------------------------------
 
   def platform_cost_factory do
     now = DateTime.utc_now()
@@ -310,17 +428,15 @@ defmodule Stacks.Factory do
     }
   end
 
-  # ---------------------------------------------------------------------------
-  # Enrichment
-  # ---------------------------------------------------------------------------
-
   def bookstore_factory do
     %Bookstore{
       name: sequence(:store_name, &"Bookstore #{&1}"),
       website_url: "https://example.com",
       scraper_module: sequence(:scraper_module, &"za/store_#{&1}"),
       has_physical: true,
-      country_code: "ZA"
+      country_code: "ZA",
+      latitude: -33.9500,
+      longitude: 18.5000
     }
   end
 
@@ -342,8 +458,11 @@ defmodule Stacks.Factory do
       type: "cafe",
       city: "Cape Town",
       country_code: "ZA",
+      latitude: -33.9249,
+      longitude: 18.4241,
       website_url: "https://example.com",
-      verified: false
+      verified: false,
+      curated: false
     }
   end
 
@@ -375,17 +494,26 @@ defmodule Stacks.Factory do
     }
   end
 
-  def price_snapshot_factory do
+  def price_snapshot_factory(attrs) do
+    {edition, attrs} = Map.pop_lazy(attrs, :book_edition, fn -> build(:book_edition) end)
+    {book, attrs} = Map.pop_lazy(attrs, :book, fn -> book_of(edition) end)
+
     %PriceSnapshot{
       price_cents: 29_900,
       currency: "ZAR",
       in_stock: true,
       url: "https://example.com/book",
       scraped_at: DateTime.utc_now(),
-      book: build(:book),
+      book_edition: edition,
+      book_id: book.id,
+      book: Ecto.put_meta(book, state: :loaded),
       store: build(:bookstore)
     }
+    |> merge_attributes(attrs)
   end
+
+  defp book_of(%BookEdition{book: %Book{} = book}), do: book
+  defp book_of(%BookEdition{book_id: id}) when is_binary(id), do: Core.Repo.get!(Book, id)
 
   def review_snapshot_factory do
     %ReviewSnapshot{
@@ -425,8 +553,6 @@ defmodule Stacks.Factory do
       synced_at: DateTime.utc_now()
     }
   end
-
-  # ── Writing Assistant / Embeddings (Issue #183) ──────────────────────────
 
   def blog_assistant_session_factory do
     %Session{
@@ -485,6 +611,28 @@ defmodule Stacks.Factory do
       content: "Shared corpus text — not personal.",
       token_count: 5,
       embedding: Pgvector.new(List.duplicate(0.1, 1024))
+    }
+  end
+
+  def library_import_factory do
+    %Stacks.Imports.LibraryImport{
+      user: build(:user),
+      source: "goodreads",
+      filename: "goodreads_library_export.csv",
+      status: "enqueued",
+      row_count: 0
+    }
+  end
+
+  def library_import_row_factory do
+    %Stacks.Imports.LibraryImportRow{
+      import: build(:library_import),
+      row_number: sequence(:library_import_row_number, & &1),
+      raw_title: "1984",
+      raw_author: "George Orwell",
+      raw_isbn13: "9780141036144",
+      goodreads_shelf: "read",
+      created_at: DateTime.utc_now()
     }
   end
 end

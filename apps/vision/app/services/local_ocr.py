@@ -1,17 +1,10 @@
-"""Local barcode-based ISBN scanner.
-
-Uses pyzbar to decode barcodes from images and validates extracted data
-as ISBN-10 or ISBN-13. This provides a fast, cheap pre-pass that can
-short-circuit the VLM call when a clean barcode is present.
-
-If the image fails to decode as-uploaded, a sweep of cheap pixel
-transforms is attempted (horizontal mirror, 90/180/270 rotations,
-mirror + 90) — pyzbar cannot natively decode mirrored barcodes, which
-show up in screenshot-of-screenshot uploads. The happy path (original
-orientation decodes) still performs exactly one decode attempt.
-
-Safety contract: ``local_isbn_scan`` NEVER raises. It returns ``None``
-on any error (corrupt image, no barcode, unrecognised format, etc.).
+"""Local barcode-based ISBN scanner (pyzbar): the fast, cheap pre-pass
+that short-circuits the VLM when a clean barcode is present. If the
+as-uploaded image fails to decode, a sweep of cheap transforms is tried
+(mirror, rotations — pyzbar can't decode mirrored barcodes, which
+screenshot-of-screenshot uploads produce); the happy path stays one
+decode attempt. Safety contract: ``local_isbn_scan`` never raises —
+any failure returns None and the VLM path proceeds.
 """
 
 from __future__ import annotations
@@ -36,7 +29,6 @@ def _is_valid_isbn10(text: str) -> bool:
     """Check whether *text* is a valid ISBN-10."""
     if len(text) != 10:
         return False
-    # First 9 characters must be digits; last may be digit or 'X'.
     if not text[:9].isdigit():
         return False
     last = text[9]
@@ -78,19 +70,13 @@ def local_isbn_scan(image_bytes: bytes) -> str | None:
                     return isbn
             return None
 
-        # Decode the bytes once; orientation variants are pixel transposes.
         original = Image.open(io.BytesIO(image_bytes))
         original.load()
 
-        # Original first — the overwhelmingly common case, identical cost
-        # to a single-attempt scan.
         isbn = _scan(original)
         if isbn is not None:
             return isbn
 
-        # Mirror first after original: pyzbar handles some rotation
-        # natively but definitively cannot decode mirrored barcodes
-        # (our observed failure class: screenshot-of-screenshot).
         mirrored = original.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         variants: list[tuple[str, Image.Image]] = [
             ("mirror", mirrored),
@@ -105,6 +91,5 @@ def local_isbn_scan(image_bytes: bytes) -> str | None:
                 logger.debug("local_isbn_scan succeeded on %s variant", name)
                 return isbn
     except Exception:
-        # Silent failure: corrupt image, missing lib, anything — return None.
         logger.debug("local_isbn_scan failed silently", exc_info=True)
     return None

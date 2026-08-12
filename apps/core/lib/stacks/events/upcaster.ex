@@ -1,33 +1,19 @@
 defmodule Stacks.Events.Upcaster do
   @moduledoc """
-  Transforms events from older schema versions to the current version.
-
-  Each event in `op.event_log` has a `schema_version` (integer, default 1).
-  When the shape of an event's payload changes, add a new pattern-match clause
-  here to migrate old payloads forward.
-
-  ## Adding an upcast
-
-  1. Add a clause matching `%{event_type: "the.type", schema_version: old_version}`.
-  2. Transform the payload and bump `schema_version` to the new version.
-  3. Document the migration reason in a comment above the clause.
-
-  Unknown versions pass through unchanged (forward compatibility).
+      Migrates events from older `schema_version`s forward. To add an upcast:
+      match `%{event_type:..., schema_version: old}`, transform the payload,
+      bump the version. Unknown versions pass through unchanged (forward
+      compatibility). Every `PayloadContract` entry with `version > 1` must
+      have a clause here — enforced by test.
   """
 
   @doc """
-  Upcasts an event map to the current schema version.
+      Upcasts an event map to the current schema version.
 
-  Returns the event unchanged if it is already at the current version or if
-  no upcast clause exists for the given type and version.
+      Returns the event unchanged if it is already at the current version or if
+      no upcast clause exists for the given type and version.
   """
   @spec upcast(map()) :: map()
-  # blog.post_* v1 → v2: the free-text `title` was removed from the payload. It is
-  # redundant with `aggregate_id` (the post id) and violated the UUID-only event
-  # invariant (see `Stacks.Events`). Strip it so historical v1 events present the v2
-  # shape to consumers. Payload keys are strings after the JSONB round-trip; drop
-  # both string and atom forms to be safe. (More specific than the v1 clause below,
-  # so these must come first.)
   def upcast(%{event_type: "blog.post_created", schema_version: 1} = event),
     do: drop_blog_title(event)
 
@@ -37,11 +23,8 @@ defmodule Stacks.Events.Upcaster do
   def upcast(%{event_type: "blog.post_published", schema_version: 1} = event),
     do: drop_blog_title(event)
 
-  # Version 1 is the initial (and current) schema version for every other event type.
-  # No transformation needed — this clause documents that v1 is current.
   def upcast(%{schema_version: 1} = event), do: event
 
-  # Catch-all: unknown versions pass through unchanged (forward compatibility).
   def upcast(event), do: event
 
   defp drop_blog_title(%{payload: payload} = event),

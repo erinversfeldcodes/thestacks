@@ -1,22 +1,10 @@
 defmodule StacksWeb.Plugs.DepsCheckTest do
   @moduledoc """
-  Tests for `StacksWeb.Plugs.DepsCheck` — the synthetic dependency probe
-  the SLO gate hits at `GET /internal/deps-check`.
-
-  Two concerns:
-
-    1. **Bearer auth is enforced upstream.** `MetricsAuth` runs before
-       this plug in the endpoint pipeline, so a bare `/internal/deps-check`
-       GET without a valid Bearer token must 401. An integration test
-       covers this because unit-calling the plug directly would bypass
-       MetricsAuth entirely.
-    2. **Result shape is stable.** The SLO gate treats any non-200 as
-       "dep is down" and folds it into availability. A successful probe
-       must return 200 with JSON `{"searxng":"ok"}`; a SearXNG failure
-       must return 503 with the failing dep's key.
-
-  Uses MockSearxngClient (registered in `apps/core/config/test.exs`),
-  which stores per-process responses so `async: true` is safe.
+      `DepsCheck` probe tests: bearer auth is enforced upstream (an
+      integration request without the token must 401 — unit-calling the plug
+      would bypass `MetricsAuth`), and the result shape is stable (the SLO
+      gate treats any non-200 as dep-down; per-dep entries carry ok/error and
+      a duration).
   """
 
   use CoreWeb.ConnCase, async: true

@@ -1,12 +1,12 @@
 defmodule Stacks.Workers.ListingExpiryJob do
   @moduledoc """
-  Daily Oban cron worker that expires active listings past their `expires_at`.
+      Daily Oban cron worker that expires active listings past their `expires_at`.
 
-  Scheduled at 1 AM UTC. Finds active listings where `expires_at` is in
-  the past and transitions each to `expired` status, clearing the
-  denormalized `listing_status` on the seller's placement.
+      Scheduled at 1 AM UTC. Finds active listings where `expires_at` is in
+      the past and transitions each to `expired` status, clearing the
+      denormalized `listing_status` on the seller's placement.
 
-  Processes in batches of 500 to avoid unbounded memory usage.
+      Processes in batches of 500 to avoid unbounded memory usage.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3

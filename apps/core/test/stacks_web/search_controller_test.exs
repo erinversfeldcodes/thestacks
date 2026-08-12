@@ -13,19 +13,13 @@ defmodule StacksWeb.SearchControllerTest do
   end
 
   defp insert_book_with_edition(attrs) do
-    book = insert(:book, Keyword.take(attrs, [:title, :author]))
-
     insert(
-      :book_edition,
-      Keyword.merge([book: book, is_primary: true], Keyword.take(attrs, [:isbn]))
+      :book,
+      Keyword.take(attrs, [:title, :author]) ++
+        [editions: [build(:primary_book_edition, Keyword.take(attrs, [:isbn]))]]
     )
-
-    book
   end
 
-  # Places `book` on `user`'s named bookshelf. `attrs` may carry :listing_status
-  # (the denormalised marketplace flag) and :visibility. The shelf is built on the
-  # same bookshelf so `shelf_id` (NOT NULL) points back at the intended bookshelf.
   defp place(user, book, shelf_name, attrs \\ []) do
     bookshelf = insert(:bookshelf, user: user, name: shelf_name)
     shelf = insert(:shelf, bookshelf: bookshelf)
@@ -33,7 +27,7 @@ defmodule StacksWeb.SearchControllerTest do
     insert(
       :placement,
       [book: book, bookshelf: bookshelf, shelf: shelf] ++
-        Keyword.take(attrs, [:listing_status, :visibility])
+        Keyword.take(attrs, [:listing_status, :visibility, :removed_at])
     )
   end
 
@@ -46,7 +40,6 @@ defmodule StacksWeb.SearchControllerTest do
       response = json_response(conn, 200)
 
       assert response["query"] == "Elixir"
-      # `results` is deprecated (#298) — read the sectioned `platform_hits`.
       titles = Enum.map(response["platform_hits"], & &1["book"]["title"])
       assert "Elixir in Action" in titles
       refute "Programming Phoenix" in titles
@@ -56,8 +49,6 @@ defmodule StacksWeb.SearchControllerTest do
       conn = get(conn, "/api/search", q: "ZZZNoMatchZZZ")
       response = json_response(conn, 200)
 
-      # count is the total distinct across both sections — zero when nothing
-      # matches. `results` stays deprecated-empty (#298).
       assert response["count"] == 0
       assert response["results"] == []
       assert response["collection"] == []
@@ -71,7 +62,7 @@ defmodule StacksWeb.SearchControllerTest do
 
     test "respects a valid limit parameter", %{conn: conn} do
       for i <- 1..5 do
-        insert_book_with_edition(title: "Rustica#{i}", isbn: "978000000000#{i}")
+        insert_book_with_edition(title: "Rustica#{i}")
       end
 
       conn = get(conn, "/api/search", q: "Rustica", limit: "2")
@@ -102,13 +93,6 @@ defmodule StacksWeb.SearchControllerTest do
     end
   end
 
-  # Query edge cases (Issue #115 audit punch #1). These exercise the read path's
-  # resilience to real-world input: multi-word tokenisation (the documented
-  # `to_tsquery` single-word gotcha — `Books.search_books/2` uses
-  # `plainto_tsquery`, which tokenises free text), injection/special-character
-  # safety, and pathological length. Each asserts on returned CONTENT + a 200,
-  # not merely status, so a regression to `to_tsquery` (which raises a tsquery
-  # syntax error on bare multi-word/operator input → 500) is caught here.
   describe "GET /api/search — query edge cases" do
     test "tokenises a multi-word query and returns the matching book", %{conn: conn} do
       insert_book_with_edition(title: "Elixir in Action", isbn: "9781617295027")
@@ -129,8 +113,6 @@ defmodule StacksWeb.SearchControllerTest do
       conn = get(conn, "/api/search", q: "'; DROP TABLE op.books;--")
       response = json_response(conn, 200)
 
-      # Query is parameterised + `plainto_tsquery` treats it as plain text — no
-      # DDL executes. Sane (list) result shape, and the seeded row still exists.
       assert is_list(response["platform_hits"])
       assert %{rows: [[1]]} = Core.Repo.query!("SELECT count(*) FROM op.books")
     end
@@ -141,8 +123,6 @@ defmodule StacksWeb.SearchControllerTest do
       conn = get(conn, "/api/search", q: "book & (title | !x)")
       response = json_response(conn, 200)
 
-      # `plainto_tsquery` ignores `& | ! ( )` as operators (it would raise under
-      # `to_tsquery`); the query degrades to the plain lexemes and 200s.
       assert is_list(response["platform_hits"])
     end
 
@@ -159,21 +139,14 @@ defmodule StacksWeb.SearchControllerTest do
     end
   end
 
-  # #229 REGRESSION LOCK — search already hides age-gated books from an
-  # authenticated-but-unverified viewer via `Stacks.Visibility` (the setup conn's
-  # `insert(:user)` defaults `age_verified: false`, i.e. authed-unverified). These
-  # two tests lock that behaviour so a future Visibility change can't silently
-  # re-expose age-gated books on the search surface (see the catalogue gap #229
-  # closed for the SQL-level listing path).
   describe "GET /api/search — visibility filtering" do
     test "excludes age_gated books from results for non-age-verified user", %{conn: conn} do
       insert_book_with_edition(title: "Thornfield Chronicles", isbn: "9781234567897")
-      age_gated_book = insert(:book, title: "Thornfield Secrets", visibility_tier: "age_gated")
 
-      insert(:book_edition,
-        book: age_gated_book,
-        isbn: "9781234567880",
-        is_primary: true
+      insert(:book,
+        title: "Thornfield Secrets",
+        visibility_tier: "age_gated",
+        editions: [build(:primary_book_edition, isbn: "9781234567880")]
       )
 
       conn = get(conn, "/api/search", q: "Thornfield")
@@ -189,15 +162,12 @@ defmodule StacksWeb.SearchControllerTest do
       {:ok, token, _} = Guardian.encode_and_sign(age_verified_user)
       verified_conn = put_req_header(conn, "authorization", "Bearer #{token}")
 
-      insert_book_with_edition(title: "Gatekeeper Chronicles", isbn: "9780000000111")
+      insert_book_with_edition(title: "Gatekeeper Chronicles", isbn: "9781600000089")
 
-      age_gated_book =
-        insert(:book, title: "Gatekeeper Secrets", visibility_tier: "age_gated")
-
-      insert(:book_edition,
-        book: age_gated_book,
-        isbn: "9780000000222",
-        is_primary: true
+      insert(:book,
+        title: "Gatekeeper Secrets",
+        visibility_tier: "age_gated",
+        editions: [build(:primary_book_edition, isbn: "9781600000096")]
       )
 
       conn = get(verified_conn, "/api/search", q: "Gatekeeper")
@@ -209,16 +179,7 @@ defmodule StacksWeb.SearchControllerTest do
     end
   end
 
-  # #285 — Platform Discovery Sectioning. The search response is split into
-  # "Your Collection" (the viewer's own active-placement title matches) and
-  # "On the Platform" (platform-visible book matches), each hit carrying
-  # optional discovery-source provenance. Provenance is labelled ONLY when the
-  # source is discoverable by design — an always-visible `looking_for_home`
-  # placement (`listing_status: "active"`, the `Visibility` marketplace
-  # exception) or an active marketplace listing. Ordinary private placements
-  # leak NO owner/provenance. The legacy flat `results` list is deprecated as of
-  # #298 — always empty; the SPA reads only the sectioned fields.
-  describe "GET /api/search — sectioning (#285)" do
+  describe "GET /api/search — sectioning" do
     test "viewer's own active placement lands in collection, not platform_hits",
          %{conn: conn, user: user} do
       book = insert_book_with_edition(title: "Dune Messiah", isbn: "9780593098233")
@@ -233,7 +194,6 @@ defmodule StacksWeb.SearchControllerTest do
       refute book.id in platform_ids
 
       hit = Enum.find(response["collection"], &(&1["book"]["title"] == "Dune Messiah"))
-      # Owned by the viewer — never source-labelled, but tagged with the shelf.
       assert hit["source"] == ""
       assert hit["owner_handle"] == ""
       assert hit["price"] == ""
@@ -255,9 +215,36 @@ defmodule StacksWeb.SearchControllerTest do
       assert collection_hit["bookshelf_name"] == "wishlist"
 
       platform_hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == listed.id))
-      # Platform provenance is source/handle/price — never the viewer's shelf.
       assert platform_hit["source"] == "listed"
       assert platform_hit["bookshelf_name"] == ""
+      assert platform_hit["bookshelf_names"] == []
+    end
+
+    test "a collection hit names every bookshelf it sits on", %{conn: conn, user: user} do
+      book = insert_book_with_edition(title: "Doubly Shelved", isbn: "9780000000194")
+      place(user, book, "wishlist")
+      place(user, book, "reading_pile")
+
+      response = conn |> get("/api/search", q: "Doubly Shelved") |> json_response(200)
+
+      hits = Enum.filter(response["collection"], &(&1["book"]["id"] == book.id))
+      assert length(hits) == 1
+
+      [hit] = hits
+      assert Enum.sort(hit["bookshelf_names"]) == ["reading_pile", "wishlist"]
+      assert hit["bookshelf_name"] == List.first(hit["bookshelf_names"])
+    end
+
+    test "a removed placement is not named among a collection hit's bookshelves",
+         %{conn: conn, user: user} do
+      book = insert_book_with_edition(title: "Partly Unshelved", isbn: "9780000000200")
+      place(user, book, "library")
+      place(user, book, "wishlist", removed_at: DateTime.utc_now())
+
+      response = conn |> get("/api/search", q: "Partly Unshelved") |> json_response(200)
+
+      hit = Enum.find(response["collection"], &(&1["book"]["id"] == book.id))
+      assert hit["bookshelf_names"] == ["library"]
     end
 
     test "another user's private library placement leaks no label or provenance",
@@ -269,8 +256,6 @@ defmodule StacksWeb.SearchControllerTest do
       response = conn |> get("/api/search", q: "Hidden Gardens") |> json_response(200)
 
       hit = Enum.find(response["platform_hits"], &(&1["book"]["id"] == book.id))
-      # The public book work is still discoverable, but the private placement's
-      # owner and provenance must never surface.
       assert hit, "public book should still be discoverable on the platform"
       assert hit["source"] == ""
       assert hit["owner_handle"] == ""
@@ -350,10 +335,6 @@ defmodule StacksWeb.SearchControllerTest do
       assert Map.has_key?(response, "collection")
       assert Map.has_key?(response, "platform_hits")
 
-      # #298 — `results` is deprecated: the field stays on the wire (proto field 3
-      # is reserved forever) but is no longer populated; the SPA never read it
-      # post-sectioning. `count` is the total distinct books returned across both
-      # sections — here the one book, which de-dups into collection.
       assert response["results"] == []
 
       assert response["count"] ==
@@ -370,16 +351,13 @@ defmodule StacksWeb.SearchControllerTest do
     end
   end
 
-  # #284 — Deep search. `?scope=deep` extends matching to book descriptions (not
-  # just titles), applies to BOTH sections (collection + platform), and returns a
-  # `ts_headline` snippet on each hit whose DESCRIPTION matched. The default
-  # (no scope / title-only) behaviour is unchanged.
-  describe "GET /api/search — deep scope (#284)" do
-    # Seeds a platform-visible book that mentions the term only in its description.
+  describe "GET /api/search — deep scope" do
     defp insert_description_only_book(title, description, isbn) do
-      book = insert(:book, title: title, description: description)
-      insert(:book_edition, book: book, isbn: isbn, is_primary: true)
-      book
+      insert(:book,
+        title: title,
+        description: description,
+        editions: [build(:primary_book_edition, isbn: isbn)]
+      )
     end
 
     test "scope=deep surfaces a description-only match with a highlighted snippet",
@@ -410,7 +388,6 @@ defmodule StacksWeb.SearchControllerTest do
 
       platform_ids = Enum.map(response["platform_hits"], & &1["book"]["id"])
       refute book.id in platform_ids
-      # `results` is deprecated (#298): always empty, never a discovery surface.
       assert response["results"] == []
     end
 

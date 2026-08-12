@@ -1,16 +1,15 @@
 defmodule StacksWeb.AgeGateTelemetryTest do
   @moduledoc """
-  Firing tests for the age-gate operational counters added in Issue #228
-  (US-4.2 §13, epic #118).
+      Firing tests for the age-gate operational counters added in.
 
-  Covers:
-  - `AgeGate.enforce/2` — `:blocked` (403) vs `:passed` outcome, emitted
-    ONLY for age-gated books (never the passthrough clause).
-  - `Stacks.AgeVerification.record_verification/3` — `:success` outcome
-    (repointed from the removed self-declared settings endpoint, ADR-020).
+      Covers:
+      - `AgeGate.enforce/2` — `:blocked` vs `:passed` outcome, emitted
+        ONLY for age-gated books (never the passthrough clause).
+      - `Stacks.AgeVerification.record_verification/3` — `:success` outcome
+        (repointed from the removed self-declared settings endpoint).
 
-  Metadata tags are whitelisted atoms only — no email, user id, or other
-  PII (GDPR: telemetry is a warehouse-adjacent sink).
+      Metadata tags are whitelisted atoms only — no email, user id, or other
+      PII (GDPR: telemetry is a warehouse-adjacent sink).
   """
 
   use CoreWeb.ConnCase, async: false
@@ -39,8 +38,6 @@ defmodule StacksWeb.AgeGateTelemetryTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
-
-  # ── AgeGate.enforce/2 ──────────────────────────────────────────────────
 
   describe "age-gate enforcement telemetry" do
     test "emits :passed when an age-verified user accesses an age-gated book (happy)", %{
@@ -86,8 +83,6 @@ defmodule StacksWeb.AgeGateTelemetryTest do
       refute_receive {:telemetry_event, [:stacks, :age_gate, :enforce], _, _}, 100
     end
   end
-
-  # ── AgeVerification.record_verification/3 (ADR-020) ─────────────────────
 
   describe "age-verification telemetry" do
     test "emits :success when a provider verification is recorded (happy)" do

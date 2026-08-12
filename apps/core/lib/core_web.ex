@@ -1,6 +1,6 @@
 defmodule CoreWeb do
   @moduledoc """
-  The entrypoint for defining the web interface for The Stacks.
+      The entrypoint for defining the web interface for The Stacks.
   """
 
   def static_paths, do: ~w(assets textures favicon.ico robots.txt)

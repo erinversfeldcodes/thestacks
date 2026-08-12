@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Installs git hooks and ensures Claude Code hook scripts are executable.
-# Idempotent — safe to run multiple times.
-#
-# Git hooks:    symlinks scripts/hooks/* into .git/hooks/
-# Claude hooks: .claude/settings.json is auto-loaded by Claude Code;
-#               this script just ensures the hook scripts are executable.
-#
-# Usage: bash scripts/install-hooks.sh
-#        just install-hooks
 
 set -euo pipefail
 
@@ -47,11 +38,6 @@ install_hook "pre-commit"
 install_hook "pre-push"
 echo "Done. Use 'git commit --no-verify' / 'git push --no-verify' to skip hooks."
 
-# ── Claude Code hooks ──────────────────────────────────────────────────────────
-# .claude/settings.json is checked in and auto-loaded by Claude Code when it
-# opens this project — no registration step needed. We just ensure the hook
-# scripts are executable (git preserves this on Unix, but not always on Windows
-# or after certain git operations).
 echo ""
 echo "Ensuring Claude Code hook scripts are executable..."
 CLAUDE_HOOK_SCRIPTS=(

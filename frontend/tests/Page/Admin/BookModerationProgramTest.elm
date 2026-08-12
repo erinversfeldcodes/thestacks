@@ -1,6 +1,6 @@
 module Page.Admin.BookModerationProgramTest exposing (suite)
 
-{-| Program tests for Page.Admin.BookModeration (#118 owner age-gate surface).
+{-| Program tests for Page.Admin.BookModeration (owner age-gate surface).
 
 Drives the page through elm-program-test: loading the book list and toggling
 a row's age gate (which must fire the admin PUT).
@@ -18,10 +18,6 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import Test exposing (Test, describe, test)
 import Test.Html.Selector as Selector
-
-
-
--- SIMULATED EFFECTS
 
 
 bmInitEffect : Maybe String -> SimulatedEffect BM.Msg
@@ -86,10 +82,6 @@ program maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-
--- RESPONSE BUILDERS
-
-
 encodeBookJson : String -> String -> String -> String -> Encode.Value
 encodeBookJson id title author tier =
     Encode.object
@@ -132,10 +124,6 @@ bookUpdateResponse bookId book =
         (Encode.encode 0 (Encode.object [ ( "book", book ) ]))
 
 
-
--- TESTS
-
-
 suite : Test
 suite =
     describe "Page.Admin.BookModeration (ProgramTest)"
@@ -173,11 +161,9 @@ togglesRow =
                     )
                 |> ProgramTest.ensureViewHas [ Selector.text "Mark age-gated" ]
                 |> ProgramTest.clickButton "Mark age-gated"
-                -- The PUT was dispatched (this fails if it was not).
                 |> ProgramTest.simulateHttpResponse "PUT"
                     "/api/admin/books/b1/age-gate"
                     (bookUpdateResponse "b1"
                         (encodeBookJson "b1" "Dune" "Frank Herbert" "age_gated")
                     )
-                -- Row now reflects the age-gated tier and offers "Un-gate".
                 |> ProgramTest.expectViewHas [ Selector.text "Un-gate" ]

@@ -10,10 +10,6 @@ config :core, Core.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
-# Core.ObanRepo mirrors Core.Repo in dev — same database, separate
-# pool. The pool-size split doesn't matter much in dev (single
-# developer, low concurrency) but keeping the two repos live so
-# dev matches prod is cheaper than bug-hunting differences later.
 config :core, Core.ObanRepo,
   username: "postgres",
   password: "postgres",

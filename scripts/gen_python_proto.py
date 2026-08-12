@@ -48,11 +48,13 @@ TARGETS: list[dict] = [
         "language": "elixir",
         "output": REPO_ROOT / "apps/core/lib/stacks/gen/proto/scraper.ex",
     },
+    {
+        "proto_file": "<all>",
+        "language": "elixir",
+        "generator": "elixir_enums",
+        "output": REPO_ROOT / "apps/core/lib/stacks/gen/proto/enums.ex",
+    },
 ]
-
-# ---------------------------------------------------------------------------
-# Proto type maps
-# ---------------------------------------------------------------------------
 
 PY_SCALAR_TYPES: dict[str, str] = {
     "TYPE_STRING": "str",
@@ -129,8 +131,6 @@ EX_WKT_TYPES: dict[str, str] = {
     ".google.protobuf.Struct": "map()",
 }
 
-# Proto3 zero values for non-optional Python field defaults.
-# Matches Elixir/Rust: missing scalar fields on the wire default to zero, not a validation error.
 PY_ZERO_VALUES: dict[str, str] = {
     "TYPE_STRING": '""',
     "TYPE_ENUM": '""',
@@ -150,8 +150,6 @@ PY_ZERO_VALUES: dict[str, str] = {
     "TYPE_DOUBLE": "0.0",
 }
 
-# Semantic mutual-exclusion rules that proto3 cannot express (e.g., repeated vs optional).
-# Each entry is a dict with "method" (validator name), "check" (condition), "error" (message).
 _SEMANTIC_EXCLUSIONS: dict[str, list[dict[str, str]]] = {
     "ExtractRequest": [
         {
@@ -162,7 +160,6 @@ _SEMANTIC_EXCLUSIONS: dict[str, list[dict[str, str]]] = {
     ],
 }
 
-# Proto3 zero values for non-optional Elixir struct fields.
 EX_ZERO_VALUES: dict[str, str] = {
     "TYPE_STRING": '""',
     "TYPE_ENUM": '""',
@@ -181,10 +178,6 @@ EX_ZERO_VALUES: dict[str, str] = {
     "TYPE_FLOAT": "0.0",
     "TYPE_DOUBLE": "0.0",
 }
-
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
 
 
 def load_descriptor() -> dict:
@@ -282,11 +275,6 @@ def _resolve_field(
     """
     proto_type = field.get("type", "")
     type_name = field.get("typeName", "")
-    # Fields with oneofIndex cover two cases:
-    #   1. proto3 optional (oneofIndex + proto3Optional=true) — truly nullable
-    #   2. real oneof members (oneofIndex without proto3Optional) — mutually exclusive
-    # Both are generated as nullable here. Real oneof mutual-exclusion constraints
-    # are not enforced by the generated types — application code must validate.
     is_optional = "oneofIndex" in field
     is_repeated = field.get("label", "") == "LABEL_REPEATED"
 
@@ -314,11 +302,6 @@ def _resolve_field(
     return inner, is_optional, is_repeated
 
 
-# ---------------------------------------------------------------------------
-# Python generation
-# ---------------------------------------------------------------------------
-
-
 def _get_real_oneof_groups(msg: dict) -> dict[int, tuple[str, list[str]]]:
     """Return {oneof_index: (oneof_name, [field_names])} for real (non-synthetic) oneofs.
 
@@ -329,7 +312,6 @@ def _get_real_oneof_groups(msg: dict) -> dict[int, tuple[str, list[str]]]:
 
     Reference: https://github.com/protocolbuffers/protobuf/blob/main/docs/implementing_proto3_presence.md
     """
-    # Collect oneof indices that are synthetic (have at least one proto3Optional field).
     synthetic_indices: set[int] = set()
     for field in msg.get("field", []):
         if field.get("proto3Optional") and "oneofIndex" in field:
@@ -378,7 +360,7 @@ def _render_py_semantic_validators(msg_name: str) -> list[str]:
         lines += [
             "",
             '    @model_validator(mode="after")',
-            f'    def {excl["method"]}(self) -> {msg_name}:',
+            f"    def {excl['method']}(self) -> {msg_name}:",
             f"        if {excl['check']}:",
             f'            raise ValueError("{excl["error"]}")',
             "        return self",
@@ -397,12 +379,9 @@ def _render_py_field(field: dict, local_messages: set[str]) -> str:
     elif is_optional:
         return f"    {name}: {inner} | None = None"
     else:
-        # Emit a proto3 zero-value default so Pydantic doesn't raise ValidationError
-        # when a sender omits a field (proto3 guarantees absent = zero value).
         zero = PY_ZERO_VALUES.get(proto_type)
         if zero is not None:
             return f"    {name}: {inner} = {zero}"
-        # Message types and WKTs: no default (caller must supply them).
         return f"    {name}: {inner}"
 
 
@@ -436,7 +415,6 @@ def generate_python_module(descriptor: dict, proto_file: str) -> str:
     if needs_datetime:
         lines.append("from datetime import datetime")
 
-    # Always import Field — needed for repeated fields; harmless otherwise.
     if needs_validator:
         lines.append("from pydantic import BaseModel, Field, model_validator")
     else:
@@ -451,7 +429,6 @@ def generate_python_module(descriptor: dict, proto_file: str) -> str:
                 lines.append(_render_py_field(field, local_messages))
         else:
             lines.append("    pass")
-        # Emit model_validator methods for real proto oneofs and semantic exclusions.
         oneof_groups = _get_real_oneof_groups(msg)
         lines.extend(_render_py_oneof_validators(msg["name"], oneof_groups))
         lines.extend(_render_py_semantic_validators(msg["name"]))
@@ -460,11 +437,6 @@ def generate_python_module(descriptor: dict, proto_file: str) -> str:
 
     lines.append("")
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Rust generation
-# ---------------------------------------------------------------------------
 
 
 def _render_rs_field(field: dict, local_messages: set[str]) -> list[str]:
@@ -517,8 +489,6 @@ def generate_rust_module(descriptor: dict, proto_file: str) -> str:
     ]
 
     for i, msg in enumerate(messages):
-        # Default is required by #[serde(default)] — missing proto3 scalar fields
-        # deserialise to zero values ("", 0, false) instead of failing.
         lines.append("#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]")
         lines.append("#[serde(default)]")
         fields = sorted(msg.get("field", []), key=lambda f: f.get("number", 0))
@@ -528,18 +498,12 @@ def generate_rust_module(descriptor: dict, proto_file: str) -> str:
                 lines.extend(_render_rs_field(field, local_messages))
             lines.append("}")
         else:
-            # cargo fmt requires inline braces for empty structs.
             lines.append(f"pub struct {msg['name']} {{}}")
         if i < len(messages) - 1:
             lines.append("")
 
     lines.append("")
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Elixir generation
-# ---------------------------------------------------------------------------
 
 
 def _render_ex_struct_field(
@@ -551,7 +515,6 @@ def _render_ex_struct_field(
     name = field["name"]
     proto_type = field.get("type", "")
     type_name = field.get("typeName", "")
-    # Any field with oneofIndex is optional (proto3 optional or real oneof member).
     is_optional = "oneofIndex" in field
     is_repeated = field.get("label", "") == "LABEL_REPEATED"
 
@@ -581,7 +544,6 @@ def _render_ex_struct_field(
     elif is_optional:
         return f"{name}: nil", f"{inner} | nil"
     else:
-        # Non-optional proto3 scalar: emit the proto3 zero value.
         zero = EX_ZERO_VALUES.get(proto_type, "nil")
         if proto_type == "TYPE_MESSAGE":
             zero = "nil"  # embedded messages: nil is the only sensible default
@@ -594,7 +556,6 @@ def generate_elixir_module(descriptor: dict, proto_file: str) -> str:
     local_messages = {m["name"] for m in messages}
 
     stem = Path(proto_file).stem
-    # PascalCase: handles multi-word stems ("my_service" → "MyService").
     namespace = f"Stacks.Proto.{''.join(w.capitalize() for w in stem.split('_'))}"
 
     lines = [
@@ -613,9 +574,6 @@ def generate_elixir_module(descriptor: dict, proto_file: str) -> str:
             f'  @moduledoc "Wire contract for {msg["name"]} — '
             f'generated from {proto_file}. Do not edit."'
         )
-        # Note: @derive Jason.Encoder is intentionally omitted.
-        # The explicit defimpl below provides custom nil-filtering; @derive
-        # would generate a redundant default impl that competes with it.
 
         if fields:
             ds_entries: list[str] = []
@@ -625,8 +583,6 @@ def generate_elixir_module(descriptor: dict, proto_file: str) -> str:
                 ds_entries.append(ds)
                 ts_entries.append((field["name"], ts))
 
-            # mix format: `defstruct key: val,\n            key2: val2` (no brackets)
-            # "  defstruct " = 12 chars → continuation lines use 12-space indent
             lines.append("")
             if len(ds_entries) == 1:
                 lines.append(f"  defstruct {ds_entries[0]}")
@@ -637,7 +593,6 @@ def generate_elixir_module(descriptor: dict, proto_file: str) -> str:
                     lines.append(f"{continuation}{entry},")
                 lines.append(f"{continuation}{ds_entries[-1]}")
 
-            # mix format: @type fields at 10-space indent, closing `}` at 8-space indent
             lines.append("")
             lines.append("  @type t() :: %__MODULE__{")
             field_indent = " " * 10
@@ -654,7 +609,6 @@ def generate_elixir_module(descriptor: dict, proto_file: str) -> str:
 
         lines.append("end")
         lines.append("")
-        # Custom Jason.Encoder that omits nil optional fields (proto3 JSON semantics).
         lines.append(f"defimpl Jason.Encoder, for: {module_name} do")
         lines.append("  def encode(struct, opts) do")
         lines.append("    struct")
@@ -671,15 +625,234 @@ def generate_elixir_module(descriptor: dict, proto_file: str) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+EX_LINE_LENGTH = 98
+
+
+def _pascal_to_screaming_snake(name: str) -> str:
+    """ISBNFormat -> ISBN_FORMAT, VisibilityTier -> VISIBILITY_TIER.
+
+    Mirrors the Elm generator's helper of the same name so both languages derive
+    the identical short form from a proto enum value.
+    """
+    result: list[str] = []
+    current: list[str] = []
+    for i, ch in enumerate(name):
+        if (
+            ch.isupper()
+            and current
+            and (
+                name[i - 1].islower()
+                or (i + 1 < len(name) and name[i + 1].islower() and name[i - 1].isupper())
+            )
+        ):
+            result.append("".join(current))
+            current = [ch]
+        else:
+            current.append(ch)
+    if current:
+        result.append("".join(current))
+    return "_".join(part.upper() for part in result)
+
+
+def enum_value_to_atom(enum_name: str, value_name: str) -> str:
+    """SCRAPE_OUTCOME_PRICED (of ScrapeOutcome) -> "priced".
+
+    Strips the SCREAMING_SNAKE form of the enum's own name, matching the wire
+    short form the Elm generator produces (`_enum_value_lowercase_form`), so the
+    two languages name the same enum value the same way.
+    """
+    prefix = _pascal_to_screaming_snake(enum_name)
+    if value_name.startswith(prefix + "_") and len(value_name) > len(prefix) + 1:
+        return value_name[len(prefix) + 1 :].lower()
+    return value_name.lower()
+
+
+def _ex_attr_list(name: str, items: list[str]) -> list[str]:
+    """Render `  @name [...]` the way mix format would: inline if it fits, else one per line."""
+    inline = f"  @{name} [{', '.join(items)}]"
+    if len(inline) <= EX_LINE_LENGTH:
+        return [inline]
+    lines = [f"  @{name} ["]
+    for i, item in enumerate(items):
+        comma = "," if i < len(items) - 1 else ""
+        lines.append(f"    {item}{comma}")
+    lines.append("  ]")
+    return lines
+
+
+def _ex_type_union(members: list[str]) -> list[str]:
+    """Render `  @type t() :: a | b` the way mix format would.
+
+    When the union does not fit on one line the formatter breaks after `::` and
+    indents the members by 10 spaces, leading each continuation with `| `.
+    """
+    inline = f"  @type t() :: {' | '.join(members)}"
+    if len(inline) <= EX_LINE_LENGTH:
+        return [inline]
+    lines = ["  @type t() ::"]
+    indent = " " * 10
+    lines.append(f"{indent}{members[0]}")
+    for member in members[1:]:
+        lines.append(f"{indent}| {member}")
+    return lines
+
+
+def _collect_all_enums(descriptor: dict) -> list[dict]:
+    """Every enum in every proto file, top-level and nested, with its source metadata."""
+
+    def walk(container: dict, proto_file: str, package: str) -> list[dict]:
+        found = []
+        for enum in container.get("enumType", []):
+            found.append({"enum": enum, "proto_file": proto_file, "package": package})
+        for msg in container.get("nestedType", []) + container.get("messageType", []):
+            found.extend(walk(msg, proto_file, package))
+        return found
+
+    enums: list[dict] = []
+    for f in descriptor.get("file", []):
+        name = f["name"]
+        if name.startswith("google/"):
+            continue
+        enums.extend(walk(f, name, f.get("package", "")))
+    return enums
+
+
+def generate_elixir_enums_module(descriptor: dict, _proto_file: str) -> str:
+    """One Elixir module per proto enum, for every enum in every proto file."""
+    entries = _collect_all_enums(descriptor)
+
+    by_name: dict[str, dict] = {}
+    for entry in entries:
+        enum_name = entry["enum"]["name"]
+        if enum_name in by_name:
+            print(
+                f"ERROR: duplicate proto enum name '{enum_name}' in "
+                f"{by_name[enum_name]['proto_file']} and {entry['proto_file']} — "
+                "Stacks.Proto.Enums.* requires globally unique enum names",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        by_name[enum_name] = entry
+
+    lines = [
+        "# Generated by scripts/gen_python_proto.py — DO NOT EDIT MANUALLY.",
+        "# Source: every enum declared under proto/",
+        "# Regenerate: scripts/gen-elixir-proto.sh",
+        "#",
+        "# One module per proto enum. `values/0` is the closed set of wire values;",
+        "# `scripts/check-enum-coverage.py` asserts that every Elixir consumer matching",
+        "# on these strings handles all of them, or declares the omission in-source.",
+        "",
+    ]
+
+    for i, enum_name in enumerate(sorted(by_name)):
+        entry = by_name[enum_name]
+        enum = entry["enum"]
+        fqn = f"{entry['package']}.{enum_name}" if entry["package"] else enum_name
+        module_name = f"Stacks.Proto.Enums.{enum_name}"
+
+        wire_values = [v["name"] for v in enum.get("value", [])]
+        atoms = [enum_value_to_atom(enum_name, name) for name in wire_values]
+
+        lines.append(f"defmodule {module_name} do")
+        lines.append('  @moduledoc """')
+        lines.append(f"  Closed enum contract for `{fqn}`.")
+        lines.append("")
+        lines.append(f"  Generated from {entry['proto_file']}. Do not edit.")
+        lines.append('  """')
+        lines.append("")
+        lines.extend(_ex_type_union([f":{a}" for a in atoms]))
+        lines.append("")
+        lines.extend(_ex_attr_list("values", [f'"{v}"' for v in wire_values]))
+        lines.append("")
+        lines.extend(_ex_attr_list("atoms", [f":{a}" for a in atoms]))
+        lines.append("")
+        lines.append('  @doc "Every wire value of this enum, in proto declaration order."')
+        lines.append("  @spec values() :: [String.t()]")
+        lines.append("  def values, do: @values")
+        lines.append("")
+        lines.append('  @doc "Every value of this enum as an atom, in proto declaration order."')
+        lines.append("  @spec atoms() :: [t()]")
+        lines.append("  def atoms, do: @atoms")
+        lines.append("")
+        lines.append('  @doc """')
+        lines.append("  Casts a wire value to its atom, or `:error` if it is not a value of")
+        lines.append("  this enum. An unknown string is a contract violation, not a default.")
+        lines.append('  """')
+        lines.append("  @spec cast(term()) :: {:ok, t()} | :error")
+        for wire, atom in zip(wire_values, atoms, strict=True):
+            lines.append(f'  def cast("{wire}"), do: {{:ok, :{atom}}}')
+        lines.append("  def cast(_other), do: :error")
+        lines.append("")
+        lines.append('  @doc "Renders an atom back to the wire value proto declares."')
+        lines.append("  @spec to_wire(t()) :: String.t()")
+        for wire, atom in zip(wire_values, atoms, strict=True):
+            lines.append(f'  def to_wire(:{atom}), do: "{wire}"')
+        lines.append("end")
+        if i < len(by_name) - 1:
+            lines.append("")
+
+    lines.append("")
+    return "\n".join(lines)
+
 
 GENERATORS = {
     "python": generate_python_module,
     "rust": generate_rust_module,
     "elixir": generate_elixir_module,
+    "elixir_enums": generate_elixir_enums_module,
 }
+
+
+def classify(path: Path) -> str:
+    """Classify a generated artefact as tracked / ignored / untracked.
+
+    Delegates to scripts/generated-file-class.sh so the tracked-vs-gitignored
+    policy has exactly one implementation, shared by this generator, the Elm
+    generator and `mix proto.sync`. That script answers with git itself —
+    parsing .gitignore by hand is the failure mode this project has been bitten
+    by before, and it fails silently.
+
+    Only called once drift has already been detected, so the clean path pays
+    nothing for it.
+    """
+    try:
+        result = subprocess.run(
+            [str(REPO_ROOT / "scripts" / "generated-file-class.sh"), str(path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "untracked"
+    return result.stdout.strip()
+
+
+def _resolve_drift(output: Path, generated: str, language: str, missing: bool) -> bool:
+    """Handle one drifted artefact. Returns True if it should fail the build.
+
+    Gitignored + stale can only ever be LOCAL staleness — CI regenerates these
+    from scratch every run — so regenerate it and say so. Anything else has to
+    fail: that is the case the drift check exists for.
+    """
+    rel = output.relative_to(REPO_ROOT)
+    reason = "does not exist" if missing else "is out of date"
+
+    if classify(output) == "ignored":
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(generated)
+        print(
+            f"REGENERATED: {rel} {reason} — gitignored, so this can only be "
+            "local staleness; regenerated from proto and continuing.",
+            file=sys.stderr,
+        )
+        return False
+
+    print(
+        f"DRIFT: {rel} {reason} — run: scripts/gen-{language}-proto.sh",
+        file=sys.stderr,
+    )
+    return True
 
 
 def main() -> None:
@@ -710,25 +883,16 @@ def main() -> None:
         proto_file: str = target["proto_file"]
         output: Path = target["output"]
         language: str = target["language"]
-        generate = GENERATORS[language]
+        generate = GENERATORS[target.get("generator", language)]
 
         generated = generate(descriptor, proto_file)
 
         if args.check:
-            if not output.exists():
-                print(
-                    f"DRIFT: {output.relative_to(REPO_ROOT)} does not exist — "
-                    f"run: scripts/gen-{language}-proto.sh",
-                    file=sys.stderr,
+            missing = not output.exists()
+            if missing or output.read_text() != generated:
+                drift_detected = (
+                    _resolve_drift(output, generated, language, missing) or drift_detected
                 )
-                drift_detected = True
-            elif output.read_text() != generated:
-                print(
-                    f"DRIFT: {output.relative_to(REPO_ROOT)} is out of date — "
-                    f"run: scripts/gen-{language}-proto.sh",
-                    file=sys.stderr,
-                )
-                drift_detected = True
             else:
                 print(f"OK: {output.relative_to(REPO_ROOT)}", file=sys.stderr)
         else:
@@ -736,7 +900,6 @@ def main() -> None:
             output.write_text(generated)
             print(f"Generated: {output.relative_to(REPO_ROOT)}")
 
-    # Check or write package init files.
     if args.check:
         drift_detected = _check_package_inits(targets) or drift_detected
     else:
@@ -750,7 +913,6 @@ def _compute_mod_rs(targets: list[dict], existing: str) -> str:
     """Compute the expected mod.rs content for Rust targets."""
     rust_targets = [t for t in targets if t["language"] == "rust"]
     new_stems = {t["output"].stem for t in rust_targets}
-    # Merge existing pub mod declarations so single-language runs preserve other modules.
     existing_stems: set[str] = set()
     for line in existing.splitlines():
         stripped = line.strip()
@@ -758,8 +920,6 @@ def _compute_mod_rs(targets: list[dict], existing: str) -> str:
             existing_stems.add(stripped[len("pub mod ") : -1])
     all_stems = sorted(existing_stems | new_stems)
     mod_content = "".join(f"pub mod {stem};\n" for stem in all_stems)
-    # Preserve the existing #[cfg(test)] block if present.
-    # Use split() to avoid fragile str.index() when multiple cfg(test) markers exist.
     if "#[cfg(test)]" in existing:
         parts = existing.split("#[cfg(test)]", 1)
         test_block = "#[cfg(test)]" + parts[1]
@@ -770,43 +930,22 @@ def _compute_mod_rs(targets: list[dict], existing: str) -> str:
 def _check_package_inits(targets: list[dict]) -> bool:
     """Check that package/module init files match what would be generated. Returns True if drift."""
     drift = False
-    # Python: __init__.py must exist alongside each generated .py file.
     for target in targets:
         if target["language"] == "python":
             init = target["output"].parent / "__init__.py"
             if not init.exists():
-                print(
-                    f"DRIFT: {init.relative_to(REPO_ROOT)} does not exist — "
-                    "run: scripts/gen-python-proto.sh",
-                    file=sys.stderr,
-                )
-                drift = True
+                drift = _resolve_drift(init, "", "python", missing=True) or drift
             else:
                 print(f"OK: {init.relative_to(REPO_ROOT)}", file=sys.stderr)
 
-    # Rust: mod.rs must list all generated modules.
     rust_targets = [t for t in targets if t["language"] == "rust"]
     if rust_targets:
         rust_out_dir = rust_targets[0]["output"].parent
         mod_rs = rust_out_dir / "mod.rs"
         existing = mod_rs.read_text() if mod_rs.exists() else ""
-        # In check mode pass empty string so stale stems (modules removed from TARGETS)
-        # are detected as drift rather than silently preserved.
         expected = _compute_mod_rs(targets, "")
-        if not mod_rs.exists():
-            print(
-                f"DRIFT: {mod_rs.relative_to(REPO_ROOT)} does not exist — "
-                "run: scripts/gen-rust-proto.sh",
-                file=sys.stderr,
-            )
-            drift = True
-        elif existing != expected:
-            print(
-                f"DRIFT: {mod_rs.relative_to(REPO_ROOT)} is out of date — "
-                "run: scripts/gen-rust-proto.sh",
-                file=sys.stderr,
-            )
-            drift = True
+        if not mod_rs.exists() or existing != expected:
+            drift = _resolve_drift(mod_rs, expected, "rust", missing=not mod_rs.exists()) or drift
         else:
             print(f"OK: {mod_rs.relative_to(REPO_ROOT)}", file=sys.stderr)
     return drift
@@ -814,14 +953,12 @@ def _check_package_inits(targets: list[dict]) -> bool:
 
 def _write_package_inits(targets: list[dict]) -> None:
     """Write package/module init files for all generated targets."""
-    # Python: __init__.py alongside each generated .py file.
     for target in targets:
         if target["language"] == "python":
             init = target["output"].parent / "__init__.py"
             if not init.exists():
                 init.write_text("")
 
-    # Rust: single mod.rs listing all generated modules.
     rust_targets = [t for t in targets if t["language"] == "rust"]
     if rust_targets:
         rust_out_dir = rust_targets[0]["output"].parent

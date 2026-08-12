@@ -5,8 +5,11 @@ module TestHelpers exposing
     , bookDetailProgram
     , bookDetailProgramWithOut
     , bookshelfProgram
+    , bookshelfUndoProgram
     , libraryProgram
+    , loginEffects
     , loginProgram
+    , loginProgramFrom
     , namedPlacement
     , placementWithPages
     , profileShelfProgram
@@ -16,10 +19,15 @@ module TestHelpers exposing
     , simulateAuthResponse
     , simulateBookDetailResponse
     , simulateBookDetailResponseWithPlacement
+    , simulateBookDetailResponseWithPlacements
     , simulateBookDetailResponseWithVisibility
+    , simulateBookPricesResponse
     , simulateBookResponse
     , simulateBookshelfErrorResponse
     , simulateBookshelfResponse
+    , simulateConfirmMergeRequiredResponse
+    , simulateConfirmResponse
+    , simulateEmptyBookPricesResponse
     , simulateMergeFormatResponse
     , simulateMultiShelfResponse
     , simulatePlacementVisibilityResponse
@@ -28,6 +36,7 @@ module TestHelpers exposing
     , testBook
     , testPlacement
     , uploadProgram
+    , uploadProgramWithInbox
     )
 
 {-| Shared test infrastructure for elm-program-test based program tests.
@@ -37,8 +46,9 @@ simulators, and test data builders.
 
 -}
 
-import Api exposing (AuthResponse, BookDetailResponse, PollStatus(..), RegisterError(..), streamEventDecoder)
+import Api exposing (PollStatus(..), streamEventDecoder)
 import Components.ISBNInput
+import Components.ShelfOrganiser as ShelfOrganiser
 import Dict
 import Http
 import Json.Decode as Decode
@@ -55,15 +65,11 @@ import SimulatedEffect.Cmd
 import SimulatedEffect.Http
 import SimulatedEffect.Process
 import SimulatedEffect.Task
-import Types.Book exposing (Book, Edition, VisibilityTier(..), bookDecoder)
-import Types.Placement exposing (Placement, placementDecoder, readingStatusToString)
+import Types.Book exposing (Book, Edition, VisibilityTier(..))
+import Types.Placement exposing (Placement, readingStatusToString)
 import Types.RemoteData
-import Types.Shelf exposing (bookshelfResponseDecoder, shelvesResponseDecoder)
+import Types.Shelf exposing (Shelf, bookshelfResponseDecoder, shelvesResponseDecoder)
 import Types.Visibility
-
-
-
--- TEST DATA BUILDERS
 
 
 {-| A default edition for tests.
@@ -78,6 +84,7 @@ testEdition =
     , publisher = Just "Random House"
     , publicationYear = Just 2012
     , isPrimary = True
+    , verificationSource = "open_library"
     }
 
 
@@ -149,10 +156,6 @@ testPlacement =
     , visibility = Nothing
     , hasUserWriting = False
     }
-
-
-
--- JSON ENCODING HELPERS
 
 
 encodeEdition : Edition -> Encode.Value
@@ -282,10 +285,6 @@ encodePlacement placement =
             ++ encodeMaybe "started_at" Encode.string placement.startedAt
             ++ encodeMaybe "finished_at" Encode.string placement.finishedAt
         )
-
-
-
--- HTTP RESPONSE SIMULATORS
 
 
 {-| Create an HTTP response containing a single book JSON payload.
@@ -474,7 +473,7 @@ simulateRegisterResponse =
 
 
 {-| Create a 422 registration validation error response carrying per-field
-error messages, mirroring the backend's `{"errors": {field: [msg, ...]}}` shape
+error messages, mirroring the backend's `{"errors": {field: [msg,...]}}` shape
 (see `format_errors/1` in the Elixir `ChangesetHelpers`).
 -}
 simulateRegisterValidationResponse : List ( String, List String ) -> Http.Response String
@@ -512,6 +511,52 @@ simulateAuthErrorResponse statusCode =
         ""
 
 
+{-| An HTTP response for `GET /api/books/:id/prices`.
+
+Two editions of one work at one store, which is the case the endpoint exists to
+represent: shops stock whichever editions they stock, at different prices.
+
+-}
+simulateBookPricesResponse : String -> Http.Response String
+simulateBookPricesResponse bookId =
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId ++ "/prices"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        """
+        {"prices": [
+          {"book_edition_id": "ed-1", "isbn": "9780749397050",
+           "format_label": "Paperback", "store_id": "st-1",
+           "store_name": "Exclusive Books", "price_cents": 40000,
+           "currency": "ZAR", "in_stock": true,
+           "url": "https://exclusivebooks.co.za/products/9780749397050",
+           "scraped_at": "2026-07-28T06:00:00Z"},
+          {"book_edition_id": "ed-2", "isbn": "9788497592581",
+           "format_label": "Paperback", "store_id": "st-1",
+           "store_name": "Exclusive Books", "price_cents": 41100,
+           "currency": "ZAR", "in_stock": true,
+           "url": "https://exclusivebooks.co.za/products/9788497592581",
+           "scraped_at": "2026-07-28T06:00:00Z"}
+        ]}
+        """
+
+
+{-| An empty price response — a book nothing has priced yet, which is the honest
+default for most of the catalogue.
+-}
+simulateEmptyBookPricesResponse : String -> Http.Response String
+simulateEmptyBookPricesResponse bookId =
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId ++ "/prices"
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        """{"prices": []}"""
+
+
 {-| Create an HTTP response containing a book detail JSON payload with no placement.
 Uses encodeBook to create a proper response wrapping a Book value.
 -}
@@ -535,7 +580,11 @@ simulateBookDetailResponse bookId book =
         json
 
 
-{-| Create an HTTP response containing a book detail JSON payload with a placement.
+{-| An HTTP response for `GET /api/books/:id` carrying a placement,
+matching `ProtoJSON.book_placement/1` exactly: the take-list of
+id/book\_id/personal\_rating/notes plus bookshelf\_name, formats,
+visibility, bookshelf\_visibility. That allow-list is the whole
+contract — fixtures must not invent keys the wire can never carry.
 -}
 simulateBookDetailResponseWithPlacement : String -> Book -> Placement -> Http.Response String
 simulateBookDetailResponseWithPlacement bookId book placement =
@@ -543,10 +592,14 @@ simulateBookDetailResponseWithPlacement bookId book placement =
         placementJson =
             Encode.object
                 ([ ( "id", Encode.string placement.id )
+                 , ( "book_id", Encode.string bookId )
                  , ( "formats", Encode.list Encode.string [] )
+                 , ( "visibility"
+                   , placement.visibility
+                        |> Maybe.map (Types.Visibility.toString >> Encode.string)
+                        |> Maybe.withDefault Encode.null
+                   )
                  ]
-                    ++ encodeMaybe "position" Encode.int placement.position
-                    ++ encodeMaybe "placed_at" Encode.string placement.placedAt
                     ++ (case placement.bookshelfName of
                             Just name ->
                                 [ ( "bookshelf_name", Encode.string name ) ]
@@ -568,16 +621,6 @@ simulateBookDetailResponseWithPlacement bookId book placement =
                             Nothing ->
                                 []
                        )
-                    ++ (case placement.readingStatus of
-                            Just status ->
-                                [ ( "reading_status", Encode.string (readingStatusToString status) ) ]
-
-                            Nothing ->
-                                []
-                       )
-                    ++ encodeMaybe "current_page" Encode.int placement.currentPage
-                    ++ encodeMaybe "started_at" Encode.string placement.startedAt
-                    ++ encodeMaybe "finished_at" Encode.string placement.finishedAt
                 )
 
         json =
@@ -595,6 +638,145 @@ simulateBookDetailResponseWithPlacement bookId book placement =
         , headers = Dict.empty
         }
         json
+
+
+{-| A book-detail response carrying SEVERAL placements of the same book — the
+legal multi-shelf state. Each entry is `{placement_id, bookshelf_name}`;
+the response emits both the `placements` list and the legacy singular
+`placement` key (the first entry), exactly as the controller does.
+-}
+simulateBookDetailResponseWithPlacements :
+    String
+    -> Book
+    -> List { placementId : String, bookshelfName : String }
+    -> Http.Response String
+simulateBookDetailResponseWithPlacements bookId book entries =
+    let
+        encodeOne entry =
+            Encode.object
+                [ ( "id", Encode.string entry.placementId )
+                , ( "book_id", Encode.string bookId )
+                , ( "bookshelf_name", Encode.string entry.bookshelfName )
+                , ( "formats", Encode.list Encode.string [] )
+                , ( "visibility", Encode.null )
+                , ( "bookshelf_visibility", Encode.null )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    [ ( "book", encodeBook book )
+                    , ( "placement"
+                      , entries
+                            |> List.head
+                            |> Maybe.map encodeOne
+                            |> Maybe.withDefault Encode.null
+                      )
+                    , ( "placements", Encode.list encodeOne entries )
+                    ]
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/" ++ bookId
+        , statusCode = 200
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| A `POST /api/books/confirm` success body, exactly as
+`StacksWeb.BookController.confirm_payload/4` builds it
+(`apps/core/lib/stacks_web/controllers/book_controller.ex:97-106`) and as
+`proto/stacks/api/v1/book_responses.proto`'s `BookConfirmResponse` declares it:
+`book`, the singular `placement` this request produced or matched, the full
+`placements` list, and — on the two non-created branches only — `source`.
+
+`source` is `Nothing` for the 201 created branch (the controller omits the key
+entirely there), `Just "catalogue"` when the work already existed and this
+request placed it, and `Just "collection"` when it was already on the requested
+bookshelf.
+
+-}
+simulateConfirmResponse :
+    { statusCode : Int
+    , bookId : String
+    , title : String
+    , authorName : String
+    , source : Maybe String
+    , placements : List { placementId : String, bookshelfName : String }
+    }
+    -> Http.Response String
+simulateConfirmResponse config =
+    let
+        book =
+            { testBook
+                | id = config.bookId
+                , title = config.title
+                , author =
+                    Just
+                        { id = "author-confirm-1"
+                        , name = config.authorName
+                        , bio = Nothing
+                        , website = Nothing
+                        }
+            }
+
+        encodeOne entry =
+            Encode.object
+                [ ( "id", Encode.string entry.placementId )
+                , ( "book_id", Encode.string config.bookId )
+                , ( "bookshelf_name", Encode.string entry.bookshelfName )
+                , ( "formats", Encode.list Encode.string [] )
+                , ( "visibility", Encode.null )
+                , ( "bookshelf_visibility", Encode.null )
+                ]
+
+        json =
+            Encode.encode 0
+                (Encode.object
+                    ([ ( "book", encodeBook book )
+                     , ( "placement"
+                       , config.placements
+                            |> List.head
+                            |> Maybe.map encodeOne
+                            |> Maybe.withDefault Encode.null
+                       )
+                     , ( "placements", Encode.list encodeOne config.placements )
+                     ]
+                        ++ encodeMaybe "source" Encode.string config.source
+                    )
+                )
+    in
+    Http.GoodStatus_
+        { url = "/api/books/confirm"
+        , statusCode = config.statusCode
+        , statusText = "OK"
+        , headers = Dict.empty
+        }
+        json
+
+
+{-| The 409 `POST /api/books/confirm` body — `Books.confirm/2` found an
+existing work whose title+author fuzzy-matches (Jaro-Winkler > 0.8) the
+metadata this ISBN resolved to, so it refused to mint a second work and named
+the one to merge into (`book_controller.ex:71-74`).
+-}
+simulateConfirmMergeRequiredResponse : String -> Http.Response String
+simulateConfirmMergeRequiredResponse workId =
+    Http.BadStatus_
+        { url = "/api/books/confirm"
+        , statusCode = 409
+        , statusText = "Conflict"
+        , headers = Dict.empty
+        }
+        (Encode.encode 0
+            (Encode.object
+                [ ( "error", Encode.string "merge_required" )
+                , ( "work_id", Encode.string workId )
+                ]
+            )
+        )
 
 
 {-| A book-detail response carrying a placement with an explicit visibility and
@@ -649,9 +831,37 @@ simulatePlacementVisibilityResponse placementId visibility =
         )
 
 
+{-| A simulated request derived from the REAL `Api.*` request definition.
 
--- DECODERS (not exposed from Api, rebuilt here for simulated effects)
--- SIMULATED EFFECT TRANSLATORS
+Hand-copying the method/url/body here is the request-side twin of the decoder
+mirrors removed: the copy and the fixture agree with each other while
+drifting from production, and the drift is invisible — hardcoding
+`Api.confirmBook`'s `shelf_name` left all 1,353 tests green. Deriving from
+`Api.RequestSpec` means a change to the production request is a change to what
+these tests assert against.
+
+-}
+authedRequestFromSpec :
+    Api.RequestSpec
+    -> String
+    -> SimulatedEffect.Http.Expect msg
+    -> SimulatedEffect msg
+authedRequestFromSpec spec token expect =
+    SimulatedEffect.Http.request
+        { method = spec.method
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = spec.url
+        , body =
+            case spec.body of
+                Just value ->
+                    SimulatedEffect.Http.jsonBody value
+
+                Nothing ->
+                    SimulatedEffect.Http.emptyBody
+        , expect = expect
+        , timeout = Nothing
+        , tracker = Nothing
+        }
 
 
 {-| Translate Upload page Cmds into SimulatedEffects.
@@ -661,6 +871,12 @@ uploadEffects msg model maybeToken =
     case msg of
         Upload.UploadAccepted (Ok _) ->
             SimulatedEffect.Cmd.none
+
+        Upload.ResumeInboxItem item ->
+            uploadEffects
+                (Upload.StatusReceived (Ok (Upload.replayFrame item)))
+                model
+                maybeToken
 
         Upload.StatusReceived (Ok response) ->
             case response.status of
@@ -686,18 +902,12 @@ uploadEffects msg model maybeToken =
                             SimulatedEffect.Cmd.none
 
                         ( bookIds, Just token ) ->
-                            if response.isDuplicate == Just True then
+                            if response.isDuplicate then
                                 case bookIds of
                                     [ singleId ] ->
-                                        SimulatedEffect.Http.request
-                                            { method = "GET"
-                                            , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                            , url = "/api/books/" ++ singleId
-                                            , body = SimulatedEffect.Http.emptyBody
-                                            , expect = SimulatedEffect.Http.expectJson Upload.GotDuplicateBook decodeBookDetailResponse
-                                            , timeout = Nothing
-                                            , tracker = Nothing
-                                            }
+                                        authedRequestFromSpec (Api.getBookRequest singleId)
+                                            token
+                                            (SimulatedEffect.Http.expectJson Upload.GotDuplicateBook Api.bookDetailResponseDecoder)
 
                                     _ ->
                                         SimulatedEffect.Cmd.none
@@ -706,15 +916,9 @@ uploadEffects msg model maybeToken =
                                 SimulatedEffect.Cmd.batch
                                     (List.map
                                         (\bid ->
-                                            SimulatedEffect.Http.request
-                                                { method = "GET"
-                                                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                                                , url = "/api/books/" ++ bid
-                                                , body = SimulatedEffect.Http.emptyBody
-                                                , expect = SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) decodeBookDetailResponse
-                                                , timeout = Nothing
-                                                , tracker = Nothing
-                                                }
+                                            authedRequestFromSpec (Api.getBookRequest bid)
+                                                token
+                                                (SimulatedEffect.Http.expectJson (Upload.GotIdentifiedBook bid) Api.bookDetailResponseDecoder)
                                         )
                                         bookIds
                                     )
@@ -725,19 +929,24 @@ uploadEffects msg model maybeToken =
                 Rejected ->
                     SimulatedEffect.Cmd.none
 
+                TimedOut ->
+                    SimulatedEffect.Cmd.none
+
         Upload.SubmitManualIsbn ->
             if Components.ISBNInput.isValidISBN model.manualIsbn then
                 case maybeToken of
                     Just token ->
-                        SimulatedEffect.Http.request
-                            { method = "GET"
-                            , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                            , url = "/api/books/isbn/" ++ model.manualIsbn
-                            , body = SimulatedEffect.Http.emptyBody
-                            , expect = SimulatedEffect.Http.expectJson Upload.IsbnLookupResult decodeBookDetailResponse
-                            , timeout = Nothing
-                            , tracker = Nothing
-                            }
+                        authedRequestFromSpec
+                            (Api.confirmBookRequest
+                                { isbn = model.manualIsbn
+                                , shelfName = model.selectedShelf
+                                }
+                            )
+                            token
+                            (SimulatedEffect.Http.expectStringResponse
+                                Upload.ConfirmCompleted
+                                Api.confirmResponseToResult
+                            )
 
                     Nothing ->
                         SimulatedEffect.Cmd.none
@@ -745,18 +954,27 @@ uploadEffects msg model maybeToken =
             else
                 SimulatedEffect.Cmd.none
 
+        Upload.ConfirmCompleted (Err (Api.ConfirmMergeRequired workId)) ->
+            case maybeToken of
+                Just token ->
+                    authedRequestFromSpec (Api.getBookRequest workId)
+                        token
+                        (SimulatedEffect.Http.expectJson Upload.GotSameWorkBook Api.bookDetailResponseDecoder)
+
+                Nothing ->
+                    SimulatedEffect.Cmd.none
+
         Upload.ConfirmMergeFormat bookId ->
             case maybeToken of
                 Just token ->
-                    SimulatedEffect.Http.request
-                        { method = "POST"
-                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
-                        , url = "/api/books/" ++ bookId ++ "/merge-format"
-                        , body = SimulatedEffect.Http.emptyBody
-                        , expect = SimulatedEffect.Http.expectJson Upload.MergeFormatCompleted decodeMergeFormatResponse
-                        , timeout = Nothing
-                        , tracker = Nothing
-                        }
+                    authedRequestFromSpec
+                        (Api.mergeFormatRequest bookId
+                            { isbn = model.mergeIsbn
+                            , formatLabel = model.mergeFormatLabel
+                            }
+                        )
+                        token
+                        (SimulatedEffect.Http.expectJson Upload.MergeFormatCompleted Api.mergeFormatResponseDecoder)
 
                 Nothing ->
                     SimulatedEffect.Cmd.none
@@ -809,8 +1027,6 @@ uploadEffects msg model maybeToken =
                     SimulatedEffect.Cmd.none
 
         Upload.ConfirmPlacement ->
-            -- Mirrors Upload.update: place the book, and (when the user ticked
-            -- "adults only") ALSO fire the raise-only user age-gate PUT.
             case ( model.step, maybeToken ) of
                 ( Upload.ChoosingShelf book, Just token ) ->
                     let
@@ -855,19 +1071,161 @@ uploadEffects msg model maybeToken =
 
 
 {-| Translate Bookshelf page Cmds into SimulatedEffects.
+
+⚠️ This used to be `case msg of _ -> Cmd.none` — a total black hole
+shared by every bookshelf harness, which silently disarmed the
+read-only SECURITY assertion (it counted POSTs the harness could never
+produce). Every mutating Msg must be translated here or its tests
+assert against nothing.
+
 -}
-libraryEffects : Bookshelf.Msg -> SimulatedEffect Bookshelf.Msg
-libraryEffects msg =
-    case msg of
+libraryEffects : Bookshelf.Msg -> Bookshelf.Model -> SimulatedEffect Bookshelf.Msg
+libraryEffects msg model =
+    case ( msg, Bookshelf.mutationToken model, model.token ) of
+        ( Bookshelf.OrganiserMsg ShelfOrganiser.AddShelf, Just token, _ ) ->
+            shelfCreateEffect model.config.apiName token
+
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.RemoveShelf id), Just token, _ ) ->
+            shelfDeleteEffect id token
+
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveUp id), Just token, _ ) ->
+            reorderEffect model token (ShelfOrganiser.moveUp id)
+
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.MoveDown id), Just token, _ ) ->
+            reorderEffect model token (ShelfOrganiser.moveDown id)
+
+        ( Bookshelf.OrganiserMsg (ShelfOrganiser.DropOn targetId), Just token, _ ) ->
+            case model.organiser.dragging of
+                Just draggedId ->
+                    reorderEffect model token (moveShelfToId draggedId targetId)
+
+                Nothing ->
+                    SimulatedEffect.Cmd.none
+
+        ( Bookshelf.UndoRemove, Just token, _ ) ->
+            case model.undoToast of
+                Bookshelf.ToastOffered removal ->
+                    restoreEffect removal.placementId token
+
+                _ ->
+                    SimulatedEffect.Cmd.none
+
+        ( Bookshelf.UndoCompleted (Ok ()), _, Just token ) ->
+            bookshelfInitEffects model.config (Just token)
+
+        ( Bookshelf.ShelfMutated _, _, Just token ) ->
+            bookshelfInitEffects model.config (Just token)
+
         _ ->
             SimulatedEffect.Cmd.none
+
+
+{-| Mirror of `Api.createShelf` — `POST /api/bookshelves/:name/shelves`.
+-}
+shelfCreateEffect : String -> String -> SimulatedEffect Bookshelf.Msg
+shelfCreateEffect bookshelfName token =
+    SimulatedEffect.Http.request
+        { method = "POST"
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "/api/bookshelves/" ++ bookshelfName ++ "/shelves"
+        , body = SimulatedEffect.Http.jsonBody (Encode.object [])
+        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Mirror of `Api.restoreBook` — `POST /api/placements/:id/restore`.
+-}
+restoreEffect : String -> String -> SimulatedEffect Bookshelf.Msg
+restoreEffect placementId token =
+    SimulatedEffect.Http.request
+        { method = "POST"
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "/api/placements/" ++ placementId ++ "/restore"
+        , body = SimulatedEffect.Http.emptyBody
+        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.UndoCompleted
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Mirror of `Api.deleteShelf` — `DELETE /api/shelves/:id`.
+-}
+shelfDeleteEffect : String -> String -> SimulatedEffect Bookshelf.Msg
+shelfDeleteEffect shelfId token =
+    SimulatedEffect.Http.request
+        { method = "DELETE"
+        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+        , url = "/api/shelves/" ++ shelfId
+        , body = SimulatedEffect.Http.emptyBody
+        , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Mirror of `Api.reorderShelves` — `PUT /api/bookshelves/:name/shelves/reorder`
+with the whole ordered id list. Applies the same pure reorder `Page.Bookshelf`
+applies, so the harness sends the order production would send rather than a
+plausible-looking one.
+-}
+reorderEffect :
+    Bookshelf.Model
+    -> String
+    -> (List Shelf -> List Shelf)
+    -> SimulatedEffect Bookshelf.Msg
+reorderEffect model token reorder =
+    case model.shelves of
+        Types.RemoteData.Success shelves ->
+            SimulatedEffect.Http.request
+                { method = "PUT"
+                , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                , url = "/api/bookshelves/" ++ model.config.apiName ++ "/shelves/reorder"
+                , body =
+                    SimulatedEffect.Http.jsonBody
+                        (Encode.object
+                            [ ( "shelf_ids"
+                              , Encode.list Encode.string
+                                    (ShelfOrganiser.orderedIds (reorder shelves))
+                              )
+                            ]
+                        )
+                , expect = SimulatedEffect.Http.expectWhatever Bookshelf.ShelfMutated
+                , timeout = Nothing
+                , tracker = Nothing
+                }
+
+        _ ->
+            SimulatedEffect.Cmd.none
+
+
+{-| Mirror of `Page.Bookshelf.moveToId` (private there): resolve a drop onto
+`targetId` to the same index move the up/down buttons perform.
+-}
+moveShelfToId : String -> String -> List Shelf -> List Shelf
+moveShelfToId draggedId targetId shelves =
+    let
+        indexOf id =
+            shelves
+                |> List.indexedMap (\i shelf -> ( i, shelf.id ))
+                |> List.filter (\( _, shelfId ) -> shelfId == id)
+                |> List.head
+                |> Maybe.map Tuple.first
+    in
+    case ( indexOf draggedId, indexOf targetId ) of
+        ( Just from, Just to ) ->
+            ShelfOrganiser.moveTo from to shelves
+
+        _ ->
+            shelves
 
 
 {-| Translate the owner-mode `Page.Bookshelf.init` Cmd into a SimulatedEffect.
 
 Mirrors `Page.Bookshelf.init`'s own structure: with no token there is no
 request at all, and with a token the GET targets `config.apiName` and tags the
-response with `requestKey config` (Issue #274). Keyed off the config so the
+response with `requestKey config`. Keyed off the config so the
 Library / Antilibrary / Wish List harnesses all share one mirror.
 
 -}
@@ -915,9 +1273,6 @@ profileShelfInitEffects maybeToken handle bookshelfName =
         , url = "/api/u/" ++ handle ++ "/bookshelves/" ++ bookshelfName
         , body = SimulatedEffect.Http.emptyBody
         , expect =
-            -- Mirror Api.getProfileShelf: the read-only profile payload carries
-            -- no visibility, so map it into the shared ShelvesLoaded response
-            -- shape with the "owner" default (RSS is never rendered here).
             SimulatedEffect.Http.expectJson
                 (Bookshelf.ShelvesLoaded
                     (Bookshelf.requestKey (Bookshelf.profileConfig handle bookshelfName))
@@ -945,8 +1300,6 @@ searchEffects msg model maybeToken =
             if count == model.debounceCount && not (String.isEmpty model.query) then
                 let
                     booksEffect =
-                        -- The scope follows the current toggle state (#284): deep
-                        -- appends `&scope=deep`, default emits no param.
                         searchBooksEffect model.query model.deepSearch maybeToken
 
                     readersEffect =
@@ -957,7 +1310,7 @@ searchEffects msg model maybeToken =
                             , body = SimulatedEffect.Http.emptyBody
                             , expect =
                                 SimulatedEffect.Http.expectJson Search.ReadersCompleted
-                                    (Decode.field "users" (Decode.list publicProfileSummaryDecoder))
+                                    (Decode.field "users" (Decode.list Api.publicProfileSummaryDecoder))
                             , timeout = Nothing
                             , tracker = Nothing
                             }
@@ -968,10 +1321,6 @@ searchEffects msg model maybeToken =
                 SimulatedEffect.Cmd.none
 
         Search.DeepSearchToggled deep ->
-            -- Mirror `Page.Search.update`: flipping the toggle with a non-empty
-            -- query re-fires ONLY the book search, under the new scope. `model` is
-            -- the pre-update model, whose `query` the toggle does not change; the
-            -- new scope comes from the Msg's `deep` value, not `model.deepSearch`.
             if String.isEmpty model.query then
                 SimulatedEffect.Cmd.none
 
@@ -984,7 +1333,7 @@ searchEffects msg model maybeToken =
 
 {-| The book-search SimulatedEffect, shared by the debounce and deep-toggle paths
 so the mirror URL (`/api/search?q=…` + optional `&scope=deep`) and the reused
-`Api.searchResponseDecoder` can never drift from the real wire (#284/#292). Fires
+`Api.searchResponseDecoder` can never drift from the real wire. Fires
 nothing without a token (book search is authenticated-only).
 -}
 searchBooksEffect : String -> Bool -> Maybe String -> SimulatedEffect Search.Msg
@@ -1023,18 +1372,6 @@ authHeaderList maybeToken =
             []
 
 
-{-| Local copy of the people-search result decoder (Api.publicProfileSummaryDecoder
-is not exposed). Matches `public_profile_summary/1`'s redacted shape.
--}
-publicProfileSummaryDecoder : Decode.Decoder Api.PublicProfileSummary
-publicProfileSummaryDecoder =
-    Decode.map4 Api.PublicProfileSummary
-        (Decode.field "handle" Decode.string)
-        (Decode.field "display_name" Decode.string)
-        (Decode.oneOf [ Decode.field "city" Decode.string, Decode.succeed "" ])
-        (Decode.oneOf [ Decode.field "country_code" Decode.string, Decode.succeed "" ])
-
-
 {-| Translate BookDetail page Cmds into SimulatedEffects.
 -}
 bookDetailEffects : BookDetail.Msg -> BookDetail.Model -> Maybe String -> SimulatedEffect BookDetail.Msg
@@ -1051,8 +1388,6 @@ bookDetailEffects msg model maybeToken =
                             SimulatedEffect.Http.jsonBody
                                 (Encode.object [ ( "bookshelf", Encode.string model.selectedBookshelf ) ])
                         , expect =
-                            -- Mirrors Api.expectMove: the 422 reading_pile_full
-                            -- body must reach MoveCompleted as its own error.
                             SimulatedEffect.Http.expectStringResponse
                                 BookDetail.MoveCompleted
                                 Api.moveResponseToResult
@@ -1079,6 +1414,24 @@ bookDetailEffects msg model maybeToken =
                 _ ->
                     SimulatedEffect.Cmd.none
 
+        BookDetail.RemovePlacement placementId ->
+            case maybeToken of
+                Just token ->
+                    SimulatedEffect.Http.request
+                        { method = "DELETE"
+                        , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                        , url = "/api/placements/" ++ placementId
+                        , body = SimulatedEffect.Http.emptyBody
+                        , expect =
+                            SimulatedEffect.Http.expectWhatever
+                                (BookDetail.PlacementRemoved placementId)
+                        , timeout = Nothing
+                        , tracker = Nothing
+                        }
+
+                Nothing ->
+                    SimulatedEffect.Cmd.none
+
         BookDetail.ConfirmPlace ->
             case ( model.book, maybeToken ) of
                 ( Types.RemoteData.Success book, Just token ) ->
@@ -1098,8 +1451,6 @@ bookDetailEffects msg model maybeToken =
                     SimulatedEffect.Cmd.none
 
         BookDetail.ProgressCardMsg _ ->
-            -- `model` is the post-update model. A Loading progressSaveState means
-            -- the card emitted ProgressUpdateRequested and a PUT should be issued.
             case ( model.placement, maybeToken, model.progressSaveState ) of
                 ( Just placement, Just token, Types.RemoteData.Loading ) ->
                     SimulatedEffect.Http.request
@@ -1140,9 +1491,6 @@ bookDetailEffects msg model maybeToken =
                     SimulatedEffect.Cmd.none
 
         BookDetail.PlacementVisibilitySelected _ ->
-            -- `model` here is the post-update model (bookDetailProgram passes
-            -- newModel). A Loading visibilityState means the client-side ceiling
-            -- guard passed and a PUT should be issued.
             case ( model.placement, maybeToken, model.visibilityState ) of
                 ( Just placement, Just token, Types.RemoteData.Loading ) ->
                     SimulatedEffect.Http.request
@@ -1169,60 +1517,6 @@ bookDetailEffects msg model maybeToken =
             SimulatedEffect.Cmd.none
 
 
-{-| Decode a BookDetailResponse. Mirrors Api.bookDetailResponseDecoder which is not exposed.
--}
-decodeBookDetailResponse : Decode.Decoder BookDetailResponse
-decodeBookDetailResponse =
-    Decode.map3 BookDetailResponse
-        (Decode.field "book" bookDecoder)
-        -- Mirror production `Api.bookDetailResponseDecoder`: the proto-generated
-        -- placementDecoder decodes JSON null to a default struct (every field
-        -- `oneOf [ field, succeed default ]`), so `Decode.maybe` alone yields a
-        -- phantom `Just {id = ""}` for an unplaced book — hiding the
-        -- "Add to Collection" (place) path the real decoder reaches via
-        -- `Decode.nullable`. Match production so null → Nothing.
-        (Decode.oneOf
-            [ Decode.field "placement" (Decode.nullable placementDecoder)
-            , Decode.succeed Nothing
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "placement", "bookshelf_visibility" ] (Decode.nullable Decode.string)
-            , Decode.succeed Nothing
-            ]
-        )
-
-
-{-| Decode a MergeFormatResponse. Mirrors Api.mergeFormatResponseDecoder which is not exposed.
--}
-decodeMergeFormatResponse : Decode.Decoder Api.MergeFormatResponse
-decodeMergeFormatResponse =
-    Decode.map (\ed -> { edition = ed })
-        (Decode.field "edition"
-            (Decode.map8
-                (\id isbn isPrimary formatLabel coverImageUrl pageCount publisher publicationYear ->
-                    { id = id
-                    , isbn = isbn
-                    , isPrimary = isPrimary
-                    , formatLabel = formatLabel
-                    , coverImageUrl = coverImageUrl
-                    , pageCount = pageCount
-                    , publisher = publisher
-                    , publicationYear = publicationYear
-                    }
-                )
-                (Decode.field "id" Decode.string)
-                (Decode.field "isbn" Decode.string)
-                (Decode.field "is_primary" Decode.bool)
-                (Decode.maybe (Decode.field "format_label" Decode.string))
-                (Decode.maybe (Decode.field "cover_image_url" Decode.string))
-                (Decode.maybe (Decode.field "page_count" Decode.int))
-                (Decode.maybe (Decode.field "publisher" Decode.string))
-                (Decode.maybe (Decode.field "publication_year" Decode.int))
-            )
-        )
-
-
 {-| Translate BookDetail init Cmds into SimulatedEffects.
 -}
 bookDetailInitEffects : String -> Maybe String -> SimulatedEffect BookDetail.Msg
@@ -1235,7 +1529,7 @@ bookDetailInitEffects bookId maybeToken =
                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                     , url = "/api/books/" ++ bookId
                     , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded decodeBookDetailResponse
+                    , expect = SimulatedEffect.Http.expectJson BookDetail.BookLoaded Api.bookDetailResponseDecoder
                     , timeout = Nothing
                     , tracker = Nothing
                     }
@@ -1244,7 +1538,16 @@ bookDetailInitEffects bookId maybeToken =
                     , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                     , url = "/api/books/" ++ bookId ++ "/availability"
                     , body = SimulatedEffect.Http.emptyBody
-                    , expect = SimulatedEffect.Http.expectJson BookDetail.AvailabilityLoaded decodeAvailabilityResponse
+                    , expect = SimulatedEffect.Http.expectJson BookDetail.AvailabilityLoaded BookDetail.availabilityDecoder
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+                , SimulatedEffect.Http.request
+                    { method = "GET"
+                    , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
+                    , url = "/api/books/" ++ bookId ++ "/prices"
+                    , body = SimulatedEffect.Http.emptyBody
+                    , expect = SimulatedEffect.Http.expectJson BookDetail.PricesLoaded BookDetail.pricesDecoder
                     , timeout = Nothing
                     , tracker = Nothing
                     }
@@ -1254,32 +1557,31 @@ bookDetailInitEffects bookId maybeToken =
             SimulatedEffect.Cmd.none
 
 
-{-| Decode an availability response. Mirrors BookDetail.availabilityDecoder.
--}
-decodeAvailabilityResponse : Decode.Decoder (List BookDetail.AvailabilityItem)
-decodeAvailabilityResponse =
-    Decode.field "availability"
-        (Decode.list
-            (Decode.map5 BookDetail.AvailabilityItem
-                (Decode.field "partner_name" Decode.string)
-                (Decode.field "price_cents" Decode.int)
-                (Decode.field "condition" Decode.string)
-                (Decode.field "quantity" Decode.int)
-                (Decode.field "isbn" Decode.string)
-            )
-        )
-
-
-
--- PROGRAM TEST HARNESSES
-
-
 {-| Create a ProgramTest harness for the Upload page. `ageGatingEnabled`
-seeds the server-config flag (ADR-020) so tests can drive both the
+seeds the server-config flag so tests can drive both the
 flag-on (age UI present) and flag-off (age UI hidden) states.
 -}
 uploadProgram : Bool -> Maybe String -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
 uploadProgram ageGatingEnabled maybeToken =
+    uploadProgramWithInbox ageGatingEnabled maybeToken Types.RemoteData.NotAsked
+
+
+{-| The upload page with an inbox already loaded.
+
+The inbox lives on `Main`, not on `Page.Upload` — one list feeding both the
+page's listing and the navigation badge, so the two cannot disagree — so it
+arrives as a view argument rather than through this program's `update`. That
+makes it a fixture here, which is exactly right: these tests are about what the
+page does WITH the list, not about fetching it (`MainNavTest` covers the badge's
+own reading of the same value, and `UploadControllerTest` covers the query).
+
+-}
+uploadProgramWithInbox :
+    Bool
+    -> Maybe String
+    -> Types.RemoteData.RemoteData Http.Error (List Api.InboxItem)
+    -> ProgramDefinition () Upload.Model Upload.Msg (SimulatedEffect Upload.Msg)
+uploadProgramWithInbox ageGatingEnabled maybeToken inbox =
     let
         baseModel =
             Upload.init
@@ -1296,7 +1598,7 @@ uploadProgram ageGatingEnabled maybeToken =
                         Upload.update msg model maybeToken
                 in
                 ( newModel, uploadEffects msg model maybeToken )
-        , view = \model -> Upload.view model maybeToken
+        , view = \model -> Upload.view model maybeToken inbox
         }
         |> ProgramTest.withSimulatedEffects identity
 
@@ -1312,7 +1614,7 @@ libraryProgram =
 config. Library, Antilibrary and Wish List all render through this one module,
 so the only thing that varies between them is the `Config` — pass
 `Bookshelf.antiLibraryConfig` / `Bookshelf.wishListConfig` to drive those
-surfaces (Issue #112 punch #5/#6).
+surfaces.
 -}
 bookshelfProgram : Bookshelf.Config -> Maybe String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 bookshelfProgram config maybeToken =
@@ -1330,7 +1632,7 @@ bookshelfProgram config maybeToken =
                     ( newModel, _, _ ) =
                         Bookshelf.update msg model
                 in
-                ( newModel, libraryEffects msg )
+                ( newModel, libraryEffects msg model )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1341,7 +1643,7 @@ bookshelfProgram config maybeToken =
 `Page.Bookshelf.ReadingPile.update` returns a third `OutMsg` element that the
 page itself cannot observe — `Main` consumes it. Recording the most recent
 `OutMsg` alongside the page model lets a program test assert the navigation
-intent a book click produces (Issue #112 punch #7) rather than only the model
+intent a book click produces rather than only the model
 change, without reaching past the page into `Main`.
 
 -}
@@ -1456,8 +1758,49 @@ readingPileInitEffects maybeToken =
             SimulatedEffect.Cmd.none
 
 
+{-| A bookshelf harness for a reader who has just removed a book and been
+returned to their shelf (extension,).
+
+Seeds the toast through production's own `Bookshelf.withPendingUndo` — the
+function `Main.applyPendingUndo` calls — rather than hand-building a model with
+`undoToast` set. A harness that constructs the state directly would keep passing
+if `withPendingUndo` stopped producing it.
+
+Takes the `Config`, so the SAME setup drives the owner shelf and the read-only
+profile shelf; `BookshelfUndoRemoveTest` runs both and requires them to differ.
+
+-}
+bookshelfUndoProgram :
+    Bookshelf.Config
+    -> Maybe String
+    -> Bookshelf.Removal
+    -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
+bookshelfUndoProgram config maybeToken removal =
+    ProgramTest.createElement
+        { init =
+            \() ->
+                let
+                    ( model, _ ) =
+                        Bookshelf.init config maybeToken "test-user-id"
+
+                    ( seeded, _ ) =
+                        Bookshelf.withPendingUndo (Just removal) ( model, Cmd.none )
+                in
+                ( seeded, bookshelfInitEffects config maybeToken )
+        , update =
+            \msg model ->
+                let
+                    ( newModel, _, _ ) =
+                        Bookshelf.update msg model
+                in
+                ( newModel, libraryEffects msg model )
+        , view = Bookshelf.view
+        }
+        |> ProgramTest.withSimulatedEffects identity
+
+
 {-| Create a ProgramTest harness for the read-only profile-shelf browse view
-(`Page.Bookshelf` in its `profileConfig` — US-10.5.3 / Issue #215).
+(`Page.Bookshelf` in its `profileConfig` — /).
 -}
 profileShelfProgram : Maybe String -> String -> String -> ProgramDefinition () Bookshelf.Model Bookshelf.Msg (SimulatedEffect Bookshelf.Msg)
 profileShelfProgram maybeToken handle bookshelfName =
@@ -1479,7 +1822,7 @@ profileShelfProgram maybeToken handle bookshelfName =
                     ( newModel, _, _ ) =
                         Bookshelf.update msg model
                 in
-                ( newModel, libraryEffects msg )
+                ( newModel, libraryEffects msg model )
         , view = Bookshelf.view
         }
         |> ProgramTest.withSimulatedEffects identity
@@ -1503,87 +1846,28 @@ searchProgram maybeToken =
         |> ProgramTest.withSimulatedEffects identity
 
 
-{-| Decode an AuthResponse. Mirrors Api.authResponseDecoder which is not exposed.
--}
-decodeAuthResponse : Decode.Decoder AuthResponse
-decodeAuthResponse =
-    Decode.map8 AuthResponse
-        (Decode.field "token" Decode.string)
-        (Decode.at [ "user", "id" ] Decode.string)
-        (Decode.at [ "user", "email" ] Decode.string)
-        (Decode.at [ "user", "display_name" ] Decode.string)
-        (Decode.oneOf
-            [ Decode.at [ "user", "handle" ] Decode.string
-            , Decode.succeed ""
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "role" ] Decode.string
-            , Decode.succeed "user"
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "consent_analytics" ] Decode.bool
-            , Decode.succeed False
-            ]
-        )
-        (Decode.oneOf
-            [ Decode.at [ "user", "consent_writing_assistant" ] Decode.bool
-            , Decode.succeed False
-            ]
-        )
-
-
-{-| Decode a registration response. Mirrors Api.registrationResponseDecoder,
-which only checks for the `"message"` key and does NOT attempt to read a token.
--}
-decodeRegistrationResponse : Decode.Decoder ()
-decodeRegistrationResponse =
-    Decode.map (\_ -> ()) (Decode.field "message" Decode.string)
-
-
-{-| Mirror `Api.expectRegister`: decode the 422 `{"errors": ...}` body so program
-tests exercise the same field-error surfacing as production rather than losing
-the body the way `expectJson` would.
--}
-registerResponseResult : Http.Response String -> Result RegisterError ()
-registerResponseResult response =
-    case response of
-        Http.BadUrl_ url ->
-            Err (RegisterRequestFailed (Http.BadUrl url))
-
-        Http.Timeout_ ->
-            Err (RegisterRequestFailed Http.Timeout)
-
-        Http.NetworkError_ ->
-            Err (RegisterRequestFailed Http.NetworkError)
-
-        Http.BadStatus_ metadata bodyText ->
-            if metadata.statusCode == 422 then
-                case Decode.decodeString (Decode.field "errors" (Decode.keyValuePairs (Decode.list Decode.string))) bodyText of
-                    Ok errors ->
-                        Err (RegisterValidationFailed errors)
-
-                    Err _ ->
-                        Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
-
-            else
-                Err (RegisterRequestFailed (Http.BadStatus metadata.statusCode))
-
-        Http.GoodStatus_ _ bodyText ->
-            case Decode.decodeString decodeRegistrationResponse bodyText of
-                Ok value ->
-                    Ok value
-
-                Err err ->
-                    Err (RegisterRequestFailed (Http.BadBody (Decode.errorToString err)))
-
-
 {-| Translate Login page Cmds into SimulatedEffects.
 -}
 loginEffects : Login.Msg -> Login.Model -> SimulatedEffect Login.Msg
 loginEffects msg model =
     case msg of
+        Login.ForgotSubmitted ->
+            if Login.isForgotDisabled model then
+                SimulatedEffect.Cmd.none
+
+            else
+                SimulatedEffect.Http.request
+                    { method = "POST"
+                    , headers = []
+                    , url = "/api/auth/forgot-password"
+                    , body =
+                        SimulatedEffect.Http.jsonBody
+                            (Encode.object [ ( "email", Encode.string model.email ) ])
+                    , expect = SimulatedEffect.Http.expectStringResponse Login.GotForgotResponse Api.resolveNoContent
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+
         Login.FormSubmitted ->
             case model.mode of
                 Login.LoginMode ->
@@ -1598,7 +1882,7 @@ loginEffects msg model =
                                     , ( "password", Encode.string model.password )
                                     ]
                                 )
-                        , expect = SimulatedEffect.Http.expectJson Login.GotAuthResponse decodeAuthResponse
+                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotAuthResponse Api.resolveAuthResponse
                         , timeout = Nothing
                         , tracker = Nothing
                         }
@@ -1616,7 +1900,7 @@ loginEffects msg model =
                                     , ( "display_name", Encode.string model.displayName )
                                     ]
                                 )
-                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotRegisterResponse registerResponseResult
+                        , expect = SimulatedEffect.Http.expectStringResponse Login.GotRegisterResponse Api.resolveRegister
                         , timeout = Nothing
                         , tracker = Nothing
                         }
@@ -1627,6 +1911,28 @@ loginEffects msg model =
                 Login.ForgotPasswordMode ->
                     SimulatedEffect.Cmd.none
 
+                Login.ResendConfirmationMode ->
+                    SimulatedEffect.Cmd.none
+
+        Login.ResendRequested ->
+            if Login.isResendDisabled model then
+                SimulatedEffect.Cmd.none
+
+            else
+                SimulatedEffect.Http.request
+                    { method = "POST"
+                    , headers = []
+                    , url = "/api/auth/resend-confirmation"
+                    , body =
+                        SimulatedEffect.Http.jsonBody
+                            (Encode.object
+                                [ ( "email", Encode.string (Login.resendTarget model) ) ]
+                            )
+                    , expect = SimulatedEffect.Http.expectStringResponse Login.GotResendResponse Api.resolveNoContent
+                    , timeout = Nothing
+                    , tracker = Nothing
+                    }
+
         _ ->
             SimulatedEffect.Cmd.none
 
@@ -1635,8 +1941,21 @@ loginEffects msg model =
 -}
 loginProgram : ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
 loginProgram =
+    loginProgramFrom Login.Fresh
+
+
+{-| The same harness, for a reader who arrived for a REASON.
+
+`loginProgram` is this with `Fresh`. Deep-linked arrivals — `/forgot-password`,
+`/resend-confirmation` — open the card on a mode an ordinary visitor cannot click
+their way to, so driving those journeys means starting the program the way `Main`
+starts it, from the arrival.
+
+-}
+loginProgramFrom : Login.Arrival -> ProgramDefinition () Login.Model Login.Msg (SimulatedEffect Login.Msg)
+loginProgramFrom arrival =
     ProgramTest.createElement
-        { init = \() -> ( Login.init, SimulatedEffect.Cmd.none )
+        { init = \() -> ( Login.init arrival, SimulatedEffect.Cmd.none )
         , update =
             \msg model ->
                 let
@@ -1650,7 +1969,7 @@ loginProgram =
 
 
 {-| Create a ProgramTest harness for the BookDetail page. Age-gating is
-enabled (ADR-020) so the 403-driven age-gate block renders under test; the
+enabled so the 403-driven age-gate block renders under test; the
 production default is off, which hides it (covered by the flag guard).
 -}
 bookDetailProgram : String -> Maybe String -> ProgramDefinition () BookDetail.Model BookDetail.Msg (SimulatedEffect BookDetail.Msg)

@@ -184,7 +184,6 @@ requests_per_minute = 5
 
         let registry = StoreRegistry::new();
         let count = registry.load_from_dir(tmp.path()).unwrap();
-        // Only the valid one is counted; invalid is skipped with a warning.
         assert_eq!(count, 1);
     }
 }

@@ -81,11 +81,6 @@ defmodule Stacks.Accounts.GuardianTest do
     end
   end
 
-  # Access-token TTL (Issue #124, A2 — P1 companion to server-side revocation).
-  # User access tokens MUST carry a bounded lifetime so the guardian_tokens
-  # reaper (GuardianTokenSweepJob) has expired rows to purge. Without a default
-  # ttl the token never expires and the reaper purges nothing. Admin tokens set
-  # an explicit {30, :minute} ttl that must continue to override the default.
   describe "access-token TTL" do
     test "a freshly issued user access token expires ~8 hours out" do
       user = insert(:user)
@@ -93,7 +88,6 @@ defmodule Stacks.Accounts.GuardianTest do
 
       exp = claims["exp"]
       assert is_integer(exp)
-      # ~8h out from now, allowing a generous delta for issuance latency.
       assert_in_delta exp - System.system_time(:second), 8 * 60 * 60, 120
     end
 

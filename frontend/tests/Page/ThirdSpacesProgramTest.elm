@@ -7,9 +7,8 @@ simulated user interactions and HTTP responses.
 
 -}
 
-import Json.Decode as Decode
 import Json.Encode as Encode
-import Page.ThirdSpaces as ThirdSpaces exposing (ThirdSpace)
+import Page.ThirdSpaces as ThirdSpaces
 import ProgramTest exposing (ProgramDefinition, SimulatedEffect)
 import SimulatedEffect.Cmd
 import SimulatedEffect.Http
@@ -28,10 +27,6 @@ suite =
         , selectedSpaceShowsEvents
         , closeDetailHidesOverlay
         ]
-
-
-
--- PROGRAM TEST HARNESS
 
 
 thirdSpacesProgram : Maybe String -> ProgramDefinition () ThirdSpaces.Model ThirdSpaces.Msg (SimulatedEffect ThirdSpaces.Msg)
@@ -65,7 +60,7 @@ thirdSpacesInitEffects maybeToken =
                 , headers = [ SimulatedEffect.Http.header "Authorization" ("Bearer " ++ token) ]
                 , url = "/api/third-spaces"
                 , body = SimulatedEffect.Http.emptyBody
-                , expect = SimulatedEffect.Http.expectJson ThirdSpaces.SpacesLoaded thirdSpacesResponseDecoder
+                , expect = SimulatedEffect.Http.expectJson ThirdSpaces.SpacesLoaded ThirdSpaces.thirdSpacesResponseDecoder
                 , timeout = Nothing
                 , tracker = Nothing
                 }
@@ -74,40 +69,9 @@ thirdSpacesInitEffects maybeToken =
             SimulatedEffect.Cmd.none
 
 
-thirdSpacesResponseDecoder : Decode.Decoder (List ThirdSpace)
-thirdSpacesResponseDecoder =
-    Decode.field "third_spaces" (Decode.list thirdSpaceDecoder)
-
-
-thirdSpaceDecoder : Decode.Decoder ThirdSpace
-thirdSpaceDecoder =
-    Decode.map8 ThirdSpace
-        (Decode.field "id" Decode.string)
-        (Decode.field "name" Decode.string)
-        (Decode.field "type" Decode.string)
-        (Decode.field "city" Decode.string)
-        (Decode.field "country_code" Decode.string)
-        (Decode.field "website_url" Decode.string)
-        (Decode.field "verified" Decode.bool)
-        (Decode.field "upcoming_events" (Decode.list thirdSpaceEventDecoder))
-
-
-thirdSpaceEventDecoder : Decode.Decoder ThirdSpaces.ThirdSpaceEvent
-thirdSpaceEventDecoder =
-    Decode.map4 ThirdSpaces.ThirdSpaceEvent
-        (Decode.field "id" Decode.string)
-        (Decode.field "title" Decode.string)
-        (Decode.field "event_date" Decode.string)
-        (Decode.maybe (Decode.field "ends_at" Decode.string))
-
-
 startThirdSpaces : ProgramTest.ProgramTest ThirdSpaces.Model ThirdSpaces.Msg (SimulatedEffect ThirdSpaces.Msg)
 startThirdSpaces =
     ProgramTest.start () (thirdSpacesProgram (Just "test-token"))
-
-
-
--- JSON HELPERS
 
 
 sampleSpacesJson : String
@@ -154,10 +118,6 @@ eventJson id title =
         , ( "event_date", Encode.string "2026-04-15T18:00:00Z" )
         , ( "ends_at", Encode.string "2026-04-15T21:00:00Z" )
         ]
-
-
-
--- TESTS
 
 
 showsLoadingState : Test

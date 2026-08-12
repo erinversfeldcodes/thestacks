@@ -1,52 +1,33 @@
 #!/usr/bin/env bash
-# scripts/ci.sh — local equivalent of .github/workflows/ci.yml.disabled
-#
-# Runs every check the CI pipeline runs, in the same order, using the same
-# scripts the CI jobs call. The CI workflow runs these in parallel across
-# isolated runners; here they run sequentially in your local environment.
-#
-# Prerequisites (must be installed and on PATH):
-#   Elixir/Mix, Node/npm, Rust/Cargo, Python/pip, buf, dbt, sqlfluff,
-#   gitleaks, semgrep, hadolint, checkov, trivy
-#
-# Postgres must be running locally for test-elixir and test-dbt.
-# By default those scripts connect using your local MIX_ENV credentials.
-# Set DATABASE_URL or the DBT_* env vars to override.
-#
-# Usage:
-#   scripts/ci.sh              # run everything
-#   scripts/ci.sh elixir       # run only the elixir group
-#   scripts/ci.sh elm rust     # run only elm and rust groups
 
-# Do NOT use set -e here. ci.sh deliberately runs every group even when earlier
-# ones fail, accumulating failures in the FAILED array for a final summary.
-# Individual scripts use set -euo pipefail internally.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Load version pins (OTP, Elixir, Node, Python, Postgres).
-# Same file consumed by .github/workflows/ci.yml via the `versions` job.
 if [[ -f "$REPO_ROOT/.versions" ]]; then
     # shellcheck source=../.versions
     source "$REPO_ROOT/.versions"
 fi
 
-# Load local .env for dev secrets (FLY_API_TOKEN, NEON_*, etc.) when outside CI.
 if [[ -f "$REPO_ROOT/.env" && -z "${CI:-}" ]]; then
     set -a; source "$REPO_ROOT/.env"; set +a
 fi
 
-# Colours for section banners
 RED='\033[0;31m'
 GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
 pass() { echo -e "${GREEN}${BOLD}PASS${RESET} $1"; }
 fail() { echo -e "${RED}${BOLD}FAIL${RESET} $1"; }
+SKIPPED=()
+skip() {
+    echo -e "${YELLOW}${BOLD}SKIP${RESET} $1"
+    SKIPPED+=("$1")
+}
 
 run_group() {
     local name="$1"; shift
@@ -59,12 +40,7 @@ run_group() {
     fi
 }
 
-# Determine which groups to run (default: all).
-# NOTE: Do NOT use GROUPS — it is a bash built-in read-only variable (user GIDs).
 if [[ $# -eq 0 ]]; then
-    # e2e and smoke are excluded from the default run — they require a live deployed
-    # stack. Run explicitly with: scripts/ci.sh e2e  or  scripts/ci.sh smoke
-    # smoke requires SMOKE_URL and SCRAPER_HMAC_SECRET to be set.
     CI_GROUPS=(elixir elm rust python proto dbt security squawk licenses)
 else
     CI_GROUPS=("$@")
@@ -78,12 +54,17 @@ has_group() {
 
 FAILED=()
 
-# ── Elixir ────────────────────────────────────────────────────────────────────
 if has_group elixir; then
-    # Toolchain drift guard (Issue #300): fail early if the flake's Elixir/OTP
-    # has drifted from .versions — CI's nix-less runner can't check the flake,
-    # so this is the only place the divergence is caught.
-    if ! run_group "elixir: version-drift" bash scripts/check-version-drift.sh; then FAILED+=(elixir-version-drift); fi
+    if ! run_group "elixir: version-drift" bash scripts/check-version-drift.sh; then
+        # A drifted toolchain means every mix invocation below compiles _build
+        # with the WRONG Elixir/OTP — beams the pinned shell then cannot load
+        # (corrupt atom table, Regex struct mismatches). Abort before the first
+        # compile instead of failing seven gates and poisoning the tree.
+        echo -e "\n${RED}${BOLD}ABORT${RESET} elixir toolchain drifted — refusing to compile with it."
+        echo "      Run via the pinned shell (just run just ci ...) or fix PATH/direnv, then retry."
+        echo "      If mix already ran on the wrong toolchain: rm -rf _build and rebuild pinned."
+        exit 1
+    fi
 
     echo -e "\n${CYAN}${BOLD}=== elixir: deps ===${RESET}"
     mix deps.get
@@ -95,7 +76,6 @@ if has_group elixir; then
     if ! run_group "elixir: test" bash scripts/test-elixir.sh; then FAILED+=(elixir-test); fi
 fi
 
-# ── Elm ───────────────────────────────────────────────────────────────────────
 if has_group elm; then
     echo -e "\n${CYAN}${BOLD}=== elm: deps ===${RESET}"
     (cd frontend && npm ci)
@@ -104,16 +84,13 @@ if has_group elm; then
     if ! run_group "elm: test" bash scripts/test-elm.sh; then FAILED+=(elm-test); fi
 fi
 
-# ── Rust ──────────────────────────────────────────────────────────────────────
 if has_group rust; then
     if ! run_group "rust: lint" bash scripts/lint-rust.sh; then FAILED+=(rust-lint); fi
     if ! run_group "rust: test" bash scripts/test-rust.sh; then FAILED+=(rust-test); fi
 fi
 
-# ── Python ────────────────────────────────────────────────────────────────────
 if has_group python; then
     echo -e "\n${CYAN}${BOLD}=== python: deps ===${RESET}"
-    # Use the venv pip — the system pip3 is too old to resolve modern package versions.
     VENV_PIP="$REPO_ROOT/apps/vision/.venv/bin/pip"
     PIP="${VENV_PIP:-$(command -v pip3 || command -v pip)}"
     (cd apps/vision && "$PIP" install -r requirements.txt -r requirements-dev.txt)
@@ -122,15 +99,10 @@ if has_group python; then
     if ! run_group "python: test" bash scripts/test-python.sh; then FAILED+=(python-test); fi
 fi
 
-# ── Protobuf ──────────────────────────────────────────────────────────────────
 if has_group proto; then
     if ! run_group "proto: lint" bash scripts/lint-proto.sh; then FAILED+=(proto-lint); fi
 fi
 
-# ── dbt ───────────────────────────────────────────────────────────────────────
-# CI runs lint-sql.sh with SQLFLUFF_TEMPLATER=dbt against a live DB.
-# Locally the default in lint-sql.sh is jinja (offline). Override by setting
-# SQLFLUFF_TEMPLATER=dbt in your environment if you want full macro resolution.
 if has_group dbt; then
     echo -e "\n${CYAN}${BOLD}=== dbt: deps ===${RESET}"
     PIP="$(command -v pip3 || command -v pip)"
@@ -141,30 +113,25 @@ if has_group dbt; then
     if ! run_group "dbt: checkpoint" bash scripts/lint-dbt.sh; then FAILED+=(dbt-checkpoint); fi
 fi
 
-# ── Security ──────────────────────────────────────────────────────────────────
-# Requires: gitleaks, semgrep, hadolint, checkov, trivy (all via brew install).
-# Note: gitleaks in CI uses fetch-depth=0 to scan full git history.
-#   Locally, security.sh uses --no-git (working tree only). To replicate CI
-#   exactly run: gitleaks detect --source . (without --no-git).
-# Note: CodeQL runs only in CI (.github/workflows/codeql.yml.disabled).
-#   It requires GitHub-hosted runners and cannot be replicated locally.
 if has_group security; then
     if ! run_group "security: scans" bash scripts/security.sh; then FAILED+=(security); fi
 fi
 
-# ── Squawk (migration safety) ──────────────────────────────────────────────────
 if has_group squawk; then
-    if ! run_group "squawk: migration lint" bash scripts/security-squawk.sh; then FAILED+=(squawk); fi
+    echo -e "\n${CYAN}${BOLD}=== squawk: migration lint ===${RESET}"
+    bash scripts/security-squawk.sh
+    _squawk_rc=$?
+    case "$_squawk_rc" in
+        0) pass "squawk: migration lint" ;;
+        2) skip "squawk: migration lint — 0 migrations inspected (nothing was checked)" ;;
+        *) fail "squawk: migration lint"; FAILED+=(squawk) ;;
+    esac
 fi
 
-# ── E2E ───────────────────────────────────────────────────────────────────────
 if has_group e2e; then
     if ! run_group "e2e: playwright" bash scripts/test-e2e.sh; then FAILED+=(e2e); fi
 fi
 
-# ── Smoke (circuit breakers) ──────────────────────────────────────────────────
-# Requires a live deployed stack. Set SMOKE_URL and SCRAPER_HMAC_SECRET.
-# Example: SMOKE_URL=https://my-app.fly.dev scripts/ci.sh smoke
 if has_group smoke; then
     if [[ -z "${SMOKE_URL:-}" ]]; then
         echo -e "${RED}${BOLD}ERROR${RESET} smoke: SMOKE_URL is not set"
@@ -180,26 +147,29 @@ if has_group smoke; then
     fi
 fi
 
-# ── Licenses ──────────────────────────────────────────────────────────────────
 if has_group licenses; then
     if ! run_group "licenses: compliance" bash scripts/check-licenses.sh; then FAILED+=(licenses); fi
 fi
 
-# ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [[ ${#FAILED[@]} -eq 0 ]]; then
-    echo -e "${GREEN}${BOLD}All checks passed.${RESET}"
+    if [[ ${#SKIPPED[@]} -eq 0 ]]; then
+        echo -e "${GREEN}${BOLD}All checks passed.${RESET}"
+    else
+        echo -e "${GREEN}${BOLD}No failures.${RESET}"
+    fi
 else
     echo -e "${RED}${BOLD}Failed checks:${RESET}"
     for f in "${FAILED[@]}"; do echo "  - $f"; done
 fi
+if [[ ${#SKIPPED[@]} -ne 0 ]]; then
+    echo -e "${YELLOW}${BOLD}Skipped (inspected nothing — not evidence of anything):${RESET}"
+    for s in "${SKIPPED[@]}"; do echo "  - $s"; done
+fi
 
-# ── Deploy preview (runs only when full default suite passes) ─────────────────
-# Only triggers when all groups are run (no args), all pass, and FLY_API_TOKEN
-# is set. Skipped when running a targeted subset (e.g. ci.sh elixir rust).
 if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]]; then
     _branch="${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "preview")}"
-    # Shared derivation (Issue #170 C): honours the optional PREVIEW_SUFFIX
+    # Shared derivation (C): honours the optional PREVIEW_SUFFIX
     # env var (set by CI, unset locally) so this block and the deploy/cleanup
     # scripts always agree on the preview resource names.
     # shellcheck source=scripts/lib/preview-names.sh
@@ -209,17 +179,11 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
     _core_url="https://${_core_app}.fly.dev"
     _neon_branch="${PREVIEW_NEON_BRANCH}"
 
-    # ── Deploy + warmup ───────────────────────────────────────────────────────
     echo -e "\n${CYAN}${BOLD}=== deploy: stack + warmup ===${RESET}"
     if bash scripts/deploy-preview.sh; then
 
-        # ── E2E ───────────────────────────────────────────────────────────────
         echo -e "\n${CYAN}${BOLD}=== deploy: E2E ===${RESET}"
 
-        # Warm both Fly machines AND the Neon database before Playwright starts.
-        # Health-check and login page hits wake the Fly machines; the DB calls
-        # (login API + catalogue query) unpark Neon so the first Playwright test
-        # doesn't time out waiting for the DB to spin up.
         echo "==> Warming Fly.io machines and Neon database..."
         _warm_pids=()
         for i in {1..20}; do
@@ -230,8 +194,6 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
             curl -sf --max-time 10 "${_core_url}/login" >/dev/null 2>&1 &
             _warm_pids+=("$!")
         done
-        # DB-warming calls: POST /api/auth/login and GET /api/catalogue both query
-        # Postgres, ensuring Neon is active before Playwright's first test runs.
         for i in {1..5}; do
             curl -sf --max-time 30 "${_core_url}/api/auth/login" \
                 -H "Content-Type: application/json" \
@@ -252,7 +214,6 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
         for pid in "${_warm_pids[@]}"; do wait "$pid" 2>/dev/null || true; done
         sleep 2
 
-        # Keep-alive: prevents auto_stop_machines firing mid-suite
         (while true; do
             curl -sf --max-time 5 "${_core_url}/api/health" >/dev/null 2>&1 || true
             sleep 10
@@ -277,9 +238,6 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
         echo "--- End core logs ---"
         rm -f "${_fly_logs}"
 
-        # ── Smoke (circuit breakers) — must run after E2E ─────────────────────
-        # Deliberately blows all circuit breakers; running before E2E corrupts
-        # Fuse state on both Fly machines and causes vision tests to fast-fail.
         if [[ -n "${SCRAPER_HMAC_SECRET:-}" ]]; then
             if ! SMOKE_URL="${_core_url}" \
                     run_group "deploy: smoke" \
@@ -290,20 +248,10 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
             echo "SKIP deploy: smoke — SCRAPER_HMAC_SECRET not set"
         fi
 
-        # ── Security live (OWASP ZAP, Nuclei, jwt_tool, IDOR) ────────────────
         echo -e "\n${CYAN}${BOLD}=== deploy: security-live ===${RESET}"
 
         if command -v docker &>/dev/null; then
             echo "==> OWASP ZAP baseline scan..."
-            # Pinned to 2.16.1 — the upstream `:stable` tag drifted to a
-            # state where the Automation Framework writes its summary file
-            # to a path zap-baseline.py doesn't expect (`/home/zap/zap_out.json`)
-            # and `--autooff` mode times out downloading add-ons before the
-            # scan starts. 2.16.1 is the last known-good version where
-            # baseline.py + AF + add-on bundle line up. Bumping the pin is
-            # a one-line edit; pair with a fresh local re-run to confirm
-            # the new tag still produces the `FAIL-NEW: 0` line the grep
-            # below depends on.
             zap_out="$(docker run --rm \
                 --mount type=tmpfs,destination=/zap/wrk \
                 ghcr.io/zaproxy/zaproxy:2.16.1 \
@@ -398,7 +346,6 @@ if [[ $# -eq 0 ]] && [[ ${#FAILED[@]} -eq 0 ]] && [[ -n "${FLY_API_TOKEN:-}" ]];
         FAILED+=(deploy)
     fi
 
-    # ── Cleanup — always runs, whether deploy/tests passed or failed ──────────
     echo -e "\n${CYAN}${BOLD}=== deploy: cleanup ===${RESET}"
     bash scripts/cleanup-preview.sh \
         --branch "${_branch}" \

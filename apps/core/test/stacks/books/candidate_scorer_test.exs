@@ -3,18 +3,6 @@ defmodule Stacks.Books.CandidateScorerTest do
 
   alias Stacks.Books.CandidateScorer
 
-  # The production failure this scorer exists to fix: fixture
-  # `screenshot_image_reversed_and_cut_off.jpg` ("Train to Crystal
-  # City" E2E test). The VLM enriches the title with subtitle keywords
-  # and invents the author; OL ranks Orson Scott Card's fantasy novel
-  # first on exact-prefix match, but Jan Jarboe Russell's book (doc #3
-  # in the same response) is the correct one.
-  #
-  # Fixtures below mirror the REAL Open Library response (verified
-  # against the live API 2026-06-10): OL returns `subtitle: nil` for
-  # every doc, so disambiguation has to come from the `subjects` lists.
-  # Subjects are the first 5 entries, matching the resolver's
-  # `Enum.take(5)`.
   @crystal_city_signals %{
     title: "The Crystal City: The Tragedy of America's First Internment Camp",
     author: "Doris Akers",
@@ -68,11 +56,6 @@ defmodule Stacks.Books.CandidateScorerTest do
 
       assert russell_score >= card_score + 0.5
 
-      # Pin the component arithmetic documented in the moduledoc:
-      # Card    = overlap 3.0 * 2/2 + subjects 0 + raw_text 1.5 * 1/3 = 3.5
-      # Russell = overlap 3.0 * 2/3
-      #         + subjects 1.0 * min(4, 3)   ({crystal city internment camp})
-      #         + raw_text 1.5 * 1/3                                  = 5.5
       assert_in_delta card_score, 3.5, 0.001
       assert_in_delta russell_score, 5.5, 0.001
     end
@@ -85,8 +68,6 @@ defmodule Stacks.Books.CandidateScorerTest do
       assert russell_score > tarantino_score
       assert russell_score > etchemendy_score
 
-      # Both collapse to the same exact-prefix shape as Card: no
-      # subject hits, only the "crystal" raw_text hit.
       assert_in_delta tarantino_score, 3.5, 0.001
       assert_in_delta etchemendy_score, 3.5, 0.001
     end
@@ -98,8 +79,6 @@ defmodule Stacks.Books.CandidateScorerTest do
       stripped_score = CandidateScorer.score(stripped, @crystal_city_signals)
 
       assert full_score > stripped_score
-      # overlap 2.0 + raw_text 0.5 — without subjects Russell would
-      # lose to Card's exact-prefix 3.5.
       assert_in_delta stripped_score, 2.5, 0.001
     end
   end
@@ -112,7 +91,6 @@ defmodule Stacks.Books.CandidateScorerTest do
         raw_text: nil
       }
 
-      # All 7 signal tokens appear across the subjects — only 3 count.
       spammy = %{
         title: "Unrelated",
         subtitle: nil,
@@ -126,8 +104,6 @@ defmodule Stacks.Books.CandidateScorerTest do
         ]
       }
 
-      # No title overlap ("unrelated" shares nothing), no raw_text:
-      # the score is purely the capped subject component.
       assert_in_delta CandidateScorer.score(spammy, signals), 3.0, 0.001
     end
 
@@ -140,9 +116,6 @@ defmodule Stacks.Books.CandidateScorerTest do
     end
 
     test "raw_text tokens also hit subjects, not just title+subtitle" do
-      # "Internment camps" shares no token with the signal TITLE, so
-      # subject evidence stays 0 — the score difference is purely the
-      # raw_text component matching against the subjects text.
       signals = %{title: "Crystal City", author: nil, raw_text: "internment"}
 
       with_subject = %{
@@ -161,8 +134,6 @@ defmodule Stacks.Books.CandidateScorerTest do
 
   describe "score/2 — subtitle evidence (Google Books supplies subtitles)" do
     test "subtitle evidence still fires when a subtitle IS present" do
-      # GB returns real subtitles even though OL search docs don't —
-      # this is the GB-shaped Russell candidate.
       gb_russell = %{
         title: "The Train to Crystal City",
         subtitle:
@@ -177,8 +148,6 @@ defmodule Stacks.Books.CandidateScorerTest do
       full_score = CandidateScorer.score(gb_russell, @crystal_city_signals)
       stripped_score = CandidateScorer.score(stripped, @crystal_city_signals)
 
-      # Subtitle adds token overlap ({internment camp americas first}),
-      # subtitle evidence, and the "fdrs" raw_text hit.
       assert full_score > stripped_score
 
       gb_card = Map.put(@card_candidate, :subjects, [])
@@ -224,8 +193,6 @@ defmodule Stacks.Books.CandidateScorerTest do
         author: "Jan Jarboe Russell"
       }
 
-      # An invented (mismatching) VLM author must score the same as no
-      # author at all — never lower.
       assert CandidateScorer.score(candidate, invented_signals) ==
                CandidateScorer.score(candidate, base_signals)
     end
@@ -238,9 +205,6 @@ defmodule Stacks.Books.CandidateScorerTest do
     end
 
     test "the literal string \"null\" as signal author yields no author evidence" do
-      # Moderation normalises null-ish authors to nil before the scorer
-      # ever sees them, but defence-in-depth: even if "null" leaks
-      # through, it must score identically to no author at all.
       candidate = %{title: "Gatsby", subtitle: nil, author: "F. Scott Fitzgerald"}
 
       null_signals = %{title: "Gatsby", author: "null", raw_text: nil}
@@ -298,9 +262,6 @@ defmodule Stacks.Books.CandidateScorerTest do
     end
 
     test "'F DRS' collapses to the single token fdrs (pinned component arithmetic)" do
-      # Isolate the raw_text component: nil title/author means the only
-      # possible contribution is raw_text 1.5 * 1/1 — which requires
-      # "f drs" to have collapsed into exactly one token, "fdrs".
       signals = %{title: nil, author: nil, raw_text: "F DRS"}
 
       candidate = %{
@@ -313,11 +274,6 @@ defmodule Stacks.Books.CandidateScorerTest do
     end
 
     test "possessive apostrophes yield one token — 'TRAMP'S' never becomes an orphan s (scrystal bug)" do
-      # All three raw_text tokens ({tramps, crystal, city}) must be
-      # found in the identically-titled candidate: raw_text 1.5 * 3/3.
-      # If the apostrophe produced an orphan "s" glued onto the next
-      # word ("scrystal"), that token would miss and the score would
-      # drop below 1.5.
       signals = %{title: nil, author: nil, raw_text: "THE TRAMP'S CRYSTAL CITY"}
 
       candidate = %{title: "The Tramp's Crystal City", subtitle: nil, author: nil}
@@ -347,12 +303,6 @@ defmodule Stacks.Books.CandidateScorerTest do
     end
   end
 
-  # The production failure the penalty exists to fix (Klara and the
-  # Sun, chore/enable-pipelines): a GB "Study Guide: ..." derivative
-  # whose title absorbs the author tokens (raw_text 4/4 vs the real
-  # work's 2/4) and whose author GB mislabels as Ishiguro himself, so
-  # it collects the author bonus AND the floor waiver. Pinned in the
-  # eval corpus as `klara_study_guide` (`mix eval.resolver`).
   @klara_signals %{
     title: "Klara and the Sun",
     author: "Kazuo Ishiguro",
@@ -380,9 +330,6 @@ defmodule Stacks.Books.CandidateScorerTest do
       real = CandidateScorer.score(@klara_real, @klara_signals, off)
       derivative = CandidateScorer.score(@klara_derivative, @klara_signals, off)
 
-      # Pin the inversion: derivative 5.5 (overlap 3.0 + raw 4/4 = 1.5
-      # + author 1.0) vs real 5.25 (overlap 3.0 + raw 2/4 = 0.75 +
-      # author 1.0 + exact 0.5).
       assert_in_delta derivative, 5.5, 0.001
       assert_in_delta real, 5.25, 0.001
     end
@@ -392,7 +339,6 @@ defmodule Stacks.Books.CandidateScorerTest do
       derivative = CandidateScorer.score(@klara_derivative, @klara_signals)
 
       assert real > derivative
-      # 5.5 - 2.0 default penalty
       assert_in_delta derivative, 3.5, 0.001
     end
 
@@ -403,8 +349,6 @@ defmodule Stacks.Books.CandidateScorerTest do
         raw_text: nil
       }
 
-      # Exact-title match on the derivative itself — the penalty must
-      # not fire, so the score includes the full overlap + exact bonus.
       assert CandidateScorer.score(@klara_derivative, signals) >=
                CandidateScorer.score(@klara_real, signals)
     end
@@ -437,8 +381,6 @@ defmodule Stacks.Books.CandidateScorerTest do
     end
   end
 
-  # `pick_best/3` is the seam shared by `ISBNResolver.pick_best_candidate/3`
-  # and `mix eval.resolver` — pick + plausibility floor + author waiver.
   describe "pick_best/3" do
     test "empty candidate list is :empty" do
       assert CandidateScorer.pick_best([], @crystal_city_signals) == :empty
@@ -492,9 +434,6 @@ defmodule Stacks.Books.CandidateScorerTest do
     end
 
     test "the floor is overridable per call (tuning experiments)" do
-      # The junk record from the July production sessions: subset title
-      # overlap + raw_text = exactly 3.0, nothing else. Above the 2.5
-      # default floor, below an experimental 3.25 one.
       junk = %{title: "Crystal City-CC", subtitle: nil, author: nil, subjects: []}
 
       signals = %{

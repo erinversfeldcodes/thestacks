@@ -1,5 +1,4 @@
 defmodule Core.Repo.Migrations.Fixture.RenameColumn do
-  # Fixture: `ALTER TABLE ... RENAME COLUMN`. Should trip `renaming-column`.
   use Ecto.Migration
 
   def change do

@@ -19,10 +19,19 @@ message BookDetailResponse {
   reserved "author", "editions", "edition_count", "primary_edition", "community_read_count";
 
   // The current user's placement of this book, if any (null when not placed).
+  // A book may sit on SEVERAL bookshelves at once, and this singular field can
+  // only carry one of them — it is kept for wire compatibility and always
+  // equals the first entry of `placements` (oldest first). Read `placements`.
   optional stacks.common.v1.BookPlacement placement = 7 [json_name = "placement"];
 
   // Blog posts the current user has written about this book.
   repeated MyWritingSummary my_writing = 8 [json_name = "my_writing"];
+
+  // EVERY active placement the current user has of this book, oldest first
+  //. Empty when the book is not in their collection. A book on two or
+  // more of Library / Antilibrary / Reading Pile / Wish List is a legal state
+  // the detail overlay surfaces so the reader can remove the extras.
+  repeated stacks.common.v1.BookPlacement placements = 9 [json_name = "placements"];
 }
 
 // MyWritingSummary is a lightweight blog post reference shown on the book detail page.
@@ -50,6 +59,12 @@ message BookConfirmResponse {
   // Origin hint: "catalogue" if book already existed, "collection" if already placed.
   // Empty string on newly created books (proto3 string default).
   string source = 3 [json_name = "source"];
+
+  // EVERY active placement the user has of this book after the confirm, oldest
+  // first. `placement` is the one this request produced (or matched);
+  // `placements` is the whole picture, so the client can say "this is now on
+  // your Library as well as your Wish List" — informational, never blocking.
+  repeated stacks.common.v1.BookPlacement placements = 4 [json_name = "placements"];
 }
 
 // SearchResponse is returned for book search queries (GET /api/search?q=...).
@@ -58,8 +73,8 @@ message BookConfirmResponse {
 // The sectioned view is delivered by `collection` (the viewer's own
 // active-placement matches) and `platform_hits` (discoverable platform
 // inventory, each carrying optional source-label metadata). `results` (field 3)
-// is the DEPRECATED flat list — no longer populated as of #298 (see its field
-// comment); the SPA reads only the sectioned fields since #285/#292.
+// is the DEPRECATED flat list — no longer populated as of (see its field
+// comment); the SPA reads only the sectioned fields since /.
 message SearchResponse {
   // The original search query string.
   string query = 1 [json_name = "query"];
@@ -67,11 +82,11 @@ message SearchResponse {
   // Total DISTINCT books returned across both sections — length(collection) +
   // length(platform_hits). `platform_hits` already excludes the viewer's
   // collection books (de-duplicated into `collection`), so the two never
-  // overlap and this is a true, non-double-counted total (#298). It is NOT the
+  // overlap and this is a true, non-double-counted total. It is NOT the
   // length of the deprecated `results` field.
   int32 count = 2 [json_name = "count"];
 
-  // DEPRECATED (#298): kept reserved, no longer populated — always an empty
+  // DEPRECATED: kept reserved, no longer populated — always an empty
   // list on the wire. The SPA never consumed it post-sectioning (it decodes and
   // drops the field). Field number 3 stays permanently so it is never reused;
   // the sectioned data lives in `collection` + `platform_hits`.
@@ -113,16 +128,24 @@ message SearchHit {
 
   // The viewer's own bookshelf this book sits on ("library", "wishlist",
   // "reading_pile", "antilibrary", "looking_for_home") — the "where" behind
-  // US-1.5.1's collection story. Populated for COLLECTION hits only; always
+  // collection story. Populated for COLLECTION hits only; always
   // empty ("") on platform_hits (platform provenance is source/handle/price).
   string bookshelf_name = 5 [json_name = "bookshelf_name"];
 
-  // A `ts_headline`-highlighted description excerpt (#284 deep search),
+  // A `ts_headline`-highlighted description excerpt,
   // populated ONLY for a scope=deep hit whose DESCRIPTION matched the query —
-  // the "why this matched" behind US-1.5.2. Empty string ("") for every
+  // the "why this matched" behind Empty string ("") for every
   // title-only hit and for the default (title-only) search scope. The `<mark>`
   // delimiters wrap the matched lexemes.
   string snippet = 6 [json_name = "snippet"];
+
+  // EVERY bookshelf of the viewer's this hit sits on. A book may legally
+  // sit on several at once, and `bookshelf_name` (field 5) can only name one —
+  // it collapsed the rest silently, so a book on both the Wish List and the
+  // Reading Pile was annotated with just one of them. Populated for COLLECTION
+  // hits only; always empty on platform_hits. `bookshelf_name` is retained for
+  // wire compatibility and always equals the first entry.
+  repeated string bookshelf_names = 7 [json_name = "bookshelf_names"];
 }
 
 // CatalogueResponse is returned for paginated book catalogue views (GET /api/catalogue).

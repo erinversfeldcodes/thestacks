@@ -38,43 +38,31 @@ if ! command -v squawk &>/dev/null; then
     exit 0
 fi
 
-# ── drop-column ───────────────────────────────────────────────────────────────
 test_case "drop-column" "ALTER TABLE ... DROP COLUMN must trip ban-drop-column"
 run_squawk "$FIXTURES/drop_column.exs"
 assert_exit_nonzero "$RC" "drop-column fixture exits non-zero"
 assert_contains "$OUT" "ban-drop-column" "output names the ban-drop-column rule"
 
-# ── rename-column ─────────────────────────────────────────────────────────────
 test_case "rename-column" "ALTER TABLE ... RENAME COLUMN must trip renaming-column"
 run_squawk "$FIXTURES/rename_column.exs"
 assert_exit_nonzero "$RC" "rename-column fixture exits non-zero"
 assert_contains "$OUT" "renaming-column" "output names the renaming-column rule"
 
-# ── rename-table ──────────────────────────────────────────────────────────────
 test_case "rename-table" "ALTER TABLE ... RENAME TO must trip renaming-table"
 run_squawk "$FIXTURES/rename_table.exs"
 assert_exit_nonzero "$RC" "rename-table fixture exits non-zero"
 assert_contains "$OUT" "renaming-table" "output names the renaming-table rule"
 
-# ── add-not-null-field ────────────────────────────────────────────────────────
-# squawk canonicalises this rule as `adding-required-field` in the output;
-# the Phase 2 config alias it so operators see the plan's name.
 test_case "add-not-null-field" "ADD COLUMN ... NOT NULL (no default) must trip"
 run_squawk "$FIXTURES/add_not_null_field.exs"
 assert_exit_nonzero "$RC" "add-not-null-field fixture exits non-zero"
 assert_contains "$OUT" "adding-required-field" \
     "output names the adding-required-field rule (aka adding-not-null-field)"
 
-# ── add-field-with-default ────────────────────────────────────────────────────
-# Orchestrator clarification: this rule is DROPPED from Phase 2 scope because
-# it is a false positive on Postgres 11+ (Neon prod is PG 15, so a non-volatile
-# DEFAULT does not trigger a rewrite). The Phase 2 wrapper does not enable
-# this rule, and the fixture is expected to pass squawk (exit 0) as a result.
 test_case "add-field-with-default" "dropped from scope — fixture should pass on PG15"
 run_squawk "$FIXTURES/add_field_with_default.exs"
 assert_exit_zero "$RC" "add-field-with-default fixture exits 0 (rule intentionally not enabled)"
 
-# ── safe additive migration ───────────────────────────────────────────────────
 test_case "safe-add-column" "Additive nullable column must pass"
 run_squawk "$FIXTURES/safe_add_column.exs"
 assert_exit_zero "$RC" "safe-add-column fixture exits 0"

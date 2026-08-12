@@ -52,10 +52,6 @@ update msg model =
                     ( { model | listings = Failure err }, Cmd.none )
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--marketplace-browse" ]
@@ -133,10 +129,6 @@ viewPrice listing =
         Nothing ->
             span [ class "marketplace__price marketplace__price--offer" ]
                 [ text "Make an offer" ]
-
-
-
--- HELPERS
 
 
 listingBookTitle : Listing -> String

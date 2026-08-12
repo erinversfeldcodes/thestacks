@@ -21,11 +21,12 @@ defmodule Stacks.Enrichment.PricePipelineTest do
 
   describe "handle_message/3 and handle_batch/4" do
     test "processes valid price data and inserts snapshot" do
-      book = insert(:book)
+      edition = insert(:book_edition)
+      book = edition.book
       store = insert(:bookstore)
 
       data = %{
-        "book_id" => book.id,
+        "book_edition_id" => edition.id,
         "store_id" => store.id,
         "price_cents" => 29_900,
         "currency" => "ZAR",
@@ -49,12 +50,13 @@ defmodule Stacks.Enrichment.PricePipelineTest do
     end
 
     test "handles batch of multiple messages" do
-      book = insert(:book)
+      edition = insert(:book_edition)
+      book = edition.book
       store1 = insert(:bookstore)
       store2 = insert(:bookstore)
 
       data1 = %{
-        "book_id" => book.id,
+        "book_edition_id" => edition.id,
         "store_id" => store1.id,
         "price_cents" => 10_000,
         "currency" => "ZAR",
@@ -63,7 +65,7 @@ defmodule Stacks.Enrichment.PricePipelineTest do
       }
 
       data2 = %{
-        "book_id" => book.id,
+        "book_edition_id" => edition.id,
         "store_id" => store2.id,
         "price_cents" => 20_000,
         "currency" => "ZAR",

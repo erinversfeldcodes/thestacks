@@ -16,6 +16,7 @@ union forces a compile error here until it is classified, and every route in
 import Expect
 import Main
 import Navigation.Route exposing (ConfirmStatus(..), Route(..))
+import Page.Login as Login
 import Test exposing (Test, describe, test)
 
 
@@ -52,11 +53,11 @@ expectedAuth route =
         Upload ->
             True
 
+        Import ->
+            True
+
         Search ->
             False
-
-        Settings ->
-            True
 
         SettingsProfile ->
             True
@@ -65,9 +66,6 @@ expectedAuth route =
             True
 
         SettingsNotifications ->
-            True
-
-        SettingsConsent ->
             True
 
         SettingsAuditLog ->
@@ -83,6 +81,9 @@ expectedAuth route =
             False
 
         About ->
+            False
+
+        ListingRemoval ->
             False
 
         Catalogue ->
@@ -118,10 +119,16 @@ expectedAuth route =
         AdminSourceApproval ->
             True
 
+        AdminInvites ->
+            True
+
         AdminScraperConfig ->
             True
 
         AdminBookModeration ->
+            True
+
+        AdminRemovalRequests ->
             True
 
         Groups ->
@@ -140,6 +147,9 @@ expectedAuth route =
             False
 
         ForgotPassword ->
+            False
+
+        ResendConfirmation ->
             False
 
         ResetPassword _ ->
@@ -164,11 +174,9 @@ allRoutes =
     , ( "BookDetail", BookDetail "abc" )
     , ( "Upload", Upload )
     , ( "Search", Search )
-    , ( "Settings", Settings )
     , ( "SettingsProfile", SettingsProfile )
     , ( "SettingsPassword", SettingsPassword )
     , ( "SettingsNotifications", SettingsNotifications )
-    , ( "SettingsConsent", SettingsConsent )
     , ( "SettingsAuditLog", SettingsAuditLog )
     , ( "Insights", Insights )
     , ( "CostTransparency", CostTransparency )
@@ -187,12 +195,14 @@ allRoutes =
     , ( "AdminSourceApproval", AdminSourceApproval )
     , ( "AdminScraperConfig", AdminScraperConfig )
     , ( "AdminBookModeration", AdminBookModeration )
+    , ( "AdminRemovalRequests", AdminRemovalRequests )
     , ( "Groups", Groups )
     , ( "GroupDetail", GroupDetail "g1" )
     , ( "Profile", Profile "handle" )
     , ( "ProfileShelf", ProfileShelf "handle" "library" )
     , ( "ConfirmEmail", ConfirmEmail EmailConfirmed )
     , ( "ForgotPassword", ForgotPassword )
+    , ( "ResendConfirmation", ResendConfirmation )
     , ( "ResetPassword", ResetPassword "tok" )
     , ( "NotFound", NotFound )
     ]
@@ -200,7 +210,7 @@ allRoutes =
 
 config : Main.AppConfig
 config =
-    { ageGatingEnabled = False }
+    { ageGatingEnabled = False, inviteOnly = False }
 
 
 matrixTest : ( String, Route ) -> Test
@@ -230,35 +240,95 @@ isPageLogin page =
             False
 
 
+isPageAdminGate : Main.Page -> Bool
+isPageAdminGate page =
+    case page of
+        Main.PageAdminGate _ _ ->
+            True
+
+        _ ->
+            False
+
+
+{-| An owner, since every admin route is owner-only. Built from `ownerAuth` so these tests exercise
+the ADMIN gate rather than tripping the ordinary auth redirect first.
+-}
+ownerAuth : Main.Auth
+ownerAuth =
+    { user =
+        { id = "owner-1"
+        , email = "owner@thestacks.app"
+        , displayName = "Owner"
+        , handle = "owner"
+        , role = "owner"
+        , countryCode = Nothing
+        , city = Nothing
+        , consentAnalytics = False
+        , consentWritingAssistant = False
+        }
+    , token = "ordinary-guardian-token"
+    }
+
+
 suite : Test
 suite =
     describe "Main auth gating"
         [ describe "requiresAuth matrix (full Route union)"
             (List.map matrixTest allRoutes)
         , describe "requiresAuth counts"
-            [ test "18 public routes and 23 protected routes are enumerated" <|
+            [ test "19 public routes and 22 protected routes are enumerated" <|
                 \() ->
                     ( List.length (List.filter (\( _, r ) -> not (Main.requiresAuth r)) allRoutes)
                     , List.length (List.filter (\( _, r ) -> Main.requiresAuth r) allRoutes)
                     )
-                        |> Expect.equal ( 18, 23 )
+                        |> Expect.equal ( 19, 22 )
+            ]
+        , describe "admin routes are gated on an ADMIN token, not the ordinary one"
+            [ test "an owner with no admin token gets the sign-in gate, not the page" <|
+                \() ->
+                    Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
+                        |> Tuple.first
+                        |> isPageAdminGate
+                        |> Expect.equal True
+            , test "with an admin token the real page loads" <|
+                \() ->
+                    Main.initPage config AdminRemovalRequests "https://thestacks.test" (Just ownerAuth) (Just "admin-tok") Nothing Login.Fresh
+                        |> Tuple.first
+                        |> isPageAdminGate
+                        |> Expect.equal False
+            , test "every admin route is gated, not just the new one" <|
+                \() ->
+                    [ AdminSourceApproval, AdminScraperConfig, AdminBookModeration, AdminRemovalRequests ]
+                        |> List.map
+                            (\r ->
+                                Main.initPage config r "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
+                                    |> Tuple.first
+                                    |> isPageAdminGate
+                            )
+                        |> Expect.equal [ True, True, True, True ]
+            , test "a non-admin route is unaffected by the admin token being absent" <|
+                \() ->
+                    Main.initPage config Library "https://thestacks.test" (Just ownerAuth) Nothing Nothing Login.Fresh
+                        |> Tuple.first
+                        |> isPageAdminGate
+                        |> Expect.equal False
             ]
         , describe "initPage redirect guard"
             [ test "a protected route with no auth renders the Login page (login-at-URL)" <|
                 \() ->
-                    Main.initPage config Upload Nothing Nothing
+                    Main.initPage config Upload "https://thestacks.test" Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal True
             , test "a second protected route with no auth also renders Login" <|
                 \() ->
-                    Main.initPage config SettingsProfile Nothing Nothing
+                    Main.initPage config SettingsProfile "https://thestacks.test" Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal True
             , test "a public route with no auth does NOT force the Login page" <|
                 \() ->
-                    Main.initPage config Home Nothing Nothing
+                    Main.initPage config Home "https://thestacks.test" Nothing Nothing Nothing Login.Fresh
                         |> Tuple.first
                         |> isPageLogin
                         |> Expect.equal False

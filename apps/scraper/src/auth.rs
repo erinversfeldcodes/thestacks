@@ -19,7 +19,7 @@ const MAX_FUTURE_SKEW_SECS: u64 = 5;
 ///
 /// Signature is HMAC-SHA256 of `"<timestamp>.<method>.<path>"`.
 ///
-/// Returns Ok(()) if valid, Err(ScraperError::AuthFailed) otherwise.
+/// Returns Ok() if valid, Err(ScraperError::AuthFailed) otherwise.
 pub fn verify_token(
     token: &str,
     method: &str,
@@ -56,8 +56,6 @@ pub fn verify_token(
         .map_err(|_| ScraperError::AuthFailed("invalid secret key".to_string()))?;
     mac.update(message.as_bytes());
 
-    // Decode the provided hex signature and verify using the HMAC crate's
-    // built-in constant-time comparison (mac.verify_slice).
     let provided_bytes = hex::decode(provided_hex)
         .map_err(|_| ScraperError::AuthFailed("invalid signature encoding".to_string()))?;
     mac.verify_slice(&provided_bytes)
@@ -121,7 +119,6 @@ mod tests {
 
     #[test]
     fn test_future_dated_token_rejected() {
-        // Token with timestamp 30 s in the future — beyond MAX_FUTURE_SKEW_SECS (5 s).
         let future_ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -141,7 +138,6 @@ mod tests {
 
     #[test]
     fn test_expired_token_rejected() {
-        // Manually craft a token with a timestamp 120 seconds in the past.
         let old_timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

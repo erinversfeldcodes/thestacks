@@ -2,12 +2,12 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
   @moduledoc "Generates dbt staging model SQL views from proto manifest entries."
 
   @doc """
-  Generates a dbt staging model SQL file from a manifest table entry and proto fields.
+      Generates a dbt staging model SQL file from a manifest table entry and proto fields.
 
-  Output is a simple `select ... from {{ source(...) }}` view.
-  Column order: id first, then proto fields by field number, then timestamps.
-  Skips API-only fields (api_only: true), security-excluded fields (dbt_exclude: true),
-  and belongs_to FK columns (uses the _id directly from proto).
+      Output is a simple `select... from {{ source(...) }}` view.
+      Column order: id first, then proto fields by field number, then timestamps.
+      Skips API-only fields (api_only: true), security-excluded fields (dbt_exclude: true),
+      and belongs_to FK columns (uses the _id directly from proto).
   """
   def generate(table, fields) do
     columns = build_column_list(table, fields)
@@ -33,7 +33,6 @@ defmodule Mix.Tasks.ProtoSync.DbtGenerator do
         field.name == "id" or field.name in ts_fields or excluded_field?(field, overrides)
       end)
 
-    # Use ecto_name if present (e.g., proto "website" → DB "website_url")
     proto_columns =
       Enum.map(filtered, fn field ->
         field_name = String.to_atom(field.name)

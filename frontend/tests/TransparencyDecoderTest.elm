@@ -1,6 +1,6 @@
 module TransparencyDecoderTest exposing (suite)
 
-{-| Decoder tests for the public transparency payload (#241 → #235).
+{-| Decoder tests for the public transparency payload (→).
 
 Confirms `Api.transparencyMetricsDecoder` matches the exact serialised shape of
 `Stacks.Transparency.metrics/0`: `{live, durable, generated_at, cache_ttl}` where

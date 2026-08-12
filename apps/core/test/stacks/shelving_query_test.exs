@@ -1,35 +1,11 @@
 defmodule Stacks.ShelvingQueryTest do
   @moduledoc """
-  Query-plan and query-count guards for the shelf-browsing read path
-  (Issue #112, punch #2 and #3 — Layer 3 cross-US cells).
-
-  Two distinct guarantees are asserted here:
-
-    * **#2 — index sanity.** The two predicates the browse path issues
-      (`bookshelves` by `(user_id, name)`, and the active-placement filter
-      `removed_at IS NULL`) are servable by a real index, and the migrations'
-      indexes still exist in the shape the queries need.
-
-    * **#3 — no N+1.** `Shelving.get_bookshelf_shelves/2` — the function
-      `BookshelfController.show/2` actually calls (`bookshelf_controller.ex:72`),
-      *not* `get_bookshelf_books/2` — issues a query count that does not grow
-      with the number of placements, shelves, authors, or editions involved.
-
-  ## Why `enable_seqscan = off` in the plan tests
-
-  Test-scale tables (a handful of rows) always plan to a Seq Scan regardless of
-  what indexes exist, so a bare `EXPLAIN` assertion would either be vacuous or
-  require seeding tens of thousands of rows per test. Disabling seqscan makes
-  the planner reveal its *best index path* for the predicate. The assertion is
-  therefore "this predicate is index-servable by THIS index", which fails if the
-  index is dropped, its column order changes, or the query's predicate drifts to
-  a shape the index cannot serve — the regressions this cell is meant to catch.
-  A plain Seq Scan still appears in the plan if no index can serve the predicate
-  (the setting is a cost penalty, not a prohibition), so the assertion has teeth.
+      Query-plan and query-count guards for the shelf-browse read path: index sanity (the browse predicates are servable by real,
+      still-existing indexes — asserted via EXPLAIN) and no-N+1
+      (`get_bookshelf_shelves/2` issues a bounded query count regardless of
+      shelf/placement count, counted via a telemetry handler).
   """
 
-  # async: false — the plan tests set session GUCs and the query-count tests
-  # attach a global telemetry handler.
   use Core.DataCase, async: false
 
   import Ecto.Query
@@ -39,14 +15,9 @@ defmodule Stacks.ShelvingQueryTest do
   alias Stacks.Shelving
   alias Stacks.Shelving.{Bookshelf, Placement}
 
-  # Index names created by the migrations under test.
   @bookshelves_idx "bookshelves_user_id_name_index"
   @placements_active_idx "bookshelf_placements_book_active_idx"
   @placements_bookshelf_idx "bookshelf_placements_bookshelf_id_index"
-
-  # ---------------------------------------------------------------------------
-  # Punch #2 — index existence and query-plan sanity
-  # ---------------------------------------------------------------------------
 
   describe "index definitions (migration drift guard)" do
     test "op.bookshelves has a unique index on (user_id, name)" do
@@ -69,7 +40,6 @@ defmodule Stacks.ShelvingQueryTest do
 
       assert indexdef =~ "UNIQUE INDEX"
       assert indexdef =~ "(book_id, bookshelf_id)"
-      # The partial predicate is what makes the active-placement filter index-servable.
       assert indexdef =~ "WHERE (removed_at IS NULL)"
     end
 
@@ -138,10 +108,6 @@ defmodule Stacks.ShelvingQueryTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Punch #3 — N+1 guard on the REAL controller read path
-  # ---------------------------------------------------------------------------
-
   describe "get_bookshelf_shelves/2 query count (N+1 guard)" do
     test "query count does not grow with the number of placements" do
       small = seed_bookshelf(placements: 2, shelves: 1)
@@ -191,9 +157,6 @@ defmodule Stacks.ShelvingQueryTest do
 
       assert placement_count(shelves) == 40
 
-      # 1 shelves query + one batched query per preloaded association
-      # (placements, book, author, editions, bookshelf, user). Any growth past
-      # this means a new unbatched association crept into the read path.
       assert queries <= 8,
              "expected <= 8 queries for the shelf browse read path, got #{queries}"
     end
@@ -203,8 +166,6 @@ defmodule Stacks.ShelvingQueryTest do
 
       shelves = Shelving.get_bookshelf_shelves(fixture.user_id, "library")
 
-      # Reading the preloaded graph must cost ZERO further queries — the
-      # controller serializes exactly these fields.
       {_result, queries} =
         with_query_count(fn ->
           for shelf <- shelves, placement <- shelf.placements do
@@ -220,12 +181,6 @@ defmodule Stacks.ShelvingQueryTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
-
-  # Runs `query` under EXPLAIN with sequential scans penalised so the planner
-  # reveals the best index path for the predicate. See the moduledoc.
   defp explain_without_seqscan(query) do
     Repo.query!("SET LOCAL enable_seqscan = off")
     Repo.query!("SET LOCAL enable_bitmapscan = off")
@@ -262,9 +217,6 @@ defmodule Stacks.ShelvingQueryTest do
     shelves |> Enum.flat_map(& &1.placements) |> length()
   end
 
-  # Counts Repo query telemetry emitted in THIS process while `fun` runs. The
-  # `self() == test_pid` guard keeps the count isolated from other modules'
-  # queries. Same pattern as profile_controller_test.exs.
   defp with_query_count(fun) do
     test_pid = self()
     ref = make_ref()

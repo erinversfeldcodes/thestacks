@@ -27,10 +27,6 @@ defmodule Stacks.MarketplaceTest do
     }
   end
 
-  # ---------------------------------------------------------------------------
-  # create_listing/2
-  # ---------------------------------------------------------------------------
-
   describe "create_listing/2" do
     setup :setup_seller_with_placement
 
@@ -92,10 +88,6 @@ defmodule Stacks.MarketplaceTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # get_listing/1
-  # ---------------------------------------------------------------------------
-
   describe "get_listing/1" do
     test "returns listing with book and seller preloaded" do
       listing = insert(:listing)
@@ -111,10 +103,6 @@ defmodule Stacks.MarketplaceTest do
       assert Marketplace.get_listing(Ecto.UUID.generate()) == nil
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # list_active_listings/0
-  # ---------------------------------------------------------------------------
 
   describe "list_active_listings/0" do
     test "returns only active listings" do
@@ -134,10 +122,6 @@ defmodule Stacks.MarketplaceTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # list_user_listings/1
-  # ---------------------------------------------------------------------------
-
   describe "list_user_listings/1" do
     test "returns all listings for a seller" do
       seller = insert(:user)
@@ -151,10 +135,6 @@ defmodule Stacks.MarketplaceTest do
       assert Enum.all?(listings, &(&1.seller_id == seller.id))
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # activate_listing/2
-  # ---------------------------------------------------------------------------
 
   describe "activate_listing/2" do
     setup :setup_seller_with_placement
@@ -219,10 +199,6 @@ defmodule Stacks.MarketplaceTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # deactivate_listing/2
-  # ---------------------------------------------------------------------------
-
   describe "deactivate_listing/2" do
     setup :setup_seller_with_placement
 
@@ -270,10 +246,6 @@ defmodule Stacks.MarketplaceTest do
       assert {:error, :unauthorized} = Marketplace.deactivate_listing(activated, other_user.id)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # sold_listing/2
-  # ---------------------------------------------------------------------------
 
   describe "sold_listing/2" do
     setup :setup_seller_with_placement
@@ -329,10 +301,6 @@ defmodule Stacks.MarketplaceTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # expire_listing/1
-  # ---------------------------------------------------------------------------
-
   describe "expire_listing/1" do
     setup :setup_seller_with_placement
 
@@ -372,10 +340,6 @@ defmodule Stacks.MarketplaceTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # State machine — disallowed transitions
-  # ---------------------------------------------------------------------------
-
   describe "state machine — disallowed transitions" do
     setup :setup_seller_with_placement
 
@@ -395,7 +359,6 @@ defmodule Stacks.MarketplaceTest do
     end
   end
 
-  # #285 — discovery-label helpers used by the sectioned search response.
   describe "format_price/2" do
     test "renders whole-rand ZAR amounts without decimals" do
       assert Marketplace.format_price(12_000, "ZAR") == "R120"

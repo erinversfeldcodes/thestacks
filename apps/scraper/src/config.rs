@@ -63,16 +63,10 @@ pub struct RateLimitConfig {
     pub requests_per_minute: u32,
     #[serde(default = "default_retry_after")]
     pub retry_after_seconds: u64,
-    #[serde(default = "default_respect_robots")]
-    pub respect_robots_txt: bool,
 }
 
 fn default_retry_after() -> u64 {
     60
-}
-
-fn default_respect_robots() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -121,7 +115,6 @@ impl ScraperConfig {
                 "rate_limit.requests_per_minute must be > 0".to_string(),
             ));
         }
-        // Validate that the price selector is a parseable CSS selector.
         scraper::Selector::parse(&self.selectors.price).map_err(|e| {
             ScraperError::InvalidConfig(format!(
                 "selectors.price is not a valid CSS selector: {e:?}"
@@ -222,7 +215,6 @@ query_param = "q"
 [selectors]
 price = ".price"
 "#;
-        // Missing [rate_limit] — should fail to deserialize
         let result = ScraperConfig::from_toml_str(toml);
         assert!(result.is_err());
     }

@@ -1,7 +1,7 @@
 defmodule Core.DataCase do
   @moduledoc """
-  This module defines the setup for tests requiring
-  access to the application's data layer.
+      This module defines the setup for tests requiring
+      access to the application's data layer.
   """
 
   use ExUnit.CaseTemplate
@@ -24,10 +24,6 @@ defmodule Core.DataCase do
 
   def setup_sandbox(tags) do
     alias Ecto.Adapters.SQL.Sandbox
-    # Tests point Oban at Core.Repo (test.exs overrides the production
-    # Core.ObanRepo — see test.exs comments), so only one sandbox owner
-    # is needed. In prod the two repos use separate pools for HTTP /
-    # background isolation; in test that isolation isn't exercised.
     pid = Sandbox.start_owner!(Core.Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)
   end

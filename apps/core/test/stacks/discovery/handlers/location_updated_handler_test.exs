@@ -14,9 +14,6 @@ defmodule Stacks.Discovery.Handlers.LocationUpdatedHandlerTest do
 
   describe "handle_event/1" do
     test "enqueues GeographicDiscoveryJob using city/country from the user record" do
-      # GDPR (Issue #121): the event payload is UUID-only. The handler resolves
-      # the user from aggregate_id and reads the *current* location off the
-      # user record.
       user = insert(:user, city: "Cape Town", country_code: "ZA")
 
       assert :ok =
@@ -47,8 +44,6 @@ defmodule Stacks.Discovery.Handlers.LocationUpdatedHandlerTest do
 
     test "does not enqueue when the user record has no country_code" do
       user = insert(:user, city: "Cape Town")
-      # country_code has a DB default ("ZA"), so null it explicitly to model a
-      # user whose location is incomplete.
       Repo.update_all(from(u in User, where: u.id == ^user.id), set: [country_code: nil])
 
       assert :ok =

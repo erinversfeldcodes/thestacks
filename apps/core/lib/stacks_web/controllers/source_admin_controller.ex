@@ -1,9 +1,9 @@
 defmodule StacksWeb.SourceAdminController do
   @moduledoc """
-  Admin controller for managing discovered sources.
+      Admin controller for managing discovered sources.
 
-  Requires an MFA-verified admin session JWT. Role is enforced at JWT issuance
-  by `AdminAuthController.login/2` — not repeated per action.
+      Requires an MFA-verified admin session JWT. Role is enforced at JWT issuance
+      by `AdminAuthController.login/2` — not repeated per action.
   """
 
   use CoreWeb, :controller
@@ -41,6 +41,67 @@ defmodule StacksWeb.SourceAdminController do
     with {:ok, source} <- Discovery.reject_source(id) do
       json(conn, %{source: serialize_source(source)})
     end
+  end
+
+  @doc """
+      GET /api/admin/removal-requests — businesses waiting on a human decision.
+
+      A removal request whose contact address did not match the listing's domain parks with
+      `exclusion_requested_at` set. This is where those become visible; before it, they were
+      not in any payload at all.
+  """
+  def removal_requests(conn, _params) do
+    requests =
+      Discovery.pending_removal_requests()
+      |> Enum.map(&serialize_removal_request/1)
+
+    json(conn, %{requests: requests, total: length(requests)})
+  end
+
+  @doc """
+      PUT /api/admin/removal-requests/:id/honour — remove the listing.
+
+      ⚠️ **Not `approve`.** `PUT /sources/:id/approve` already exists and *publishes* a
+      listing; this takes one down. Two endpoints named "approve" with opposite effects on the
+      same row is a mistake waiting to happen, so these name what happens to the listing.
+  """
+  def honour_removal(conn, %{"id" => id}) do
+    case Discovery.honour_removal_request(id) do
+      {:ok, _source} -> json(conn, %{ok: true, outcome: "removed"})
+      {:error, reason} -> removal_error(conn, reason)
+    end
+  end
+
+  @doc "PUT /api/admin/removal-requests/:id/decline — the listing stays."
+  def decline_removal(conn, %{"id" => id}) do
+    case Discovery.decline_removal_request(id) do
+      {:ok, _source} -> json(conn, %{ok: true, outcome: "kept"})
+      {:error, reason} -> removal_error(conn, reason)
+    end
+  end
+
+  defp removal_error(conn, :not_found) do
+    conn |> put_status(404) |> json(%{error: "No such removal request."})
+  end
+
+  defp removal_error(conn, :not_pending) do
+    conn |> put_status(409) |> json(%{error: "That request has already been decided."})
+  end
+
+  defp removal_error(conn, _reason) do
+    conn |> put_status(422) |> json(%{error: "Could not record that decision."})
+  end
+
+  defp serialize_removal_request(%DiscoveredSource{} = s) do
+    %{
+      id: s.id,
+      name: s.name,
+      url: s.url,
+      type: s.type,
+      exclusion_email: s.exclusion_email,
+      requested_at: s.exclusion_requested_at,
+      status: s.status
+    }
   end
 
   @doc "GET /api/admin/source-health — per-source health for the scraper-health page."

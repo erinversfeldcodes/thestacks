@@ -106,7 +106,6 @@ defmodule Stacks.SocialFeedTest do
         placed_at: new_time
       )
 
-      # Use a cursor between old and new
       cursor = DateTime.add(old_time, 1800, :second)
       assert {:ok, items} = Social.feed_for_group(group.id, viewer.id, before: cursor)
       assert length(items) == 1
@@ -126,11 +125,9 @@ defmodule Stacks.SocialFeedTest do
         placed_at: DateTime.utc_now()
       )
 
-      # Verify content is visible while member
       assert {:ok, items_before} = Social.feed_for_group(group.id, viewer.id)
       assert Enum.any?(items_before, &(&1.user_id == former.id))
 
-      # Remove former member
       Repo.delete_all(
         from(m in GroupMember, where: m.group_id == ^group.id and m.user_id == ^former.id)
       )

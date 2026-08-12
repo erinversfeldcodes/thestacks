@@ -295,10 +295,6 @@ foldProjectContexts newContext previousContext =
     }
 
 
-
--- MODULE DEFINITION VISITOR
-
-
 moduleDefinitionVisitor : Node Module -> ModuleContext -> ModuleContext
 moduleDefinitionVisitor node moduleContext =
     { moduleContext | exposed = Module.exposingList (Node.value node) }
@@ -312,10 +308,6 @@ isNotNever lookupTable node =
 
         _ ->
             True
-
-
-
--- DECLARATION VISITOR
 
 
 declarationVisitor : Node Declaration -> ModuleContext -> ModuleContext
@@ -372,10 +364,6 @@ createArguments lookupTable arguments =
 collectUsedPatternsFromFunctionDeclaration : ModuleContext -> Expression.Function -> List ( ( ModuleName, String ), Set Int )
 collectUsedPatternsFromFunctionDeclaration context { declaration } =
     collectUsedCustomTypeArgs context.lookupTable (Node.value declaration).arguments
-
-
-
--- EXPRESSION VISITOR
 
 
 expressionVisitor : Node Expression -> ModuleContext -> ModuleContext
@@ -585,10 +573,6 @@ isWildcard node =
 
         _ ->
             False
-
-
-
--- FINAL EVALUATION
 
 
 finalEvaluation : ProjectContext -> List (Error { useErrorForModule : () })

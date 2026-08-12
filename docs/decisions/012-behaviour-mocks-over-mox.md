@@ -44,17 +44,22 @@ Each needs a test double that:
 Each external client follows a three-file pattern:
 
 ```
-lib/stacks/discovery/brave_client_behaviour.ex    # @callback declarations
-lib/stacks/discovery/brave_client.ex               # Real HTTP implementation
-lib/stacks/discovery/mock_brave_client.ex          # Process dictionary mock
+lib/stacks/discovery/brave_client_behaviour.ex           # @callback declarations
+lib/stacks/discovery/brave_client.ex                     # Real HTTP implementation
+test/support/mocks/discovery/mock_brave_client.ex        # Process dictionary mock
 ```
+
+**Amended 2026-07-30 (Issue #327):** mocks live under `apps/core/test/support/mocks/`,
+not `lib/`. `mix.exs` puts `test/support` on the `:test` elixirc path only, so no mock
+compiles into the dev or prod release artifact. Correspondingly, `config.exs` names only
+real clients — every mock binding lives in `test.exs`.
 
 Wiring:
 ```elixir
-# config.exs (dev/prod)
+# config.exs (dev/prod) — real clients only
 config :core, :brave_client, Stacks.Discovery.BraveClient
 
-# test.exs
+# test.exs — the only place a mock is named
 config :core, :brave_client, Stacks.Discovery.MockBraveClient
 
 # In production code:

@@ -5,7 +5,106 @@ defmodule Stacks.Workers.DiscoverAuthorSourcesJobTest do
   import Stacks.Factory
 
   alias Stacks.Discovery.MockBraveClient
+  alias Stacks.Enrichment.MockRssFetcher
   alias Stacks.Workers.DiscoverAuthorSourcesJob
+
+  setup do
+    on_exit(fn -> MockRssFetcher.clear() end)
+    :ok
+  end
+
+  defp record_finch_requests(fun) do
+    test_pid = self()
+    handler_id = {__MODULE__, System.unique_integer()}
+
+    :telemetry.attach(
+      handler_id,
+      [:finch, :request, :start],
+      fn _event, _measurements, meta, _config ->
+        if self() == test_pid do
+          send(test_pid, {:finch_request, "#{meta.request.scheme}://#{meta.request.host}"})
+        end
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler_id)
+    end
+
+    collect_finch_requests([])
+  end
+
+  defp collect_finch_requests(acc) do
+    receive do
+      {:finch_request, url} -> collect_finch_requests([url | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  describe "transport isolation" do
+    test "discovery reaches no real host — Finch is never invoked" do
+      author = insert(:author)
+
+      MockBraveClient.put_response(
+        {:ok,
+         [
+           %{
+             title: "#{author.name} - Official Site",
+             url: "https://authorsite.com",
+             description: "The official website"
+           }
+         ]}
+      )
+
+      dialled =
+        record_finch_requests(fn ->
+          assert :ok = perform_job(DiscoverAuthorSourcesJob, %{"author_id" => author.id})
+        end)
+
+      assert dialled == [],
+             "the job dialled real hosts through Finch: #{inspect(dialled)}"
+    end
+
+    test "the feed probe goes through the swappable fetcher, not Finch" do
+      author = insert(:author)
+
+      MockBraveClient.put_response(
+        {:ok, [%{title: "Site", url: "https://authorsite.com", description: "d"}]}
+      )
+
+      MockRssFetcher.put_probe_response({:ok, "https://authorsite.com/feed"})
+
+      dialled =
+        record_finch_requests(fn ->
+          assert :ok = perform_job(DiscoverAuthorSourcesJob, %{"author_id" => author.id})
+        end)
+
+      updated = Core.Repo.get!(Stacks.Books.Author, author.id)
+
+      assert updated.rss_feed_url == "https://authorsite.com/feed"
+      assert dialled == []
+    end
+
+    test "batch discovery reaches no real host either" do
+      insert(:author, website_url: nil)
+      insert(:author, website_url: nil)
+
+      MockBraveClient.put_response(
+        {:ok, [%{title: "Site", url: "https://authorsite.com", description: "d"}]}
+      )
+
+      dialled =
+        record_finch_requests(fn ->
+          assert :ok = perform_job(DiscoverAuthorSourcesJob, %{"batch" => true})
+        end)
+
+      assert dialled == []
+    end
+  end
 
   describe "perform/1 with author_id" do
     test "discovers website for an author" do

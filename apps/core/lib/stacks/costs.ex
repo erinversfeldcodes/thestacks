@@ -1,11 +1,11 @@
 defmodule Stacks.Costs do
   @moduledoc """
-  Context for platform cost transparency.
+      Context for platform cost transparency.
 
-  Manages infrastructure cost line items stored in `op.platform_costs` and
-  computes real usage metrics from the database for consumer-friendly cost
-  breakdowns. All data is aggregate platform operational costs — no user
-  data is ever stored or exposed through this context.
+      Manages infrastructure cost line items stored in `op.platform_costs` and
+      computes real usage metrics from the database for consumer-friendly cost
+      breakdowns. All data is aggregate platform operational costs — no user
+      data is ever stored or exposed through this context.
   """
 
   import Ecto.Changeset
@@ -18,22 +18,14 @@ defmodule Stacks.Costs do
   alias Stacks.Costs.PlatformCost
   alias Stacks.Shelving.Placement
 
-  # ── Known pricing (from published rate cards) ─────────────────────────────
-  # Fly.io shared-cpu-1x, 512MB: $5.34/mo (see deploy/fly.core.toml [[vm]])
-  # Modal A10G GPU: ~$0.000463/sec (~$0.03/inference at ~60s)
-  # Neon free tier: $0 (0.5 GiB storage, 190 compute hours)
-  # Domain: ~$12/year = $1.00/month amortised
-
   @fly_core_cents 534
   @fly_vision_cents 534
   @modal_per_inference_cents 3
   @neon_cents 0
   @domain_monthly_cents 100
 
-  # ── Cost Queries ──────────────────────────────────────────────────────────
-
   @doc """
-  Returns all cost line items for the current billing period (current calendar month).
+      Returns all cost line items for the current billing period (current calendar month).
   """
   @spec current_period_costs() :: [PlatformCost.t()]
   def current_period_costs do
@@ -48,7 +40,7 @@ defmodule Stacks.Costs do
   end
 
   @doc """
-  Returns cost line items grouped by month for the last `months` months.
+      Returns cost line items grouped by month for the last `months` months.
   """
   @spec monthly_totals(pos_integer()) :: [map()]
   def monthly_totals(months \\ 6) do
@@ -69,11 +61,9 @@ defmodule Stacks.Costs do
     |> Repo.all()
   end
 
-  # ── Usage Metrics (real data from DB) ─────────────────────────────────────
-
   @doc """
-  Returns platform usage metrics derived from actual database contents.
-  These power the consumer-friendly cost explanations.
+      Returns platform usage metrics derived from actual database contents.
+      These power the consumer-friendly cost explanations.
   """
   @spec usage_metrics() :: map()
   def usage_metrics do
@@ -147,8 +137,6 @@ defmodule Stacks.Costs do
     ) || 0
   end
 
-  # ── Changesets ────────────────────────────────────────────────────────────
-
   @platform_cost_valid_categories ~w(hosting compute database domain)
 
   @doc "Changeset for creating or updating a platform cost line item."
@@ -176,11 +164,9 @@ defmodule Stacks.Costs do
     |> unique_constraint([:service, :period_start, :period_end])
   end
 
-  # ── Upsert ────────────────────────────────────────────────────────────────
-
   @doc """
-  Upserts a cost line item. If a record with the same service and period
-  already exists, it updates the amount and description.
+      Upserts a cost line item. If a record with the same service and period
+      already exists, it updates the amount and description.
   """
   @spec upsert_cost(map()) :: {:ok, PlatformCost.t()} | {:error, Ecto.Changeset.t()}
   def upsert_cost(attrs) do
@@ -207,20 +193,18 @@ defmodule Stacks.Costs do
     result
   end
 
-  # ── Cost Item Builder (single source of truth, Issue #259) ────────────────
-
   @doc """
-  Builds the 5 platform cost line items for a billing period.
+      Builds the 5 platform cost line items for a billing period.
 
-  Single source of truth for the platform cost line items, shared by
-  `Stacks.Workers.RefreshCostsJob` (which passes the live
-  `vision_jobs_this_month/0` count) and `seed_current_period_costs/0` (which
-  passes `0`). Each item is a map with `:category`, `:service`, `:description`,
-  `:amount_cents`, `:period_start`, `:period_end`, and `:currency`.
+      Single source of truth for the platform cost line items, shared by
+      `Stacks.Workers.RefreshCostsJob` (which passes the live
+      `vision_jobs_this_month/0` count) and `seed_current_period_costs/0` (which
+      passes `0`). Each item is a map with `:category`, `:service`, `:description`,
+      `:amount_cents`, `:period_start`, `:period_end`, and `:currency`.
 
-  The Modal item's `amount_cents` is `vision_jobs * #{@modal_per_inference_cents}`
-  and its description embeds the `vision_jobs` count, so `vision_jobs: 0` yields
-  `amount_cents: 0` and `"0 inferences this month"`.
+      The Modal item's `amount_cents` is `vision_jobs * #{@modal_per_inference_cents}`
+      and its description embeds the `vision_jobs` count, so `vision_jobs: 0` yields
+      `amount_cents: 0` and `"0 inferences this month"`.
   """
   @spec build_cost_items(DateTime.t(), DateTime.t(), non_neg_integer()) :: [map()]
   def build_cost_items(period_start, period_end, vision_jobs) do
@@ -262,22 +246,13 @@ defmodule Stacks.Costs do
     ]
   end
 
-  # ── Seed Fixture (E2E cost-data, Issue #110) ──────────────────────────────
-
   @doc """
-  Seeds the 5 static current-month platform cost line items so preview/local
-  deploys always have current-period data for the `/costs` page E2E.
-
-  The daily `Stacks.Workers.RefreshCostsJob` cron only runs at `"0 6 * * *"`, so
-  a fresh preview has no cost data until it fires. This fixture reuses the shared
-  `build_cost_items/3` builder with **Modal fixed at 0 inferences**
-  (`vision_jobs: 0` → `amount_cents: 0`), summing to 1168 cents — the same list
-  the cron produces, guaranteeing seed and cron can't diverge.
-
-  Uses the same current-calendar-month window as `current_period_costs/0` and
-  the same `[:service, :period_start, :period_end]` conflict target as
-  `upsert_cost/1`, so the daily cron updates these rows in place rather than
-  duplicating them. Idempotent. Returns `:ok`.
+      Seeds the 5 static current-month cost line items so fresh previews have
+      data before the daily `RefreshCostsJob` cron (06:00) first fires. Reuses
+      `build_cost_items/3` with Modal fixed at 0 inferences (1168 cents total)
+      — the same list the cron produces, so seed and cron cannot diverge — and
+      the same period window + conflict target, so the cron updates these rows
+      in place. Idempotent; returns `:ok`.
   """
   @spec seed_current_period_costs() :: :ok
   def seed_current_period_costs do
@@ -292,11 +267,9 @@ defmodule Stacks.Costs do
     :ok
   end
 
-  # ── Public Breakdown ──────────────────────────────────────────────────────
-
   @doc """
-  Builds the full public cost breakdown response with real usage metrics.
-  No user data is included — only aggregate platform stats.
+      Builds the full public cost breakdown response with real usage metrics.
+      No user data is included — only aggregate platform stats.
   """
   @spec cost_breakdown() :: map()
   def cost_breakdown do

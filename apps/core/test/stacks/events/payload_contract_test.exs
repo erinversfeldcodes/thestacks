@@ -1,13 +1,13 @@
 defmodule Stacks.Events.PayloadContractTest do
   @moduledoc """
-  The three static guards over the event-payload contract (the schema `buf` can't
-  see, because payloads are opaque `google.protobuf.Struct`). Shape-drift itself is
-  caught at emit time by `Stacks.Events.emit/1` (the whole suite drives the
-  emitters); this file enforces the parts a runtime emit can't:
+      The three static guards over the event-payload contract (the schema `buf` can't
+      see, because payloads are opaque `google.protobuf.Struct`). Shape-drift itself is
+      caught at emit time by `Stacks.Events.emit/1` (the whole suite drives the
+      emitters); this file enforces the parts a runtime emit can't:
 
-    * PII-lint — no personal/free-text key sneaks into a payload unjustified.
-    * version ↔ upcaster — every bumped version has a migration.
-    * coverage — every emitted event type is declared.
+        * PII-lint — no personal/free-text key sneaks into a payload unjustified.
+        * version ↔ upcaster — every bumped version has a migration.
+        * coverage — every emitted event type is declared.
   """
   use ExUnit.Case, async: true
 
@@ -15,8 +15,6 @@ defmodule Stacks.Events.PayloadContractTest do
 
   @contract PayloadContract.contract()
 
-  # A payload key is an identifier (always safe) when it ends in _id/_ids — this
-  # exempts comment_id/author_id/book_ids from the free-text substring check.
   defp identifier?(key), do: String.ends_with?(key, "_id") or String.ends_with?(key, "_ids")
 
   defp personal_shaped?(key) do
@@ -63,10 +61,6 @@ defmodule Stacks.Events.PayloadContractTest do
 
   describe "coverage" do
     test "every literal event_type emitted in lib/ is declared in the contract" do
-      # Scope to emit-construction sites (`emit(%{ … event_type: "…" }`) so we do
-      # NOT flag consumer pattern-matches (`handle_event(%{event_type: "offer.opened"`)
-      # or docstring examples (`%{event_type: "the.type"`) — only types the app
-      # actually WRITES need a payload contract.
       emit_re = ~r/emit(?:_safe)?\(%\{[^}]*?event_type:\s*"([a-z0-9_.]+)"/s
 
       emitted =
@@ -108,7 +102,6 @@ defmodule Stacks.Events.PayloadContractTest do
     end
 
     test "accepts a payload with or without a declared-optional key" do
-      # image.rejected: reason required, isbn optional (mismatch path only).
       assert :ok =
                PayloadContract.validate!(%{
                  event_type: "image.rejected",

@@ -11,7 +11,7 @@ import Types.RemoteData exposing (RemoteData(..))
 
 suite : Test
 suite =
-    describe "Writing assistant (Issue #184)"
+    describe "Writing assistant"
         [ describe "Consent page — writing assistant toggle"
             [ test "ToggleWritingAssistant flips writingAssistantConsent" <|
                 \_ ->

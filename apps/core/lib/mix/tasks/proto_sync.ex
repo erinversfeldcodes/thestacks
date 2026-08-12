@@ -1,25 +1,11 @@
 defmodule Mix.Tasks.Proto.Sync do
   @moduledoc """
-  Generates Ecto schemas, dbt staging models, and migrations from Protobuf descriptors.
-
-  Uses `buf build` to produce a JSON FileDescriptorSet, then maps proto fields
-  to Ecto types and dbt columns based on the manifest in `proto/persisted.exs`.
-
-  ## Usage
-
-      mix proto.sync          # Generate all files
-      mix proto.sync --check  # Check for drift without writing
-
-  ## How it works
-
-  1. Loads the manifest from `proto/persisted.exs`
-  2. Runs `buf build` to get the proto descriptor as JSON
-  3. For each table in the manifest, extracts the proto message fields
-  4. Generates an Ecto schema module (read-only, no changeset)
-  5. Generates a dbt staging SQL view
-  6. For new tables (`migration_exists: false`), generates a CREATE TABLE migration
-  7. For existing tables, detects new proto fields and generates ADD COLUMN migrations
-  8. In `--check` mode, compares generated output and detects migration gaps
+      Generates Ecto schemas, dbt staging models, and migrations from proto
+      descriptors: `buf build` → JSON FileDescriptorSet, mapped per the
+      `proto/persisted.exs` manifest. New tables get CREATE TABLE migrations;
+      new proto fields on existing tables get ADD COLUMN. `--check` compares
+      output and detects migration gaps without writing (runs in CI; drift
+      fails the build).
   """
 
   use Mix.Task
@@ -52,27 +38,17 @@ defmodule Mix.Tasks.Proto.Sync do
     end
   end
 
-  defp run_generate(manifest, descriptor, repo_root) do
+  @doc false
+  def run_generate(manifest, descriptor, repo_root) do
     core_root = Path.join(repo_root, "apps/core")
     dbt_root = Path.join(repo_root, "dbt/models/staging")
     migrations_dir = Path.join(core_root, "priv/repo/migrations")
     schema_yml_path = Path.join(dbt_root, "schema.yml")
 
-    # Tables with `skip_dbt: true` opt out of dbt staging model + schema.yml
-    # generation entirely. Used for infra plumbing tables (e.g. cache.*) that
-    # live outside the analytics schemas and should never appear in dbt.
-    # Unlike `dbt_grant: false`, which only suppresses the GRANT SELECT block
-    # in the migration, `skip_dbt` also skips the .sql staging file and
-    # the schema.yml entry. Both flags are set together for cache tables.
     generated_blocks =
       Enum.reduce(manifest.tables, %{}, fn table, blocks ->
         fields = Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
-        # `skip_ecto: true` opts out of Ecto schema generation. Used for tables
-        # whose schema carries a column proto cannot express (e.g. a pgvector
-        # `vector` field via Pgvector.Ecto.Vector) — the schema is hand-written
-        # outside gen/ and must not be clobbered/drift-flagged. Migration + dbt
-        # generation still run (or are governed by their own skip flags).
         unless Map.get(table, :skip_ecto, false) do
           ecto_content = EctoGenerator.generate(table, fields)
           ecto_path = Path.join(core_root, table.ecto_path)
@@ -107,7 +83,6 @@ defmodule Mix.Tasks.Proto.Sync do
       Mix.shell().info("Skipped schema.yml — file not found at #{schema_yml_path}")
     end
 
-    # Generate ProtoJSON.Gen base serializer
     if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
       proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
       proto_json_path = Path.join(core_root, "lib/stacks/gen/proto_json.ex")
@@ -116,9 +91,6 @@ defmodule Mix.Tasks.Proto.Sync do
       Mix.shell().info("Generated #{proto_json_path}")
     end
 
-    # Format all generated Elixir files so they satisfy `mix format --check-formatted`.
-    # Uses Code.format_string!/1 directly rather than Mix.Task.run("format") to avoid
-    # Mix writing a manifest file (which fails in test environments due to CWD mismatch).
     gen_dir = Path.join(core_root, "lib/stacks/gen")
 
     ecto_locals = [
@@ -185,7 +157,6 @@ defmodule Mix.Tasks.Proto.Sync do
     overrides = Map.get(table, :field_overrides, %{})
     ts_fields = timestamp_field_names(table)
 
-    # Filter to only DB-column fields (exclude id, timestamps, skipped API-only fields)
     db_fields =
       Enum.reject(fields, fn field ->
         field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
@@ -200,13 +171,12 @@ defmodule Mix.Tasks.Proto.Sync do
       timestamp = MigrationGenerator.generate_timestamp()
       content = MigrationGenerator.generate_add_columns(table, new_fields, timestamp)
 
-      slug = Enum.map_join(new_fields, "_", & &1.name)
-      filename = "#{timestamp}_add_#{slug}_to_#{table.table_name}.exs"
-      path = Path.join(migrations_dir, filename)
+      slug = MigrationGenerator.add_columns_slug(new_fields, table.table_name)
+      path = Path.join(migrations_dir, "#{timestamp}_#{slug}.exs")
+      File.mkdir_p!(migrations_dir)
       File.write!(path, content)
       Mix.shell().info("Generated migration #{path}")
     else
-      # Check for removed fields (warn only, additive-only convention)
       timestamp_cols = ~w(created_at updated_at inserted_at)
 
       existing
@@ -241,10 +211,6 @@ defmodule Mix.Tasks.Proto.Sync do
       Enum.map_reduce(manifest.tables, %{}, fn table, blocks_acc ->
         fields = Descriptor.extract_fields(descriptor, table.proto_file, table.proto_message)
 
-        # `skip_ecto: true` opts out of Ecto schema drift-checking (the schema
-        # is hand-written outside gen/ — e.g. a pgvector column proto cannot
-        # express). Must match run_generate, else the hand-written schema is
-        # flagged as drift on every check.
         ecto_results =
           if Map.get(table, :skip_ecto, false) do
             []
@@ -252,24 +218,22 @@ defmodule Mix.Tasks.Proto.Sync do
             [
               DriftChecker.check(
                 EctoGenerator.generate(table, fields),
-                Path.join(core_root, table.ecto_path)
+                Path.join(core_root, table.ecto_path),
+                repo_root
               )
             ]
           end
 
         migration_result = check_migration_drift(table, fields, migrations_dir)
 
-        # `skip_dbt: true` opts out of both the dbt staging model and the
-        # schema.yml block. Drift check must match: otherwise a missing
-        # .sql file would be flagged as drift for every infra-plumbing
-        # table.
         if Map.get(table, :skip_dbt, false) do
           {ecto_results ++ migration_result, blocks_acc}
         else
           dbt_result =
             DriftChecker.check(
               DbtGenerator.generate(table, fields),
-              Path.join(dbt_root, table.dbt_path)
+              Path.join(dbt_root, table.dbt_path),
+              repo_root
             )
 
           model_name = "stg_#{table.table_name}"
@@ -285,16 +249,22 @@ defmodule Mix.Tasks.Proto.Sync do
     schema_yml_result = SchemaYmlGenerator.check_drift(schema_yml_path, generated_blocks)
     results = results ++ List.wrap(schema_yml_result)
 
-    # ProtoJSON.Gen drift check
     results =
       if Map.has_key?(manifest, :proto_json) and manifest.proto_json != [] do
         proto_json_content = ProtoJsonGenerator.generate(manifest, descriptor)
         proto_json_path = Path.join(core_root, "lib/stacks/gen/proto_json.ex")
-        proto_json_result = DriftChecker.check(proto_json_content, proto_json_path)
+        proto_json_result = DriftChecker.check(proto_json_content, proto_json_path, repo_root)
         results ++ List.wrap(proto_json_result)
       else
         results
       end
+
+    for {:regenerated, path} <- results do
+      Mix.shell().info(
+        "REGENERATED: #{path} was stale — gitignored, so this can only be " <>
+          "local staleness; regenerated from proto and continuing."
+      )
+    end
 
     drifted = Enum.filter(results, &match?({:drift, _, _}, &1))
 
@@ -315,14 +285,12 @@ defmodule Mix.Tasks.Proto.Sync do
     ts_fields = timestamp_field_names(table)
     migration_exists = Map.get(table, :migration_exists, false)
 
-    # Filter to only DB-column fields
     db_fields =
       Enum.reject(fields, fn field ->
         field.name == "id" or field.name in ts_fields or api_only_field?(field, overrides)
       end)
 
     if migration_exists do
-      # For existing tables, check if any proto fields are missing from migrations
       existing = MigrationGenerator.existing_columns(migrations_dir, table.table_name)
       proto_field_names = Enum.map(db_fields, & &1.name)
       missing = Enum.reject(proto_field_names, fn name -> name in existing end)

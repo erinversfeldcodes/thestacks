@@ -1,7 +1,7 @@
 module Page.BookDetailVisibilityTest exposing (suite)
 
 {-| Program tests for the per-placement visibility dropdown in the book-detail
-overlay (US-10.2.2 — Override Placement Visibility).
+overlay (— Override Placement Visibility).
 
 Covers:
 

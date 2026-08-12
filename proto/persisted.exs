@@ -1,9 +1,6 @@
 %{
   version: 1,
   tables: [
-    # -------------------------------------------------------------------------
-    # Internal / Infrastructure
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/internal/v1/event_bus.proto",
       proto_message: "EventEnvelope",
@@ -76,12 +73,6 @@
         metadata: %{ecto_type: :map}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Book lookup caches (L2 — persistent backing for the ETS L1 caches in
-    # Stacks.Books.ISBNResolverCache and Stacks.Books.TitleSearchCache).
-    # Survive Fly machine stops and deploys; shared across all nodes.
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/infra/v1/book_cache.proto",
       proto_message: "IsbnResolverCacheEntry",
@@ -92,9 +83,6 @@
       dbt_path: "stg_isbn_resolver_cache.sql",
       timestamps: :standard,
       migration_exists: true,
-      # Infra plumbing: NOT exposed to dbt. `dbt_grant: false` suppresses the
-      # GRANT SELECT block in any generated migration; `skip_dbt: true` also
-      # skips the staging .sql model and its schema.yml block.
       dbt_grant: false,
       skip_dbt: true,
       indexes: [
@@ -145,14 +133,6 @@
         expires_at: %{null: false}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Feed cache (Issue #264 — persisted Atom XML per platform-visible
-    # bookshelf, backing StacksWeb.FeedController. Derived/regenerable, so kept
-    # OUT of the warehouse (skip_dbt / dbt_grant: false) like the book caches —
-    # but user-linked personal data, so the FK CASCADEs and GDPR erasure has an
-    # explicit :delete_feed_cache step in Stacks.GDPR.Deletion.
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/infra/v1/feed_cache.proto",
       proto_message: "FeedCacheEntry",
@@ -165,11 +145,6 @@
       migration_exists: true,
       dbt_grant: false,
       skip_dbt: true,
-      # This single-column unique index on `bookshelf_id` is the upsert conflict
-      # target (`ON CONFLICT (bookshelf_id)`). Because it exactly covers the
-      # `references_table` FK column below, the generator suppresses the
-      # otherwise auto-emitted non-unique FK index (see MigrationGenerator
-      # `index_block/1`) — so only this one index is created (Issue #266).
       indexes: [
         %{
           name: "feed_cache_bookshelf_id_unique_index",
@@ -188,10 +163,6 @@
         etag: %{null: false}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Partners
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/internal/v1/partner.proto",
       proto_message: "Partner",
@@ -234,10 +205,6 @@
         synced_at: %{null: false, default: {:fragment, "NOW()"}}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Accounts
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/user.proto",
       proto_message: "User",
@@ -265,17 +232,12 @@
       field_overrides: %{
         role: %{default: "user"},
         profile_visibility: %{default: "owner"},
-        # handle is a NOT NULL, case-insensitively-unique business key (the /u/:handle
-        # profile URL). NOT NULL + the unique test keep the manifest authoritative and
-        # give the warehouse coverage on the profile key. Uniqueness is enforced in the
-        # DB by the functional index `users_lower_handle_index` (lower(handle)); the dbt
-        # `unique` test guards the raw column.
         handle: %{null: false, dbt_tests: [:unique]},
         country_code: %{default: "ZA"},
         age_verified: %{default: false},
         consent_analytics: %{default: false},
         consent_writing_assistant: %{default: false},
-        # generated_always: true suppresses default and cast — Postgres generates this column.
+        syndication_default: %{default: true, null: false},
         onboarding_completed: %{generated_always: true},
         onboarding_steps: %{ecto_type: :map, default: %{}},
         notify_wishlist_availability: %{default: false},
@@ -283,22 +245,138 @@
         notify_group_invitations: %{default: true},
         notify_event_matches: %{default: false},
         email_confirmed: %{default: false},
-        # Security-sensitive fields — exclude from dbt analytics
         password_hash: %{dbt_exclude: true},
         password_reset_token: %{dbt_exclude: true},
         password_reset_sent_at: %{dbt_exclude: true},
         email_confirmation_token: %{dbt_exclude: true},
-        # Per-account login lockout counters (Issue #161) — security telemetry,
-        # exclude from dbt analytics to avoid leaking attack patterns downstream.
         failed_login_count: %{default: 0, null: false, dbt_exclude: true},
         failed_login_first_at: %{dbt_exclude: true},
         locked_until: %{dbt_exclude: true}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Books
-    # -------------------------------------------------------------------------
+    %{
+      proto_file: "stacks/common/v1/user.proto",
+      proto_message: "InviteCode",
+      table_name: "invite_codes",
+      schema_prefix: "op",
+      ecto_module: Stacks.Accounts.InviteCode,
+      ecto_path: "lib/stacks/gen/accounts/invite_code.ex",
+      dbt_path: "stg_invite_codes.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      dbt_grant: true,
+      indexes: [
+        %{name: "invite_codes_code_hash_index", columns: [:code_hash], unique: true},
+        %{name: "invite_codes_created_at_index", columns: [{:desc, :created_at}]}
+      ],
+      field_overrides: %{
+        code_hash: %{null: false, dbt_exclude: true},
+        code_prefix: %{null: false},
+        note: %{dbt_exclude: true},
+        invited_email: %{dbt_exclude: true},
+        max_uses: %{default: 1, null: false},
+        use_count: %{default: 0, null: false},
+        issued_by_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :nilify_all
+        },
+        redeemed_by_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :nilify_all
+        }
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/import.proto",
+      proto_message: "LibraryImport",
+      table_name: "library_imports",
+      schema_prefix: "op",
+      ecto_module: Stacks.Imports.LibraryImport,
+      ecto_path: "lib/stacks/gen/imports/library_import.ex",
+      dbt_path: "stg_library_imports.sql",
+      timestamps: :standard,
+      migration_exists: true,
+      dbt_grant: true,
+      indexes: [
+        %{
+          name: "library_imports_user_id_created_at_index",
+          columns: [:user_id, {:desc, :created_at}]
+        }
+      ],
+      field_overrides: %{
+        user_id: %{
+          belongs_to: Stacks.Accounts.User,
+          references_table: :users,
+          on_delete: :delete_all,
+          null: false
+        },
+        source: %{
+          default: "goodreads",
+          null: false,
+          dbt_tests: [{:accepted_values, ["goodreads"]}]
+        },
+        filename: %{dbt_exclude: true},
+        status: %{
+          default: "enqueued",
+          null: false,
+          dbt_tests: [{:accepted_values, ["enqueued", "running", "complete", "failed"]}]
+        },
+        row_count: %{default: 0, null: false},
+        processed_count: %{default: 0, null: false},
+        shelved_count: %{default: 0, null: false},
+        duplicate_count: %{default: 0, null: false},
+        unverified_count: %{default: 0, null: false},
+        unreadable_count: %{default: 0, null: false}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/import.proto",
+      proto_message: "LibraryImportRow",
+      table_name: "library_import_rows",
+      schema_prefix: "op",
+      ecto_module: Stacks.Imports.LibraryImportRow,
+      ecto_path: "lib/stacks/gen/imports/library_import_row.ex",
+      dbt_path: "stg_library_import_rows.sql",
+      timestamps: false,
+      migration_exists: true,
+      dbt_grant: false,
+      skip_dbt: true,
+      indexes: [
+        %{
+          name: "library_import_rows_import_id_row_number_index",
+          columns: [:import_id, :row_number],
+          unique: true
+        },
+        %{
+          name: "library_import_rows_import_id_outcome_index",
+          columns: [:import_id, :outcome]
+        }
+      ],
+      field_overrides: %{
+        import_id: %{
+          belongs_to: Stacks.Imports.LibraryImport,
+          references_table: :library_imports,
+          on_delete: :delete_all,
+          null: false
+        },
+        row_number: %{null: false},
+        raw_rating: %{default: 0, null: false},
+        raw_read_count: %{default: 0, null: false},
+        raw_owned_copies: %{default: 0, null: false},
+        book_id: %{
+          belongs_to: Stacks.Books.Book,
+          references_table: :books,
+          on_delete: :nilify_all
+        },
+        placement_id: %{
+          belongs_to: Stacks.Shelving.Placement,
+          references_table: :bookshelf_placements,
+          on_delete: :nilify_all
+        }
+      }
+    },
     %{
       proto_file: "stacks/common/v1/book.proto",
       proto_message: "Book",
@@ -326,7 +404,6 @@
         {:has_many, :editions, Stacks.Books.BookEdition, foreign_key: :book_id}
       ],
       field_overrides: %{
-        # DB fields
         title: %{null: false},
         author_id: %{belongs_to: Stacks.Books.Author},
         subjects: %{ecto_type: {:array, :string}, default: []},
@@ -335,7 +412,6 @@
           default: "public",
           dbt_tests: [{:accepted_values, ["public", "age_gated"]}]
         },
-        # API-only fields — no DB column, excluded from Ecto schema and dbt
         author: %{api_only: true},
         editions: %{api_only: true},
         edition_count: %{api_only: true},
@@ -388,7 +464,13 @@
           belongs_to: Stacks.Books.Book,
           dbt_tests: [{:relationships, "stg_books"}]
         },
-        is_primary: %{default: false}
+        is_primary: %{default: false},
+        verification_source: %{
+          null: false,
+          dbt_tests: [
+            {:accepted_values, ["open_library", "google_books", "barcode_unverified"]}
+          ]
+        }
       }
     },
     %{
@@ -412,7 +494,7 @@
           ]
         },
         storage_path: %{
-          dbt_tests: [:not_null]
+          dbt_exclude: true
         },
         book_ids: %{
           ecto_type: {:array, :binary_id},
@@ -427,10 +509,6 @@
         user_id: %{ecto_type: :binary_id, belongs_to: Stacks.Accounts.User}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Shelving
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/placement.proto",
       proto_message: "Shelf",
@@ -486,11 +564,6 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
-        # Issue #112 punch #4: explicit referential-integrity tests in the
-        # warehouse. Auto-inferred relationships are off by design (unreliable
-        # ref names), but these two joins are the ones every placement mart
-        # denormalises through, so an orphan here silently drops rows from
-        # mart_community_read_count rather than erroring.
         book_id: %{
           belongs_to: Stacks.Books.Book,
           dbt_tests: [{:relationships, "stg_books"}]
@@ -500,14 +573,26 @@
           dbt_tests: [{:relationships, "stg_bookshelves"}]
         },
         shelf_id: %{belongs_to: Stacks.Shelving.Shelf},
+        book_edition_id: %{
+          belongs_to: Stacks.Books.BookEdition,
+          references_table: :book_editions,
+          on_delete: :nilify_all,
+          dbt_tests: [{:relationships, "stg_book_editions"}]
+        },
         formats: %{ecto_type: {:array, :string}, default: []},
+        source: %{
+          default: "manual",
+          null: false,
+          dbt_tests: [{:accepted_values, ["manual", "upload", "goodreads_import"]}]
+        },
         visibility: %{default: "owner"},
         reading_status: %{
           dbt_tests: [
             :not_null,
             {:accepted_values, ["to_read", "reading", "completed", "abandoned"]}
           ]
-        }
+        },
+        notes: %{dbt_exclude: true}
       }
     },
     %{
@@ -523,16 +608,6 @@
       dbt_grant: true,
       indexes: [],
       field_overrides: %{
-        # Issue #116 punch #13: warehouse referential-integrity tests for the
-        # move-history model. These columns store bookshelf/book UUIDs
-        # (Shelving.do_move_book/3 writes from_bookshelf.id / to_bookshelf.id /
-        # placement.book_id) but carry NO database FK — the table is an
-        # append-only audit trail, deliberately decoupled from op-schema
-        # lifecycle so a bookshelf/book delete never cascades away its history.
-        # That makes these dbt relationships tests the ONLY orphan check on the
-        # history model. `ecto_type: :binary_id` (not belongs_to) keeps it FK-free.
-        # dbt's built-in relationships test filters `where <col> is not null`, so
-        # any future null-source rows won't false-fail.
         book_id: %{ecto_type: :binary_id, dbt_tests: [{:relationships, "stg_books"}]},
         from_bookshelf: %{
           ecto_type: :binary_id,
@@ -541,10 +616,6 @@
         to_bookshelf: %{ecto_type: :binary_id, dbt_tests: [{:relationships, "stg_bookshelves"}]}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Blog
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BlogPost",
@@ -566,7 +637,8 @@
         :visibility_group_id,
         :published_at,
         :created_at,
-        :updated_at
+        :updated_at,
+        :syndicated
       ],
       associations: [
         {:has_many, :book_associations, Stacks.Blog.PostBookAssociation, foreign_key: :post_id}
@@ -576,13 +648,9 @@
         visibility: %{default: "owner"},
         visibility_group_id: %{belongs_to: Stacks.Social.Group},
         published_at: %{ecto_type: :utc_datetime_usec},
-        # API-only fields — no DB column, excluded from Ecto schema and dbt
+        syndicated: %{default: true, null: false},
         associations: %{api_only: true},
-        # Denormalised projection of the author's users.display_name (block-user
-        # confirmation label). Serialized from post.user, never stored on blog_posts.
         author_display_name: %{api_only: true},
-        # Denormalised projection of the author's users.handle (link the author
-        # name to their public profile). Serialized from post.user, never stored.
         author_handle: %{api_only: true}
       }
     },
@@ -613,9 +681,52 @@
         book_id: %{belongs_to: Stacks.Books.Book},
         source: %{default: "llm"},
         visible: %{default: true},
-        # API-only fields — no DB column, excluded from Ecto schema and dbt
         book_title: %{api_only: true},
         status: %{api_only: true}
+      }
+    },
+    %{
+      proto_file: "stacks/common/v1/blog.proto",
+      proto_message: "PostSyndication",
+      table_name: "post_syndications",
+      schema_prefix: "op",
+      ecto_module: Stacks.Blog.PostSyndication,
+      ecto_path: "lib/stacks/gen/blog/post_syndication.ex",
+      dbt_path: "stg_post_syndications.sql",
+      timestamps: {:standard, updated_at: false},
+      migration_exists: true,
+      # Warehouse-safe by construction: ids, a target, a method, two URLs and a
+      # timestamp — no free text. The canonical URL embeds the post UUID, not a
+      # title-derived slug (story §11: a slug in the warehouse would be title
+      # text in the warehouse; revisit if slugs ever land).
+      dbt_grant: true,
+      indexes: [],
+      derive_jason: [
+        :id,
+        :post_id,
+        :target,
+        :method,
+        :canonical_url,
+        :syndicated_url,
+        :created_at
+      ],
+      field_overrides: %{
+        post_id: %{
+          belongs_to: Stacks.Blog.Post,
+          references_table: :blog_posts,
+          on_delete: :delete_all,
+          null: false
+        },
+        target: %{
+          default: "substack",
+          null: false,
+          dbt_tests: [{:accepted_values, ["substack"]}]
+        },
+        method: %{
+          null: false,
+          dbt_tests: [{:accepted_values, ["rss", "export"]}]
+        },
+        canonical_url: %{null: false}
       }
     },
     %{
@@ -646,10 +757,6 @@
         created_at: %{ecto_type: :utc_datetime_usec, default: {:fragment, "NOW()"}}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Costs
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/costs.proto",
       proto_message: "PlatformCost",
@@ -666,10 +773,6 @@
         currency: %{default: "USD"}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Social
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/social.proto",
       proto_message: "Group",
@@ -788,10 +891,6 @@
         blocked_id: %{belongs_to: Stacks.Accounts.User}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Marketplace
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/listing.proto",
       proto_message: "Listing",
@@ -829,7 +928,6 @@
         listed_at: %{ecto_type: :utc_datetime_usec},
         expires_at: %{ecto_type: :utc_datetime_usec},
         sold_at: %{ecto_type: :utc_datetime_usec},
-        # API-only fields — no DB column, excluded from Ecto schema and dbt
         book: %{api_only: true}
       }
     },
@@ -925,10 +1023,6 @@
         payment_status: %{default: "pending"}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Enrichment
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/enrichment.proto",
       proto_message: "DiscoveredSource",
@@ -943,7 +1037,6 @@
       indexes: [],
       field_overrides: %{
         config_generated: %{ecto_type: :map},
-        # PII — exclude from dbt analytics
         exclusion_email: %{dbt_exclude: true}
       }
     },
@@ -974,7 +1067,12 @@
       timestamps: :standard,
       migration_exists: true,
       dbt_grant: true,
-      indexes: [],
+      indexes: [
+        %{
+          name: "idx_bookstores_lat_lng",
+          columns: [:latitude, :longitude]
+        }
+      ],
       field_overrides: %{
         has_physical: %{default: false},
         country_code: %{default: "ZA"}
@@ -994,6 +1092,7 @@
       indexes: [],
       field_overrides: %{
         book_id: %{belongs_to: Stacks.Books.Book},
+        book_edition_id: %{belongs_to: Stacks.Books.BookEdition, null: false},
         store_id: %{belongs_to: Stacks.Enrichment.Bookstore},
         currency: %{default: "ZAR"}
       }
@@ -1026,7 +1125,12 @@
       timestamps: :standard,
       migration_exists: true,
       dbt_grant: true,
-      indexes: [],
+      indexes: [
+        %{
+          name: "idx_third_spaces_lat_lng",
+          columns: [:latitude, :longitude]
+        }
+      ],
       field_overrides: %{
         country_code: %{default: "ZA"},
         verified: %{default: false},
@@ -1050,26 +1154,6 @@
         related_authors: %{ecto_type: {:array, :string}}
       }
     },
-
-    # -------------------------------------------------------------------------
-    # Writing Assistant / Embeddings (Issue #183 — GDPR data-model foundation)
-    #
-    # Ownership + erasure classification (see docs/decisions/017):
-    #   embeddings, blog_assistant_sessions, turn_feedback, retrieval_log,
-    #   user_book_content_access  — PERSONAL, cascade-deleted on user erasure
-    #     (every user_id / session_id FK is on_delete: :delete_all, so a single
-    #      `Repo.delete(user)` in Stacks.GDPR.Deletion reaches them).
-    #   book_content_chunks       — SHARED, NON-personal, PRESERVED by erasure
-    #     (NO user_id column — nothing to erase; book_id FK only).
-    #
-    # embeddings + book_content_chunks carry a pgvector `vector(1024)` column
-    # that proto CANNOT express. They therefore use `skip_ecto: true` (schema is
-    # hand-written with the Pgvector.Ecto.Vector field, outside gen/) and
-    # `migration_exists: true` (CREATE EXTENSION + table + vector col + HNSW
-    # index are in a hand-written migration). proto.sync still enforces, via
-    # --check, that every SCALAR proto field appears as a column in that
-    # migration; the vector column is invisible to the codegen path.
-    # -------------------------------------------------------------------------
     %{
       proto_file: "stacks/common/v1/writing_assistant.proto",
       proto_message: "BlogAssistantSession",
@@ -1091,7 +1175,6 @@
         },
         status: %{default: "active", null: false},
         started_at: %{ecto_type: :utc_datetime_usec},
-        # User free-text topic/prompt — PII-adjacent. Exclude from dbt analytics.
         topic: %{dbt_exclude: true}
       }
     },
@@ -1116,7 +1199,6 @@
         },
         turn_index: %{null: false},
         rating: %{dbt_tests: [{:accepted_values, ["up", "down"]}]},
-        # User free-text comment — PII. Exclude from dbt analytics (mirrors retrieval_log.query).
         comment: %{dbt_exclude: true}
       }
     },
@@ -1139,7 +1221,6 @@
           on_delete: :delete_all,
           null: false
         },
-        # User free-text query — PII-adjacent. Exclude from dbt analytics.
         query: %{dbt_exclude: true},
         retrieved_ids: %{ecto_type: {:array, :binary_id}, default: []},
         scores: %{default: []}
@@ -1174,16 +1255,11 @@
         granted_at: %{ecto_type: :utc_datetime_usec}
       }
     },
-    # embeddings + book_content_chunks: hand-written migration + schema (pgvector
-    # vector(1024) column). skip_ecto keeps the Pgvector schema out of gen/;
-    # migration_exists keeps the CREATE EXTENSION / vector / HNSW migration
-    # hand-written. --check still verifies scalar columns are present.
     %{
       proto_file: "stacks/common/v1/writing_assistant.proto",
       proto_message: "Embedding",
       table_name: "embeddings",
       schema_prefix: "op",
-      # Hand-written (skip_ecto) — carries `field :embedding, Pgvector.Ecto.Vector`.
       ecto_module: Stacks.WritingAssistant.Embedding,
       ecto_path: "lib/stacks/writing_assistant/embedding.ex",
       dbt_path: "stg_embeddings.sql",
@@ -1209,8 +1285,6 @@
       proto_message: "BookContentChunk",
       table_name: "book_content_chunks",
       schema_prefix: "op",
-      # Hand-written (skip_ecto) — carries `field :embedding, Pgvector.Ecto.Vector`.
-      # SHARED, NON-personal: no user_id column ⇒ preserved by erasure.
       ecto_module: Stacks.WritingAssistant.BookContentChunk,
       ecto_path: "lib/stacks/writing_assistant/book_content_chunk.ex",
       dbt_path: "stg_book_content_chunks.sql",
@@ -1231,13 +1305,6 @@
       }
     }
   ],
-
-  # -------------------------------------------------------------------------
-  # ProtoJSON.Gen — base serializer functions generated from proto messages.
-  # Each entry produces a function in StacksWeb.ProtoJSON.Gen that extracts
-  # all proto fields from an Ecto struct. The hand-written ProtoJSON module
-  # composes these with business logic (field subsetting, computed fields).
-  # -------------------------------------------------------------------------
   proto_json: [
     %{
       proto_file: "stacks/common/v1/book.proto",
@@ -1269,8 +1336,6 @@
         :email_confirmation_token,
         :password_reset_token,
         :password_reset_sent_at,
-        # Per-account lockout counters (Issue #161) — internal security state,
-        # never exposed in user JSON responses.
         :failed_login_count,
         :failed_login_first_at,
         :locked_until
@@ -1288,8 +1353,6 @@
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BlogPost",
       function_name: :blog_post,
-      # author_display_name and author_handle are projected from post.user by
-      # ProtoJSON.blog_post/1, not struct fields (api_only) — skip in base Gen.
       skip_fields: [:associations, :author_display_name, :author_handle],
       field_overrides: %{}
     },
@@ -1297,7 +1360,6 @@
       proto_file: "stacks/common/v1/blog.proto",
       proto_message: "BookAssociation",
       function_name: :book_association,
-      # book_title, status, created_at are computed by ProtoJSON, not struct fields
       skip_fields: [:post_id, :book_title, :status, :created_at],
       field_overrides: %{}
     },

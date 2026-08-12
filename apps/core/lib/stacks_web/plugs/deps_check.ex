@@ -1,32 +1,12 @@
 defmodule StacksWeb.Plugs.DepsCheck do
   @moduledoc """
-  Synthetic dependency probe for the SLO gate.
-
-  Handles `GET /internal/deps-check` at the endpoint level (before the
-  router) and synchronously exercises the in-cluster dependencies that
-  otherwise have no synthetic coverage:
-
-    * SearXNG — only invoked as a fallback from
-      `Stacks.Workers.SourceDiscoveryJob`. A fresh deploy with no real
-      traffic exercising that fallback path leaves the `searxng_fuse`
-      circuit breaker in its initial healthy state regardless of whether
-      SearXNG actually works, so the existing `searxng_fuse_open` SLI has
-      a cold-start blind spot. This probe closes it.
-
-  Bearer-auth is provided upstream by `StacksWeb.Plugs.MetricsAuth`, which
-  guards every `/internal/*` path with the shared `METRICS_SCRAPE_TOKEN`.
-  This plug assumes auth has already passed.
-
-  ## Response shape
-
-  JSON body always, status code carries the aggregate result:
-
-      200 {"searxng": "ok"}
-      503 {"searxng": "error:url_not_configured"}
-
-  Individual dep keys mirror the client module names so operators can add
-  new deps (Brave, Open Library, vision, scraper) by appending to
-  `@deps` without touching the response contract.
+      Synthetic dependency probe for the SLO gate: `GET /internal/deps-check`
+      (handled at the endpoint, before the router) synchronously exercises
+      in-cluster deps with no other synthetic coverage — today SearXNG, whose
+      fuse sits in its healthy initial state on a fresh deploy whether or not
+      SearXNG works (the cold-start blind spot this closes). Assumes
+      `MetricsAuth` has already passed upstream. JSON body always; the status
+      code carries the aggregate (200 all-ok / 503 any-failed).
   """
 
   @behaviour Plug
@@ -62,10 +42,6 @@ defmodule StacksWeb.Plugs.DepsCheck do
     ]
   end
 
-  # SearXNG: a tiny query with `limit: 1` exercises the real HTTP path and
-  # keeps response-body parsing cost minimal. A failure returns
-  # `error:<reason>` so operators can tell "not configured" (deploy gap)
-  # from "unreachable" (Fly networking gap) without opening the container.
   defp check_searxng do
     case searxng_client().search("probe", limit: 1) do
       {:ok, _results} ->

@@ -3,48 +3,61 @@ module Page.Bookshelf exposing
     , Model
     , Msg(..)
     , OutMsg(..)
+    , Removal
+    , UndoToast(..)
     , antiLibraryConfig
     , init
     , libraryConfig
+    , mutationToken
     , profileConfig
     , requestKey
+    , undoToastMillis
     , update
     , view
     , wishListConfig
+    , withPendingUndo
     )
 
 import Api
+import Browser.Dom
 import Components.AgeGate exposing (ageGate)
 import Components.BookList as BookList
 import Components.RSSLink as RSSLink
+import Components.ShelfOrganiser as ShelfOrganiser
 import Components.Spine exposing (WearLevel(..))
 import Components.ViewModeToggle as ViewModeToggle exposing (ShelfViewMode(..))
-import Html exposing (Html, a, div, p, text)
-import Html.Attributes exposing (attribute, class, href)
+import Html exposing (Html, a, button, div, h2, p, text)
+import Html.Attributes exposing (attribute, class, disabled, href)
+import Html.Events exposing (onClick)
 import Http
 import Navigation.Route exposing (Route(..))
+import Page.Bookshelf.GridNav as GridNav
 import Page.Bookshelf.Helpers
     exposing
         ( groupIntoRows
         , minShelfRows
+        , placementSpineWidth
         , viewBookcase
         , viewEmptyShelfMessage
+        , viewLoadingShelfRows
         , viewShelfLabel
         , viewShelfRowClickable
         )
+import Process
+import Task
 import Types.Book exposing (Book)
 import Types.RemoteData exposing (RemoteData(..))
 import Types.Shelf exposing (BookshelfResponse, Shelf)
 import Util.TestId exposing (testId)
 
 
-{-| Configuration that differs between bookshelf pages.
-Everything else (model, update, view structure) is identical.
+{-| Configuration that differs between bookshelf pages; everything else is
+identical. `readOnly` is the browse mode for another reader's shelf
+(`/u/:handle/:bookshelf_name`): profile-endpoint fetch, all mutating
+affordances stripped.
 
-`readOnly` toggles the browse mode used when viewing _another_ reader's shelf at
-`/u/:handle/:bookshelf_name`: the fetch targets the profile endpoint (via
-`profileHandle`) and all mutating affordances (add shelf, RSS feed, the
-per-placement visibility / move / remove controls) are stripped. See US-10.5.3.
+⚠️ Read-only is enforced at `mutationToken` (the credential source),
+not just in the view — hiding a control is presentation, not security.
 
 -}
 type alias Config =
@@ -134,10 +147,6 @@ profileConfig handle bookshelfName =
     }
 
 
-
--- MODEL
-
-
 type alias Model =
     { shelves : RemoteData Http.Error (List Shelf)
     , showAgeGate : Bool
@@ -148,7 +157,45 @@ type alias Model =
     , viewMode : ShelfViewMode
     , sortState : BookList.SortState
     , token : Maybe String
+    , organiser : ShelfOrganiser.State
+    , organiserBusy : Bool
+    , organiserError : Maybe String
+    , undoToast : UndoToast
+    , focusedSpine : Maybe String
     }
+
+
+{-| The removal an Undo would reverse.
+
+`placementId` is the id of the row `DELETE /api/placements/:id` soft-deleted —
+not the book's id — because the undo restores **that row**, keeping its
+`placed_at`, formats, rating and notes. Passing a book id here would force the
+server to guess which of a book's placements was meant.
+
+-}
+type alias Removal =
+    { placementId : String
+    , bookTitle : String
+    }
+
+
+{-| The four states the undo affordance can be in, as one type rather than a
+`Maybe Removal` plus a `Bool` plus a `Maybe String` — that trio can spell
+"restoring a removal that isn't there" and "offered and failed at once", and
+neither is a state this page has any answer for.
+
+`ToastOffered` is the only one `UndoRemove` acts on. That matters for the timer:
+`Process.sleep` cannot be cancelled, so the expiry message always arrives, and
+the only thing stopping it from wiping a request already in flight (or the
+failure the reader still needs to read) is that `ToastExpired` matches
+`ToastOffered` and nothing else.
+
+-}
+type UndoToast
+    = ToastHidden
+    | ToastOffered Removal
+    | ToastRestoring Removal
+    | ToastFailed String
 
 
 type OutMsg
@@ -163,7 +210,7 @@ Library, Antilibrary and Wish List all render through this one module and all
 sit behind Main.elm's single `PageBookshelf` constructor, so Main's
 constructor-match cannot tell them apart: a response for the shelf the user has
 just left is still delivered to the shelf they landed on. Tagging the message
-with the requesting config lets `update` drop it (Issue #274, US-1.2.5).
+with the requesting config lets `update` drop it.
 
 The handle is part of the key because the same `apiName` is also fetched in
 read-only mode for another reader's profile shelf — `/library` and
@@ -187,33 +234,39 @@ type Msg
     | RSSLinkMsg RSSLink.Msg
     | ViewModeChanged ShelfViewMode
     | SortColumnClicked BookList.SortColumn
+    | OrganiserMsg ShelfOrganiser.Msg
+    | ShelfMutated (Result Http.Error ())
+    | UndoRemove
+    | UndoCompleted (Result Http.Error ())
+    | ToastExpired
+    | SpineNavKey String GridNav.Key
+    | SpineFocusAttempted
 
 
 init : Config -> Maybe String -> String -> ( Model, Cmd Msg )
 init config maybeToken userId =
     let
-        apiCmd =
+        ( apiCmd, initialShelves ) =
             case ( config.readOnly, config.profileHandle ) of
                 ( True, Just handle ) ->
-                    -- Browsing another reader's shelf: optional-auth GET so the
-                    -- backend visibility-filters against the viewer (even anon).
-                    -- The read-only path never renders RSS, so the profile
-                    -- payload carries no visibility; default it to "owner" to
-                    -- reuse the shared ShelvesLoaded response shape.
-                    Api.getProfileShelf maybeToken
+                    ( Api.getProfileShelf maybeToken
                         handle
                         config.apiName
                         (ShelvesLoaded (requestKey config) << Result.map (\shelves -> { shelves = shelves, visibility = "owner" }))
+                    , Loading
+                    )
 
                 _ ->
                     case maybeToken of
                         Just token ->
-                            Api.getBookshelf config.apiName token (ShelvesLoaded (requestKey config))
+                            ( Api.getBookshelf config.apiName token (ShelvesLoaded (requestKey config))
+                            , Loading
+                            )
 
                         Nothing ->
-                            Cmd.none
+                            ( Cmd.none, NotAsked )
     in
-    ( { shelves = Loading
+    ( { shelves = initialShelves
       , showAgeGate = False
       , config = config
       , userId = userId
@@ -226,13 +279,48 @@ init config maybeToken userId =
       , viewMode = SpineView
       , sortState = { column = BookList.Title, direction = BookList.Asc }
       , token = maybeToken
+      , organiser = ShelfOrganiser.init
+      , organiserBusy = False
+      , organiserError = Nothing
+      , undoToast = ToastHidden
+      , focusedSpine = Nothing
       }
     , apiCmd
     )
 
 
+{-| How long the "Removed — Undo" toast stays offered, in milliseconds.
 
--- UPDATE
+Exposed so a test can state the number it is asserting about rather than
+re-typing it, and so the number lives next to the thing it governs.
+
+-}
+undoToastMillis : Float
+undoToastMillis =
+    8000
+
+
+{-| Offer an undo on a page just built for a reader arriving straight off
+a removal. Applied by `Main` AFTER `init`, deliberately — the undo
+is not part of building a bookshelf, and a fourth argument would make
+ten call sites pass `Nothing` forever. Composing over `( Model, Cmd)`
+keeps the arrival-only concern at the one site where it can be true.
+-}
+withPendingUndo : Maybe Removal -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+withPendingUndo maybeRemoval ( model, cmd ) =
+    case maybeRemoval of
+        Just removal ->
+            ( { model | undoToast = ToastOffered removal }
+            , Cmd.batch [ cmd, expireToastAfterDelay ]
+            )
+
+        Nothing ->
+            ( model, cmd )
+
+
+expireToastAfterDelay : Cmd Msg
+expireToastAfterDelay =
+    Process.sleep undoToastMillis |> Task.perform (\_ -> ToastExpired)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg, OutMsg )
@@ -240,12 +328,6 @@ update msg model =
     case msg of
         ShelvesLoaded key result ->
             if key /= requestKey model.config then
-                -- Stale: this response belongs to a bookshelf the user has since
-                -- navigated away from. Because Library / Antilibrary / Wish List
-                -- share Main's single `PageBookshelf` constructor, it still lands
-                -- here — applying it would paint the previous shelf's books onto
-                -- this one (Issue #274). Drop it; this page's own request is still
-                -- in flight and will resolve on its own.
                 ( model, Cmd.none, NoOut )
 
             else
@@ -274,8 +356,6 @@ update msg model =
 
         BookClicked bk ->
             if model.config.readOnly then
-                -- Read-only browse is look-only (US-10.5.3): a spine click must not
-                -- escape into the viewer's OWN owner-mode BookDetail (Add/move/remove).
                 ( model, Cmd.none, NoOut )
 
             else
@@ -303,9 +383,298 @@ update msg model =
             in
             ( { model | sortState = { column = column, direction = newDirection } }, Cmd.none, NoOut )
 
+        OrganiserMsg subMsg ->
+            handleOrganiser subMsg model
+
+        ShelfMutated (Ok ()) ->
+            ( { model | organiserBusy = False, organiserError = Nothing }
+            , reloadShelves model
+            , NoOut
+            )
+
+        ShelfMutated (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | organiserBusy = False, organiserError = Just (mutationError err) }
+                , reloadShelves model
+                , NoOut
+                )
+
+        UndoRemove ->
+            case ( model.undoToast, mutationToken model ) of
+                ( ToastOffered removal, Just token ) ->
+                    ( { model | undoToast = ToastRestoring removal }
+                    , Api.restoreBook removal.placementId token UndoCompleted
+                    , NoOut
+                    )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        UndoCompleted (Ok ()) ->
+            ( { model | undoToast = ToastHidden }
+            , reloadShelves model
+            , NoOut
+            )
+
+        UndoCompleted (Err err) ->
+            if Api.isUnauthorized err then
+                ( model, Cmd.none, SessionExpired )
+
+            else
+                ( { model | undoToast = ToastFailed (undoError model.config err) }
+                , Cmd.none
+                , NoOut
+                )
+
+        ToastExpired ->
+            case model.undoToast of
+                ToastOffered _ ->
+                    ( { model | undoToast = ToastHidden }, Cmd.none, NoOut )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        SpineNavKey originId key ->
+            case model.shelves of
+                Success shelves ->
+                    case GridNav.nextFocus key originId (navRows shelves) of
+                        Just nextId ->
+                            ( { model | focusedSpine = Just nextId }
+                            , Task.attempt (\_ -> SpineFocusAttempted)
+                                (Browser.Dom.focus ("spine-" ++ nextId))
+                            , NoOut
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none, NoOut )
+
+                _ ->
+                    ( model, Cmd.none, NoOut )
+
+        SpineFocusAttempted ->
+            ( model, Cmd.none, NoOut )
 
 
--- VIEW
+{-| The packed rows as `GridNav` reasons about them: the SAME grouping the
+SpineView renders, each spine as ( book id, the width the packer gave it).
+-}
+navRows : List Shelf -> List (List ( String, Int ))
+navRows shelves =
+    List.concatMap .placements shelves
+        |> groupIntoRows bookcaseInnerWidth
+        |> List.map
+            (List.map
+                (\placement ->
+                    ( placement.book |> Maybe.map .id |> Maybe.withDefault ""
+                    , placementSpineWidth placement
+                    )
+                )
+            )
+
+
+{-| The credential a MUTATING organiser branch requires. `Nothing` whenever
+the page is read-only — whatever token the viewer carries — so every
+`Just token` branch is unselectable and dispatch falls to the silent
+catch-all.
+
+⚠️ THE enforcement point for read-only, deliberately one place: it used
+to be `model.token`, and only view-level hiding stood between a viewer
+and mutating someone else's shelf. `read_only_undo_is_inert_SECURITY`
+pins it.
+
+-}
+mutationToken : Model -> Maybe String
+mutationToken model =
+    if model.config.readOnly then
+        Nothing
+
+    else
+        model.token
+
+
+{-| Shelf organisation, split out so `update` stays flat.
+
+Reorders are **optimistic** — the row moves immediately and the full order is sent — because
+a reorder with a round trip of latency before anything moves feels broken. Create and delete
+are not optimistic: both change positions the server assigns, so guessing would show a
+number that is about to change.
+
+Dispatches on `mutationToken` rather than `model.token`: see above for why the
+difference matters. The drag-state branches match `_` because tracking which row is
+mid-drag is local bookkeeping, not a mutation — a read-only page may hold a drag it
+can never complete, because `DropOn` needs the credential it does not have.
+
+-}
+handleOrganiser : ShelfOrganiser.Msg -> Model -> ( Model, Cmd Msg, OutMsg )
+handleOrganiser subMsg model =
+    case ( subMsg, mutationToken model, model.shelves ) of
+        ( ShelfOrganiser.AddShelf, Just token, _ ) ->
+            ( { model | organiserBusy = True }
+            , Api.createShelf model.config.apiName token ShelfMutated
+            , NoOut
+            )
+
+        ( ShelfOrganiser.RemoveShelf id, Just token, _ ) ->
+            ( { model | organiserBusy = True }
+            , Api.deleteShelf id token ShelfMutated
+            , NoOut
+            )
+
+        ( ShelfOrganiser.MoveUp id, Just token, Success shelves ) ->
+            persistOrder (ShelfOrganiser.moveUp id shelves) token model
+
+        ( ShelfOrganiser.MoveDown id, Just token, Success shelves ) ->
+            persistOrder (ShelfOrganiser.moveDown id shelves) token model
+
+        ( ShelfOrganiser.DragStart id, _, _ ) ->
+            ( { model | organiser = { dragging = Just id } }, Cmd.none, NoOut )
+
+        ( ShelfOrganiser.DragEnd, _, _ ) ->
+            ( { model | organiser = { dragging = Nothing } }, Cmd.none, NoOut )
+
+        ( ShelfOrganiser.DragOver, _, _ ) ->
+            ( model, Cmd.none, NoOut )
+
+        ( ShelfOrganiser.DropOn targetId, Just token, Success shelves ) ->
+            case model.organiser.dragging of
+                Just draggedId ->
+                    persistOrder
+                        (moveToId draggedId targetId shelves)
+                        token
+                        { model | organiser = { dragging = Nothing } }
+
+                Nothing ->
+                    ( model, Cmd.none, NoOut )
+
+        _ ->
+            ( model, Cmd.none, NoOut )
+
+
+{-| Apply an already-computed order locally and persist the whole list.
+-}
+persistOrder : List Shelf -> String -> Model -> ( Model, Cmd Msg, OutMsg )
+persistOrder reordered token model =
+    ( { model | shelves = Success reordered, organiserBusy = True, organiserError = Nothing }
+    , Api.reorderShelves
+        model.config.apiName
+        (ShelfOrganiser.orderedIds reordered)
+        token
+        ShelfMutated
+    , NoOut
+    )
+
+
+{-| Move `draggedId` to wherever `targetId` currently sits.
+-}
+moveToId : String -> String -> List Shelf -> List Shelf
+moveToId draggedId targetId shelves =
+    let
+        indexOf id =
+            shelves
+                |> List.indexedMap (\i shelf -> ( i, shelf.id ))
+                |> List.filter (\( _, shelfId ) -> shelfId == id)
+                |> List.head
+                |> Maybe.map Tuple.first
+    in
+    case ( indexOf draggedId, indexOf targetId ) of
+        ( Just from, Just to ) ->
+            ShelfOrganiser.moveTo from to shelves
+
+        _ ->
+            shelves
+
+
+{-| Refetch after a shelf mutation — via `getBookshelf`, the SAME call as
+the initial load, which is the point: the old `Api.getShelves` payload
+carried a hardcoded empty `placements` per shelf, so every shelf
+mutation repainted the bookcase placement-less (nineteen books vanished;
+the organiser called a full shelf "empty"). One endpoint, one shape,
+no lying refetch.
+-}
+reloadShelves : Model -> Cmd Msg
+reloadShelves model =
+    case model.token of
+        Just token ->
+            Api.getBookshelf model.config.apiName token (ShelvesLoaded (requestKey model.config))
+
+        Nothing ->
+            Cmd.none
+
+
+{-| A load failure in the reader's terms. The two cases split from
+the generic copy are the two the reader can act on — `Timeout` (names
+the wait) and `Offline` (names the cause) — and both only became
+REACHABLE with this issue's timeout: a stalled connection used to sit in
+`Loading` forever.
+-}
+loadError : Config -> Http.Error -> String
+loadError config err =
+    let
+        shelf =
+            String.toLower config.label
+    in
+    case err of
+        Http.Timeout ->
+            "Your " ++ shelf ++ " is taking too long to arrive. The library may be busy — please try again."
+
+        Http.NetworkError ->
+            "The library is unreachable. Your "
+                ++ shelf
+                ++ " will reload by itself as soon as the connection returns."
+
+        _ ->
+            "Could not load your " ++ shelf ++ ". Please try again."
+
+
+{-| A failed undo in the reader's terms.
+
+Split from `mutationError` because every case here says something different.
+The 409 in particular is not an error at all from where the reader is standing —
+they re-added the book themselves, so the shelf already looks the way pressing
+Undo would have made it look, and the message says so instead of apologising.
+
+-}
+undoError : Config -> Http.Error -> String
+undoError config err =
+    case err of
+        Http.BadStatus 409 ->
+            "That book is already back on your " ++ config.label ++ "."
+
+        Http.BadStatus 404 ->
+            "That book is no longer in your collection, so there is nothing to put back."
+
+        Http.BadStatus 403 ->
+            "That removal is not yours to undo."
+
+        Http.Timeout ->
+            "Putting that book back is taking too long. The library may be busy — please try again."
+
+        Http.NetworkError ->
+            "The library is unreachable, so that book stayed removed. Check your connection."
+
+        _ ->
+            "Could not put that book back. Please try again."
+
+
+{-| A mutation failure in the reader's terms.
+-}
+mutationError : Http.Error -> String
+mutationError err =
+    case err of
+        Http.BadStatus 422 ->
+            "That shelf still has books on it. Move them elsewhere first."
+
+        Http.BadStatus 403 ->
+            "That shelf is not yours to change."
+
+        Http.BadStatus 404 ->
+            "That shelf no longer exists."
+
+        _ ->
+            "Could not save that change. Please try again."
 
 
 view : Model -> Html Msg
@@ -319,12 +688,11 @@ view model =
         , div [ class "lighting" ] []
         , div [ class "shelf-room" ]
             (viewReadOnlyAttribution cfg
-                ++ [ div [ class "shelf-room__header" ]
+                ++ [ viewUndoToast model
+                   , div [ class "shelf-room__header" ]
                         (viewShelfLabel cfg.label
                             :: ViewModeToggle.view model.viewMode ViewModeChanged
                             :: (if cfg.readOnly then
-                                    -- The RSS feed link is an owner affordance; a viewer
-                                    -- browsing another reader's shelf gets no feed control.
                                     []
 
                                 else
@@ -350,16 +718,16 @@ view model =
                                     viewBookshelfFromShelves model []
 
                                 Loading ->
-                                    viewBookshelfFromShelves model []
+                                    viewLoadingBookshelf model
 
-                                Failure _ ->
+                                Failure err ->
                                     if cfg.readOnly then
                                         p [ class "shelf-unavailable", testId "shelf-unavailable" ]
                                             [ text "Reader not found, or this shelf isn't available." ]
 
                                     else
-                                        p [ class "error" ]
-                                            [ text ("Could not load your " ++ String.toLower cfg.label ++ ". Please try again.") ]
+                                        p [ class "error", testId "shelf-error" ]
+                                            [ text (loadError cfg err) ]
 
                                 Success shelves ->
                                     let
@@ -377,11 +745,93 @@ view model =
         ]
 
 
+{-| The "Removed — Undo" toast. Hidden under `readOnly` as the
+SECOND line of defence: deleting this branch would make the page look
+wrong, not act wrong — `mutationToken` in `UndoRemove` is what makes a
+viewer's undo inert, and `read_only_undo_is_inert_SECURITY` asserts
+that with the view out of the picture.
+-}
+viewUndoToast : Model -> Html Msg
+viewUndoToast model =
+    if model.config.readOnly then
+        text ""
+
+    else
+        case model.undoToast of
+            ToastHidden ->
+                text ""
+
+            ToastOffered removal ->
+                div [ class "undo-toast", testId "undo-toast", attribute "role" "status", attribute "aria-live" "polite" ]
+                    [ p [ class "undo-toast__message" ]
+                        [ text ("Removed “" ++ removal.bookTitle ++ "”.") ]
+                    , button
+                        [ class "undo-toast__action"
+                        , testId "undo-remove"
+                        , onClick UndoRemove
+                        ]
+                        [ text "Undo" ]
+                    ]
+
+            ToastRestoring removal ->
+                div [ class "undo-toast", testId "undo-toast", attribute "role" "status", attribute "aria-live" "polite" ]
+                    [ p [ class "undo-toast__message" ]
+                        [ text ("Putting “" ++ removal.bookTitle ++ "” back…") ]
+                    , button
+                        [ class "undo-toast__action"
+                        , testId "undo-remove"
+                        , disabled True
+                        ]
+                        [ text "Undo" ]
+                    ]
+
+            ToastFailed message ->
+                div
+                    [ class "undo-toast undo-toast--failed"
+                    , testId "undo-toast-error"
+                    , attribute "role" "status"
+                    , attribute "aria-live" "polite"
+                    ]
+                    [ p [ class "undo-toast__message" ] [ text message ] ]
+
+
 viewEmptyBookshelf : Model -> Html Msg
 viewEmptyBookshelf model =
     div [ class "bookshelf", testId "bookshelf-empty" ]
         [ viewBookcase
             (minShelfRows 4 [ viewEmptyShelfMessage model.config.emptyMessage ])
+        ]
+
+
+{-| The shelves are on their way.
+
+⛔ `Loading` used to share `NotAsked`'s empty-bookcase render — which is
+also what `Success []` looks like: three facts, one picture. Offline
+shelf navigation told the reader their library was empty when the
+request simply never completed. Loading now has its own visibly-waiting
+render, distinct from a genuinely empty shelf.
+
+-}
+viewLoadingBookshelf : Model -> Html Msg
+viewLoadingBookshelf model =
+    let
+        whose =
+            case model.config.profileHandle of
+                Just handle ->
+                    "@" ++ handle ++ "’s "
+
+                Nothing ->
+                    "your "
+    in
+    div
+        [ class "bookshelf bookshelf--loading"
+        , testId "bookshelf-loading"
+        , attribute "role" "status"
+        , attribute "aria-busy" "true"
+        ]
+        [ p [ class "bookshelf__loading-text" ]
+            [ text ("Fetching " ++ whose ++ model.config.label ++ "…") ]
+        , viewBookcase viewLoadingShelfRows
         ]
 
 
@@ -419,20 +869,78 @@ viewBookshelfFromShelves model shelves =
 
         SpineView ->
             let
-                -- Auto-flow: flatten every placement across the server's shelves
-                -- and re-group into rows that fill the bookcase inner width, so the
-                -- bookcase grows a new row only as books demand it. This is a
-                -- deliberate presentation choice — the frontend does not surface the
-                -- physical op.shelves boundaries (#151). The shelves themselves are
-                -- live backend infrastructure (place_book assigns each placement a
-                -- shelf); we simply render across them rather than per-shelf.
-                shelfRows =
+                packedRows =
                     List.concatMap .placements shelves
                         |> groupIntoRows bookcaseInnerWidth
-                        |> List.map (viewShelfRowClickable model.config.wearLevel BookClicked)
+
+                tabStopId =
+                    let
+                        gridIds =
+                            List.concatMap (List.filterMap (.book >> Maybe.map .id)) packedRows
+                    in
+                    case model.focusedSpine of
+                        Just focusedId ->
+                            if List.member focusedId gridIds then
+                                Just focusedId
+
+                            else
+                                List.head gridIds
+
+                        Nothing ->
+                            List.head gridIds
+
+                shelfRows =
+                    packedRows
+                        |> List.map
+                            (viewShelfRowClickable
+                                { wearLevel = model.config.wearLevel
+                                , onBookClicked = BookClicked
+                                , onNavKey = SpineNavKey
+                                , tabStopId = tabStopId
+                                }
+                            )
             in
             div [ class "bookshelf" ]
-                [ viewBookcase (minShelfRows 4 shelfRows) ]
+                [ viewBookcase (minShelfRows 4 shelfRows)
+                , viewOrganiser model shelves
+                ]
+
+
+{-| The shelf organiser, owner only. A separate panel,
+deliberately NOT a change to the spine layout: the bookcase auto-flows
+placements and does not surface physical `op.shelves` boundaries (the
+151 presentation choice) — per-shelf spine rendering would quietly
+reverse that. This manages the physical shelves alongside.
+-}
+viewOrganiser : Model -> List Shelf -> Html Msg
+viewOrganiser model shelves =
+    if model.config.readOnly || model.token == Nothing then
+        text ""
+
+    else
+        div [ class "bookshelf__organiser", testId "shelf-organiser" ]
+            [ h2 [ class "bookshelf__organiser-title" ] [ text "Shelves" ]
+            , p [ class "bookshelf__organiser-hint" ]
+                [ text
+                    ("These are the physical shelves in this bookcase. Drag a row, or use "
+                        ++ "the arrows, to reorder them."
+                    )
+                ]
+            , case model.organiserError of
+                Just message ->
+                    p [ class "bookshelf__organiser-error", testId "shelf-organiser-error" ]
+                        [ text message ]
+
+                Nothing ->
+                    text ""
+            , Html.map OrganiserMsg
+                (ShelfOrganiser.view
+                    { shelves = shelves
+                    , state = model.organiser
+                    , busy = model.organiserBusy
+                    }
+                )
+            ]
 
 
 {-| The bookcase inner width (~996px) used to pack book spines into rows. A new

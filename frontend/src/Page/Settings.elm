@@ -1,8 +1,7 @@
 module Page.Settings exposing (view)
 
-import Html exposing (Html, a, div, h1, li, nav, option, select, text, ul)
-import Html.Attributes exposing (class, href, selected, value)
-import Html.Events exposing (onInput)
+import Html exposing (Html, a, div, h1, h2, li, nav, text, ul)
+import Html.Attributes exposing (attribute, class, href)
 import Navigation.Route as Route exposing (Route(..))
 import Util.TestId exposing (testId)
 
@@ -10,7 +9,6 @@ import Util.TestId exposing (testId)
 type alias Config msg =
     { currentRoute : Route
     , content : Html msg
-    , onMobileNavChange : String -> msg
     }
 
 
@@ -19,31 +17,30 @@ view config =
     div [ class "page page--settings settings-hub", testId "settings-hub" ]
         [ h1 [ class "page__title" ] [ text "Settings" ]
         , div [ class "settings-hub__layout" ]
-            [ viewSidebar config
-            , viewMobileNav config
+            [ viewNav config.currentRoute
             , div [ class "settings-hub__content" ]
                 [ config.content ]
             ]
         ]
 
 
-viewSidebar : Config msg -> Html msg
-viewSidebar config =
-    nav [ class "settings-hub__sidebar", testId "settings-sidebar" ]
-        [ ul [ class "settings-hub__nav" ]
-            (List.map (viewSidebarItem config.currentRoute) sidebarItems)
-        ]
+{-| ONE nav idiom for every viewport (TR-4): a grouped list of links that
+reflows from a left-hand sidebar to a stacked, wrapping row at the 768px
+breakpoint via CSS — the CSS-less mobile `<select>` is gone. The current
+sub-page is marked with `aria-current="page"`, which both announces "you are
+here" to assistive tech and drives the active styling (`[aria-current="page"]`),
+so there is a single source of truth for the active state.
+-}
+viewNav : Route -> Html msg
+viewNav currentRoute =
+    nav [ class "settings-hub__nav", testId "settings-sidebar" ]
+        (List.map (viewGroup currentRoute) navGroups)
 
 
-viewMobileNav : Config msg -> Html msg
-viewMobileNav config =
-    div [ class "settings-hub__mobile-nav" ]
-        [ select
-            [ class "settings-hub__mobile-select"
-            , onInput config.onMobileNavChange
-            ]
-            (List.map (viewMobileOption config.currentRoute) sidebarItems)
-        ]
+type alias NavGroup =
+    { heading : String
+    , items : List SidebarItem
+    }
 
 
 type alias SidebarItem =
@@ -53,41 +50,64 @@ type alias SidebarItem =
     }
 
 
-sidebarItems : List SidebarItem
-sidebarItems =
-    [ { route = SettingsProfile, label = "Profile", path = Route.toPath SettingsProfile }
-    , { route = SettingsPassword, label = "Password", path = Route.toPath SettingsPassword }
-    , { route = SettingsNotifications, label = "Notifications", path = Route.toPath SettingsNotifications }
-    , { route = SettingsConsent, label = "Consent", path = Route.toPath SettingsConsent }
-    , { route = SettingsPrivacy, label = "Privacy", path = Route.toPath SettingsPrivacy }
-    , { route = SettingsAuditLog, label = "Audit Log", path = Route.toPath SettingsAuditLog }
-    , { route = Insights, label = "Your Data Insights", path = Route.toPath Insights }
+item : Route -> String -> SidebarItem
+item route label =
+    { route = route, label = label, path = Route.toPath route }
+
+
+{-| The settings destinations grouped into the three families the IA now speaks
+in: who you are, your privacy (visibility + consent, since the consent page
+folded into Privacy), and the record of your data.
+-}
+navGroups : List NavGroup
+navGroups =
+    [ { heading = "You"
+      , items =
+            [ item SettingsProfile "Profile"
+            , item SettingsPassword "Password"
+            , item SettingsNotifications "Notifications"
+            ]
+      }
+    , { heading = "Privacy"
+      , items =
+            [ item SettingsPrivacy "Privacy & consent" ]
+      }
+    , { heading = "Your data"
+      , items =
+            [ item SettingsAuditLog "Audit Log"
+            , item Insights "Your Data Insights"
+            ]
+      }
     ]
 
 
+viewGroup : Route -> NavGroup -> Html msg
+viewGroup currentRoute group =
+    div [ class "settings-hub__group" ]
+        [ h2 [ class "settings-hub__group-heading" ] [ text group.heading ]
+        , ul [ class "settings-hub__nav-list" ]
+            (List.map (viewSidebarItem currentRoute) group.items)
+        ]
+
+
 viewSidebarItem : Route -> SidebarItem -> Html msg
-viewSidebarItem currentRoute item =
+viewSidebarItem currentRoute navItem =
     let
         isActive =
-            currentRoute == item.route
+            currentRoute == navItem.route
 
-        activeClass =
+        currentAttrs =
             if isActive then
-                "settings-hub__nav-item settings-hub__nav-item--active"
+                [ attribute "aria-current" "page" ]
 
             else
-                "settings-hub__nav-item"
+                []
     in
-    li [ class activeClass ]
-        [ a [ href item.path, class "settings-hub__nav-link" ]
-            [ text item.label ]
+    li [ class "settings-hub__nav-item" ]
+        [ a
+            (href navItem.path
+                :: class "settings-hub__nav-link"
+                :: currentAttrs
+            )
+            [ text navItem.label ]
         ]
-
-
-viewMobileOption : Route -> SidebarItem -> Html msg
-viewMobileOption currentRoute item =
-    option
-        [ value item.path
-        , selected (currentRoute == item.route)
-        ]
-        [ text item.label ]

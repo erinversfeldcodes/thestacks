@@ -10,21 +10,13 @@ defmodule Stacks.Books.ISBNResolverTest do
 
   import ExUnit.CaptureLog
 
-  alias Stacks.Books.{ISBNResolver, MockHttpClient}
+  alias Stacks.Books.{ISBNResolver, MockHttpClient, TitleSearchCache}
 
-  # Reset the resolver's circuit breakers before each test. :fuse state is
-  # global (ETS-backed), so a fuse blown by an earlier suite test (e.g. a
-  # failure-path/burst test) can otherwise leak in and turn a mocked resolve
-  # into :circuit_open → :not_found — an order-dependent flake in the full run.
   setup do
     :fuse.reset(:open_library_fuse)
     :fuse.reset(:google_books_fuse)
     :ok
   end
-
-  # ---------------------------------------------------------------------------
-  # Fixture helpers
-  # ---------------------------------------------------------------------------
 
   defp ol_book_data(opts \\ []) do
     %{
@@ -68,21 +60,12 @@ defmodule Stacks.Books.ISBNResolverTest do
       "first_publish_year" => opts[:year] || 1925
     }
 
-    # OL omits the `subtitle` key entirely for most docs — only add it
-    # when the fixture asks for one, mirroring the real response shape.
     case opts[:subtitle] do
       nil -> doc
       subtitle -> Map.put(doc, "subtitle", subtitle)
     end
   end
 
-  # REAL OL response for the "Train to Crystal City" production
-  # failure (query title="The Crystal City", verified against the live
-  # API 2026-06-10). OL returns subtitle: nil for EVERY doc — the
-  # Russell book is disambiguated by its subjects, not a subtitle. OL
-  # ranks Orson Scott Card's fantasy novel first (exact-prefix match on
-  # the VLM's enriched title), with the correct Jan Jarboe Russell book
-  # as doc #3. Take-first returned Card; scoring must return Russell.
   defp crystal_city_docs do
     [
       ol_search_doc(
@@ -118,7 +101,6 @@ defmodule Stacks.Books.ISBNResolverTest do
         ],
         year: 2015
       ),
-      # No ISBN — excluded before scoring.
       ol_search_doc(
         title: "The crystal city",
         author_name: ["Paschal] [Grousset"],
@@ -133,10 +115,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     ]
   end
 
-  # Drain the URLs captured via `MockHttpClient.capture_requests/0`.
-  # Title-search requests are sequential (OL first, GB only on an OL
-  # miss), so all requests have completed — and their capture messages
-  # are already in the mailbox — by the time search_by_title returns.
   defp collect_request_urls(acc \\ []) do
     receive do
       {MockHttpClient, :request, url} -> collect_request_urls([url | acc])
@@ -162,10 +140,6 @@ defmodule Stacks.Books.ISBNResolverTest do
       Logger.configure(level: previous_level)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # resolve/1 — Open Library
-  # ---------------------------------------------------------------------------
 
   describe "resolve/1 — Open Library" do
     test "returns {:ok, metadata} when Open Library has the ISBN" do
@@ -264,10 +238,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # resolve/1 — fallback to Google Books
-  # ---------------------------------------------------------------------------
-
   describe "resolve/1 — Google Books fallback" do
     test "falls back to Google Books when Open Library returns empty" do
       isbn = "9780743273565"
@@ -307,7 +277,6 @@ defmodule Stacks.Books.ISBNResolverTest do
       MockHttpClient.put_response("openlibrary.org/api/books", {:ok, %{}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => [item]}})
 
-      # parse_google_books does not re-extract ISBN — resolve already knows it
       assert {:ok, meta} = ISBNResolver.resolve(isbn)
       assert meta.source == :google_books
     end
@@ -343,10 +312,6 @@ defmodule Stacks.Books.ISBNResolverTest do
       assert meta.publication_year == 2004
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # search_by_title/3 — Open Library title search
-  # ---------------------------------------------------------------------------
 
   describe "search_by_title/3 — Open Library" do
     test "returns {:ok, isbn, metadata} when OL search finds a match" do
@@ -402,10 +367,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # search_by_title/3 — Google Books title search fallback
-  # ---------------------------------------------------------------------------
-
   describe "search_by_title/3 — Google Books fallback" do
     test "falls back to Google Books when OL search fails" do
       MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
@@ -433,15 +394,129 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # search_by_title — sequential OL-first, GB fallback-only
-  # ---------------------------------------------------------------------------
+  describe "search_by_title/4 — an outage is not an absence" do
+    test "a transport failure is :unavailable, not :not_found" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :transport_error})
+      MockHttpClient.put_response("googleapis.com", {:error, :transport_error})
 
-  # Regression for the :google_books_fuse burst blow-out: title-search
-  # used to RACE OL + GB per query variant, so every variant hit GB even
-  # when OL answered. GB 503s stochastically under burst (~10%/request),
-  # and up to 12 variants per upload amplified that into enough melts to
-  # blow the fuse. GB must now only be consulted when OL misses.
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    test "a 5xx from both catalogues is :unavailable" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :unexpected_status})
+      MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    test "a blown fuse on both catalogues is :unavailable" do
+      Enum.each(1..10, fn _ ->
+        :fuse.melt(:open_library_fuse)
+        :fuse.melt(:google_books_fuse)
+      end)
+
+      assert :blown = :fuse.ask(:open_library_fuse, :sync)
+      assert :blown = :fuse.ask(:google_books_fuse, :sync)
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    test "Open Library down + a clean Google Books miss is still :unavailable" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :timeout})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => []}})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    test "a clean Open Library miss + Google Books down is :unavailable" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
+      MockHttpClient.put_response("googleapis.com", {:error, :unexpected_status})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+    end
+
+    test "both catalogues answering with no results is still :not_found" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => []}})
+
+      assert {:error, :not_found} = ISBNResolver.search_by_title("ZZZNoSuchBook", "Nobody")
+    end
+  end
+
+  describe "search_by_title/4 — an outage is never cached as an absence" do
+    setup do
+      original = Application.get_env(:core, :title_search_cache_enabled)
+      Application.put_env(:core, :title_search_cache_enabled, true)
+      TitleSearchCache.invalidate_all()
+
+      on_exit(fn ->
+        Application.put_env(:core, :title_search_cache_enabled, original)
+        TitleSearchCache.invalidate_all()
+      end)
+
+      :ok
+    end
+
+    test "an outage leaves the cache empty and the next reader gets the real book after recovery" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :transport_error})
+      MockHttpClient.put_response("googleapis.com", {:error, :transport_error})
+
+      assert {:error, :unavailable} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+
+      assert :miss == TitleSearchCache.get("The Great Gatsby", "Fitzgerald", nil),
+             "the outage was negative-cached: a transient provider failure is " <>
+               "now a durable claim that the book does not exist"
+
+      :fuse.reset(:open_library_fuse)
+      :fuse.reset(:google_books_fuse)
+      MockHttpClient.clear()
+
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc()]}}
+      )
+
+      assert {:ok, "9780743273565", meta} =
+               ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
+
+      assert meta.source == :open_library
+    end
+
+    test "a genuine :not_found is still cached and served from the cache" do
+      MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
+      MockHttpClient.put_response("googleapis.com", {:ok, %{"items" => []}})
+
+      assert {:error, :not_found} = ISBNResolver.search_by_title("ZZZNoSuchBook", "Nobody")
+
+      assert {:ok, {:error, :not_found}} =
+               TitleSearchCache.get("ZZZNoSuchBook", "Nobody", nil)
+
+      MockHttpClient.clear()
+      MockHttpClient.put_response("openlibrary.org/search.json", {:error, :transport_error})
+      MockHttpClient.put_response("googleapis.com", {:error, :transport_error})
+
+      assert {:error, :not_found} = ISBNResolver.search_by_title("ZZZNoSuchBook", "Nobody")
+    end
+
+    test "a positive result is still cached" do
+      MockHttpClient.put_response(
+        "openlibrary.org/search.json",
+        {:ok, %{"docs" => [ol_search_doc()]}}
+      )
+
+      assert {:ok, "9780743273565", _} = ISBNResolver.search_by_title("The Great Gatsby", "Fitz")
+
+      assert {:ok, {:ok, "9780743273565", _}} =
+               TitleSearchCache.get("The Great Gatsby", "Fitz", nil)
+    end
+  end
+
   describe "search_by_title — sequential OL-first, GB fallback-only" do
     test "Google Books is never consulted when Open Library hits" do
       MockHttpClient.capture_requests()
@@ -469,17 +544,11 @@ defmodule Stacks.Books.ISBNResolverTest do
       assert {:ok, _, meta} = ISBNResolver.search_by_title("The Great Gatsby", "Fitzgerald")
       assert meta.source == :google_books
 
-      # The GB hit resolves the FIRST query variant, so exactly two
-      # requests went out — OL first, then GB.
       assert [first, second] = collect_request_urls()
       assert first =~ "openlibrary.org"
       assert second =~ "googleapis.com"
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # search_by_title/3 — candidate generation
-  # ---------------------------------------------------------------------------
 
   describe "search_by_title/3 — candidate generation" do
     test "with nil author still searches" do
@@ -492,7 +561,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
 
     test "strips subtitle from title for additional candidates" do
-      # "Born Again Bodies: A Novel" → also tries "Born Again Bodies"
       MockHttpClient.put_response(
         "openlibrary.org/search.json",
         {:ok, %{"docs" => [ol_search_doc()]}}
@@ -512,9 +580,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
 
     test "with raw_text generates enriched candidates first" do
-      # raw_text triggers the enriched_prefix path. The doc must actually
-      # match the signals now that single candidates are scored against
-      # the plausibility floor — a non-matching doc is correctly floored.
       MockHttpClient.put_response(
         "openlibrary.org/search.json",
         {:ok, %{"docs" => [ol_search_doc(title: "The Crystal City")]}}
@@ -538,15 +603,8 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # normalize_raw_text (exercised via search_by_title raw_text param)
-  # ---------------------------------------------------------------------------
-
   describe "normalize_raw_text via search_by_title" do
     test "joins space-separated acronym letters like F D R → fdr" do
-      # Fail the plain-title candidates (empty docs) so the enriched
-      # variants fire, then assert the raw_text keywords went out on the
-      # wire as the joined "fdr" token.
       MockHttpClient.capture_requests()
       MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
@@ -563,11 +621,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
 
     test "possessive apostrophes never produce orphan-letter gluing (scrystal bug)" do
-      # Production regression: raw_text "THE TRAMP'S CRYSTAL CITY" used
-      # to normalise to "tramp scrystal city" — the apostrophe became a
-      # space and the orphan "s" was glued onto the NEXT word, poisoning
-      # every enriched query variant. It must normalise to
-      # "tramps crystal city" instead.
       MockHttpClient.capture_requests()
       MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
       MockHttpClient.put_response("googleapis.com", {:ok, %{}})
@@ -596,10 +649,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # search_by_title/4 — candidate scoring (score-everything-pick-best)
-  # ---------------------------------------------------------------------------
-
   describe "search_by_title/4 — candidate scoring" do
     test "picks the best-scoring doc, not the first, when OL ranks the wrong book on top" do
       MockHttpClient.put_response(
@@ -617,17 +666,12 @@ defmodule Stacks.Books.ISBNResolverTest do
                )
 
       assert meta.title == "The train to Crystal City"
-      # Real OL search docs carry no subtitle — disambiguation comes
-      # from the subjects list (resolver passes the first 5 through).
       assert meta.subtitle == nil
       assert meta.author == "Jan Jarboe Russell"
       assert "Crystal City Internment Camp (Crystal City, Tex.)" in meta.subjects
     end
 
     test "scoring composes with exclusion: excluded docs are not scored" do
-      # Exclude the Russell ISBN — the best-scoring doc — and the
-      # resolver must fall back to the best of the remaining docs
-      # rather than returning the excluded one.
       MockHttpClient.put_response(
         "openlibrary.org/search.json",
         {:ok, %{"docs" => crystal_city_docs()}}
@@ -692,11 +736,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
 
     test "a derivative 'Study Guide' edition loses to the real work (Klara case)" do
-      # Production failure: GB returns a study-guide companion whose
-      # title absorbs the author tokens AND whose author field GB
-      # mislabels as the real author — without the derivative-title
-      # penalty it outscores the real work (5.5 vs 5.25) and displaces
-      # it. Pinned offline in priv/eval/corpus.exs (klara_study_guide).
       real =
         google_item(
           title: "Klara and the Sun",
@@ -715,7 +754,6 @@ defmodule Stacks.Books.ISBNResolverTest do
 
       MockHttpClient.put_response("openlibrary.org/search.json", {:ok, %{"docs" => []}})
 
-      # Derivative FIRST — GB's own ranking put it on top in production.
       MockHttpClient.put_response(
         "googleapis.com",
         {:ok, %{"items" => [derivative, real]}}
@@ -732,16 +770,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # search_by_title/4 — plausibility floor
-  # ---------------------------------------------------------------------------
-
-  # The production noise-match the plausibility floor exists to fix:
-  # VLM signals title="The Tramp's Crystal City", raw_text="THE TRAMP'S
-  # CRYSTAL CITY" — Google Books fuzzy-matched the corrupted query and
-  # returned "The Crystal Ball a Mystery Story for Girls", which scored
-  # 1.5 (overlap 3.0 * 1/3 + raw_text 1.5 * 1/3) and won because
-  # max-wins had no floor.
   defp crystal_ball_item do
     google_item(
       title: "The Crystal Ball a Mystery Story for Girls",
@@ -766,7 +794,6 @@ defmodule Stacks.Books.ISBNResolverTest do
                    )
         end)
 
-      # The floored decision is logged for production debuggability.
       assert log =~ "floored"
       assert log =~ "9781532774393"
     end
@@ -797,16 +824,11 @@ defmodule Stacks.Books.ISBNResolverTest do
                    )
         end)
 
-      # The scored-decision diagnostic still fires for N>=2 before the
-      # floor rejects the pick.
       assert log =~ "scored 2 candidates"
       assert log =~ "floored"
     end
 
     test "the floor is waived when the candidate has author corroboration" do
-      # Total score is only the author bonus (1.0, well below 2.5), but
-      # a scored author match is strong positive evidence, so the pick
-      # survives.
       doc =
         ol_search_doc(
           title: "Completely Different Title",
@@ -823,9 +845,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
 
     test "a 3.5-scoring bare-title coincidence stays above the floor (Card case)" do
-      # Card is a legitimate pick for a genuinely ambiguous query: no
-      # author corroboration (signal author is invented), score exactly
-      # 3.5 — must NOT be floored.
       MockHttpClient.put_response(
         "openlibrary.org/search.json",
         {:ok, %{"docs" => [List.first(crystal_city_docs())]}}
@@ -842,23 +861,10 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # search_by_title/4 — excluded_isbns (rejection-retry plumbing)
-  # ---------------------------------------------------------------------------
-
   describe "search_by_title/4 — excluded_isbns" do
-    # Rejection-retry: when a user clicks "No, try again" on the
-    # identified book, the controller resolves the rejected book ids to
-    # ISBNs and threads the list through to the resolver. Without this,
-    # a slightly-different VLM title variant on the retry can collapse
-    # back to the same wrong OL/GB top match and we'd loop on the same
-    # incorrect identification.
-
     test "skips OL search results whose ISBN matches an excluded entry" do
       excluded = "9781429964500"
-      # OL returns the excluded ISBN as its (only) top match. With the
-      # exclusion in effect, the candidate is treated as no match and
-      # the resolver falls through to {:error, :not_found}.
+
       MockHttpClient.put_response(
         "openlibrary.org/search.json",
         {:ok, %{"docs" => [ol_search_doc(isbn: [excluded])]}}
@@ -890,9 +896,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     end
 
     test "exclusion match is ISBN-10/13-form-insensitive" do
-      # A rejected book's edition ISBN is always stored as ISBN-13, but
-      # OL docs often only carry the ISBN-10 form. The excluded 13 must
-      # still knock out a doc yielding its 10 (canonical-13 both sides).
       excluded_isbn13 = "9780312864835"
       doc_isbn10 = "0312864833"
 
@@ -926,8 +929,6 @@ defmodule Stacks.Books.ISBNResolverTest do
     test "returns {:error, :not_found} when all candidate variants resolve to excluded ISBNs" do
       excluded = "9780743273565"
 
-      # Every candidate query variant (title+author, title, etc.) returns
-      # the same excluded ISBN — exhaustion path.
       MockHttpClient.put_response(
         "openlibrary.org/search.json",
         {:ok, %{"docs" => [ol_search_doc(isbn: [excluded])]}}

@@ -116,17 +116,14 @@ findTupleInTypeAnnotation index fullArgRange previousRange list =
                     ( node
                     , case previousRange of
                         Just previous ->
-                            -- Not the first element
                             { start = previous.end, end = range.end }
 
                         Nothing ->
                             case rest of
                                 (Node next _) :: _ ->
-                                    -- first element
                                     { start = range.start, end = next.start }
 
                                 [] ->
-                                    -- only element
                                     fullArgRange
                     )
 
@@ -398,17 +395,14 @@ findNeighboring predicate previousEnd list =
                 ( node
                 , case before of
                     Just (Node before_ _) ->
-                        -- Not the first element
                         { start = before_.end, end = range.end }
 
                     Nothing ->
                         case after of
                             Just (Node after_ _) ->
-                                -- first element
                                 { start = range.start, end = after_.start }
 
                             Nothing ->
-                                -- only element
                                 { start = previousEnd, end = range.end }
                 )
             )
@@ -422,17 +416,14 @@ getNeighboring index fullRange list =
                 ( node
                 , case before of
                     Just (Node before_ _) ->
-                        -- Not the first element
                         { start = before_.end, end = range.end }
 
                     Nothing ->
                         case after of
                             Just (Node after_ _) ->
-                                -- first element
                                 { start = range.start, end = after_.start }
 
                             Nothing ->
-                                -- only element
                                 fullRange
                 )
             )

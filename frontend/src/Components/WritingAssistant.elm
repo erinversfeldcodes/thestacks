@@ -1,6 +1,6 @@
 module Components.WritingAssistant exposing (view)
 
-{-| Under-construction writing-assistant widget (Issue #184).
+{-| Under-construction writing-assistant widget.
 
 Honest placeholder — the assistant is not built yet. Two states:
 
@@ -37,7 +37,7 @@ view { hasConsent } =
                 [ text "Enable the writing assistant to get personalised writing suggestions. "
                 , a
                     [ class "writing-assistant__settings-link"
-                    , href (Route.toPath SettingsConsent)
+                    , href (Route.toPath SettingsPrivacy)
                     ]
                     [ text "Enable it in Settings › Privacy." ]
                 ]

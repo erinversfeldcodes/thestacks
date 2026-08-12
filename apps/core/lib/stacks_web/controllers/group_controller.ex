@@ -10,8 +10,7 @@ defmodule StacksWeb.GroupController do
 
   def create(conn, params) do
     user = Guardian.Plug.current_resource(conn)
-    # Social.create_group/2 merges %{owner_id: id} (atom key) into attrs,
-    # so we use atom keys to avoid Ecto's mixed-key cast error.
+
     attrs =
       %{name: params["name"], type: params["type"], visibility: params["visibility"]}
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)

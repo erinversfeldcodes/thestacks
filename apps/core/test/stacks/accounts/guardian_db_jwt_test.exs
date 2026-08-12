@@ -1,27 +1,10 @@
 defmodule Stacks.Accounts.GuardianDbJwtTest do
   @moduledoc """
-  Issue #174 — the raw signed bearer token must never persist in
-  `op.guardian_tokens.jwt`.
-
-  Guardian.DB tracks every issued "access" token in `op.guardian_tokens` so that
-  logout/revoke and per-request verification work server-side (Issue #124, A2).
-  The `jwt` column, however, stores the FULL signed bearer token even though the
-  verify/revoke/purge path never reads it (verify is by `jti` PK + `aud`, purge is
-  by `exp`). A SELECT-capable compromise of that table therefore yields directly
-  replayable sessions.
-
-  The fix (a LATER step) installs a `BEFORE INSERT OR UPDATE` trigger on
-  `op.guardian_tokens` that forces `NEW.jwt = NULL`, plus a one-time scrub of
-  existing rows. These tests pin that invariant at the DB layer:
-
-    * tests 1 & 2 are the RED signal — they fail against the current code because
-      the app still persists the raw token (INSERT) and a raw UPDATE value sticks;
-    * test 3 is a regression guard — the four Guardian.DB hooks must keep working
-      with `jwt` nulled (they already do today, since none of them read `jwt`).
-
-  Raw-table access is schemaless (`Repo.insert_all` / `Repo.all(from … in
-  "guardian_tokens" …, prefix: "op")`) because the project owns no Ecto schema for
-  this Guardian.DB-backed table — mirroring `guardian_token_sweep_job_test.exs`.
+      174 — the raw signed bearer must never persist in
+      `op.guardian_tokens.jwt`: Guardian.DB stores the full token though
+      verify/revoke/purge never read it (verify is jti+aud, purge is exp), so
+      a SELECT-capable compromise would yield replayable sessions. Asserts
+      the column is stored redacted and the auth flows still work without it.
   """
 
   use Core.DataCase, async: false
@@ -32,8 +15,6 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
   alias Core.Repo
   alias Stacks.Accounts.Guardian
 
-  # Reads a single persisted guardian_tokens row schemalessly, projecting the
-  # bookkeeping columns plus the sensitive jwt so we can assert on each.
   defp read_token_row(jti) do
     Repo.one(
       from(t in "guardian_tokens",
@@ -61,12 +42,9 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
 
       assert row, "expected a persisted op.guardian_tokens row for jti #{jti}"
 
-      # RED today: the app writes jwt = token, so this is a non-nil signed token.
       assert row.jwt == nil,
              "expected persisted jwt to be nil, got #{inspect(row.jwt)} — a replayable bearer token is stored in op.guardian_tokens"
 
-      # Prove we nulled ONLY the jwt: the columns verify/revoke/sweep actually use
-      # must still be populated, or we'd have broken tracking instead of hardening it.
       assert row.jti == jti
       assert row.aud == claims["aud"]
       assert row.sub == to_string(user.id)
@@ -88,10 +66,8 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
               jti: jti,
               aud: "access",
               typ: "access",
-              sub: Ecto.UUID.generate(),
+              sub: insert(:user).id,
               exp: future_exp,
-              # Even the initial insert value must not survive the trigger, but the
-              # UPDATE below is the specific behaviour under test here.
               jwt: "raw.token.value",
               inserted_at: now,
               updated_at: now
@@ -110,13 +86,12 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
 
       assert row, "expected the raw guardian_tokens row to still exist after UPDATE"
 
-      # RED today: no trigger, so the UPDATE value "another.raw.token" persists.
       assert row.jwt == nil,
              "expected jwt to be nil after UPDATE, got #{inspect(row.jwt)} — the trigger does not cover UPDATE"
     end
   end
 
-  describe "no #124-A2 regression — the four Guardian.DB hooks still work with jwt nulled" do
+  describe "no -A2 regression — the four Guardian.DB hooks still work with jwt nulled" do
     test "a freshly issued token verifies (after_encode_and_sign + on_verify)" do
       user = insert(:user)
 
@@ -134,15 +109,9 @@ defmodule Stacks.Accounts.GuardianDbJwtTest do
 
       assert {:ok, _claims} = Guardian.revoke(token)
 
-      # Row is gone …
       refute read_token_row(jti), "row should be deleted after revoke"
 
-      # … and because the token is no longer tracked, verification fails.
       assert {:error, _reason} = Guardian.decode_and_verify(token)
     end
-
-    # Expired-token sweeping is already covered by
-    # apps/core/test/stacks/workers/guardian_token_sweep_job_test.exs — not
-    # duplicated here.
   end
 end

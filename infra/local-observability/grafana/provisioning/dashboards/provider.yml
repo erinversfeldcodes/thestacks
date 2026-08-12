@@ -1,5 +1,3 @@
-# Load every dashboard-as-code the app ships (apps/core/priv/grafana/*.json),
-# mounted read-only into the container. No manual import, no API token.
 apiVersion: 1
 providers:
   - name: stacks

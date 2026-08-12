@@ -1,34 +1,44 @@
 defmodule Stacks.Discovery.BraveClientTest do
   use Core.DataCase, async: true
 
-  alias Stacks.Discovery.MockBraveClient
+  alias Stacks.Discovery.BraveClient
 
-  describe "MockBraveClient.search/2" do
-    test "returns empty list when no response is registered" do
-      assert {:ok, []} = MockBraveClient.search("test query")
+  describe "BraveClient.increment_daily_counter/0 — the daily budget counter" do
+    setup do
+      :persistent_term.erase({BraveClient, :daily_counter})
+      on_exit(fn -> :persistent_term.erase({BraveClient, :daily_counter}) end)
+      :ok
     end
 
-    test "returns registered response" do
-      results = [
-        %{title: "Author Blog", url: "https://author.com", description: "An author's blog"}
-      ]
+    test "does not crash on the first call in a fresh node" do
+      assert BraveClient.increment_daily_counter() == :ok
 
-      MockBraveClient.put_response({:ok, results})
-      assert {:ok, ^results} = MockBraveClient.search("test query")
+      assert {_date, counter} =
+               :persistent_term.get({BraveClient, :daily_counter}),
+             "the first call must CREATE the counter, not assume one exists"
+
+      assert :counters.get(counter, 1) == 1
     end
 
-    test "returns error when error response is registered" do
-      MockBraveClient.put_response({:error, :rate_limited})
-      assert {:error, :rate_limited} = MockBraveClient.search("test query")
+    test "counts successive calls in the same day" do
+      for _ <- 1..3, do: BraveClient.increment_daily_counter()
+      {_date, counter} = :persistent_term.get({BraveClient, :daily_counter})
+      assert :counters.get(counter, 1) == 3
     end
 
-    test "clear removes registered response" do
-      MockBraveClient.put_response(
-        {:ok, [%{title: "Test", url: "https://test.com", description: ""}]}
-      )
+    test "starts a new count when the stored date is not today" do
+      stale = :counters.new(1, [:atomics])
+      :counters.add(stale, 1, 199)
+      yesterday = Date.add(Date.utc_today(), -1)
+      :persistent_term.put({BraveClient, :daily_counter}, {yesterday, stale})
 
-      MockBraveClient.clear()
-      assert {:ok, []} = MockBraveClient.search("test query")
+      assert BraveClient.increment_daily_counter() == :ok
+
+      {date, counter} = :persistent_term.get({BraveClient, :daily_counter})
+      assert date == Date.utc_today()
+
+      assert :counters.get(counter, 1) == 1,
+             "yesterday's 199 calls were carried into today's budget"
     end
   end
 end

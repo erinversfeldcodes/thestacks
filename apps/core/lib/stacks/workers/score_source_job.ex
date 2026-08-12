@@ -1,13 +1,13 @@
 defmodule Stacks.Workers.ScoreSourceJob do
   @moduledoc """
-  Oban worker that scores a discovered source's confidence (0.0–1.0)
-  using the Together AI LLM.
+      Oban worker that scores a discovered source's confidence (0.0–1.0)
+      using the Together AI LLM.
 
-  Accepts `%{"source_id" => id}`. Fetches the source, builds a prompt
-  asking the LLM to evaluate whether it is a legitimate bookshop/community,
-  parses the numeric confidence from the response, and updates the record.
+      Accepts `%{"source_id" => id}`. Fetches the source, builds a prompt
+      asking the LLM to evaluate whether it is a legitimate bookshop/community,
+      parses the numeric confidence from the response, and updates the record.
 
-  Sources scoring above 0.8 are logged for platform owner review.
+      Sources scoring above 0.8 are logged for platform owner review.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 3
@@ -68,7 +68,6 @@ defmodule Stacks.Workers.ScoreSourceJob do
         0.0
 
       _ ->
-        # Default to moderate confidence if parsing fails
         0.5
     end
   end

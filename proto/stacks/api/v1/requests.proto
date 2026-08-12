@@ -12,6 +12,11 @@ message RegisterRequest {
   string password = 2 [json_name = "password"];
   // Public display name for the user.
   string display_name = 3 [json_name = "display_name"];
+  // Closed-beta invitation code. Required by the server while
+  // INVITE_ONLY_REGISTRATION is on; ignored when the gate is off. Empty
+  // string means "not provided" (proto3 default), which the server treats
+  // as absent.
+  string invite_code = 4 [json_name = "invite_code"];
 }
 
 // POST /api/auth/login

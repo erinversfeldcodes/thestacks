@@ -1,7 +1,3 @@
-# File-provisioned datasource — no API token, no SSO (the fly-metrics.net problem
-# that ADR-021 removes). `uid: prometheus` MUST match the datasource uid the
-# dashboard JSON hard-codes (Core.PromEx dashboard_assigns/0 → datasource_id:
-# "prometheus"), or every panel renders blank.
 apiVersion: 1
 datasources:
   - name: VictoriaMetrics

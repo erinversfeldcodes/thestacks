@@ -1,19 +1,21 @@
 defmodule Stacks.GDPR.Export do
   @moduledoc """
-  GDPR data export. Collects all user-owned data from the operational schema
-  and formats it for download (right to data portability).
+      GDPR data export. Collects all user-owned data from the operational schema
+      and formats it for download (right to data portability).
   """
 
   import Ecto.Query
 
   alias Core.Repo
   alias Stacks.Accounts
+  alias Stacks.Blog.{Post, PostComment}
+  alias Stacks.Books.UploadedImage
   alias Stacks.Shelving.{Bookshelf, Placement, PlacementHistory}
   alias Stacks.WritingAssistant.{Embedding, Session, TurnFeedback}
 
   @doc """
-  Exports all data for a user. Returns a JSON-serialisable map.
-  The `_opts` parameter is reserved for future filtering options.
+      Exports all data for a user. Returns a JSON-serialisable map.
+      The `_opts` parameter is reserved for future filtering options.
   """
   @spec export_user_data(binary(), keyword()) :: {:ok, map()} | {:error, term()}
   def export_user_data(user_id, _opts \\ []) do
@@ -29,7 +31,7 @@ defmodule Stacks.GDPR.Export do
     placements =
       Placement
       |> where([p], p.bookshelf_id in ^bookshelf_ids)
-      |> preload(book: :editions)
+      |> preload([:book_edition, book: :editions])
       |> Repo.all()
 
     histories =
@@ -48,9 +50,6 @@ defmodule Stacks.GDPR.Export do
       |> where([_f, s], s.user_id == ^user_id)
       |> Repo.all()
 
-    # Summary only — the `embedding` vector column is deliberately NOT selected,
-    # so the raw vector never leaves the database. Vectors are not human-readable
-    # and carry no portability value; exporting them would be a data-leak risk.
     embeddings_summary =
       Embedding
       |> where([e], e.user_id == ^user_id)
@@ -61,6 +60,55 @@ defmodule Stacks.GDPR.Export do
         date_embedded: e.content_date
       })
       |> Repo.all()
+
+    uploaded_images =
+      UploadedImage
+      |> where([i], i.user_id == ^user_id)
+      |> select([i], %{id: i.id, uploaded_at: i.uploaded_at, status: i.status})
+      |> Repo.all()
+
+    blog_posts =
+      Post
+      |> where([p], p.user_id == ^user_id)
+      |> Repo.all()
+
+    blog_comments =
+      PostComment
+      |> where([c], c.author_id == ^user_id)
+      |> Repo.all()
+
+    blog_syndications =
+      Stacks.Blog.PostSyndication
+      |> join(:inner, [s], p in Post, on: s.post_id == p.id)
+      |> where([_s, p], p.user_id == ^user_id)
+      |> Repo.all()
+      |> Enum.map(
+        &%{
+          post_id: &1.post_id,
+          target: &1.target,
+          method: &1.method,
+          canonical_url: &1.canonical_url,
+          syndicated_url: &1.syndicated_url,
+          created_at: &1.created_at
+        }
+      )
+
+    invitations =
+      Stacks.Accounts.InviteCode
+      |> where([i], i.redeemed_by_id == ^user_id)
+      |> select([i], %{
+        code_prefix: i.code_prefix,
+        redeemed_at: i.redeemed_at,
+        expires_at: i.expires_at
+      })
+      |> Repo.all()
+
+    library_imports =
+      Stacks.Imports.LibraryImport
+      |> where([li], li.user_id == ^user_id)
+      |> order_by([li], desc: li.created_at)
+      |> Repo.all()
+      |> Enum.map(&library_import_to_map/1)
 
     export = %{
       exported_at: DateTime.utc_now(),
@@ -90,6 +138,7 @@ defmodule Stacks.GDPR.Export do
         notify_marketplace: user.notify_marketplace,
         notify_group_invitations: user.notify_group_invitations,
         notify_event_matches: user.notify_event_matches,
+        syndication_default: user.syndication_default,
         age_verified: user.age_verified,
         age_verified_at: user.age_verified_at,
         age_verification_provider: user.age_verification_provider,
@@ -105,12 +154,55 @@ defmodule Stacks.GDPR.Export do
       placement_history: Enum.map(histories, &history_to_map/1),
       writing_assistant_sessions: Enum.map(sessions, &session_to_map/1),
       writing_assistant_feedback: Enum.map(feedback, &feedback_to_map/1),
-      embeddings_summary: embeddings_summary
+      embeddings_summary: embeddings_summary,
+      uploaded_images: uploaded_images,
+      blog_posts: Enum.map(blog_posts, &blog_post_to_map/1),
+      blog_comments: Enum.map(blog_comments, &blog_comment_to_map/1),
+      invitations: invitations,
+      library_imports: library_imports,
+      blog_syndications: blog_syndications
     }
 
     {:ok, export}
   rescue
     error -> {:error, error}
+  end
+
+  defp library_import_to_map(import) do
+    rows =
+      Stacks.Imports.LibraryImportRow
+      |> where([r], r.import_id == ^import.id)
+      |> order_by([r], asc: r.row_number)
+      |> Repo.all()
+      |> Enum.map(
+        &%{
+          row_number: &1.row_number,
+          title: &1.raw_title,
+          author: &1.raw_author,
+          isbn13: &1.raw_isbn13,
+          goodreads_shelf: &1.goodreads_shelf,
+          rating: &1.raw_rating,
+          review: &1.raw_review,
+          private_notes: &1.raw_notes,
+          outcome: &1.outcome,
+          reason: &1.reason
+        }
+      )
+
+    %{
+      id: import.id,
+      source: import.source,
+      filename: import.filename,
+      status: import.status,
+      row_count: import.row_count,
+      shelved_count: import.shelved_count,
+      duplicate_count: import.duplicate_count,
+      unverified_count: import.unverified_count,
+      unreadable_count: import.unreadable_count,
+      created_at: import.created_at,
+      finished_at: import.finished_at,
+      rows: rows
+    }
   end
 
   defp bookshelf_to_map(bookshelf) do
@@ -122,12 +214,30 @@ defmodule Stacks.GDPR.Export do
     }
   end
 
+  defp blog_post_to_map(post) do
+    %{
+      id: post.id,
+      title: post.title,
+      body: post.body,
+      visibility: post.visibility,
+      published_at: post.published_at,
+      created_at: post.created_at
+    }
+  end
+
+  defp blog_comment_to_map(comment) do
+    %{
+      id: comment.id,
+      post_id: comment.post_id,
+      body: comment.body,
+      created_at: comment.created_at
+    }
+  end
+
   defp placement_to_map(placement) do
     %{
       id: placement.id,
-      book_isbn:
-        placement.book &&
-          (Stacks.Books.primary_edition(placement.book) || %{isbn: nil}).isbn,
+      book_isbn: placement_isbn(placement),
       book_title: placement.book && placement.book.title,
       bookshelf_id: placement.bookshelf_id,
       position: placement.position,
@@ -138,6 +248,19 @@ defmodule Stacks.GDPR.Export do
       notes: placement.notes
     }
   end
+
+  defp placement_isbn(%{book_edition: %{isbn: isbn}}) when is_binary(isbn), do: isbn
+
+  defp placement_isbn(%{book: nil}), do: nil
+
+  defp placement_isbn(%{book: book}) do
+    case Stacks.Books.primary_edition(book) do
+      nil -> nil
+      edition -> edition.isbn
+    end
+  end
+
+  defp placement_isbn(_placement), do: nil
 
   defp history_to_map(history) do
     %{

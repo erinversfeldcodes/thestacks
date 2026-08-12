@@ -106,7 +106,6 @@ defmodule StacksWeb.Plugs.AuditAdminCallTest do
       |> AuditAdminCall.call([])
       |> send_resp(200, ~s({"user": {}}))
 
-      # Reason is stored in encrypted metadata — check the row was written
       row = get_last_audit_row()
       assert row != nil
       assert row["action"] == "admin.call"
@@ -128,8 +127,6 @@ defmodule StacksWeb.Plugs.AuditAdminCallTest do
     end
 
     test "does not halt or modify the response when audit write fails", %{conn: conn} do
-      # Use a conn without current_user / admin_session to simulate a context
-      # where something might go wrong in the audit path
       conn =
         conn
         |> Map.put(:request_path, "/api/admin/test")
@@ -140,7 +137,6 @@ defmodule StacksWeb.Plugs.AuditAdminCallTest do
         |> AuditAdminCall.call([])
         |> send_resp(200, ~s({"ok": true}))
 
-      # Response should still be sent normally despite nil user/session
       assert conn.status == 200
       refute conn.halted
     end

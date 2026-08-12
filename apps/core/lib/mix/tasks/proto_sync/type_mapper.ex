@@ -2,10 +2,10 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   @moduledoc "Maps proto descriptor types to Ecto schema types and migration types."
 
   @doc """
-  Maps a proto descriptor field type to an Ecto schema type.
+      Maps a proto descriptor field type to an Ecto schema type.
 
-  Handles scalar types, well-known types (Timestamp, Struct), and enums.
-  Field overrides from the manifest take precedence.
+      Handles scalar types, well-known types (Timestamp, Struct), and enums.
+      Field overrides from the manifest take precedence.
   """
   def ecto_type(field, overrides \\ %{}) do
     field_name = String.to_atom(field.name)
@@ -18,7 +18,6 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
         map_proto_type(field.type, field.type_name)
       end
 
-    # Don't double-wrap: if the override already specifies {:array, _}, don't wrap again.
     if field.label == "LABEL_REPEATED" and not match?({:array, _}, base_type) do
       {:array, base_type}
     else
@@ -27,15 +26,15 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   end
 
   @doc """
-  Maps a proto descriptor field type to an Ecto migration type.
+      Maps a proto descriptor field type to an Ecto migration type.
 
-  Migration types differ from schema types in a few cases:
-  - `TYPE_STRING` → `:text` (not `:string`) — unbounded text in Postgres
-  - `TYPE_INT64` → `:bigint` (not `:integer`)
-  - `TYPE_ENUM` → `:text` (not `:string`)
+      Migration types differ from schema types in a few cases:
+      - `TYPE_STRING` → `:text` (not `:string`) — unbounded text in Postgres
+      - `TYPE_INT64` → `:bigint` (not `:integer`)
+      - `TYPE_ENUM` → `:text` (not `:string`)
 
-  Field overrides with `:migration_type` take highest precedence,
-  then `:ecto_type` overrides, then the default mapping.
+      Field overrides with `:migration_type` take highest precedence,
+      then `:ecto_type` overrides, then the default mapping.
   """
   def migration_type(field, overrides \\ %{}) do
     field_name = String.to_atom(field.name)
@@ -57,10 +56,10 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   end
 
   @doc """
-  Returns the default value for a field, if specified in overrides.
+      Returns the default value for a field, if specified in overrides.
 
-  Fragment defaults (`{:fragment, sql}`) are migration-only and excluded here.
-  Use `migration_default/2` for migration generation.
+      Fragment defaults (`{:fragment, sql}`) are migration-only and excluded here.
+      Use `migration_default/2` for migration generation.
   """
   def default(field, overrides \\ %{}) do
     field_name = String.to_atom(field.name)
@@ -73,9 +72,9 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   end
 
   @doc """
-  Returns the default value for a field for use in migrations.
+      Returns the default value for a field for use in migrations.
 
-  Includes fragment defaults (`{:fragment, sql}`) that are not valid in schemas.
+      Includes fragment defaults (`{:fragment, sql}`) that are not valid in schemas.
   """
   def migration_default(field, overrides \\ %{}) do
     field_name = String.to_atom(field.name)
@@ -86,7 +85,6 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
     end
   end
 
-  # Scalar types
   defp map_proto_type("TYPE_STRING", _), do: :string
   defp map_proto_type("TYPE_INT32", _), do: :integer
   defp map_proto_type("TYPE_UINT32", _), do: :integer
@@ -103,7 +101,6 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
   defp map_proto_type("TYPE_BOOL", _), do: :boolean
   defp map_proto_type("TYPE_BYTES", _), do: :binary
 
-  # Well-known types
   defp map_proto_type("TYPE_MESSAGE", "." <> type_name) do
     case type_name do
       "google.protobuf.Timestamp" ->
@@ -112,14 +109,11 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
       "google.protobuf.Struct" ->
         :map
 
-      # Non-WKT embedded messages: default to :map (JSONB).
-      # Use api_only: true or belongs_to in field_overrides for most cases.
       _other ->
         :map
     end
   end
 
-  # Enums are stored as strings in Postgres (text column)
   defp map_proto_type("TYPE_ENUM", _), do: :string
 
   defp map_proto_type(type, type_name) do
@@ -128,7 +122,6 @@ defmodule Mix.Tasks.ProtoSync.TypeMapper do
     )
   end
 
-  # Migration-specific type mappings (differ from schema types)
   defp map_migration_type("TYPE_STRING", _), do: :text
   defp map_migration_type("TYPE_INT32", _), do: :integer
   defp map_migration_type("TYPE_UINT32", _), do: :integer

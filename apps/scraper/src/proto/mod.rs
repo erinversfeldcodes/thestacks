@@ -7,6 +7,7 @@ mod tests {
     #[test]
     fn scrape_request_round_trip() {
         let req = ScrapeRequest {
+            product_path: None,
             isbn: "9780679410232".to_string(),
             store: "za/loot".to_string(),
         };
@@ -27,10 +28,11 @@ mod tests {
             url: None,
             title: None,
             selector_match_rate: None,
+            outcome: "SCRAPE_OUTCOME_NOT_STOCKED".to_string(),
+            detail: None,
+            capability: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
-        // Parse as Value so field-presence checks aren't fooled by substrings in
-        // other field names (e.g. "cover_image_url" containing "url").
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(
             val.get("price_cents").is_none(),
@@ -51,6 +53,9 @@ mod tests {
             url: Some("https://example.com".to_string()),
             title: Some("The Book".to_string()),
             selector_match_rate: Some(0.95),
+            outcome: "SCRAPE_OUTCOME_PRICED".to_string(),
+            detail: Some("priced".to_string()),
+            capability: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         let decoded: ScrapeResponse = serde_json::from_str(&json).unwrap();

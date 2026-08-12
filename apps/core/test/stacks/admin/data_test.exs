@@ -79,14 +79,12 @@ defmodule Stacks.Admin.DataTest do
     test "respects from/to bounds (excludes entries outside)" do
       user = insert(:user)
 
-      # Insert an entry now
       {:ok, _} =
         Stacks.Audit.log(user.id, "in_range.action",
           resource_type: "test",
           metadata: %{}
         )
 
-      # Query for a range in the past that excludes the entry we just created
       from_dt = DateTime.add(DateTime.utc_now(), -60, :minute)
       to_dt = DateTime.add(DateTime.utc_now(), -30, :minute)
 
@@ -137,7 +135,6 @@ defmodule Stacks.Admin.DataTest do
       {:ok, entries} = Data.list_audit_log(user.id, from_dt, to_dt)
       entry = Enum.find(entries, fn e -> e.action == "uuid.check" end)
       assert entry != nil
-      # Should be a formatted UUID string, not binary bytes
       assert is_binary(entry.user_id)
       assert String.length(entry.user_id) == 36
       assert entry.user_id =~ ~r/^[0-9a-f-]{36}$/

@@ -1,11 +1,11 @@
 defmodule Core.Repo.Migrations.ExpandUsersDiscoveredSourcesThirdSpaces do
   @moduledoc """
-  Adds notification/onboarding columns to op.users, opt-out columns to
-  op.third_spaces, exclusion columns to op.discovered_sources, and extends
-  the source_status enum with an 'excluded' value.
+      Adds notification/onboarding columns to op.users, opt-out columns to
+      op.third_spaces, exclusion columns to op.discovered_sources, and extends
+      the source_status enum with an 'excluded' value.
 
-  ALTER TYPE … ADD VALUE cannot run inside a transaction, so DDL transactions
-  are disabled for this migration.
+      ALTER TYPE … ADD VALUE cannot run inside a transaction, so DDL transactions
+      are disabled for this migration.
   """
 
   use Ecto.Migration
@@ -53,9 +53,5 @@ defmodule Core.Repo.Migrations.ExpandUsersDiscoveredSourcesThirdSpaces do
       remove :excluded_at
       remove :exclusion_email
     end
-
-    # NOTE: ALTER TYPE ... ADD VALUE cannot be reversed in PostgreSQL — enum values
-    # cannot be removed once added. The 'excluded' value in op.source_status is
-    # intentionally left in place on rollback to avoid a destructive DDL operation.
   end
 end

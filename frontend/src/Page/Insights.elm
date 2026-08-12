@@ -7,22 +7,11 @@ module Page.Insights exposing
     , view
     )
 
-{-| Personal inference & de-anonymisation education view (authed, own-only).
-
-The authenticated counterpart to the public `/metrics` page. Shows a signed-in
-user ONLY their own data-derived inferences, computed live from their own
-records and never persisted, to educate on:
-
-  - what can be inferred about them from their behaviour, and
-  - how they could be de-anonymised even though the platform keeps no PII.
-
-Everything shown is ephemeral — nothing here is stored, and it is computed from
-the user's own data only. The sensitive "what could be inferred" section is
-hidden behind an explicit consent-to-view action; clicking it re-fetches the
-same endpoint with `?reveal_risk=true`.
-
-Design: ADR-019 §3a. Issue #242.
-
+{-| Personal inference & de-anonymisation education view (authed,
+own-only) — the signed-in counterpart to the public `/metrics` page.
+Shows only the viewer's own inferences, computed live and never
+persisted; facts labelled as facts, inferences as guesses with limits
+stated.
 -}
 
 import Api exposing (Behaviour, Deanonymisation, InterestProfile, PersonalInferences, RiskInference, SubjectCount)
@@ -31,6 +20,7 @@ import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.Plural
 import Util.TestId exposing (testId)
 
 
@@ -117,10 +107,6 @@ update msg model =
                         ( { model | riskLoading = False, riskError = True }, Cmd.none, NoOut )
 
 
-
--- VIEW
-
-
 view : Model -> Html Msg
 view model =
     div [ class "page page--insights", testId "insights-page" ]
@@ -153,10 +139,6 @@ viewContent model =
                 , viewDeanon payload.deanonymisation
                 , viewRisk model payload
                 ]
-
-
-
--- INTEREST PROFILE
 
 
 viewInterest : InterestProfile -> Html Msg
@@ -199,12 +181,8 @@ viewBisac : Api.BisacCount -> Html Msg
 viewBisac bisac =
     li [ class "insights__list-item" ]
         [ span [ class "insights__code" ] [ text bisac.code ]
-        , text (" — " ++ pluraliseBooks bisac.count)
+        , text (" — " ++ Util.Plural.books bisac.count)
         ]
-
-
-
--- BEHAVIOUR
 
 
 viewBehaviour : Behaviour -> Html Msg
@@ -241,10 +219,6 @@ maybeStat label maybeValue =
 
         Nothing ->
             []
-
-
-
--- DE-ANONYMISATION (the centrepiece)
 
 
 viewDeanon : Deanonymisation -> Html Msg
@@ -299,10 +273,6 @@ viewDeanonBody deanon =
                 , p [ class "insights__section-desc" ]
                     [ text "The uniqueness of your shelf could not be computed this time. Nothing has been recorded either way." ]
                 ]
-
-
-
--- RISK INFERENCES (consent-gated)
 
 
 viewRisk : Model -> PersonalInferences -> Html Msg
@@ -371,10 +341,6 @@ viewRiskItem inference =
         ]
 
 
-
--- FORMATTING HELPERS
-
-
 formatPercent : Float -> String
 formatPercent rate =
     String.fromInt (round (rate * 100)) ++ "%"
@@ -396,12 +362,3 @@ formatHour hour =
             String.padLeft 2 '0' (String.fromInt hour)
     in
     "around " ++ padded ++ ":00"
-
-
-pluraliseBooks : Int -> String
-pluraliseBooks count =
-    if count == 1 then
-        "1 book"
-
-    else
-        String.fromInt count ++ " books"

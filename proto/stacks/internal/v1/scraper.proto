@@ -8,8 +8,269 @@ package stacks.internal.v1;
 message ScrapeRequest {
   // ISBN (digits only, no hyphens).
   string isbn = 1 [json_name = "isbn"];
-  // Store identifier (e.g. "za/exclusive_books", "za/takealot").
+  // Store identifier (e.g. "za/exclusive_books").
   string store = 2 [json_name = "store"];
+
+  // Where to find the product, when the caller already knows.
+  //
+  // Two of the target shops carry no ISBN anywhere on their products (Ike's: 0 of 50
+  // sampled; Love Books: 0 of 30), so no amount of enumeration can map an ISBN to a
+  // product there. Fuzzy title matching is the only remaining path, and it has to run
+  // caller-side because that is where the catalogue of what we hold lives — this
+  // service knows the shop but not our books.
+  //
+  // When set, the service fetches this path and skips ISBN resolution entirely.
+  optional string product_path = 3 [json_name = "product_path"];
+}
+
+// POST /catalogue/titles — request the titles of products this store lists.
+message CatalogueTitlesRequest {
+  // Store identifier.
+  string store = 1 [json_name = "store"];
+}
+
+// One listed product, reduced to what title matching needs.
+//
+// Deliberately just a path and a title: no price, description or image. The caller
+// matches titles against its own catalogue and keeps only the resulting pointer, so
+// there is never a copy of the shop's catalogue anywhere.
+message CatalogueTitle {
+  // Path relative to the store root, e.g. "/products/some-handle".
+  string product_path = 1 [json_name = "product_path"];
+  // Product title as the store lists it.
+  string title = 2 [json_name = "title"];
+}
+
+// Response from POST /catalogue/titles.
+message CatalogueTitlesResponse {
+  // Products that carry no extractable ISBN — the residual needing title matching.
+  repeated CatalogueTitle titles = 1 [json_name = "titles"];
+}
+
+// Request for POST /fetch — retrieve one page through the compliant egress.
+//
+// Exists so that callers which need a store's *page* rather than its price do not
+// have to build their own HTTP request, because doing so bypasses robots.txt and the
+// rate limiter. The events discovery job did exactly that (a bare Finch GET with no
+// robots check, no rate limit and no fuse), which is why this message exists.
+//
+// Deliberately keyed by `store` and not by URL: the config supplies the base URL and
+// the rate limit, so a store with no scraper config CANNOT be fetched at all. That is
+// the point — no configuration means no declared crawl policy, and guessing one is
+// how a compliance rule becomes advisory.
+message FetchPageRequest {
+  // Store identifier, e.g. "za/exclusive_books". Must exist in the registry.
+  string store = 1 [json_name = "store"];
+  // Path relative to the store root, e.g. "/events". Must begin with "/".
+  string path = 2 [json_name = "path"];
+
+  // Validators from the last time we fetched this path, so the shop can answer "nothing changed".
+  //
+  // This is the cheapest politeness available to us and it was missing entirely. An events page is
+  // re-read on a schedule and changes rarely; without these the shop renders and transmits the whole
+  // page every time to tell us something it could have said in a 304 with no body at all.
+  //
+  // Sent as received, never synthesised. An `ETag` is opaque — it may be weak (`W/"..."`), quoted, or
+  // any byte string the origin chose — so normalising or reformatting it is how a validator silently
+  // stops matching and the saving quietly disappears.
+  string if_none_match = 3 [json_name = "if_none_match"];
+  // An HTTP-date exactly as the origin's `Last-Modified` gave it.
+  string if_modified_since = 4 [json_name = "if_modified_since"];
+}
+
+// How a page fetch ended.
+//
+// Deliberately NOT `ScrapeOutcome`. A page fetch cannot be "priced", "not stocked" or
+// "index required", and reusing that enum here would let the contract encode three
+// nonsense states — the most expensive place to allow one. Two outcomes are all this
+// operation has.
+enum FetchOutcome {
+  // Never sent. Present because proto3 requires a zero value; treating "unset" as
+  // success is exactly the trap this enum exists to avoid.
+  FETCH_OUTCOME_UNSPECIFIED = 0;
+
+  // The page was fetched. `status` carries the upstream HTTP status, which may itself
+  // be a 404 — that is data about the store, not a failure of the fetch.
+  FETCH_OUTCOME_FETCHED = 1;
+
+  // robots.txt disallows this path. The caller must record it and stop; retrying
+  // cannot succeed, and treating it as an error melts the shared fuse every time.
+  FETCH_OUTCOME_ROBOTS_BLOCKED = 2;
+
+  // The shop answered 429, or we are still inside a cooldown it previously asked for.
+  //
+  // A determination, not a failure — same reasoning as ROBOTS_BLOCKED, and for the same fuse.
+  // The distinction from ROBOTS_BLOCKED is that this one *does* resolve on its own:
+  // `retry_after_seconds` says when.
+  FETCH_OUTCOME_RATE_LIMITED = 3;
+
+  // The shop answered 304: what we already have is current.
+  //
+  // Its own outcome rather than a FETCHED with an empty body, because those mean opposite things — an
+  // empty body would read as "the page is now blank", which for an events page means "all events were
+  // removed". `body` is empty here because there is nothing new to send, and a caller must keep what
+  // it already had.
+  FETCH_OUTCOME_NOT_MODIFIED = 4;
+}
+
+// Response from POST /fetch.
+message FetchPageResponse {
+  // Upstream HTTP status. 404 is data, not an error — the page may not exist.
+  // Zero when nothing was fetched (i.e. ROBOTS_BLOCKED).
+  int32 status = 1 [json_name = "status"];
+  // Response body, empty unless the outcome is FETCHED.
+  string body = 2 [json_name = "body"];
+  // Why this fetch ended the way it did.
+  FetchOutcome outcome = 3 [json_name = "outcome"];
+  // The `Disallow:` line that blocked us, set only when outcome is ROBOTS_BLOCKED.
+  // Recorded on the store so a block is observable state rather than a silent skip,
+  // and so an operator can tell a narrow disallow from a total one.
+  string robots_rule = 4 [json_name = "robots_rule"];
+  // `Sitemap:` URLs the shop declares in its robots.txt, in order, de-duplicated.
+  //
+  // Carried on EVERY fetch response because robots.txt is already fetched for every
+  // request — so this information is free, and asking for it separately would cost the
+  // shop a request it should never have to serve.
+  //
+  // It is what makes polite discovery possible. Guessing a path costs the shop a full
+  // page render (measured: 249,540 bytes for a Shopify 404, which is a *styled error
+  // page*), whereas a sitemap index is ~10 KB and states exactly which pages exist.
+  repeated string sitemaps = 5 [json_name = "sitemaps"];
+
+  // How long to wait before asking again, set only when the outcome is RATE_LIMITED.
+  //
+  // Carried on the response so the caller can *schedule* rather than poll: an Oban job that knows
+  // the cooldown can snooze itself for exactly that long. Without it the caller's only options are
+  // to guess an interval or to retry blindly, and retrying blindly against a shop that just said
+  // "too many requests" is how a rate limit becomes a ban.
+  //
+  // Sourced from the shop's `Retry-After` header where it sends one, else from the store's
+  // configured `retry_after_seconds`.
+  int64 retry_after_seconds = 6 [json_name = "retry_after_seconds"];
+
+  // Validators for this response, to be stored and sent back on the next fetch of this path.
+  //
+  // Empty when the origin sent none — plenty of pages carry neither, and in that case conditional
+  // requests are simply unavailable for that path rather than broken.
+  string etag = 7 [json_name = "etag"];
+  // The origin's `Last-Modified`, verbatim.
+  string last_modified = 8 [json_name = "last_modified"];
+}
+
+// Request for POST /sitemap-urls — enumerate a store's pages from its own sitemap.
+//
+// Keyed by `store` for the same reason `FetchPageRequest` is: the config supplies the base URL and
+// the rate limit, so a store with no scraper config cannot be walked at all.
+//
+// Takes no filter. The page-type sitemaps of a bookshop list tens of URLs, not thousands, so
+// returning them whole costs nothing and keeps the *decision* about which path is an events page
+// with the caller — which is where the vocabulary for that decision lives.
+message SitemapUrlsRequest {
+  // Store identifier, e.g. "za/exclusive_books". Must exist in the registry.
+  string store = 1 [json_name = "store"];
+}
+
+// How a sitemap walk ended.
+enum SitemapOutcome {
+  // Never sent; proto3 requires a zero value.
+  SITEMAP_OUTCOME_UNSPECIFIED = 0;
+
+  // The walk completed. `urls` may still be empty — a shop can genuinely list no pages — and
+  // `truncated` says whether it is complete.
+  SITEMAP_OUTCOME_HARVESTED = 1;
+
+  // robots.txt declared no `Sitemap:` at all, so there is nothing to walk. Distinct from HARVESTED
+  // with an empty `urls`: one means "the shop has no index", the other "the index listed nothing".
+  // Collapsing them would record a shop as having no events page on the strength of never asking.
+  SITEMAP_OUTCOME_NO_SITEMAP_DECLARED = 2;
+
+  // robots.txt disallows the sitemap path. Rare but real, and permanent until the rule changes.
+  SITEMAP_OUTCOME_ROBOTS_BLOCKED = 3;
+
+  // The shop is pacing us; see FETCH_OUTCOME_RATE_LIMITED. `retry_after_seconds` says when.
+  SITEMAP_OUTCOME_RATE_LIMITED = 4;
+}
+
+// Response from POST /sitemap-urls.
+message SitemapUrlsResponse {
+  // How the walk ended.
+  SitemapOutcome outcome = 1 [json_name = "outcome"];
+
+  // Page URLs the shop lists, de-duplicated, in document order.
+  repeated string urls = 2 [json_name = "urls"];
+
+  // How many sitemap documents were actually fetched, and how many bytes that cost the shop.
+  // Reported so the politeness of this operation is *measurable* rather than asserted: a change that
+  // quietly starts pulling a catalogue shows up here as a number, in a log line, on every run.
+  int32 documents_fetched = 3 [json_name = "documents_fetched"];
+  // Bytes transferred across those documents — what the walk actually cost the shop.
+  int64 bytes_read = 4 [json_name = "bytes_read"];
+
+  // Documents deliberately NOT fetched, each with its reason — a catalogue-sized child, a
+  // cross-host `Sitemap:` line, a non-2xx, a body that was not a sitemap.
+  //
+  // Carried on the response because "found nothing" and "declined to look" are different facts and
+  // a caller that cannot tell them apart will record the wrong one.
+  repeated string skipped = 5 [json_name = "skipped"];
+
+  // True when the crawl budget or a backoff ended the walk early, so `urls` is incomplete.
+  // A partial result presented as complete is how a shop gets permanently recorded as having no
+  // events page.
+  bool truncated = 6 [json_name = "truncated"];
+
+  // Set only when the outcome is RATE_LIMITED.
+  int64 retry_after_seconds = 7 [json_name = "retry_after_seconds"];
+}
+
+// What a scrape attempt concluded.
+//
+// The point of this enum is to separate two things that used to be
+// indistinguishable, because every scrape error became an HTTP 500 carrying a
+// stringified message:
+//
+//   - a *determination* — the shop genuinely does not carry this ISBN, or
+//     robots.txt forbids the path. Permanent, correct, and worth storing.
+//   - a *failure* — our extractor broke, or the network did. A defect to fix.
+//
+// Collapsing them was not merely untidy. `ScraperClient` melts the shared
+// `:scraper_fuse` on any non-200, and that fuse opens for 15 minutes after 3
+// failures across ALL stores — so a shop that permanently disallows our path,
+// or simply does not stock a book, would take price scraping down for every
+// other shop too.
+enum ScrapeOutcome {
+  // Unset. Treated as a failure by consumers: a response that cannot say what
+  // it concluded is not evidence that nothing is wrong.
+  SCRAPE_OUTCOME_UNSPECIFIED = 0;
+  // A price was found; price_cents is set.
+  SCRAPE_OUTCOME_PRICED = 1;
+  // The store does not carry this ISBN. A real answer, not an error — shops
+  // stock whichever editions they stock.
+  SCRAPE_OUTCOME_NOT_STOCKED = 2;
+  // robots.txt forbids the path we would need. The store's configuration is
+  // retained so this resolves itself if the rule is ever lifted.
+  SCRAPE_OUTCOME_ROBOTS_BLOCKED = 3;
+  // The page was fetched but we could not extract a price from it. This is our
+  // bug, and the only one of these that should count against the circuit breaker.
+  SCRAPE_OUTCOME_EXTRACTOR_FAILED = 4;
+  // This store needs a local ISBN→path index and none exists yet.
+  //
+  // Distinct from EXTRACTOR_FAILED, which it used to be folded into, because it is
+  // *actionable*: the caller should build the index rather than treat this as a
+  // defect. It is also emphatically not NOT_STOCKED — we do not know whether the
+  // shop carries the book, only that we cannot currently ask.
+  //
+  // Having its own value is what lets the index be built on demand rather than only
+  // on a schedule, which matters because the index lives in this service's process
+  // and dies with it.
+  SCRAPE_OUTCOME_INDEX_REQUIRED = 5;
+
+  // The shop is pacing us — it answered 429, or we are inside a cooldown it asked for.
+  //
+  // Its own value rather than folded into EXTRACTOR_FAILED or a 5xx, because it is neither our
+  // defect nor a service failure: it is the shop exercising a right we should have been honouring
+  // all along. Crucially it must not count against the shared fuse, since it recurs on every
+  // attempt until the cooldown lapses — the identical trap ROBOTS_BLOCKED was split out to avoid.
+  SCRAPE_OUTCOME_RATE_LIMITED = 6;
 }
 
 // Response from POST /scrape.
@@ -30,6 +291,34 @@ message ScrapeResponse {
   optional string title = 7 [json_name = "title"];
   // CSS selector match confidence 0.0–1.0 (absent if not applicable).
   optional double selector_match_rate = 8 [json_name = "selector_match_rate"];
+  // What this attempt concluded. Determinations (NOT_STOCKED, ROBOTS_BLOCKED)
+  // are returned with HTTP 200 precisely so they do not read as service
+  // failures; only genuine failures use a 5xx.
+  ScrapeOutcome outcome = 9 [json_name = "outcome"];
+  // Why, when the outcome is not PRICED. Human-facing diagnostic only — never
+  // parsed. Consumers branch on `outcome`.
+  optional string detail = 10 [json_name = "detail"];
+
+  // What the service observed this store to be capable of while serving this
+  // request.
+  //
+  // Reported on every scrape rather than through a separate probe endpoint, so the
+  // observation rides along with work already being done and its timestamp stays
+  // current for free. A replatform therefore shows up on the next scrape rather
+  // than waiting for a scheduled sweep.
+  optional StoreCapability capability = 11 [json_name = "capability"];
+}
+
+// What a store was observed to be capable of. Strings rather than enums because the
+// scraper service owns this vocabulary; adding a platform should not require a
+// coordinated proto change in every consumer.
+message StoreCapability {
+  // Which product API answered: "shopify_products_json", "woo_store_api", "none".
+  string price_source = 1 [json_name = "price_source"];
+  // Where the ISBN lives: "handle", "sku", "barcode", "body", "none".
+  string isbn_location = 2 [json_name = "isbn_location"];
+  // How one ISBN becomes one product: "direct", "native_search", "local_index".
+  string lookup_mode = 3 [json_name = "lookup_mode"];
 }
 
 // POST /config/reload — request body (empty; no parameters required).

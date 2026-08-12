@@ -1,13 +1,13 @@
 defmodule StacksWeb.Plugs.AdminAuthPipeline do
   @moduledoc """
-  Plug that authenticates and validates admin sessions.
+      Plug that authenticates and validates admin sessions.
 
-  Extracts a Bearer token from the Authorization header, verifies it as an
-  admin token (`typ: "admin_session"`), validates the associated admin session
-  (not revoked, not expired, matching boot_id and IP), and loads the user.
+      Extracts a Bearer token from the Authorization header, verifies it as an
+      admin token (`typ: "admin_session"`), validates the associated admin session
+      (not revoked, not expired, matching boot_id and IP), and loads the user.
 
-  On success, assigns `:current_user` and `:admin_session` to the conn.
-  On any failure, halts with a 401 JSON response.
+      On success, assigns `:current_user` and `:admin_session` to the conn.
+      On any failure, halts with a 401 JSON response.
   """
 
   import Plug.Conn

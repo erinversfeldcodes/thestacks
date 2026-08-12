@@ -1,28 +1,13 @@
 defmodule Stacks.Release do
   @moduledoc """
-  Release tasks for production and preview deployments.
+      Release tasks, run via the compiled binary:
 
-  Run via the compiled release binary:
+          /app/bin/core eval 'Stacks.Release.migrate'
+          /app/bin/core rpc  'Stacks.Release.seed_live'
 
-      /app/bin/core eval 'Stacks.Release.migrate()'
-      /app/bin/core eval 'Stacks.Release.seed()'
-      /app/bin/core eval 'Stacks.Release.seed_prod()'
-
-  Or via fly ssh console:
-
-      fly ssh console --app <app> -C "/app/bin/core eval 'Stacks.Release.migrate()'"
-
-  ## Seed gating
-
-  `seed/0` is gated behind the `ALLOW_SEEDS` environment variable. Set
-  `ALLOW_SEEDS=true` to enable seeding — this should only be done for dev
-  and preview environments, never for production.
-
-  `seed_prod/0` is the production-safe counterpart. It creates exactly one
-  owner user from `PROD_OWNER_EMAIL` and `PROD_OWNER_PASSWORD` environment
-  variables. It is idempotent (no-op if a user with that email already
-  exists) and is NOT invoked by `seed/0` — the function's identity is the
-  gate, not `ALLOW_SEEDS`.
+      `seed/0` is gated behind `ALLOW_SEEDS=true`; `seed_live/0` is prod-guarded by
+      `STACKS_E2E_TEST_HELPERS`. Prefer `rpc` on the 512MB preview VM — `eval`
+      spawns a second BEAM and OOMs it.
   """
 
   alias Core.Repo
@@ -42,16 +27,56 @@ defmodule Stacks.Release do
   end
 
   @doc """
-  Prints the migration versions applied on the connected DB, one per line,
-  prefixed with `APPLIED_VERSION `.
+      The deploy entry point (`release_command` in fly.core.toml): corrections,
+      migrate, corrections again. Order matters — a migration adding a constraint
+      is a claim about existing data, so repairs run before it; the second sweep
+      covers corrections whose target column the migration just added.
+  """
+  @spec deploy() :: :ok
+  def deploy do
+    correct_data(apply: true)
 
-  Consumed by `scripts/deploy-stack.sh`'s migration-integrity guard: the deploy
-  compares these against the migration files present in the repo and FAILS if
-  the repo contains a migration that is not applied on the deployed DB. This
-  catches the silent failure where `migrate/0` reports "already up" but a
-  migration never reached the image (e.g. an uncommitted/untracked migration
-  file absent from the working tree at image-build time) → the deployed schema
-  ends up behind the code → fail-closed auth/DB outages.
+    migrate()
+
+    correct_data(apply: true)
+
+    :ok
+  end
+
+  @doc """
+      Runs the registered data corrections. Dry-run by default (prints, writes
+      nothing); pass `apply: true` to write. Release-side twin of
+      `mix stacks.data.correct`.
+  """
+  @spec correct_data(keyword()) :: :ok
+  def correct_data(opts \\ []) do
+    load_app()
+
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(Repo, fn _repo ->
+        run_corrections(Keyword.get(opts, :apply, false))
+      end)
+
+    :ok
+  end
+
+  defp run_corrections(apply?) do
+    case Stacks.DataCorrection.run_all(Stacks.DataCorrection.Registry.all(),
+           apply: apply?,
+           invoked_by: "Stacks.Release.correct_data"
+         ) do
+      {:ok, outcomes} ->
+        Enum.each(outcomes, &IO.puts(&1.report))
+
+      {:error, {correction, reason}} ->
+        raise "data correction #{inspect(correction)} failed: #{inspect(reason)} — nothing was committed"
+    end
+  end
+
+  @doc """
+      Prints applied migration versions (`APPLIED_VERSION <v>` lines) for
+      deploy-stack.sh's integrity guard, which fails the deploy if the repo holds
+      a migration the DB never ran — catching a false "already up".
   """
   def print_applied_versions do
     load_app()
@@ -61,10 +86,6 @@ defmodule Stacks.Release do
     end
   end
 
-  # Read schema_migrations directly rather than via
-  # Ecto.Migrator.migrated_versions/1: the guard needs an exact, unambiguous
-  # list of every recorded version, and the direct query matches what a plain
-  # `SELECT` sees.
   defp emit_applied_versions(started_repo) do
     %{rows: rows} = SQL.query!(started_repo, "SELECT version FROM schema_migrations", [])
     Enum.each(rows, fn [version] -> IO.puts("APPLIED_VERSION #{version}") end)
@@ -84,22 +105,10 @@ defmodule Stacks.Release do
   end
 
   @doc """
-  Seed the dev/preview fixtures INSIDE the already-running release node.
-
-  Invoke via `bin/core rpc 'Stacks.Release.seed_live()'` (NOT `eval`). Unlike
-  `seed/0` — which is written for the fresh-BEAM `eval` path and therefore
-  `load_app`s and `with_repo`-starts each repo — this assumes the app and its
-  repos are already started (they are, in the serving node), so it evaluates the
-  seeds directly against the live `Core.Repo`.
-
-  Why: `eval 'seed()'` spawns a SECOND BEAM alongside the serving Phoenix, and on
-  the 512 MB preview VM that second BEAM plus the ~160-book in-memory seed set
-  OOMs the machine (the exec drops with a bare `EOF`). Running the seed in the
-  existing node via `rpc` avoids the second BEAM entirely.
-
-  No `ALLOW_SEEDS` gate: `rpc` cannot inject env into the running node, and — like
-  `seed_prod/0` and `seed_prober/0` — the function's identity is the gate.
-  `scripts/deploy-stack.sh` calls this ONLY in its preview branch, never prod.
+      Seeds dev/preview fixtures INSIDE the running node — invoke via
+      `bin/core rpc`, never `eval` (a second BEAM OOMs the 512MB preview VM).
+      Prod-guarded by `STACKS_E2E_TEST_HELPERS`; assumes app + repos already
+      started.
   """
   @spec seed_live() :: term()
   def seed_live do
@@ -107,33 +116,10 @@ defmodule Stacks.Release do
   end
 
   @doc """
-  Operator-run GDPR right-to-erasure for ONE user, addressed strictly by
-  `user_id`. Invoked from the `gdpr-erase-user` GitHub Actions workflow via:
-
-      bin/core rpc 'Stacks.Release.gdpr_erase_user("<base64-json>")'
-
-  The single argument is `Base64(JSON)` so the workflow carries arbitrary
-  reason text into the rpc expression with NO shell/Elixir injection surface —
-  the Base64 alphabet cannot break out of the string literal. Decoded JSON keys:
-
-    * `"user_id"` (required) — the UUID of the user to erase. This is the ONLY
-      globally-unique identifier; the destructive path refuses anything else so
-      it can never resolve ambiguously to the wrong person. Resolve an email or
-      handle to a `user_id` first with `gdpr_lookup_user/1` (the lookup workflow).
-    * `"reason"` (required to execute) — operator justification, recorded
-      encrypted in the `user.data_deleted` audit row. Must NOT contain the
-      subject's personal data.
-    * `"execute"` — `true` to actually erase; anything else is a dry run.
-    * `"confirm"` (required to execute) — must equal `"user_id"` verbatim.
-
-  A dry run (the default) prints the per-target counts that WOULD be erased,
-  mutating nothing. Runs inside the live node (`rpc`), so it uses the
-  already-started `Core.Repo`.
-
-  Prints machine-parseable `GDPR_ERASE_*` markers and RAISES on any failure so
-  the invoking `fly ssh` command exits non-zero. The erasure scrubs the
-  operational + event-log data immediately; the analytics warehouse drops it on
-  the next daily `DbtRefreshJob` full run (config.exs crontab, ≤24h).
+      Operator-run GDPR erasure for ONE user, by `user_id` only, driven by the
+      `gdpr-erase-user` workflow. The argument is Base64(JSON) so arbitrary reason
+      text crosses the rpc boundary with no shell/Elixir injection surface.
+      Decoded: `%{"user_id" =>, "reason" =>, "actor" =>, "dry_run" =>}`.
   """
   @spec gdpr_erase_user(binary()) :: :ok
   def gdpr_erase_user(params_b64) when is_binary(params_b64) do
@@ -145,9 +131,6 @@ defmodule Stacks.Release do
 
     if user_id == "", do: erase_fail!("user_id is required")
 
-    # Refuse anything that is not a UUID — no email/handle resolution lives in
-    # the destructive path, so it can never delete the wrong user on an
-    # ambiguous key. Use gdpr_lookup_user/1 to turn an email into a user_id.
     case Ecto.UUID.cast(user_id) do
       :error ->
         erase_fail!(
@@ -183,18 +166,10 @@ defmodule Stacks.Release do
   end
 
   @doc """
-  Read-only lookup that resolves an email or handle to its `user_id`(s) —
-  the non-destructive companion to `gdpr_erase_user/1`, driven by the
-  `gdpr-lookup-user` workflow:
-
-      bin/core rpc 'Stacks.Release.gdpr_lookup_user("<base64-json>")'
-
-  Decoded JSON: `%{"query" => email-or-handle}`. An email (`@`) is matched
-  case-insensitively and MAY return several rows (email is not a unique key);
-  a handle is unique and returns at most one. Prints one
-  `GDPR_LOOKUP_MATCH user_id=<uuid> email=<email> handle=<handle>` per match and
-  a trailing `GDPR_LOOKUP_COUNT <n>`, so the operator can pick the right
-  `user_id` to feed the erase workflow. Never mutates anything.
+      Read-only companion to `gdpr_erase_user/1` (the `gdpr-lookup-user`
+      workflow): resolves Base64(JSON) `%{"query" => email-or-handle}` to
+      user_id rows. Emails match case-insensitively and may return several rows;
+      handles are unique.
   """
   @spec gdpr_lookup_user(binary()) :: :ok
   def gdpr_lookup_user(params_b64) when is_binary(params_b64) do
@@ -253,18 +228,9 @@ defmodule Stacks.Release do
   end
 
   @doc """
-  Creates exactly one owner user from `PROD_OWNER_EMAIL` and
-  `PROD_OWNER_PASSWORD` environment variables.
-
-  Idempotent: if a user with that email already exists, logs a message and
-  returns `:ok` without modifying the existing user.
-
-  Raises `RuntimeError` if either env var is missing/empty, or if user
-  creation fails (e.g. password below minimum length). The exception surfaces
-  through `release eval` with a non-zero exit code.
-
-  This function is NOT called by `seed/0` — its identity is the gate. Invoke
-  it directly via `/app/bin/core eval 'Stacks.Release.seed_prod()'`.
+      Creates exactly one owner user from `PROD_OWNER_EMAIL`/`PROD_OWNER_PASSWORD`.
+      Idempotent (existing email → log + `:ok`). Raises on missing env or invalid
+      attrs so `release eval` exits non-zero and the deploy fails loudly.
   """
   @spec seed_prod() :: :ok
   def seed_prod do
@@ -273,8 +239,6 @@ defmodule Stacks.Release do
 
     load_app()
 
-    # We only need the primary repo (Core.Repo) for Accounts.register/1.
-    # Use with_repo to start it so context calls work under release eval.
     [primary_repo | _] = repos()
 
     {:ok, _, _} =
@@ -286,16 +250,9 @@ defmodule Stacks.Release do
   end
 
   @doc """
-  Creates exactly one probe user from `STACKS_PROBER_EMAIL` and
-  `STACKS_PROBER_PASSWORD` environment variables.
-
-  The prober user has role `"user"` (NOT `"owner"`) so probe credentials
-  never carry owner privileges. Idempotent: if a user with that email
-  already exists, logs a message and returns `:ok` without modifying the
-  existing user.
-
-  Raises `RuntimeError` if either env var is missing/empty, or if user
-  creation fails.
+      Creates exactly one probe user from `STACKS_PROBER_EMAIL`/`_PASSWORD` with
+      role `"user"` — probe credentials never carry owner privileges. Idempotent;
+      raises on missing env or failed creation.
   """
   @spec seed_prober() :: :ok
   def seed_prober do
@@ -335,8 +292,6 @@ defmodule Stacks.Release do
       "display_name" => "Platform Prober"
     }
 
-    # Use the registration changeset directly (not Accounts.register) to
-    # bypass maybe_assign_owner_role, which forces role="owner" on empty DBs.
     changeset =
       Stacks.Accounts.registration_changeset(%Stacks.Accounts.User{}, attrs)
 
@@ -385,12 +340,6 @@ defmodule Stacks.Release do
 
     case Stacks.Accounts.register(attrs) do
       {:ok, user} ->
-        # Mark the owner email as confirmed so the login endpoint accepts
-        # them immediately. The owner is created programmatically from a
-        # trusted secret flow (PROD_OWNER_EMAIL/PASSWORD) — no email
-        # verification posture applies. Without this, the login probe
-        # (and the operator themselves) get `email_unconfirmed` on first
-        # authentication attempt.
         confirm_owner!(user)
         IO.puts("seed_prod: created owner: #{email}")
         :ok

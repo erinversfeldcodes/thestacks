@@ -1,16 +1,16 @@
 defmodule Stacks.Workers.EnrichBookJobTest do
   @moduledoc """
-  Tests for Stacks.Workers.EnrichBookJob.
+      Tests for Stacks.Workers.EnrichBookJob.
 
-  The worker is enqueued by `Stacks.Moderation.store_book/3` when a
-  checksum-valid ISBN takes the fast path — the synchronous OL/GB call
-  is skipped, a placeholder book is inserted, and this worker fills in
-  the real metadata asynchronously. Tests verify:
+      The worker is enqueued by `Stacks.Moderation.store_book/3` when a
+      checksum-valid ISBN takes the fast path — the synchronous OL/GB call
+      is skipped, a placeholder book is inserted, and this worker fills in
+      the real metadata asynchronously. Tests verify:
 
-    * Valid ISBN with a placeholder book → title + cover get filled in
-    * Unknown ISBN → :ok, no-op (book row doesn't exist yet)
-    * Already-enriched book → :ok, no-op (idempotent on retry)
-    * Legacy book_id arg shape → resolved via BookEdition join
+        * Valid ISBN with a placeholder book → title + cover get filled in
+        * Unknown ISBN →:ok, no-op (book row doesn't exist yet)
+        * Already-enriched book →:ok, no-op (idempotent on retry)
+        * Legacy book_id arg shape → resolved via BookEdition join
   """
 
   use Core.DataCase, async: true
@@ -26,7 +26,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     test "enriches a placeholder book with OL metadata" do
       isbn = "9780743273565"
 
-      # Seed a placeholder book row the way Moderation does on the fast path.
       {:ok, book} =
         Books.create(%{
           "isbn" => isbn,
@@ -34,7 +33,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
           "visibility_tier" => "public"
         })
 
-      # Prime the mock so the resolver returns real metadata.
       MockHttpClient.put_response(
         "openlibrary.org/api/books",
         {:ok,
@@ -57,11 +55,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     end
 
     test "links the resolver author to the book via author_id" do
-      # Regression: previously `update_book` only cast title/description,
-      # so an OL response with an authors list left `op.books.author_id`
-      # null. The deployed preview showed
-      # `curl /api/books/isbn/9780156001311` returning `"author": null`
-      # for "The Name of the Rose" despite OL carrying Umberto Eco.
       isbn = "9780156001311"
 
       {:ok, book} =
@@ -91,8 +84,85 @@ defmodule Stacks.Workers.EnrichBookJobTest do
       assert updated.author.name == "Umberto Eco"
     end
 
+    test "enrichment stops the edition claiming nothing ever verified it" do
+      isbn = "9780679783268"
+
+      {:ok, book} =
+        Books.create(%{
+          "isbn" => isbn,
+          "title" => "ISBN #{isbn}",
+          "verification_source" => "barcode_unverified",
+          "visibility_tier" => "public"
+        })
+
+      edition = hd(book.editions)
+
+      assert edition.verification_source == "barcode_unverified",
+             "precondition: the fast path recorded that nothing external had confirmed this ISBN"
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:#{isbn}" => %{
+             "title" => "Pride and Prejudice",
+             "authors" => [%{"name" => "Jane Austen"}],
+             "key" => "/works/OL66554W"
+           }
+         }}
+      )
+
+      assert :ok = perform_job(EnrichBookJob, %{"isbn" => isbn})
+
+      reloaded = Repo.get!(Stacks.Books.BookEdition, edition.id)
+
+      refute reloaded.verification_source == "barcode_unverified",
+             "Open Library has now confirmed this ISBN; the row must stop saying otherwise"
+
+      assert reloaded.verification_source == "open_library"
+      assert Repo.get!(Book, book.id).title == "Pride and Prejudice"
+    end
+
+    test "enrichment stores the cross-reference id its provenance claim is read off" do
+      isbn = "9780141439518"
+
+      {:ok, book} =
+        Books.create(%{
+          "isbn" => isbn,
+          "title" => "ISBN #{isbn}",
+          "verification_source" => "barcode_unverified",
+          "visibility_tier" => "public"
+        })
+
+      edition = hd(book.editions)
+
+      assert is_nil(edition.open_library_id),
+             "precondition: the fast path had no identifier to write"
+
+      MockHttpClient.put_response(
+        "openlibrary.org/api/books",
+        {:ok,
+         %{
+           "ISBN:#{isbn}" => %{
+             "title" => "Pride and Prejudice",
+             "authors" => [%{"name" => "Jane Austen"}],
+             "key" => "/books/OL24236411M"
+           }
+         }}
+      )
+
+      assert :ok = perform_job(EnrichBookJob, %{"isbn" => isbn})
+
+      reloaded = Repo.get!(Stacks.Books.BookEdition, edition.id)
+
+      assert reloaded.open_library_id == "/books/OL24236411M",
+             "enrichment resolved the ISBN and threw the cross-reference away"
+
+      assert reloaded.verification_source == "open_library",
+             "the claim and the id it is read off must land on the row together"
+    end
+
     test "no-ops when book row for the ISBN doesn't exist" do
-      # No book seeded — worker should log + succeed, not crash.
       assert :ok = perform_job(EnrichBookJob, %{"isbn" => "9780000000000"})
     end
 
@@ -106,9 +176,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
           "visibility_tier" => "public"
         })
 
-      # Worker should short-circuit without calling the resolver. No
-      # mock response registered — if it DID hit the resolver, the
-      # result would be :not_found which isn't an error.
       assert :ok = perform_job(EnrichBookJob, %{"isbn" => isbn})
     end
   end
@@ -143,8 +210,6 @@ defmodule Stacks.Workers.EnrichBookJobTest do
     end
 
     test "no-ops when book_id has no associated edition" do
-      # Book without edition — shouldn't happen in production but tests
-      # resilience against legacy args.
       assert :ok = perform_job(EnrichBookJob, %{"book_id" => Ecto.UUID.generate()})
     end
   end

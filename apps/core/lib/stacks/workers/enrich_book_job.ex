@@ -1,39 +1,18 @@
 defmodule Stacks.Workers.EnrichBookJob do
   @moduledoc """
-  Oban worker that fills in external-registry metadata (title, author,
-  cover, publisher, etc.) for a book previously stored with placeholder
-  fields.
-
-  Invoked by `Stacks.Moderation.store_book/3` when a checksum-valid ISBN
-  arrives from the vision pipeline — that fast path skips the synchronous
-  OpenLibrary/Google Books lookup to cut ~400ms from the upload hot path,
-  so this worker picks up the round-trip asynchronously.
-
-  Behaviour:
-    * Looks up the book by ISBN (not by ID — the Moderation pipeline
-      deduplicates via `Books.find_existing(isbn)`, so the same ISBN
-      may already have been enriched by a prior run; we re-fetch the
-      latest row every time).
-    * Calls `Books.resolve_isbn/1` which hits the cached + parallel
-      OL/GB resolver. Any miss is logged and retried by Oban.
-    * Updates the book row in-place, overwriting the placeholder
-      title/author/cover/etc. with real metadata.
-    * No-ops when the book already has a real title (not starting with
-      the `"ISBN "` placeholder) — another run already enriched it.
+      Fills in external-registry metadata for a book stored with placeholder
+      fields — the async half of the fast path where `Moderation.store_book/3`
+      skips the synchronous OL/GB lookup (~400ms off the upload hot path).
+      Looks up by ISBN, not ID (the pipeline dedups via `find_existing/1`, so
+      a prior run may already have enriched the row); calls
+      `Books.resolve_isbn/1` (cached, parallel); overwrites placeholders
+      in place. Emits `book.enriched` so caches invalidate.
   """
 
   use Oban.Worker, queue: :default, max_attempts: 5
 
   require Logger
 
-  # Aggressive early backoff. Default Oban backoff is
-  # `(attempt - 1) ** 4 + 15 + (rand * 30)` seconds — attempt 2 lands at
-  # 15-45 s after attempt 1, which routinely exceeds the upload UI's
-  # 60 s enrichment-poll budget when OL/GB are transiently slow. Our
-  # cache-poison fix means a transient resolver error no longer locks
-  # the ISBN out for an hour, so retrying fast is safe. Stair-step
-  # 3 → 6 → 12 → 24 s gets attempt 4 in by ~45 s, fitting comfortably
-  # inside the test poll while still ceiling at 48 s on attempt 5.
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}) do
     case attempt do
@@ -51,6 +30,7 @@ defmodule Stacks.Workers.EnrichBookJob do
   alias Stacks.Books
   alias Stacks.Books.Book
   alias Stacks.Books.BookEdition
+  alias Stacks.Events
 
   @placeholder_title_prefix "ISBN "
 
@@ -74,11 +54,7 @@ defmodule Stacks.Workers.EnrichBookJob do
     end
   end
 
-  # Legacy arg shape — pre-consolidation jobs carried `book_id`. ISBN
-  # lives on `BookEdition`, not `Book`, so we need a join to recover it.
   def perform(%Oban.Job{args: %{"book_id" => book_id}}) do
-    # Schema maps `inserted_at` → `created_at` column; sort by the real
-    # column name to recover the oldest edition deterministically.
     isbn_query =
       from e in BookEdition,
         where: e.book_id == ^book_id,
@@ -125,15 +101,6 @@ defmodule Stacks.Workers.EnrichBookJob do
     end
   end
 
-  # Classify the resolver result into a closed tag set so that
-  # log/telemetry consumers (and the diagnostic tests in
-  # enrichment_diagnostics_test.exs) can distinguish each failure mode
-  # observed in production: cache poisoning (:not_found), blown fuses
-  # (:circuit_open), unexpected 5xx (:unexpected_status), malformed JSON
-  # (:malformed_response), transport failure (:transport_error), and
-  # outright timeout (:timeout). No catch-all — every atom in
-  # `Stacks.Books.ISBNResolver.error_reason()` has a matching clause so
-  # dialyzer rejects any new resolver reason that goes unmapped here.
   defp outcome_tag({:ok, _}), do: :ok
   defp outcome_tag({:error, :not_found}), do: :not_found
   defp outcome_tag({:error, :circuit_open}), do: :circuit_open
@@ -152,24 +119,26 @@ defmodule Stacks.Workers.EnrichBookJob do
         :ok
 
       %Book{} = book ->
-        # Fields split across Book (title/description/subjects) and
-        # BookEdition (cover/publisher/publication_year/page_count) —
-        # update both rows in a single transaction so the user sees
-        # enriched metadata atomically rather than a half-filled row.
-        #
-        # Bug-fix history: previous versions used Repo.update!/1 here.
-        # A raise inside the transaction propagated out, Oban retried
-        # the job 5×, every retry hit the same bug, and the job was
-        # silently abandoned — leaving the book stuck on its
-        # placeholder title for an hour. Both helpers now return
-        # `{:ok, struct}` / `{:error, changeset}` and we propagate
-        # failure via Repo.rollback/1 so the transaction surfaces a
-        # tidy `{:error, _}` instead of a process-leaking raise.
         book
         |> run_update_transaction(isbn, metadata)
         |> handle_update_result(isbn)
+        |> announce_enrichment(book)
     end
   end
+
+  defp announce_enrichment(:ok, %Book{} = book) do
+    Events.emit_safe(%{
+      event_type: "book.enriched",
+      aggregate_type: "book",
+      aggregate_id: book.id,
+      payload: %{book_id: book.id},
+      metadata: %{actor: "enrich_book_job"}
+    })
+
+    :ok
+  end
+
+  defp announce_enrichment(other, _book), do: other
 
   defp run_update_transaction(book, isbn, metadata) do
     Repo.transaction(fn ->
@@ -198,15 +167,6 @@ defmodule Stacks.Workers.EnrichBookJob do
     {:error, :update_failed}
   end
 
-  # Bug-fix history: previous versions cast only `title` and
-  # `description` from the resolver metadata. The resolver returns
-  # `author` as a string (e.g. `"Umberto Eco"`), but `op.books` stores it
-  # as `author_id` (FK to `op.authors`), so the author silently vanished
-  # on enrichment — placeholder books ended up with a real title but
-  # `author: null` in the API. The fix runs `find_or_create_author/1` in
-  # the transaction and links the resulting row via `author_id`. When the
-  # resolver has no author (nil/empty), we leave the existing `author_id`
-  # alone rather than null it out.
   defp update_book(%Book{} = book, metadata, author) do
     base = %{
       "title" => presence_or(metadata[:title], book.title),
@@ -235,7 +195,10 @@ defmodule Stacks.Workers.EnrichBookJob do
           "publisher" => metadata[:publisher] || edition.publisher,
           "publication_year" =>
             coerce_integer(metadata[:publication_year]) || edition.publication_year,
-          "page_count" => coerce_integer(metadata[:page_count]) || edition.page_count
+          "page_count" => coerce_integer(metadata[:page_count]) || edition.page_count,
+          "open_library_id" => metadata[:open_library_id] || edition.open_library_id,
+          "google_books_id" => metadata[:google_books_id] || edition.google_books_id,
+          "verification_source" => Books.verification_source_from(metadata)
         }
 
         edition
@@ -244,10 +207,6 @@ defmodule Stacks.Workers.EnrichBookJob do
     end
   end
 
-  # Treat blank or whitespace-only strings as absent so we fall back to
-  # the existing column value. Without this, OL responses carrying
-  # `"title": ""` would replace a real placeholder with an empty title,
-  # tripping `validate_required(:title)` on book_changeset.
   defp presence_or(value, fallback) when is_binary(value) do
     case String.trim(value) do
       "" -> fallback
@@ -258,12 +217,6 @@ defmodule Stacks.Workers.EnrichBookJob do
   defp presence_or(nil, fallback), do: fallback
   defp presence_or(value, _fallback), do: value
 
-  # Coerce values destined for `:integer` Ecto fields. OL and Google
-  # Books occasionally return `page_count` / `publish_date` as strings
-  # (`"lots"`, `"unknown"`, `"200"`); a non-coercible value would fail
-  # the changeset cast and (with the old `Repo.update!`) raise out of
-  # the transaction. Returning `nil` here lets the `||` fallback in the
-  # caller keep the existing column value.
   defp coerce_integer(value) when is_integer(value), do: value
 
   defp coerce_integer(value) when is_binary(value) do

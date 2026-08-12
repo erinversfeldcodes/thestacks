@@ -2,13 +2,13 @@ module BookcaseHelpersTest exposing (suite)
 
 {-| Tests for the bookcase frame structure in Page.Bookshelf.Helpers.
 
-These tests validate the DoD items for Issue #029:
+These tests validate the DoD items for:
 
-  - viewBookcase wraps content in .bookcase with .bookcase\_\_side--left and .bookcase\_\_side--right
-  - viewShelfRow renders .shelf-row containing .shelf-row\_\_back, .shelf-row\_\_books, .shelf-row\_\_plank, .shelf-row\_\_lip
+  - viewBookcase wraps content in.bookcase with.bookcase\_\_side--left and.bookcase\_\_side--right
+  - viewShelfRow renders.shelf-row containing.shelf-row\_\_back,.shelf-row\_\_books,.shelf-row\_\_plank,.shelf-row\_\_lip
   - Books are grouped into rows that fit within the shelf width
 
-Issue #112 punch #14 adds the cases that matter in production: `groupIntoRows`
+This suite adds the cases that matter in production: `groupIntoRows`
 at the real bookcase inner width (990px) rather than a toy `maxWidth`, and the
 `minShelfRows 4` padding that keeps a sparse bookcase looking like furniture.
 
@@ -17,6 +17,7 @@ at the real bookcase inner width (990px) rather than a toy `maxWidth`, and the
 import Components.Spine exposing (WearLevel(..))
 import Expect
 import Html
+import Html.Attributes
 import Page.Bookshelf.Helpers exposing (groupIntoRows, minShelfRows, viewShelfRow)
 import ProgramTest
 import Test exposing (Test, describe, test)
@@ -35,10 +36,39 @@ suite =
         , minShelfRowsPadding
         , productionWidthDrivenThroughThePage
         , noPageCountFallsBackToMinimumWidth
+        , shelfLabelPluralisation
         ]
 
 
-{-| A shelf row must include a .shelf-row\_\_lip element after the plank.
+{-| The shelf's `role="list"` container carries an `aria-label` a screen reader
+reads verbatim, so its grammar is heard, not just seen (TR-6). A one-book
+shelf must say "1 book", not "1 books"; two must say "2 books". Both directions
+are asserted so the test fails on the old naive `String.fromInt n ++ " books"`.
+-}
+shelfLabelPluralisation : Test
+shelfLabelPluralisation =
+    describe "viewShelfRow aria-label pluralises the book count"
+        [ test "one_book_is_singular: a shelf of one book says '1 book'" <|
+            \_ ->
+                viewShelfRow Softened [ testPlacement ]
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "shelf-row__books" ]
+                    |> Query.has [ shelfAriaLabel "Shelf — 1 book" ]
+        , test "two_books_are_plural: a shelf of two books says '2 books'" <|
+            \_ ->
+                viewShelfRow Softened [ testPlacement, testPlacement ]
+                    |> Query.fromHtml
+                    |> Query.find [ Selector.class "shelf-row__books" ]
+                    |> Query.has [ shelfAriaLabel "Shelf — 2 books" ]
+        ]
+
+
+shelfAriaLabel : String -> Selector.Selector
+shelfAriaLabel value =
+    Selector.attribute (Html.Attributes.attribute "aria-label" value)
+
+
+{-| A shelf row must include a.shelf-row\_\_lip element after the plank.
 -}
 shelfRowHasLip : Test
 shelfRowHasLip =
@@ -180,7 +210,6 @@ productionWidthDrivenThroughThePage =
                         >> Query.findAll [ Selector.class "book-button" ]
                         >> Query.count (Expect.equal 1)
                     )
-                -- Two book rows, padded out to the four-row minimum.
                 |> ProgramTest.expectView
                     (Query.findAll [ Selector.class "shelf-row" ]
                         >> Query.count (Expect.equal 4)
@@ -211,10 +240,6 @@ noPageCountFallsBackToMinimumWidth =
                     |> Query.find [ Selector.class "book" ]
                     |> Query.has [ Selector.style "width" "35px" ]
         ]
-
-
-
--- FIXTURES
 
 
 {-| A placement whose book has neither editions nor a primary edition, so

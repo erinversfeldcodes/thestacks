@@ -25,17 +25,10 @@ async function openBookOverlayFromCatalogue(page: Page, bookId: string): Promise
   await page.goto("/catalogue");
   await page.getByTestId('catalogue-grid').waitFor({ timeout: 10000 });
 
-  // Find and click the card link for this specific book. `bookId` comes from
-  // findMultiEditionBookId, which reads the same default-sorted catalogue the
-  // page renders, so the target card is always on the first page. Assert its
-  // presence rather than silently falling back to the first card — that
-  // fallback would open the WRONG (possibly single-edition) book and make the
-  // caller's edition assertions vacuous.
   const cardLink = page.locator(`.catalogue__card-link[href="/books/${bookId}"], .catalogue__card-link[data-book-id="${bookId}"]`).first();
   await expect(cardLink).toBeVisible({ timeout: 10000 });
   await cardLink.click();
 
-  // Wait for the overlay to appear
   await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
   await page.waitForSelector('[role="dialog"] [data-testid="book-overlay"], [data-testid="book-overlay"]', { timeout: 10000 });
 }
@@ -49,7 +42,6 @@ async function findPlacedBookId(page: Page): Promise<string | null> {
     });
     if (!resp.ok) return null;
     const data = await resp.json();
-    // API returns {shelves: [{placements: [...]}]} after #151 shelf entity change
     const allPlacements = (data.shelves ?? []).flatMap((s: any) => s.placements ?? []);
     return allPlacements[0]?.book?.id ?? null;
   });

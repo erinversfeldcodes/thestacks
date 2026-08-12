@@ -129,6 +129,18 @@ message DiscoveredSource {
 
   // When this record was last updated.
   google.protobuf.Timestamp updated_at = 14 [json_name = "updated_at"];
+
+  // When a removal was *requested*, as distinct from applied.
+  //
+  // `opt_out` used to apply the exclusion the moment a form was submitted, which meant
+  // anyone who knew a listing's URL could delist any business — the form has no account
+  // behind it by design. A request whose contact email does not demonstrably belong to
+  // the business now waits for owner review instead, and this records that it is waiting.
+  //
+  // Pending is derivable rather than a new enum value: this timestamp set while `status`
+  // is not yet `excluded` *is* the pending state, which avoids an enum alteration and
+  // keeps the two facts (requested / applied) independently visible.
+  google.protobuf.Timestamp exclusion_requested_at = 15 [json_name = "exclusion_requested_at"];
 }
 
 // ReviewSnapshot represents a scraped review summary for a book from an external source.
@@ -192,6 +204,133 @@ message Bookstore {
 
   // When this record was last updated.
   google.protobuf.Timestamp updated_at = 9 [json_name = "updated_at"];
+
+  // ── Observed capability ──────────────────────────────────────────────────
+  //
+  // What this store can actually do, as measured rather than declared. Every
+  // field below is written by the capability probe and must never be
+  // hand-authored: bookshops replatform, and a hand-set platform turns that into
+  // a silent outage indistinguishable from "we don't stock it".
+
+  // Which product API answered, e.g. "shopify_products_json", "woo_store_api",
+  // "none". Free-form rather than an enum because the scraper service owns the
+  // vocabulary and adding a platform should not require a proto change here.
+  string price_source = 10 [json_name = "price_source"];
+
+  // Where the ISBN was found on this store's products: "handle", "sku",
+  // "barcode", "body", or "none".
+  string isbn_location = 11 [json_name = "isbn_location"];
+
+  // How one ISBN becomes one product: "direct" (the handle is the ISBN, so a 404
+  // means not stocked), "native_search" (the platform's search matches the ISBN),
+  // or "local_index" (an ISBN→URL index must be built first).
+  string lookup_mode = 12 [json_name = "lookup_mode"];
+
+  // When the capability above was last observed. A stale timestamp is the signal
+  // to re-probe; a null one means never probed.
+  google.protobuf.Timestamp capability_probed_at = 13 [json_name = "capability_probed_at"];
+
+  // An ISBN this store is known to carry, used as a canary. If it stops resolving
+  // the store has changed underneath us — a replatform, a theme change, or a
+  // moved ISBN — and the capability must be re-derived rather than trusted.
+  string canary_isbn = 14 [json_name = "canary_isbn"];
+
+  // Set when robots.txt forbids the path we would need, together with the rule
+  // that forbade it. Configuration is deliberately retained so that if the rule is
+  // ever lifted this store simply starts working again.
+  //
+  // These three move together and are cleared together: a block is a single
+  // observation, and a half-cleared one would read as "still blocked, reason
+  // unknown". `Prices.record_robots_block/3` and `clear_robots_block/1` are the only
+  // writers, so that invariant lives in one place.
+  string robots_blocked_path = 15 [json_name = "robots_blocked_path"];
+
+  // The `Disallow:` line that blocked us, e.g. "Disallow: /search" or "Disallow: /".
+  //
+  // Without it a blocked store is unactionable: an operator cannot tell whether the
+  // shop forbade one path (try another) or the whole site (stop configuring it). The
+  // path alone does not carry that, because the same path can be blocked by rules of
+  // very different scope.
+  string robots_blocked_rule = 16 [json_name = "robots_blocked_rule"];
+
+  // When the block was last observed.
+  //
+  // Present so the block is *re-checkable* rather than permanent. robots.txt is not a
+  // contract a site is held to forever; a disallow lifted next month should let this
+  // store resume by itself, and without a timestamp there is no way to know a block
+  // is stale rather than current.
+  google.protobuf.Timestamp robots_blocked_at = 17 [json_name = "robots_blocked_at"];
+
+  // Why this store cannot be priced, when `price_source` is "none".
+  //
+  // A verdict without a reason is not actionable: "none" alone cannot distinguish a
+  // shop with no product API from one whose API exists but exposes no ISBN, and those
+  // want completely different follow-up (nothing, versus a title-matching pass). It
+  // also stops the same shop being re-investigated from scratch every few months —
+  // the research cost is real and this is where it is banked.
+  //
+  // Free text on purpose: this is a note for a human operator, and an enum would have
+  // to be extended for every new way a shop turns out to be unscrapable.
+  string unscrapable_reason = 18 [json_name = "unscrapable_reason"];
+
+  // ── Location ────────────────────────────────────────────────────────────
+  //
+  // The 500 m rule pairs a third space with a bookshop, so it needs coordinates
+  // on BOTH sides. `op.bookstores` had `country_code` and a website and nothing
+  // positional, which is why the rule could not be computed at all.
+  // Decimal degrees, WGS 84. Null until geocoded.
+  double latitude = 19 [json_name = "latitude"];
+  // Decimal degrees, WGS 84. Null until geocoded.
+  double longitude = 20 [json_name = "longitude"];
+
+  // ── Events page ─────────────────────────────────────────────────────────
+  //
+  // Where this shop's events actually live, resolved from its own sitemap.
+  //
+  // `DiscoverBookstoreEventsJob` used to fetch one hardcoded `/events` on every store, and it 404s
+  // on **every** scrapeable store — so the events pipeline had never written a row. Guessing further
+  // is not cheap for the shop either: a Shopify 404 is a *styled* page, measured at 249,540 bytes.
+  //
+  // Stored so the question is asked once. `Stacks.Enrichment.EventsPath` is the only writer.
+  //
+  // ⚠️ Deliberately NOT folded into `unscrapable_reason` above. That field means "this store cannot
+  // be *priced*", and a shop can be perfectly priceable while having no events page — the two are
+  // independent facts about a store and one field cannot answer both.
+
+  // Path relative to the store root, e.g. "/pages/events". Empty until resolved.
+  string events_path = 21 [json_name = "events_path"];
+
+  // When resolution was last attempted.
+  //
+  // This is the field that makes "we looked and found nothing" distinguishable from "we have not
+  // looked yet" — an empty `events_path` alone cannot tell those apart, and treating the second as
+  // the first is how a shop gets permanently written off. It also makes the verdict *re-checkable*:
+  // a shop that adds an events page next month should be found, so a stale check is a reason to look
+  // again. Exactly the role `robots_blocked_at` plays for a disallow.
+  google.protobuf.Timestamp events_path_checked_at = 22 [json_name = "events_path_checked_at"];
+
+  // Why the last attempt resolved nothing — "no sitemap declared in robots.txt", "no candidate
+  // matched", "candidate answered 404", "shop paced us".
+  //
+  // Free text for the same reason `unscrapable_reason` is: it is a note for a human operator, and an
+  // enum would need extending every time a shop turns out to be unresolvable in a new way. The
+  // distinctions matter operationally — "no sitemap" is a shop we could not ask, while "no candidate
+  // matched" is a shop we asked and that genuinely lists no events page.
+  string events_unresolved_reason = 23 [json_name = "events_unresolved_reason"];
+
+  // Cache validators from the last fetch of `events_path`, sent back as `If-None-Match` /
+  // `If-Modified-Since` so the shop can answer 304 instead of rendering the page again.
+  //
+  // An events page is re-read on a schedule and changes rarely, which makes this the cheapest
+  // courtesy available: a 304 carries no body at all. Stored per store because a validator is only
+  // meaningful for the exact URL that issued it.
+  //
+  // ⚠️ Stored and sent **verbatim**. An ETag is an opaque byte string — weak (`W/"..."`), quoted,
+  // whatever the origin chose — so normalising it makes it silently stop matching, and the failure is
+  // invisible: everything keeps working, just at full cost to the shop.
+  string events_page_etag = 24 [json_name = "events_page_etag"];
+  // The origin's `Last-Modified` for `events_path`, verbatim.
+  string events_page_last_modified = 25 [json_name = "events_page_last_modified"];
 }
 
 // PriceSnapshot represents a scraped price for a book at a store.
@@ -199,7 +338,17 @@ message PriceSnapshot {
   // UUID of the price snapshot record.
   string id = 1 [json_name = "id"];
 
-  // Foreign key to the book being priced.
+  // Foreign key to the work being priced.
+  //
+  // DERIVED, NOT AUTHORITATIVE. A price is a fact about an edition, not a work:
+  // shops stock whichever edition they stock, at different prices (Exclusive
+  // Books carries six ISBNs of The Name of the Rose, two of them Spanish, at
+  // different prices). `book_edition_id` below is the real key.
+  //
+  // This field is retained because proto field numbers are forever and
+  // `buf breaking` is set to FILE, so it cannot be removed. It is populated by
+  // `Prices.upsert_snapshot/1` from the edition, at the single write site, so
+  // the two can never disagree — callers do not supply it.
   string book_id = 2 [json_name = "book_id"];
 
   // Foreign key to the bookstore where the price was found.
@@ -219,6 +368,13 @@ message PriceSnapshot {
 
   // When the price was scraped.
   google.protobuf.Timestamp scraped_at = 8 [json_name = "scraped_at"];
+
+  // Foreign key to the specific edition priced. THIS IS THE REAL KEY.
+  //
+  // Snapshots are unique on (book_edition_id, store_id). Keying on the work
+  // instead meant pricing one edition marked every edition of that work as
+  // freshly scraped, so the others could never be priced at all.
+  string book_edition_id = 9 [json_name = "book_edition_id"];
 }
 
 // BookstoreEvent represents an event listing scraped from a bookstore website.
@@ -292,6 +448,56 @@ message ThirdSpace {
 
   // When the space opted out.
   google.protobuf.Timestamp opted_out_at = 15 [json_name = "opted_out_at"];
+
+  // ── Location ────────────────────────────────────────────────────────────
+  //
+  // Real coordinates, replacing a `city` string looked up in a hardcoded
+  // six-entry map. `Enrichment.within_radius?/4` resolved a space's position by
+  // that lookup, so any space outside those six cities was silently dropped and
+  // two spaces in one city were treated as equidistant — while
+  // `GET /api/third-spaces` advertised `lat`/`lng`/`radius_km`. The endpoint was
+  // live with a contract it could not keep; 0 rows were all that hid it.
+  //
+  // `double`, not a geography type: a viewport IS a bounding box, so the primary
+  // query is two `between` clauses, and the 500 m rule is a Haversine expression
+  // that `Enrichment.haversine_km/4` already implements. PostGIS buys nothing
+  // until real geometry is needed.
+  // Decimal degrees, WGS 84. Null until geocoded.
+  double latitude = 16 [json_name = "latitude"];
+  // Decimal degrees, WGS 84. Null until geocoded. Range -180..180, so a viewport that
+  // crosses the antimeridian arrives with east < west — see `filter_bounds/2`.
+  double longitude = 17 [json_name = "longitude"];
+
+  // Kilometres to the nearest bookshop, computed once at geocode time.
+  //
+  // Precomputed deliberately. The 500 m rule is the page's premise, so filtering
+  // on it happens on every pan; recomputing space-to-bookshop distances across a
+  // viewport per request is exactly the query that would later force PostGIS for
+  // the wrong reason. Stored as a scalar, the filter is `where <= 0.5`.
+  //
+  // Null means "not yet computed" — distinct from "no bookshop near", which is a
+  // large number. A space that failed to geocode must stay visible to the owner
+  // rather than silently vanishing from the queue.
+  double nearest_bookshop_km = 18 [json_name = "nearest_bookshop_km"];
+
+  // ── Curation ───────────────────────────────────────────────
+  //
+  // Owner-marked as worth recommending. This is what "well-regarded" means here: no
+  // stars, no scores, no third-party ratings API — the cork board shows "a handful",
+  // and curation suits that framing.
+  //
+  // It is also the **second tier of the 500 m rule**. The owner's ruling (2026-07-28):
+  // *"500m is a rule of thumb: further away should only be included if the ratings are
+  // high."* So proximity and quality trade off — a space inside 500 m qualifies on
+  // distance alone, and one further out qualifies only if curated. Observed live: Truth
+  // Coffee sits 678 m from Clarke's, which a hard cutoff wrongly excluded.
+  bool curated = 19 [json_name = "curated"];
+
+  // What the poster says, in the owner's words — "a good window seat and no music".
+  //
+  // Free text, not a rating. "4.6 stars" is not a sentence a cork board should contain,
+  // and editorial copy is honest about its provenance in a way a borrowed score is not.
+  string curated_note = 20 [json_name = "curated_note"];
 
   // When this record was created.
   google.protobuf.Timestamp created_at = 12 [json_name = "created_at"];

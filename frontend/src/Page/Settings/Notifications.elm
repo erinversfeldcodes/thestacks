@@ -1,6 +1,7 @@
 module Page.Settings.Notifications exposing
     ( Model
     , Msg(..)
+    , OutMsg(..)
     , init
     , update
     , view
@@ -12,6 +13,7 @@ import Html.Attributes exposing (class)
 import Html.Events exposing (onClick)
 import Http
 import Types.RemoteData exposing (RemoteData(..))
+import Util.FailureCopy as FailureCopy
 
 
 {-| The preferences hydrate from the server (`GET /api/settings/notifications`)
@@ -32,28 +34,52 @@ type Msg
     | ToggleAuthorUpdates
     | ToggleEventAlerts
     | SaveCompleted (Result Http.Error ())
+    | SessionExpiryDetected
 
 
+{-| `SessionExpired` bubbles to `Main.handleSessionExpiry`.
+
+Until this page had no `OutMsg`, so an expired session showed either
+"Could not load your notification preferences. Please refresh to try again." or
+"Could not save notification preferences. Please try again." Refreshing an
+expired session reloads the same 401; the toggle, meanwhile, had already been
+flipped optimistically, so the reader was looking at a value the server never
+stored.
+
+-}
+type OutMsg
+    = NoOut
+    | SessionExpired
+
+
+{-| `init` keeps its 2-tuple: the load's 401 arrives as `SessionExpiryDetected`
+in `update`, which is the only place an `OutMsg` can be raised anyway.
+-}
 init : Maybe String -> ( Model, Cmd Msg )
 init maybeToken =
-    ( { prefs = Loading, saving = NotAsked }
-    , case maybeToken of
+    case maybeToken of
         Just token ->
-            Api.getNotifications token Loaded
+            ( { prefs = Loading, saving = NotAsked }
+            , Api.getNotifications
+                (Api.authed token
+                    { onExpired = SessionExpiryDetected
+                    , onResult = Loaded
+                    }
+                )
+            )
 
         Nothing ->
-            Cmd.none
-    )
+            ( { prefs = NotAsked, saving = NotAsked }, Cmd.none )
 
 
-update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg )
+update : Msg -> Model -> Maybe String -> ( Model, Cmd Msg, OutMsg )
 update msg model maybeToken =
     case msg of
         Loaded (Ok prefs) ->
-            ( { model | prefs = Success prefs }, Cmd.none )
+            ( { model | prefs = Success prefs }, Cmd.none, NoOut )
 
         Loaded (Err err) ->
-            ( { model | prefs = Failure err }, Cmd.none )
+            ( { model | prefs = Failure err }, Cmd.none, NoOut )
 
         TogglePriceDrops ->
             flipAndSave model maybeToken (\prefs -> { prefs | priceDrops = not prefs.priceDrops })
@@ -70,16 +96,19 @@ update msg model maybeToken =
         SaveCompleted result ->
             case result of
                 Ok _ ->
-                    ( { model | saving = Success () }, Cmd.none )
+                    ( { model | saving = Success () }, Cmd.none, NoOut )
 
                 Err err ->
-                    ( { model | saving = Failure err }, Cmd.none )
+                    ( { model | saving = Failure err }, Cmd.none, NoOut )
+
+        SessionExpiryDetected ->
+            ( model, Cmd.none, SessionExpired )
 
 
 {-| Flip one preference on the loaded values and immediately auto-save. A toggle
 is a no-op until the preferences have loaded — there is nothing to flip yet.
 -}
-flipAndSave : Model -> Maybe String -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg )
+flipAndSave : Model -> Maybe String -> (NotificationPreferences -> NotificationPreferences) -> ( Model, Cmd Msg, OutMsg )
 flipAndSave model maybeToken flip =
     case model.prefs of
         Success prefs ->
@@ -89,17 +118,23 @@ flipAndSave model maybeToken flip =
             in
             ( { model | prefs = Success newPrefs, saving = NotAsked }
             , savePreferences newPrefs maybeToken
+            , NoOut
             )
 
         _ ->
-            ( model, Cmd.none )
+            ( model, Cmd.none, NoOut )
 
 
 savePreferences : NotificationPreferences -> Maybe String -> Cmd Msg
 savePreferences prefs maybeToken =
     case maybeToken of
         Just token ->
-            Api.updateNotifications prefs token SaveCompleted
+            Api.updateNotifications prefs
+                (Api.authed token
+                    { onExpired = SessionExpiryDetected
+                    , onResult = SaveCompleted
+                    }
+                )
 
         Nothing ->
             Cmd.none
@@ -134,17 +169,32 @@ viewPreferences prefs =
             p [ class "error" ]
                 [ text "Could not load your notification preferences. Please refresh to try again." ]
 
-        _ ->
+        NotAsked ->
+            text ""
+
+        Loading ->
             p [ class "settings-section__desc" ]
                 [ text "Loading your preferences…" ]
 
 
+{-| ⛔ The save feedback says WHICH failure.
+
+"Could not save notification preferences. Please try again." was shown for a
+422 the reader cannot fix by repeating it, a dropped connection they can fix but
+not here, and a timeout after which the change may well have been saved — the
+one case where trying again is actively the wrong advice, because it invites a
+second write to settle a question a reload answers.
+
+The 401 leg is not here and must not be added: `Api.Authed` routes an expired
+session to `SessionExpired` before this state can be reached.
+
+-}
 viewSaveFeedback : RemoteData Http.Error () -> Html Msg
 viewSaveFeedback saving =
     case saving of
-        Failure _ ->
+        Failure err ->
             p [ class "error" ]
-                [ text "Could not save notification preferences. Please try again." ]
+                [ text (FailureCopy.saveFailure "your notification preferences" err) ]
 
         Success _ ->
             p [ class "success" ]

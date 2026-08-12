@@ -1,16 +1,16 @@
 defmodule Stacks.Discovery.SearxngClient do
   @moduledoc """
-  HTTP client for self-hosted SearXNG search.
+      HTTP client for self-hosted SearXNG search.
 
-  No rate limiting needed (self-hosted, unlimited).
-  Uses Finch with the shared `Stacks.Finch` pool.
-  Instance URL configured via `Application.get_env(:core, :searxng_url)`.
+      No rate limiting needed (self-hosted, unlimited).
+      Uses Finch with the shared `Stacks.Finch` pool.
+      Instance URL configured via `Application.get_env(:core,:searxng_url)`.
 
-  Protected by `:searxng_fuse` — managed by `Stacks.CircuitBreakers`.
-  When the fuse is blown (SearXNG is down or slow), requests
-  short-circuit to `{:error, :circuit_open}` without touching the
-  upstream. The probe loop confirms SearXNG is back and resets the
-  fuse automatically.
+      Protected by `:searxng_fuse` — managed by `Stacks.CircuitBreakers`.
+      When the fuse is blown (SearXNG is down or slow), requests
+      short-circuit to `{:error,:circuit_open}` without touching the
+      upstream. The probe loop confirms SearXNG is back and resets the
+      fuse automatically.
   """
 
   @behaviour Stacks.Discovery.SearxngClientBehaviour
@@ -21,13 +21,13 @@ defmodule Stacks.Discovery.SearxngClient do
 
   @impl true
   @doc """
-  Searches SearXNG for the given query.
+      Searches SearXNG for the given query.
 
-  ## Options
+      ## Options
 
-    * `:limit` — maximum number of results (default: 5)
+        * `:limit` — maximum number of results (default: 5)
 
-  Returns `{:ok, [%{title, url, description}]}` or `{:error, reason}`.
+      Returns `{:ok, [%{title, url, description}]}` or `{:error, reason}`.
   """
   @spec search(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def search(query, opts \\ []) do
@@ -59,7 +59,7 @@ defmodule Stacks.Discovery.SearxngClient do
         [{"Accept", "application/json"}]
       )
 
-    case Finch.request(req, Stacks.Finch, receive_timeout: 15_000) do
+    case Finch.request(req, Stacks.Finch, receive_timeout: 15_000, request_timeout: 20_000) do
       {:ok, %Finch.Response{status: 200, body: body}} ->
         parse_results(body)
 
@@ -69,8 +69,6 @@ defmodule Stacks.Discovery.SearxngClient do
         {:error, {:unexpected_status, status}}
 
       {:ok, %Finch.Response{status: status, body: body}} ->
-        # 4xx other than server errors — don't melt; likely a
-        # misconfigured query, not a service-health signal.
         Logger.warning("SearxngClient: unexpected status #{status}: #{body}")
         {:error, {:unexpected_status, status}}
 

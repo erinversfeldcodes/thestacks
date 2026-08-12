@@ -10,20 +10,12 @@ _DEFAULT_APP_NAME = "thestacks-vision"
 
 
 class VisionClient:
-    """Calls the Modal-hosted Qwen2.5-VL model for book classification and extraction.
-
-    Credentials are read from MODAL_TOKEN_ID / MODAL_TOKEN_SECRET env vars (set as
-    Fly secrets on the core app, or from ~/.modal.toml in local dev).
-
-    The target Modal app name is read from MODAL_APP_NAME (injected by modal_app.py
-    as a Secret.from_dict at deploy time). This allows ephemeral preview deployments
-    to call their own GPU class rather than the production one.
-
-    Exposes one method per Modal-side `VisionModel` method: ``classify``
-    and ``extract``. The HTTP ``/analyze`` endpoint orchestrates
-    ``classify`` + ``extract`` at the FastAPI layer (with a short-circuit
-    on confident ``not_book``) — there is no single-call ``analyze`` any
-    more; the prior consolidation regressed classification accuracy.
+    """Calls the Modal-hosted Qwen2.5-VL model for classification and
+    extraction. Credentials: MODAL_TOKEN_ID/SECRET env vars. The target app
+    name comes from MODAL_APP_NAME (injected at deploy), so preview
+    deployments call their own GPU class, not production's. One method per
+    Modal-side VisionModel method (``classify``, ``extract``); the
+    ``/analyze`` endpoint orchestrates the two-call flow.
     """
 
     def __init__(self) -> None:

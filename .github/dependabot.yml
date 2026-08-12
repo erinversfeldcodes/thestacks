@@ -1,17 +1,6 @@
 version: 2
 
-# Dependency-update automation. Closes the OpenSSF Scorecard
-# "Dependency-Update-Tool" check and is the standing mechanism for the
-# "Vulnerabilities" check — Dependabot opens PRs for advisories across every
-# ecosystem below (mix, pip, cargo, npm, docker) plus the pinned GitHub
-# Actions. Grouped minor/patch updates keep PR volume manageable; majors and
-# security fixes still come through individually.
-#
-# Every ecosystem sets a 7-day `cooldown`: Dependabot waits a week after a
-# release before opening a bump PR, so freshly-published (and potentially
-# compromised) versions age out of the immediate-adoption window.
 updates:
-  # ── GitHub Actions (all workflows are SHA-pinned; this keeps the pins fresh)
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -22,7 +11,6 @@ updates:
       actions:
         update-types: [minor, patch]
 
-  # ── Elixir (umbrella root + apps/core)
   - package-ecosystem: mix
     directory: /
     schedule:
@@ -34,7 +22,6 @@ updates:
       elixir-minor-patch:
         update-types: [minor, patch]
 
-  # ── Python (vision sidecar + shared requirements)
   - package-ecosystem: pip
     directory: /apps/vision
     schedule:
@@ -54,7 +41,6 @@ updates:
       py-minor-patch:
         update-types: [minor, patch]
 
-  # ── Rust (scraper microservice)
   - package-ecosystem: cargo
     directory: /apps/scraper
     schedule:
@@ -65,7 +51,6 @@ updates:
       scraper-minor-patch:
         update-types: [minor, patch]
 
-  # ── JavaScript (frontend build, core assets, e2e, root tooling)
   - package-ecosystem: npm
     directory: /frontend
     schedule:
@@ -94,7 +79,6 @@ updates:
       e2e-minor-patch:
         update-types: [minor, patch]
 
-  # ── Docker base images (core / vision / scraper / searxng / log-shipper)
   - package-ecosystem: docker
     directory: /deploy
     schedule:

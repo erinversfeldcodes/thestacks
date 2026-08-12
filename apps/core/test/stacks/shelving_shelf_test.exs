@@ -1,7 +1,7 @@
 defmodule Stacks.ShelvingShelfTest do
   @moduledoc """
-  Tests for physical shelf management within bookshelves.
-  These functions do not exist yet — tests are expected to fail.
+      Tests for physical shelf management within bookshelves.
+      These functions do not exist yet — tests are expected to fail.
   """
 
   use Core.DataCase, async: true
@@ -11,10 +11,6 @@ defmodule Stacks.ShelvingShelfTest do
 
   alias Core.Repo
   alias Stacks.Shelving
-
-  # ---------------------------------------------------------------------------
-  # Setup helpers
-  # ---------------------------------------------------------------------------
 
   defp setup_user_bookshelf(_ctx) do
     user = insert(:user)
@@ -28,10 +24,6 @@ defmodule Stacks.ShelvingShelfTest do
     shelf_c = insert(:shelf, bookshelf: bookshelf, position: 2)
     %{user: user, bookshelf: bookshelf, shelf_a: shelf_a, shelf_b: shelf_b, shelf_c: shelf_c}
   end
-
-  # ---------------------------------------------------------------------------
-  # list_shelves/1
-  # ---------------------------------------------------------------------------
 
   describe "list_shelves/1" do
     setup [:setup_user_bookshelf, :setup_with_shelves]
@@ -54,10 +46,6 @@ defmodule Stacks.ShelvingShelfTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # create_shelf/2
-  # ---------------------------------------------------------------------------
-
   describe "create_shelf/2" do
     setup :setup_user_bookshelf
 
@@ -77,10 +65,6 @@ defmodule Stacks.ShelvingShelfTest do
       assert {:error, :unauthorized} = Shelving.create_shelf(bookshelf.id, other_user.id)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # delete_shelf/2
-  # ---------------------------------------------------------------------------
 
   describe "delete_shelf/2" do
     setup [:setup_user_bookshelf, :setup_with_shelves]
@@ -105,10 +89,6 @@ defmodule Stacks.ShelvingShelfTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # reorder_shelves/3
-  # ---------------------------------------------------------------------------
-
   describe "reorder_shelves/3" do
     setup [:setup_user_bookshelf, :setup_with_shelves]
 
@@ -119,7 +99,6 @@ defmodule Stacks.ShelvingShelfTest do
       shelf_b: shelf_b,
       shelf_c: shelf_c
     } do
-      # Reverse the order: C, B, A
       assert :ok =
                Shelving.reorder_shelves(bookshelf.id, user.id, [
                  shelf_c.id,
@@ -166,10 +145,6 @@ defmodule Stacks.ShelvingShelfTest do
                ])
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # move_placement_to_shelf/3
-  # ---------------------------------------------------------------------------
 
   describe "move_placement_to_shelf/3" do
     setup [:setup_user_bookshelf, :setup_with_shelves]
@@ -232,10 +207,6 @@ defmodule Stacks.ShelvingShelfTest do
                Shelving.move_placement_to_shelf(placement.id, Ecto.UUID.generate(), user.id)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Invariant: all placements belong to a shelf
-  # ---------------------------------------------------------------------------
 
   describe "shelf invariant" do
     setup :setup_user_bookshelf

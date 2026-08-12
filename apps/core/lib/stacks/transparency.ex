@@ -1,47 +1,13 @@
 defmodule Stacks.Transparency do
   @moduledoc """
-  Public, curated, anonymised transparency data layer (Issue #241 / ADR-019).
-
-  Serves the subset of platform observability the public `/metrics` page (#235)
-  renders — combining **live ops signals** (windowed rates / current values
-  queried from Fly's managed Prometheus via a fixed allowlist) with **durable
-  aggregates** (public-safe corpus/cost totals). Everything is an aggregate,
-  never a per-user value.
-
-  ## The privacy boundary is the allowlist + the durable column set
-
-  Nothing is public by default. Live signals come ONLY from `@allowlist` — a
-  fixed, code-defined list of safe PromQL queries built from the registered
-  `stacks_*` metric families (see `Core.PromEx.Plugins.Stacks`). There is NO
-  function that accepts a caller-supplied PromQL string; `run_signal/1` accepts
-  only a allowlist KEY. Durable aggregates come from `durable_stats/0`, a fixed
-  set of anonymised corpus/cost counts. Adding a signal to either is an
-  explicit, reviewed code change — so nothing leaks by construction.
-
-  Linked-account / cross-integration (future Audible-style) signals are
-  **excluded by construction**; they enable de-anonymisation by correlation and
-  are reserved for a future owner-only view (ADR-019 §3/§3a).
-
-  ## Live signals — cached, token-guarded, degrade-on-absent
-
-  Live signals are cached (`Stacks.Transparency.Cache`) for `@cache_ttl_seconds`
-  so public page-loads don't fan out to Prometheus. When the Prometheus read
-  token is absent (or the client otherwise errors on every query), the live
-  section degrades to `:unavailable` — never an error or a leak — and the
-  durable section is still served. A previously cached good value is served
-  stale-on-error where one exists.
-
-  ## Teaching metadata
-
-  Every returned entry carries `label`, `what`, `how`, `why`, `unit` so #235 can
-  render the "why we measure this" tooltip — the public analogue of the #233
-  self-explanatory-dashboard standard.
-
-  > NOTE: `durable_stats/0` currently reads aggregate op-data directly. A
-  > dedicated `wh.mart_public_transparency` dbt mart is a #235 refinement
-  > (tracked): it would make the durable totals deploy-surviving and let dbt
-  > schema tests assert the public-safe column set. The context aggregate here
-  > is the interim, equally-anonymised source.
+      Public, curated, anonymised transparency data layer for
+      the public `/metrics` page: live ops signals + durable aggregates, never
+      a per-user value. The privacy boundary is structural: live signals come
+      ONLY from `@allowlist` (fixed, code-defined PromQL — `run_signal/1`
+      accepts an allowlist KEY, no function takes a query string), and every
+      family used must be classified `:public` in `Core.PromEx.MetricAudience`
+      (enforced by test, fail-closed). Degrades to `:unavailable` when the
+      metrics store is unreachable — public page, no errors, no leaks.
   """
 
   import Ecto.Query
@@ -55,25 +21,8 @@ defmodule Stacks.Transparency do
   @cache_ttl_ms @cache_ttl_seconds * 1_000
   @live_cache_key :live_signals
 
-  # ── App scoping (Fly org-wide Prometheus) ───────────────────────────────────
-  # Fly's managed Prometheus is ORG-WIDE: every scraped series carries an `app`
-  # label (`thestacks-core` for prod, `stacks-core-pr-…` for previews). The
-  # PUBLIC page must show prod-only data, so every allowlist query is scoped to
-  # the app this node serves. The app name is derived from `FLY_APP_NAME` (set
-  # automatically on every Fly machine) with a config/default fallback, and the
-  # `app="…"` matcher is injected as a code-defined literal (NOT user input) —
-  # the allowlist remains the privacy boundary.
   @default_app "thestacks-core"
 
-  # ── Live PromQL allowlist ───────────────────────────────────────────────────
-  # Fixed, code-defined queries built ONLY from metric families registered in
-  # `Core.PromEx.Plugins.Stacks`. Each entry is an aggregate (sum/min across
-  # series) — no per-series/per-user label is projected. This list IS the live
-  # privacy boundary; a query not here can never run.
-  #
-  # Each query carries an `app="$app"` placeholder in its metric selector; the
-  # placeholder is substituted with the concrete serving-app literal at query
-  # time (see `scoped_query/1` / `app_label/0`), never with caller input.
   @allowlist [
     %{
       key: :isbn_not_found_rate,
@@ -147,19 +96,17 @@ defmodule Stacks.Transparency do
 
   @entry_public_keys [:key, :label, :what, :how, :why, :unit, :value]
 
-  # ── Public API ──────────────────────────────────────────────────────────────
-
   @doc """
-  Builds the full public transparency payload:
+      Builds the full public transparency payload:
 
-      %{
-        live: [entry] | :unavailable,
-        durable: [entry],
-        generated_at: DateTime.t(),
-        cache_ttl: pos_integer()
-      }
+          %{
+            live: [entry] |:unavailable,
+            durable: [entry],
+            generated_at: DateTime.t,
+            cache_ttl: pos_integer
+          }
 
-  where each entry is `%{key, label, what, how, why, unit, value}`.
+      where each entry is `%{key, label, what, how, why, unit, value}`.
   """
   @spec metrics() :: %{
           live: [map()] | :unavailable,
@@ -181,18 +128,18 @@ defmodule Stacks.Transparency do
   def allowlist_keys, do: Enum.map(@allowlist, & &1.key)
 
   @doc """
-  The raw PromQL of every allowlisted live signal. For introspection/tests only —
-  e.g. proving every metric the public page exposes is `MetricAudience` `:public`.
+      The raw PromQL of every allowlisted live signal. For introspection/tests only —
+      e.g. proving every metric the public page exposes is `MetricAudience` `:public`.
   """
   @spec allowlist_queries() :: [String.t()]
   def allowlist_queries, do: Enum.map(@allowlist, & &1.query)
 
   @doc """
-  Runs a single allowlisted live signal by KEY.
+      Runs a single allowlisted live signal by KEY.
 
-  Accepts only a allowlist key (atom) — never a raw/user-supplied PromQL string.
-  Returns `{:error, :not_allowlisted}` for any key not in the fixed allowlist,
-  so there is no path to run an arbitrary or injected query.
+      Accepts only a allowlist key (atom) — never a raw/user-supplied PromQL string.
+      Returns `{:error,:not_allowlisted}` for any key not in the fixed allowlist,
+      so there is no path to run an arbitrary or injected query.
   """
   @spec run_signal(atom()) :: {:ok, number()} | {:error, term()}
   def run_signal(key) when is_atom(key) do
@@ -203,8 +150,8 @@ defmodule Stacks.Transparency do
   end
 
   @doc """
-  Public-safe durable aggregates read from op-data. All are corpus/cost totals —
-  no per-user rows, no de-anonymisable or linked-account dimension.
+      Public-safe durable aggregates read from op-data. All are corpus/cost totals —
+      no per-user rows, no de-anonymisable or linked-account dimension.
   """
   @spec durable_stats() :: [map()]
   def durable_stats do
@@ -249,8 +196,6 @@ defmodule Stacks.Transparency do
     ]
   end
 
-  # ── Live signal computation + cache ─────────────────────────────────────────
-
   defp cached_live_signals do
     case Cache.get(@live_cache_key, @cache_ttl_ms) do
       {:ok, cached} -> cached
@@ -265,8 +210,6 @@ defmodule Stacks.Transparency do
         entries
 
       :unavailable ->
-        # Do not cache a failure: retry next request. Serve the last good value
-        # stale-on-error if one exists, otherwise report unavailable.
         case Cache.get_stale(@live_cache_key) do
           {:ok, stale} -> stale
           :miss -> :unavailable
@@ -274,9 +217,6 @@ defmodule Stacks.Transparency do
     end
   end
 
-  # Runs every allowlisted query through the configured client. If EVERY query
-  # errors (e.g. token absent), the whole section is `:unavailable`. Otherwise
-  # returns the entries that resolved to a number.
   defp compute_live_signals do
     client = prometheus_client()
 
@@ -319,8 +259,6 @@ defmodule Stacks.Transparency do
     }
   end
 
-  # ── Durable aggregate queries (anonymised) ──────────────────────────────────
-
   defp edition_count do
     Repo.one(from(e in BookEdition, select: count(e.id))) || 0
   end
@@ -343,21 +281,10 @@ defmodule Stacks.Transparency do
     Application.get_env(:core, :transparency_prometheus_client, Stacks.Transparency.Prometheus)
   end
 
-  # ── App scoping ─────────────────────────────────────────────────────────────
-
-  # Substitutes the `$app` placeholder in a code-defined allowlist query with the
-  # concrete serving-app literal. The replacement value is `app_label/0` — a
-  # config/env-derived constant, NEVER caller input — so this cannot widen the
-  # fixed allowlist into a query-injection surface.
   defp scoped_query(query) when is_binary(query) do
     String.replace(query, "$app", app_label())
   end
 
-  # The Fly app whose metrics this node should expose publicly. Fly sets
-  # `FLY_APP_NAME` on every machine (`thestacks-core` in prod, `stacks-core-pr-…`
-  # on previews); a config override wins for tests/staging, and the prod app name
-  # is the final fallback so a mis-set env never blends preview traffic into the
-  # public prod page.
   defp app_label do
     Application.get_env(
       :core,

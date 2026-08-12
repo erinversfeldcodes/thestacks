@@ -61,22 +61,15 @@ defmodule Stacks.AccountsTest do
     end
 
     test "register/1 emits event payload without PII fields" do
-      # Verify the event payload built in register/1 excludes :email (PII).
-      # Events.emit is called inside the Multi transaction with payload: %{role: user.role}.
-      # We verify this by checking that registration succeeds and that the user struct
-      # exposes role (not email) as the expected event payload field.
       attrs = %{"email" => "pii_test@example.com", "password" => "password123"}
       assert {:ok, user} = Accounts.register(attrs)
       assert user.role in ["owner", "user"]
 
-      # The payload that would be sent is %{role: user.role} — verify role is a non-nil string
       assert is_binary(user.role)
-      # Email must not be part of the event payload (it's stripped in the Multi.run block)
-      # The source of truth is the code: payload: %{role: user.role} — no :email key
     end
   end
 
-  describe "handles (/u/:handle) — #211" do
+  describe "handles (/u/:handle) —" do
     test "register/1 auto-generates a valid, slugified handle from the display name" do
       {:ok, user} =
         Accounts.register(%{
@@ -155,9 +148,6 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  # search_users/2 — people search for the discovery surface (US-10.5.4, #217).
-  # The discoverability privacy rule (platform-only + bidirectional
-  # block-exclusion) is enforced IN THE QUERY, never by serializer redaction.
   describe "search_users/2" do
     test "returns a discoverable (public) user matching the term to an anon searcher" do
       match = insert(:user, display_name: "Ada Lovelace", profile_visibility: "public")
@@ -176,16 +166,14 @@ defmodule Stacks.AccountsTest do
       assert Accounts.search_users("da Love", nil) |> Enum.map(& &1.id) == [match.id]
     end
 
-    test "an anonymous searcher gets public profiles but NOT platform (Members) ones (#225)" do
+    test "an anonymous searcher gets public profiles but NOT platform (Members) ones" do
       public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
       _members = insert(:user, display_name: "Ada Members", profile_visibility: "platform")
 
-      # A logged-out visitor must not even learn a Members profile exists (they'd
-      # 404 on it); public is the only search-discoverable rung for anon.
       assert Accounts.search_users("Ada", nil) |> Enum.map(& &1.id) == [public.id]
     end
 
-    test "a signed-in searcher gets BOTH platform (Members) and public profiles (#225)" do
+    test "a signed-in searcher gets BOTH platform (Members) and public profiles" do
       viewer = insert(:user)
       public = insert(:user, display_name: "Ada Public", profile_visibility: "public")
       members = insert(:user, display_name: "Ada Members", profile_visibility: "platform")
@@ -229,7 +217,6 @@ defmodule Stacks.AccountsTest do
       viewer = insert(:user, profile_visibility: "platform")
       blocker = insert(:user, profile_visibility: "platform")
       candidate = insert(:user, display_name: "Ada Seen", profile_visibility: "platform")
-      # candidate is blocked w.r.t. `blocker`, but `viewer` is unrelated.
       {:ok, _} = Social.block_user(blocker.id, candidate.id)
 
       results = Accounts.search_users("Ada", viewer.id)
@@ -253,15 +240,10 @@ defmodule Stacks.AccountsTest do
     test "treats ILIKE wildcards in the term literally" do
       insert(:user, display_name: "Ada Lovelace", profile_visibility: "platform")
 
-      # "%" must not act as a wildcard that matches everything.
       assert Accounts.search_users("%", nil) == []
     end
   end
 
-  # Punch #5 (Issue #124): the user.registered event is emitted INSIDE the
-  # registration Ecto.Multi. If the transaction rolls back, no event row must be
-  # written to event_log — an event that describes a registration that never
-  # happened would corrupt every downstream projection.
   describe "register/1 negative event emission (rollback)" do
     test "does not emit user.registered when the email is a duplicate" do
       insert(:user, email: "dupe_event@example.com")
@@ -279,8 +261,6 @@ defmodule Stacks.AccountsTest do
     test "does not emit user.registered when the changeset is invalid" do
       before_count = event_count("user.registered")
 
-      # Invalid email format — the :user insert step fails, rolling back the Multi
-      # before :emit_event ever runs.
       assert {:error, %Ecto.Changeset{}} =
                Accounts.register(%{"email" => "not-an-email", "password" => "password123"})
 
@@ -445,9 +425,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "same email + empty current_password is a profile-only update (CG-1)" do
-      # The settings UI sends the user's current email on every save. A payload
-      # whose email equals the current email is NOT an email change, so it must
-      # not demand current_password — it routes through the plain profile path.
       user = insert(:user, email: "same@example.com", display_name: "Old Name")
       before_count = event_count("user.profile_updated")
 
@@ -460,14 +437,11 @@ defmodule Stacks.AccountsTest do
 
       assert updated.display_name == "New Name"
       assert updated.email == "same@example.com"
-      # Emits the plain profile-updated event with the PII-free ({}) payload.
       assert event_count("user.profile_updated") == before_count + 1
       assert latest_payload("user.profile_updated", user.id) == %{}
     end
 
     test "same email compares case-insensitively (CG-1)" do
-      # auth resolves identity case-insensitively (get_user_by_email/1 downcases),
-      # so a differently-cased same email is still no change.
       user = insert(:user, email: "Same@Example.com", display_name: "Old Name")
 
       assert {:ok, updated} =
@@ -491,9 +465,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "user.profile_updated payload carries no PII (UUID-only)" do
-      # GDPR (Issue #121): the display_name is PII and must NOT be written into
-      # op.event_log. The event carries only the aggregate_id — the payload is
-      # empty.
       user = insert(:user)
 
       assert {:ok, _} = Accounts.update_profile(user, %{"display_name" => "Grace Hopper"})
@@ -504,8 +475,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "does not emit user.profile_updated when the changeset is invalid" do
-      # An over-length website_url fails validation before Repo.update, so
-      # tap_emit_profile_updated/1 sees {:error, changeset} and emits nothing.
       user = insert(:user)
       before_count = event_count("user.profile_updated")
 
@@ -516,8 +485,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "does not emit user.profile_updated when an email change is rejected (wrong current_password)" do
-      # A genuine email change with a wrong current_password fails at
-      # verify_password, before the Multi runs — its emit_event step never fires.
       user = insert(:user, email: "old@example.com")
       before_count = event_count("user.profile_updated")
 
@@ -531,9 +498,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "does not emit user.profile_updated when the email Multi rolls back (duplicate email)" do
-      # Correct current_password, but the new email is already taken: the :email
-      # step's unique_constraint fails, so the whole transaction — including the
-      # :emit_event step — rolls back and no event is written.
       taken = insert(:user, email: "taken@example.com")
 
       user =
@@ -551,9 +515,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "an empty handle is treated as no change (no NULL write on the NOT NULL handle column)" do
-      # Regression: handle "" casts to a nil change; validate_handle skips nil, so
-      # without dropping it the UPDATE writes NULL into op.users.handle (NOT NULL)
-      # → Postgrex 23502 → 500. An empty/blank handle must mean "no change".
       user = insert(:user)
       original_handle = user.handle
 
@@ -566,9 +527,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "an empty handle on the email-change path is treated as no change" do
-      # The email-change Multi runs the same profile_changeset, so a blank handle
-      # must not NULL the column there either (the Multi rolls back cleanly on the
-      # 23502, but the save still 500s without the guard).
       user =
         insert(:user, email: "old@example.com", password_hash: Argon2.hash_pwd_salt("pass123"))
 
@@ -620,9 +578,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "user.location_updated payload carries no PII (UUID-only)" do
-      # GDPR (Issue #121): city + country_code are PII and must NOT be written
-      # into op.event_log. The discovery handler re-reads the location from the
-      # user record, so the event payload stays empty.
       user = insert(:user)
 
       assert {:ok, _} =
@@ -635,8 +590,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "does not emit user.location_updated when the country_code is invalid" do
-      # A 3-char country_code fails validate_length before Repo.update, so the
-      # {:error, changeset} branch returns without emitting.
       user = insert(:user)
       before_count = event_count("user.location_updated")
 
@@ -688,13 +641,13 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  describe "token family reuse detection (Issue #179, Phase 2b)" do
+  describe "token family reuse detection" do
     setup do
       user = insert(:user)
       fid = Ecto.UUID.generate()
 
       {:ok, _family} =
-        Accounts.open_token_family(%{
+        Accounts.rotate_token_family(%{
           family_id: fid,
           user_id: user.id,
           current_jti: "jti-current",
@@ -728,16 +681,11 @@ defmodule Stacks.AccountsTest do
 
     test "a family owned by a DIFFERENT user is rejected and NOT revoked",
          %{fid: fid} do
-      # A token whose sub does not match the family's user_id must never be
-      # treated as this user's session — reject, and leave the innocent owner's
-      # family untouched (no cross-user revocation).
       other_sub = Ecto.UUID.generate()
 
       assert {:error, :session_revoked} =
                Accounts.check_token_family(fid, "jti-current", other_sub)
 
-      # The real owner's family is still live — the mismatched check did not
-      # revoke it.
       assert is_nil(Repo.get(AuthTokenFamily, fid).revoked_at)
     end
 
@@ -752,7 +700,7 @@ defmodule Stacks.AccountsTest do
       other = Ecto.UUID.generate()
 
       {:ok, _} =
-        Accounts.open_token_family(%{
+        Accounts.rotate_token_family(%{
           family_id: other,
           user_id: user.id,
           current_jti: "jti-other",
@@ -765,14 +713,7 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  describe "token rotation grace window (Issue #180, Phase 1)" do
-    # #179 burns the whole family whenever a non-current jti is presented. That
-    # over-fires on a benign rotation race: an in-flight request (or a second
-    # tab) still carrying the JUST-rotated old token trips reuse detection and
-    # logs the user out. #180 honours the IMMEDIATELY-PREVIOUS token for a short
-    # grace window (20s) after rotation WITHOUT burning. Anything else — an older
-    # token (2+ rotations back), the previous token past grace, or an unknown
-    # jti — still burns, preserving #179's posture outside the tiny window.
+  describe "token rotation grace window" do
     setup do
       user = insert(:user)
       fid = Ecto.UUID.generate()
@@ -781,7 +722,7 @@ defmodule Stacks.AccountsTest do
 
     defp open_rotated_family(fid, user, rotated_at) do
       {:ok, family} =
-        Accounts.open_token_family(%{
+        Accounts.rotate_token_family(%{
           family_id: fid,
           user_id: user.id,
           current_jti: "jti-current",
@@ -797,11 +738,8 @@ defmodule Stacks.AccountsTest do
          %{user: user, fid: fid, sub: sub} do
       open_rotated_family(fid, user, DateTime.utc_now())
 
-      # The benign in-flight / multi-tab replay of the just-rotated token: honoured.
       assert :ok = Accounts.check_token_family(fid, "jti-previous", sub)
 
-      # NON-BURN is the key assertion: the family is untouched — not revoked,
-      # and current_jti did NOT advance to the previous token.
       family = Repo.get(AuthTokenFamily, fid)
       assert is_nil(family.revoked_at)
       assert family.current_jti == "jti-current"
@@ -810,7 +748,6 @@ defmodule Stacks.AccountsTest do
 
     test "the previous jti PAST the grace window is REUSE: burns the family",
          %{user: user, fid: fid, sub: sub} do
-      # rotated_at is 21s ago → outside the 20s grace: this token is now stale.
       past = DateTime.add(DateTime.utc_now(), -21, :second)
       open_rotated_family(fid, user, past)
 
@@ -822,9 +759,6 @@ defmodule Stacks.AccountsTest do
 
     test "an OLDER/unknown jti burns even with a FRESH rotated_at (grace saves only previous_jti)",
          %{user: user, fid: fid, sub: sub} do
-      # rotated_at is now (grace is wide open) but the presented token is neither
-      # current nor the immediate predecessor — it's two-plus rotations back or
-      # forged. Grace must NOT save it.
       open_rotated_family(fid, user, DateTime.utc_now())
 
       assert {:error, :token_reuse_detected} =
@@ -841,13 +775,10 @@ defmodule Stacks.AccountsTest do
 
     test "a family with no rotation history (previous_jti nil) still burns a non-current jti",
          %{user: user, sub: sub} do
-      # Non-vacuity: the grace branch requires BOTH previous_jti and rotated_at.
-      # A never-rotated family (legacy / just-opened) has neither, so a stale
-      # token against it burns exactly as #179 intended.
       fid = Ecto.UUID.generate()
 
       {:ok, _} =
-        Accounts.open_token_family(%{
+        Accounts.rotate_token_family(%{
           family_id: fid,
           user_id: user.id,
           current_jti: "jti-current",
@@ -903,8 +834,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "does not emit user.notifications_updated when the changeset is invalid" do
-      # A non-boolean value for a notify_* field is a cast error, so Repo.update
-      # returns {:error, changeset} and no event is emitted.
       user = insert(:user)
       before_count = event_count("user.notifications_updated")
 
@@ -915,9 +844,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "a freshly inserted user has the expected notification defaults" do
-      # Schema defaults (op.users): marketplace + group invitations default ON;
-      # wishlist availability + event matches default OFF. The settings screen
-      # hydrates from these via GET /api/settings/notifications.
       user = insert(:user)
 
       assert user.notify_marketplace == true
@@ -927,10 +853,6 @@ defmodule Stacks.AccountsTest do
     end
 
     test "user.notifications_updated payload carries no PII (UUID-only)" do
-      # GDPR (Issue #121): notification preferences are personal data and must NOT
-      # be written into op.event_log. Consumers re-read the preferences from the
-      # user record, so the event payload stays empty — matching the sibling
-      # profile_updated / location_updated / password_changed events.
       user =
         insert(:user,
           notify_wishlist_availability: false,
@@ -985,10 +907,6 @@ defmodule Stacks.AccountsTest do
       assert %{profile_visibility: [_]} = errors_on(changeset)
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Onboarding context functions
-  # ---------------------------------------------------------------------------
 
   describe "onboarding_status/1" do
     test "fresh user has all steps false and next_step = profile" do
@@ -1049,8 +967,6 @@ defmodule Stacks.AccountsTest do
       assert {:error, :invalid_step} = Accounts.complete_onboarding_step(user.id, "invalid")
     end
 
-    # The self-declared "verify your age" step was dropped (ADR-020) — it is now
-    # an invalid onboarding step.
     test "age_verification is no longer a valid step" do
       user = insert(:user)
 
@@ -1108,10 +1024,6 @@ defmodule Stacks.AccountsTest do
     end
   end
 
-  # ---------------------------------------------------------------------------
-  # Generated column: onboarding_completed (Issue #149-W1)
-  # ---------------------------------------------------------------------------
-
   describe "onboarding_completed generated column" do
     test "empty onboarding_steps map produces onboarding_completed = false at DB level" do
       user = insert(:user, onboarding_steps: %{})
@@ -1127,8 +1039,6 @@ defmodule Stacks.AccountsTest do
     )
   end
 
-  # Latest event payload for an aggregate — uses the EventLog schema so
-  # aggregate_id casts from the UUID string and payload loads as a map.
   defp latest_payload(event_type, aggregate_id) do
     Repo.one(
       from(e in EventLog,
@@ -1141,14 +1051,25 @@ defmodule Stacks.AccountsTest do
   end
 
   describe "find_users_by_email/1" do
-    test "returns every user matching case-insensitively (email is not unique)" do
-      a = insert(:user, email: "casing@stacks.test")
-      b = insert(:user, email: "CASING@stacks.test")
+    test "matches case-insensitively however the query is cased" do
+      user = insert(:user, email: "casing@stacks.test")
 
-      ids = "Casing@Stacks.Test" |> Accounts.find_users_by_email() |> Enum.map(& &1.id)
+      for query <- ["casing@stacks.test", "CASING@stacks.test", "Casing@Stacks.Test"] do
+        assert Enum.map(Accounts.find_users_by_email(query), & &1.id) == [user.id],
+               "lookup missed the account for query #{query}"
+      end
+    end
 
-      assert a.id in ids
-      assert b.id in ids
+    test "matches a legacy row stored with mixed case" do
+      user = insert(:user, email: "legacy@stacks.test")
+
+      {1, _} =
+        Core.Repo.update_all(
+          from(u in Stacks.Accounts.User, where: u.id == ^user.id),
+          set: [email: "LeGaCy@Stacks.Test"]
+        )
+
+      assert Enum.map(Accounts.find_users_by_email("legacy@stacks.test"), & &1.id) == [user.id]
     end
 
     test "returns [] when nothing matches" do
@@ -1158,8 +1079,6 @@ defmodule Stacks.AccountsTest do
 
   describe "expired_unverified_ids/1" do
     test "returns only unverified accounts older than the TTL" do
-      # `now` is injected far in the future so freshly-inserted rows read as
-      # older than (now - 24h), without fiddling with created_at.
       future = DateTime.add(DateTime.utc_now(), 2 * 24 * 60 * 60, :second)
 
       unverified_a = insert(:user, email: "unv-a@thestacks.test", email_confirmed: false)
@@ -1176,7 +1095,6 @@ defmodule Stacks.AccountsTest do
     test "excludes unverified accounts still within the TTL" do
       fresh = insert(:user, email: "fresh-unv@thestacks.test", email_confirmed: false)
 
-      # Real now: a just-created account is well within the 24h window.
       refute fresh.id in Accounts.expired_unverified_ids(DateTime.utc_now())
     end
   end

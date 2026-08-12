@@ -9,20 +9,12 @@ module Types.Visibility exposing
     , toString
     )
 
-{-| Placement / bookshelf / profile visibility and the client-side ceiling rule.
-
-Mirrors the canonical Audience ladder (`proto/…/visibility.proto`,
-`Stacks.Visibility`), ordered by EXPOSURE — ascending = more exposed:
-
-    owner (0)  only me
-    group (1)  a chosen group ("friends")   — shelf-level; not a per-placement option
-    platform (2) "Members" — any signed-in user
-    public (3) anyone with the link, signed in or not
-
-A placement may not be _more exposed_ than its parent bookshelf — the server
-returns 422 if it is. We reproduce the rule so the UI greys the offending options
-before the user hits the 422. (Server-side is authoritative; this is UX only.)
-
+{-| Placement/bookshelf/profile visibility and the client-side ceiling
+rule. Mirrors the canonical Audience ladder (visibility.proto,
+`Stacks.Visibility`), ordered by EXPOSURE ascending: owner (0), group
+(1, shelf-level only), platform (2), public (3). A placement may not be
+more exposed than its bookshelf — the same ceiling the server enforces;
+the client mirror only pre-filters option lists.
 -}
 
 
@@ -112,7 +104,7 @@ rank v =
 
 
 {-| True when `option` is MORE exposed than the shelf `ceiling` allows — i.e. the
-server would reject it (422). Such an option must be greyed out.
+server would reject it. Such an option must be greyed out.
 -}
 exceedsCeiling : Visibility -> Visibility -> Bool
 exceedsCeiling ceiling option =

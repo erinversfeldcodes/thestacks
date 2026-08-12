@@ -1,17 +1,29 @@
 defmodule Stacks.Workers.RegenerateFeedJob do
   @moduledoc """
-  Oban worker that regenerates an Atom feed when a shelf placement changes and
-  upserts the result into the `op.feed_cache` store.
+      Oban worker that regenerates an Atom feed when a shelf placement changes and
+      upserts the result into the `op.feed_cache` store.
 
-  Triggered by `placement.created`, `placement.moved`, and `placement.removed`
-  events via the event handler `Stacks.Feeds.Handlers.PlacementHandler`.
+      Triggered by `placement.created`, `placement.moved`, and `placement.removed`
+      events via the event handler `Stacks.Feeds.Handlers.PlacementHandler`.
 
-  On a platform-visible bookshelf it renders the Atom XML and upserts the cache
-  row (`Stacks.Feeds.regenerate/2`); the run is idempotent. The job is a no-op
-  for non-platform-visible shelves — it logs a debug message and returns `:ok`
-  without writing a row.
+      On a platform-visible bookshelf it renders the Atom XML and upserts the cache
+      row (`Stacks.Feeds.regenerate/2`); the run is idempotent. The job is a no-op
+      for non-platform-visible shelves — it logs a debug message and returns `:ok`
+      without writing a row.
   """
 
+  # NOTE: deliberately NOT `unique:`. Placing N books enqueues N identical
+  # regenerations, which is wasteful but harmless — the job recomputes the whole
+  # feed and upserts one row per bookshelf, so the end state is correct either way.
+  #
+  # Deduping is tempting and is a trap worth writing down. Oban warns that unique
+  # `states` omitting `:executing` "may break uniqueness", and the obvious fix —
+  # adding `:executing` — introduces a LOST UPDATE here: a regeneration that is
+  # already running may have read the placements before the newest one committed,
+  # so collapsing the newest event into it drops that book from the feed until
+  # something else triggers a regeneration. Any dedup must therefore exclude
+  # `:executing` (and accept the warning), or debounce rather than deduplicate.
+  # Not worth it for a batch path; revisit only with that analysis in hand.
   use Oban.Worker, queue: :default, max_attempts: 3
 
   require Logger
@@ -51,13 +63,10 @@ defmodule Stacks.Workers.RegenerateFeedJob do
           "RegenerateFeedJob: feed_cache write failed for user=#{user_id} bookshelf=#{bookshelf_name}: #{inspect(changeset.errors)}"
         )
 
-        # Filling the cache is the whole point of this job — surface the failure
-        # so Oban retries (max_attempts: 3) rather than dropping the update.
         {:error, "feed cache write failed"}
     end
   end
 
-  # Catch-all for unexpected args shape
   def perform(%Oban.Job{args: args}) do
     Logger.warning("RegenerateFeedJob: unexpected args shape: #{inspect(args)}")
     {:cancel, "invalid args"}

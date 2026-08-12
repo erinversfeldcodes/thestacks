@@ -77,7 +77,20 @@ echo "local #NNN -> GH #$gh_num"
   the whole issue.
 - Keep the printed `local #NNN -> GH #<num>` map — the PR body needs the **GitHub** numbers.
 
-### 4. Fill the PR body and wire close-on-merge
+### 4. Run the staff shadow review
+
+Invoke the **`staff-review` skill** over this branch (`git diff main...$BRANCH`). It is the Staff
+Engineer's advisory design/taste lens (see `docs/agents/staff-engineer-agent.md`) — it does not
+re-verify the work and cannot block this skill.
+
+- **LGTM / LGTM WITH NOTES:** proceed. Carry the condensed "Staff review" block (verdict +
+  finding one-liners) into the PR body in step 5. Offer to file 🟧 findings as follow-up issues;
+  any filed go in the PR's "Follow-ups" section.
+- **DESIGN CONCERNS (⛔ findings):** present them to the user before proceeding. The user decides:
+  fix now (stop finalizing, return after the fix), or file-and-ship (create the follow-up issues,
+  note the override in the PR body, continue). Record whichever they choose.
+
+### 5. Fill the PR body and wire close-on-merge
 
 Write a real PR description (what it delivers, how it was validated, follow-ups), then a `Closes`
 section using the **GitHub** numbers from step 3 — one `Closes #<gh_num>` per line (GitHub only
@@ -95,11 +108,14 @@ PR body should include:
 - **What this delivers** — the substance, not a commit list.
 - **Validation** — `just verify` / `just ci` results, E2E counts, completion-audit verdict, with real
   numbers. If Modal-dependent E2E was skipped, say so and why (vision-clean diff).
-- **Follow-ups (tracked, not in this PR)** — the spun-out issues left in `issues/` from step 1.
+- **Staff review** — the condensed block from step 4: verdict + finding one-liners (and any
+  override note if the user shipped past DESIGN CONCERNS).
+- **Follow-ups (tracked, not in this PR)** — the spun-out issues left in `issues/` from step 1,
+  plus any 🟧/⛔ staff-review findings filed as follow-up issues in step 4.
 - **Closes** — `Closes #<gh_num>` lines.
 - End with the Claude Code generation trailer.
 
-### 5. Commit the moves — do NOT push
+### 6. Commit the moves — do NOT push
 
 ```bash
 git add -A issues/
@@ -118,6 +134,7 @@ git log --oneline origin/$BRANCH..$BRANCH    # show what's unpushed
 
 Report back:
 - The PR (number + URL) you filled.
+- The staff-review verdict (and any follow-up issues it filed, or the override decision).
 - The local→GitHub issue map (so the user can see which GH issue each local one became).
 - What moved to `issues/complete/` and what stayed (with why — unchecked boxes / spun-out).
 - The unpushed commit, and that **the user must push** for the PR to update.

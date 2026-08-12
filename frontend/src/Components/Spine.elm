@@ -42,7 +42,6 @@ hash s =
                 shifted =
                     Bitwise.shiftLeftBy 5 acc - acc + Char.toCode c
 
-                -- Simulate JS `| 0` (truncate to signed 32-bit)
                 masked =
                     Bitwise.or shifted 0
             in
@@ -105,7 +104,7 @@ useGold titleStr goldProbability =
 
 
 {-| Texture data matching the mockup palette.
-Returns ( bgColor, textColor, goldProbability, isLeather )
+Returns ( bgColor, textColor, goldProbability, isLeather)
 -}
 textureData : Int -> { bg : String, text_ : String, gold : Float, leather : Bool }
 textureData idx =
@@ -164,7 +163,7 @@ textureUrl texture titleStr =
 
 
 {-| Render a complete book element with 3D spine, top, and cover.
-This produces the full `.book > .book__spine + .book__top + .book__cover`
+This produces the full `.book >.book__spine +.book__top +.book__cover`
 structure matching the reference mockup.
 -}
 book :
@@ -270,8 +269,6 @@ book config =
                 Softened ->
                     ", well-loved"
 
-        -- A book the owner has written about (#287) announces ", with your
-        -- notes" so the bookmark ribbon is not a purely visual signal.
         notesSuffix =
             if config.hasWriting then
                 ", with your notes"
@@ -286,9 +283,6 @@ book config =
             else
                 ""
 
-        -- Suffix order is fixed: pages, wear, notes, hidden — so a screen reader
-        -- hears "…, N pages, well-loved, with your notes, hidden (only visible to
-        -- you)". The exact-label tests in SpineBookTest pin this order.
         ariaLabel =
             "Book: "
                 ++ config.title
@@ -301,32 +295,27 @@ book config =
                 ++ notesSuffix
                 ++ hiddenSuffix
 
-        -- A well-loved (Softened) book earns a muted, worn treatment via the
-        -- book--softened class (see .book--softened in main.css); Pristine books
-        -- get nothing. Composed alongside book/book--hidden below.
-        wearClass =
-            case config.wearLevel of
-                Pristine ->
-                    ""
+        wrapperClass =
+            case ( config.hidden, config.wearLevel ) of
+                ( True, Softened ) ->
+                    class "book book--hidden book--softened"
 
-                Softened ->
-                    " book--softened"
+                ( True, Pristine ) ->
+                    class "book book--hidden"
 
-        -- Owner-only placements on an otherwise-visible shelf render as a
-        -- faint outline so the owner still sees the book is there but private.
-        hiddenAttrs =
+                ( False, Softened ) ->
+                    class "book book--softened"
+
+                ( False, Pristine ) ->
+                    class "book"
+
+        lockEls =
             if config.hidden then
-                [ class ("book book--hidden" ++ wearClass)
-                , style "opacity" "0.35"
-                ]
+                [ div [ class "book__lock", attribute "aria-hidden" "true" ] [ text "🔒" ] ]
 
             else
-                [ class ("book" ++ wearClass) ]
+                []
 
-        -- Additive bookmark ribbon for a book the owner has written about (#287).
-        -- A direct child of the `.book` container (not the overflow-hidden spine
-        -- face) so it can poke above the top edge like a real ribbon; decorative
-        -- only — the ", with your notes" aria suffix carries the meaning.
         ribbonEls =
             if config.hasWriting then
                 [ div [ class "book__ribbon", attribute "aria-hidden" "true" ] [] ]
@@ -335,15 +324,14 @@ book config =
                 []
     in
     div
-        (hiddenAttrs
-            ++ [ testId "book-spine"
-               , style "width" (String.fromInt widthPx ++ "px")
-               , style "height" (String.fromInt heightPx ++ "px")
-               , style "transform-style" "preserve-3d"
-               , title (config.title ++ " — " ++ config.author)
-               , attribute "aria-label" ariaLabel
-               ]
-        )
+        [ wrapperClass
+        , testId "book-spine"
+        , style "width" (String.fromInt widthPx ++ "px")
+        , style "height" (String.fromInt heightPx ++ "px")
+        , style "transform-style" "preserve-3d"
+        , title (config.title ++ " — " ++ config.author)
+        , attribute "aria-label" ariaLabel
+        ]
         ([ div
             [ class "book__face book__spine"
             , style "background-color" tex.bg
@@ -392,4 +380,5 @@ book config =
             []
          ]
             ++ ribbonEls
+            ++ lockEls
         )

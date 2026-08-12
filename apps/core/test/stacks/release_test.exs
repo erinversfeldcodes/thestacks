@@ -1,10 +1,10 @@
 defmodule Stacks.ReleaseTest do
   @moduledoc """
-  Tests for `Stacks.Release.seed_prod/0` — the production owner-user seed.
+      Tests for `Stacks.Release.seed_prod/0` — the production owner-user seed.
 
-  These tests manipulate `PROD_OWNER_EMAIL` and `PROD_OWNER_PASSWORD` via
-  `System.put_env/2`/`System.delete_env/1`. Each test snapshots and restores
-  prior env var values via `on_exit/1` so tests stay independent.
+      These tests manipulate `PROD_OWNER_EMAIL` and `PROD_OWNER_PASSWORD` via
+      `System.put_env/2`/`System.delete_env/1`. Each test snapshots and restores
+      prior env var values via `on_exit/1` so tests stay independent.
   """
   use Core.DataCase, async: false
 
@@ -87,7 +87,6 @@ defmodule Stacks.ReleaseTest do
       assert user.email == email
       assert user.role == "owner"
 
-      # Password must verify via Argon2 (same check used by Accounts.authenticate/2)
       assert Argon2.verify_pass(password, user.password_hash)
     end
 
@@ -100,7 +99,6 @@ defmodule Stacks.ReleaseTest do
 
       assert :ok = Release.seed_prod()
 
-      # Looking up by the downcased form must find the user.
       user = Accounts.get_user_by_email(String.downcase(email))
       assert %User{} = user
       assert user.email == String.downcase(email)
@@ -120,7 +118,6 @@ defmodule Stacks.ReleaseTest do
       assert %User{} = user_before
       hash_before = user_before.password_hash
 
-      # Call again — must not error, must not change password hash.
       assert :ok = Release.seed_prod()
 
       user_after = Accounts.get_user_by_email(email)
@@ -128,7 +125,6 @@ defmodule Stacks.ReleaseTest do
       assert user_after.id == user_before.id
       assert user_after.password_hash == hash_before
 
-      # And only one row exists for that email.
       assert Repo.aggregate(from_user_by_email_query(email), :count, :id) == 1
     end
   end
@@ -144,13 +140,12 @@ defmodule Stacks.ReleaseTest do
         Release.seed_prod()
       end
 
-      # Must NOT have inserted a user.
       assert Accounts.get_user_by_email(email) == nil
     end
   end
 
   # ---------------------------------------------------------------------------
-  # Issue #138 Phase 1 — seed_prober/0
+  # Phase 1 — seed_prober/0
   #
   # `seed_prober/0` is the production-safe seed for the dedicated probe
   # user. Mirrors `seed_prod/0`'s shape but creates a non-owner user so the
@@ -275,7 +270,6 @@ defmodule Stacks.ReleaseTest do
       assert %User{} = user_before
       hash_before = user_before.password_hash
 
-      # Second call must be a no-op.
       assert :ok = Release.seed_prober()
 
       user_after = Accounts.get_user_by_email(email)
@@ -284,14 +278,9 @@ defmodule Stacks.ReleaseTest do
       assert user_after.password_hash == hash_before
       assert user_after.role == "user"
 
-      # Only one row exists for that email.
       assert Repo.aggregate(from_user_by_email_query(email), :count, :id) == 1
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # gdpr_erase_user/1 — operator right-to-erasure (GitHub Actions entry point)
-  # ---------------------------------------------------------------------------
 
   describe "gdpr_erase_user/1 dry run (user_id only)" do
     test "previews by user_id without deleting" do
@@ -392,20 +381,16 @@ defmodule Stacks.ReleaseTest do
   end
 
   describe "gdpr_lookup_user/1 (email/handle → user_id, read-only)" do
-    test "finds every user matching an email case-insensitively" do
-      u1 = insert(:user, email: "dup@stacks.test", handle: "dup_one")
-      # A second row with the SAME email but different case — the exact-match
-      # get_user_by_email would miss it; the lookup must surface both.
-      u2 = insert(:user, email: "DUP@stacks.test", handle: "dup_two")
+    test "finds a user however the operator cased the email" do
+      user = insert(:user, email: "dup@stacks.test", handle: "dup_one")
 
       out =
         capture_io(fn ->
-          assert :ok = Release.gdpr_lookup_user(encode(%{query: "dup@stacks.test"}))
+          assert :ok = Release.gdpr_lookup_user(encode(%{query: "DUP@Stacks.Test"}))
         end)
 
-      assert out =~ "user_id=#{u1.id}"
-      assert out =~ "user_id=#{u2.id}"
-      assert out =~ "GDPR_LOOKUP_COUNT 2"
+      assert out =~ "user_id=#{user.id}"
+      assert out =~ "GDPR_LOOKUP_COUNT 1"
     end
 
     test "finds a user by unique handle" do
@@ -429,10 +414,6 @@ defmodule Stacks.ReleaseTest do
       assert out =~ "GDPR_LOOKUP_COUNT 0"
     end
   end
-
-  # ---------------------------------------------------------------------------
-  # Helpers
-  # ---------------------------------------------------------------------------
 
   defp encode(params), do: params |> Jason.encode!() |> Base.encode64()
 

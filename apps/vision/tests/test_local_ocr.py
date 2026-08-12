@@ -164,7 +164,6 @@ class TestLocalISBNScanSilentFailure:
 
     def test_truncated_png_returns_none(self) -> None:
         """Truncated PNG header should return None, not raise."""
-        # Valid PNG magic bytes but truncated
         result = local_isbn_scan(b"\x89PNG\r\n\x1a\n\x00\x00")
         assert result is None
 
@@ -179,15 +178,7 @@ class TestLocalISBNScanSilentFailure:
         generate a valid barcode and then verify that a manually-constructed
         invalid ISBN would be rejected by the validation logic.
         """
-        # 9780156001312 has an incorrect check digit (correct is 1, not 2).
-        # We can't generate a barcode with an invalid check digit via
-        # python-barcode (it auto-corrects), so we test the validation
-        # logic by asserting that a scan result is only returned when
-        # the check digit is valid.
         valid_isbn = "9780156001311"
         image_bytes = _generate_ean13_barcode_bytes(valid_isbn)
         result = local_isbn_scan(image_bytes)
-        # The valid ISBN should be returned
         assert result == valid_isbn
-        # And the function should only return ISBNs with valid check digits
-        # (this is an implicit contract — invalid check digits yield None)

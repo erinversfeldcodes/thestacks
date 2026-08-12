@@ -1,19 +1,17 @@
 defmodule Stacks.ObservabilityTelemetryTest do
   @moduledoc """
-  Tests for observability instrumentation added in Issue #129.
+      Tests for observability instrumentation added in.
 
-  Verifies that telemetry events fire correctly for:
-  - Vision client requests (start/stop/exception)
-  - Fuse melt/blown events
-  - BudgetTracker cost recording and limit exceeded
-  - Costs context cost recording
+      Verifies that telemetry events fire correctly for:
+      - Vision client requests (start/stop/exception)
+      - Fuse melt/blown events
+      - BudgetTracker cost recording and limit exceeded
+      - Costs context cost recording
   """
 
   use Core.DataCase, async: false
 
   alias Stacks.AI.BudgetTracker
-
-  # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp attach_telemetry(events) do
     test_pid = self()
@@ -33,8 +31,6 @@ defmodule Stacks.ObservabilityTelemetryTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
-  # ── Vision Request Telemetry ─────────────────────────────────────────────
-
   describe "vision request telemetry" do
     test "emits start and stop events on successful request" do
       attach_telemetry([
@@ -42,7 +38,6 @@ defmodule Stacks.ObservabilityTelemetryTest do
         [:stacks, :vision, :request, :stop]
       ])
 
-      # Emit events directly to test the telemetry contract
       :telemetry.execute(
         [:stacks, :vision, :request, :start],
         %{system_time: System.system_time()},
@@ -77,8 +72,6 @@ defmodule Stacks.ObservabilityTelemetryTest do
     end
   end
 
-  # ── Fuse Telemetry ──────────────────────────────────────────────────────
-
   describe "fuse telemetry" do
     test "emits melt event" do
       attach_telemetry([[:stacks, :fuse, :melt]])
@@ -99,11 +92,8 @@ defmodule Stacks.ObservabilityTelemetryTest do
     end
   end
 
-  # ── BudgetTracker Telemetry ─────────────────────────────────────────────
-
   describe "budget tracker telemetry" do
     setup do
-      # Start a named BudgetTracker for test isolation
       name = :"budget_tracker_#{System.unique_integer([:positive])}"
       {:ok, pid} = BudgetTracker.start_link(name: name)
       on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
@@ -115,7 +105,6 @@ defmodule Stacks.ObservabilityTelemetryTest do
 
       GenServer.cast(name, {:record_cost, :modal, 42})
 
-      # Give the cast time to process
       _ = GenServer.call(name, :current_state)
 
       assert_receive {:telemetry_event, [:stacks, :budget, :cost_recorded], %{amount_cents: 42},
@@ -128,12 +117,9 @@ defmodule Stacks.ObservabilityTelemetryTest do
         [:stacks, :budget, :limit_exceeded]
       ])
 
-      # Record cost that exceeds the default daily limit (500 cents)
       GenServer.cast(name, {:record_cost, :modal, 600})
-      # Wait for cast to process
       _ = GenServer.call(name, :current_state)
 
-      # Now check budget — should emit limit_exceeded
       GenServer.call(name, {:check_budget, :modal})
 
       assert_receive {:telemetry_event, [:stacks, :budget, :limit_exceeded], %{},
@@ -146,7 +132,6 @@ defmodule Stacks.ObservabilityTelemetryTest do
         [:stacks, :budget, :limit_exceeded]
       ])
 
-      # Record cost that exceeds the default monthly limit (5000 cents)
       GenServer.cast(name, {:record_cost, :modal, 6_000})
       _ = GenServer.call(name, :current_state)
 
@@ -156,8 +141,6 @@ defmodule Stacks.ObservabilityTelemetryTest do
                       %{provider: "modal", type: :monthly}}
     end
   end
-
-  # ── Costs Context Telemetry ─────────────────────────────────────────────
 
   describe "costs context telemetry" do
     test "emits recorded event on upsert_cost" do
