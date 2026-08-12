@@ -101,7 +101,9 @@ markers = {
     "checkout":          r"actions/checkout@",
     "record-prev-state": r"(prev[-_]?image|CORE_PREV_IMAGE|fly image show|modal app history|record[-_]prev)",
     "deploy-stack":      r"scripts/deploy-stack\.sh",
-    "check-slo-gate":    r"scripts/check-slo-gate\.sh",
+    # The gate is invoked as a composite action; the bare script path only
+    # appears later inside post-rollback advice text, which is not the step.
+    "check-slo-gate":    r"\./\.github/actions/check-slo-gate",
     "rollback":          r"(scripts/rollback-production\.sh|rollback-production|\brollback\b)",
     "upload-artifact":   r"actions/upload-artifact@",
     "step-summary":      r"GITHUB_STEP_SUMMARY",
@@ -116,7 +118,7 @@ def pos(pat):
 
 order_errs = []
 p_deploy = pos(r"scripts/deploy-stack\.sh")
-p_gate = pos(r"scripts/check-slo-gate\.sh")
+p_gate = pos(r"\./\.github/actions/check-slo-gate")
 p_roll = pos(r"(scripts/rollback-production\.sh|rollback-production|\brollback\b)")
 if p_deploy > 0 and p_gate > 0 and p_deploy > p_gate:
     order_errs.append("deploy-stack.sh must come before check-slo-gate.sh")
